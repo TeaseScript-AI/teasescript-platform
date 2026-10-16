@@ -159,6 +159,7 @@ export {
   type RandomDrawAlternatives,
 } from "./runtime/random-alternatives.js";
 export {
+  checkedOutcome,
   listRandomSites,
   pendingRandomDraw,
   RANDOM_DRAW_KINDS,

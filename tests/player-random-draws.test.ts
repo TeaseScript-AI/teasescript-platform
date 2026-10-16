@@ -7,6 +7,7 @@ import {
   compilePlayerProject,
   createPlayerRuntimeSession,
   playerRuntimeAwaitsHost,
+  resumePlayerRuntimeRandomDraw,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
@@ -81,8 +82,15 @@ interface Presentation {
   randomDrawChoices(
     draw: RandomDrawView,
   ):
-    | { readonly kind: "buttons"; readonly outcomes: readonly { readonly label: string }[] }
-    | { readonly kind: "number"; readonly accepts: (value: number) => boolean }
+    | {
+        readonly kind: "buttons";
+        readonly outcomes: readonly { readonly outcome: RandomOutcome; readonly label: string }[];
+      }
+    | {
+        readonly kind: "number";
+        readonly hint: string;
+        readonly refusal: (value: number) => string | null;
+      }
     | { readonly kind: "order"; readonly items: readonly string[] };
 }
 let usePlayerSession: (options: {
@@ -443,52 +451,142 @@ test("Show whole block fits the smallest statement or block around the draw that
   });
 });
 
-test("earlier outcomes read like code, and each kind of draw offers its outcomes as its support allows", () => {
+test("earlier outcomes read like code", () => {
   const [order] = presentation.outcomeLines(['["red", "blue"]']);
   assert.deepEqual(
     order!.segments.filter((segment) => segment.kind === "string").map((segment) => segment.text),
     ['"', "red", '"', '"', "blue", '"'],
   );
-  const view = (
-    support: RandomDrawView["support"],
-    natural: RandomDrawView["natural"],
-  ): RandomDrawView => ({ drawId: 1, site: "main.tease:1:1", kind: "random", support, natural });
-  const labels = (draw: RandomDrawView) => {
-    const choices = presentation.randomDrawChoices(draw);
-    return choices.kind === "buttons"
-      ? choices.outcomes.map((outcome) => outcome.label)
-      : choices.kind;
+});
+
+/** A session paused at the first draw of `source`, and that draw. */
+function pausedAtDraw(source: string) {
+  const session = createPlayerRuntimeSession(`${source}\nexit`, { randomControl: {} });
+  const draw = session.state.randomDraw;
+  assert.ok(draw !== null, source);
+  return { session, draw };
+}
+
+test("each kind of draw offers what the engine takes, and a typed outcome it refuses shows the engine's reason", () => {
+  const resume = (source: string, outcome: RandomOutcome) => {
+    const { session, draw } = pausedAtDraw(source);
+    return resumePlayerRuntimeRandomDraw(session, { drawId: draw.drawId, outcome }).outcome;
   };
-  const number = { kind: "number", value: 0.5 } as const;
-  assert.deepEqual(
-    labels(view({ kind: "chance", percent: 25 }, { kind: "boolean", value: true })),
-    ["true", "false"],
-  );
-  assert.deepEqual(
-    labels(view({ kind: "chance", percent: 0 }, { kind: "boolean", value: false })),
-    ["false"],
-  );
-  assert.deepEqual(labels(view({ kind: "integer", min: 1, max: 3 }, number)), ["1", "2", "3"]);
-  assert.equal(labels(view({ kind: "integer", min: 1, max: 100 }, number)), "number");
-  assert.deepEqual(
-    labels(
-      view(
-        { kind: "weighted", candidates: ["a", "b", "c"], weights: [1, 0, 2] },
-        { kind: "index", index: 0 },
-      ),
+  const resolved = { kind: "resolved", forced: true };
+  // A continuous draw or a large range: a field that takes what the engine takes, and refuses the rest with the message
+  // the engine refuses it with. Typed text that is no finite number gets the draw's message too; the engine refuses
+  // such a request before it reads the outcome.
+  const fields: readonly [source: string, accepted: number[], refused: number[]][] = [
+    ["let x = random()", [0, 0.5], [1, -0.5]],
+    ["let x = randomInteger(1..=100)", [1, 100], [0, 101, 2.5]],
+    ["let x = randomNormal(10, 2)", [-1e6, 10], []],
+    ["let x = randomBeta(2, 5)", [0, 1], [1.5, -0.5]],
+    ["let x = randomPert(1, 2, 3)", [1, 3], [0.5, 3.5]],
+  ];
+  for (const [source, accepted, refused] of fields) {
+    const choices = presentation.randomDrawChoices(pausedAtDraw(source).draw);
+    assert.ok(choices.kind === "number", source);
+    for (const value of accepted) {
+      assert.equal(choices.refusal(value), null, `${source}: ${value}`);
+      assert.deepEqual(resume(source, { kind: "number", value }), resolved, `${source}: ${value}`);
+    }
+    for (const value of refused) {
+      const outcome = resume(source, { kind: "number", value });
+      assert.ok(outcome.kind === "invalidOutcome", `${source}: ${value}`);
+      assert.equal(choices.refusal(value), outcome.message, `${source}: ${value}`);
+    }
+    for (const value of [Number.NaN, Infinity])
+      assert.equal(
+        choices.refusal(value),
+        refused.length === 0 ? "randomNormal takes a finite number." : choices.refusal(refused[0]!),
+        `${source}: ${value}`,
+      );
+  }
+  // A draw with few outcomes: a button for each the engine takes, and none for an outcome it refuses.
+  const buttons: readonly [source: string, labels: string[], refused: RandomOutcome[]][] = [
+    ["let x = chance(25)", ["true", "false"], []],
+    ["let x = chance(0)", ["false"], [{ kind: "boolean", value: true }]],
+    [
+      "let x = randomInteger(1..=3)",
+      ["1", "2", "3"],
+      [
+        { kind: "number", value: 0 },
+        { kind: "number", value: 4 },
+      ],
+    ],
+    ['let x = ["a", "b", "c"].random', ['"a"', '"b"', '"c"'], [{ kind: "index", index: 3 }]],
+    [
+      'let x = randomWeighted(dict{ "x": 3, "y": 0, "z": 1 })',
+      ['"x"', '"z"'],
+      [{ kind: "index", index: 1 }],
+    ],
+    ["let x = randomNormal(10, 0)", ["10"], [{ kind: "number", value: 11 }]],
+  ];
+  for (const [source, labels, refused] of buttons) {
+    const choices = presentation.randomDrawChoices(pausedAtDraw(source).draw);
+    assert.ok(choices.kind === "buttons", source);
+    assert.deepEqual(
+      choices.outcomes.map((button) => button.label),
+      labels,
+      source,
+    );
+    for (const { outcome } of choices.outcomes)
+      assert.deepEqual(resume(source, outcome), resolved, `${source}: ${JSON.stringify(outcome)}`);
+    for (const outcome of refused)
+      assert.equal(
+        resume(source, outcome).kind,
+        "invalidOutcome",
+        `${source}: ${JSON.stringify(outcome)}`,
+      );
+  }
+  // A shuffle: its items to reorder, any order of which the engine takes.
+  const shuffle = 'let items = ["a", "b"]\nitems.shuffle()';
+  const order = presentation.randomDrawChoices(pausedAtDraw(shuffle).draw);
+  assert.ok(order.kind === "order");
+  assert.deepEqual(order.items, ['"a"', '"b"']);
+  for (const moved of [
+    [0, 1],
+    [1, 0],
+  ])
+    assert.deepEqual(resume(shuffle, { kind: "order", order: moved }), resolved);
+});
+
+test("a duration draw's field says no unit, as its number counts in the unit the script wrote", () => {
+  // A ranged wait and a repeating timer's later rounds draw the number of the unit after the range.
+  for (const [unit, unitMs] of [
+    ["ms", 1],
+    ["s", 1000],
+    ["min", 60_000],
+  ] as const) {
+    const source = `wait (1..=100) ${unit}\nsay "Done", instant`;
+    const { session, draw } = pausedAtDraw(source);
+    assert.equal(draw.kind, "duration");
+    const choices = presentation.randomDrawChoices(draw);
+    assert.ok(choices.kind === "number");
+    assert.equal(choices.hint, "Whole number from 1 through 100.", unit);
+    assert.equal(choices.refusal(101), "This draw takes a whole number from 1 through 100.");
+    const resumed = resumePlayerRuntimeRandomDraw(session, {
+      drawId: draw.drawId,
+      outcome: { kind: "number", value: 20 },
+    }).session;
+    const waiting = advancePlayerRuntimeTime(resumed, 20 * unitMs - 1);
+    assert.deepEqual(waiting.transcriptEntries, [], unit);
+    const done = advancePlayerRuntimeTime(waiting, 20 * unitMs);
+    assert.deepEqual(
+      done.transcriptEntries.map((entry) => entry.text),
+      ["Done"],
+      unit,
+    );
+  }
+  // A repeating timer draws each later round when the round before it ends.
+  const repeating = advancePlayerRuntimeTime(
+    createPlayerRuntimeSession(
+      "let t = timer(duration: (1..=100) ms, async: true, repeat: true)\nwait 1 s\nexit",
+      { randomControl: { filter: { kinds: ["timerRepeat"] } } },
     ),
-    ['"a"', '"c"'],
-    "a weight of 0 is no outcome",
-  );
-  const unit = presentation.randomDrawChoices(view({ kind: "unit" }, number));
-  assert.ok(unit.kind === "number" && unit.accepts(0) && !unit.accepts(1));
-  const normal = presentation.randomDrawChoices(
-    view({ kind: "normal", mean: 30, spread: 5 }, number),
-  );
-  assert.ok(normal.kind === "number" && normal.accepts(-1e6) && !normal.accepts(Infinity));
-  assert.deepEqual(labels(view({ kind: "normal", mean: 30, spread: 0 }, number)), ["30"]);
-  assert.equal(
-    labels(view({ kind: "order", items: ["x", "y"] }, { kind: "order", order: [1, 0] })),
-    "order",
-  );
+    1000,
+  ).state.randomDraw;
+  assert.ok(repeating?.kind === "timerRepeat");
+  const choices = presentation.randomDrawChoices(repeating);
+  assert.ok(choices.kind === "number" && choices.hint === "Whole number from 1 through 100.");
 });

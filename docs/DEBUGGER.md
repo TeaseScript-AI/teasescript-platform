@@ -153,7 +153,8 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
   - a button for each outcome of a `chance`, of a whole-number range of at most 17 values, of a pick from a list or
     set, and of a weighted pick whose weight is above 0, each with a muted `×N` when the site took it before;
   - an **Outcome** field for any other number, with its range ("From 0 through 1.", "Any finite number. Suggested: 15
-    to 45." for a normal draw's ±3 spreads), and **Use this value**;
+    to 45." for a normal draw's ±3 spreads), and **Use this value**; a value the draw does not take shows the engine's
+    reason instead of the range and cannot be used;
   - for a shuffle, the items in their order before it, to drag or move with **Move up** and **Move down**, and **Use
     this order**;
   - **Least tried**, the outcome Prefer untried would take, and **Random**, the natural outcome, which has the focus.

@@ -1,6 +1,8 @@
 import {
+  checkedOutcome,
   lex,
   parse,
+  randomDrawAlternatives,
   runtimeDebugPreview,
   type RandomDrawView,
   type RandomOutcome,
@@ -11,7 +13,8 @@ import {
 
 /**
  * How the random draw picker (DEBUGGER.md "Random draws") offers a draw's outcomes: a button for each when the draw has
- * few, a number field for a continuous draw or a large range, and a list to reorder for a shuffle.
+ * few, a number field for a continuous draw or a large range, and a list to reorder for a shuffle. Which outcomes a draw
+ * takes is the engine's: `randomDrawAlternatives` lists them when they are few, and `checkedOutcome` checks a typed one.
  */
 export type RandomDrawChoices =
   | { readonly kind: "buttons"; readonly outcomes: readonly RandomDrawButton[] }
@@ -19,7 +22,8 @@ export type RandomDrawChoices =
       readonly kind: "number";
       readonly integer: boolean;
       readonly hint: string;
-      readonly accepts: (value: number) => boolean;
+      /** Why the draw does not take `value`, in the engine's words, or `null` when it does. */
+      readonly refusal: (value: number) => string | null;
     }
   | { readonly kind: "order"; readonly items: readonly string[] };
 
@@ -30,73 +34,63 @@ export interface RandomDrawButton {
 
 export function randomDrawChoices(draw: RandomDrawView): RandomDrawChoices {
   const { support } = draw;
-  const buttons = (outcomes: readonly RandomDrawButton[]): RandomDrawChoices => ({
-    kind: "buttons",
-    outcomes,
-  });
-  const numbers = (values: readonly number[]) =>
-    buttons(values.map((value) => ({ outcome: { kind: "number", value }, label: text(value) })));
-  const field = (
-    hint: string,
-    accepts: (value: number) => boolean,
-    integer = false,
-  ): RandomDrawChoices => ({
+  if (support.kind === "order")
+    return { kind: "order", items: support.items.map((item) => runtimeDebugPreview(item).text) };
+  // A pick offers every candidate it can draw, however many.
+  const limit =
+    support.kind === "candidates" || support.kind === "weighted"
+      ? support.candidates.length
+      : undefined;
+  const { alternatives, complete } = randomDrawAlternatives(draw, limit);
+  const field = (hint: string, integer = false): RandomDrawChoices => ({
     kind: "number",
     integer,
     hint,
-    accepts: (value) => Number.isFinite(value) && accepts(value),
+    refusal: (value) => {
+      const checked = checkedOutcome(support, { kind: "number", value });
+      return typeof checked === "string" ? checked : null;
+    },
   });
-  switch (support.kind) {
-    case "chance": {
-      const values =
-        support.percent <= 0 ? [false] : support.percent >= 100 ? [true] : [true, false];
-      return buttons(
-        values.map((value) => ({ outcome: { kind: "boolean", value }, label: String(value) })),
-      );
+  if (!complete)
+    switch (support.kind) {
+      // The draw's number counts in the unit its script wrote, which the draw does not carry.
+      case "integer":
+        return field(`Whole number from ${text(support.min)} through ${text(support.max)}.`, true);
+      case "unit":
+        return field("From 0 up to, but not including, 1.");
+      case "normal": {
+        const { mean, spread } = support;
+        return field(
+          `Any finite number. Suggested: ${text(mean - 3 * spread)} to ${text(mean + 3 * spread)}.`,
+        );
+      }
+      case "beta":
+        return field("From 0 through 1.");
+      case "pert":
+        return field(`From ${text(support.min)} through ${text(support.max)}.`);
     }
-    case "integer": {
-      const { min, max } = support;
-      // A range with as few values as `randomDrawAlternatives` enumerates gets a button for each.
-      if (max - min <= 16)
-        return numbers(Array.from({ length: max - min + 1 }, (_, offset) => min + offset));
-      const seconds = draw.kind === "duration" || draw.kind === "timerRepeat";
-      return field(
-        `Whole number${seconds ? " of seconds" : ""} from ${text(min)} through ${text(max)}.`,
-        (value) => Number.isSafeInteger(value) && value >= min && value <= max,
-        true,
-      );
-    }
-    case "candidates":
-    case "weighted":
-      return buttons(
-        support.candidates.flatMap((candidate, index) =>
-          support.kind === "weighted" && !(support.weights[index]! > 0)
-            ? []
-            : [{ outcome: { kind: "index", index }, label: runtimeDebugPreview(candidate).text }],
-        ),
-      );
-    case "unit":
-      return field("From 0 up to, but not including, 1.", (value) => value >= 0 && value < 1);
-    case "normal": {
-      const { mean, spread } = support;
-      if (spread === 0) return numbers([mean]);
-      return field(
-        `Any finite number. Suggested: ${text(mean - 3 * spread)} to ${text(mean + 3 * spread)}.`,
-        () => true,
-      );
-    }
-    case "beta":
-      return field("From 0 through 1.", (value) => value >= 0 && value <= 1);
-    case "pert": {
-      const { min, max } = support;
-      if (min === max) return numbers([min]);
-      return field(
-        `From ${text(min)} through ${text(max)}.`,
-        (value) => value >= min && value <= max,
-      );
-    }
+  // Every outcome the engine lists: the natural result and the alternatives, in the order of their values.
+  const outcomes =
+    draw.natural.kind === "failure" ? [...alternatives] : [draw.natural, ...alternatives];
+  return {
+    kind: "buttons",
+    outcomes: outcomes
+      .sort((left, right) => rank(left) - rank(right))
+      .map((outcome) => ({ outcome, label: randomOutcomeLabel(draw, outcome) })),
+  };
+}
+
+/** Where an outcome stands among a draw's buttons: true before false, numbers and candidates in their order. */
+function rank(outcome: RandomOutcome): number {
+  switch (outcome.kind) {
+    case "boolean":
+      return outcome.value ? 0 : 1;
+    case "number":
+      return outcome.value;
+    case "index":
+      return outcome.index;
     case "order":
-      return { kind: "order", items: support.items.map((item) => runtimeDebugPreview(item).text) };
+      return 0;
   }
 }
 

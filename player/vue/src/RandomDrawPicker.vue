@@ -76,12 +76,17 @@ const expandLabels = {
 } as const;
 
 const typed = ref("");
-const typedValue = computed(() => {
+const typedNumber = computed(() =>
+  choices.value.kind !== "number" || typed.value.trim() === "" ? null : Number(typed.value),
+);
+// Why the draw does not take the typed number, in the engine's words.
+const typedRefusal = computed(() => {
   const current = choices.value;
-  if (current.kind !== "number" || typed.value.trim() === "") return null;
-  const value = Number(typed.value);
-  return current.accepts(value) ? value : null;
+  return current.kind === "number" && typedNumber.value !== null
+    ? current.refusal(typedNumber.value)
+    : null;
 });
+const typedValue = computed(() => (typedRefusal.value === null ? typedNumber.value : null));
 // The shuffle's items in the order shown, as their old indexes.
 const order = ref<number[]>([]);
 watch(
@@ -149,6 +154,7 @@ const nextOptions: readonly { readonly value: DebugRandomNext; readonly label: s
   { value: "untried", label: "Prefer untried" },
 ];
 const fieldId = useId();
+const hintId = useId();
 const nextId = useId();
 // The natural outcome is the safe default: focus starts on Random, so Enter never picks an outcome by accident.
 const randomButton = ref<InstanceType<typeof Button> | null>(null);
@@ -248,10 +254,18 @@ function focusRandom(event: Event) {
           v-model="typed"
           :inputmode="choices.integer ? 'numeric' : 'decimal'"
           autocomplete="off"
-          :aria-invalid="typed.trim() !== '' && typedValue === null"
+          :aria-invalid="typedRefusal !== null"
+          :aria-describedby="hintId"
           data-random-draw-value
         />
-        <p class="text-muted-foreground" data-random-draw-hint>{{ choices.hint }}</p>
+        <p
+          :id="hintId"
+          :class="typedRefusal === null ? 'text-muted-foreground' : 'text-destructive'"
+          aria-live="polite"
+          data-random-draw-hint
+        >
+          {{ typedRefusal ?? choices.hint }}
+        </p>
       </form>
       <ol v-else ref="list" aria-label="Order" class="grid gap-1 text-sm" data-random-draw-order>
         <li

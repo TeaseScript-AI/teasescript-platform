@@ -1119,7 +1119,8 @@ not language; without it every draw is natural and costs one more check.
   paused draw takes the resolution. The interrupted operation then finishes within its own budget: `run` runs on,
   `stepToEvent` stops at its event, `executeInstruction` stops after its instruction and catch-up, and catch-up
   continues to the observed time. The outcome is `{ kind: "resolved", forced }`. A paused draw resumes on the session
-  generator, so this throws with an injected `capabilities.random`.
+  generator, so this throws with an injected `capabilities.random`. `checkedOutcome(draw.support, outcome)` is the check
+  it applies to a chosen outcome, without a session: it gives the outcome when the draw takes it, otherwise why not.
 - **Exploring.** A host branches by forking a session at a paused draw and resolving the draw differently on each
   fork. `randomDrawAlternatives(draw, limit = 16)` gives the outcomes to try besides the natural result, which
   `"natural"` tries without recording an input: a finite support in order up to `limit`, otherwise representative
