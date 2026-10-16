@@ -67,9 +67,41 @@ test("completion exposes optional speaker and current say modifiers", () => {
   assert.ok(say.includes("as"));
   assert.ok(say.includes("skippable"));
   assert.ok(say.includes("unskippable"));
-  const pacing = labels('say "Hi",');
-  assert.ok(pacing.includes("instant"));
-  assert.ok(pacing.includes("0"));
+});
+
+test("every completion offered for a say's pacing compiles there", () => {
+  // `|` marks the cursor. The parser decides where the pacing is, also in the parentheses of a bounded say.
+  for (const marked of [
+    'say "Hi",|\nexit',
+    'say "Hi", |\nexit',
+    'say("Hi", |)\nexit',
+    'say bubble() ("Hi",\n  |)\nexit',
+    'let line = say "Hi", |\nexit',
+    'let lines = [say("Hi", |)]\nexit',
+    'speaker mistress { name: "Mistress" }\nsay as mistress skippable "Hi", |\nexit',
+  ]) {
+    const offset = marked.indexOf("|");
+    const source = marked.replace("|", "");
+    const document = createLanguageDocument("file:///main.tease", source);
+    const items = languageCompletions(document, languagePositionAt(document, offset));
+    assert.ok(
+      items.some((item) => item.label === "instant"),
+      marked,
+    );
+    for (const item of items) {
+      const completed = source.slice(0, offset) + item.insertText + source.slice(offset);
+      assert.deepEqual(compileSource(completed).diagnostics, [], completed);
+    }
+  }
+  // A comma inside the text separates arguments or elements, where a pacing is no value.
+  for (const prefix of [
+    "function pick(a, b) { return a }\nsay pick(1, ",
+    "say [1, ",
+    'say "${max(1, ',
+  ]) {
+    const offered = labels(prefix);
+    assert.ok(!offered.includes("instant") && !offered.includes("0 s"), prefix);
+  }
 });
 
 test("context, hover, and signature help select the compact command and its slots", () => {
@@ -197,6 +229,7 @@ function assertDeepSayTooling(source: string): void {
     hover?.contents,
     languageHover(topLevel, languagePositionAt(topLevel, 1))?.contents,
   );
+  assert.ok(labels(source, start + DEEP_SAY.indexOf(",") + 1).includes("0 s"));
 }
 
 test("hover and formatting handle deeply nested source inside a timer expiry block", () => {
