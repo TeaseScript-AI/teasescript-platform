@@ -214,7 +214,12 @@ export {
   updateInteraction,
   type InteractionUpdateOutcome,
 } from "./runtime/operations/update-interaction.js";
-export { observeTime, type MediaProgressReport } from "./runtime/operations/observe-time.js";
+export {
+  observeTime,
+  runtimeTimedWork,
+  type MediaProgressReport,
+  type RuntimeTimedWork,
+} from "./runtime/operations/observe-time.js";
 export {
   RUNTIME_DEBUG_TRACE_LIMITS,
   RuntimeDebugContext,

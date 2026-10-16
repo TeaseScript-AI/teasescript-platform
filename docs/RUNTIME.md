@@ -647,6 +647,8 @@ Every public operation drops the others before it returns, with the search and c
 
 `observeTime` processes due work globally by `(scene time, phase, action ID)`: foreground delays and reading times,
 the timeout of the presented button, timer rounds, and media timeline events (see [Stage image and media playback](#stage-image-and-media-playback)).
+`runtimeTimedWork(view)` lists that work for a session view with its deadlines, so a host knows when to observe next;
+a media event appears there only once reported progress reached it.
 A round that expires naturally ends at its deadline and a repeating timer starts its next round there, drawing a
 repeating range from the session RNG; `remaining` reaching zero ends the round at the current scene time, as does
 pausing a round that is already due while its expiry waits behind a running block. An expired round with an expiry block

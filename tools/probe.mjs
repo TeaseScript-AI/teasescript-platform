@@ -15,8 +15,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const usage = "Usage: npm run probe -- [--run] [--json] <file.tease | ->";
 const maxClockMoves = 10_000;
-// Foreground actions that complete by time alone; every other foreground wait needs the player or the host.
-const timedForeground = new Set(["delay", "chatPacingGate"]);
 const options = { run: false, json: false };
 const files = [];
 const args = process.argv.slice(2);
@@ -36,7 +34,9 @@ if (!existsSync(entry)) {
   console.error(`No build at ${entry}. Run npm run build:typescript first.`);
   process.exit(2);
 }
-const { compileSource, createFreshRuntimeSession } = await import(pathToFileURL(entry).href);
+const { compileSource, createFreshRuntimeSession, runtimeTimedWork } = await import(
+  pathToFileURL(entry).href
+);
 let source;
 try {
   source = readFileSync(file === "-" ? 0 : file, "utf8");
@@ -111,20 +111,21 @@ function runScript(plan) {
   };
 }
 
-// The next moment the script waits for by time alone, or null when it waits for the player or the host. A foreground
-// interaction (an ask, a button with or without a timeout) always stops the probe.
+// The next moment the script waits for by time alone, or null when it waits for the player or the host. The engine
+// says what comes due by time; a foreground interaction (an ask, a button with or without a timeout) always stops the
+// probe, and so does a foreground wait that nothing timed settles.
 function nextDueMs(view) {
+  const due = runtimeTimedWork(view);
   const foreground = view.foregroundAction;
-  if (foreground !== null && !timedForeground.has(foreground.kind)) return null;
+  if (
+    foreground !== null &&
+    (foreground.kind === "interaction" ||
+      !due.some((work) => work.actionId === foreground.actionId))
+  )
+    return null;
   // A running loop, not Math.min(...): a script may start any number of timers.
   let earliest = Infinity;
-  if (foreground !== null && Number.isFinite(foreground.deadlineMs))
-    earliest = foreground.deadlineMs;
-  for (const action of view.backgroundActions) {
-    const deadline =
-      action.timer?.state === "running" ? action.timer.deadlineMs : action.deadlineMs;
-    if (Number.isFinite(deadline) && deadline < earliest) earliest = deadline;
-  }
+  for (const work of due) if (work.deadlineMs < earliest) earliest = work.deadlineMs;
   if (earliest === Infinity) return null;
   return Math.max(earliest, view.currentSessionTimeMs);
 }

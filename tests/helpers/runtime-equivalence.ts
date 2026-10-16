@@ -9,11 +9,11 @@ import {
   deserializeCheckpoint,
   deserializeRuntimeSession,
   executeInstruction,
-  interactionDeadlineMs,
   observeTime,
   pressPermanentButton,
   reportMediaLoad,
   run,
+  runtimeTimedWork,
   serializeCheckpoint,
   validateRuntimeSnapshot,
   validateInstructionPlan,
@@ -507,17 +507,10 @@ function dueDelayStep(
   if (playing.length > 0) {
     deadlines.push(view.observedSessionTimeMs + MEDIA_OBSERVATION_STEP_MS);
   }
-  for (const action of [view.foregroundAction, ...view.backgroundActions]) {
-    if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
-      deadlines.push(action.deadlineMs);
-    }
-    if (action?.kind === "timer" && action.timer.deadlineMs !== null) {
-      deadlines.push(action.timer.deadlineMs);
-    }
+  // Media events come due through the progress reported at those samples.
+  for (const work of runtimeTimedWork(view)) {
+    if (work.kind !== "media") deadlines.push(work.deadlineMs);
   }
-  const button = view.foregroundAction;
-  const buttonDeadlineMs = button?.kind === "interaction" ? interactionDeadlineMs(button) : null;
-  if (buttonDeadlineMs !== null) deadlines.push(buttonDeadlineMs);
   assert.ok(
     deadlines.length > 0,
     `${context}: only delays, pacing, timers, media, and button timeouts can be serviced`,

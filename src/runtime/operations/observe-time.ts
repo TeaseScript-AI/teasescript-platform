@@ -32,6 +32,7 @@ import {
 import { timeOutButton } from "./complete-action.js";
 import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "../debug-trace.js";
 import { captureExecutableData, copySpan, pendingResult, takeSequence } from "./support.js";
+import type { RuntimeSessionView } from "../session.js";
 import { randomControlFor } from "../random-control.js";
 import {
   compileRandomPolicy,
@@ -394,11 +395,63 @@ function nextOtherWork(
   return boundary;
 }
 
+/**
+ * Work that comes due by scene time alone, at `deadlineMs`, for the pending action `actionId` of kind `kind`: a `wait`
+ * or blocking timer (`delay`), a reading time (`chatPacingGate`), the timeout of a presented button (`interaction`), the
+ * end of a timer round (`timer`), or the next timeline event of media whose reported progress reached it (`media`).
+ */
+export interface RuntimeTimedWork {
+  readonly kind: "delay" | "chatPacingGate" | "interaction" | "timer" | "media";
+  readonly actionId: number;
+  readonly deadlineMs: number;
+  /**
+   * A round of a repeating timer without an expiry block. It runs nothing, so an observation past it gives the result
+   * of observing it on time.
+   */
+  readonly silent: boolean;
+  /** A timer round that draws the next round's length from a range; catch-up settles each such round on its own. */
+  readonly drawsNextRound: boolean;
+}
+
+/**
+ * The timed work of a session, which `observeTime` settles once scene time reaches its deadline: where a host observes
+ * time next. A foreground wait, reading time, or button timeout stands still while a queued block goes first, and a
+ * failed session settles nothing further.
+ */
+export function runtimeTimedWork(
+  view: Pick<
+    RuntimeSessionView,
+    "status" | "foregroundAction" | "backgroundActions" | "queuedBlocks" | "suspendedAtMs"
+  >,
+): readonly RuntimeTimedWork[] {
+  if (view.status === "failed") return Object.freeze([]);
+  // `suspendedAtMs` is when the running block started, so it is set exactly while a block runs.
+  const blockRunning = view.suspendedAtMs !== null;
+  return Object.freeze(
+    timedWorkOf(view, blockRunning || view.queuedBlocks === 0).map((work) => {
+      const timer = work.kind === "timer" ? work.action.timer : null;
+      return Object.freeze({
+        kind: work.action.kind,
+        actionId: work.actionId,
+        deadlineMs: work.deadlineMs,
+        silent: timer !== null && timer.repeat && timer.handlerFunctionId === null,
+        drawsNextRound: timer !== null && timer.range !== null,
+      });
+    }),
+  );
+}
+
 function timedWork(snapshot: RuntimeSnapshot): DueWork[] {
-  const candidates: DueWork[] = [];
-  const foreground = snapshot.foregroundAction;
   const handlerRunning = interruptRunning(snapshot);
-  const noQueuedBlockFirst = handlerRunning || snapshot.pendingTimerHandlers.length === 0;
+  return timedWorkOf(snapshot, handlerRunning || snapshot.pendingTimerHandlers.length === 0);
+}
+
+function timedWorkOf(
+  state: Pick<RuntimeSessionView, "foregroundAction" | "backgroundActions">,
+  noQueuedBlockFirst: boolean,
+): DueWork[] {
+  const candidates: DueWork[] = [];
+  const foreground = state.foregroundAction;
   if (
     (foreground?.kind === "delay" || foreground?.kind === "chatPacingGate") &&
     noQueuedBlockFirst
@@ -420,7 +473,7 @@ function timedWork(snapshot: RuntimeSnapshot): DueWork[] {
       actionId: foreground.actionId,
     });
   }
-  for (const action of snapshot.backgroundActions) {
+  for (const action of state.backgroundActions) {
     if (action.kind === "timer" && action.timer.deadlineMs !== null) {
       candidates.push({
         kind: "timer",
