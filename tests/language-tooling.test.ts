@@ -100,11 +100,15 @@ test("every completion offered for a say's pacing compiles there", () => {
       assert.deepEqual(compileSource(completed).diagnostics, [], completed);
     }
   }
-  // A comma inside the text separates arguments or elements, where a pacing is no value.
+  // A comma inside the text separates arguments or elements, and outside parentheses a say's pacing does not continue
+  // on the next line or in a comment, so no pacing is offered there.
   for (const prefix of [
     "function pick(a, b) { return a }\nsay pick(1, ",
     "say [1, ",
     'say "${max(1, ',
+    'say "Hi",\n  ',
+    'let line = say "Hi",\n  ',
+    'say "Hi", // soon, ',
   ]) {
     const offered = labels(prefix);
     assert.ok(!offered.includes("instant") && !offered.includes("0 s"), prefix);

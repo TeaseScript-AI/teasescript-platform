@@ -242,8 +242,9 @@ export function languageCompletions(
   const significant = tokens.filter((token) => token.kind !== TokenKind.Newline);
   const last = significant.at(-1);
   // Where the parser reads a say's pacing, a duration or `instant`, the two values without reading time are offered
-  // (V30, "Message presentation defaults and overrides") instead of the commands offered for other values.
-  if (last?.kind === TokenKind.Comma && sayPacingAfter(last, document.text, offset))
+  // (V30, "Message presentation defaults and overrides") instead of the commands offered for other values. A pacing
+  // follows a comma, so only then is the text parsed again.
+  if (last?.kind === TokenKind.Comma && sayPacingStartsAt(document.text, offset))
     return Object.freeze([
       value("instant", "Disable pacing delay"),
       value("0 s", "Exact zero-second pacing"),
@@ -495,15 +496,14 @@ function askCommand(kind: InteractionExpression["interactionKind"]): CompactComm
 }
 
 /**
- * Whether the parser reads a say's pacing after `comma`, the last token before `offset`, when a value is written at
- * `offset`: after `say "Hi", ` or `say("Hi", `, also before the `)` or the block after it is written, but not after a
- * comma inside its text, as in `say f(1, ` or `say [1, `. The value decides a call such as `say skippable ("Hi", x)`.
+ * Whether the parser starts reading a say's pacing at `offset` when a value is written there: after `say "Hi", ` or
+ * `say("Hi", `, also before the `)` or the block after it is written, and on a later line only inside the parentheses
+ * of a bounded say; not after a comma inside its text, as in `say f(1, ` or `say [1, `. The value decides a call such
+ * as `say skippable ("Hi", x)`.
  */
-function sayPacingAfter(comma: Token, text: string, offset: number): boolean {
+function sayPacingStartsAt(text: string, offset: number): boolean {
   try {
-    return parse(`${text.slice(0, offset)}pacing${text.slice(offset)}`).sayPacingCommas.has(
-      comma.span.start.offset,
-    );
+    return parse(`${text.slice(0, offset)}pacing${text.slice(offset)}`).sayPacingStarts.has(offset);
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
     return false;
