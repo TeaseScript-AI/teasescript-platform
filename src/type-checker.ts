@@ -2378,6 +2378,8 @@ class TypeChecker {
         const start = this.#flow.mark();
         const ends: FlowState[] = [];
         const casePaths: boolean[] = [];
+        // The literal values that the value cases list, to tell whether they take every value the subject can hold.
+        const literals: PossibleValue[] = [];
         for (const switchCase of statement.cases) {
           // What the block may assume about the value, or `null` when the case does not narrow it.
           let taken: StaticType | null = null;
@@ -2427,8 +2429,11 @@ class TypeChecker {
                 value,
                 valueType,
               );
-              if (never === undefined) matchable = true;
-              else
+              if (never === undefined) {
+                matchable = true;
+                if (literalRange(value) === undefined)
+                  literals.push(...(comparedLiteral(value) ?? []));
+              } else
                 this.diagnostics.push(
                   createDiagnostic(
                     DiagnosticSeverity.Warning,
@@ -2458,7 +2463,11 @@ class TypeChecker {
         // `default`, or the path without one, runs when no case matched. A path that no value reaches does not continue.
         this.#flow.restore(start);
         const restReached = remaining.kind !== "never";
-        this.#notePaths(statement, [...casePaths, restReached]);
+        // The flow of speaker properties also knows that no value is left when the cases list every value it can be.
+        this.#notePaths(statement, [
+          ...casePaths,
+          restReached && !takesEveryValue(remaining, literals),
+        ]);
         if (variable !== null && restReached && remaining !== subject)
           this.#flow.apply(this.#flow.since(start, new Map([[variable, remaining]])));
         if (statement.defaultBlock === null) {
@@ -10107,6 +10116,30 @@ function comparedLiteral(expression: Expression): readonly PossibleValue[] | und
   if (value === null || typeof value !== "object") return [{ value, measure: null }];
   if (value.kind === "angle") return [{ value: value.degrees, measure: "angle" }];
   return isCalendar(value) ? undefined : [{ value: value.milliseconds, measure: "duration" }];
+}
+
+/**
+ * Whether the literal values of `taken` include every value that a value of `type` can hold: both booleans, or each
+ * button value of an `askChoice` with literal values, and `null` when it may be null.
+ */
+function takesEveryValue(type: StaticType, taken: readonly PossibleValue[]): boolean {
+  const possible: PossibleValue[] = [];
+  for (const member of members(type)) {
+    const value = resolved(member);
+    if (value.kind === "scalar" && value.name === "boolean" && value.values === undefined)
+      possible.push({ value: true, measure: null }, { value: false, measure: null });
+    else {
+      const restricted = possibleValues(value);
+      if (restricted === undefined) return false;
+      possible.push(...restricted);
+    }
+  }
+  return (
+    possible.length > 0 &&
+    possible.every(({ value, measure }) =>
+      taken.some((literal) => literal.value === value && literal.measure === measure),
+    )
+  );
 }
 
 /** The earlier `case is T` or `case is not T` that already takes a literal case value, if any. */

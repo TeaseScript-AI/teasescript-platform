@@ -140,6 +140,18 @@ test("a custom property that only some ways assign is a compile error that names
       ],
     ],
     [
+      "cases that miss a button value",
+      'let pick = askChoice "a", "b", "c"\nswitch pick {\n    case "a" { vera.mood = "calm" }\n    case "b" { vera.mood = "calm" }\n}\nsay vera.mood',
+      {},
+      [
+        "main.tease:9",
+        some(
+          "when no 'case' of the 'switch' on line 5 matches",
+          "on that way too, as in a 'default'",
+        ),
+      ],
+    ],
+    [
       "the default without it",
       'switch randomInteger(1..3) {\n    case 1 { vera.mood = "calm" }\n    default { say "other" }\n}\nsay vera.mood',
       {},
@@ -310,6 +322,10 @@ test("reads that every followed way prepares compile and run", () => {
         '    case 1 { vera.b = "b" }',
         '    default { vera.b = "b" }',
         "}",
+        "switch chance(0.5) {",
+        '    case true { vera.bool = "" }',
+        '    case false { vera.bool = "" }',
+        "}",
         'let value: string | number = "x"',
         "if chance(0.5) { value = 3 }",
         "switch value {",
@@ -336,12 +352,23 @@ test("reads that every followed way prepares compile and run", () => {
         "    exit",
         "}",
         'if load("stop", default: false) { stop() } else { vera.i = "i" }',
-        'say "${vera.a}${vera.b}${vera.c}${vera.d}${vera.e}${vera.f}${vera.g}${vera.h}${vera.i}"',
+        'say "${vera.a}${vera.b}${vera.bool}${vera.c}${vera.d}${vera.e}${vera.f}${vera.g}${vera.h}${vera.i}"',
         "exit",
       ].join("\n"),
     ),
     ["calm", "abcdefghi"],
   );
+  // Cases that list every button value of an `askChoice` leave no other way.
+  for (const choice of ['"a", "b"', 'open: "Open", leave: "Leave"', "5, 10"]) {
+    const values = choice.includes(":") ? ['"open"', '"leave"'] : choice.split(", ");
+    assert.deepEqual(
+      diagnostics(
+        `${VERA}\nlet pick = askChoice ${choice}\nswitch pick {\n${values.map((value) => `    case ${value} { vera.mood = "calm" }`).join("\n")}\n}\nsay vera.mood\nexit`,
+      ),
+      [],
+      choice,
+    );
+  }
   // A function read after the assignment, a label reached only once it is assigned, a block that may have run, a store
   // through an alias or a parameter, and the player's fields after a copy.
   assert.deepEqual(
