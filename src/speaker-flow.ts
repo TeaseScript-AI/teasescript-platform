@@ -192,6 +192,8 @@ class SpeakerFlow {
   /** The store bits of each instruction that stores. */
   readonly #storeBits = new Map<number, bigint>();
   #allStores = 0n;
+  /** The properties that speaker declarations give, which hold from the start of the session. */
+  #declared = 0n;
   /** The instructions that store each `speaker.property`, and the copies of the account, in order. */
   readonly #storesOf = new Map<string, number[]>();
   readonly #copies: number[] = [];
@@ -273,6 +275,7 @@ class SpeakerFlow {
       } else if (instruction.kind === "declareSpeaker") {
         for (const property of instruction.properties)
           stores |= this.#bit(instruction.name, property.name);
+        this.#declared |= stores;
       } else if (instruction.kind === "copyAccount") {
         this.#copies.push(index);
         for (const field of PERSON_FIELDS) stores |= this.#noteStore(PLAYER, field, index);
@@ -796,7 +799,9 @@ class SpeakerFlow {
   }
 
   #solve(mode: Mode): (bigint | null)[] {
-    const entries: [number, bigint][] = [[this.#plan.files[0]!.startInstruction, 0n]];
+    // The session sets up the speakers before the story runs; a declared property also serves the start values that
+    // the declaration's own block and the declarations before it read.
+    const entries: [number, bigint][] = [[this.#plan.files[0]!.startInstruction, this.#declared]];
     // A block runs at a time the code around it cannot tell: it starts with everything.
     for (const routine of this.#handlers.values()) entries.push([routine.start, this.#all]);
     return solveForward(this.#analysis(mode), entries);
