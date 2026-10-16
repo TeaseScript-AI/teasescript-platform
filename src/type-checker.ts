@@ -3082,9 +3082,8 @@ class TypeChecker {
       return;
     }
     const operator = statement.operator === "+=" ? "+" : "-";
-    const kept = resolved(
-      read ?? (variable === undefined ? place.type : this.#currentType(variable)),
-    );
+    // `+=` and `-=` read the variable before the value runs (V30 §14).
+    const kept = resolved(read ?? before ?? place.type);
     if (variable !== undefined) this.#flow.set(variable, undefined);
     const reported = this.diagnostics.length;
     const combine = (a: StaticType, b: StaticType) => arithmeticType(operator, a, b);
