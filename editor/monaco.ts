@@ -15,137 +15,43 @@ export function registerTeaseScriptLanguage(): void {
       extensions: [".tease"],
       aliases: ["TeaseScript"],
     });
+    // The colours come from the compiler's own token classes (`registerProviders`). This tokenizer only marks strings
+    // and comments, which Monaco itself reads: brackets and quotes in them are text for bracket matching, bracket
+    // colours, and auto-closing, which the compiler's classes cannot tell Monaco. It also colours them before the
+    // classes arrive.
     monaco.languages.setMonarchTokensProvider(TEASE_LANGUAGE_ID, {
       tokenizer: {
-        root: [{ include: "@expression" }],
-        expression: [
+        root: [
           [/\/\/.*$/, "comment"],
-          [
-            /[A-Za-z_][\w-]*/,
-            {
-              cases: {
-                "@keywords": "keyword",
-                "@types": "type",
-                "@commands": "type.identifier",
-                "@default": "identifier",
-              },
-            },
-          ],
-          [/-?\d+(?:\.\d+)?/, "number"],
-          [/"""/, { token: "string.quote", next: "@blockString" }],
-          [
-            /"/,
-            {
-              cases: {
-                "@eos": "string.invalid",
-                "@default": { token: "string.quote", next: "@singleLineString" },
-              },
-            },
-          ],
-          [/[{}()[\],:|?]/, "delimiter"],
+          [/\/\*/, "comment", "@blockComment"],
+          [/"""/, "string", "@blockString"],
+          [/"/, "string", "@string"],
+          [/[^/"{}]+|[/{}]/, ""],
         ],
-        singleLineString: [
+        blockComment: [
+          [/\*\//, "comment", "@pop"],
+          [/[^*]+|\*/, "comment"],
+        ],
+        // A single-line string ends at the end of its line, also without its closing quote.
+        string: [
+          [/\$\{/, "delimiter.bracket", "@interpolation"],
+          [/"/, "string", "@pop"],
           [
-            /[^\\$\"]+/,
-            { cases: { "@eos": { token: "string.invalid", next: "@pop" }, "@default": "string" } },
+            /[^\\"$]+|\\.?|\$/,
+            { cases: { "@eos": { token: "string", next: "@pop" }, "@default": "string" } },
           ],
-          [/\\(?:[\\\"nrt]|\$\{)/, "string.escape"],
-          [/\\./, "string.escape.invalid"],
-          [/\\$/, { token: "string.escape.invalid", next: "@pop" }],
-          [/\$\{/, { token: "delimiter.bracket", next: "@stringInterpolation" }],
-          [
-            /\$(?!\{)/,
-            { cases: { "@eos": { token: "string.invalid", next: "@pop" }, "@default": "string" } },
-          ],
-          [/"/, { token: "string.quote", next: "@pop" }],
         ],
         blockString: [
-          [/"""/, { token: "string.quote", next: "@pop" }],
-          [/[^\\$\"]+/, "string"],
-          [/\\(?:[\\\"nrt]|\$\{)/, "string.escape"],
-          [/\\./, "string.escape.invalid"],
-          [/\$\{/, { token: "delimiter.bracket", next: "@stringInterpolation" }],
-          [/"{1,2}(?!")|\$(?!\{)/, "string"],
+          [/\$\{/, "delimiter.bracket", "@interpolation"],
+          [/"""/, "string", "@pop"],
+          [/[^\\"$]+|\\.?|\$|"/, "string"],
         ],
-        stringInterpolation: [
-          [/\}/, { token: "delimiter.bracket", next: "@pop" }],
-          [/\{/, { token: "delimiter", next: "@interpolationBrace" }],
-          { include: "@expression" },
-        ],
-        interpolationBrace: [
-          [/\}/, { token: "delimiter", next: "@pop" }],
-          [/\{/, { token: "delimiter", next: "@push" }],
-          { include: "@expression" },
+        interpolation: [
+          [/\}/, "delimiter.bracket", "@pop"],
+          [/\{/, "delimiter.bracket", "@interpolation"],
+          { include: "@root" },
         ],
       },
-      keywords: [
-        "as",
-        "skippable",
-        "unskippable",
-        "instant",
-        "speaker",
-        "let",
-        "global",
-        "if",
-        "else",
-        "switch",
-        "case",
-        "default",
-        "repeat",
-        "while",
-        "for",
-        "in",
-        "function",
-        "return",
-        "is",
-        "label",
-        "goto",
-        "tagged",
-        "call",
-        "fallback",
-      ],
-      types: [
-        "string",
-        "boolean",
-        "integer",
-        "number",
-        "date",
-        "time",
-        "datetime",
-        "absoluteDateTime",
-        "duration",
-        "calendarDuration",
-        "list",
-        "set",
-        "dict",
-        "object",
-        "range",
-        "media",
-        "script",
-      ],
-      commands: [
-        "showButton",
-        "askText",
-        "askNumber",
-        "choose",
-        "say",
-        "wait",
-        "timer",
-        "showImage",
-        "hideImage",
-        "showCamera",
-        "hideCamera",
-        "findImages",
-        "findScripts",
-        "playAudio",
-        "playVideo",
-        "takePhoto",
-        "save",
-        "load",
-        "delete",
-        "exit",
-        "end",
-      ],
     });
     monaco.languages.setLanguageConfiguration(TEASE_LANGUAGE_ID, {
       comments: { lineComment: "//", blockComment: ["/*", "*/"] },
@@ -178,6 +84,20 @@ function registerProviders(): void {
     (startLineNumber, startColumn, endLineNumber, endColumn) =>
       new monaco.Range(startLineNumber, startColumn, endLineNumber, endColumn),
     monaco.languages.CompletionItemKind,
+    // The theme's colour for each class, by the token types Monaco's themes colour.
+    {
+      keyword: "keyword",
+      type: "type",
+      command: "type.identifier",
+      name: "identifier",
+      number: "number",
+      string: "string",
+      interpolation: "delimiter.bracket",
+      regex: "regexp",
+      comment: "comment",
+      operator: "operator",
+      punctuation: "delimiter",
+    },
   );
   registerTeaseScriptProviders(
     {
@@ -192,6 +112,9 @@ function registerProviders(): void {
       },
       formatting: (provider) => {
         monaco.languages.registerDocumentFormattingEditProvider(TEASE_LANGUAGE_ID, provider);
+      },
+      semanticTokens: (provider) => {
+        monaco.languages.registerDocumentSemanticTokensProvider(TEASE_LANGUAGE_ID, provider);
       },
     },
     providers,
