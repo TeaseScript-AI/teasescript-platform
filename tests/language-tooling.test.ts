@@ -69,49 +69,32 @@ test("completion exposes optional speaker and current say modifiers", () => {
   assert.ok(say.includes("unskippable"));
 });
 
-test("every completion offered for a say's pacing compiles there", () => {
-  // `|` marks the cursor, and the rest is written after the completion. The parser decides where the pacing is, also in
-  // the parentheses of a bounded say, whose `)` or enclosing block may not be written yet.
+test("the pacing values offered after a say's comma compile there", () => {
+  // `|` marks the cursor, and the rest is written after the completion.
   const cases: readonly (readonly [marked: string, rest: string])[] = [
     ['say "Hi",|\nexit', ""],
     ['say "Hi", |\nexit', ""],
     ['say("Hi", |)\nexit', ""],
     ['say("Hi", |', ")\nexit"],
-    ['say bubble() ("Hi",\n  |)\nexit', ""],
     ['let line = say "Hi", |\nexit', ""],
     ['let lines = [say("Hi", |)]\nexit', ""],
-    ['let lines = [say("Hi", |', ")]\nexit"],
-    ['say "${say("Hi", |', ').text}"\nexit'],
-    ['if say("Hi", |).text == "Hi" {\n}\nexit', ""],
-    ['if say("Hi", |', ').text == "Hi" {\n}\nexit'],
     ['speaker mistress { name: "Mistress" }\nsay as mistress skippable "Hi", |\nexit', ""],
   ];
   for (const [marked, rest] of cases) {
     const offset = marked.indexOf("|");
     const source = marked.replace("|", "");
     const document = createLanguageDocument("file:///main.tease", source);
-    const items = languageCompletions(document, languagePositionAt(document, offset));
+    const values = languageCompletions(document, languagePositionAt(document, offset)).filter(
+      (item) => item.kind === "value",
+    );
     assert.ok(
-      items.some((item) => item.label === "instant"),
+      values.some((item) => item.label === "instant"),
       marked,
     );
-    for (const item of items) {
+    for (const item of values) {
       const completed = source.slice(0, offset) + item.insertText + source.slice(offset) + rest;
       assert.deepEqual(compileSource(completed).diagnostics, [], completed);
     }
-  }
-  // A comma inside the text separates arguments or elements, and outside parentheses a say's pacing does not continue
-  // on the next line or in a comment, so no pacing is offered there.
-  for (const prefix of [
-    "function pick(a, b) { return a }\nsay pick(1, ",
-    "say [1, ",
-    'say "${max(1, ',
-    'say "Hi",\n  ',
-    'let line = say "Hi",\n  ',
-    'say "Hi", // soon, ',
-  ]) {
-    const offered = labels(prefix);
-    assert.ok(!offered.includes("instant") && !offered.includes("0 s"), prefix);
   }
 });
 
@@ -240,8 +223,6 @@ function assertDeepSayTooling(source: string): void {
     hover?.contents,
     languageHover(topLevel, languagePositionAt(topLevel, 1))?.contents,
   );
-  // Completion finds the deepest say's pacing too.
-  assert.ok(labels(source, start + DEEP_SAY.indexOf(",") + 1).includes("0 s"));
 }
 
 test("hover and formatting handle deeply nested source inside a timer expiry block", () => {

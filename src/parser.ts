@@ -113,12 +113,6 @@ export interface ParseResult {
    * inside of every statement block. Language tooling finds the statement at a position with them.
    */
   readonly statementRanges: readonly StatementRange[];
-  /**
-   * The offsets where the parser starts reading a `say`'s pacing: right after its comma, or in the parentheses of a
-   * bounded `say` after the line breaks that follow it; also in a `say` or an enclosing statement it could not read to
-   * the end. Language tooling offers the pacing values there.
-   */
-  readonly sayPacingStarts: ReadonlySet<number>;
 }
 
 /**
@@ -230,11 +224,6 @@ interface SharedParse {
    * a run, or giving it back after a missing closer, costs the same at every level of nesting.
    */
   readonly newlineRuns: { readonly starts: Int32Array; readonly ends: Int32Array };
-  /**
-   * Where a `say`'s pacing starts (see `ParseResult.sayPacingStarts`). A speculative parser adds those of the `say`
-   * values it parses, as the parse that counts reuses their parse (see `sayValues`).
-   */
-  readonly sayPacingStarts: Set<number>;
 }
 /** A `say` value parsed at a token position in one parsing context, with what its parse left behind. */
 interface ParsedSayValue {
@@ -361,7 +350,6 @@ export function parse(source: string): ParseResult {
       header: header.header,
       diagnostics: Object.freeze([...header.diagnostics, ...parser.diagnostics]),
       statementRanges: Object.freeze(parser.statementRanges()),
-      sayPacingStarts: parser.sayPacingStarts,
     });
   }
 }
@@ -411,7 +399,6 @@ class Parser {
       sayValues: new Map(),
       recoveredStrings: new WeakSet(),
       newlineRuns: newlineRuns(tokens),
-      sayPacingStarts: new Set(),
     },
   ) {
     this.#shared = shared;
@@ -423,10 +410,6 @@ class Parser {
 
   public get regexStarts(): readonly number[] {
     return this.#regexStarts;
-  }
-
-  public get sayPacingStarts(): ReadonlySet<number> {
-    return this.#shared.sayPacingStarts;
   }
 
   /** The statement ranges, with those of each reused `say` value in its place, read once without recursion. */
@@ -997,7 +980,6 @@ class Parser {
     let pacing: SayParts["pacing"] = null;
     let endSpan = value.span;
     if (this.#match(TokenKind.Comma)) {
-      this.#shared.sayPacingStarts.add(this.#peek().span.start.offset);
       if (this.#canParseInstantPacingAlias(statement)) {
         endSpan = this.#advance().span;
         pacing = "instant";
@@ -1081,7 +1063,6 @@ class Parser {
     let pacing: SayParts["pacing"] = null;
     if (this.#match(TokenKind.Comma)) {
       this.#skipNewlines();
-      this.#shared.sayPacingStarts.add(this.#peek().span.start.offset);
       let after = 1;
       while (this.#peek(after).kind === TokenKind.Newline) after += 1;
       if (

@@ -241,14 +241,6 @@ export function languageCompletions(
   );
   const significant = tokens.filter((token) => token.kind !== TokenKind.Newline);
   const last = significant.at(-1);
-  // Where the parser reads a say's pacing, a duration or `instant`, the two values without reading time are offered
-  // (V30, "Message presentation defaults and overrides") instead of the commands offered for other values. A pacing
-  // follows a comma, so only then is the text parsed again.
-  if (last?.kind === TokenKind.Comma && sayPacingStartsAt(document.text, offset))
-    return Object.freeze([
-      value("instant", "Disable pacing delay"),
-      value("0 s", "Exact zero-second pacing"),
-    ]);
   const lineTokens = tokensAfterLastNewline(tokens);
   const items: LanguageCompletionItem[] = [];
 
@@ -302,6 +294,10 @@ export function languageCompletions(
           }),
         );
       }
+    }
+    if (compact.command === "say" && compact.stage === "afterComma") {
+      items.push(value("instant", "Disable pacing delay"));
+      items.push(value("0 s", "Exact zero-second pacing"));
     }
   }
 
@@ -460,7 +456,7 @@ function isExpressionCompletionContext(
   );
 }
 
-type CompactStage = "afterCommand" | "afterAs" | "other";
+type CompactStage = "afterCommand" | "afterAs" | "afterComma" | "other";
 
 function compactCommandContext(
   tokens: readonly Token[],
@@ -472,6 +468,8 @@ function compactCommandContext(
     const tail = tokens.slice(index + 1);
     if (tail.length === 0) return { command, stage: "afterCommand" };
     if (tail.at(-1)?.kind === TokenKind.KeywordAs) return { command, stage: "afterAs" };
+    if (command === "say" && tail.at(-1)?.kind === TokenKind.Comma)
+      return { command, stage: "afterComma" };
     return { command, stage: "other" };
   }
   return null;
@@ -493,21 +491,6 @@ function askCommand(kind: InteractionExpression["interactionKind"]): CompactComm
   for (const command of Object.keys(ASK_KINDS))
     if (isAskCommand(command) && ASK_KINDS[command] === kind) return command;
   return null;
-}
-
-/**
- * Whether the parser starts reading a say's pacing at `offset` when a value is written there: after `say "Hi", ` or
- * `say("Hi", `, also before the `)` or the block after it is written, and on a later line only inside the parentheses
- * of a bounded say; not after a comma inside its text, as in `say f(1, ` or `say [1, `. The value decides a call such
- * as `say skippable ("Hi", x)`.
- */
-function sayPacingStartsAt(text: string, offset: number): boolean {
-  try {
-    return parse(`${text.slice(0, offset)}pacing${text.slice(offset)}`).sayPacingStarts.has(offset);
-  } catch (error) {
-    if (!isNativeStackExhaustion(error)) throw error;
-    return false;
-  }
 }
 
 const protectedNames: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
