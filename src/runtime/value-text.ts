@@ -1,3 +1,4 @@
+import { formatAngle } from "../angle.js";
 import { formatDuration } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
@@ -28,6 +29,7 @@ import type {
 } from "./serializable-values.js";
 import {
   describeRuntimeValue,
+  isAngle,
   isAnyDuration,
   isDict,
   isList,
@@ -48,8 +50,8 @@ import {
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /**
- * Scalar visible text: strings, finite numbers, booleans, `null`, durations, date and time values, script references,
- * and regexes. Dates and times use the player's numeric presentation from `context`, and an absolute date and time shows
+ * Scalar visible text: strings, finite numbers, booleans, `null`, durations, angles, date and time values, script
+ * references, and regexes. Dates and times use the player's numeric presentation from `context`, and an absolute date and time shows
  * as the local date and time it is.
  */
 export function visibleText(
@@ -105,6 +107,7 @@ function plainScalarText(value: SerializableRuntimeValue, span: SourceSpan): str
   if (typeof value === "boolean") return value ? "true" : "false";
   if (value === null) return "null";
   if (isAnyDuration(value)) return formatDuration(value);
+  if (isAngle(value)) return formatAngle(value);
   if (isScriptReference(value)) return scriptNotation(value, span);
   if (isRegex(value)) return regexNotation(value, span);
   throw fault(
@@ -160,6 +163,7 @@ export function isVisibleScalar(value: SerializableRuntimeValue): boolean {
     typeof value === "boolean" ||
     value === null ||
     isAnyDuration(value) ||
+    isAngle(value) ||
     isTemporal(value) ||
     isScriptReference(value) ||
     isRegex(value)

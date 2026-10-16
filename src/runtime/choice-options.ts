@@ -17,6 +17,7 @@ import {
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
 import {
+  isAngle,
   isAnyDuration,
   isList,
   isObject,
@@ -128,7 +129,7 @@ function choiceButton(
   if (ownValue !== undefined && !isVisibleScalar(ownValue))
     throw fault(
       "TSR052",
-      "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
+      "A choice value must be text, a number, true, false, null, a duration, an angle, or a date or time value.",
       span,
     );
   const background = getSerializableProperty(option, "background");
@@ -141,7 +142,7 @@ function choiceButton(
 
 /** A scalar that `isVisibleScalar` accepted, as a choice value; a script reference or regex is shown but not returned. */
 function choiceValue(value: SerializableRuntimeValue, span: SourceSpan): InteractionChoiceValue {
-  if (isAnyDuration(value)) return { ...value };
+  if (isAnyDuration(value) || isAngle(value)) return { ...value };
   if (isTemporal(value)) return { ...value };
   if (typeof value === "number") return Object.is(value, -0) ? 0 : value;
   if (typeof value === "string" || typeof value === "boolean" || value === null) return value;

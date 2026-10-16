@@ -1035,6 +1035,7 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       return;
     case "unaryExpression":
     case "unitExpression":
+    case "angleExpression":
       children.push({ kind: "expression", node: expression.operand });
       return;
     case "binaryExpression":

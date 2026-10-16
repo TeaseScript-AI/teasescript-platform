@@ -46,6 +46,7 @@ import {
 } from "./protected-names.js";
 import {
   findVisibleOverflows,
+  isStaticDuration,
   staticChoiceValue,
   staticNumber,
   staticQuantity,
@@ -217,6 +218,7 @@ const OVERFLOW_MESSAGES = {
   zero: "This divides by zero, so it has no result. Divide by a value other than zero.",
   number: "This calculation gives a number too large to represent. Use smaller values.",
   duration: "This calculation gives a duration too long to represent. Use a shorter duration.",
+  angle: "This calculation gives an angle too large to represent. Use a smaller angle.",
 } as const;
 
 /** Validates one source as the `main.tease` of a single-file project. */
@@ -1944,7 +1946,8 @@ class SemanticValidator {
     while (
       expression.kind === "parenthesizedExpression" ||
       expression.kind === "unaryExpression" ||
-      expression.kind === "unitExpression"
+      expression.kind === "unitExpression" ||
+      expression.kind === "angleExpression"
     ) {
       expression =
         expression.kind === "parenthesizedExpression" ? expression.expression : expression.operand;
@@ -3360,7 +3363,9 @@ function knownMilliseconds(expression: Expression, unit: DurationUnit | null): n
   if (typeof known === "number")
     return unit === null ? undefined : known * DURATION_UNIT_MILLISECONDS[unit];
   // A duration with a unit after it is a type error of its own, and a calendar duration has no fixed length.
-  return unit === null && !isCalendar(known) ? known.milliseconds : undefined;
+  return unit === null && isStaticDuration(known) && !isCalendar(known)
+    ? known.milliseconds
+    : undefined;
 }
 
 /** Scene time is at most `Number.MAX_SAFE_INTEGER` milliseconds, so a known longer duration can never be reached. */

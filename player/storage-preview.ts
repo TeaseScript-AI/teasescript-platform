@@ -1,3 +1,4 @@
+import { formatAngle } from "../src/angle.js";
 import { formatDuration } from "../src/duration.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 import {
@@ -77,6 +78,8 @@ export function storagePreview(value: SerializableRuntimeValue): StoragePreview 
       return preview("Duration", formatDuration(value));
     case "calendarDuration":
       return preview("Calendar duration", formatDuration(value));
+    case "angle":
+      return preview("Angle", formatAngle(value));
     case "date":
       return preview("Date", formatIsoDate(value));
     case "time":

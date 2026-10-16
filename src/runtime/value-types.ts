@@ -1,6 +1,7 @@
 import type { PlanSourceLocation, TypeCheckPlan, TypePlan } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
 import { booleanFromText, numberFromText, withoutNegativeZero } from "../conversions.js";
+import { formatAngle } from "../angle.js";
 import { formatDuration } from "../duration.js";
 import { RuntimeFault } from "./errors.js";
 import { messageText } from "./text-length.js";
@@ -8,6 +9,7 @@ import { quotedText } from "./value-text.js";
 import { copySpan } from "./operations/support.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 import {
+  isAngle,
   isAnyDuration,
   isCalendarDuration,
   isDate,
@@ -53,14 +55,15 @@ export function assertValueType(
 }
 
 /**
- * A value as a message shows it: text, a number, true or false, or a duration with its bounded value, such as
- * `text (string) "3"`, and any other value by its kind.
+ * A value as a message shows it: text, a number, true or false, or a duration or an angle with its bounded value, such
+ * as `text (string) "3"`, and any other value by its kind.
  */
 export function describeShownValue(value: SerializableRuntimeValue): string {
   if (typeof value === "string") return `text (string) ${quotedText(messageText(value))}`;
   if (typeof value === "number") return String(withoutNegativeZero(value));
   if (typeof value === "boolean") return `${value} (boolean)`;
   if (isAnyDuration(value)) return formatDuration(value);
+  if (isAngle(value)) return formatAngle(value);
   return describeValue(value);
 }
 
@@ -224,6 +227,8 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
       return isDuration(value);
     case "calendarDuration":
       return isCalendarDuration(value);
+    case "angle":
+      return isAngle(value);
     case "range":
       return isRange(value);
     case "speaker":
@@ -263,6 +268,7 @@ const NAMED_DESCRIPTIONS: Readonly<Record<string, string>> = {
   boolean: "true or false (boolean)",
   duration: "a duration",
   calendarDuration: "a calendar duration",
+  angle: "an angle",
   date: "a date",
   time: "a time",
   datetime: "a date and time",

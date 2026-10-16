@@ -48,6 +48,7 @@ const entries: RuntimeScriptStorageEntrySnapshot[] = [
   { key: "set", value: { kind: "set", items: ["a", 1] } },
   { key: "range", value: { kind: "range", start: 1, end: 5, inclusive: false } },
   { key: "duration", value: { kind: "duration", milliseconds: 1_500 } },
+  { key: "angle", value: { kind: "angle", degrees: 57.29577951308232 } },
   {
     key: "calendarDuration",
     value: { kind: "calendarDuration", months: 1, days: 2, milliseconds: 1_500 },

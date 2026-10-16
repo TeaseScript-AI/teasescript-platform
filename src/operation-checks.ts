@@ -15,11 +15,13 @@ import {
   type ConversionResult,
 } from "./conversions.js";
 import { NUMERIC_FUNCTIONS } from "./numeric-functions.js";
+import { ANGLE_FUNCTIONS, angleArgumentMessage } from "./angle.js";
 import { misspelledPropertyHint } from "./object-properties.js";
 import type { SourceSpan } from "./source.js";
 import { canonicalRegexFlags, compileRegex, regexFlagProblem, replacementParts } from "./regex.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
+  ANGLE_TYPE,
   CALENDAR_DURATION_TYPE,
   containsType,
   DATE_TYPE,
@@ -119,7 +121,7 @@ export function memberProblems(
     if (element !== undefined)
       problems.push({
         kind: "invalidOperand",
-        message: `join() can only join text, numbers, true or false, null, durations, date and time values, script references, and regexes, not ${describeValue(element.type)}. Select an element or a property first.`,
+        message: `join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes, not ${describeValue(element.type)}. Select an element or a property first.`,
         span: element.expression.span,
       });
     return problems;
@@ -298,8 +300,8 @@ function unshowableElement(
 }
 
 /**
- * Whether a value of this type may be shown by `join`: text, a number, true or false, a duration, a date or time value,
- * or null; `join` checks the value.
+ * Whether a value of this type may be shown by `join`: text, a number, true or false, a duration, an angle, a date or
+ * time value, or null; `join` checks the value.
  */
 function joinShowable(type: StaticType): boolean {
   return members(type).some(
@@ -358,6 +360,7 @@ export function builtinCallProblems(
 ): OperationProblem[] {
   if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
   if (NUMERIC_FUNCTIONS.has(name)) return numericFunctionProblems(name, call, typeOf);
+  if (ANGLE_FUNCTIONS.has(name)) return angleFunctionProblems(name, call, typeOf);
   if (
     DATA_TEXT_FUNCTIONS.has(name) ||
     name === "fileFromBase64" ||
@@ -622,7 +625,59 @@ function numericFunctionProblems(
     if (!isAssignable(NUMBER_TYPE, type))
       problems.push({
         kind: "invalidOperand",
-        message: `${name}(...) needs a number${place}, not ${describeValue(forUse(type))}.${isScalar(forUse(type), "string") ? " Convert text with toNumber(...) first." : ""}`,
+        message: `${name}(...) needs a number${place}, not ${describeValue(forUse(type))}.${numberFix(forUse(type))}`,
+        span: value.span,
+      });
+  }
+  return problems;
+}
+
+/** How to turn text or an angle into the number a numeric function needs, or nothing for other values. */
+function numberFix(type: StaticType): string {
+  if (isScalar(type, "string")) return " Convert text with toNumber(...) first.";
+  return isScalar(type, "angle") ? " Convert it to a number of degrees with toDeg(...) first." : "";
+}
+
+/**
+ * Problems with an angle function (V30 §13): names, its number of arguments, and arguments that are not of the kind it
+ * takes. A plain number where an angle is needed names the unit to write.
+ */
+function angleFunctionProblems(
+  name: string,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const { parameters, takes } = ANGLE_FUNCTIONS.get(name)!;
+  const problems: OperationProblem[] = [];
+  const values: Expression[] = [];
+  for (const argument of call.arguments) {
+    if (argument.kind === "positionalArgument") values.push(argument.value);
+    else
+      problems.push({
+        kind: "unknownNamedArgument",
+        message: `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`,
+        span: argument.name.span,
+      });
+  }
+  if (values.length !== parameters.length)
+    problems.push({
+      kind: "argumentCount",
+      message: `${name}(...) takes ${parameters.length} argument${parameters.length === 1 ? "" : "s"} (${parameters.join(", ")}), received ${values.length}.`,
+      span: call.span,
+    });
+  if (problems.length > 0) return problems;
+  const accepted = takes === "angle" ? ANGLE_TYPE : NUMBER_TYPE;
+  for (const value of values) {
+    const type = forUse(typeOf(value));
+    if (!isAssignable(accepted, typeOf(value)))
+      problems.push({
+        kind: "invalidOperand",
+        message: angleArgumentMessage(
+          name,
+          takes,
+          describeValue(type),
+          isScalar(type, "integer", "number") ? "number" : isScalar(type, "string") ? "string" : "",
+        ),
         span: value.span,
       });
   }
@@ -659,12 +714,14 @@ function minMaxProblems(
   for (const argument of call.arguments) {
     const type = typeOf(argument.value);
     if (!isKnown(forUse(type))) continue;
-    // Numbers, durations, calendar durations, or date and time values of one kind (V30 §35) compare with each other.
+    // Numbers, durations, calendar durations, angles, or date and time values of one kind (V30 §35) compare with each
+    // other.
     const kind = isAssignable(NUMBER_TYPE, type)
       ? NUMBER_TYPE
       : [
           DURATION_TYPE,
           CALENDAR_DURATION_TYPE,
+          ANGLE_TYPE,
           DATE_TYPE,
           TIME_TYPE,
           DATETIME_TYPE,
@@ -672,7 +729,7 @@ function minMaxProblems(
         ].find((candidate) => isAssignable(candidate, type));
     const message =
       kind === undefined
-        ? `${name}(...) needs numbers, durations, or date and time values, not ${describeValue(forUse(type))}.`
+        ? `${name}(...) needs numbers, durations, angles, or date and time values, not ${describeValue(forUse(type))}.`
         : family !== undefined && kind !== family
           ? `${name}(...) needs values of one kind, but this is ${describeValue(kind)} and an earlier one is ${describeValue(family)}.`
           : undefined;
@@ -723,7 +780,7 @@ function candidateConversionProblem(
       ? `toString(...) cannot convert ${describeValue(type)}. Use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`
       : type.kind === "dict"
         ? `toString(...) cannot convert ${describeValue(type)}. Use .values.join() to combine its values as text.`
-        : `toString(...) converts text, numbers, true or false, null, durations, date and time values, script references, and regexes, not ${describeValue(type)}.`;
+        : `toString(...) converts text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes, not ${describeValue(type)}.`;
   }
   if (isTemporalConversionResult(result)) {
     const conversion = TEMPORAL_CONVERSIONS[result];
@@ -749,7 +806,7 @@ function candidateConversionProblem(
     return text === undefined || numberFromText(text) !== undefined
       ? undefined
       : `${name}(...) cannot convert ${JSON.stringify(text)}. The text must be a number such as 2.5 or -3.`;
-  return `${name}(...) converts text and numbers, not ${describeValue(type)}.${isScalar(type, "duration") ? " Divide a duration by a unit instead, such as value / 1 s." : ""}`;
+  return `${name}(...) converts text and numbers, not ${describeValue(type)}.${isScalar(type, "duration") ? " Divide a duration by a unit instead, such as value / 1 s." : isScalar(type, "angle") ? " Use toDeg(...) or toRad(...) for the size of an angle instead." : ""}`;
 }
 
 /**
@@ -1249,18 +1306,20 @@ function sortProblem(element: StaticType): string | undefined {
           ? "durations"
           : isScalar(candidate, "calendarDuration")
             ? "calendar durations"
-            : isScalar(candidate, "date")
-              ? "dates"
-              : isScalar(candidate, "time")
-                ? "times"
-                : isScalar(candidate, "datetime")
-                  ? "dates and times"
-                  : isScalar(candidate, "absoluteDateTime")
-                    ? "absolute dates and times"
-                    : undefined;
+            : isScalar(candidate, "angle")
+              ? "angles"
+              : isScalar(candidate, "date")
+                ? "dates"
+                : isScalar(candidate, "time")
+                  ? "times"
+                  : isScalar(candidate, "datetime")
+                    ? "dates and times"
+                    : isScalar(candidate, "absoluteDateTime")
+                      ? "absolute dates and times"
+                      : undefined;
   const unsortable = candidates.find((candidate) => kindOf(candidate) === undefined);
   if (unsortable !== undefined)
-    return `sort() sorts numbers, text, durations, or date and time values, not ${describeValue(unsortable)}.`;
+    return `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeValue(unsortable)}.`;
   const kinds = new Set(candidates.map(kindOf));
   return kinds.size > 1
     ? `sort() needs elements of one kind, but this list may hold ${[...kinds].join(" and ")}.`

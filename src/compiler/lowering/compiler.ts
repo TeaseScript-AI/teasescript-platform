@@ -1581,6 +1581,18 @@ export class InstructionCompiler {
           temporaryIds: operand.temporaryIds,
         };
       }
+      case "angleExpression": {
+        const operand = yield* compileChild(this.#lowerExpressionTask(expression.operand));
+        return {
+          plan: {
+            kind: "angleUnit",
+            operand: operand.plan,
+            unit: expression.unit,
+            span: copySpan(expression.span),
+          },
+          temporaryIds: operand.temporaryIds,
+        };
+      }
       case "binaryExpression": {
         const leftExpression = expression.left;
         const rightExpression = expression.right;
@@ -3502,6 +3514,13 @@ function assembleExpression(
         kind: "unit",
         operand: child(expression.operand),
         ...unitOf(expression),
+        span: copySpan(expression.span),
+      };
+    case "angleExpression":
+      return {
+        kind: "angleUnit",
+        operand: child(expression.operand),
+        unit: expression.unit,
         span: copySpan(expression.span),
       };
     case "binaryExpression":

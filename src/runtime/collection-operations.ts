@@ -1,4 +1,5 @@
 import { withoutNegativeZero } from "../conversions.js";
+import { compareAngles } from "../angle.js";
 import { compareDurations, durationFamily, durationParts } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
@@ -9,6 +10,7 @@ import { compareTemporal } from "./temporal-operations.js";
 import { groupedDigits } from "./text-length.js";
 import {
   describeRuntimeValue,
+  isAngle,
   isAnyDuration,
   isCalendarDuration,
   isDuration,
@@ -23,7 +25,7 @@ export const SET_OPERATIONS: ReadonlySet<string> = new Set(["intersection", "uni
 
 /**
  * The ascending, stable order of sortable list items as their old indexes: numbers (integers and numbers together),
- * text by Unicode code point, durations, or date and time values. Every item must be of one of these kinds, and all of
+ * text by Unicode code point, durations, angles by size, or date and time values. Every item must be of one of these kinds, and all of
  * the same kind; dates, times, datetimes, and absolute dates and times are four kinds (V30 §35).
  */
 export function sortOrder(items: readonly SerializableRuntimeValue[], span: SourceSpan): number[] {
@@ -38,13 +40,15 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
             ? "duration"
             : isCalendarDuration(item)
               ? "calendarDuration"
-              : isTemporal(item)
-                ? item.kind
-                : undefined;
+              : isAngle(item)
+                ? "angle"
+                : isTemporal(item)
+                  ? item.kind
+                  : undefined;
     if (itemKind === undefined)
       throw fault(
         "TSR060",
-        `sort() sorts numbers, text, durations, or date and time values, not ${describeRuntimeValue(item)}.`,
+        `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeRuntimeValue(item)}.`,
         span,
       );
     if (kind !== undefined && itemKind !== kind)
@@ -77,6 +81,7 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
       const order = compareDurations(left, right);
       return typeof order === "number" ? order : 0;
     }
+    if (isAngle(left) && isAngle(right)) return compareAngles(left, right);
     if (isTemporal(left) && isTemporal(right)) return compareTemporal(left, right);
     return sortKey(left) - sortKey(right);
   };
@@ -91,6 +96,7 @@ const KIND_DESCRIPTIONS = {
   text: "text",
   duration: "durations",
   calendarDuration: "calendar durations",
+  angle: "angles",
   date: "dates",
   time: "times",
   datetime: "dates and times",
