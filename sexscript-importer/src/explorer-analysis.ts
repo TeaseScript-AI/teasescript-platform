@@ -3574,34 +3574,22 @@ export interface ClockDifference extends Constants {
 
 /**
  * Whether the condition at `index` is the one the compiler adds for a load whose default calls a function
- * (`load(k, default: f())`): the load without its default into a temporary, then whether that gave nothing, before the
- * default is computed. The author wrote no such condition: whether the default is used shows in the lines of what it
- * calls.
+ * (`load(k, default: f())`): the load without its default into a temporary, which also tells whether the default is
+ * used (#938: a default runs only when it is used), then a jump on that, before the default is computed. The author
+ * wrote no such condition: whether the default is used shows in the lines of what it calls.
  */
 export function loadDefaultCheck(instructions: readonly Data[], index: number): boolean {
   const instruction = instructions[index];
   const before = instructions[index - 1];
   if (instruction?.kind !== "jumpIfFalse" || before?.kind !== "storeTemporary") return false;
   const condition = record(instruction.condition);
-  const [left, right, loaded] = [
-    record(condition.left),
-    record(condition.right),
-    record(before.value),
-  ];
-  const span = record(condition.span);
-  const same = (other: Data) =>
-    isRecord(other.span) && other.span.so === span.so && other.span.eo === span.eo;
+  const loaded = record(before.value);
   return (
-    condition.kind === "binary" &&
-    condition.operator === "==" &&
-    left.kind === "temporary" &&
-    left.temporaryId === before.temporaryId &&
-    right.kind === "literal" &&
-    right.value === null &&
-    same(right) &&
+    condition.kind === "temporary" &&
+    typeof before.defaultTemporary === "number" &&
+    condition.temporaryId === before.defaultTemporary &&
     loaded.kind === "storageLoad" &&
-    loaded.default === null &&
-    same(loaded)
+    loaded.default === null
   );
 }
 
