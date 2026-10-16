@@ -23,8 +23,10 @@ import { utc } from "./helpers/temporal-fixtures.js";
 import {
   activatePlayerRuntimeButton,
   activePlayerRuntimeCapture,
+  adoptPlayerRuntimeCatchUp,
   answerPlayerRuntimeCapture,
   answerPlayerRuntimeImage,
+  beginPlayerRuntimeCatchUp,
   beginPlayerRuntimeRecording,
   compilePlayerProject,
   completePlayerRuntimeStorageWrite,
@@ -44,6 +46,7 @@ import {
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
+  stepPlayerRuntimeCatchUp,
   stepPlayerRuntimeFormField,
   skipPlayerRuntimeImage,
   submitPlayerRuntimeComposer,
@@ -546,12 +549,18 @@ test("the Player keeps its own state, for a save or a recording's anchor, as the
     beginPlayerRuntimeRecording(session, new DebugRecorder());
     assert.equal(statistics().counts.externalCaptureVisits ?? 0, 0);
   });
-  // A recording that starts again before a call takes its anchor without capturing the state either: the same calls
-  // capture only their arguments.
+  // A recording that starts again before a call takes its anchor without capturing the state either, also before a call
+  // of a copy that catches up: the same calls capture only their arguments.
   const captureVisits = (recorder: DebugRecorder) => {
     let played = createPlayerRuntimeSession(source, { recorder });
     return withValidationTestStatistics((statistics) => {
-      for (const atMs of [1_000, 2_000]) played = observePlayerRuntimeTime(played, atMs).session;
+      played = observePlayerRuntimeTime(played, 1_000).session;
+      const catchUp = beginPlayerRuntimeCatchUp(played, 2_000);
+      assert.equal(
+        stepPlayerRuntimeCatchUp(catchUp, () => true),
+        "done",
+      );
+      played = adoptPlayerRuntimeCatchUp(played, catchUp)!;
       assert.equal(played.state.status, "halted");
       return statistics().counts.externalCaptureVisits ?? 0;
     });
