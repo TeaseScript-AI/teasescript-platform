@@ -96,6 +96,7 @@ import {
   collectionMethodProblems,
   expressionLabel,
   fallbackFix,
+  HANDLE_KINDS,
   LIST_REORDERS,
   LIST_SEARCHES,
   mayBeMessage,
@@ -334,6 +335,7 @@ export type RuntimeCheckSite =
   | LoadExpression;
 
 const typeCode = {
+  invalidAssignment: "TSV004",
   argumentCount: "TSV020",
   unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
@@ -2275,6 +2277,7 @@ class TypeChecker {
       case "expressionStatement":
         if (copiesAccount(statement.expression)) this.#copyStatements.add(statement.expression);
         yield* compileChild(this.#expressionTask(statement.expression, scope));
+        this.#reportCopyChangedInPlace(statement.expression);
         return true;
       case "speakerDeclaration":
         // Its properties are start values, checked before the files.
@@ -2904,6 +2907,7 @@ class TypeChecker {
       )
         this.#relaxNarrowedRoot(target.object, scope);
       const object = yield* compileChild(this.#expressionTask(target.object, scope));
+      this.#reportChangedCopy(target, target.object);
       this.#noteUncheckedStore(target, scope);
       if (target.kind === "indexExpression") {
         const index = yield* compileChild(this.#expressionTask(target.index, scope));
@@ -8465,6 +8469,51 @@ class TypeChecker {
     }
   }
 
+  /**
+   * Reports a change of `changed` that lands in a value no variable holds, such as `obj()` in `obj().n = 5`, so the
+   * change is lost with it (owner decision O3, 2026-10-16). `start` is the value changed: the object of an assigned
+   * property or element, or the receiver of an in-place method. Of it and the values it is part of, the first that may
+   * be a speaker or a handle takes the change, as every copy of it names the same one; so does a variable. A value the
+   * compiler cannot know may be a speaker, so it is not reported, nor is a value that can only be null, which has
+   * nothing to change and its own message.
+   */
+  #reportChangedCopy(changed: Expression, start: Expression): void {
+    for (let node = start; ;) {
+      const type = this.#typeOf(node);
+      const reference = members(type).some(
+        (member) => !isKnown(member) || HANDLE_KINDS.has(resolved(member).kind),
+      );
+      if (reference || nonNullType(type).kind === "never") return;
+      if (node.kind === "parenthesizedExpression") node = node.expression;
+      else if (node.kind === "propertyAccessExpression" || node.kind === "indexExpression")
+        node = node.object;
+      else {
+        if (node.kind !== "identifier")
+          this.#report(typeCode.invalidAssignment, changedCopyMessage(changed, node), changed.span);
+        return;
+      }
+    }
+  }
+
+  /** Reports an in-place change in statement position, such as `things().sort()`, of a value no variable holds. */
+  #reportCopyChangedInPlace(expression: Expression): void {
+    if (expression.kind !== "callExpression") return;
+    const callee = unwrap(expression.callee);
+    if (callee.kind !== "propertyAccessExpression") return;
+    const method = callee.property.name;
+    // Text `reverse` gives a new text, and a method that the receiver does not have is reported as such.
+    const changes = COLLECTION_CHANGES.has(method)
+      ? isCollection
+      : LIST_REORDERS.has(method)
+        ? isList
+        : null;
+    if (
+      changes !== null &&
+      members(this.#typeOf(callee.object)).some((member) => changes(resolved(member)))
+    )
+      this.#reportChangedCopy(callee.object, callee.object);
+  }
+
   /** A value that may be of a member type the operation does not support: name the test that makes it safe. */
   #reportMayBe(expression: Expression, failing: StaticType, passing: readonly StaticType[]): void {
     this.#report(
@@ -11087,6 +11136,37 @@ function sourceText(expression: Expression): string | null {
   if (literal.kind === "numberLiteral") return literal.raw;
   if (literal.kind === "booleanLiteral") return String(literal.value);
   return null;
+}
+
+/**
+ * The message for a change of `changed` that lands in `copy`, a value no variable holds. For a call, such as `obj()`,
+ * it shows how to keep the value in a variable named by the call's first letter and change it there, as in `o.n`.
+ */
+function changedCopyMessage(changed: Expression, copy: Expression): string {
+  const callee = copy.kind === "callExpression" ? expressionLabel(copy.callee) : null;
+  if (copy.kind !== "callExpression" || callee === null)
+    return "This changes a copy that no variable holds, so the change is lost. Store the value in a variable first, then change the variable.";
+  const call = `${callee}(${copy.arguments.length > 0 ? "..." : ""})`;
+  const initial = callee
+    .slice(callee.lastIndexOf(".") + 1)
+    .charAt(0)
+    .toLowerCase();
+  const name = /^[a-z]$/.test(initial) && initial !== callee ? initial : "value";
+  const steps: string[] = [];
+  for (let node = changed; node !== copy;) {
+    if (node.kind === "parenthesizedExpression") node = node.expression;
+    else if (node.kind === "propertyAccessExpression") {
+      steps.push(`.${node.property.name}`);
+      node = node.object;
+    } else if (node.kind === "indexExpression") {
+      const index = unwrap(node.index);
+      steps.push(
+        `[${index.kind === "numberLiteral" ? index.raw : index.kind === "identifier" ? index.name : "..."}]`,
+      );
+      node = node.object;
+    } else break;
+  }
+  return `This changes a copy that no variable holds: '${call}' gives a new value each time, so the change is lost. Store it in a variable first, as in 'let ${name} = ${call}', then change '${name}${steps.reverse().join("")}'.`;
 }
 
 /**
