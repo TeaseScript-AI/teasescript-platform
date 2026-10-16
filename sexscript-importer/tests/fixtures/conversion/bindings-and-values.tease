@@ -22,7 +22,7 @@ if empty != {} {
 }
 let items = ["a", "b"]
 let more = items + ["c"]
-let check = (1 < 2) == true
+let check = 1 < 2
 let setValue = "tools" // protected in TeaseScript
 say prose "Set: ${setValue}", instant
 function pick(a, b) {

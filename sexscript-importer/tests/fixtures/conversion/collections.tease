@@ -285,7 +285,7 @@ if replies.length == 0 {
 let drainSpeed = 0
 for stroke in 1..=2 {
   say prose "Stroke ${stroke}", instant
-  if load("training.edge", default: false) == true {
+  if load("training.edge", default: false) {
     if askBoolean prose "Over the edge?" {
       break
     }

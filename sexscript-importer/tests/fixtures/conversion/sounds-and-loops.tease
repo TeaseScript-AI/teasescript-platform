@@ -15,7 +15,7 @@ while true {
 }
 // A shock plays its sound once for each started ten seconds (PainStacks playShockSingle).
 let stime = 25
-let repetitions = toInteger(ceil(stime / 10))
+let repetitions = ceil(stime / 10)
 if repetitions >= 1 {
   playAudio(file: "shock.mp3", async: true, repeat: repetitions times)
 }

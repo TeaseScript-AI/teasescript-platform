@@ -113,14 +113,14 @@ if n <= 3 and n >= 1 {
 // A case that falls through into a case whose own break sits in an if leaves the switch at that break as well.
 switch randomInteger(0..2) {
   case 0 {
-    if load("toys.paddle", default: false) == true {
+    if load("toys.paddle", default: false) {
       say prose "Fetch the paddle", instant
-    } else if load("toys.crop", default: false) == true {
+    } else if load("toys.crop", default: false) {
       say prose "Fetch the crop", instant
     }
   }
   default {
-    if load("toys.crop", default: false) == true {
+    if load("toys.crop", default: false) {
       say prose "Fetch the crop", instant
     }
   }
@@ -129,7 +129,7 @@ switch randomInteger(0..2) {
 function implement(choice) {
   switch choice {
     case 0 {
-      if load("toys.paddle", default: false) == true {
+      if load("toys.paddle", default: false) {
         return "paddle"
       } else {
         return "hand"

@@ -425,7 +425,7 @@ say prose "Any ${checkAny(anyValue)}", instant
 // (jackoffrace).
 let debug = false
 let lives = 6
-if load("game.resume", default: false) == true {
+if load("game.resume", default: false) {
   lives = load "game.lives", default: 6
 }
 let moved = false

@@ -30,7 +30,7 @@ if conditional3 {
 }
 let value = "old"
 let answer = "yes"
-if flag != true {
+if not flag {
   answer = value
 }
 let conditional4 = "C"

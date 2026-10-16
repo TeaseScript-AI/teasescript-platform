@@ -843,6 +843,8 @@ function analyse(
   const savedScopes = new Map<IrStatement & { kind: "save" }, Scope>();
   // The variables that get a value of a type the analysis cannot tell somewhere.
   const unknownAssigned = new Set<Binding>();
+  // The variables of boolean comparisons that findIndexes reads as plain tests (plainBooleans).
+  const testedBooleans = new Map<IrExpression, Binding>();
   const root = new Scope(null);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
   const binding = (
@@ -1151,6 +1153,23 @@ function analyse(
           textIndexes.add(child);
           analysis.indexes.add(child);
         } else textIndexes.delete(child);
+      }
+      // A comparison of a value typing proves a boolean, never null, with true or false is the value itself or its
+      // opposite: `ready == true` is `ready`, `ready != true` is `not ready`.
+      if (
+        child.kind === "binary" &&
+        (child.operator === "==" || child.operator === "!=") &&
+        child.right.kind === "literal" &&
+        typeof child.right.value === "boolean"
+      ) {
+        const type = typeOf(child.left, scope);
+        if (type.kind === "scalar" && type.name === "boolean") {
+          plainBooleans.set(child, (child.operator === "==") === child.right.value);
+          analysis.indexes.add(child);
+          // A variable that also gets a value of unknown type may hold another type by then (checked after the walk).
+          const found = child.left.kind === "variable" ? scope.resolve(child.left.name) : undefined;
+          if (found !== undefined) testedBooleans.set(child, found);
+        } else plainBooleans.delete(child);
       }
       // The truth helper on a value whose type is now known is written as a plain test, which narrows a variable. A
       // value that may be null is tested twice, which only a variable may be.
@@ -1700,6 +1719,11 @@ function analyse(
         analysis.parameters.set(parameter, scalar("number"));
     });
   }
+  for (const [test, found] of testedBooleans)
+    if (unknownAssigned.has(found)) {
+      plainBooleans.delete(test);
+      analysis.indexes.delete(test);
+    }
   // A variable that a whole-number or number read starts and that also gets a value of unknown type.
   const openRead = (found: Binding): boolean => {
     const start = found.declaration?.value;
@@ -3223,6 +3247,8 @@ function settledValue(value: IrExpression): boolean {
 
 /** Truth helper calls on a variable of a known scalar type, with that type (findIndexes). */
 const plainTruths = new WeakMap<IrExpression, TeaseType>();
+/** Comparisons of a boolean, never null, with true or false: whether the comparison is the value (true) or its opposite. */
+const plainBooleans = new WeakMap<IrExpression, boolean>();
 /** Operators that need one type on each side, where an element of several types is read open (findIndexes). */
 /**
  * The saved type of a value that a number read starts and a value of unknown type may change (analyse): unknown, and
@@ -3324,6 +3350,9 @@ function withIntegerIndexes<T extends IrStatement>(
     )
       return negatedTest(copy.value) ?? copy;
     if (!indexes.has(value)) return copy;
+    const same = plainBooleans.get(value);
+    if (same !== undefined && copy.kind === "binary")
+      return same ? copy.left : { kind: "unary", operator: "not", value: copy.left };
     const truthType = plainTruths.get(value);
     if (truthType !== undefined && copy.kind === "call")
       return plainTruth(copy.positional[0]!, truthType);

@@ -26,7 +26,7 @@ let counter = say prose """
 
   ${x}
 """, instant
-wait 3000 ms
+wait 3 s
 for it in 1..=3 {
   x += 1
   counter.text = """
@@ -35,7 +35,7 @@ for it in 1..=3 {
     ${x}
   """
   playAudio "swat.wav"
-  wait 1000 ms
+  wait 1 s
 }
 let counter2 = say prose "20 jerks", instant
 let i = 19

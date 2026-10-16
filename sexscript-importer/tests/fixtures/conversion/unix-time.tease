@@ -34,7 +34,7 @@ let timewrite = 120
 let starttime = getAbsoluteDateTime()
 let start = getAbsoluteDateTime()
 let rounds = 0
-while starttime + timewrite * 1 s > getAbsoluteDateTime() and rounds < 3 {
+while starttime + timewrite s > getAbsoluteDateTime() and rounds < 3 {
   start = getAbsoluteDateTime()
   wait 1 s
   rounds += 1

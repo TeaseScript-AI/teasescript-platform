@@ -101,7 +101,17 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
       // (#760), so a duration of any other form, such as `15 + randomInteger(0..35)` or a range, takes parentheses.
       const duration = emitExpression(statement.duration);
       const command = statement.visible ? "timer" : "wait";
+      const value = statement.duration;
       if (statement.unit === null) lines.push(`${pad}${command} ${duration}`);
+      // Whole seconds read as seconds: `wait 3 s`, not `wait 3000 ms`.
+      else if (
+        statement.unit === "ms" &&
+        value.kind === "literal" &&
+        typeof value.value === "number" &&
+        value.value > 0 &&
+        value.value % 1000 === 0
+      )
+        lines.push(`${pad}${command} ${value.value / 1000} s`);
       else {
         const whole = UNIT_OPERANDS.has(statement.duration.kind) ? duration : `(${duration})`;
         lines.push(`${pad}${command} ${whole} ${statement.unit}`);
@@ -306,6 +316,21 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
   }
 }
 
+/**
+ * A number with a unit, `n s` or `x rad`: the unit binds to a number, a name, a member, an item, or a call (V30 §35);
+ * anything else is parenthesized.
+ */
+function withUnit(value: IrExpression, unit: string): string {
+  const bare =
+    (value.kind === "literal" && typeof value.value === "number" && value.value >= 0) ||
+    value.kind === "variable" ||
+    value.kind === "property" ||
+    value.kind === "index" ||
+    value.kind === "methodCall" ||
+    (value.kind === "call" && value.prose !== true);
+  return `${bare ? emitExpression(value) : `(${emitExpression(value)})`} ${unit}`;
+}
+
 export function emitExpression(expression: IrExpression): string {
   switch (expression.kind) {
     case "regex":
@@ -318,17 +343,12 @@ export function emitExpression(expression: IrExpression): string {
         : expression.decimal === true && /^-?\d+$/u.test(String(expression.value))
           ? `${expression.value}.0`
           : String(expression.value);
-    case "angle": {
-      // The unit binds to a number, a name, a member, or a call, as a duration's does; anything else is parenthesized.
-      const value = expression.value;
-      const bare =
-        (value.kind === "literal" && typeof value.value === "number" && value.value >= 0) ||
-        value.kind === "variable" ||
-        value.kind === "property" ||
-        value.kind === "call";
-      return `${bare ? emitExpression(value) : `(${emitExpression(value)})`} ${expression.unit}`;
-    }
+    case "angle":
+      return withUnit(expression.value, expression.unit);
     case "duration":
+      // Whole seconds read as seconds: `5 s`, not `5000 ms`.
+      if (expression.unit === "ms" && expression.value !== 0 && expression.value % 1000 === 0)
+        return `${expression.value / 1000} s`;
       // Time model 2 writes calendar steps with `calendar`, as every month and year is one (time-model.ts).
       return timeModel() === 2 &&
         (expression.calendar === true || expression.unit === "month" || expression.unit === "year")
@@ -462,6 +482,16 @@ export function emitExpression(expression: IrExpression): string {
             : operand(expression.right, POSTFIX);
         return `${left} otherwise ${right}`;
       }
+      // A number of seconds, minutes, hours, or milliseconds as a duration is the number with its unit: `n s`, not
+      // `n * 1 s`.
+      if (
+        expression.operator === "*" &&
+        expression.right.kind === "duration" &&
+        expression.right.value === 1 &&
+        expression.right.calendar !== true &&
+        ["s", "ms", "min", "h"].includes(expression.right.unit)
+      )
+        return withUnit(expression.left, expression.right.unit);
       const level = precedence(expression);
       // Left-associative operators need parentheses for an equal-precedence right operand, and comparisons
       // may not be chained at all (V30 section 5).
@@ -476,6 +506,17 @@ export function emitExpression(expression: IrExpression): string {
       return `${side(expression.left, leftLevel)} ${expression.operator} ${side(expression.right, rightLevel)}`;
     }
     case "call": {
+      // round, floor, and ceil give a whole number already (V30 "Numeric functions").
+      const [only] = expression.positional;
+      if (
+        expression.name === "toInteger" &&
+        expression.positional.length === 1 &&
+        only?.kind === "call" &&
+        ["round", "floor", "ceil"].includes(only.name) &&
+        only.positional.length === 1 &&
+        Object.keys(only.named).length === 0
+      )
+        return emitExpression(only);
       // askBooleans takes its message first without a name, as the other asks do (V30 §20).
       if (isBooleansAsk(expression))
         return `askBooleans${expression.prose === true ? " prose() " : ""}(${booleansArguments(expression).join(", ")})`;

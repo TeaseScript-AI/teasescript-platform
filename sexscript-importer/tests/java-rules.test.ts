@@ -197,7 +197,7 @@ test("converts Calendar and Date values to local dates and times", { skip }, asy
     "Date built = new Date(126, 9, 6, 25, 0, 0)",
     'show("${built.year + 1900}-${built.month + 1}-${built.date} ${built.hours}")',
   ]);
-  assert.match(source, /^c = \(c\.toAbsoluteDateTime\(\) \+ 50 \* 1 min\)\.toDateTime\(\)$/mu);
+  assert.match(source, /^c = \(c\.toAbsoluteDateTime\(\) \+ 50 min\)\.toDateTime\(\)$/mu);
   assert.match(source, /^c -= 1 \* 1 calendar day$/mu);
   assert.match(
     source,

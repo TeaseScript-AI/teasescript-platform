@@ -168,14 +168,14 @@ function sexscriptLegacyLoadInteger(key, whenMissing = null) {
 }
 // The legacy desktop intro asked the player's name and gender once; a package that only reads them asks once.
 let gender = "boy"
-if load("intro.female", default: false) == true {
+if load("intro.female", default: false) {
   gender = "girl"
 }
 say prose "Hello, ${load("intro.name", default: "")}, my good ${gender}", instant
-if load("intro.likemale", default: false) == true {
+if load("intro.likemale", default: false) {
   say prose "You like men too", instant
 }
-if load("toys.dildo", default: false) != true {
+if not load("toys.dildo", default: false) {
   say prose "A dildo or dildo alternative is needed", instant
 }
 // A save of an owned item corrects the answer, so the item is still asked first.

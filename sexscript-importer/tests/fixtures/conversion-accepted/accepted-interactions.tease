@@ -6,7 +6,7 @@ function sexscriptLegacyShowButton(text, timeout) {
     showButton text, timeout: 10 ms
     return 0
   }
-  return (showButton text, timeout: timeout * 1 s) / 1 s
+  return (showButton text, timeout: timeout s) / 1 s
 }
 let ready = askBoolean prose "Are you ready?"
 let sure = askBoolean prose "Really?", yesText: "Yes, Mistress"
@@ -54,7 +54,7 @@ if photo != null {
 }
 // With the accepted forms selected, getBooleans asks every question in one form and getFile opens the file chooser.
 let kit = askBooleans prose "Which toys do you have?", texts: ["Paddle", "Crop"], prefill: [true, false]
-if kit[1] == true {
+if kit[1] {
   say prose "Bring the crop", instant
 }
 // NOTE SX_FILE_TITLE line 31: getFile() titled its file chooser with this message; chooseFile() has no title.

@@ -579,10 +579,54 @@ export function withStorageDefaults(
     ),
   );
   return withUsedHelpers(
-    withTypedComputedReads(withDeclaredKeys(withEmptyText(filled, textKeys), declaredType, layout)),
+    withTypedComputedReads(
+      withDeclaredKeys(
+        withPlainBooleanReads(withEmptyText(filled, textKeys), declaredType),
+        declaredType,
+        layout,
+      ),
+    ),
     shared,
     layout,
   );
+}
+
+/**
+ * A read of a key that holds booleans only, with a boolean default, compared with true or false is the read itself or
+ * its opposite: `load "seen", default: false) == true` is `load("seen", default: false)`, `!= true` its `not`.
+ */
+function withPlainBooleanReads(
+  programs: readonly MigrationProgram[],
+  declaredType: (key: string) => string | null,
+): MigrationProgram[] {
+  const plain = (value: IrExpression): IrExpression => {
+    const next = mapChildren(value, plain);
+    if (
+      next.kind !== "binary" ||
+      (next.operator !== "==" && next.operator !== "!=") ||
+      next.right.kind !== "literal" ||
+      typeof next.right.value !== "boolean" ||
+      next.left.kind !== "load" ||
+      next.left.defaultValue?.kind !== "literal" ||
+      typeof next.left.defaultValue.value !== "boolean"
+    )
+      return next;
+    const key = literalKey(next.left.key);
+    if (key === null || declaredType(key) !== "boolean") return next;
+    return (next.operator === "==") === next.right.value
+      ? next.left
+      : { kind: "unary", operator: "not", value: next.left };
+  };
+  // A variable that a comparison sets stays a boolean; one that a read sets would take the key's open type.
+  const block = (items: IrStatement[]): IrStatement[] =>
+    items.map((item) => {
+      const nested = withNestedBlocks(item, block);
+      const kept = nested.kind === "let" || nested.kind === "assign" ? nested.value : null;
+      return mapOwnValues(nested, (value) =>
+        value === kept ? mapChildren(value, plain) : plain(value),
+      );
+    });
+  return programs.map((program) => ({ ...program, statements: block(program.statements) }));
 }
 
 /**

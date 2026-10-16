@@ -3,7 +3,7 @@ function sexscriptLegacyShowButton(text, timeout) {
     showButton text, timeout: 10 ms
     return 0
   }
-  return (showButton text, timeout: timeout * 1 s) / 1 s
+  return (showButton text, timeout: timeout s) / 1 s
 }
 function sexscriptLegacyTruth(value) {
   if value is boolean {
@@ -48,7 +48,7 @@ let took = (showButton "Finished") / 1 s
 say prose "You took ${took} seconds.", instant
 let total = (showButton "Next") / 1 s + 10
 let limit = 20
-let stopped = (showButton "Stop", timeout: limit * 1 s) / 1 s
+let stopped = (showButton "Stop", timeout: limit s) / 1 s
 if stopped < limit {
   say prose "Stopped early.", instant
 }
@@ -71,7 +71,7 @@ let quickest = sexscriptLegacyShowButton("Faster", none)
 say prose "You took ${quickest} seconds.", instant
 // A gauge wait counts from 0 the seconds of a variable that may still hold a number below 0, so it keeps the seconds.
 let measured: number = -1
-if load("game.measure", default: false) == true {
+if load("game.measure", default: false) {
   measured = (showButton "Measure") / 1 s
 }
 timer max(measured, 0) s

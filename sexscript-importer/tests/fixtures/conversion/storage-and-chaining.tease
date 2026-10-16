@@ -64,7 +64,7 @@ let title = load "training.title", default: ""
 if title == "" or title == "" {
   title = "pet"
 }
-if load("training.finished", default: false) == true {
+if load("training.finished", default: false) {
   say prose "Welcome back, ${title}", instant
   goto "finished.tease"
 }
