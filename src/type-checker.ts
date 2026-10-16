@@ -75,6 +75,7 @@ import {
 } from "./form-fields.js";
 import type { VariableSite } from "./semantic.js";
 import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "./capture-call.js";
+import { lazyDefaultArgument } from "./lazy-defaults.js";
 import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "./web-url.js";
 import {
   emptyImageFilterMessage,
@@ -4591,11 +4592,8 @@ class TypeChecker {
         yield* compileChild(this.#storageKeyTask(expression.key, scope));
         let fallback: StaticType = UNKNOWN_TYPE;
         if (expression.defaultValue !== null) {
-          // The default runs only for a missing key, so what it changes may or may not have happened afterwards.
-          const start = this.#flow.mark();
-          fallback = yield* compileChild(this.#expressionTask(expression.defaultValue, scope));
-          const changes = this.#flow.undo(start);
-          this.#flow.apply(this.#flow.join([new Map(), changes]));
+          // The default runs only for a missing key.
+          fallback = yield* compileChild(this.#mayRunTask(expression.defaultValue, scope));
           if (holdsSessionValue(fallback)) {
             const given = unwrap(expression.defaultValue);
             const fix = !containsType(fallback, (part) => part.kind === "messageHandle")
@@ -6411,6 +6409,40 @@ class TypeChecker {
     return { failed };
   }
 
+  /**
+   * The arguments of a call of a built-in function or a method, each as it was evaluated, before later arguments run; a
+   * `default:` that runs only when the call needs it comes last (owner decision, 2026-10-16). A call that `waits` for the
+   * Player waits after its other arguments, so a block may run before its result or its default.
+   */
+  *#callArgumentsTask(
+    expression: CallExpression,
+    scope: Scope,
+    waits = false,
+  ): CompileTask<readonly StaticType[]> {
+    const lazy = lazyDefaultArgument(expression)?.argument;
+    const values: StaticType[] = [];
+    for (const [index, argument] of expression.arguments.entries()) {
+      if (argument === lazy) continue;
+      yield* compileChild(this.#expressionTask(argument.value, scope));
+      values[index] = this.#capture(argument.value);
+    }
+    if (waits) this.#suspend();
+    if (lazy !== undefined) {
+      yield* compileChild(this.#mayRunTask(lazy.value, scope));
+      values[expression.arguments.indexOf(lazy)] = this.#capture(lazy.value);
+    }
+    return values;
+  }
+
+  /** An operand that runs only on some ways, such as a default: what it changes may or may not have happened after it. */
+  *#mayRunTask(expression: Expression, scope: Scope): CompileTask<StaticType> {
+    const start = this.#flow.mark();
+    const type = yield* compileChild(this.#expressionTask(expression, scope));
+    const changes = this.#flow.undo(start);
+    this.#flow.apply(this.#flow.join([new Map(), changes]));
+    return type;
+  }
+
   *#callTask(expression: CallExpression, scope: Scope): CompileTask<StaticType> {
     let callee = expression.callee;
     while (callee.kind === "parenthesizedExpression") callee = callee.expression;
@@ -6442,18 +6474,12 @@ class TypeChecker {
       const entry = scope.resolve(callee.name);
       if (entry?.kind === "function")
         return yield* compileChild(this.#functionCallTask(expression, entry.fn, scope));
-      const values: StaticType[] = [];
-      for (const argument of expression.arguments) {
-        yield* compileChild(this.#expressionTask(argument.value, scope));
-        // A built-in takes each argument as it was evaluated, before later arguments run.
-        values.push(this.#capture(argument.value));
-      }
-      if (entry === undefined && this.#builtins.has(callee.name)) {
-        const type = this.#builtinType(callee.name, expression, values);
-        // A file store call may wait for the Player, and a block may run before it gives its result.
-        if (isFileStoreCall(expression)) this.#suspend();
-        return type;
-      }
+      // A file store call may wait for the Player.
+      const values = yield* compileChild(
+        this.#callArgumentsTask(expression, scope, isFileStoreCall(expression)),
+      );
+      if (entry === undefined && this.#builtins.has(callee.name))
+        return this.#builtinType(callee.name, expression, values);
       return UNKNOWN_TYPE;
     }
     if (callee.kind !== "propertyAccessExpression") {
@@ -6519,11 +6545,7 @@ class TypeChecker {
         return NULL_TYPE;
       }
     }
-    const values: StaticType[] = [];
-    for (const argument of expression.arguments) {
-      yield* compileChild(this.#expressionTask(argument.value, scope));
-      values.push(this.#capture(argument.value));
-    }
+    const values = yield* compileChild(this.#callArgumentsTask(expression, scope));
     if (!isKnown(value)) {
       // Only text and lists have these methods, so their arguments are checked on any receiver.
       memberChecks();

@@ -107,7 +107,6 @@ export function requiredInstructionTemporaries(
       break;
     case "fileStore":
       collect(instruction.value);
-      if (instruction.default !== null) collect(instruction.default);
       if (instruction.files !== null) collect(instruction.files);
       break;
     case "storageWrite":
@@ -173,7 +172,9 @@ export function requiredInstructionTemporaries(
 export function instructionKilledTemporaries(instruction: Instruction): ReadonlySet<number> {
   switch (instruction.kind) {
     case "storeTemporary":
-      return new Set([instruction.temporaryId]);
+      return instruction.defaultTemporary === undefined
+        ? new Set([instruction.temporaryId])
+        : new Set([instruction.temporaryId, instruction.defaultTemporary]);
     case "prepareSayText":
     case "prepareSaySpeaker":
     case "prepareSayContextualSpeaker":
@@ -189,8 +190,11 @@ export function instructionKilledTemporaries(instruction: Instruction): Readonly
     case "callFunction":
       return new Set([instruction.destinationTemporary]);
     case "capture":
-    case "fileStore":
       return new Set([instruction.destinationTemporary]);
+    case "fileStore":
+      return instruction.defaultTemporary === null
+        ? new Set([instruction.destinationTemporary])
+        : new Set([instruction.destinationTemporary, instruction.defaultTemporary]);
     case "say":
       return instruction.destinationTemporary === undefined
         ? new Set<number>()

@@ -13,9 +13,9 @@ import { compileAndRunVariants, type FlowKnob, type FlowRun } from "./helpers/fl
  * assigning everything, so the cases with one only check that the read is accepted.
  *
  * The cases cover the constructs that order what runs: branches and switches, loops, labels and gotos, functions and
- * their defaults, the lazy operators and the `load` default, the parts of an ask, a say, a named timer, timer blocks
- * and the helpers they call, permanent buttons, waits and other statements between a store and a read, compound
- * assignment, exits, a fallback, and other files. A construct whose order the check gets wrong fails here. An
+ * their defaults, the lazy operators and the `default:` of a `load` or a call, the parts of an ask, a say, a named
+ * timer, timer blocks and the helpers they call, permanent buttons, waits and other statements between a store and a
+ * read, compound assignment, exits, a fallback, and other files. A construct whose order the check gets wrong fails here. An
  * instruction kind without a case here is caught only by the type check of the plan helpers (`satisfies never`), so a
  * new kind that can stand between a store and a read needs a case.
  */
@@ -351,6 +351,50 @@ const TEMPLATES: readonly Template[] = [
       ...k.give('"given"'),
       'let v = load "k1", default: give()',
       `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "a call in the default of a get",
+    knobs: [undefined],
+    main: (k) => [
+      KNOB(1),
+      ...k.give('"given"'),
+      "let names: string[] = []",
+      'if k1 { names.add("a") }',
+      "let v = names.get(0, default: give())",
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "a call in the default of a conversion",
+    knobs: ["5"],
+    main: (k) => [
+      ...k.give("0"),
+      'let text = load "k1", default: "x"',
+      "let v = toNumber(text, default: give())",
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "a call in the default of fromJson",
+    knobs: ["1"],
+    main: (k) => [
+      ...k.give("0"),
+      'let text = load "k1", default: "x"',
+      "let v = fromJson(text, default: give())",
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "a read in the default of a get",
+    knobs: [undefined],
+    skips: true,
+    main: (k) => [
+      KNOB(1),
+      "let names: string[] = []",
+      'if k1 { names.add("a") }',
+      `let v = names.get(0, default: ${k.expr}) // READ`,
+      k.set,
     ],
   },
   {

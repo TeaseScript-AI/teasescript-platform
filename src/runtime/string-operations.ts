@@ -483,30 +483,23 @@ function* regexMatches(
 
 /**
  * `toRegex(text, default:)` (V30 §8): a regex of the pattern text, with its flags written inside it, such as `(?i)`.
- * Text that RE2 rejects or that is over the regex limits, and a value that is not text, give the default, a regex or
- * `null`, which is checked first.
+ * Text that RE2 rejects or that is over the regex limits, and a value that is not text, give `undefined`, for the
+ * default, which `named` leaves out (`defaulted`).
  */
 export function regexFromText(
   positional: readonly SerializableRuntimeValue[],
   named: Readonly<Record<string, SerializableRuntimeValue>>,
+  defaulted: boolean,
   span: SourceSpan,
-): SerializableRuntimeValue {
-  const names = Object.keys(named);
-  if (positional.length !== 1 || names.length !== 1 || names[0] !== "default")
+): SerializableRegex | undefined {
+  if (positional.length !== 1 || Object.keys(named).length !== 0 || !defaulted)
     throw fault(
       "TSR028",
       "toRegex(...) takes one text and a default:, such as toRegex(text, default: null).",
       span,
     );
-  const fallback = named.default!;
-  if (fallback !== null && !isRegex(fallback))
-    throw fault(
-      "TSR058",
-      `toRegex(...) needs a regex or null as its default:, not ${describeRuntimeValue(fallback)}.`,
-      span,
-    );
   const text = positional[0]!;
-  if (typeof text !== "string" || !compileRegex(text, "").ok) return fallback;
+  if (typeof text !== "string" || !compileRegex(text, "").ok) return undefined;
   return { kind: "regex", source: text, flags: "" };
 }
 

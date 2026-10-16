@@ -924,7 +924,8 @@ A regex is a value of type `regex` ([§13](#13-explicit-types)), which holds its
 `toRegex(text, default: value)` makes a regex of pattern text. The text has no slashes, its flags go inside it, as in
 `"(?i)yes|no"`, and in a string a backslash is written twice, as in `"\\d+"`. The `default:` is required and is a
 regex or `null`; the result is a `regex`, or a `regex?` with `default: null`. Text that is not a valid pattern, or that
-is over the regex limits, gives the default.
+is over the regex limits, gives the default. The default is evaluated only when it is used (owner decision,
+2026-10-16).
 
 ## 9. Commands
 **Status:** Accepted
@@ -1396,7 +1397,8 @@ fits when every element or value fits, and an object fits when each known proper
   Other text, such as `"2,5"`, `"ten"`, or a number too large to represent, cannot be converted.
 - No other value can be converted: `toNumber(true)` and `toBoolean(1)` are errors, and a list is combined into text with
   [`join`](#16-lists).
-- A `default:` value must have the conversion's result type; an `integer` may be the default of `toNumber`.
+- A `default:` value must have the conversion's result type; an `integer` may be the default of `toNumber`. The default
+  is evaluated only when the value cannot be converted.
 
 `toInteger` discards the fractional part toward zero:
 
@@ -1484,7 +1486,7 @@ does not need the padding.
 
 `fromJson` and `fromBase64` need their `default:`, which may be any value, also `null`; a call without one is a compile
 error. Text that is not JSON, or that is not Base64 or whose bytes are not UTF-8, gives the default, never a runtime
-error.
+error. The default is evaluated last, and only when it is used (owner decision, 2026-10-16).
 
 ```text
 let shared = "-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----\n${toBase64(toJson(preset))}\n-----END CORNERTIME CUSTOM PUNISHMENT-----"
@@ -2080,9 +2082,9 @@ Sets have none of the three: a set has no indexes, and it holds each member once
 whose element or value type no value decided yet, such as `[]` or `dict{}`, takes it from a default of known type other
 than `null`, as from a first stored value ([§40](#40-dictionaries)): after `let scores = []`,
 `scores.add(scores.get(0, default: 0) + 1)` makes `scores` an `integer[]`, and a later `scores.add("x")` is an error.
-Like any argument, the default is evaluated before the lookup. The compiler checks the index as for `items[index]`,
-except that a negative index gives the default: an index that it can see is not a whole number, such as `0.5`, or may
-be `null`, is an error.
+The default is evaluated only when it is used, when the list has no such position (owner decision, 2026-10-16). The
+compiler checks the index as for `items[index]`, except that a negative index gives the default: an index that it can
+see is not a whole number, such as `0.5`, or may be `null`, is an error.
 
 ```text
 let deck = ["ace", "king"]
@@ -4380,10 +4382,11 @@ fileToBase64(file)
 `fileFromBase64` stores the bytes that Base64 `text` holds as a file in the Player's file store and returns its
 store-issued file reference, a `string` like a photo reference. It reads Base64 as `fromBase64` does, with spaces and
 line breaks, the URL alphabet, and missing padding ([§13](#json-and-base64)), and also a `data:<type>;base64,…` URL.
-`default:` is required; text that is not Base64 gives the default. `fileToBase64` reads a stored file's bytes and returns
-them as plain Base64 text, and `hashFile` gives their SHA-256 ([§13](#hashes)). Storing a file and reading one each take
-a short wait, as a photo does. The result is recorded: a restore or a replay can reuse a recorded result without asking
-the store again. The Base64 text may be as long as any text.
+`default:` is required; text that is not Base64 gives the default, which is evaluated last, and only when it is used
+(owner decision, 2026-10-16). `fileToBase64` reads a stored file's bytes and returns them as plain Base64 text, and
+`hashFile` gives their SHA-256 ([§13](#hashes)). Storing a file and reading one each take a short wait, as a photo
+does. The result is recorded: a restore or a replay can reuse a recorded result without asking the store again. The
+Base64 text may be as long as any text.
 
 A file's type comes from its first bytes, never from a file name or the type in a data URL:
 
@@ -5831,8 +5834,8 @@ for name, toy in toys { ... }           // the keys with a copy of each value
   `default: "none"` an `integer | string`, and on a `string[] dict`, `default: []` gives a `string[]`. A list or dict
   whose element or value type no value decided yet, such as `[]` or `dict{}`, takes it from a default of known type
   other than `null`, as from a first stored value, so after `let counts = dict{}`,
-  `counts[name] = counts.get(name, default: 0) + 1` makes `counts` an `integer dict`. Like any argument, the default is
-  evaluated before the lookup.
+  `counts[name] = counts.get(name, default: 0) + 1` makes `counts` an `integer dict`. The default is evaluated only when
+  it is used, for a missing key.
 - **Iteration:** `for key in toys` goes through the keys, and `for key, value in toys` through the keys with a copy of
   each value, as they were when the loop started ([§23](#23-loops)), so changing the dict inside the loop is safe.
 - **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an
