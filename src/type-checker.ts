@@ -149,6 +149,12 @@ import {
 } from "./object-properties.js";
 import { GENDER_TERMS, PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 import {
+  speakerFlowDiagnostics,
+  type SpeakerFlowInput,
+  type SpeakerFlowRead,
+  type SpeakerFlowStore,
+} from "./speaker-flow.js";
+import {
   arithmeticType,
   BOOLEAN_TYPE,
   containsType,
@@ -463,10 +469,15 @@ export function checkTypes(
     }
     if (last) {
       const closedLoops = closedLoopWarnings(programs, checker.unreachable);
+      const speakerFlow = speakerFlowDiagnostics(
+        files,
+        checker.speakerFlowInput(),
+        checker.unreachable,
+      );
       return Object.freeze({
         diagnostics: Object.freeze(
           checker.fileDiagnostics.map((diagnostics, file) =>
-            Object.freeze([...diagnostics, ...closedLoops[file]!]),
+            Object.freeze([...diagnostics, ...closedLoops[file]!, ...speakerFlow[file]!]),
           ),
         ),
         runtimeChecks: checker.runtimeChecks(),
@@ -1419,6 +1430,14 @@ class TypeChecker {
   /** The calls `player.copyFrom(account)` that are statements of their own, the only place the copy may stand. */
   readonly #copyStatements = new WeakSet<Expression>();
 
+  // What the flow check of speaker properties needs (see `speakerFlowInput`): the reads of a property through a
+  // speaker's name or `speaker` under `as`, the stores through a speaker's name, the author function each call calls,
+  // and which ways through each branch or loop are possible (see `SpeakerFlowInput.paths`).
+  readonly #flowReads = new Map<PropertyAccessExpression, Omit<SpeakerFlowRead, "sources">>();
+  readonly #flowStores = new Map<AssignmentStatement, SpeakerFlowStore>();
+  readonly #calledFunctions = new Map<CallExpression, FunctionDeclaration>();
+  readonly #pathFacts = new Map<Statement, boolean[]>();
+
   /** The fallbacks and assignments of this check that replaced places that so far held only null, with those places. */
   readonly #replaced: {
     readonly node: Expression | AssignmentStatement;
@@ -1914,6 +1933,7 @@ class TypeChecker {
     const speaker = this.#speakerName(read.object, scope);
     const own = speaker === undefined ? this.#anySpeaker : this.#speakerProperties.get(speaker);
     if (own === undefined) return;
+    if (speaker !== undefined) this.#flowReads.set(read, { speaker, name, field: false });
     const example = speaker ?? this.#exampleSpeaker();
     this.#noteMissingIn(
       read,
@@ -1988,14 +2008,49 @@ class TypeChecker {
   #noteSpeakerField(read: PropertyAccessExpression, scope: Scope): void {
     if (this.#fieldReads.has(read)) return;
     this.#fieldReads.add(read);
+    const speaker = this.#speakerName(read.object, scope);
+    if (speaker !== undefined)
+      this.#flowReads.set(read, { speaker, name: read.property.name, field: true });
     this.#deferred.push({
       kind: "speakerField",
       file: this.#file,
       at: this.diagnostics.length,
-      speaker: this.#speakerName(read.object, scope) ?? null,
+      speaker: speaker ?? null,
       name: read.property.name,
       span: read.property.span,
     });
+  }
+
+  /** Notes which ways through a branch or loop are possible; a body checked again adds the ways it finds then. */
+  #notePaths(statement: Statement, paths: boolean[]): void {
+    const known = this.#pathFacts.get(statement);
+    this.#pathFacts.set(
+      statement,
+      known === undefined ? paths : paths.map((path, index) => path || known[index] === true),
+    );
+  }
+
+  /**
+   * What the flow check of speaker properties needs from the last check (V30 §37). It follows the reads through a
+   * speaker's name of a property that a declaration or a store in the package gives the speaker, since the end of the
+   * check reports the others, and that no store reaches unchecked, since such a store may give it to any speaker.
+   */
+  public speakerFlowInput(): SpeakerFlowInput {
+    const reads = new Map<PropertyAccessExpression, SpeakerFlowRead>();
+    for (const [read, flow] of this.#flowReads) {
+      const sources = flow.field ? fieldSources(flow.name) : [flow.name];
+      if (sources.some((source) => this.#unchecked.has(source))) continue;
+      const given = flow.field
+        ? sources.some((source) => this.#speakerGets.get(flow.speaker)?.has(source) === true)
+        : this.#speakerProperties.get(flow.speaker)?.has(flow.name) === true;
+      if (given) reads.set(read, { ...flow, sources });
+    }
+    return {
+      reads,
+      stores: this.#flowStores,
+      calls: this.#calledFunctions,
+      paths: this.#pathFacts,
+    };
   }
 
   /** A declared speaker for a message to name in its example, other than the built-in `player`. */
@@ -2282,6 +2337,7 @@ class TypeChecker {
         return true;
       case "ifStatement": {
         const condition = yield* compileChild(this.#conditionTask(statement.condition, scope));
+        this.#notePaths(statement, [condition.whenTrue !== null, condition.whenFalse !== null]);
         const start = this.#flow.mark();
         this.#flow.apply(condition.whenTrue ?? condition.unreachedTrue ?? null);
         const thenContinues = yield* compileChild(
@@ -2321,6 +2377,7 @@ class TypeChecker {
         const typeCases: { readonly typeTest: SwitchTypeTest; readonly test: StaticType }[] = [];
         const start = this.#flow.mark();
         const ends: FlowState[] = [];
+        const casePaths: boolean[] = [];
         for (const switchCase of statement.cases) {
           // What the block may assume about the value, or `null` when the case does not narrow it.
           let taken: StaticType | null = null;
@@ -2394,12 +2451,14 @@ class TypeChecker {
           this.#flow.restore(start);
           if (variable !== null && taken !== null && reached)
             this.#flow.apply(this.#flow.since(start, new Map([[variable, taken]])));
+          casePaths.push(reached);
           if ((yield* compileChild(this.#pathTask(switchCase.body, scope, reached))) && reached)
             ends.push(this.#flow.mark());
         }
         // `default`, or the path without one, runs when no case matched. A path that no value reaches does not continue.
         this.#flow.restore(start);
         const restReached = remaining.kind !== "never";
+        this.#notePaths(statement, [...casePaths, restReached]);
         if (variable !== null && restReached && remaining !== subject)
           this.#flow.apply(this.#flow.since(start, new Map([[variable, remaining]])));
         if (statement.defaultBlock === null) {
@@ -2419,6 +2478,7 @@ class TypeChecker {
         // The condition is tested anew on each iteration, after whatever the body changed (rule 5.5).
         this.#widen(statement.body);
         const condition = yield* compileChild(this.#conditionTask(statement.condition, scope));
+        this.#notePaths(statement, [condition.whenTrue !== null, condition.whenFalse !== null]);
         const start = this.#flow.mark();
         this.#flow.apply(condition.whenTrue ?? condition.unreachedTrue ?? null);
         this.#loops.push({ start, breaks: [], continued: false });
@@ -2446,6 +2506,10 @@ class TypeChecker {
             "A repeat count is a whole number (integer)",
           );
         const times = staticNumber(statement.count);
+        this.#notePaths(statement, [
+          times === undefined || times >= 1,
+          times === undefined || times < 1,
+        ]);
         const ends = yield* compileChild(
           this.#loopBodyTask(statement.body, scope, [], times === undefined || times >= 1),
         );
@@ -2477,6 +2541,10 @@ class TypeChecker {
           declaration: statement,
         };
         this.#declared.set(statement, variable);
+        this.#notePaths(statement, [
+          !isEmptyLiteral(statement.iterable),
+          !isNonEmptyLiteral(statement.iterable),
+        ]);
         const ends = yield* compileChild(
           this.#loopBodyTask(
             statement.body,
@@ -2596,6 +2664,10 @@ class TypeChecker {
     };
     this.#declared.set(statement, key);
     this.#declared.set(valueName, value);
+    this.#notePaths(statement, [
+      !isEmptyLiteral(statement.iterable),
+      !isNonEmptyLiteral(statement.iterable),
+    ]);
     const ends = yield* compileChild(
       this.#loopBodyTask(statement.body, scope, [key, value], !isEmptyLiteral(statement.iterable)),
     );
@@ -2863,7 +2935,10 @@ class TypeChecker {
         else {
           // A store through a speaker's name gives it the property; any other store into a speaker is unchecked.
           const speaker = this.#speakerName(target.object, scope);
-          if (speaker !== undefined) this.#speakerGets.get(speaker)?.add(name);
+          if (speaker !== undefined) {
+            this.#speakerGets.get(speaker)?.add(name);
+            this.#flowStores.set(statement, { speaker, name });
+          }
         }
         const custom = this.#customProperties(target.object, object, name, scope);
         const receiver = custom ?? object;
@@ -6333,8 +6408,10 @@ class TypeChecker {
     }
     if (callee.kind === "identifier") {
       const entry = scope.resolve(callee.name);
-      if (entry?.kind === "function")
+      if (entry?.kind === "function") {
+        this.#calledFunctions.set(expression, entry.fn.declaration);
         return yield* compileChild(this.#functionCallTask(expression, entry.fn, scope));
+      }
       const values: StaticType[] = [];
       for (const argument of expression.arguments) {
         yield* compileChild(this.#expressionTask(argument.value, scope));
