@@ -98,3 +98,59 @@ test("the same changes through a variable change the variable, and a call that o
     "3 3",
   ]);
 });
+
+const COLLECTIONS =
+  "let d = dict{ a: [1], b: [2] }\nlet s = set[[1], [2]]\nlet os = set[{ n: 1 }]\nlet o = { d: dict{ a: [1] } }\nlet dl = [dict{ a: [1] }]\n";
+
+function computedError(property: string, span: string): [string, string, string] {
+  const receiver = property.slice(0, property.lastIndexOf("."));
+  const message = `This changes a copy that no variable holds: '${property}'`;
+  return [
+    "TSV004",
+    property.endsWith(".keys")
+      ? `${message} gives a new list each time, so the change is lost. Change the dict itself, as in '${receiver}[key] = value' or '${receiver}.remove(key)'.`
+      : property.endsWith(".values")
+        ? `${message} gives a new list each time, so the change is lost. Change the dict through its keys, as in '${receiver}[key]'.`
+        : `${message} gives a copy of the member, so the change is lost. To change the set, replace the member: 'let member = ${property}', '${receiver}.remove(member)', then change 'member' and '${receiver}.add(member)'.`,
+    span,
+  ];
+}
+
+test("a change through a property that computes a new value, such as a dict's values, is a compile error", () => {
+  const changes =
+    'd.values[0].add(3)\nd.values[0] = [7]\nd.values.add([5])\nd.keys.add("c")\ns.first.add(9)\ns.last.add(8)\ns.random.add(7)\nos.first.n = 5\no.d.values[0].add(1)\ndl[0].values[0].add(1)\nvera.table.values[0].add(9)\nfunction table {\n    return d\n}\ntable().values[0].add(1)\n';
+  const table = VERA.replace("items: [1]\n", "items: [1]\n    table: dict{ a: [1] }\n");
+  assert.deepEqual(diagnostics(`${table}${COLLECTIONS}${changes}exit`), [
+    computedError("d.values", "d.values[0]"),
+    computedError("d.values", "d.values[0]"),
+    computedError("d.values", "d.values"),
+    computedError("d.keys", "d.keys"),
+    computedError("s.first", "s.first"),
+    computedError("s.last", "s.last"),
+    computedError("s.random", "s.random"),
+    computedError("os.first", "os.first.n"),
+    computedError("o.d.values", "o.d.values[0]"),
+    computedError("dict.values", "dl[0].values[0]"),
+    computedError("vera.table.values", "vera.table.values[0]"),
+    // A value that no variable holds is named first, as the property's own copy is read from it.
+    copyError("table()", "t", "t.values[0]", "table().values[0]"),
+  ]);
+});
+
+test("a speaker between a computed property and the change takes the change", () => {
+  const changes =
+    'let ds = dict{ v: vera }\nds.values[0].mood = "cross"\nsay vera.mood\nlet ss = set[vera]\nss.first.mood = "sulky"\nsay vera.mood\n';
+  assert.deepEqual(sayTexts(runValidSource(`${VERA}${changes}exit`)), ["cross", "sulky"]);
+});
+
+test("a list's first, last, and random elements and an object's properties keep a change through them", () => {
+  const changes =
+    'let xs = [[1], [2]]\nxs.first.add(9)\nxs.last.add(8)\nlet one = [[1]]\none.random.add(7)\nlet ol = [{ n: 1 }]\nol.first.n = 5\no.d["a"].add(2)\nlet values = d.values\nvalues[0].add(6)\nsay xs\nsay one\nsay ol\nsay o\nsay d\n';
+  assert.deepEqual(sayTexts(runValidSource(`${COLLECTIONS}${changes}exit`)), [
+    "[[1, 9], [2, 8]]",
+    "[[1, 7]]",
+    "[{ n: 5 }]",
+    '{ d: dict{ "a": [1, 2] } }',
+    'dict{ "a": [1], "b": [2] }',
+  ]);
+});
