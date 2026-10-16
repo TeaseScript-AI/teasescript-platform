@@ -262,3 +262,30 @@ test("'not' right after arithmetic or a range operator is one error that names n
     ],
   ]);
 });
+
+test("'not' right after a sign is one error, as after arithmetic", () => {
+  const source = (form: string) => `let n = 1\nlet b = true\n${form}\nexit\n`;
+  const message = (sign: string) =>
+    `'not' cannot follow '${sign}': it gives true or false, which '${sign}' cannot use. Remove the 'not'.`;
+  const forms: [string, string][] = [
+    ["let c = -not b", "-"],
+    ["let c = +not b", "+"],
+    ["let c = - not b", "-"],
+    ["let c = -\n    not b", "-"],
+    ["let c = - -not b", "-"],
+    ["let c = -not not b", "-"],
+    ["let c = -not b * 2", "-"],
+    ["let c = n * -not b", "-"],
+    ["let c = n + -not b", "-"],
+    ['if -not b {\n    say "yes", instant\n}', "-"],
+  ];
+  for (const [form, sign] of forms)
+    assert.deepEqual(diagnostics(source(form)), [["TSP012", message(sign), "not"]], form);
+  assert.deepEqual(diagnostics(source("let c = -!b")), [
+    ["TSP037", "TeaseScript writes 'not' instead of '!': if not a { ... }", "!"],
+    ["TSP012", message("-"), "!"],
+  ]);
+  assert.deepEqual(diagnostics(source("let c = -not")), [
+    ["TSP012", "Expected an expression after 'not'.", ""],
+  ]);
+});

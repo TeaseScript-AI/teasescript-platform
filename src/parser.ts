@@ -3531,7 +3531,7 @@ class Parser {
   }
 
   /**
-   * The operand after `symbol`, a comparison, `otherwise`, arithmetic, or a range, which `parse` reads, or
+   * The operand after `symbol`, a comparison, `otherwise`, arithmetic, a range, or a sign, which `parse` reads, or
    * `missing` without one. `not` binds more loosely than each of them (V30 §5), so `x == not a` has no operand after the
    * `==`: `report` gives the one error for the `not`, and the rest is read as `x == (not a)`, so that nothing after it
    * reports another error. `report` hears whether the operand is free of errors of its own, which the `??` of
@@ -3638,8 +3638,8 @@ class Parser {
   }
 
   /**
-   * Reports `not` right after arithmetic or a range operator, which cannot use the true or false it gives, also in
-   * parentheses, so the message names no grouping.
+   * Reports `not` right after arithmetic, a sign, or a range operator, which cannot use the true or false it gives,
+   * also in parentheses, so the message names no grouping.
    */
   #reportNotAfterArithmetic(symbol: string, operators: readonly Token[]): void {
     const user = symbol === ".." || symbol === "..=" ? "a range" : `'${symbol}'`;
@@ -3892,18 +3892,17 @@ class Parser {
       operators.push(this.#advance());
       this.#skipContinuationNewlines();
     }
-    const diagnosticCount = this.#diagnostics.length;
-    let expression = yield* parseChild(this.#parsePostfix());
-    if (expression === null) {
-      const sign = operators.at(-1);
-      if (sign !== undefined)
-        this.#reportMissingOperand(
-          sign.lexeme,
-          "Expected an expression after the unary operator.",
-          diagnosticCount,
-        );
-      return null;
-    }
+    const sign = operators.at(-1);
+    if (sign === undefined) return yield* parseChild(this.#parsePostfix());
+    let expression = yield* parseChild(
+      this.#parseOperand(
+        sign.lexeme,
+        () => this.#parseUnaryArithmetic(),
+        "Expected an expression after the unary operator.",
+        (nots) => this.#reportNotAfterArithmetic(sign.lexeme, nots),
+      ),
+    );
+    if (expression === null) return null;
     for (let index = operators.length - 1; index >= 0; index -= 1) {
       const operator = operators[index]!;
       // EVIDENCE: invariant: operators contains only the plus/minus tokens collected by the loop above.
