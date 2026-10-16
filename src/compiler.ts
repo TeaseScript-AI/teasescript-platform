@@ -2,7 +2,11 @@ import type { Block, FileTarget, InteractionExpression, Program } from "./ast.js
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
 import { dayWaitWarnings } from "./day-waits.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
-import { compileStableProject, type InstructionPlan } from "./compiler/compile-program.js";
+import {
+  compileStableProject,
+  type ControlOrigin,
+  type InstructionPlan,
+} from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
 import type { ScriptHeader } from "./script-header.js";
 import { runsOnItsOwn } from "./project-globals.js";
@@ -16,6 +20,7 @@ import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import { validateProjectSemantics, type SemanticValidationOptions } from "./semantic.js";
+import { speakerFlowDiagnostics, type SpeakerFlowInput } from "./speaker-flow.js";
 import { checkTypes, type RuntimeCheckSite } from "./type-checker.js";
 import { createSourcePosition, createSourceSpan } from "./source.js";
 
@@ -123,13 +128,17 @@ function compileProjectFiles(
   });
   if (inventory.diagnostics.length === 0 && !hasErrors(catalog.diagnostics) && checked !== null) {
     if (checked.reachesExit) {
+      const origins = new Map<number, ControlOrigin>();
       plan = lowerProject(
         files,
         checked.typeChecks,
         catalog.images,
         checked.formShapes,
         checked.storageTypes,
+        origins,
       );
+      // The flow of speaker properties follows the plan, which runs exactly as the session will (V30 §37).
+      if (plan !== null) plan = checkSpeakerFlow(files, plan, origins, checked.speakerFlow);
     } else {
       const main = files[0]!.result;
       const noExit = createDiagnostic(
@@ -271,6 +280,7 @@ function checkProject(
   readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
   readonly reachesExit: boolean;
   readonly storageTypes: readonly StorageTypePlan[];
+  readonly speakerFlow: SpeakerFlowInput;
 } | null {
   let current = 0;
   const track = (file: number): void => {
@@ -340,6 +350,7 @@ function checkProject(
           formShapes: types.formShapes,
           reachesExit: types.reachesExit,
           storageTypes: types.storageTypes,
+          speakerFlow: types.speakerFlow,
         };
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
@@ -368,9 +379,36 @@ function addSemanticDiagnostics(
   });
 }
 
+/** The plan when the flow check of speaker properties accepts it, else `null` with its diagnostics in the files. */
+function checkSpeakerFlow(
+  files: CompiledProjectFile[],
+  plan: InstructionPlan,
+  origins: ReadonlyMap<number, ControlOrigin>,
+  input: SpeakerFlowInput,
+): InstructionPlan | null {
+  let flow: readonly (readonly Diagnostic[])[];
+  try {
+    flow = speakerFlowDiagnostics(plan, origins, input);
+  } catch (error) {
+    if (!isNativeStackExhaustion(error)) throw error;
+    const main = files[0]!;
+    main.result = stackExhaustionResult(
+      main.result.path,
+      main.source,
+      main.result.program,
+      main.result.header,
+      main.parsed?.diagnostics,
+    );
+    return null;
+  }
+  if (!flow.some((diagnostics) => diagnostics.length > 0)) return plan;
+  flow.forEach((diagnostics, index) => addSemanticDiagnostics(files[index]!, diagnostics));
+  return null;
+}
+
 /**
  * Lowers the error-free files into one plan; a lowering diagnostic belongs to the file it arose in, and a failure of the
- * finished plan to `main.tease`.
+ * finished plan to `main.tease`. `origins` receives the source construct of each of the plan's branches.
  */
 function lowerProject(
   files: CompiledProjectFile[],
@@ -378,6 +416,7 @@ function lowerProject(
   images: readonly PlanImage[],
   formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>,
   storageTypes: readonly StorageTypePlan[],
+  origins: Map<number, ControlOrigin>,
 ): InstructionPlan | null {
   let current = files[0]!;
   let failure: ReturnType<typeof compiledPlanValidationDiagnostic>;
@@ -397,6 +436,7 @@ function lowerProject(
       images,
       formShapes,
       storageTypes,
+      origins,
     );
     current = files[0]!;
     failure = compiledPlanValidationDiagnostic(compiled);

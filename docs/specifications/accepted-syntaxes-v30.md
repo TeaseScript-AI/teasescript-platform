@@ -5124,10 +5124,11 @@ This allows state to remain attached to the character it describes instead of re
 
 Built-in dynamic terms, name lists, presentation fields, and custom properties may all be changed by the running script.
 
-A speaker has a built-in field, term, or name list only once a declaration or an assignment gives it one. Reading one
-that nothing in the package gives the speaker is a compile error. `title` and `shortTitle` count for each other,
-`gender` counts for every term, and `title`, `shortTitle`, `firstName`, or `lastName` counts for `displayName`.
-`player.copyFrom(account)` anywhere in the package gives `player` every field it copies.
+A speaker has a built-in field, term, or name list only once a declaration, an assignment, or for `player` a copy of
+the account gives it one. Reading one where no way to the read has given it one is a compile error. `title` and
+`shortTitle` count for each other, `gender` counts for every term, and `title`, `shortTitle`, `firstName`, or
+`lastName` counts for `displayName`. A field that only some ways give, such as through a copy inside an `if`, is checked
+when the script runs.
 
 Custom-property rules:
 
@@ -5135,6 +5136,11 @@ Custom-property rules:
 - A custom property may also be declared directly in a `speaker` property block.
 - Reading a property before it has definitely been declared is a compile error.
 - A conditionally assigned property is not considered definitely available after the condition unless every path assigns it.
+- The compiler follows a speaker through its name and through `speaker` under `as`. Reads through a variable, a
+  parameter, an element, or `speaker` without `as`, reads in timer, media, and button blocks, and reads that only a
+  computed target or a fallback reaches are checked when the script runs. A block or a called file counts as assigning
+  whatever it may assign. A recursive function, and a function that creates a timer, media, or button block, count as
+  assigning every property.
 - The inferred or declared property type remains fixed.
 - Speaker references compare by identity with `==` and `!=` and may be used as `switch` values.
 

@@ -18,6 +18,7 @@ import type {
   OpenUrlStatement,
   ExportTextStatement,
   SpeakerDeclaration,
+  IfStatement,
   SwitchCase,
   SwitchStatement,
   TagQueryExpression,
@@ -82,6 +83,26 @@ import {
 } from "../../expression-children.js";
 
 /** A transfer or fallback at `instruction` whose destination is a file, from its entry or at a label. */
+/**
+ * The source construct that a `jumpIfFalse` or `loopStart` decides, for an analysis that reads the plan's ways back
+ * as source: an `if`, one `case` of a `switch`, a loop, the right side of `and`, `or`, or `otherwise` that runs as
+ * instructions, or the `default:` of a `load`. Not part of the plan.
+ */
+export type ControlOrigin =
+  | { readonly kind: "if"; readonly statement: IfStatement }
+  | { readonly kind: "case"; readonly statement: SwitchStatement; readonly index: number }
+  | { readonly kind: "loop"; readonly statement: LoopStatement }
+  | {
+      readonly kind: "operand";
+      readonly expression: Extract<Expression, { kind: "binaryExpression" }>;
+    }
+  | { readonly kind: "load"; readonly expression: Extract<Expression, { kind: "loadExpression" }> };
+
+export type LoopStatement = Extract<
+  Statement,
+  { kind: "repeatStatement" | "forStatement" | "whileStatement" }
+>;
+
 export interface PendingDestination {
   readonly instruction: number;
   /** The file, or for a glob the files to pick from. */
@@ -211,6 +232,8 @@ export class InstructionCompiler {
     private readonly captures: ReadonlyMap<Block, readonly string[]> = new Map(),
     /** The result shape of each `askForm`, from the type check. */
     private readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape> = new Map(),
+    /** Receives the source construct of each `jumpIfFalse` and `loopStart`, when an analysis asks for it. */
+    private readonly origins: Map<number, ControlOrigin> | null = null,
   ) {
     this.#functionIdBase = functions.length;
     const functionByName = new Map<
@@ -224,6 +247,10 @@ export class InstructionCompiler {
       }),
     );
     this.#functionByName = functionByName;
+  }
+
+  #originate(instruction: number, origin: ControlOrigin): void {
+    this.origins?.set(instruction, origin);
   }
 
   /** The ID of one of this file's functions. */
@@ -534,12 +561,20 @@ export class InstructionCompiler {
         return;
       case "repeatStatement":
         yield* compileChild(
-          this.#compileLoop("repeat", statement.count, statement.body, null, statement.span),
+          this.#compileLoop(
+            statement,
+            "repeat",
+            statement.count,
+            statement.body,
+            null,
+            statement.span,
+          ),
         );
         return;
       case "forStatement":
         yield* compileChild(
           this.#compileLoop(
+            statement,
             "for",
             statement.iterable,
             statement.body,
@@ -551,7 +586,14 @@ export class InstructionCompiler {
         return;
       case "whileStatement":
         yield* compileChild(
-          this.#compileLoop("while", statement.condition, statement.body, null, statement.span),
+          this.#compileLoop(
+            statement,
+            "while",
+            statement.condition,
+            statement.body,
+            null,
+            statement.span,
+          ),
         );
         return;
       case "breakStatement":
@@ -601,6 +643,7 @@ export class InstructionCompiler {
       span: copySpan(statement.condition.span),
     };
     this.instructions.push(conditionalInstruction);
+    this.#originate(conditional, { kind: "if", statement });
     this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
     yield* compileChild(this.#compileBlock(statement.thenBlock));
     if (statement.elseBlock === null) {
@@ -644,7 +687,7 @@ export class InstructionCompiler {
     });
     this.#emitTemporaryCleanup(subject.temporaryIds, statement.subject.span);
     const jumpsToEnd: { readonly index: number; readonly instruction: JumpInstruction }[] = [];
-    for (const switchCase of statement.cases) {
+    for (const [index, switchCase] of statement.cases.entries()) {
       const valuesSpan =
         switchCase.typeTest?.span ??
         createSourceSpan(switchCase.values[0]!.span.start, switchCase.values.at(-1)!.span.end);
@@ -656,6 +699,7 @@ export class InstructionCompiler {
         span: copySpan(valuesSpan),
       };
       this.instructions.push(conditionalInstruction);
+      this.#originate(conditional, { kind: "case", statement, index });
       this.#emitTemporaryCleanup([subjectTemporary], valuesSpan);
       yield* compileChild(this.#compileBlock(switchCase.body));
       const jump: JumpInstruction = { kind: "jump", target: -1, span: copySpan(switchCase.span) };
@@ -728,6 +772,7 @@ export class InstructionCompiler {
   }
 
   *#compileLoop(
+    statement: LoopStatement,
     loopKind: "repeat" | "for" | "while",
     expression: Expression,
     body: Block,
@@ -764,6 +809,7 @@ export class InstructionCompiler {
             span: copySpan(span),
           };
     this.instructions.push(instruction);
+    this.#originate(start, { kind: "loop", statement });
     this.#emitTemporaryCleanup(lowered.temporaryIds, expression.span);
     const breaks: number[] = [];
     const context = { loopId, continueTarget: instruction.continueTarget, breaks };
@@ -2909,6 +2955,7 @@ export class InstructionCompiler {
       span: copySpan(expression.span),
     };
     this.instructions.push(conditionalInstruction);
+    this.#originate(conditional, { kind: "load", expression });
     const lowered = yield* compileChild(this.#lowerExpressionTask(defaultValue));
     // The default takes the place of the stored value, so it fits the load's type, or is null.
     const check = this.typeChecks.get(expression);
@@ -2972,6 +3019,7 @@ export class InstructionCompiler {
       span: copySpan(expression.span),
     };
     this.instructions.push(conditionalInstruction);
+    this.#originate(conditional, { kind: "operand", expression });
     const right = yield* compileChild(this.#lowerExpressionTask(expression.right));
     this.instructions.push({
       kind: "storeTemporary",
@@ -3016,6 +3064,7 @@ export class InstructionCompiler {
         span: copySpan(expression.span),
       };
       this.instructions.push(conditionalInstruction);
+      this.#originate(conditional, { kind: "operand", expression });
       const right = yield* compileChild(this.#lowerExpressionTask(expression.right));
       this.instructions.push({
         kind: "storeTemporary",
@@ -3041,6 +3090,7 @@ export class InstructionCompiler {
       span: copySpan(expression.span),
     };
     this.instructions.push(conditionalInstruction);
+    this.#originate(conditional, { kind: "operand", expression });
     const skipRight = this.instructions.length;
     const skipRightInstruction: JumpInstruction = {
       kind: "jump",

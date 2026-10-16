@@ -149,6 +149,12 @@ import {
 } from "./object-properties.js";
 import { GENDER_TERMS, PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 import {
+  placeKey,
+  type SpeakerFlowInput,
+  type SpeakerFlowRead,
+  type SpeakerFlowStore,
+} from "./speaker-flow.js";
+import {
   arithmeticType,
   BOOLEAN_TYPE,
   containsType,
@@ -294,6 +300,8 @@ export interface TypeCheckResult {
   readonly reachesExit: boolean;
   /** Which statements run, for the checks that follow this flow. */
   readonly flow: StatementFlow;
+  /** What the flow check of speaker properties needs from the check, once the project is lowered (V30 §37). */
+  readonly speakerFlow: SpeakerFlowInput;
   /**
    * For each storage key written as a string literal that a load gives a type, the type that every load of it accepts,
    * which a saved value has to fit when the script runs (ADR 0021 §6), sorted by key.
@@ -469,6 +477,7 @@ export function checkTypes(
             Object.freeze([...diagnostics, ...closedLoops[file]!]),
           ),
         ),
+        speakerFlow: checker.speakerFlowInput(),
         runtimeChecks: checker.runtimeChecks(),
         formShapes: checker.formShapes(),
         reachesExit: checker.reachesExit,
@@ -1419,6 +1428,20 @@ class TypeChecker {
   /** The calls `player.copyFrom(account)` that are statements of their own, the only place the copy may stand. */
   readonly #copyStatements = new WeakSet<Expression>();
 
+  // What the flow check of speaker properties needs (see `speakerFlowInput`): the reads of a property through a
+  // speaker's name or `speaker` under `as`, the stores through a speaker's name, and which ways through each branch,
+  // loop, and lazy operand are possible (see `SpeakerFlowInput`).
+  readonly #flowReads = new Map<
+    PropertyAccessExpression,
+    Omit<SpeakerFlowRead, "sources"> & { readonly file: number }
+  >();
+  readonly #flowStores = new Map<
+    AssignmentStatement,
+    SpeakerFlowStore & { readonly file: number }
+  >();
+  readonly #pathFacts = new Map<Statement, boolean[]>();
+  readonly #operandFacts = new Map<string, boolean[]>();
+
   /** The fallbacks and assignments of this check that replaced places that so far held only null, with those places. */
   readonly #replaced: {
     readonly node: Expression | AssignmentStatement;
@@ -1914,6 +1937,14 @@ class TypeChecker {
     const speaker = this.#speakerName(read.object, scope);
     const own = speaker === undefined ? this.#anySpeaker : this.#speakerProperties.get(speaker);
     if (own === undefined) return;
+    if (speaker !== undefined)
+      this.#flowReads.set(read, {
+        speaker,
+        name,
+        field: false,
+        file: this.#file,
+        span: read.property.span,
+      });
     const example = speaker ?? this.#exampleSpeaker();
     this.#noteMissingIn(
       read,
@@ -1988,14 +2019,55 @@ class TypeChecker {
   #noteSpeakerField(read: PropertyAccessExpression, scope: Scope): void {
     if (this.#fieldReads.has(read)) return;
     this.#fieldReads.add(read);
+    const speaker = this.#speakerName(read.object, scope);
+    if (speaker !== undefined)
+      this.#flowReads.set(read, {
+        speaker,
+        name: read.property.name,
+        field: true,
+        file: this.#file,
+        span: read.property.span,
+      });
     this.#deferred.push({
       kind: "speakerField",
       file: this.#file,
       at: this.diagnostics.length,
-      speaker: this.#speakerName(read.object, scope) ?? null,
+      speaker: speaker ?? null,
       name: read.property.name,
       span: read.property.span,
     });
+  }
+
+  /** Notes which ways through a branch or loop are possible; a body checked again adds the ways it finds then. */
+  #notePaths(statement: Statement, paths: boolean[]): void {
+    this.#pathFacts.set(statement, joinedWays(this.#pathFacts.get(statement), paths));
+  }
+
+  /** Notes whether the right side of `and`, `or`, or `otherwise` may run, and whether it may be skipped. */
+  #noteOperand(expression: Expression, ways: boolean[]): void {
+    const key = placeKey(this.#file, expression.span);
+    this.#operandFacts.set(key, joinedWays(this.#operandFacts.get(key), ways));
+  }
+
+  /**
+   * What the flow check of speaker properties needs from the last check (V30 §37). It follows the reads through a
+   * speaker's name of a property that a declaration or a store in the package gives the speaker, since the end of the
+   * check reports the others, and that no store reaches unchecked, since such a store may give it to any speaker.
+   */
+  public speakerFlowInput(): SpeakerFlowInput {
+    const reads = new Map<string, SpeakerFlowRead>();
+    for (const [read, { file, ...flow }] of this.#flowReads) {
+      const sources = flow.field ? fieldSources(flow.name) : [flow.name];
+      if (sources.some((source) => this.#unchecked.has(source))) continue;
+      const given = flow.field
+        ? sources.some((source) => this.#speakerGets.get(flow.speaker)?.has(source) === true)
+        : this.#speakerProperties.get(flow.speaker)?.has(flow.name) === true;
+      if (given) reads.set(placeKey(file, read.span), { ...flow, sources });
+    }
+    const stores = new Map<string, SpeakerFlowStore>();
+    for (const [statement, { file, ...store }] of this.#flowStores)
+      stores.set(placeKey(file, statement.target.span), store);
+    return { reads, stores, paths: this.#pathFacts, operands: this.#operandFacts };
   }
 
   /** A declared speaker for a message to name in its example, other than the built-in `player`. */
@@ -2282,6 +2354,7 @@ class TypeChecker {
         return true;
       case "ifStatement": {
         const condition = yield* compileChild(this.#conditionTask(statement.condition, scope));
+        this.#notePaths(statement, [condition.whenTrue !== null, condition.whenFalse !== null]);
         const start = this.#flow.mark();
         this.#flow.apply(condition.whenTrue ?? condition.unreachedTrue ?? null);
         const thenContinues = yield* compileChild(
@@ -2321,6 +2394,9 @@ class TypeChecker {
         const typeCases: { readonly typeTest: SwitchTypeTest; readonly test: StaticType }[] = [];
         const start = this.#flow.mark();
         const ends: FlowState[] = [];
+        const casePaths: boolean[] = [];
+        // The literal values that the value cases list, to tell whether they take every value the subject can hold.
+        const literals: PossibleValue[] = [];
         for (const switchCase of statement.cases) {
           // What the block may assume about the value, or `null` when the case does not narrow it.
           let taken: StaticType | null = null;
@@ -2370,8 +2446,11 @@ class TypeChecker {
                 value,
                 valueType,
               );
-              if (never === undefined) matchable = true;
-              else
+              if (never === undefined) {
+                matchable = true;
+                if (literalRange(value) === undefined)
+                  literals.push(...(comparedLiteral(value) ?? []));
+              } else
                 this.diagnostics.push(
                   createDiagnostic(
                     DiagnosticSeverity.Warning,
@@ -2394,12 +2473,18 @@ class TypeChecker {
           this.#flow.restore(start);
           if (variable !== null && taken !== null && reached)
             this.#flow.apply(this.#flow.since(start, new Map([[variable, taken]])));
+          casePaths.push(reached);
           if ((yield* compileChild(this.#pathTask(switchCase.body, scope, reached))) && reached)
             ends.push(this.#flow.mark());
         }
         // `default`, or the path without one, runs when no case matched. A path that no value reaches does not continue.
         this.#flow.restore(start);
         const restReached = remaining.kind !== "never";
+        // The flow of speaker properties also knows that no value is left when the cases list every value it can be.
+        this.#notePaths(statement, [
+          ...casePaths,
+          restReached && !takesEveryValue(remaining, literals),
+        ]);
         if (variable !== null && restReached && remaining !== subject)
           this.#flow.apply(this.#flow.since(start, new Map([[variable, remaining]])));
         if (statement.defaultBlock === null) {
@@ -2419,6 +2504,7 @@ class TypeChecker {
         // The condition is tested anew on each iteration, after whatever the body changed (rule 5.5).
         this.#widen(statement.body);
         const condition = yield* compileChild(this.#conditionTask(statement.condition, scope));
+        this.#notePaths(statement, [condition.whenTrue !== null, condition.whenFalse !== null]);
         const start = this.#flow.mark();
         this.#flow.apply(condition.whenTrue ?? condition.unreachedTrue ?? null);
         this.#loops.push({ start, breaks: [], continued: false });
@@ -2446,6 +2532,10 @@ class TypeChecker {
             "A repeat count is a whole number (integer)",
           );
         const times = staticNumber(statement.count);
+        this.#notePaths(statement, [
+          times === undefined || times >= 1,
+          times === undefined || times < 1,
+        ]);
         const ends = yield* compileChild(
           this.#loopBodyTask(statement.body, scope, [], times === undefined || times >= 1),
         );
@@ -2477,6 +2567,10 @@ class TypeChecker {
           declaration: statement,
         };
         this.#declared.set(statement, variable);
+        this.#notePaths(statement, [
+          !isEmptyLiteral(statement.iterable),
+          !isNonEmptyLiteral(statement.iterable),
+        ]);
         const ends = yield* compileChild(
           this.#loopBodyTask(
             statement.body,
@@ -2596,6 +2690,10 @@ class TypeChecker {
     };
     this.#declared.set(statement, key);
     this.#declared.set(valueName, value);
+    this.#notePaths(statement, [
+      !isEmptyLiteral(statement.iterable),
+      !isNonEmptyLiteral(statement.iterable),
+    ]);
     const ends = yield* compileChild(
       this.#loopBodyTask(statement.body, scope, [key, value], !isEmptyLiteral(statement.iterable)),
     );
@@ -2863,7 +2961,10 @@ class TypeChecker {
         else {
           // A store through a speaker's name gives it the property; any other store into a speaker is unchecked.
           const speaker = this.#speakerName(target.object, scope);
-          if (speaker !== undefined) this.#speakerGets.get(speaker)?.add(name);
+          if (speaker !== undefined) {
+            this.#speakerGets.get(speaker)?.add(name);
+            this.#flowStores.set(statement, { speaker, name, file: this.#file });
+          }
         }
         const custom = this.#customProperties(target.object, object, name, scope);
         const receiver = custom ?? object;
@@ -5368,6 +5469,10 @@ class TypeChecker {
           // The right operand runs only when the left one did not decide the result. When no value lets it run, it is
           // still checked like an `if` branch that is never taken, without what the left operand rules out.
           const runsRight = node.operator === "and" ? left.whenTrue : left.whenFalse;
+          this.#noteOperand(node, [
+            runsRight !== null,
+            (node.operator === "and" ? left.whenFalse : left.whenTrue) !== null,
+          ]);
           this.#flow.apply(
             runsRight ??
               (node.operator === "and" ? left.unreachedTrue : left.unreachedFalse) ??
@@ -5603,6 +5708,7 @@ class TypeChecker {
       // The result may be the value or the fallback itself, so it is a copy that later stores to either cannot share.
       const left = this.#capture(node.left);
       if (unused === null && neverNull(left)) unused = index;
+      this.#noteOperand(node, [unused === null, true]);
       // A fallback runs only when every value before it is null, so what it changes may or may not have happened
       // afterwards, and after a value that is never null, it never runs, but is still checked.
       const start = this.#flow.mark();
@@ -10030,6 +10136,35 @@ function comparedLiteral(expression: Expression): readonly PossibleValue[] | und
   if (value === null || typeof value !== "object") return [{ value, measure: null }];
   if (value.kind === "angle") return [{ value: value.degrees, measure: "angle" }];
   return isCalendar(value) ? undefined : [{ value: value.milliseconds, measure: "duration" }];
+}
+
+/** The ways that a check finds possible, with those an earlier check of the same code found. */
+function joinedWays(known: readonly boolean[] | undefined, ways: boolean[]): boolean[] {
+  return known === undefined ? ways : ways.map((way, index) => way || known[index] === true);
+}
+
+/**
+ * Whether the literal values of `taken` include every value that a value of `type` can hold: both booleans, or each
+ * button value of an `askChoice` with literal values, and `null` when it may be null.
+ */
+function takesEveryValue(type: StaticType, taken: readonly PossibleValue[]): boolean {
+  const possible: PossibleValue[] = [];
+  for (const member of members(type)) {
+    const value = resolved(member);
+    if (value.kind === "scalar" && value.name === "boolean" && value.values === undefined)
+      possible.push({ value: true, measure: null }, { value: false, measure: null });
+    else {
+      const restricted = possibleValues(value);
+      if (restricted === undefined) return false;
+      for (const each of restricted) possible.push(each);
+    }
+  }
+  return (
+    possible.length > 0 &&
+    possible.every(({ value, measure }) =>
+      taken.some((literal) => literal.value === value && literal.measure === measure),
+    )
+  );
 }
 
 /** The earlier `case is T` or `case is not T` that already takes a literal case value, if any. */

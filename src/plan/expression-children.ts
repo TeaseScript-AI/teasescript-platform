@@ -44,3 +44,22 @@ export function expressionPlanChildren(expression: ExpressionPlan): readonly Exp
       return expression.operands;
   }
 }
+
+/**
+ * The children that the runtime evaluates only on some ways: the right side of `and`, `or`, and `otherwise`, which
+ * runs only when the left side does not decide the result (V30 §18), and the default of a `load`, which runs only when
+ * the key has no value.
+ */
+export function conditionalExpressionPlanChildren(
+  expression: ExpressionPlan,
+): readonly ExpressionPlan[] {
+  if (expression.kind === "binary")
+    return expression.operator === "and" ||
+      expression.operator === "or" ||
+      expression.operator === "otherwise"
+      ? [expression.right]
+      : [];
+  if (expression.kind === "storageLoad")
+    return expression.default === null ? [] : [expression.default];
+  return [];
+}
