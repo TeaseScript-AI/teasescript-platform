@@ -3081,8 +3081,8 @@ Default invalid messages:
 | `askImage(...)` | `"That image is not valid."` |
 | `askVideo(...)` | `"That video is not valid."` |
 | `askAudio(...)` | `"That audio is not valid."` |
-| `askChoice(...)`, typed text that matches no button | `"That is wrong. Type the exact text of one button, or use the buttons above."` |
-| `askChoice(...)`, typed text that matches more than one button | `"More than one button has this text. Use the buttons above."` |
+| `askChoice(...)` or `askBoolean(...)`, typed text that matches no button | `"That is wrong. Type the exact text of one button, or use the buttons above."` |
+| `askChoice(...)` or `askBoolean(...)`, typed text that matches more than one button | `"More than one button has this text. Use the buttons above."` |
 
 `askText(...)` refuses a blank answer with `"That is wrong. I asked for some text."` (owner decision, 2026-10-16).
 
