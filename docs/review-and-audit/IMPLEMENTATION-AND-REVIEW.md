@@ -82,8 +82,9 @@ order, exceptions, executable detail, and resistance to misinterpretation.
 ### One home for each language rule
 
 Each TeaseScript rule (evaluation order, which code runs, protected names, keyword and unit lists,
-built-in signatures, type rules, diagnostic texts) is defined in one place that every component uses, so
-the parser, type checker, lowering, plan, runtime and editor cannot drift apart.
+built-in signatures and value domains, what counts as a known value, type rules, diagnostic texts and
+codes, the editor's syntax facts) is defined in one place that every component uses, so the parser, type
+checker, lowering, plan, runtime and editor cannot drift apart.
 
 - Before encoding a language rule, find where it is already defined and use that definition. If a second
   component needs it, move it to a shared module instead of copying it. A copy is acceptable only where a
@@ -97,6 +98,17 @@ the parser, type checker, lowering, plan, runtime and editor cannot drift apart.
   covers (branches, loops, short-circuit operators, defaults supplied and left out, the parts of an ask,
   gotos, calls), a reported problem must occur when the script runs, and an accepted script must not fail
   that way.
+- Check each rule in one compiler pass: names, scopes, and placement in the name pass, values and types
+  in the type checker. One problem gets one code, whichever pass, path, or form of the source finds it.
+- A compile-time value check uses the shared known-value fold, so a constant expression counts like the
+  literal it equals. The compile-time and runtime checks of one domain use one predicate and one message.
+- Type discovery may follow the checking order of ADR 0021 §1.6, but a fact that depends on what has run
+  before (narrowing, what a call or ask may change, definite assignment) follows evaluation order through
+  the shared order helpers (`src/expression-children.ts`).
+- Where the lowering has a lazy path and an instruction path for one construct, both use one
+  implementation and one message for each runtime rule.
+- Every editor completion compiles where it is offered, and the editor's syntax help is built from the
+  parser's tables.
 - When a second fix for the same kind of case is needed in one area, look for the shared cause before
   patching again (see Convergence).
 
