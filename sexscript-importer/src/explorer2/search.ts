@@ -212,11 +212,12 @@ const MAX_CANDIDATES = 4096;
 /** Candidates a target tries first; each time it runs out, it comes back with this many times more. */
 const FIRST_BUDGET = 64;
 /**
- * A run stops on a plateau, as V1's runs until stalled do, when no new code or way came for {@link PLATEAU_FACTOR} times
- * the work it took to its last one (in the runner's units, see `Runner.work`), and at least this much work plus this
- * much per instruction of the plan. Measured on the batch-33 corpus's progress (both seeds): it stops 52 of 178 and 61 of
- * 185 runs early, mostly small units whose last new code came in the first seconds, and 4 and 2 of them would have found
- * more (0.4–5% of their plan) later.
+ * A run whose coverage is complete (every line its report counts ran) stops on a plateau, as V1's runs until stalled do,
+ * when no new code or way came for {@link PLATEAU_FACTOR} times the work it took to its last one (in the runner's units,
+ * see `Runner.work`), and at least this much work plus this much per instruction of the plan. A run with a line not run
+ * yet goes on: its queues hold the ways, values, answers and visits left to try, and which of them lead to the line is
+ * not known (on the batch-33 corpus, 6 of the 113 runs such a plateau would have stopped found lines later, up to 5% of
+ * the plan).
  */
 const PLATEAU_WORK = 10_000_000;
 const PLATEAU_WORK_PER_INSTRUCTION = 10_000;
@@ -498,6 +499,10 @@ export function explore2(
   const outOfTime = () => performance.now() - started >= options.budgetMs;
   /** The work done when a play last ran new code or took a new way (see {@link PLATEAU_FACTOR}). */
   let progressWork = 0;
+  /** Whether the run's coverage is complete, as of the progress at that work (-1: not known yet). */
+  let allRanAt = -1;
+  let allRan = false;
+  const files = instructionFiles(plan);
 
   /** Answer children played per interaction instruction. */
   const answeredAt = new Map<number, number>();
@@ -2047,7 +2052,7 @@ export function explore2(
       continue;
     }
     // After what checks found is played: a plateau, no new code or way for many times as long as the run took to its last
-    // one (see `PLATEAU_FACTOR`).
+    // one, once its coverage is complete (see `PLATEAU_FACTOR`).
     if (
       runner.work - progressWork >=
       Math.max(
@@ -2055,8 +2060,28 @@ export function explore2(
         PLATEAU_FACTOR * progressWork,
       )
     ) {
-      stoppedBy = "plateau";
-      break;
+      if (allRanAt !== progressWork) {
+        allRanAt = progressWork;
+        const { visitedLines, coverableLines } = coverageOf(
+          plan,
+          instructions,
+          files,
+          runner,
+          visited,
+          ways,
+          attempts,
+          checksBySide,
+          reasonOf,
+          "plateau",
+          drawnSites,
+          options,
+        );
+        allRan = visitedLines >= coverableLines;
+      }
+      if (allRan) {
+        stoppedBy = "plateau";
+        break;
+      }
     }
     const ready = KINDS.filter((kind) => kind !== "walks" || recent.length > 0)
       .filter((kind) => kind !== "decisions" || decisionsQueue.size > 0)
@@ -2390,7 +2415,6 @@ export function explore2(
   }
   // Ways V2 tried to take and no path took in the end: what keeps a run that ran out of work from being complete.
   const open = [...attempts.keys()].filter((side) => !ways.has(side)).length;
-  const files = instructionFiles(plan);
   const coverage = coverageOf(
     plan,
     instructions,
