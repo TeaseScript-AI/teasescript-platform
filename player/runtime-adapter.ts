@@ -220,7 +220,7 @@ export class PlayerRuntimeEngine {
       return at.recorder.call(
         this,
         kind,
-        () => runtime.exportSnapshot(),
+        () => runtime.exportTrustedSnapshot(),
         args,
         (admission) => {
           const result = invoke(runtime, admission);
@@ -263,6 +263,14 @@ export class PlayerRuntimeEngine {
     return this.runtimeAt(at).exportSnapshot();
   }
 
+  /**
+   * The complete state of publication `at` as the runtime session's trusted export: the same JSON as `exportSnapshot`,
+   * copied without capture and validation, for a snapshot the Player keeps itself and restores only through validation.
+   */
+  exportTrustedSnapshot(at: PlayerRuntimePublication): RuntimeSnapshot {
+    return this.runtimeAt(at).exportTrustedSnapshot();
+  }
+
   /** A self-contained checkpoint of publication `at`, freshly exported and validated. */
   exportCheckpoint(at: PlayerRuntimePublication) {
     return this.runtimeAt(at).exportCheckpoint();
@@ -285,7 +293,11 @@ export class PlayerRuntimeEngine {
     this.#randomControl = randomControl;
   }
 
-  /** Starts `recorder`'s recording at publication `at`, whose state is the latest publication's. */
+  /**
+   * Starts `recorder`'s recording at publication `at`, whose state is the latest publication's. The recorder keeps its
+   * anchors as trusted exports, which a debug export checkpoints and a rebuild restores; the state at the end or at a
+   * failure it takes checked, so a state the session cannot export leaves the recording incomplete.
+   */
   beginRecording(
     at: PlayerRuntimePublication,
     plan: InstructionPlan,
@@ -294,7 +306,7 @@ export class PlayerRuntimeEngine {
     this.#dropCopy();
     recorder.begin(
       plan,
-      this.exportSnapshot(at),
+      this.exportTrustedSnapshot(at),
       () => this.#runtime.exportSnapshot(),
       this,
       this.#revision,
@@ -336,7 +348,7 @@ export class PlayerRuntimeEngine {
       return copy.recorder.call(
         this,
         kind,
-        () => runtime.exportSnapshot(),
+        () => runtime.exportTrustedSnapshot(),
         args,
         () => {
           const result = invoke(runtime);
@@ -597,8 +609,8 @@ export function restorePlayerRuntimeSession(
 }
 
 /**
- * The session's complete state, freshly exported and validated: a snapshot a debug export, rewind position, or storage
- * adoption keeps. It costs work in proportion to the whole state, so ordinary presentation reads `state` instead.
+ * The session's complete state, freshly exported and validated: a snapshot a debug export or storage adoption keeps. It
+ * costs work in proportion to the whole state, so ordinary presentation reads `state` instead.
  */
 export function playerRuntimeSnapshot(session: PlayerRuntimeSession): RuntimeSnapshot {
   return session.engine.exportSnapshot(session);
@@ -613,9 +625,13 @@ export function playerRuntimeSnapshotOrNull(session: PlayerRuntimeSession): Runt
   }
 }
 
-/** The session's state as JSON, validated first, for Debug's rewind history to keep. */
+/**
+ * The session's state as JSON, the same as `playerRuntimeSnapshot`'s, written from the trusted export without capture
+ * and validation: for the Player's own saves, its kept session and Debug's rewind history, which are validated when they
+ * are restored (`restorePlayerRuntimeSessionAt`).
+ */
 export function playerRuntimeSnapshotJson(session: PlayerRuntimeSession): string {
-  return serializeValidatedRuntimeJson(playerRuntimeSnapshot(session));
+  return serializeValidatedRuntimeJson(session.engine.exportTrustedSnapshot(session));
 }
 
 /**

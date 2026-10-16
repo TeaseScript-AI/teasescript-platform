@@ -16,6 +16,7 @@ import {
   recordContinueCapture,
   DEFAULT_TEMPORAL_CONTEXT,
 } from "../src/index.js";
+import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 import { utc } from "./helpers/temporal-fixtures.js";
 
@@ -24,6 +25,7 @@ import {
   activePlayerRuntimeCapture,
   answerPlayerRuntimeCapture,
   answerPlayerRuntimeImage,
+  beginPlayerRuntimeRecording,
   compilePlayerProject,
   completePlayerRuntimeStorageWrite,
   pendingPlayerRuntimeStorageWrite,
@@ -52,6 +54,7 @@ import {
   dismissPlayerRuntimeFormField,
   draftPlayerRuntimeForm,
   playerRuntimeSnapshot,
+  playerRuntimeSnapshotJson,
   playerRuntimeTranscript,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
@@ -530,6 +533,38 @@ test("runtime checkpoint restore handles retained event histories above the nati
   assert.equal(restored.transcriptEntries[0]?.text, "x");
   assert.equal(restored.transcriptEntries.at(-1)?.text, "x");
   assert.deepEqual(playerRuntimeSnapshot(restored), result.snapshot);
+});
+
+test("the Player keeps its own state, for a save or a recording's anchor, as the checked JSON without capturing it", () => {
+  const source =
+    'let numbers = [1, 2.5]\nlet person = {name: "Kiara", tags: ["a"]}\nwait 1 s\nwait 1 s\nexit';
+  const session = createPlayerRuntimeSession(source);
+  const checked = JSON.stringify(playerRuntimeSnapshot(session));
+  withValidationTestStatistics((statistics) => {
+    // The JSON the kept session and Debug's rewind history keep, which a restore checks as external data.
+    assert.equal(playerRuntimeSnapshotJson(session), checked);
+    beginPlayerRuntimeRecording(session, new DebugRecorder());
+    assert.equal(statistics().counts.externalCaptureVisits ?? 0, 0);
+  });
+  // A recording that starts again before a call takes its anchor without capturing the state either: the same calls
+  // capture only their arguments.
+  const captureVisits = (recorder: DebugRecorder) => {
+    let played = createPlayerRuntimeSession(source, { recorder });
+    return withValidationTestStatistics((statistics) => {
+      for (const atMs of [1_000, 2_000]) played = observePlayerRuntimeTime(played, atMs).session;
+      assert.equal(played.state.status, "halted");
+      return statistics().counts.externalCaptureVisits ?? 0;
+    });
+  };
+  const restarting = new DebugRecorder({ operations: 2 });
+  assert.equal(captureVisits(restarting), captureVisits(new DebugRecorder()));
+  assert.notEqual(restarting.recording()!.anchorSnapshot.observedSessionTimeMs, 0, "no new anchor");
+  const restored = restorePlayerRuntimeSessionAt(
+    session.plan,
+    playerRuntimeSnapshotJson(session),
+    [],
+  );
+  assert.equal(JSON.stringify(playerRuntimeSnapshot(restored)), checked);
 });
 
 test("invalid dynamic markup colours preserve enclosing colours in delivered pieces", () => {
