@@ -331,6 +331,49 @@ test("reading a built-in field, term, or name list where no way gave it one is a
       ],
     ],
   );
+  // A store on a way of a function that does not return, and a default that a call with the argument does not run.
+  assert.deepEqual(
+    diagnostics(
+      'function give {\n    if chance(0.5) {\n        player.firstName = "Sam"\n        exit\n    }\n}\ngive()\nsay player.firstName\nexit',
+    ),
+    [
+      [
+        "TSV043",
+        "main.tease:8",
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. Line 3 assigns it, but only on a way that does not reach this line. ${copyFix("'player.firstName'")}`,
+      ],
+    ],
+  );
+  assert.deepEqual(
+    diagnostics(
+      'function setName {\n    player.firstName = "Sam"\n    return 1\n}\nfunction optional(value = setName()) {\n    say value\n}\noptional(0)\nsay player.firstName\nexit',
+    ),
+    [
+      [
+        "TSV043",
+        "main.tease:9",
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. Line 2 assigns it, but that line never runs. ${copyFix("'player.firstName'")}`,
+      ],
+    ],
+  );
+  // A custom property named `copy` is not the copy of the account.
+  assert.deepEqual(
+    diagnostics(
+      "say player.copy\nsay player.firstName\nplayer.copy = 1\nplayer.copyFrom(account)\nexit",
+    ),
+    [
+      [
+        "TSV043",
+        "main.tease:1",
+        "Speaker 'player' has no 'copy' yet here: nothing assigns it before this line runs. Line 3 assigns it, but only later. Assign it before this line, as in 'player.copy = ...'.",
+      ],
+      [
+        "TSV043",
+        "main.tease:2",
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. The copy on line 4 comes only later. ${copyFix("'player.firstName'")}`,
+      ],
+    ],
+  );
   // A declared speaker: `gender` counts for a term, the titles for each other, and the parts of the name for
   // `displayName`.
   const speaker = 'speaker vera {\n    color: "white"\n}';
@@ -447,6 +490,41 @@ test("reads that every followed way prepares compile and run", () => {
       ].join("\n"),
     ),
     ["0", "calm"],
+  );
+  // The defaults that a call runs come before the later defaults, the body, and the code after the call; one that never
+  // returns ends the way.
+  const give = 'function give {\n    vera.mood = "calm"\n    return 1\n}';
+  assert.deepEqual(
+    runs(
+      [
+        VERA,
+        give,
+        "function show(first = give(), second = vera.mood) {",
+        "    say second",
+        "}",
+        "function optional(value = give()) {",
+        "    say value",
+        "}",
+        "show()",
+        "optional()",
+        "say vera.mood",
+        "exit",
+      ].join("\n"),
+    ),
+    ["calm", "1", "calm"],
+  );
+  assert.deepEqual(
+    runs(
+      `${VERA}\nfunction stop {\n    exit\n}\nfunction show(value = stop()) {\n    say vera.mood\n}\nshow()\nvera.mood = "calm"\nexit`,
+    ),
+    [],
+  );
+  // `askChoice` evaluates its `prefill:` after its buttons.
+  assert.deepEqual(
+    diagnostics(
+      `${VERA}\n${give}\nlet choice = askChoice give(), 2, prefill: vera.mood\nsay choice\nexit`,
+    ),
+    [],
   );
   // A function read after the assignment, a label reached only once it is assigned, a block that may have run, a store
   // through an alias or a parameter, and the player's fields after a copy.

@@ -10144,7 +10144,7 @@ function takesEveryValue(type: StaticType, taken: readonly PossibleValue[]): boo
     else {
       const restricted = possibleValues(value);
       if (restricted === undefined) return false;
-      possible.push(...restricted);
+      for (const each of restricted) possible.push(each);
     }
   }
   return (

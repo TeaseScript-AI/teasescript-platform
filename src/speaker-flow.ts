@@ -99,12 +99,10 @@ type FlowEvent =
       readonly kind: "call";
       readonly fn: FunctionUnit;
       readonly site: CallExpression;
-      /** The parameter defaults that the call runs: those of the arguments it leaves out. */
-      readonly defaults: readonly Unit[];
+      /** The parameter defaults that the call runs, in order: those of the arguments it leaves out. */
+      readonly defaults: readonly Routine[];
     }
   | { readonly kind: "block"; readonly unit: Unit }
-  /** A parameter default, which runs only for a call that leaves its argument out. */
-  | { readonly kind: "default"; readonly unit: Unit }
   | {
       readonly kind: "transfer";
       readonly call: boolean;
@@ -134,22 +132,26 @@ interface Unit {
   /** The functions, blocks, and files the unit may run. */
   readonly runs: Set<Unit>;
   /** The functions the unit calls. */
-  readonly calls: Set<FunctionUnit>;
+  readonly calls: Set<Routine>;
   /** Whether the unit may `call` a file that the compiler cannot know, which may be any file. */
   callsAnyFile: boolean;
 }
 
-interface FunctionUnit extends Unit {
-  readonly declaration: FunctionDeclaration;
+/** A function, or a parameter default, which a call runs and returns from at its exit. */
+interface Routine extends Unit {
   readonly exit: FlowNode;
-  /** Whether a way through the function reaches its end or a `return`, once known. */
+  /** Whether a way through it reaches its exit, once known. */
   returns: boolean;
-  /** What every way through the function to its end or a `return` assigns, once known. */
+  /** What every way to its exit assigns, once known. */
   gains: bigint;
-  /** What some way through the function to its end or a `return` may assign, once known. */
+  /** What some way to its exit may assign, once known. */
   mayGains: bigint;
-  /** The unit of each parameter's default, or `null` for a parameter without one. */
-  readonly defaults: readonly (Unit | null)[];
+}
+
+interface FunctionUnit extends Routine {
+  readonly declaration: FunctionDeclaration;
+  /** The routine of each parameter's default, or `null` for a parameter without one. */
+  readonly defaults: readonly (Routine | null)[];
 }
 
 interface FileUnit extends Unit {
@@ -181,7 +183,8 @@ interface NamedStore {
   readonly source: string | null;
   readonly place: Place;
   readonly runs: boolean;
-  readonly reaching: ReadonlySet<FlowNode>;
+  /** For each node from which some way leads to the store, how many of its first events that way follows. */
+  readonly reaching: ReadonlyMap<FlowNode, number>;
 }
 
 /** A store's place in the source, to name in a message, and the node and event it runs as. */
@@ -234,13 +237,15 @@ class SpeakerFlow {
     readonly unit: Unit;
     readonly code: Block | Expression;
     readonly file: number;
+    /** For a parameter default, where its value is done. */
+    readonly exit: FlowNode | null;
   }[] = [];
+  /** The functions and parameter defaults. */
+  readonly #routines: Routine[] = [];
   /** For the entry of a block or a parameter default, the nodes that start it; for a hub, the nodes that enter it. */
   readonly #startedBy = new Map<FlowNode, FlowNode[]>();
   /** For each file, the nodes with an `end` in its code, which return to the file's caller. */
   readonly #ends: FlowNode[][] = [];
-  /** For each parameter default, the node where its value is done, which returns to the call. */
-  readonly #lastOf = new Map<Unit, FlowNode>();
   /** Where the session starts: the first start value, or main.tease's top. */
   readonly #start: FlowNode;
   /** Where a target the compiler cannot know leads: on to every file's top and label. Only `may` enters it. */
@@ -299,20 +304,14 @@ class SpeakerFlow {
       for (const declaration of functionDeclarations(program)) {
         const defaults = declaration.parameters.map((parameter) => {
           if (parameter.defaultValue === null) return null;
-          const unit = this.#newUnit();
+          const unit = this.#newRoutine();
+          this.#routines.push(unit);
           this.#blocks.push(unit);
-          this.#pending.push({ unit, code: parameter.defaultValue, file });
+          this.#pending.push({ unit, code: parameter.defaultValue, file, exit: unit.exit });
           return unit;
         });
-        const fn: FunctionUnit = {
-          ...this.#newUnit(),
-          declaration,
-          exit: this.#node(),
-          returns: false,
-          gains: 0n,
-          mayGains: 0n,
-          defaults,
-        };
+        const fn: FunctionUnit = { ...this.#newRoutine(), declaration, defaults };
+        this.#routines.push(fn);
         for (const unit of defaults) if (unit !== null) fn.runs.add(unit);
         this.#functions.set(declaration, fn);
       }
@@ -326,6 +325,10 @@ class SpeakerFlow {
     for (const file of this.#fileUnits)
       for (const entry of [file.entry, ...file.labels.values()]) this.#edge(this.#anywhere, entry);
     this.#build();
+  }
+
+  #newRoutine(): Routine {
+    return { ...this.#newUnit(), exit: this.#node(), returns: false, gains: 0n, mayGains: 0n };
   }
 
   #newUnit(): Unit {
@@ -358,11 +361,11 @@ class SpeakerFlow {
       let mayState = may[node.id] ?? null;
       // The calls so far in the node of functions that assign something on only some of their ways.
       const partial: Extract<FlowEvent, { kind: "call" }>[] = [];
-      for (const event of node.events) {
-        if (event.kind === "call" && (event.fn.mayGains & ~event.fn.gains) !== 0n)
+      for (const [index, event] of node.events.entries()) {
+        if (event.kind === "call" && (callGains(event, "may") & ~callGains(event, "must")) !== 0n)
           partial.push(event);
         if (event.kind === "read" && event.reported && mustState !== null && mayState !== null) {
-          const message = this.#message(event, node, partial, mustState, mayState, known);
+          const message = this.#message(event, node, index, partial, mustState, mayState, known);
           if (message !== null)
             result[node.file]!.push(
               createDiagnostic(
@@ -440,8 +443,6 @@ class SpeakerFlow {
     for (const fn of this.#functions.values()) {
       this.#enter(fn, fn.entry.file);
       this.#function = fn;
-      // A parameter default runs first, but only for a call that leaves its argument out.
-      for (const unit of fn.defaults) if (unit !== null) this.#event({ kind: "default", unit });
       this.#sequence([
         () => this.#statements(fn.declaration.body.statements),
         () => this.#edge(this.#current, fn.exit),
@@ -453,7 +454,7 @@ class SpeakerFlow {
       if (pending.code.kind === "block") this.#statements(pending.code.statements);
       else this.#expression(pending.code);
       this.#runWork();
-      if (pending.code.kind !== "block") this.#lastOf.set(pending.unit, this.#current!);
+      if (pending.exit !== null) this.#edge(this.#current, pending.exit);
     }
     for (const from of this.#nodes)
       for (const [at, event] of from.events.entries()) {
@@ -493,7 +494,7 @@ class SpeakerFlow {
   #block(block: Block): void {
     const unit = this.#newUnit();
     this.#blocks.push(unit);
-    this.#pending.push({ unit, code: block, file: this.#file });
+    this.#pending.push({ unit, code: block, file: this.#file, exit: null });
     this.#unit!.runs.add(unit);
     this.#event({ kind: "block", unit });
     this.#startedBy.set(unit.entry, [this.#current!]);
@@ -954,14 +955,11 @@ class SpeakerFlow {
         const declaration = this.#input.calls.get(expression);
         const fn = declaration === undefined ? undefined : this.#functions.get(declaration);
         if (fn === undefined) return;
+        const defaults = omittedDefaults(fn, expression);
         this.#unit!.runs.add(fn);
         this.#unit!.calls.add(fn);
-        this.#event({
-          kind: "call",
-          fn,
-          site: expression,
-          defaults: omittedDefaults(fn, expression),
-        });
+        for (const routine of defaults) this.#unit!.calls.add(routine);
+        this.#event({ kind: "call", fn, site: expression, defaults });
         return;
       }
       case "timerExpression":
@@ -1011,22 +1009,22 @@ class SpeakerFlow {
     }
   }
 
-  /** Which functions can return to their caller: some way through the body reaches its end or a `return`. */
+  /** Which functions and defaults can return to their caller: some way through them reaches their exit. */
   #findReturns(): void {
     const callers = this.#callers();
-    const work = new Set(this.#functions.values());
-    for (const fn of work) {
-      work.delete(fn);
-      if (fn.returns || !this.#reachesExit(fn)) continue;
-      fn.returns = true;
-      for (const caller of callers.get(fn) ?? []) if (!caller.returns) work.add(caller);
+    const work = new Set(this.#routines);
+    for (const routine of work) {
+      work.delete(routine);
+      if (routine.returns || !this.#reachesExit(routine)) continue;
+      routine.returns = true;
+      for (const caller of callers.get(routine) ?? []) if (!caller.returns) work.add(caller);
     }
   }
 
-  /** The functions that call each function. */
-  #callers(): Map<FunctionUnit, FunctionUnit[]> {
-    const callers = new Map<FunctionUnit, FunctionUnit[]>();
-    for (const caller of this.#functions.values())
+  /** The functions and defaults that call each function or run each default. */
+  #callers(): Map<Routine, Routine[]> {
+    const callers = new Map<Routine, Routine[]>();
+    for (const caller of this.#routines)
       for (const called of caller.calls) {
         const known = callers.get(called);
         if (known === undefined) callers.set(called, [caller]);
@@ -1035,12 +1033,12 @@ class SpeakerFlow {
     return callers;
   }
 
-  #reachesExit(fn: FunctionUnit): boolean {
-    const seen = new Set([fn.entry]);
-    const work = [fn.entry];
+  #reachesExit(routine: Routine): boolean {
+    const seen = new Set([routine.entry]);
+    const work = [routine.entry];
     for (let node = work.pop(); node !== undefined; node = work.pop()) {
-      if (node === fn.exit) return true;
-      if (node.events.some((event) => event.kind === "call" && !event.fn.returns)) continue;
+      if (node === routine.exit) return true;
+      if (node.events.some((event) => event.kind === "call" && !returns(event))) continue;
       for (const next of node.next)
         if (!seen.has(next)) {
           seen.add(next);
@@ -1051,24 +1049,23 @@ class SpeakerFlow {
   }
 
   /**
-   * What each function that returns assigns on every way to its end or a `return` (`must`), or on some way (`may`): a
-   * call in it gives what the called function gains, a block or a file `call` whatever it may store, and a parameter
-   * default its stores only for `may`. A way ends at an `end`, a `goto`, or for `must` a call that never returns.
-   * `must` starts from everything and only shrinks, so recursion keeps what its other ways assign; `may` starts from
-   * nothing and only grows.
+   * What each function and default that returns assigns on every way to its exit (`must`), or on some way (`may`): a
+   * call in it gives what the defaults it runs and the called function gain, and a block or a file `call` whatever it
+   * may store. A way ends at an `end`, a `goto`, or for `must` a call that never returns. `must` starts from everything
+   * and only shrinks, so recursion keeps what its other ways assign; `may` starts from nothing and only grows.
    */
   #findGains(mode: "must" | "may"): void {
     const callers = this.#callers();
-    const returning = [...this.#functions.values()].filter((fn) => fn.returns);
-    for (const fn of returning) {
-      if (mode === "must") fn.gains = this.#all;
-      else fn.mayGains = 0n;
+    const returning = this.#routines.filter((routine) => routine.returns);
+    for (const routine of returning) {
+      if (mode === "must") routine.gains = this.#all;
+      else routine.mayGains = 0n;
     }
     const work = new Set(returning);
-    for (const fn of work) {
-      work.delete(fn);
-      const states = new Map<FlowNode, bigint>([[fn.entry, 0n]]);
-      const nodes = [fn.entry];
+    for (const routine of work) {
+      work.delete(routine);
+      const states = new Map<FlowNode, bigint>([[routine.entry, 0n]]);
+      const nodes = [routine.entry];
       for (let node = nodes.pop(); node !== undefined; node = nodes.pop()) {
         let state: bigint | null = states.get(node)!;
         for (const event of node.events) {
@@ -1085,17 +1082,17 @@ class SpeakerFlow {
           nodes.push(next);
         }
       }
-      const exit = states.get(fn.exit);
+      const exit = states.get(routine.exit);
       if (mode === "must") {
         const gains = exit ?? this.#all;
-        if (gains === fn.gains) continue;
-        fn.gains = gains;
+        if (gains === routine.gains) continue;
+        routine.gains = gains;
       } else {
         const gains = exit ?? 0n;
-        if (gains === fn.mayGains) continue;
-        fn.mayGains = gains;
+        if (gains === routine.mayGains) continue;
+        routine.mayGains = gains;
       }
-      for (const caller of callers.get(fn) ?? []) if (caller.returns) work.add(caller);
+      for (const caller of callers.get(routine) ?? []) if (caller.returns) work.add(caller);
     }
   }
 
@@ -1153,16 +1150,22 @@ class SpeakerFlow {
         return state;
       case "store":
         return state | event.bits;
-      case "call":
-        join(event.fn.entry, state);
-        for (const unit of event.defaults) join(unit.entry, state);
-        if (mode === "may") return state | event.fn.mayGains;
-        return event.fn.returns ? state | event.fn.gains : null;
+      case "call": {
+        // The defaults of the arguments the call leaves out run in order before the body, each after the one before.
+        let entered = state;
+        for (const routine of event.defaults) {
+          join(routine.entry, entered);
+          if (mode === "may") entered |= routine.mayGains;
+          else if (routine.returns) entered |= routine.gains;
+          else return null;
+        }
+        join(event.fn.entry, entered);
+        if (mode === "may") return entered | event.fn.mayGains;
+        return event.fn.returns ? entered | event.fn.gains : null;
+      }
       case "block":
         join(event.unit.entry, this.#all);
         return state | event.unit.summary;
-      case "default":
-        return mode === "may" ? state | event.unit.summary : state;
       case "transfer":
         if (event.targets !== null) for (const target of event.targets) join(target, state);
         else if (mode === "may") join(this.#anywhere, state);
@@ -1182,6 +1185,7 @@ class SpeakerFlow {
   #message(
     event: Extract<FlowEvent, { kind: "read" }>,
     node: FlowNode,
+    index: number,
     partial: readonly Extract<FlowEvent, { kind: "call" }>[],
     mustState: bigint,
     mayState: bigint,
@@ -1190,7 +1194,7 @@ class SpeakerFlow {
     const { speaker, name, field, sources } = event.info;
     let some = 0n;
     for (const source of field ? sources : [name]) some |= this.#bit(speaker, source);
-    if ((mayState & some) === 0n) return this.#tooEarly(event.info, node, known);
+    if ((mayState & some) === 0n) return this.#tooEarly(event.info, node, index, known);
     const bit = this.#bit(speaker, name);
     if (field || (mustState & bit) !== 0n) return null;
     // The nearest call before the read that may leave it out, or else a way into the read's node.
@@ -1275,7 +1279,11 @@ class SpeakerFlow {
 
   /** A call of a function that may assign `bit` but does not on every way, as a way that misses it. */
   #partialCall(event: FlowEvent, bit: bigint, file: number): Way | null {
-    if (event.kind !== "call" || (event.fn.mayGains & bit) === 0n || (event.fn.gains & bit) !== 0n)
+    if (
+      event.kind !== "call" ||
+      (callGains(event, "may") & bit) === 0n ||
+      (callGains(event, "must") & bit) !== 0n
+    )
       return null;
     return { kind: "partialCall", name: event.fn.declaration.name.name, at: event.site.span, file };
   }
@@ -1285,10 +1293,10 @@ class SpeakerFlow {
    * player's field a copy of the account, else an assignment of a source, preferring one that runs, and says whether
    * it comes later, runs only on a way that does not reach the read, or never runs.
    */
-  #tooEarly(read: SpeakerFlowRead, node: FlowNode, known: Known): string {
+  #tooEarly(read: SpeakerFlowRead, node: FlowNode, index: number, known: Known): string {
     const { speaker, name, field, sources } = read;
     const copy = speaker === PLAYER && field && this.#copies.length > 0;
-    const key = `${speaker}.${copy ? "copy" : sources.join(".")}`;
+    const key = JSON.stringify([speaker, copy, sources]);
     let store = known.named.get(key);
     if (store === undefined) {
       const stores = copy
@@ -1313,7 +1321,7 @@ class SpeakerFlow {
     if (store !== null) {
       const when = !store.runs
         ? "never"
-        : store.place.node === node || store.reaching.has(node)
+        : index < (store.reaching.get(node) ?? 0)
           ? "later"
           : "elsewhere";
       const line = this.#line(store.place, node.file);
@@ -1343,7 +1351,7 @@ class SpeakerFlow {
    * entry, the code that starts a block or a parameter default, and the code that enters a hub, and from a call before
    * it, back from the end of the function or the `end`s of the files it runs.
    */
-  #reaching(target: Place): ReadonlySet<FlowNode> {
+  #reaching(target: Place): ReadonlyMap<FlowNode, number> {
     // For each node, how many of its events lead on to the store.
     const upTo = new Map<FlowNode, number>([[target.node, target.event]]);
     const work = [target.node];
@@ -1357,10 +1365,7 @@ class SpeakerFlow {
       for (const event of node.events.slice(0, events))
         if (event.kind === "call") {
           visit(event.fn.exit, 0);
-          for (const unit of event.defaults) {
-            const last = this.#lastOf.get(unit)!;
-            visit(last, last.events.length);
-          }
+          for (const routine of event.defaults) visit(routine.exit, 0);
         } else if (event.kind === "transfer" && event.call)
           for (const file of event.files)
             for (const end of this.#ends[file.entry.file] ?? []) visit(end, end.events.length);
@@ -1368,7 +1373,7 @@ class SpeakerFlow {
         visit(incoming.from, incoming.at ?? incoming.from.events.length);
       for (const from of this.#startedBy.get(node) ?? []) visit(from, from.events.length);
     }
-    return new Set(upTo.keys());
+    return upTo;
   }
 
   #line(place: Pick<Place, "file" | "span">, from: number): string {
@@ -1472,8 +1477,18 @@ function noJoin(): void {}
 /** The operands of an expression in evaluation order. */
 function expressionOperands(expression: Expression): readonly Expression[] {
   switch (expression.kind) {
-    case "interactionExpression":
-      return [...askOperands(expression), ...expression.options.map((option) => option.expression)];
+    case "interactionExpression": {
+      const options = expression.options.map((option) => option.expression);
+      const asked = askOperands(expression);
+      // `askChoice` evaluates its `prefill:` after its buttons (V30 §19).
+      return expression.prefill === null
+        ? [...asked, ...options]
+        : [
+            ...asked.filter((operand) => operand !== expression.prefill),
+            ...options,
+            expression.prefill,
+          ];
+    }
     case "showButtonExpression":
       return [expression.label, ...showButtonOptions(expression).map((option) => option.value)];
     case "sayExpression":
@@ -1483,8 +1498,20 @@ function expressionOperands(expression: Expression): readonly Expression[] {
   }
 }
 
-/** The default units of the parameters whose argument a call leaves out. */
-function omittedDefaults(fn: FunctionUnit, call: CallExpression): Unit[] {
+/** Whether a call returns: the defaults it runs and the function it calls all can. */
+function returns(event: Extract<FlowEvent, { kind: "call" }>): boolean {
+  return event.fn.returns && event.defaults.every((routine) => routine.returns);
+}
+
+/** What a call gives when it returns: what its defaults and the called function assign on every way, or on some way. */
+function callGains(event: Extract<FlowEvent, { kind: "call" }>, mode: "must" | "may"): bigint {
+  let gains = mode === "must" ? event.fn.gains : event.fn.mayGains;
+  for (const routine of event.defaults) gains |= mode === "must" ? routine.gains : routine.mayGains;
+  return gains;
+}
+
+/** The defaults of the parameters whose argument a call leaves out, in parameter order. */
+function omittedDefaults(fn: FunctionUnit, call: CallExpression): Routine[] {
   const positional = call.arguments.filter(
     (argument) => argument.kind === "positionalArgument",
   ).length;
