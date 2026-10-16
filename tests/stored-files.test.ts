@@ -616,6 +616,47 @@ test("a file store's default runs only when it is used, after the Player's answe
   assert.deepEqual([picture, read, bad], ["none", "nothing", "bad"]);
 });
 
+test("a block may run while a file store waits, before its default, so the check forgets what it may change", () => {
+  const json = JSON.stringify(JSON.stringify([`data:image/png;base64,${base64("png")}`]));
+  for (const call of ['fileFromBase64("YWJj", default: @)', `fromJson(${json}, default: @)`]) {
+    // The check reports the read in the default, which may run after the block.
+    const checked = compileSource(
+      [
+        "let x: integer | null = 1",
+        "timer async 1 ms { x = null }",
+        "x = 1",
+        `let result = ${call.replace("@", "x + 1")}`,
+        "exit",
+      ].join("\n"),
+    );
+    assert.deepEqual(
+      checked.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.span.start.line]),
+      [["TSV043", 3]],
+      call,
+    );
+    // Through a property, which the check does not follow, the read fails there when the block ran meanwhile.
+    const plan = compileValidPlan(
+      [
+        "let o: object = { n: 1 }",
+        "timer async 1 ms { o.n = null }",
+        `let result = ${call.replace("@", "o.n + 1")}`,
+        "exit",
+      ].join("\n"),
+    );
+    let snapshot = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+    snapshot = run(plan, observeTime(plan, snapshot, 1).snapshot).snapshot;
+    const action = snapshot.foregroundAction;
+    assert.ok(action?.kind === "fileStore", call);
+    const answered = completeAction(plan, snapshot, {
+      actionId: action.actionId,
+      actionKind: "fileStore",
+      payload: { kind: "failed" },
+    });
+    const failure = run(plan, answered.snapshot).snapshot.failure;
+    assert.deepEqual([failure?.code, failure?.span.start.line], ["TSR027", 2], call);
+  }
+});
+
 test("when the Player cannot keep a file the call gives its default with a warning, and a file it cannot read fails", () => {
   const store = new FakeFileStore();
   store.failing = true;

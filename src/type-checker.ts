@@ -6411,11 +6411,13 @@ class TypeChecker {
 
   /**
    * The arguments of a call of a built-in function or a method, each as it was evaluated, before later arguments run; a
-   * `default:` that runs only when the call needs it comes last (owner decision, 2026-10-16).
+   * `default:` that runs only when the call needs it comes last (owner decision, 2026-10-16). A call that `waits` for the
+   * Player waits after its other arguments, so a block may run before its result or its default.
    */
   *#callArgumentsTask(
     expression: CallExpression,
     scope: Scope,
+    waits = false,
   ): CompileTask<readonly StaticType[]> {
     const lazy = lazyDefaultArgument(expression)?.argument;
     const values: StaticType[] = [];
@@ -6424,6 +6426,7 @@ class TypeChecker {
       yield* compileChild(this.#expressionTask(argument.value, scope));
       values[index] = this.#capture(argument.value);
     }
+    if (waits) this.#suspend();
     if (lazy !== undefined) {
       yield* compileChild(this.#mayRunTask(lazy.value, scope));
       values[expression.arguments.indexOf(lazy)] = this.#capture(lazy.value);
@@ -6471,13 +6474,12 @@ class TypeChecker {
       const entry = scope.resolve(callee.name);
       if (entry?.kind === "function")
         return yield* compileChild(this.#functionCallTask(expression, entry.fn, scope));
-      const values = yield* compileChild(this.#callArgumentsTask(expression, scope));
-      if (entry === undefined && this.#builtins.has(callee.name)) {
-        const type = this.#builtinType(callee.name, expression, values);
-        // A file store call may wait for the Player, and a block may run before it gives its result.
-        if (isFileStoreCall(expression)) this.#suspend();
-        return type;
-      }
+      // A file store call may wait for the Player.
+      const values = yield* compileChild(
+        this.#callArgumentsTask(expression, scope, isFileStoreCall(expression)),
+      );
+      if (entry === undefined && this.#builtins.has(callee.name))
+        return this.#builtinType(callee.name, expression, values);
       return UNKNOWN_TYPE;
     }
     if (callee.kind !== "propertyAccessExpression") {
