@@ -1,30 +1,38 @@
 import { emitTease } from "./emit-tease.ts";
-import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
+import type { IrExpression, IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
 import { withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 
 /**
  * Legacy chance helpers, the scripts' own `percentChance(percent)`, are TeaseScript's `chance(percent)` (V30
- * "Randomness"): a function whose body draws a number from 1 through 100, or from 0 through 99, and tests it against
- * its parameter. Drawing from 0 through 99 and testing `<= percent` gave one point more than the percentage, which the
- * owner treats as unintended (2026-10-16, as Groovy's count-down ranges). A call with a whole number from 0 through 100
+ * "Randomness"): a function whose body draws a number from 0 through 99, or from 1 through 99, and tests it against
+ * its parameter. `percent > n` over 0 through 99 gives the percentage; `n <= percent` gave one point more over 0
+ * through 99, and percent/99, up to one point more, over 1 through 99, which the owner treats as unintended
+ * (2026-10-16, as Groovy's count-down ranges). A call with a whole number from 0 through 100
  * becomes `chance(n)`; another argument, which may be null or out of range where `chance` fails, keeps the helper. A
  * global helper's calls in every file take the builtin, a local one's in its own file; a definition that nothing names
- * any more goes.
+ * any more goes. Each call of a helper over 1 through 99 is noted in the conversion report (`SX_CHANCE_ODDS`,
+ * coordinator 2026-10-16).
  */
 export function withChanceCalls(programs: readonly MigrationProgram[]): MigrationProgram[] {
   const global = new Set<string>();
+  // The helpers that drew from 1 through 99, whose odds were percent/99.
+  const ninetyNine = new Set<string>();
   const local = programs.map((program) => {
     const names = new Set<string>();
-    for (const statement of program.statements)
-      if (statement.kind === "function" && isChanceHelper(statement))
-        (statement.global === true ? global : names).add(statement.name);
+    for (const statement of program.statements) {
+      const body = statement.kind === "function" ? chanceHelperBody(statement) : null;
+      if (statement.kind !== "function" || body === null) continue;
+      (statement.global === true ? global : names).add(statement.name);
+      if (body.includes(NINETY_NINE)) ninetyNine.add(statement.name);
+    }
     return names;
   });
   if (global.size === 0 && local.every((names) => names.size === 0)) return [...programs];
   const replaced = programs.map((program, index) => {
     const names = new Set([...global, ...local[index]!]);
     if (names.size === 0) return program;
+    const diagnostics: MigrationDiagnostic[] = [];
     const call = (value: IrExpression): IrExpression => {
       const next = mapChildren(value, call);
       if (
@@ -34,11 +42,19 @@ export function withChanceCalls(programs: readonly MigrationProgram[]): Migratio
         !isPercentage(next.positional[0]!)
       )
         return next;
+      if (ninetyNine.has(next.name))
+        diagnostics.push({
+          code: "SX_CHANCE_ODDS",
+          severity: "info",
+          message: CHANCE_ODDS_NOTE,
+          span: null,
+        });
       return { kind: "call", name: "chance", positional: next.positional, named: {} };
     };
     const block = (items: IrStatement[]): IrStatement[] =>
       items.map((item) => mapOwnExpressions(withNestedBlocks(item, block), call));
-    return { ...program, statements: block(program.statements) };
+    const statements = block(program.statements);
+    return { ...program, statements, diagnostics: [...program.diagnostics, ...diagnostics] };
   });
   // Whether code other than the definition names a function, as a call or an action.
   const names = (program: MigrationProgram, name: string): boolean =>
@@ -71,18 +87,26 @@ function isPercentage(value: IrExpression): boolean {
   );
 }
 
+/** The draw of the helpers over 1 through 99. */
+const NINETY_NINE = "randomInteger(0..99) + 1";
+
+/** The conversion report's note on the calls of such a helper (coordinator 2026-10-16). */
+export const CHANCE_ODDS_NOTE =
+  "legacy percentChance drew 1–99 (odds percent/99); converted to chance(percent)";
+
 /** The converted forms of the legacy chance helpers, with the parameter as `P` and the drawn number as `V`. */
 const CHANCE_BODIES = new Set(
   [
     "return P > randomInteger(0..100)",
     "let V = randomInteger(0..100)\nreturn (V >= 0 and V <= P) or (V <= 0 and V >= P)",
-    "let V = randomInteger(0..99) + 1\nreturn (V >= 0 and V <= P) or (V <= 0 and V >= P)",
+    `let V = ${NINETY_NINE}\nreturn (V >= 0 and V <= P) or (V <= 0 and V >= P)`,
   ].flatMap((body) => [body, `P = P otherwise 0\n${body}`]),
 );
 
-function isChanceHelper(statement: IrStatement & { kind: "function" }): boolean {
+/** The body of a legacy chance helper as its template gives it, or null for another function. */
+function chanceHelperBody(statement: IrStatement & { kind: "function" }): string | null {
   const [parameter, ...others] = statement.parameters;
-  if (parameter === undefined || others.length > 0 || parameter.defaultValue != null) return false;
+  if (parameter === undefined || others.length > 0 || parameter.defaultValue != null) return null;
   const drawn = statement.body.find((item) => item.kind === "let");
   const words = (text: string): string => {
     const named = text.replace(new RegExp(`\\b${parameter.name}\\b`, "gu"), "P");
@@ -96,7 +120,13 @@ function isChanceHelper(statement: IrStatement & { kind: "function" }): boolean 
     statements: statement.body.filter((item) => item.kind !== "comment"),
     diagnostics: [],
   });
-  return CHANCE_BODIES.has(words(body).trim());
+  // A name P or V of the body's own, such as a global it reads, is not the parameter or the drawn number.
+  const other = (placeholder: string, name: string | undefined): boolean =>
+    name !== placeholder && new RegExp(`\\b${placeholder}\\b`, "u").test(body);
+  if (other("P", parameter.name) || other("V", drawn?.kind === "let" ? drawn.name : undefined))
+    return null;
+  const template = words(body).trim();
+  return CHANCE_BODIES.has(template) ? template : null;
 }
 
 /**
@@ -148,8 +178,9 @@ function opposite(test: IrExpression): IrExpression {
  * Groovy truth of a value that may be null, written as two tests of one variable, reads as one test with a fallback:
  * `x == null or x == 0` is `(x otherwise 0) == 0`, `x != null and x != ""` is `(x otherwise "") != ""`, and
  * `x != null and x == true` is `x == true`, which a null never equals (V30 §18 "Fallback with otherwise"). The
- * variable, or a member of one, is read twice either way, so it has no effect. The null test of a condition whose
- * blocks read the variable stays: it narrows the variable there, which a fallback does not.
+ * variable, or a member of one other than `.random`, gives the same value at each read, so reading it once where the
+ * tests read it twice changes nothing. The null test of a condition whose blocks read the variable stays: it narrows
+ * the variable there, which a fallback does not.
  */
 export function withPlainNullTests(statements: IrStatement[]): IrStatement[] {
   let guarded = "";
@@ -270,8 +301,13 @@ function rootName(value: IrExpression): string {
       : "";
 }
 
-/** A variable, or a member of one, which reading again gives again. */
+/** A variable, or a member of one, which reading again gives again; `.random` draws anew at each read. */
 function isPlainRead(value: IrExpression): boolean {
   if (value.kind === "variable") return true;
-  return value.kind === "property" && value.dict !== true && isPlainRead(value.target);
+  return (
+    value.kind === "property" &&
+    value.dict !== true &&
+    value.name !== "random" &&
+    isPlainRead(value.target)
+  );
 }

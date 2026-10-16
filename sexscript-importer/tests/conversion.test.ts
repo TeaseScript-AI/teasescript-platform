@@ -594,6 +594,47 @@ test(
   },
 );
 
+// The 1–99 percentChance helper's odds were percent/99; chance(percent) takes it (coordinator decision 2026-10-16), and
+// the conversion report says so for each call.
+test(
+  "notes in the report each chance() call of a percentChance helper that drew from 1 through 99",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-chance-"));
+    try {
+      const sourcePath = path.join(directory, "chance.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          "def percentChance = { percent ->",
+          "  switch (getRandom(99) + 1) {",
+          "    case 0..percent:",
+          "      return true",
+          "    default:",
+          "      return false",
+          "  }",
+          "}",
+          'if (percentChance(40)) show("Forty")',
+          'if (percentChance(60)) show("Sixty")',
+          "",
+        ].join("\n"),
+      );
+      const files = [await parseGroovySource(sourcePath)];
+      const written = emitTease(lowerSelfContainedPackage(files)[0]!);
+      assert.match(written, /^if chance\(40\) \{$/mu);
+      assert.doesNotMatch(written, /percentChance/u);
+      const report = analyzeFeasibility(files);
+      assert.equal(report.chanceOdds.calls, 2);
+      assert.equal(
+        report.chanceOdds.note,
+        "legacy percentChance drew 1–99 (odds percent/99); converted to chance(percent)",
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 test("names media files as the package holds them", { skip: parserUnavailable }, async () => {
   const directory = mkdtempSync(path.join(tmpdir(), "sexscript-media-"));
   try {

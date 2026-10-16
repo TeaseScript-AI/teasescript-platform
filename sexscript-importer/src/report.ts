@@ -14,6 +14,7 @@ import { withNestedBlocks } from "./repeated-text.ts";
 import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 import type { PackageFileReader } from "./java-data.ts";
 import { lowerPackage, type PackageOptions } from "./package.ts";
+import { CHANCE_ODDS_NOTE } from "./readability.ts";
 import type { AcceptedForm } from "./workarounds.ts";
 import {
   pendingHostFunctions,
@@ -187,6 +188,11 @@ export interface FeasibilityReport {
    */
   roundingTies: { calls: number; rule: string };
   /**
+   * Calls of a legacy percentChance helper that drew from 1 through 99 (odds percent/99), now `chance(percent)`
+   * (`SX_CHANCE_ODDS`, readability.ts; coordinator decision 2026-10-16), with the note.
+   */
+  chanceOdds: { calls: number; note: string };
+  /**
    * Legacy settings flows asked as one `askForm`: runs of settings asks (`SX_SETTINGS_FORM`) and menus that toggle
    * settings until the player leaves (`SX_MENU_FORM`).
    */
@@ -347,6 +353,7 @@ export function analyzeFeasibility(
     missingMedia: 0,
     blankTexts: 0,
     roundingTies: { calls: 0, rule: ROUNDING_TIES_RULE },
+    chanceOdds: { calls: 0, note: CHANCE_ODDS_NOTE },
     forms: { sequences: 0, menus: 0 },
     buttonDurations: { compared: 0, variables: 0 },
     messageHandles: { animations: 0, counters: 0 },
@@ -468,6 +475,7 @@ export function analyzeFeasibility(
       report.storageReads.textEmpty += count("SX_LOAD_TEXT_EMPTY");
       report.storageReads.textTests +=
         count("SX_LOAD_TEXT_NULL_TEST") + count("SX_LOAD_TEXT_NULL_SET");
+      report.chanceOdds.calls += count("SX_CHANCE_ODDS");
     }
     for (const { code } of program.diagnostics) {
       if (code === "SX_REPEATED_TEXT_DROPPED") report.repeatedText.dropped += 1;
