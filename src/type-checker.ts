@@ -107,6 +107,8 @@ import {
   ANGLE_ARITHMETIC_ROUTE,
   ANGLE_FUNCTIONS,
   anglePropertyMessage,
+  angleValue,
+  formatAngle,
   type StoredAngle,
 } from "./angle.js";
 import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
@@ -5528,9 +5530,9 @@ class TypeChecker {
     // A range matches a number within its bounds, so no button value may fall in it.
     const range = literalRange(value);
     if (range !== undefined) {
-      const within = ({ value, duration }: PossibleValue) =>
+      const within = ({ value, measure }: PossibleValue) =>
         typeof value === "number" &&
-        !duration &&
+        measure === null &&
         value >= range.start &&
         (range.inclusive ? value <= range.end : value < range.end);
       return possible.some(within)
@@ -9981,13 +9983,14 @@ function buttonLiteral(entry: Expression): ScalarValue | null | undefined {
   return property === undefined ? undefined : literalValue(property.value);
 }
 
-/** The text, number, true, false, or null that an expression certainly is, or `undefined`. */
+/** The text, number, true, false, null, exact duration, or angle that an expression certainly is, or `undefined`. */
 function literalValue(expression: Expression): ScalarValue | null | undefined {
   const known = staticChoiceValue(expression)?.value;
-  // An exact duration is compared by its length, so it stands for its milliseconds in a duration type. A calendar
-  // duration has no fixed length, and an angle is not tracked.
+  // An exact duration is compared by its length and an angle by its size, so in its type each stands for its
+  // milliseconds or its degrees. A calendar duration has no fixed length.
   if (known === null || typeof known !== "object") return known;
-  return known.kind === "angle" || isCalendar(known) ? undefined : known.milliseconds;
+  if (known.kind === "angle") return known.degrees;
+  return isCalendar(known) ? undefined : known.milliseconds;
 }
 
 /** The value a compared expression certainly is, such as `"Open"` or `1 s`, or `undefined`. */
@@ -10018,13 +10021,9 @@ function comparedLiteral(expression: Expression): readonly PossibleValue[] | und
   const known = staticChoiceValue(expression);
   if (known === undefined) return undefined;
   const value = known.value;
-  if (value !== null && typeof value === "object" && (value.kind === "angle" || isCalendar(value)))
-    return undefined;
-  return [
-    value !== null && typeof value === "object"
-      ? { value: value.milliseconds, duration: true }
-      : { value, duration: false },
-  ];
+  if (value === null || typeof value !== "object") return [{ value, measure: null }];
+  if (value.kind === "angle") return [{ value: value.degrees, measure: "angle" }];
+  return isCalendar(value) ? undefined : [{ value: value.milliseconds, measure: "duration" }];
 }
 
 /** The earlier `case is T` or `case is not T` that already takes a literal case value, if any. */
@@ -10032,32 +10031,39 @@ function takingTypeCase<
   Case extends { readonly typeTest: SwitchTypeTest; readonly test: StaticType },
 >(typeCases: readonly Case[], value: Expression, valueType: StaticType): Case | undefined {
   if (caseValueText(value) === undefined) return undefined;
-  // Every duration literal is a duration, also a calendar one such as `1 d` that is not compared as one exact length.
-  const duration = isScalar(valueType, "duration");
-  const literal = duration ? undefined : comparedLiteral(value)?.[0];
-  if (!duration && literal === undefined) return undefined;
+  // Every duration literal is a duration, also a calendar one such as `1 d` that is not compared as one exact length,
+  // and every angle literal an angle.
+  const measure = isScalar(valueType, "duration")
+    ? "duration"
+    : isScalar(valueType, "angle")
+      ? "angle"
+      : null;
+  const literal = measure === null ? comparedLiteral(value)?.[0] : undefined;
+  if (measure === null && literal === undefined) return undefined;
   const scalar = literal?.value;
   // Like the runtime type test: a whole number such as `5.0` is an integer.
   const passes = (member: StaticType): boolean =>
     member.kind === "null"
       ? scalar === null
       : member.kind === "scalar" &&
-        (duration
-          ? member.name === "duration"
+        (measure !== null
+          ? member.name === measure
           : typeof scalar === "number"
             ? member.name === "number" || (member.name === "integer" && Number.isInteger(scalar))
             : member.name === typeof scalar);
   return typeCases.find(({ typeTest, test }) => members(test).some(passes) !== typeTest.negated);
 }
 
-/** Literal values as an author writes them, as in `"spank" or "lines"`. */
+/** Literal values as an author writes them, as in `"spank" or "lines"`, `2 seconds`, or `90°`. */
 function describeLiterals(values: readonly PossibleValue[]): string {
-  const written = values.map(({ value, duration }) =>
+  const written = values.map(({ value, measure }) =>
     typeof value === "string"
       ? JSON.stringify(value)
-      : duration && typeof value === "number"
+      : measure === "duration" && typeof value === "number"
         ? formatDuration(value)
-        : String(value),
+        : measure === "angle" && typeof value === "number"
+          ? formatAngle(angleValue(value))
+          : String(value),
   );
   return written.length <= 1
     ? (written[0] ?? "")

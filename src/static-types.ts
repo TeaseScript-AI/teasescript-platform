@@ -278,12 +278,13 @@ export function withValues(type: StaticType, values: readonly ScalarValue[]): St
 }
 
 /**
- * A value that a value of a restricted type can be. A duration stands for its milliseconds and never equals a number of
- * the same size.
+ * A value that a value of a restricted type can be. A duration stands for its milliseconds and an angle for its degrees,
+ * and neither equals a number of the same size.
  */
 export interface PossibleValue {
   readonly value: ScalarValue | null;
-  readonly duration: boolean;
+  /** What the number measures: a duration, an angle, or `null` for a plain value. */
+  readonly measure: "duration" | "angle" | null;
 }
 
 /**
@@ -293,11 +294,11 @@ export interface PossibleValue {
 export function possibleValues(type: StaticType): readonly PossibleValue[] | undefined {
   const possible: PossibleValue[] = [];
   for (const member of members(type)) {
-    if (member.kind === "null") possible.push({ value: null, duration: false });
-    else if (member.kind === "scalar" && member.values !== undefined)
-      for (const value of member.values)
-        possible.push({ value, duration: member.name === "duration" });
-    else return undefined;
+    if (member.kind === "null") possible.push({ value: null, measure: null });
+    else if (member.kind === "scalar" && member.values !== undefined) {
+      const measure = member.name === "duration" || member.name === "angle" ? member.name : null;
+      for (const value of member.values) possible.push({ value, measure });
+    } else return undefined;
   }
   return possible;
 }
@@ -310,10 +311,13 @@ export function mayEqualAny(type: StaticType, others: readonly PossibleValue[]):
   if (others.length === 0) return false;
   const possible = possibleValues(type);
   if (possible === undefined) return true;
-  const values = new Set<ScalarValue | null>();
-  const durations = new Set<ScalarValue | null>();
-  for (const { value, duration } of possible) (duration ? durations : values).add(value);
-  return others.some(({ value, duration }) => (duration ? durations : values).has(value));
+  const measured = new Map<PossibleValue["measure"], Set<ScalarValue | null>>();
+  for (const { value, measure } of possible) {
+    const values = measured.get(measure) ?? new Set();
+    values.add(value);
+    measured.set(measure, values);
+  }
+  return others.some(({ value, measure }) => measured.get(measure)?.has(value) === true);
 }
 
 function isSubset(inner: readonly ScalarValue[], outer: readonly ScalarValue[]): boolean {
