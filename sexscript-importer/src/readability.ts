@@ -98,3 +98,34 @@ function isChanceHelper(statement: IrStatement & { kind: "function" }): boolean 
   });
   return CHANCE_BODIES.has(words(body).trim());
 }
+
+/**
+ * A loop that runs until a test at its top breaks it, `while true { if done { break } … }`, is a loop on the opposite
+ * test, `while not done { … }`: the test runs before each pass as the loop's condition does, and `continue` comes back
+ * to it either way.
+ */
+export function withLoopConditions(statements: IrStatement[]): IrStatement[] {
+  return statements.map((item) => {
+    const statement = withNestedBlocks(item, withLoopConditions);
+    if (
+      statement.kind !== "while" ||
+      statement.condition.kind !== "literal" ||
+      statement.condition.value !== true
+    )
+      return statement;
+    const [first, ...rest] = statement.body;
+    if (
+      first?.kind !== "if" ||
+      first.else.length > 0 ||
+      first.then.length !== 1 ||
+      first.then[0]!.kind !== "break"
+    )
+      return statement;
+    const test = first.condition;
+    const condition: IrExpression =
+      test.kind === "unary" && test.operator === "not"
+        ? test.value
+        : { kind: "unary", operator: "not", value: test };
+    return { ...statement, condition, body: rest };
+  });
+}
