@@ -89,7 +89,7 @@ the parser, type checker, lowering, plan, runtime and editor cannot drift apart.
   component needs it, move it to a shared module instead of copying it. A copy is acceptable only where a
   trust boundary must validate independently (checkpoint and host data); then a test compares the copy
   with the original.
-- An analysis that predicts runtime behaviour (a warning, a compile check, a flow fact) takes the order
+- An analysis that predicts runtime behavior (a warning, a compile check, a flow fact) takes the order
   and the reachable code from the compiled plan or the shared helpers, not from its own model of the
   runtime. Reuse the shared control-flow analysis, once it exists, where it fits.
 - Such an analysis is tested against the runtime: for representative variants of every construct it
@@ -115,7 +115,7 @@ to support the landing decision without audit-only ceremony or unrelated cleanup
 lenses below; not every lens applies equally, and preference alone is not a blocker. On changed scalable
 paths, independently apply the input-driven scaling and native-JavaScript lens above; small fixtures and
 green CI do not by themselves prove that valid large or complex input avoids accidental amplification or
-native failure. On changes that encode a language rule or predict runtime behaviour, apply the one-home
+native failure. On changes that encode a language rule or predict runtime behavior, apply the one-home
 lens above. Escalate uncertainty that cannot be bounded through a separately assigned
 [`AUDIT.md`](AUDIT.md).
 
@@ -168,7 +168,7 @@ Non-authoritative memory aid; mark `N/A` only after considering the item.
 - [ ] Scope, authority, criteria, risks, and affected paths established.
 - [ ] Simplest complete solution; DRY keeps or lowers total complexity.
 - [ ] Code, tests, documentation, workflows, and integrations form one result.
-- [ ] Language rules reused from their one home; analyses that predict runtime behaviour derive it from
+- [ ] Language rules reused from their one home; analyses that predict runtime behavior derive it from
   the plan or shared helpers and are tested against the runtime.
 - [ ] Supported behavior and failures proved through real paths.
 - [ ] Tests and oracles are sound; negative probes used when warranted.
