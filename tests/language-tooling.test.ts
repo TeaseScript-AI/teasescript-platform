@@ -70,16 +70,21 @@ test("completion exposes optional speaker and current say modifiers", () => {
 });
 
 test("every completion offered for a say's pacing compiles there", () => {
-  // `|` marks the cursor. The parser decides where the pacing is, also in the parentheses of a bounded say.
-  for (const marked of [
-    'say "Hi",|\nexit',
-    'say "Hi", |\nexit',
-    'say("Hi", |)\nexit',
-    'say bubble() ("Hi",\n  |)\nexit',
-    'let line = say "Hi", |\nexit',
-    'let lines = [say("Hi", |)]\nexit',
-    'speaker mistress { name: "Mistress" }\nsay as mistress skippable "Hi", |\nexit',
-  ]) {
+  // `|` marks the cursor, and the rest is written after the completion. The parser decides where the pacing is, also in
+  // the parentheses of a bounded say, whose `)` may not be written yet.
+  const cases: readonly (readonly [marked: string, rest: string])[] = [
+    ['say "Hi",|\nexit', ""],
+    ['say "Hi", |\nexit', ""],
+    ['say("Hi", |)\nexit', ""],
+    ['say("Hi", |', ")\nexit"],
+    ['say bubble() ("Hi",\n  |)\nexit', ""],
+    ['let line = say "Hi", |\nexit', ""],
+    ['let lines = [say("Hi", |)]\nexit', ""],
+    ['let lines = [say("Hi", |', ")]\nexit"],
+    ['say "${say("Hi", |', ').text}"\nexit'],
+    ['speaker mistress { name: "Mistress" }\nsay as mistress skippable "Hi", |\nexit', ""],
+  ];
+  for (const [marked, rest] of cases) {
     const offset = marked.indexOf("|");
     const source = marked.replace("|", "");
     const document = createLanguageDocument("file:///main.tease", source);
@@ -89,7 +94,7 @@ test("every completion offered for a say's pacing compiles there", () => {
       marked,
     );
     for (const item of items) {
-      const completed = source.slice(0, offset) + item.insertText + source.slice(offset);
+      const completed = source.slice(0, offset) + item.insertText + source.slice(offset) + rest;
       assert.deepEqual(compileSource(completed).diagnostics, [], completed);
     }
   }
@@ -229,6 +234,7 @@ function assertDeepSayTooling(source: string): void {
     hover?.contents,
     languageHover(topLevel, languagePositionAt(topLevel, 1))?.contents,
   );
+  // Completion finds the deepest say's pacing too.
   assert.ok(labels(source, start + DEEP_SAY.indexOf(",") + 1).includes("0 s"));
 }
 

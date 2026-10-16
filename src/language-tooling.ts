@@ -243,7 +243,7 @@ export function languageCompletions(
   const last = significant.at(-1);
   // Where the parser reads a say's pacing, a duration or `instant`, the two values without reading time are offered
   // (V30, "Message presentation defaults and overrides") instead of the commands offered for other values.
-  if (last?.kind === TokenKind.Comma && sayPacingStartsAt(document.text, offset))
+  if (last?.kind === TokenKind.Comma && sayPacingStartsAt(prefix, tokens))
     return Object.freeze([
       value("instant", "Disable pacing delay"),
       value("0 s", "Exact zero-second pacing"),
@@ -495,13 +495,24 @@ function askCommand(kind: InteractionExpression["interactionKind"]): CompactComm
 }
 
 /**
- * Whether the pacing of a `say` starts at `offset`, as the parser reads the text with a name written there: after the
- * comma of `say "Hi", ` or `say("Hi", `, but not after a comma inside its text, as in `say f(1, ` or `say [1, `.
+ * Whether the pacing of a `say` starts at the end of `prefix`, whose tokens are `tokens`, as the parser reads it with a
+ * name written there and what is still open closed: after the comma of `say "Hi", ` or `say("Hi", `, also before its
+ * `)` is written, but not after a comma inside its text, as in `say f(1, ` or `say [1, `.
  */
-function sayPacingStartsAt(text: string, offset: number): boolean {
+function sayPacingStartsAt(prefix: string, tokens: readonly Token[]): boolean {
+  const closers: string[] = [];
+  for (const token of tokens) {
+    if (token.kind === TokenKind.LeftParenthesis) closers.push(")");
+    else if (token.kind === TokenKind.LeftBracket) closers.push("]");
+    else if (token.kind === TokenKind.LeftBrace || token.kind === TokenKind.InterpolationStart)
+      closers.push("}");
+    else if (token.kind === TokenKind.StringStart) closers.push(token.lexeme);
+    else if (CLOSING_DELIMITERS.has(token.kind) || token.kind === TokenKind.StringEnd)
+      closers.pop();
+  }
   let program: Program;
   try {
-    program = parse(`${text.slice(0, offset)}pacing${text.slice(offset)}`).program;
+    program = parse(`${prefix}pacing${closers.reverse().join("")}`).program;
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
     return false;
@@ -511,7 +522,7 @@ function sayPacingStartsAt(text: string, offset: number): boolean {
     showButton() {},
     interaction() {},
     say(node) {
-      if (typeof node.pacing === "object" && node.pacing?.span.start.offset === offset)
+      if (typeof node.pacing === "object" && node.pacing?.span.start.offset === prefix.length)
         found = true;
     },
   });
