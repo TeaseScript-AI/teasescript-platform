@@ -2776,27 +2776,35 @@ function conditionMeasure(condition: unknown, wanted: boolean, snapshot: Data): 
   // its first outcome, then at its last, and the nearer distance is the measure, as a draw origin can give either.
   let last = false;
   let draws = false;
+  /** A runtime value as `held` gives it: a scalar, or a composite's record. */
+  const asHeld = (value: unknown): AtomValue | Data => (isRecord(value) ? value : scalar(value));
+  /** The value a variable or a chain of properties of one holds (`information.maxPoints`), as the snapshot has it. */
+  const held = (subject: unknown): AtomValue | Data => {
+    const node = record(subject);
+    if (node.kind === "group") return held(node.expression);
+    if (node.kind === "identifier" && typeof node.name === "string")
+      return asHeld(variables.get(node.name));
+    if (node.kind !== "property" || typeof node.name !== "string") return undefined;
+    const holder = held(node.object);
+    // A list's length (a deck dealt card by card gets closer to `cards.length <= 0`), or a text's (in characters, as
+    // the runtime counts them).
+    const composite = record(holder);
+    if (node.name === "length") {
+      if (typeof holder === "string") return [...holder].length;
+      if (composite.kind === "list" && Array.isArray(composite.items))
+        return composite.items.length;
+    }
+    if (composite.kind === "object")
+      return asHeld(
+        list(composite.properties).find((property) => property.name === node.name)?.value,
+      );
+    return undefined;
+  };
   const valueOf = (subject: unknown): AtomValue => {
     const node = record(subject);
     if (node.kind === "literal") return scalar(node.value);
     if (node.kind === "group") return valueOf(node.expression);
-    if (node.kind === "identifier" && typeof node.name === "string")
-      return scalar(variables.get(node.name));
-    // A list's length (a deck dealt card by card gets closer to `cards.length <= 0`), or a text's.
-    const object = record(node.object);
-    if (
-      node.kind === "property" &&
-      node.name === "length" &&
-      object.kind === "identifier" &&
-      typeof object.name === "string"
-    ) {
-      const value = variables.get(object.name);
-      // A text's length counts its characters, as the runtime's does.
-      if (typeof value === "string") return [...value].length;
-      const collection = record(value);
-      if (collection.kind === "list" && Array.isArray(collection.items))
-        return collection.items.length;
-    }
+    if (node.kind === "identifier" || node.kind === "property") return scalar(held(node));
     // What the condition compares with may be worked out of numbers: `limit - 1`, `3 * min(LIMITS)`.
     if (node.kind === "unary" && node.operator === "-") {
       const operand = valueOf(node.operand);
