@@ -28,7 +28,7 @@ import { lazyDefaultArgumentIndex, lazyDefaultCallOperation } from "./expression
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
-  type Instruction,
+  type InstructionPlan,
   type PreparedFormShape,
 } from "./model.js";
 import {
@@ -120,8 +120,9 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
     );
     analyzeInstructionStream(value.instructions, value.functions, files, errors);
     if (errors.length === 0 && files !== null) {
-      // EVIDENCE: validation: every instruction passed its shape check above, with no error.
-      validateLabelPositions(value.instructions as readonly Instruction[], files, errors);
+      const plan: unknown = value;
+      // EVIDENCE: validation: every part of the plan passed its check above, with no error.
+      validateLabelPositions(plan as InstructionPlan, files, errors);
     }
   }
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });

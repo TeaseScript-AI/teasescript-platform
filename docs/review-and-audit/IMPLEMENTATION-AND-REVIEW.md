@@ -92,8 +92,8 @@ checker, lowering, plan, runtime and editor cannot drift apart.
   with the original.
 - An analysis that predicts runtime behavior (a warning, a compile check, a flow fact) takes the order
   and the reachable code from the compiled plan or the shared helpers, not from its own model of the
-  runtime. Reuse the plan's control flow (`src/plan/control-flow.ts`) and the forward dataflow solver
-  (`src/plan/dataflow.ts`) where they fit; `src/speaker-flow.ts` shows a client.
+  runtime. Reuse the plan's control flow (`src/plan/control-flow.ts`) and the forward and backward dataflow
+  solvers (`src/plan/dataflow.ts`) where they fit; `src/speaker-flow.ts` shows a client.
 - Such an analysis is tested against the runtime: for representative variants of every construct it
   covers (branches, loops, short-circuit operators, defaults supplied and left out, the parts of an ask,
   gotos, calls), a reported problem must occur when the script runs, and an accepted script must not fail
