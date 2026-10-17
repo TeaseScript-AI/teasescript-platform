@@ -6,6 +6,13 @@
       "category": "b",
       "reason": "Semantics bridge (coordinator decision 2026-10-13, option b; not a legacy bug): RollScore and showRolls sort the dice they are given with rolledDice = rolledDice.sort(), and ReRoll its RolledDice, before reversing them. Groovy's sort() sorted the caller's list in place, so after RollScore(OpponentRolls, …) the main loop's showRolls(OpponentRolls, …) listed the dice in ascending order; a TeaseScript parameter holds a copy (ADR 0014), so that change cannot reach the caller, and the converter refuses such writes. The main loop sorts OpponentRolls and PlayerRolls itself right after rolling them (both now start as empty lists instead of null, so they are known lists), and the functions sort their own copy with sort(false), which leaves the caller's list as it is; their dice parameters are declared List. The player sees the same dice in the same order and the same scores as in the legacy game.",
       "diff": "sorted-rolls.diff"
+    },
+    {
+      "id": "stim-folder",
+      "layer": "source",
+      "category": "b",
+      "reason": "PlayeStim chooses its sound folder at run time: sounds/ and the folder it is given, or sounds itself where that folder is missing, and walks it with eachFile. Every call passes eStimSound, \"ShockYourself\", and the package holds sounds/ShockYourself, so Groovy always walked that folder. The conversion lists a walked folder only where the script fixes its path, and left the sound list empty, so no stim sound played and #967 found it at compile time (TSV043, soundlist.random of an empty list). The walk names that folder through eStimSound.",
+      "diff": "stim-folder.diff"
     }
   ]
 }
