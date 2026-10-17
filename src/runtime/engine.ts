@@ -251,7 +251,7 @@ import { cloneMedia, type RuntimeMediaRepeatSnapshot } from "./media.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
 import { cloneTimer } from "./timers.js";
 import { assertValueType, describeShownValue, shownChoice } from "./value-types.js";
-import { numberFromText } from "../conversions.js";
+import { conversionTo, numberFromText } from "../conversions.js";
 import {
   describeRuntimeValue,
   isDate,
@@ -2068,15 +2068,15 @@ function temporalPrefill(
         ? isTime(value) && value
         : isDateTime(value) && value;
   if (answer !== false) return temporalAnswerText(answer);
-  const [command, noun, conversion] =
+  const [command, noun] =
     kind === "date"
-      ? ["askDate", "a date", "toDate"]
+      ? ["askDate", "a date"]
       : kind === "time"
-        ? ["askTime", "a time", "toTime"]
-        : ["askDateTime", "a date and time", "toDateTime"];
+        ? ["askTime", "a time"]
+        : ["askDateTime", "a date and time"];
   throw fault(
     "TSR052",
-    `The prefill of ${command} must be ${noun}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversion}(...).` : ""}`,
+    `The prefill of ${command} must be ${noun}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversionTo(kind)}(...).` : ""}`,
     span,
   );
 }

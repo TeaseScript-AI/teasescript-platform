@@ -106,19 +106,19 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       'say toNumber("hello")\nexit',
       "TSV043",
-      'toNumber(...) cannot convert "hello". The text must be a number such as 2.5 or -3.',
+      'toNumber(...) cannot convert text (string) "hello" to a number. The text must be a number such as 2.5 or -3.',
       '"hello"',
     ],
     [
       'say toInteger("${2} apples", default: 0)\nexit',
       "TSV043",
-      'toInteger(...) cannot convert "2 apples". The text must be a number such as 2.5 or -3.',
+      'toInteger(...) cannot convert text (string) "2 apples" to a whole number (integer). The text must be a number such as 2.5 or -3.',
       '"${2} apples"',
     ],
     [
       'say toBoolean("yes")\nexit',
       "TSV043",
-      'toBoolean(...) cannot convert "yes". The text must be "true" or "false".',
+      'toBoolean(...) cannot convert text (string) "yes" to true or false (boolean). The text must be "true" or "false".',
       '"yes"',
     ],
     [

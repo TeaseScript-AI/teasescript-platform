@@ -1,11 +1,11 @@
+import { isConversion } from "../conversions.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import type { ExpressionPlan, SayInstruction } from "../plan/model.js";
 
 /**
  * Engine functions that, apart from drawing from the session generator, only read copies of their arguments and the
- * scene clock, and return a new value. A host built-in runs code the engine has not checked, so it is not listed.
- * `toJson` and `fromJson` are calls only with a written `files: false`; otherwise they may wait for the Player's file
- * store and run as instructions before the say, which reads their result.
+ * scene clock, and return a new value; so do the conversions (see `Conversion`). A host built-in runs code the engine
+ * has not checked, so it is not listed.
  */
 const READING_FUNCTIONS: ReadonlySet<string> = new Set([
   "random",
@@ -15,20 +15,7 @@ const READING_FUNCTIONS: ReadonlySet<string> = new Set([
   "randomNormal",
   "randomBeta",
   "randomPert",
-  "toString",
-  "toNumber",
-  "toInteger",
-  "toBoolean",
-  "toDate",
-  "toTime",
-  "toDateTime",
-  "toAbsoluteDateTime",
-  "toJson",
-  "fromJson",
-  "toBase64",
-  "fromBase64",
   "hashText",
-  "toRegex",
   "round",
   "floor",
   "ceil",
@@ -135,9 +122,11 @@ export function sayStagesSelectively(instruction: SayInstruction): boolean {
 
 /**
  * Whether evaluating an expression changes no state in place but the session generator: it reads variables,
- * temporaries, and storage, builds new values, and calls only the functions and methods listed above, which may also
- * report warnings. A lookup may still build a key index of a dict it reads, which is derived from entries it does not
- * change. Any other expression, including one of a kind added later, counts as one that may change state.
+ * temporaries, and storage, builds new values, and calls only the functions and methods listed above and the
+ * conversions, which may also report warnings. A conversion that may wait for the Player's file store runs as an
+ * instruction before the say, which reads its result, so a call of one in the plan only reads. A lookup may still build
+ * a key index of a dict it reads, which is derived from entries it does not change. Any other expression, including one
+ * of a kind added later, counts as one that may change state.
  */
 function changesOnlyGenerator(root: ExpressionPlan): boolean {
   const pending = [root];
@@ -147,7 +136,7 @@ function changesOnlyGenerator(root: ExpressionPlan): boolean {
       case "call":
         if (
           node.callee.kind === "identifier"
-            ? !READING_FUNCTIONS.has(node.callee.name)
+            ? !READING_FUNCTIONS.has(node.callee.name) && !isConversion(node.callee.name)
             : node.callee.kind !== "property" || !READING_METHODS.has(node.callee.name)
         )
           return false;

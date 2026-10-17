@@ -74,6 +74,7 @@ import {
   isLockCall,
   isTakePhotoCall,
 } from "../../capture-call.js";
+import { isConversion, takesDefault, takesFiles } from "../../conversions.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
@@ -2547,13 +2548,8 @@ export class InstructionCompiler {
     if (expression.callee.kind !== "identifier")
       throw new TypeError("A file store call reached lowering without its name.");
     const call = expression.callee.name;
-    if (
-      call !== "fileFromBase64" &&
-      call !== "fileToBase64" &&
-      call !== "hashFile" &&
-      call !== "toJson" &&
-      call !== "fromJson"
-    )
+    const conversion = isConversion(call) && takesFiles(call);
+    if (call !== "fileFromBase64" && call !== "fileToBase64" && call !== "hashFile" && !conversion)
       throw new TypeError(`'${call}' is not a file store call.`);
     // The default runs only when it is used, as instructions after the call.
     const lazy = lazyDefaultArgument(expression);
@@ -2607,7 +2603,7 @@ export class InstructionCompiler {
           expression,
         ),
       );
-    if (call === "fileFromBase64" || call === "fromJson")
+    if (call === "fileFromBase64" || (conversion && takesDefault(call)))
       throw new TypeError(`${call}(...) reached lowering without its default:.`);
     const destinationTemporary = this.#allocateTemporary();
     store(destinationTemporary, null);

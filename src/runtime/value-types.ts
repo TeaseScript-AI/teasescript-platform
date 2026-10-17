@@ -1,6 +1,12 @@
 import type { PlanSourceLocation, TypeCheckPlan, TypePlan } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
-import { booleanFromText, numberFromText, withoutNegativeZero } from "../conversions.js";
+import {
+  booleanFromText,
+  describeConversionResult,
+  numberFromText,
+  withoutNegativeZero,
+  type ValueConversion,
+} from "../conversions.js";
 import { formatAngle } from "../angle.js";
 import { formatDuration } from "../duration.js";
 import { RuntimeFault } from "./errors.js";
@@ -65,6 +71,19 @@ export function describeShownValue(value: SerializableRuntimeValue): string {
   if (isAnyDuration(value)) return formatDuration(value);
   if (isAngle(value)) return formatAngle(value);
   return describeValue(value);
+}
+
+/**
+ * That a conversion cannot convert `value`, and for text why (V30 §13, §35): the compile error for text the compiler can
+ * see, and the start of the runtime error, which goes on with what to do.
+ */
+export function cannotConvert(
+  name: string,
+  conversion: ValueConversion,
+  value: SerializableRuntimeValue,
+): string {
+  const problem = typeof value === "string" ? (conversion.textProblem(value) ?? "") : "";
+  return `${name}(...) cannot convert ${describeShownValue(value)} to ${describeConversionResult(conversion.result)}${problem}.`;
 }
 
 /** A value where a message lists the texts it accepts: text as it is quoted, and any other value as `describeShownValue`. */
