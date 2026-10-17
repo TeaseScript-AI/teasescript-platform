@@ -141,7 +141,23 @@ export const DIAGNOSTIC_CODES = {
   TSH015: entry(["parser"], "error", "Expected the end of the line", DOCS.header),
   TSH016: entry(["parser"], "error", "Expected a value", DOCS.header),
 
-  TSV001: entry(["name pass"], "error", "Name already in use", DOCS.values),
+  TSV001: {
+    ...entry(
+      ["parser", "name pass"],
+      "error",
+      "Protected name, or name already in use",
+      DOCS.values,
+    ),
+    shared: {
+      problems: "one",
+      texts: "same",
+      parts: [
+        "a declaration whose name is a keyword or another protected name, where it reads the name",
+        "the same rule with the same text (`protectedNameMessage`) where it finds such a declaration, " +
+          "and a name that is already in use",
+      ],
+    },
+  },
   TSV002: entry(["name pass"], "error", "Unknown variable", DOCS.values),
   TSV003: entry(["name pass"], "error", "Assignment to an unknown variable", DOCS.values),
   TSV004: {

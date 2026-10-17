@@ -118,7 +118,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 
 | Code | Title | Severity | Owner |
 | --- | --- | --- | --- |
-| `TSV001` | Name already in use | error | name pass |
+| `TSV001` | Protected name, or name already in use | error | parser, name pass |
 | `TSV002` | Unknown variable | error | name pass |
 | `TSV003` | Assignment to an unknown variable | error | name pass |
 | `TSV004` | Invalid assignment | error | name pass, type checker |
@@ -208,6 +208,9 @@ A shared code is one problem found in more than one place when the owners report
 when they report it with the same text. It is two problems when the owners report different mistakes under one code,
 which each need a code of their own.
 
+- `TSV001` (one problem, same text)
+  - parser: a declaration whose name is a keyword or another protected name, where it reads the name
+  - name pass: the same rule with the same text (`protectedNameMessage`) where it finds such a declaration, and a name that is already in use
 - `TSV004` (two problems)
   - name pass: an assignment to `debugMode`, `account`, a speaker, or a global that the host gives, and a change of the account
   - type checker: a change of a copy that no variable holds, such as a property of a call's result, which is lost
