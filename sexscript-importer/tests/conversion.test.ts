@@ -1063,6 +1063,38 @@ test(
   },
 );
 
+// An isolated run asks the legacy profile first, as main.tease does, so a script that reads a player term the profile
+// sets runs as in play (#931 refuses the read where no way to it sets the term; DW_intro's bm.tease).
+test(
+  "an isolated smoke run sets the player's profile first, as main.tease does",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("compiler" in projectResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-isolated-profile-"));
+    try {
+      mkdirSync(path.join(directory, "pack"));
+      const main = path.join(directory, "main.groovy");
+      const tasks = path.join(directory, "pack", "tasks.groovy");
+      writeFileSync(main, 'if (loadBoolean("intro.female")) show("Hello")\nreturn null\n');
+      writeFileSync(tasks, 'show("You need a punishment, " + loadString("user.boygirl") + ".")\n');
+      const files = await Promise.all([main, tasks].map((file) => parseGroovySource(file)));
+      const report = analyzeFeasibility(files, {
+        compiler: projectResult.compiler,
+        runner: projectResult.runner,
+      });
+      assert.deepEqual(
+        report.smokeRuns.map(({ entry, isolated, status }) => ({ entry, isolated, status })),
+        [
+          { entry: "main.tease", isolated: false, status: "halted" },
+          { entry: "pack/tasks.tease", isolated: true, status: "halted" },
+        ],
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 test(
   "package smoke run follows script transfers with shared storage",
   { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },

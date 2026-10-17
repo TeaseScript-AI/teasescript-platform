@@ -15,6 +15,7 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 import type { PackageFileReader } from "./java-data.ts";
 import { lowerPackage, type PackageOptions } from "./package.ts";
 import { CHANCE_ODDS_NOTE } from "./readability.ts";
+import { PROFILE_HELPER } from "./profile.ts";
 import type { AcceptedForm } from "./workarounds.ts";
 import {
   pendingHostFunctions,
@@ -607,6 +608,15 @@ function diagnosticsByPath(
 }
 
 /** A stand-in for a file that has no runnable conversion: reaching it ends the run as `blocked`. */
+/** The legacy profile's function as main.tease writes it (profile.ts), or the empty text. */
+function profileFunction(source: string): string {
+  const lines = source.split("\n");
+  const start = lines.findIndex((line) => line === `function ${PROFILE_HELPER} {`);
+  if (start < 0) return "";
+  const end = lines.findIndex((line, index) => index > start && line === "}");
+  return end < 0 ? "" : `${lines.slice(start, end + 1).join("\n")}\n`;
+}
+
 function stub(path: string, source = ""): string {
   return `${globalDeclarations(source)}${BLOCKED}(${JSON.stringify(path)})\nexit\n`;
 }
@@ -781,15 +791,18 @@ function runPackageProject(
         Number(targets.has(left)) - Number(targets.has(right)) || left.localeCompare(right),
     );
   // One project serves every isolated run: its main.tease transfers to the file the host names once.
-  const isolatedProject = project.map((file) =>
-    file.path === MAIN
-      ? {
-          path: MAIN,
-          // It keeps what main.tease declares for the other files, such as the generated global helpers.
-          source: `let start = ${START}()\nif start != "" {\n  goto script(start)\n}\n${stub(MAIN, file.source)}`,
-        }
-      : file,
-  );
+  const isolatedProject = project.map((file) => {
+    if (file.path !== MAIN) return file;
+    // It asks the legacy profile first, as main.tease does, so the files read the player's settings and terms as they
+    // do in play (#931 refuses a read of a player term that no way to it sets).
+    const profile = profileFunction(file.source);
+    const call = profile === "" ? "" : `  ${PROFILE_HELPER}()\n`;
+    return {
+      path: MAIN,
+      // It keeps what main.tease declares for the other files, such as the generated global helpers.
+      source: `${profile}let start = ${START}()\nif start != "" {\n${call}  goto script(start)\n}\n${stub(MAIN, file.source)}`,
+    };
+  });
   for (const path of unreached) {
     if (report.smokeRuns.some(({ visited }) => visited.includes(path))) continue;
     run(isolatedProject, path, true);
