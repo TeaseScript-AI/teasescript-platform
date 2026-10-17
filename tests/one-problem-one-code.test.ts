@@ -263,6 +263,37 @@ test("a call's arguments have the compiler's text where the runtime checks them"
     ["say linearRegression()", "say linearRegression([1, 2])", "linearRegression", []],
     [`${TREND}say predict(trend)`, `${TREND}say predict(trend, 1)`, "predict", [1]],
     ["say randomWeighted()", 'say randomWeighted(dict{ "a": 1 })', "randomWeighted", []],
+    // The conversions and `hashText`: a name, the number of arguments, and a `default:` they need.
+    ["say toString(1, 2)", "say toString(1)", "toString", [1, 2]],
+    ['say toNumber("1", x: 1)', 'say toNumber("1")', "toNumber", ["1", ["x", 1]]],
+    ["say toInteger()", 'say toInteger("1")', "toInteger", []],
+    [
+      "let at = toDateTime(1, 2, 3)",
+      'let at = toDateTime("2026-10-04T18:00")',
+      "toDateTime",
+      [1, 2, 3],
+    ],
+    // Without a written `files: false`, `fromJson` is a file store instruction, not a call.
+    [
+      'let x = fromJson("1", files: false)',
+      'let x = fromJson("1", default: null, files: false)',
+      "fromJson",
+      ["1", ["files", false]],
+    ],
+    [
+      'let x = fromJson("1", default: null, files: false, x: 1)',
+      'let x = fromJson("1", default: null, files: false)',
+      "fromJson",
+      [{ kept: 0 }, { kept: 1 }, ["files", false], ["x", 1]],
+    ],
+    [
+      "say toJson(1, files: false, x: 1)",
+      "say toJson(1, files: false)",
+      "toJson",
+      [1, ["files", false], ["x", 1]],
+    ],
+    ['say hashText("a", x: 1)', 'say hashText("a")', "hashText", ["a", ["x", 1]]],
+    ["say hashText()", 'say hashText("a")', "hashText", []],
     // `script(...)` reports the number of arguments first.
     ["let s = script()", 'let s = script("main.tease")', "script", []],
     [
@@ -331,6 +362,30 @@ test("a value of a type the compiler does not know fails with the compiler's tex
     const compiled = diagnostics(known!);
     assert.equal(compiled.length, 1, known);
     assert.equal(runtimeFailure(compileValidPlan(`${unknown}\nexit`))[1], compiled[0]![1], unknown);
+  }
+});
+
+test("min or max of one value that is not a list fails at run time with the compiler's rule and text", () => {
+  // The compiler takes a value of a type it does not know as maybe a list; one that is not a list breaks the rule of the
+  // arguments' names and number (TSV020, TSV022), which the runtime checks under TSR028.
+  const D = "function dynamic(value) {\n    return value\n}\n";
+  for (const [unknown, known, code] of [
+    [`${D}say min(dynamic(5))`, "say min(5)", "TSV020"],
+    [`${D}say max(dynamic(1..3))`, "say max(1..3)", "TSV020"],
+    [`${D}say min(dynamic(5), by: "w")`, 'say min(5, by: "w")', "TSV022"],
+    [`${D}say max(dynamic("a"), by: "w")`, 'say max("a", by: "w")', "TSV022"],
+  ] as const) {
+    const compiled = diagnostics(known);
+    assert.deepEqual(
+      compiled.map(([found]) => found),
+      [code],
+      known,
+    );
+    assert.deepEqual(
+      runtimeFailure(compileValidPlan(`${unknown}\nexit`)),
+      ["TSR028", compiled[0]![1]],
+      unknown,
+    );
   }
 });
 

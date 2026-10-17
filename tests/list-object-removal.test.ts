@@ -48,6 +48,11 @@ test("each operand of == and != is read when it is evaluated, left to right", ()
     ],
     ['let items = [1, 2]\nsay "${items != [items.removeFirst(), 2]}"\nexit', "false"],
     ['let items = [1]\nsay "${[items.removeAt(0)] == items}"\nexit', "false"],
+    // A list's `reverse` changes it, although text's only reads.
+    [
+      'let items = [2, 1]\nsay "${items == [items.reverse(), items].get(1, default: [])}"\nexit',
+      "false",
+    ],
   ] as const;
   for (const [source, expected] of cases) {
     const result = runValidSource(source);
@@ -110,7 +115,7 @@ test("removal fails at runtime for an invalid index or an empty list", () => {
       "Cannot remove index 1: 'items' has 1 element, so its only index is 0. Check the index against 'items.length' first.",
     ],
     [
-      'let items = ["a"]\nlet index = 0 - 1\nitems.removeAt(index)\nexit',
+      'function dynamic(value) {\n    return value\n}\nlet items = ["a"]\nlet index = dynamic(0 - 1)\nitems.removeAt(index)\nexit',
       "TSR025",
       "Cannot remove index -1: 'items' has 1 element, so its only index is 0. Check the index against 'items.length' first.",
     ],

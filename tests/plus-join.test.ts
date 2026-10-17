@@ -210,10 +210,10 @@ test("+ does not convert: text or a list with another kind is a compile error th
     "'counts' holds a list (integer[]), so a whole number (integer) cannot be added to it. To add one element, use 'counts.add(2)'.",
   ]);
   assert.deepEqual(message("let counts = [1]\ncounts.addAll(2)"), [
-    "addAll() needs a list, but this is a whole number (integer).",
+    "addAll() needs a list, not a whole number (integer).",
   ]);
   assert.deepEqual(message("let counts = [1]\ncounts.addAll(set[2])"), [
-    "addAll() needs a list, but this is a set (integer set). Copy a set into a list with toList() first.",
+    "addAll() needs a list, not a set (integer set). Copy a set into a list with toList() first.",
   ]);
   assert.deepEqual(message("let seen = set[1]\nseen.addAll([2])"), [
     "Sets have no method 'addAll'.",
@@ -230,15 +230,15 @@ test("+ on values known only when the script runs joins them or fails with the f
   );
   assert.deepEqual(failure(`${DYNAMIC}say "Score: " + dynamic(5)\nexit`), [
     "TSR009",
-    "'+' joins two texts or two lists and adds numbers or durations, but these are text (string) and a number. Put the value in the text instead, as in \"${first}${second}\".",
+    "'+' joins two texts or two lists and adds numbers or durations, but these are text (string) and a whole number (integer). Put the value in the text instead, as in \"${first}${second}\".",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nsay items + dynamic(2)\nexit`), [
     "TSR009",
-    "'+' joins two texts or two lists and adds numbers or durations, but these are a list and a number. To add one element, use add(value), or write list + [value] for a new list.",
+    "'+' joins two texts or two lists and adds numbers or durations, but these are a list and a whole number (integer). To add one element, use add(value), or write list + [value] for a new list.",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nitems.addAll(dynamic(2))\nexit`), [
     "TSR060",
-    "addAll() needs a list, not a number.",
+    "addAll() needs a list, not a whole number (integer).",
   ]);
   // Elements of unknown type are checked against the list's element type.
   assert.deepEqual(

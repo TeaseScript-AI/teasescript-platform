@@ -25,6 +25,7 @@ import {
 import type { RuntimeBindingSnapshot, RuntimeSnapshot, RuntimeTemporarySnapshot } from "./state.js";
 import { speakerPropertyValue } from "../speaker-terms.js";
 import { isDict, isList, isObject, isSet, isSpeakerReference } from "./value-predicates.js";
+import { listProperty } from "../list-methods.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -585,7 +586,8 @@ function resolvePreparedReferenceStep(
       ? { found: false, value: null }
       : { found: true, value: property };
   }
-  if ((isList(value) || isSet(value)) && step.name === "length") {
+  // A list's or set's element is read as an index or a copy, so only its length is a property step.
+  if ((isList(value) || isSet(value)) && listProperty(step.name)?.gives === "length") {
     return { found: true, value: value.items.length };
   }
   if (isDict(value)) {

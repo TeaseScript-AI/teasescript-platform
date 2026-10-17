@@ -29,7 +29,6 @@ import type {
   SerializableTimerHandle,
 } from "./serializable-values.js";
 import {
-  describeRuntimeValue,
   isAngle,
   isAnyDuration,
   isDict,
@@ -47,6 +46,7 @@ import {
   isTemporal,
   isTimerHandle,
 } from "./value-predicates.js";
+import { describeValue, VALUE_KINDS, valueKindOf } from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -113,7 +113,7 @@ function plainScalarText(value: SerializableRuntimeValue, span: SourceSpan): str
   if (isRegex(value)) return regexNotation(value, span);
   throw fault(
     "TSR021",
-    `${describeRuntimeValue(value).replace(/^a/u, "A")} cannot be shown as text here.${isObject(value) ? " Show one of its properties instead." : isSet(value) ? " Show its elements with toList().join() instead." : ""}`,
+    `${describeValue(value).replace(/^a/u, "A")} cannot be shown as text here.${isObject(value) ? " Show one of its properties instead." : isSet(value) ? " Show its elements with toList().join() instead." : ""}`,
     span,
   );
 }
@@ -156,19 +156,26 @@ function prefix(text: string, limit: number): string {
   return text.length > limit ? text.slice(0, limit) : text;
 }
 
-/** Whether `visibleText` accepts the value. */
+/** Whether `visibleText` accepts the value: one of a kind that is `shown`, and a finite number. */
 export function isVisibleScalar(value: SerializableRuntimeValue): boolean {
-  return (
-    typeof value === "string" ||
-    isFiniteNumber(value) ||
-    typeof value === "boolean" ||
-    value === null ||
-    isAnyDuration(value) ||
-    isAngle(value) ||
-    isTemporal(value) ||
-    isScriptReference(value) ||
-    isRegex(value)
-  );
+  return typeof value === "number"
+    ? Number.isFinite(value)
+    : VALUE_KINDS[valueKindOf(value)].shown !== null;
+}
+
+/** An element as `join` shows it: a value `visibleText` shows, and otherwise a failure. */
+export function joinedText(
+  item: SerializableRuntimeValue,
+  span: SourceSpan,
+  context: TemporalContext,
+): string {
+  if (!isVisibleScalar(item))
+    throw fault(
+      "TSR021",
+      "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes. Select an element or a property first.",
+      span,
+    );
+  return visibleText(item, span, context);
 }
 
 /** Text of a field such as a button label or an input hint. Only `${...}` selects from a list. */

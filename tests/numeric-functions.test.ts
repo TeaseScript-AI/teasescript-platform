@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
-import { NUMERIC_FUNCTIONS } from "../src/numeric-functions.js";
+import { NUMERIC_FUNCTIONS, type NumericFunctionName } from "../src/language-facts.js";
+import {
+  domainFailure,
+  NUMERIC_CONTRACTS,
+  numericResult,
+  parameterArgument,
+  type NumericFunction,
+} from "../src/numeric-functions.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -64,11 +71,7 @@ test("round to decimals rounds the number as written, half away from zero, and g
     ],
   ]);
   assert.deepEqual(diagnostics("say round(2.5, decimals: 1.5)\nexit"), [
-    [
-      "TSV043",
-      "round(...) needs decimals: to be a whole number of at least 0, not 1.5.",
-      "round(2.5, decimals: 1.5)",
-    ],
+    ["TSV043", "round(...) needs decimals: to be a whole number of at least 0, not 1.5.", "1.5"],
   ]);
   assert.deepEqual(diagnostics("say floor(2.5, decimals: 1)\nexit"), [
     ["TSV022", "floor() takes its arguments without names. Remove 'decimals:'.", "decimals"],
@@ -113,11 +116,16 @@ test("mod takes the divisor's sign where % keeps the dividend's, sign gives -1, 
       ["TSV041", "pi"],
     ],
   );
-  for (const [call, code, message] of [
-    ["mod(5, 0)", "TSR036", "mod(5, 0) has no result: it divides by zero."],
-    ["clamp(5, 10, 1)", "TSR039", "clamp(5, 10, 1) needs a min that is at most its max."],
+  for (const [call, code, message, at] of [
+    ["mod(5, 0)", "TSR036", "mod(...) has no result: it divides by zero.", "0"],
+    [
+      "clamp(5, 10, 1)",
+      "TSR039",
+      "clamp(...) needs a min that is at most its max, but min 10 is above max 1.",
+      "clamp(5, 10, 1)",
+    ],
   ] as const) {
-    assert.deepEqual(diagnostics(`say ${call}\nexit`), [["TSV043", message, call]], call);
+    assert.deepEqual(diagnostics(`say ${call}\nexit`), [["TSV043", message, at]], call);
     const hidden = call.replace(/-?[\d.]+/gu, (number) => `dynamic(${number})`);
     assert.deepEqual(failure(`${DYNAMIC}say ${hidden}\nexit`), [code, message], hidden);
   }
@@ -182,18 +190,87 @@ test("abs keeps an integer whole, pow of a whole number to a known whole power i
 });
 
 test("a call without a finite result is a compile error when the arguments are known, and a runtime error otherwise", () => {
-  const cases: [string, string][] = [
-    ["sqrt(-4)", "sqrt(-4) has no result: a negative number has no square root."],
+  // A domain of one number names it.
+  const cases: [string, string, string?][] = [
+    ["sqrt(-4)", "sqrt(-4) has no result: a negative number has no square root.", "-4"],
     ["pow(0, -1)", "pow(0, -1) has no result: it divides by zero."],
     ["pow(-8, 0.5)", "pow(-8, 0.5) has no result: a negative base needs a whole exponent."],
     ["pow(10, 400)", "pow(10, 400) gives a number too large to represent. Use smaller values."],
     ["pow(-10, 401)", "pow(-10, 401) gives a number too large to represent. Use smaller values."],
   ];
-  for (const [call, message] of cases) {
-    assert.deepEqual(diagnostics(`say ${call}\nexit`), [["TSV043", message, call]], call);
+  for (const [call, message, at = call] of cases) {
+    assert.deepEqual(diagnostics(`say ${call}\nexit`), [["TSV043", message, at]], call);
     const hidden = call.replace(/-?[\d.]+/gu, (number) => `dynamic(${number})`);
     assert.deepEqual(failure(`${DYNAMIC}say ${hidden}\nexit`), ["TSR036", message], hidden);
   }
+});
+
+/**
+ * Calls of the numeric functions whose numbers fail one domain, the first in the contract's order: each domain of every
+ * contract has one.
+ */
+const INVALID: readonly {
+  readonly name: NumericFunctionName;
+  readonly values: readonly number[];
+  readonly named?: Readonly<Record<string, number>>;
+}[] = [
+  { name: "round", values: [2.5], named: { decimals: -1 } },
+  { name: "sqrt", values: [-4] },
+  { name: "pow", values: [0, -0.5] },
+  { name: "pow", values: [-8, 0.5] },
+  { name: "mod", values: [5, 0] },
+  { name: "clamp", values: [5, 10, 1] },
+  { name: "ln", values: [0] },
+  { name: "log10", values: [-1] },
+  { name: "asin", values: [2] },
+  { name: "acos", values: [-1.5] },
+];
+
+test("a domain of a numeric function's numbers fails alike when the compiler can see them, whatever the others are", () => {
+  const covered = new Set<string>();
+  for (const { name, values, named = {} } of INVALID) {
+    const numeric: NumericFunction = NUMERIC_CONTRACTS[name];
+    const failing = numeric.domains.findIndex(
+      (domain) => domainFailure({ ...numeric, domains: [domain] }, values, named) !== undefined,
+    );
+    covered.add(`${name} ${failing}`);
+    const { reads } = numeric.domains[failing]!;
+    const { failure: message, code } = domainFailure(numeric, values, named)!;
+    // The call with each number as `write` writes it, from its parameter and its value.
+    const call = (write: (parameter: string, value: number) => string) =>
+      `${name}(${[
+        ...values.map((value, position) => write(numeric.parameters[position]!, value)),
+        ...Object.entries(named).map(
+          ([parameter, value]) => `${parameter}: ${write(parameter, value)}`,
+        ),
+      ].join(", ")})`;
+    // The runtime checks the numbers it is given, before the result.
+    const hidden = call((_, value) => `dynamic(${value})`);
+    assert.deepEqual(failure(`${DYNAMIC}say ${hidden}\nexit`), [code, message], hidden);
+    // The compiler gives the runtime's text when it sees all the numbers, and when it sees only those the domain reads.
+    // A domain of one number names it.
+    const known = call((_, value) => String(value));
+    const one =
+      reads.length === 1 ? String(parameterArgument(numeric, reads[0]!, values, named)) : undefined;
+    assert.deepEqual(diagnostics(`say ${known}\nexit`), [["TSV043", message, one ?? known]], known);
+    const seen = call((parameter, value) => (reads.includes(parameter) ? String(value) : "n"));
+    assert.deepEqual(
+      diagnostics(`function f(n) {\n    return ${seen}\n}\nexit`),
+      [["TSV043", message, one ?? seen]],
+      seen,
+    );
+  }
+  for (const name of NUMERIC_FUNCTIONS)
+    NUMERIC_CONTRACTS[name].domains.forEach((_, index) =>
+      assert.ok(covered.has(`${name} ${index}`), `${name} domain ${index}`),
+    );
+  // Numbers the compiler cannot see, or that no domain refuses, compile.
+  for (const source of [
+    "function f(n) {\n    return clamp(n, 1, n) + mod(n, n) + pow(n, -1) + pow(-8, n)\n}\nexit",
+    "function f(n) {\n    return round(n, decimals: 2) + sqrt(n) + ln(n)\n}\nexit",
+    "say clamp(4, 4, 4)\nsay mod(0, 3)\nsay pow(0, 0)\nsay pow(-8, 3)\nsay round(2.5, decimals: 0)\nexit",
+  ])
+    assert.deepEqual(diagnostics(source), [], source);
 });
 
 test("numeric functions check their arguments", () => {
@@ -267,7 +344,7 @@ test("the numeric functions are protected names", () => {
 
 test("pow gives the correctly rounded result with the same operations on every JavaScript engine", () => {
   const pow = (base: number, exponent: number) =>
-    NUMERIC_FUNCTIONS.get("pow")!.apply([base, exponent], {});
+    numericResult(NUMERIC_CONTRACTS.pow, [base, exponent], {});
   // Whole powers of whole numbers, rounded once from the exact BigInt power.
   for (const [base, exponent] of [
     [477, 6],

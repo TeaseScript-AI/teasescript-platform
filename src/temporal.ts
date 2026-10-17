@@ -32,7 +32,8 @@ const MS_PER_MINUTE = 60_000;
 const MS_PER_HOUR = 3_600_000;
 const MS_PER_DAY = 86_400_000;
 
-const WEEKDAY_NAMES = Object.freeze([
+/** The English weekday names, from Monday (V30 §35). */
+export const WEEKDAY_NAMES = Object.freeze([
   "Monday",
   "Tuesday",
   "Wednesday",

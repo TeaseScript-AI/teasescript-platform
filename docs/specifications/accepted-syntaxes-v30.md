@@ -1661,9 +1661,10 @@ round(pi * 2 * 2, decimals: 2)   // 12.57
   below it. Without `decimals:`, `round` returns an `integer` as described above.
 - A call without a result fails: `sqrt` of a negative number, `pow` of 0 to a negative exponent, `pow` of a negative
   base to an exponent that is not whole, a `pow` result too large to represent, `mod` by 0, `clamp` with `min` above
-  `max`, and `decimals:` that is negative or not whole. It is a compile error when the compiler can see the arguments,
-  and otherwise runtime error `TSR036` for a result that is not a finite number and `TSR039` for an argument out of
-  range. A `pow` result too small to represent is 0.
+  `max`, and `decimals:` that is negative or not whole. It is a compile error when the compiler can see the arguments
+  that cause it, also beside arguments it cannot see, as in `clamp(level, 10, 1)`, and otherwise runtime error `TSR036`
+  for a result that is not a finite number and `TSR039` for an argument out of range. A `pow` result too small to
+  represent is 0.
 - Every argument is a number. Other values, `null`, another number of arguments, and other named arguments are compile
   errors when the types show them, and runtime errors otherwise.
 - `sqrt` and `pow` give the same result on every device and browser.

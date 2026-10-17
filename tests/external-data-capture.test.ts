@@ -256,7 +256,8 @@ test("repeated stepping and checkpoint entries reuse the validated immutable pla
 test("runtime entry validates mutable external plans and snapshots before halted or failed returns", () => {
   const exitPlan = compiledPlan("exit");
   const halted = run(exitPlan, createFreshRuntimeSnapshot(exitPlan)).snapshot;
-  const faultSource = "let values = []\nsay values.first\nexit";
+  const faultSource =
+    "function dynamic(value) {\n    return value\n}\nlet values = dynamic([])\nsay values.first\nexit";
   const faultPlan = compiledPlan(faultSource);
   const failed = run(faultPlan, createFreshRuntimeSnapshot(faultPlan)).snapshot;
 

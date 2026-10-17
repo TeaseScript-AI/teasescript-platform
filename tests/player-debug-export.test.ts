@@ -770,8 +770,13 @@ test("a recorded call that threw is compared like any other, and a failed anchor
 
   // A session that had already failed at the anchor: neither no calls nor calls that change nothing reproduce it.
   const failed = new Recording(
-    compileProject([{ path: "main.tease", source: "let zero = 0\nlet result = 1 / zero\nexit" }])
-      .plan!,
+    compileProject([
+      {
+        path: "main.tease",
+        source:
+          "let zero = dynamic(0)\nlet result = 1 / zero\nexit\nfunction dynamic(value) {\n    return value\n}",
+      },
+    ]).plan!,
   );
   assert.equal(failed.snapshot.status, "failed");
   const afterFailure = failed.export({

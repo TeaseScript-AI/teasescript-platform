@@ -152,7 +152,7 @@ test("a condition, comparison, or loop value of the wrong kind names the value a
     [
       "let score = pick(null)\nsay score < 10",
       "TSR009",
-      "'<' compares two numbers, two texts, or two durations, but these are null and 10. Check that 'score' is not null first.",
+      "'<' compares two numbers, two texts, two durations, two calendar durations, or two angles, but these are null and 10. Check that 'score' is not null first.",
       "score < 10",
     ],
     [
@@ -225,7 +225,7 @@ test("a runtime rule has one text whether its expression runs lazily or through 
     ],
     [
       "TSR009",
-      "'<' compares two numbers, two texts, or two durations, but these are null and 1. Check that 'n' is not null first.",
+      "'<' compares two numbers, two texts, two durations, two calendar durations, or two angles, but these are null and 1. Check that 'n' is not null first.",
       null,
       ["say n < (1 + 0)", "say n < pick(1)"],
     ],

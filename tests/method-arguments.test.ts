@@ -173,7 +173,7 @@ test("a call that no receiver with the method takes is a compile error on a valu
       "remove() takes its arguments without names. Remove 'key:'.",
       "key",
     ],
-    // Timers and media, and date and time values, take no arguments for their methods.
+    // Timers and media take no arguments for their methods.
     ["v.pause(1)", "TSV020", "pause() takes no arguments, received 1.", "v.pause(1)"],
     [
       "v.stop(now: true)",
@@ -181,7 +181,8 @@ test("a call that no receiver with the method takes is a compile error on a valu
       "stop() takes its arguments without names. Remove 'now:'.",
       "now",
     ],
-    ["say v.toISO(1)", "TSV020", "toISO() takes no arguments, received 1.", "v.toISO(1)"],
+    // Nor do date and time values, which report the method as for a value the compiler knows (see `TemporalMethod`).
+    ["say v.toISO(1)", "TSV020", "toISO() takes no arguments, received 1.", "toISO"],
   ];
   for (const [statement, code, message, text] of cases)
     assert.deepEqual(

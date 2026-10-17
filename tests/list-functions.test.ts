@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { LIST_FUNCTIONS } from "../src/language-facts.js";
+import { LIST_FUNCTION_CONTRACTS, type ListFunction } from "../src/list-function-rules.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -145,7 +147,7 @@ test("statistics report empty lists, values they cannot read, and percentages ou
     [
       "average(dynamic([1, dynamic(2 s)]))",
       "TSR060",
-      "average(...) needs values of one kind: all numbers or all durations.",
+      "average(...) needs values of one kind: numbers or durations.",
     ],
     [
       "average(dynamic([1 calendar day, 2 calendar days]))",
@@ -155,7 +157,7 @@ test("statistics report empty lists, values they cannot read, and percentages ou
     [
       "sum([dynamic(2), dynamic(1 s)])",
       "TSR060",
-      "sum(...) needs values of one kind: all numbers, all durations, or all angles.",
+      "sum(...) needs values of one kind: numbers, durations, or angles.",
     ],
     [
       'sum(dynamic([{ n: 1 }]), by: "count")',
@@ -165,9 +167,9 @@ test("statistics report empty lists, values they cannot read, and percentages ou
     [
       'median(dynamic([1]), by: "count")',
       "TSR060",
-      "median(...) needs a list of objects for by:, not a list that holds a number.",
+      "median(...) needs a list of objects for by:, not a list that holds a whole number (integer).",
     ],
-    ["sum(dynamic(5))", "TSR059", "sum(...) needs a list, not a number."],
+    ["sum(dynamic(5))", "TSR059", "sum(...) needs a list, not a whole number (integer)."],
     [
       "sum(dynamic([1e308, 1e308]))",
       "TSR036",
@@ -517,7 +519,7 @@ test("indexOf, lastIndexOf, and count find a value by ==, and a missing value ha
   for (const [source, expected] of cases) assert.deepEqual(diagnostics(source), expected, source);
   assert.deepEqual(failure(`${DYNAMIC}say dynamic(set[1]).indexOf(1)\nexit`), [
     "TSR016",
-    "Sets have no method 'indexOf'.",
+    "A set has no positions, so it has no indexOf(). Copy it into a list with toList() first.",
   ]);
 });
 
@@ -687,7 +689,7 @@ test("get gives the element at an index, or its default for an index the list do
   for (const [source, expected] of cases) assert.deepEqual(diagnostics(source), expected, source);
   assert.deepEqual(failure(`${DYNAMIC}say dynamic(set[1]).get(0, default: 3)\nexit`), [
     "TSR016",
-    "Sets have no method 'get'.",
+    "A set has no positions, so it has no 'get()'. Use 'contains(...)' instead.",
   ]);
 });
 
@@ -909,7 +911,7 @@ test("linearRegression and predict report too few points, one x, and values of t
       'say linearRegression([{ at: "a", n: 1 }, { at: "b", n: 2 }], x: "at", y: "n").slope\nexit',
     ).map(([, message]) => message),
     [
-      "linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times, not text (string).",
+      "linearRegression(...) needs numbers, dates, dates and times, or absolute dates and times as x values, not text (string).",
     ],
   );
   assert.deepEqual(diagnostics('say linearRegression([{ day: 1 }], x: "day")\nexit'), [
@@ -941,7 +943,7 @@ test("linearRegression and predict report too few points, one x, and values of t
     [
       'linearRegression(dynamic([{ x: toTime("08:00"), y: 2 }, { x: toTime("09:00"), y: 3 }]), x: "x", y: "y")',
       "TSR060",
-      "linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times as x values, not a time.",
+      "linearRegression(...) needs numbers, dates, dates and times, or absolute dates and times as x values, not a time.",
     ],
     [
       "predict(dynamic({ slope: 1 }), 2)",
@@ -1063,5 +1065,57 @@ test("list results survive checkpoint resume", () => {
   assert.deepEqual(
     equivalent.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["11 11, 18, 16 2.5 20 true", "2 null 2", "plank rest"],
+  );
+});
+
+test("a domain of a list function's numbers fails alike when the compiler can see them, whatever the list is", () => {
+  for (const name of LIST_FUNCTIONS) {
+    const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
+    if (contract.takes !== "values") continue;
+    for (const domain of contract.domains)
+      for (const value of [-1, 101, 100.5]) {
+        const call = (list: string, number: string): string =>
+          `${name}(${contract.parameters.map((parameter) => (parameter === "list" ? list : domain.reads.includes(parameter) ? number : "1")).join(", ")})`;
+        const message = domain.problem([value]);
+        assert.notEqual(message, undefined, `${name} ${value}`);
+        assert.deepEqual(
+          failure(`${DYNAMIC}say ${call("dynamic([1, 2])", `dynamic(${value})`)}\nexit`),
+          ["TSR039", message],
+        );
+        for (const source of [
+          `say ${call("[1, 2]", String(value))}\nexit`,
+          `function f(xs) {\n    return ${call("xs", String(value))}\n}\nexit`,
+        ])
+          assert.deepEqual(diagnostics(source), [["TSV043", message, String(value)]], source);
+      }
+  }
+});
+
+test("values of another kind, or of several kinds, fail alike when the compiler can see them and at runtime", () => {
+  const lists = [
+    'let xs: (integer | string)[] = [1, "a"]',
+    "let xs: (integer | duration)[] = [1, 2 s]",
+    "let xs: (calendarDuration | duration)[] = [1 calendar month, 2 s]",
+  ];
+  for (const name of LIST_FUNCTIONS) {
+    const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
+    if (contract.takes === "line") continue;
+    const rest = contract.parameters.length > 1 ? ", 50" : "";
+    for (const list of lists) {
+      const compiled = diagnostics(`${list}\nsay ${name}(xs${rest})\nexit`);
+      assert.equal(compiled.length, 1, `${name}: ${list}`);
+      assert.deepEqual(
+        failure(`${DYNAMIC}${list}\nsay ${name}(dynamic(xs)${rest})\nexit`),
+        ["TSR060", compiled[0]![1]],
+        `${name}: ${list}`,
+      );
+    }
+  }
+  // An x value of a line, which is a number or one kind of date and time value.
+  const points = 'let points = [{ x: toTime("12:00"), y: 1 }, { x: toTime("13:00"), y: 2 }]';
+  const compiled = diagnostics(`${points}\nsay linearRegression(points, y: "y", x: "x")\nexit`);
+  assert.deepEqual(
+    failure(`${DYNAMIC}${points}\nsay linearRegression(dynamic(points), y: "y", x: "x")\nexit`),
+    ["TSR060", compiled[0]?.[1]],
   );
 });

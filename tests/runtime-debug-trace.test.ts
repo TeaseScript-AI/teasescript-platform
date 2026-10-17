@@ -1222,7 +1222,14 @@ test("a long chain of unmatched cases keeps only the newest decisions it can nam
 
 test("a rejected say inside a branch leaves no decision behind", () => {
   const played = traced(
-    ["let pace = -1 s", "if pace < 0 s {", '    say "${["a", "b"]}", pace', "}", "exit"].join("\n"),
+    [
+      "function dynamic(value) {\n    return value\n}",
+      "let pace = dynamic(-1 s)",
+      "if pace < 0 s {",
+      '    say "${["a", "b"]}", pace',
+      "}",
+      "exit",
+    ].join("\n"),
   );
   assert.equal(played.snapshot.status, "failed");
   assert.deepEqual(
@@ -1232,7 +1239,14 @@ test("a rejected say inside a branch leaves no decision behind", () => {
 });
 
 test("a rejected say leaves no output, draw, or link behind", () => {
-  const played = traced(["let pace = -1 s", 'say "${["a", "b"]}", pace', "exit"].join("\n"));
+  const played = traced(
+    [
+      "function dynamic(value) {\n    return value\n}",
+      "let pace = dynamic(-1 s)",
+      'say "${["a", "b"]}", pace',
+      "exit",
+    ].join("\n"),
+  );
   assert.equal(played.snapshot.status, "failed");
   const all = records(played.trace);
   assert.deepEqual(
@@ -1518,7 +1532,8 @@ test("oversized values, wide staged messages, and rollbacks stay within the boun
   const failing = compile(
     [
       `let s = "${"x".repeat(1024)}"`,
-      "let pace = -1 s",
+      "function dynamic(value) {\n    return value\n}",
+      "let pace = dynamic(-1 s)",
       `say "${"${s}".repeat(placeholders)}", pace`,
       "exit",
     ].join("\n"),

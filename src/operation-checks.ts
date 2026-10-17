@@ -3,9 +3,8 @@ import {
   conversionTo,
   CONVERSIONS,
   defaultDescription,
+  FILE_TEXT_FUNCTIONS,
   isConversion,
-  MIN_MAX_BUILTINS,
-  unwritableJsonReason,
   WRITABLE_JSON_FIX,
   type CallShape,
   type Conversion,
@@ -13,23 +12,27 @@ import {
 } from "./conversions.js";
 import type { ConversionName } from "./language-facts.js";
 import { LOCK_CALLS } from "./capture-call.js";
-import { NUMERIC_FUNCTIONS, type NumberSignature } from "./numeric-functions.js";
+import {
+  isNumericFunction,
+  numberArgumentMessage,
+  NUMERIC_CONTRACTS,
+  type NumberSignature,
+} from "./numeric-functions.js";
 import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "./random-functions.js";
-import { ANGLE_FUNCTIONS, angleArgumentMessage } from "./angle.js";
+import {
+  isTemporalMethod,
+  TEMPORAL_METHODS,
+  temporalArgumentsMessage,
+} from "./temporal-builtins.js";
 import { misspelledPropertyHint } from "./object-properties.js";
 import { parsePublicKey } from "./public-keys.js";
 import { cannotConvert } from "./runtime/value-types.js";
 import type { SourceSpan } from "./source.js";
-import { canonicalRegexFlags, compileRegex, regexFlagProblem, replacementParts } from "./regex.js";
-import { staticNumber, staticVisibleText } from "./static-evaluation.js";
+import { staticVisibleText, type KnownValue } from "./static-evaluation.js";
 import {
   ANGLE_TYPE,
-  CALENDAR_DURATION_TYPE,
   containsType,
-  DATE_TYPE,
-  DATETIME_TYPE,
   describeValue,
-  DURATION_TYPE,
   INTEGER_TYPE,
   isAssignable,
   isKnown,
@@ -41,42 +44,73 @@ import {
   REGEX_TYPE,
   resolved,
   STRING_TYPE,
-  TIME_TYPE,
   typeName,
   union,
-  ABSOLUTE_DATE_TIME_TYPE,
+  valueKindOfType,
+  isIdentityType,
+  isShown,
   type StaticType,
 } from "./static-types.js";
 import {
+  orderedFamily,
+  unwritableJsonReason,
+  VALUE_KINDS,
+  type OrderedFamily,
+  type ValueKind,
+} from "./value-kinds.js";
+import {
   argumentCountMessage,
+  argumentShapeProblem,
   argumentsTaken,
+  callShapeNames,
+  callShapeProblem,
   FIXED_PARAMETERS,
   getArgumentsProblem,
-  LIST_ONLY_METHODS,
   missingDefaultMessage,
-  POSITIONAL_METHODS,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
-import { MIN_MAX_TAKES } from "./list-function-rules.js";
+import { DICT_METHODS, dictMethod } from "./dict-operations.js";
+import { handleMethod, handleMethodNames, kindsWithMethod } from "./handle-members.js";
+import {
+  isListFunction,
+  LIST_FUNCTION_CONTRACTS,
+  minMaxValuesProblem,
+  takesValues,
+} from "./list-function-rules.js";
+import {
+  countProblem,
+  LIST_METHODS,
+  listArgumentMessage,
+  listMethod,
+  missingListMethodMessage,
+  type ListKind,
+  type ListMethod,
+  type ListParameterKind,
+} from "./list-methods.js";
 import {
   argumentFix,
   argumentTypeMessage,
-  beyondLengthMessage,
-  emptyTextMessage,
-  endBeforeStartMessage,
+  isTextMember,
+  isTextMethod,
   LIST_JOIN,
   methodArgumentCountMessage,
-  needsNonEmptyText,
-  negativeMessage,
   regexMemberMessage,
+  stringLength,
   takesRegex,
   takesText,
-  TEXT_MEMBERS,
+  TEXT_METHODS,
   unknownTextMemberMessage,
   type ArgumentKind,
+  type DomainValue,
   type MethodParameters,
-  type TextMember,
+  type TextDomain,
+  type TextParameter,
+  type TextSignature,
 } from "./text-operations.js";
+import { isRegex } from "./runtime/value-predicates.js";
+
+/** The value that every run gives an expression, when the compiler knows it (see `KnownValues`). */
+type Known = (expression: Expression) => KnownValue | undefined;
 
 /**
  * A compile-time problem with a built-in operation: a wrong number of arguments, an argument name it does not take, or
@@ -90,9 +124,6 @@ export interface OperationProblem {
   readonly widened?: Expression;
   readonly fix?: string;
 }
-
-/** The fix for a range where a list is needed, as for a set (V30 §6). */
-export const RANGE_LIST_FIX = " Make a list of its numbers with toList() first.";
 
 /** The problem with calling `length`, which text, lists, sets, and dicts have as a property. */
 const LENGTH_PROPERTY = "'length' is a property, not a method. Write .length without parentheses.";
@@ -110,6 +141,7 @@ export function memberProblems(
   property: Identifier,
   call: CallExpression | null,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
 ): OperationProblem[] {
   const type = forUse(receiverType);
   const name = property.name;
@@ -117,19 +149,26 @@ export function memberProblems(
     { kind: "invalidOperand", message, span: property.span },
   ];
   if (type.kind === "scalar" && type.name === "string") {
-    const member = TEXT_MEMBERS.get(name);
-    if (member === undefined)
+    if (name === "length") return call === null ? [] : problem(LENGTH_PROPERTY);
+    if (!isTextMethod(name))
       return problem(unknownTextMemberMessage(name, call === null ? "property" : "method"));
-    if (member.parameters === null) return call === null ? [] : problem(LENGTH_PROPERTY);
+    const method = TEXT_METHODS[name];
     if (call === null)
       return problem(
-        `'${name}' is a method. Write ${name}(${member.parameters.length === 0 ? "" : "..."}) with parentheses.`,
+        `'${name}' is a method. Write ${name}(${method.parameters.length === 0 ? "" : "..."}) with parentheses.`,
       );
-    return argumentProblems(member, call, typeOf, staticVisibleText(receiver));
+    const text = known(receiver);
+    return argumentProblems(
+      method,
+      call,
+      typeOf,
+      known,
+      typeof text === "string" ? text : undefined,
+    );
   }
   if (type.kind === "list" && name === "join") {
     if (call === null) return problem("'join' is a method. Write .join() with parentheses.");
-    const problems = argumentProblems(LIST_JOIN, call, typeOf, undefined);
+    const problems = argumentProblems(LIST_JOIN, call, typeOf, known, undefined);
     const element = unshowableElement(receiver, type.element, typeOf);
     if (element !== undefined)
       problems.push({
@@ -141,8 +180,7 @@ export function memberProblems(
   }
   if (type.kind === "unknown" || type.kind === "open") {
     // Only lists have `join`, and only text has the other text methods, so their arguments are checked even when the
-    // receiver is not known. Text, lists, and sets all have `contains` with one argument of any type for collections,
-    // and text and lists both have `reverse` without arguments.
+    // receiver is not known.
     if (call === null) return [];
     // A name that no value has as a method fails on every receiver; every value with `length` has it as a property.
     if (!METHOD_NAMES.has(name))
@@ -151,27 +189,33 @@ export function memberProblems(
           ? LENGTH_PROPERTY
           : `No value has a method '${name}'.${misspelledPropertyHint(name, [...METHOD_NAMES, "length"]) || " Check the name."}`,
       );
-    // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
-    if (name === "take" || name === "takeLast")
-      return takeProblems(name, undefined, property, call, typeOf);
-    // A list's `indexOf`, `lastIndexOf`, and `count` take any value, so only one argument without a name is checked.
-    if (LIST_SEARCHES.has(name)) return searchProblems(name, undefined, property, call);
-    // A list's `get` takes an index and a dict's a key, each with a `default:`.
-    if (name === "get") return getProblems(undefined, property, call);
-    const member = name === "join" ? LIST_JOIN : TEXT_MEMBERS.get(name);
-    if (member?.parameters)
-      return name === "contains"
-        ? shapeProblems(member, call)
-        : argumentProblems(member, call, typeOf, undefined);
-    // Every receiver with one of the other methods takes as many arguments, but a message or a permanent button may take
-    // `remove()` without any.
-    return positionalMethodProblems(name, call, true);
+    // Every receiver with a method of lists and sets takes as many arguments, but a message or a permanent button may
+    // take `remove()` without any. Text takes text or a regex where a list takes any value, and only lists and sets take
+    // a count, a list, or a collection, so those arguments are checked on any receiver too.
+    const list = listMethod(name);
+    if (list !== undefined && name !== "join")
+      return listArgumentProblems(list, undefined, property, call, typeOf, known, true);
+    const member = name === "join" ? LIST_JOIN : isTextMethod(name) ? TEXT_METHODS[name] : null;
+    if (member !== null) return argumentProblems(member, call, typeOf, known, undefined);
+    // Only date and time values have their methods, which take no arguments.
+    if (isTemporalMethod(name))
+      return call.arguments.length === 0
+        ? []
+        : [
+            {
+              kind: "argumentCount",
+              message: temporalArgumentsMessage(name, call.arguments.length),
+              span: property.span,
+            },
+          ];
+    // Only handles have the other methods, and every handle with one takes the same.
+    return handleMethodProblems(name, call);
   }
   if (type.kind !== "scalar" && type.kind !== "null" && type.kind !== "range") return [];
   if (isScalar(type, "regex"))
     return problem(regexMemberMessage(name, call === null ? "property" : "method"));
   const fix =
-    type.kind === "scalar" && TEXT_MEMBERS.has(name)
+    type.kind === "scalar" && isTextMember(name)
       ? " Convert it to text first with toString(...)."
       : "";
   return problem(
@@ -180,8 +224,37 @@ export function memberProblems(
 }
 
 /**
- * Argument names, which text operations, `join`, and the methods of `POSITIONAL_METHODS` never take, and the number of
- * arguments.
+ * Argument names and the number of arguments of a method that only handles have, such as `pause()`, as the first handle
+ * with it takes them (see `HandleMethod`).
+ */
+function handleMethodProblems(name: string, call: CallExpression): OperationProblem[] {
+  const kind = kindsWithMethod(name)[0];
+  if (kind === undefined) return [];
+  const named = call.arguments.flatMap((argument) =>
+    argument.kind === "namedArgument" ? [argument.name] : [],
+  );
+  const problem = argumentShapeProblem(
+    name,
+    handleMethod(kind, name)!.shape,
+    call.arguments.length - named.length,
+    named.map((identifier) => identifier.name),
+  );
+  if (problem === undefined) return [];
+  return [
+    {
+      kind: problem.kind,
+      message: problem.message,
+      span:
+        problem.kind === "unknownNamedArgument"
+          ? named.find((identifier) => identifier.name === problem.name)!.span
+          : call.span,
+    },
+  ];
+}
+
+/**
+ * Argument names, which text operations, `join`, and the methods of lists and sets but `get` never take, and the number
+ * of arguments.
  */
 function shapeProblems(member: MethodParameters, call: CallExpression): OperationProblem[] {
   const parameters = member.parameters!;
@@ -206,25 +279,51 @@ function shapeProblems(member: MethodParameters, call: CallExpression): Operatio
   return [];
 }
 
+/**
+ * The problems with the arguments of a method of text or `join` that the compiler can see: their shape, each argument's
+ * type, and each domain whose values it knows, with the runtime's text (see `TextDomain`), where the arguments the
+ * domain reads have no other problem. A domain is checked after the last argument it reads, and reported there.
+ * `receiverText` is the text the method is called on, when it is known.
+ */
 function argumentProblems(
-  member: TextMember,
+  member: TextSignature,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
   receiverText: string | undefined,
 ): OperationProblem[] {
   const shape = shapeProblems(member, call);
   if (shape.length > 0) return shape;
-  const parameters = member.parameters!;
+  const parameters = member.parameters;
   const problems: OperationProblem[] = [];
-  const positions: (number | undefined)[] = [];
+  // The known value of each argument, `undefined` where it is not known, and `null` after a problem with it.
+  const values: (DomainValue | undefined | null)[] = [];
   let length: number | undefined;
+  const check = (domain: TextDomain): void => {
+    const known: DomainValue[] = [];
+    for (const read of domain.reads) {
+      const value =
+        read !== "length"
+          ? values[read]
+          : receiverText === undefined
+            ? undefined
+            : (length ??= stringLength(receiverText));
+      if (value === undefined || value === null) return;
+      known.push(value);
+    }
+    const message = domain.problem(known, member);
+    if (message === undefined) return;
+    for (const read of domain.reads) if (read !== "length") values[read] = null;
+    problems.push({
+      kind: "invalidOperand",
+      message,
+      span: call.arguments[lastArgument(domain)]!.value.span,
+    });
+  };
   for (const [index, argument] of call.arguments.entries()) {
     const parameter = parameters[index]!;
     const value = argument.value;
     const type = typeOf(value);
-    const fail = (message: string): void => {
-      problems.push({ kind: "invalidOperand", message, span: value.span });
-    };
     const text = takesText(parameter);
     const searches = takesRegex(parameter);
     const needed = searches
@@ -235,6 +334,7 @@ function argumentProblems(
         ? STRING_TYPE
         : INTEGER_TYPE;
     if (!isAssignable(needed, type)) {
+      values[index] = null;
       problems.push(
         nullCheckProblem(value, type, needed) ?? {
           kind: "invalidOperand",
@@ -246,50 +346,28 @@ function argumentProblems(
       );
       continue;
     }
-    if (text || searches) {
-      if (needsNonEmptyText(parameter) && staticVisibleText(value) === "")
-        fail(emptyTextMessage(member, parameter));
-      continue;
-    }
-    const known = staticNumber(value);
-    if (parameter.kind === "position") positions.push(known);
-    if (known === undefined) continue;
-    if (known < 0) {
-      fail(negativeMessage(member, parameter, known));
-    } else if (parameter.kind === "position" && receiverText !== undefined) {
-      length ??= codePointLength(receiverText);
-      if (known > length) fail(beyondLengthMessage(member, parameter, known, length));
-    }
+    values[index] = knownArgument(parameter, known(value));
+    for (const domain of member.domains) if (lastArgument(domain) === index) check(domain);
   }
-  const [start, end] = positions;
-  if (problems.length === 0 && start !== undefined && end !== undefined && end < start)
-    problems.push({
-      kind: "invalidOperand",
-      message: endBeforeStartMessage(member, start, end),
-      span: call.arguments[1]!.value.span,
-    });
-  if (problems.length === 0 && member.name === "replace")
-    problems.push(...replacementProblems(call));
   return problems;
 }
 
-/**
- * A replacement that refers to a group the regex does not have (V30 §8), when the search is a regex literal and the
- * replacement's text is known. A literal RE2 rejects is reported where it is written.
- */
-function replacementProblems(call: CallExpression): OperationProblem[] {
-  let search = call.arguments[0]!.value;
-  while (search.kind === "parenthesizedExpression") search = search.expression;
-  const replacement = call.arguments[1]!.value;
-  const text = staticVisibleText(replacement);
-  if (search.kind !== "regexLiteral" || text === undefined) return [];
-  if (regexFlagProblem(search.flags) !== null) return [];
-  const compiled = compileRegex(search.source, canonicalRegexFlags(search.flags));
-  if (!compiled.ok) return [];
-  const parts = replacementParts(text, search.source, compiled.program.groups);
-  return parts.ok
-    ? []
-    : [{ kind: "invalidOperand", message: parts.problem, span: replacement.span }];
+/** The position of the last argument a domain reads. */
+function lastArgument(domain: TextDomain): number {
+  return Math.max(...domain.reads.map((read) => (read === "length" ? -1 : read)));
+}
+
+/** The known `value` of an argument of `parameter` as its domains read it: text, a whole number, or a regex. */
+function knownArgument(
+  parameter: TextParameter,
+  value: KnownValue | undefined,
+): DomainValue | undefined {
+  if (!takesText(parameter) && !takesRegex(parameter))
+    return typeof value === "number" ? value : undefined;
+  return (takesText(parameter) && typeof value === "string") ||
+    (takesRegex(parameter) && value !== undefined && isRegex(value))
+    ? value
+    : undefined;
 }
 
 /**
@@ -312,14 +390,9 @@ function unshowableElement(
   return undefined;
 }
 
-/**
- * Whether a value of this type may be shown by `join`: text, a number, true or false, a duration, an angle, a date or
- * time value, or null; `join` checks the value.
- */
+/** Whether a value of this type may be shown by `join` (`isShown`); `join` checks the value. */
 function joinShowable(type: StaticType): boolean {
-  return members(type).some(
-    (member) => !isKnown(member) || ["scalar", "null"].includes(resolved(member).kind),
-  );
+  return members(type).some(isShown);
 }
 
 function capitalized(text: string): string {
@@ -367,17 +440,17 @@ export function builtinCallProblems(
   name: string,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
 ): OperationProblem[] {
-  if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
-  if (NUMERIC_FUNCTIONS.has(name))
-    return numberArgumentProblems(name, NUMERIC_FUNCTIONS.get(name)!, call, typeOf);
+  if (isListFunction(name) && takesValues(name)) return minMaxProblems(name, call, typeOf);
+  if (isNumericFunction(name))
+    return numberArgumentProblems(name, NUMERIC_CONTRACTS[name], call, typeOf);
   if (isRandomFunction(name)) {
     const random: RandomFunction = RANDOM_CONTRACTS[name];
     if (random.takes === "numbers") return numberArgumentProblems(name, random, call, typeOf);
     return random.takes === "range" ? fixedShapeProblems(name, random.parameters, call) : [];
   }
-  if (ANGLE_FUNCTIONS.has(name)) return angleFunctionProblems(name, call, typeOf);
-  if (isConversion(name)) return conversionProblems(name, CONVERSIONS[name], call, typeOf);
+  if (isConversion(name)) return conversionProblems(name, CONVERSIONS[name], call, typeOf, known);
   const shape = FILE_TEXT_FUNCTIONS.get(name);
   if (shape !== undefined) return fileTextProblems(name, shape, call, typeOf);
   if (LOCK_CALLS.has(name)) return lockProblems(name, call, typeOf);
@@ -535,8 +608,9 @@ interface ShapedCall {
 }
 
 /**
- * The arguments of a call of `shape` (see `CallShape`), and its problems: a named argument it does not take, a
- * `files:` that is not true or false, the number of positional arguments, and a required `default:` that is missing.
+ * The arguments of a call of `shape` (see `CallShape`), and its problems: each named argument it does not take, a
+ * `files:` that is not true or false, and then the number of positional arguments or a required `default:` that is
+ * missing, with the texts of `callShapeProblem`.
  */
 function shapedCall(
   name: string,
@@ -544,10 +618,7 @@ function shapedCall(
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): ShapedCall {
-  const named = [
-    ...(shape.fallback === null ? [] : ["default"]),
-    ...(shape.files ? ["files"] : []),
-  ];
+  const named = callShapeNames(shape);
   const problems: OperationProblem[] = [];
   const positional: Expression[] = [];
   let fallback: Expression | undefined;
@@ -576,26 +647,9 @@ function shapedCall(
         span: files.span,
       });
   }
-  const required = shape.fallback?.required ?? null;
-  if (positional.length !== 1 && (shape.pair === undefined || positional.length !== 2))
-    problems.push({
-      kind: "argumentCount",
-      message: argumentCountMessage(
-        name,
-        `1 argument (${shape.parameter})${required === null ? "" : " and a 'default:'"}${shape.pair === undefined ? "" : ` or 2 (${shape.pair.join(", ")})`}`,
-        positional.length,
-      ),
-      span: call.span,
-    });
-  else if (required !== null && fallback === undefined)
-    problems.push({
-      kind: "argumentCount",
-      message: missingDefaultMessage(
-        `${name}(${shape.parameter}, default: value)`,
-        `for ${required}`,
-      ),
-      span: call.span,
-    });
+  const problem = callShapeProblem(name, shape, positional.length, [], fallback !== undefined);
+  if (problem !== undefined)
+    problems.push({ kind: "argumentCount", message: problem.message, span: call.span });
   return { problems, positional, fallback };
 }
 
@@ -610,6 +664,7 @@ function conversionProblems(
   conversion: Conversion,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
 ): OperationProblem[] {
   const { problems, positional, fallback } = shapedCall(name, conversion, call, typeOf);
   if (problems.length > 0) return problems;
@@ -619,7 +674,16 @@ function conversionProblems(
     if (conversion.pair !== undefined && positional.length === 2)
       problems.push(...pairProblems(name, conversion.pair, positional, typeOf));
     else {
-      const message = conversionProblem(name, conversion, value, type);
+      // Without a default, a run fails at any known text that does not convert. With one, the run gives the default,
+      // and only text written as a constant is an error (V30 §13).
+      const computed = known(value);
+      const text =
+        fallback !== undefined
+          ? staticVisibleText(value)
+          : typeof computed === "string"
+            ? computed
+            : undefined;
+      const message = conversionProblem(name, conversion, value, type, text);
       if (message !== undefined)
         problems.push({ kind: "invalidOperand", message, span: value.span });
     }
@@ -647,24 +711,10 @@ function conversionProblems(
 }
 
 /**
- * The file and hash functions of text (V30 §13, §33). The text or file is checked where they are called, but
- * `fileFromBase64` gives its default for text it cannot read.
+ * Problems with a call of a file or hash function of text (`FILE_TEXT_FUNCTIONS`): its shape, and text to read that can
+ * never be text. The text or file is checked where they are called, but `fileFromBase64` gives its default for text it
+ * cannot read.
  */
-const FILE_TEXT_FUNCTIONS: ReadonlyMap<string, CallShape> = new Map([
-  [
-    "fileFromBase64",
-    {
-      parameter: "text",
-      fallback: { required: "text that is not valid Base64", type: "any" },
-      files: false,
-    },
-  ],
-  ["fileToBase64", { parameter: "file", fallback: null, files: false }],
-  ["hashText", { parameter: "text", fallback: null, files: false }],
-  ["hashFile", { parameter: "file", fallback: null, files: false }],
-]);
-
-/** Problems with a call of a file or hash function of text: its shape, and text to read that can never be text. */
 function fileTextProblems(
   name: string,
   shape: CallShape,
@@ -700,19 +750,17 @@ function neverTextProblems(
 /** A value that is or may hold one that `toJson` cannot write (V30 §13). */
 function unwritableJsonProblems(value: Expression, type: StaticType): OperationProblem[] {
   let unwritable: StaticType | undefined;
+  let unwritableKind: ValueKind | undefined;
   containsType(type, (part) => {
-    if (
-      !SESSION_HANDLE_KINDS.has(part.kind) &&
-      part.kind !== "range" &&
-      !isScalar(part, "calendarDuration", "script", "regex")
-    )
-      return false;
+    const kind = valueKindOfType(part);
+    if (kind === undefined || VALUE_KINDS[kind].json !== null) return false;
     unwritable = part;
+    unwritableKind = kind;
     return true;
   });
-  if (unwritable === undefined) return [];
+  if (unwritable === undefined || unwritableKind === undefined) return [];
   const kind = describeValue(unwritable);
-  const reason = unwritableJsonReason(SESSION_HANDLE_KINDS.has(unwritable.kind));
+  const reason = unwritableJsonReason(unwritableKind);
   return [
     {
       kind: "invalidOperand",
@@ -725,25 +773,17 @@ function unwritableJsonProblems(value: Expression, type: StaticType): OperationP
   ];
 }
 
-/** The handles of what a script started or showed, which exist only in the current session. */
-const SESSION_HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
-  "timer",
-  "media",
-  "camera",
-  "permanentButton",
-  "messageHandle",
-]);
-
 /**
- * Problems with a function of numbers, such as a numeric function or `chance`: names it does not take, its number of
- * positional arguments, and arguments that are not numbers.
+ * Problems with a function of numbers or angles, such as a numeric or angle function or `chance`: names it does not
+ * take, its number of positional arguments, and arguments that are not of the kind it takes.
  */
 function numberArgumentProblems(
   name: string,
-  { parameters, named = [] }: NumberSignature,
+  signature: NumberSignature & { readonly result: unknown },
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
+  const { parameters, named = [] } = signature;
   const problems: OperationProblem[] = [];
   const values: [Expression, string][] = [];
   let positional = 0;
@@ -772,69 +812,36 @@ function numberArgumentProblems(
       span: call.span,
     });
   if (problems.length > 0) return problems;
+  const accepted = signature.takes === "angles" ? ANGLE_TYPE : NUMBER_TYPE;
   for (const [value, place] of values) {
     const type = typeOf(value);
-    if (!isAssignable(NUMBER_TYPE, type))
-      problems.push({
-        kind: "invalidOperand",
-        message: `${name}(...) needs a number${place}, not ${describeValue(forUse(type))}.${numberFix(forUse(type))}`,
-        span: value.span,
-      });
-  }
-  return problems;
-}
-
-/** How to turn text or an angle into the number a numeric function needs, or nothing for other values. */
-function numberFix(type: StaticType): string {
-  if (isScalar(type, "string")) return " Convert text with toNumber(...) first.";
-  return isScalar(type, "angle") ? " Convert it to a number of degrees with toDeg(...) first." : "";
-}
-
-/**
- * Problems with an angle function (V30 §13): names, its number of arguments, and arguments that are not of the kind it
- * takes. A plain number where an angle is needed names the unit to write.
- */
-function angleFunctionProblems(
-  name: string,
-  call: CallExpression,
-  typeOf: (expression: Expression) => StaticType,
-): OperationProblem[] {
-  const { parameters, takes } = ANGLE_FUNCTIONS.get(name)!;
-  const problems: OperationProblem[] = [];
-  const values: Expression[] = [];
-  for (const argument of call.arguments) {
-    if (argument.kind === "positionalArgument") values.push(argument.value);
-    else
-      problems.push({
-        kind: "unknownNamedArgument",
-        message: unknownNamedArgumentMessage(name, argument.name.name, []),
-        span: argument.name.span,
-      });
-  }
-  if (values.length !== parameters.length)
+    if (isAssignable(accepted, type)) continue;
+    const shown = forUse(type);
     problems.push({
-      kind: "argumentCount",
-      message: argumentCountMessage(name, argumentsTaken(parameters), values.length),
-      span: call.span,
+      kind: "invalidOperand",
+      message: numberArgumentMessage(
+        name,
+        signature,
+        describeValue(shown),
+        isScalar(shown, "integer", "number")
+          ? "number"
+          : isScalar(shown, "string")
+            ? "string"
+            : isScalar(shown, "angle")
+              ? "angle"
+              : "other",
+        place,
+      ),
+      span: value.span,
     });
-  if (problems.length > 0) return problems;
-  const accepted = takes === "angle" ? ANGLE_TYPE : NUMBER_TYPE;
-  for (const value of values) {
-    const type = forUse(typeOf(value));
-    if (!isAssignable(accepted, typeOf(value)))
-      problems.push({
-        kind: "invalidOperand",
-        message: angleArgumentMessage(
-          name,
-          takes,
-          describeValue(type),
-          isScalar(type, "integer", "number") ? "number" : isScalar(type, "string") ? "string" : "",
-        ),
-        span: value.span,
-      });
   }
   return problems;
 }
+
+/** The type of each kind of value that `min` and `max` compare, in the order of their contract. */
+const MIN_MAX_TYPES: readonly StaticType[] = LIST_FUNCTION_CONTRACTS.min.values.map(
+  (kind): StaticType => (kind === "number" ? NUMBER_TYPE : { kind: "scalar", name: kind }),
+);
 
 /**
  * Problems with `min` or `max`: two or more positional arguments that are all numbers or all durations. A possibly null
@@ -845,40 +852,26 @@ function minMaxProblems(
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
-  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
-  if (named !== undefined)
+  const named = call.arguments.filter((argument) => argument.kind === "namedArgument");
+  const problem = minMaxValuesProblem(
+    name,
+    call.arguments.length - named.length,
+    named.map((argument) => argument.name.name),
+  );
+  if (problem !== undefined)
     return [
       {
-        kind: "unknownNamedArgument",
-        message: unknownNamedArgumentMessage(name, named.name.name, []),
-        span: named.name.span,
-      },
-    ];
-  if (call.arguments.length < 2)
-    return [
-      {
-        kind: "argumentCount",
-        message: argumentCountMessage(name, MIN_MAX_TAKES, call.arguments.length),
-        span: call.span,
+        kind: problem.kind,
+        message: problem.message,
+        span: problem.kind === "unknownNamedArgument" ? named[0]!.name.span : call.span,
       },
     ];
   let family: StaticType | undefined;
   for (const argument of call.arguments) {
     const type = typeOf(argument.value);
     if (!isKnown(forUse(type))) continue;
-    // Numbers, durations, calendar durations, angles, or date and time values of one kind (V30 §35) compare with each
-    // other.
-    const kind = isAssignable(NUMBER_TYPE, type)
-      ? NUMBER_TYPE
-      : [
-          DURATION_TYPE,
-          CALENDAR_DURATION_TYPE,
-          ANGLE_TYPE,
-          DATE_TYPE,
-          TIME_TYPE,
-          DATETIME_TYPE,
-          ABSOLUTE_DATE_TIME_TYPE,
-        ].find((candidate) => isAssignable(candidate, type));
+    // Values of one kind that `min` and `max` compare (`LIST_FUNCTION_CONTRACTS`) compare with each other.
+    const kind = MIN_MAX_TYPES.find((candidate) => isAssignable(candidate, type));
     const message =
       kind === undefined
         ? `${name}(...) needs numbers, durations, angles, or date and time values, not ${describeValue(forUse(type))}.`
@@ -901,12 +894,13 @@ function conversionProblem(
   conversion: ValueConversion,
   value: Expression,
   type: StaticType,
+  text: string | undefined,
 ): string | undefined {
   const candidates = members(forUse(type)).map(resolved);
   if (candidates.length === 0 || candidates.some((candidate) => !isKnown(candidate)))
     return undefined;
   const problems = candidates.map((candidate) =>
-    candidateConversionProblem(name, conversion, value, candidate),
+    candidateConversionProblem(name, conversion, value, candidate, text),
   );
   return problems.every((problem) => problem !== undefined) ? problems[0] : undefined;
 }
@@ -916,13 +910,12 @@ function candidateConversionProblem(
   conversion: ValueConversion,
   value: Expression,
   type: StaticType,
+  text: string | undefined,
 ): string | undefined {
   const { kinds, result } = conversion;
-  if (kinds === "shown" ? type.kind === "scalar" || type.kind === "null" : isScalar(type, ...kinds))
-    return undefined;
+  if (kinds === "shown" ? isShown(type) : isScalar(type, ...kinds)) return undefined;
   if (isScalar(type, "string")) {
     // Text it can see converts as the runtime converts it, and does not convert with the runtime's text.
-    const text = staticVisibleText(value);
     return text === undefined || conversion.textProblem(text) === undefined
       ? undefined
       : cannotConvert(name, conversion, text);
@@ -932,7 +925,7 @@ function candidateConversionProblem(
     if (type.kind === "list" || type.kind === "dict") {
       const unjoinable = members(type.element)
         .map(resolved)
-        .find((member) => isKnown(member) && member.kind !== "scalar" && member.kind !== "null");
+        .find((member) => isKnown(member) && !isShown(member));
       if (unjoinable !== undefined)
         return `${name}(...) cannot convert ${describeValue(type)}, and ${type.kind === "list" ? ".join() cannot combine its elements" : ".values.join() cannot combine its values"}, which hold ${describeValue(unjoinable)}. Show the whole ${type.kind} with say, or select a value inside it that ${name}(...) converts.`;
     }
@@ -1031,13 +1024,6 @@ function argumentKind(type: StaticType): ArgumentKind {
     : null;
 }
 
-function codePointLength(text: string): number {
-  let length = 0;
-  for (let index = 0; index < text.length; index += text.codePointAt(index)! > 0xffff ? 2 : 1)
-    length += 1;
-  return length;
-}
-
 /**
  * The type an operation acts on: a possibly null value acts on its other members (V30 §34), and a value that is only
  * `null` stays `null`, so its misuse is still visible.
@@ -1058,17 +1044,6 @@ export function noteSharing<K>(writes: Map<K, Sharing>, name: K, how: Sharing): 
   if (writes.get(name) !== "assigns") writes.set(name, how);
 }
 
-/** The methods that change the list, set, or dict they are called on, and so the variable that holds it. */
-export const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
-  "add",
-  "addAll",
-  "remove",
-  "clear",
-  "removeAt",
-  "removeFirst",
-  "removeLast",
-]);
-
 /** The variable a place belongs to, such as `xs` for `xs[0].name`, or `null` for a place no variable holds. */
 export function rootName(expression: Expression): string | null {
   let node = expression;
@@ -1081,54 +1056,71 @@ export function rootName(expression: Expression): string | null {
   return node.kind === "identifier" ? node.name : null;
 }
 
-/** The list methods that search for a value: its first or last position, or how often it occurs (V30 §16). */
-export const LIST_SEARCHES: ReadonlySet<string> = new Set(["indexOf", "lastIndexOf", "count"]);
-
-/** The list methods that reorder a list in place, which a set, keeping its insertion order, does not have (V30 §16). */
-export const LIST_REORDERS: ReadonlySet<string> = new Set(["sort", "shuffle", "reverse"]);
-
 /**
- * The list methods that reorder a list in place, take part of it, search it, or read an element with a default, and
- * the set operations of lists and sets (V30 §16, ADR 0013).
- */
-export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
-  ...LIST_REORDERS,
-  "take",
-  "takeLast",
-  ...LIST_SEARCHES,
-  "get",
-  "intersection",
-  "union",
-  "difference",
-]);
-
-/**
- * The name of every method a value has: those of text (V30 §8), of lists, sets, and dicts (V30 §16), of timer and media
- * handles (V30 §22), of messages and permanent buttons, and of date and time values (V30 §35). Other values, such as
- * numbers, objects, and speakers, have none.
+ * The name of every method a value has: those of text (V30 §8), of lists and sets (V30 §16), of dicts (V30 §40), of
+ * handles (see `HANDLE_MEMBERS`), and of date and time values (V30 §35). Other values, such as numbers, objects, and
+ * speakers, have none.
  */
 const METHOD_NAMES: ReadonlySet<string> = new Set([
-  ...[...TEXT_MEMBERS.values()]
-    .filter((member) => member.parameters !== null)
-    .map(({ name }) => name),
-  LIST_JOIN.name,
-  ...COLLECTION_METHODS,
-  ...POSITIONAL_METHODS.keys(),
+  ...Object.keys(TEXT_METHODS),
+  ...Object.keys(LIST_METHODS),
+  ...Object.keys(DICT_METHODS),
+  ...handleMethodNames(),
+  ...Object.keys(TEMPORAL_METHODS),
 ]);
 
 /**
- * Argument names and the number of arguments of a method in `POSITIONAL_METHODS`, which every receiver with the method
- * rejects. Where the receiver may be a message or a permanent button (`removable`), `remove()` may have no argument.
+ * The method `name` as every receiver with it takes its arguments, all of them without a name: a method of lists and
+ * sets but `get` and `join`. A dict (see `DICT_METHODS`), a range, text, a message, and a permanent button take as many
+ * with the methods they share with lists, but a message and a permanent button take `remove()`.
+ */
+function positionalMethod(name: string): MethodParameters | undefined {
+  const method = listMethod(name);
+  return method !== undefined &&
+    !("named" in method && method.named !== undefined) &&
+    method.parameters!.every((parameter) => parameter.optional !== true)
+    ? method
+    : undefined;
+}
+
+/**
+ * Argument names and the number of arguments of a method that takes them without names (see `positionalMethod`), which
+ * every receiver with the method rejects. Where the receiver may be a message or a permanent button (`removable`),
+ * `remove()` may have no argument.
  */
 export function positionalMethodProblems(
   name: string,
   call: CallExpression,
   removable: boolean,
 ): OperationProblem[] {
-  const method = POSITIONAL_METHODS.get(name);
-  if (method === undefined) return [];
+  const method = positionalMethod(name);
+  return method === undefined ? [] : methodShapeProblems(method, call, removable);
+}
+
+/**
+ * Argument names and the number of arguments of a dict's method `name` (see `DICT_METHODS`) but `get`, which takes them
+ * without names, as `positionalMethodProblems` checks those of lists, for a dict in a union.
+ */
+export function dictMethodProblems(
+  name: string,
+  call: CallExpression,
+  removable: boolean,
+): OperationProblem[] {
+  const method = dictMethod(name);
+  return method === undefined || method.named !== undefined
+    ? []
+    : methodShapeProblems(method, call, removable);
+}
+
+/** Argument names and the number of arguments of `method`, which may be `remove()` where the receiver is `removable`. */
+function methodShapeProblems(
+  method: MethodParameters,
+  call: CallExpression,
+  removable: boolean,
+): OperationProblem[] {
   const problems = shapeProblems(method, call);
-  if (!removable || name !== "remove" || problems[0]?.kind !== "argumentCount") return problems;
+  if (!removable || method.name !== "remove" || problems[0]?.kind !== "argumentCount")
+    return problems;
   if (call.arguments.length === 0) return [];
   return [
     {
@@ -1144,140 +1136,101 @@ export function positionalMethodProblems(
 }
 
 /**
- * Compile-time problems with `sort`, `shuffle`, `reverse`, `take`, `takeLast`, a search, `get`, `intersection`,
- * `union`, or `difference` on a list or set: argument names and count, reordering, taking from, searching, or reading a
- * position of a set, elements `sort` cannot order, and a set operation's argument that is neither a list nor a set.
+ * Compile-time problems with a call of a method of lists and sets (see `LIST_METHODS`) on a list or set of a known
+ * type: a method its kind does not have, then the problems of `listArgumentProblems`.
  */
 export function collectionMethodProblems(
   name: string,
-  receiverType: StaticType & { readonly kind: "list" | "set" },
+  receiverType: StaticType & { readonly kind: ListKind },
   property: Identifier,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
+  removable = false,
 ): OperationProblem[] {
-  if (LIST_SEARCHES.has(name)) return searchProblems(name, receiverType, property, call);
-  if (name === "get") return getProblems(receiverType, property, call);
-  if (name === "take" || name === "takeLast")
-    return takeProblems(name, receiverType, property, call, typeOf);
-  const reorders = LIST_REORDERS.has(name);
-  if (reorders && receiverType.kind === "set")
+  const method = listMethod(name);
+  if (method === undefined || !method.receivers.includes(receiverType.kind))
     return [
       {
         kind: "invalidOperand",
-        message: `A set keeps its insertion order, so it has no ${name}(). Copy it into a list with toList() first.`,
+        message: missingListMethodMessage(receiverType.kind, name),
         span: property.span,
       },
     ];
-  const shape = positionalMethodProblems(name, call, false);
+  return listArgumentProblems(method, receiverType, property, call, typeOf, known, removable);
+}
+
+/**
+ * Compile-time problems with the arguments of a method of lists and sets, on a list or set of `receiverType`, or on a
+ * receiver of any type (`undefined`): their names and number (`get` takes a `default:`, as a dict's does), a count that is
+ * not a whole number of at least 0, a list or collection argument that is another value, and on a list elements `sort`
+ * cannot order. A list's index is checked as for `list[index]`, and the elements that `add` and `addAll` store as the
+ * list's other elements, by the type check.
+ */
+function listArgumentProblems(
+  method: ListMethod,
+  receiverType: (StaticType & { readonly kind: ListKind }) | undefined,
+  property: Identifier,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+  known: Known,
+  removable: boolean,
+): OperationProblem[] {
+  if (method.named !== undefined) return getProblems(receiverType, call);
+  const shape = methodShapeProblems(method, call, removable);
   if (shape.length > 0) return shape;
-  if (name === "sort") {
-    const message = sortProblem(receiverType.element);
-    return message === undefined ? [] : [{ kind: "invalidOperand", message, span: property.span }];
-  }
-  if (reorders) return [];
-  const argument = call.arguments[0]!.value;
-  const type = forUse(typeOf(argument));
-  // Every member of a union argument must be a list or a set (ADR 0021 rule 3.5).
-  const collections = members(type).every((member) => {
-    const value = resolved(member);
-    return !isKnown(value) || value.kind === "list" || value.kind === "set";
-  });
-  if (!collections)
-    return [
-      {
-        kind: "invalidOperand",
-        message: `${name}() needs a list or a set, not ${describeValue(type)}.${members(type).some((member) => resolved(member).kind === "range") ? RANGE_LIST_FIX : ""}`,
-        span: argument.span,
-      },
-    ];
-  return [];
+  // The shape fits, so each argument has its parameter.
+  const problems = call.arguments.flatMap((argument, position) =>
+    argumentKindProblems(method, method.parameters[position]!.kind, argument.value, typeOf, known),
+  );
+  if (method.name !== "sort" || receiverType === undefined) return problems;
+  const message = sortProblem(receiverType.element);
+  return message === undefined
+    ? problems
+    : [{ kind: "invalidOperand", message, span: property.span }];
 }
 
-/** Problems with `take` or `takeLast`: a list method of one count, a whole number of at least 0 (V30 §16). */
-function takeProblems(
-  name: string,
-  receiverType: (StaticType & { readonly kind: "list" | "set" }) | undefined,
-  property: Identifier,
-  call: CallExpression,
+/** Problems with one argument of a list method for a parameter of `kind`: a count, a list, or a collection. */
+function argumentKindProblems(
+  method: ListMethod,
+  kind: ListParameterKind,
+  argument: Expression,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
 ): OperationProblem[] {
-  if (receiverType?.kind === "set")
-    return [
-      {
-        kind: "invalidOperand",
-        message: `A set has no ${name}(). Copy it into a list with toList() first.`,
-        span: property.span,
-      },
-    ];
-  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
-  if (named !== undefined)
-    return [
-      {
-        kind: "unknownNamedArgument",
-        message: unknownNamedArgumentMessage(name, named.name.name, []),
-        span: named.name.span,
-      },
-    ];
-  if (call.arguments.length !== 1)
-    return [
-      {
-        kind: "argumentCount",
-        message: methodArgumentCountMessage(LIST_ONLY_METHODS.get(name)!, call.arguments.length),
-        span: call.span,
-      },
-    ];
-  const count = call.arguments[0]!.value;
-  const type = typeOf(count);
-  const nullable = nullCheckProblem(count, type, INTEGER_TYPE);
-  if (nullable !== undefined) return [nullable];
-  const known = staticNumber(count);
-  // The first kind the count may be that is not a whole number, such as the number in `number?`.
-  const other = members(type).find((member) => !isAssignable(INTEGER_TYPE, member));
-  const message =
-    other !== undefined
-      ? `${name}() needs a whole number (integer), not ${describeValue(other)}.`
-      : known !== undefined && known < 0
-        ? `${name}() needs a whole number of at least 0, not ${known}.`
-        : undefined;
-  return message === undefined ? [] : [{ kind: "invalidOperand", message, span: count.span }];
-}
-
-/** Problems with `indexOf`, `lastIndexOf`, or `count`: a list method of one value of any type (V30 §16). */
-function searchProblems(
-  name: string,
-  receiverType: (StaticType & { readonly kind: "list" | "set" }) | undefined,
-  property: Identifier,
-  call: CallExpression,
-): OperationProblem[] {
-  if (receiverType?.kind === "set")
-    return [
-      {
-        kind: "invalidOperand",
-        message:
-          name === "count"
-            ? "A set holds each member once, so it has no count(). Use contains(...) instead."
-            : `A set has no positions, so it has no ${name}(). Copy it into a list with toList() first.`,
-        span: property.span,
-      },
-    ];
-  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
-  if (named !== undefined)
-    return [
-      {
-        kind: "unknownNamedArgument",
-        message: unknownNamedArgumentMessage(name, named.name.name, []),
-        span: named.name.span,
-      },
-    ];
-  if (call.arguments.length !== 1)
-    return [
-      {
-        kind: "argumentCount",
-        message: methodArgumentCountMessage(LIST_ONLY_METHODS.get(name)!, call.arguments.length),
-        span: call.span,
-      },
-    ];
-  return [];
+  const problem = (message: string): OperationProblem[] => [
+    { kind: "invalidOperand", message, span: argument.span },
+  ];
+  if (kind === "count") {
+    const type = typeOf(argument);
+    const nullable = nullCheckProblem(argument, type, INTEGER_TYPE);
+    if (nullable !== undefined) return [nullable];
+    // The first kind the count may be that is not a whole number, such as the number in `number?`.
+    const other = members(type).find((member) => !isAssignable(INTEGER_TYPE, member));
+    if (other !== undefined)
+      return problem(listArgumentMessage(method.name, "count", describeValue(other), "other"));
+    const count = known(argument);
+    const message = typeof count === "number" ? countProblem(method.name, count) : undefined;
+    return message === undefined ? [] : problem(message);
+  }
+  if (kind !== "list" && kind !== "collection") return [];
+  // Every member of a union argument must be a list, or a list or a set (ADR 0021 rule 3.5).
+  const type = forUse(typeOf(argument));
+  const kinds = members(type).map((member) => resolved(member));
+  const fits = kinds.every(
+    (member) =>
+      !isKnown(member) ||
+      member.kind === "list" ||
+      (kind === "collection" && member.kind === "set"),
+  );
+  if (fits) return [];
+  const other =
+    kind === "list" && kinds.some((member) => member.kind === "set")
+      ? "set"
+      : kinds.some((member) => member.kind === "range")
+        ? "range"
+        : "other";
+  return problem(listArgumentMessage(method.name, kind, describeValue(type), other));
 }
 
 /**
@@ -1286,18 +1239,9 @@ function searchProblems(
  * `list[index]`.
  */
 function getProblems(
-  receiverType: (StaticType & { readonly kind: "list" | "set" }) | undefined,
-  property: Identifier,
+  receiverType: (StaticType & { readonly kind: ListKind }) | undefined,
   call: CallExpression,
 ): OperationProblem[] {
-  if (receiverType?.kind === "set")
-    return [
-      {
-        kind: "invalidOperand",
-        message: "A set has no positions, so it has no 'get()'. Use 'contains(...)' instead.",
-        span: property.span,
-      },
-    ];
   const named = call.arguments.filter((argument) => argument.kind === "namedArgument");
   const problem = getArgumentsProblem(
     receiverType === undefined ? "either" : "list",
@@ -1316,19 +1260,6 @@ function getProblems(
     },
   ];
 }
-
-/**
- * The kinds of speakers and of handles to what a script started or showed, which no literal can write. Every copy of
- * one names the same speaker or handle, so a change through any copy reaches it.
- */
-export const HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
-  "timer",
-  "media",
-  "camera",
-  "permanentButton",
-  "messageHandle",
-  "speaker",
-]);
 
 /**
  * The message for a value that may be of a member type an operation does not support, naming the test that makes it
@@ -1361,7 +1292,7 @@ export function mayBeMessage(
  * media, has no value to write as a fallback, so it gets none.
  */
 export function fallbackFix(label: string, passing: readonly StaticType[]): string {
-  if (passing.some((type) => HANDLE_KINDS.has(resolved(type).kind))) return "";
+  if (passing.some(isIdentityType)) return "";
   const every = (...names: ScalarTypeName[]) =>
     passing.length > 0 && passing.every((type) => isScalar(type, ...names));
   const value = every("integer", "number")
@@ -1398,35 +1329,19 @@ function nullCheckProblem(
   };
 }
 
-/** Why elements of `element` type cannot be sorted, or `undefined` when they can or may. */
+/** Why elements of `element` type cannot be sorted, or `undefined` when they can or may: one ordered family only. */
 function sortProblem(element: StaticType): string | undefined {
   const candidates = members(element).map(resolved);
   if (candidates.some((candidate) => !isKnown(candidate))) return undefined;
-  const kindOf = (candidate: StaticType): string | undefined =>
-    isScalar(candidate, "integer", "number")
-      ? "numbers"
-      : isScalar(candidate, "string")
-        ? "text"
-        : isScalar(candidate, "duration")
-          ? "durations"
-          : isScalar(candidate, "calendarDuration")
-            ? "calendar durations"
-            : isScalar(candidate, "angle")
-              ? "angles"
-              : isScalar(candidate, "date")
-                ? "dates"
-                : isScalar(candidate, "time")
-                  ? "times"
-                  : isScalar(candidate, "datetime")
-                    ? "dates and times"
-                    : isScalar(candidate, "absoluteDateTime")
-                      ? "absolute dates and times"
-                      : undefined;
-  const unsortable = candidates.find((candidate) => kindOf(candidate) === undefined);
+  const familyOfType = (candidate: StaticType): OrderedFamily | undefined => {
+    const kind = valueKindOfType(candidate);
+    return kind === undefined ? undefined : orderedFamily(kind);
+  };
+  const unsortable = candidates.find((candidate) => familyOfType(candidate) === undefined);
   if (unsortable !== undefined)
     return `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeValue(unsortable)}.`;
-  const kinds = new Set(candidates.map(kindOf));
-  return kinds.size > 1
-    ? `sort() needs elements of one kind, but this list may hold ${[...kinds].join(" and ")}.`
+  const families = new Set(candidates.map(familyOfType));
+  return families.size > 1
+    ? `sort() needs elements of one kind, but this list may hold ${[...families].map((family) => VALUE_KINDS[family!].plural).join(" and ")}.`
     : undefined;
 }

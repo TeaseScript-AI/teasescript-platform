@@ -11,14 +11,18 @@ export interface MessagePresentation {
   readonly font: string | null;
 }
 
+/** The options of each mode of a message: `color`, `background`, `font`, and with `prose` also `position` and `align`. */
+export const MESSAGE_PRESENTATION_OPTIONS = {
+  bubble: ["color", "background", "font"],
+  prose: ["color", "background", "font", "position", "align"],
+} as const satisfies Readonly<Record<MessagePresentation["kind"], readonly string[]>>;
+
 export function isMessagePresentationOption(
   kind: MessagePresentation["kind"],
   name: string,
 ): boolean {
-  return (
-    ["color", "background", "font"].includes(name) ||
-    (kind === "prose" && ["position", "align"].includes(name))
-  );
+  const options: readonly string[] = MESSAGE_PRESENTATION_OPTIONS[kind];
+  return options.includes(name);
 }
 
 export function isMessagePresentation(value: unknown): value is MessagePresentation {

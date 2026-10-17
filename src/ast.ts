@@ -1,5 +1,6 @@
 import type { ANGLE_UNITS, CALENDAR_DURATION_UNITS, DURATION_UNITS } from "./language-facts.js";
 import type { SourceSpan } from "./source.js";
+import type { ScalarKind, WrittenKind } from "./value-kinds.js";
 
 export interface Program {
   readonly kind: "program";
@@ -475,36 +476,14 @@ export interface GlobalStatement {
   readonly span: SourceSpan;
 }
 
-export type ScalarTypeName =
-  | "string"
-  | "boolean"
-  | "integer"
-  | "number"
-  | "date"
-  | "time"
-  | "datetime"
-  | "absoluteDateTime"
-  | "duration"
-  | "calendarDuration"
-  | "angle"
-  | "script"
-  | "regex";
+/** A scalar type name (`ScalarKind` in `value-kinds.ts`). */
+export type ScalarTypeName = ScalarKind;
 
 /**
- * A type name: a scalar type, `null`, any `list`, `set`, `dict`, or `object`, or a program-control type (ADR 0021).
+ * A type name: a scalar type, `null`, any `list`, `set`, `dict`, or `object`, or a program-control type (ADR 0021): every
+ * kind that an annotation writes by name (`WrittenKind` in `value-kinds.ts`).
  */
-export type TypeName =
-  | ScalarTypeName
-  | "null"
-  | "list"
-  | "set"
-  | "dict"
-  | "object"
-  | "range"
-  | "speaker"
-  | "timer"
-  | "media"
-  | "messageHandle";
+export type TypeName = WrittenKind;
 
 /** A written type: a name, `T[]`, `T set`, `T dict`, `T?`, or a union `A | B`. Parentheses only group. */
 export type TypeAnnotation = NamedType | CollectionType | OptionalType | UnionType;

@@ -559,7 +559,7 @@ test("fileToBase64 and hashFile need a stored file this session knows", () => {
     ],
     [
       'fileToBase64(fromJson("1", default: null))',
-      `fileToBase64(...) reads a stored file, not a number. ${pass}`,
+      `fileToBase64(...) reads a stored file, not a whole number (integer). ${pass}`,
     ],
     // A package path is a file of the package, not a stored file.
     [
@@ -568,7 +568,7 @@ test("fileToBase64 and hashFile need a stored file this session knows", () => {
     ],
     [
       'hashFile(fromJson("1", default: null))',
-      `hashFile(...) hashes a stored file, not a number. ${pass}`,
+      `hashFile(...) hashes a stored file, not a whole number (integer). ${pass}`,
     ],
   ] as const) {
     const played = play(`let data = ${call}\nexit`);

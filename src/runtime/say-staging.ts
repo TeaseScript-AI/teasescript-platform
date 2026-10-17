@@ -1,99 +1,41 @@
 import { isConversion } from "../conversions.js";
+import { isAnyHandleMethod } from "../handle-members.js";
+import { isListFunction } from "../list-function-rules.js";
+import { isDictMethod, onlyReadsDict } from "../dict-operations.js";
+import { isListMethod, onlyReadsList } from "../list-methods.js";
+import { isNumericFunction } from "../numeric-functions.js";
 import { isRandomFunction } from "../random-functions.js";
+import { isClockFunction, isTemporalMethod } from "../temporal-builtins.js";
+import { isTextOnlyMethod } from "../text-operations.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import type { ExpressionPlan, SayInstruction } from "../plan/model.js";
 
 /**
- * Engine functions that only read copies of their arguments and the scene clock, and return a new value; so do the
- * conversions and the random functions, apart from drawing from the session generator (see `Conversion` and
- * `RandomFunction`). A host built-in runs code the engine has not checked, so it is not listed.
+ * Engine functions that only read copies of their arguments and return a new value; so do the conversions, the numeric
+ * and angle functions, the list functions, and the random functions, apart from drawing from the session generator, and
+ * the clock reads, which read the session clock (see `Conversion`, `NumericFunction`, `ListFunction`, `RandomFunction`,
+ * and `ClockFunction`). A host built-in runs code the engine has not checked, so it is not listed.
  */
-const READING_FUNCTIONS: ReadonlySet<string> = new Set([
-  "hashText",
-  "round",
-  "floor",
-  "ceil",
-  "min",
-  "max",
-  "abs",
-  "sqrt",
-  "pow",
-  "sign",
-  "mod",
-  "clamp",
-  "exp",
-  "ln",
-  "log10",
-  "sin",
-  "cos",
-  "tan",
-  "asin",
-  "acos",
-  "atan",
-  "atan2",
-  "toDeg",
-  "toRad",
-  "sum",
-  "average",
-  "median",
-  "percentile",
-  "stddev",
-  "linearRegression",
-  "predict",
-  "getDate",
-  "getTime",
-  "getDateTime",
-  "getAbsoluteDateTime",
-  "script",
-  "escapeMarkup",
-]);
+const READING_FUNCTIONS: ReadonlySet<string> = new Set(["hashText", "script", "escapeMarkup"]);
 
 /**
- * Methods that only read their receiver and arguments on every value that has a method of that name: lists, sets,
- * dicts, text, and date and time values. A name that changes its receiver on any of them, such as `reverse`, which
- * reverses a list in place, is not listed, nor is any method of a timer, media, button, or message handle.
+ * Whether a call of the method `name` only reads its receiver and arguments, whatever value it is called on: every
+ * method of text and of date and time values does (see `TextMethod` and `TemporalMethod`), and no other value has a
+ * method of a date and time value's name; a method of lists and sets or of dicts (see `LIST_METHODS` and
+ * `DICT_METHODS`) does where it only reads each of them that has it, and then also only reads text or a range that has
+ * a method of its name. A method of a handle changes the handle (see `HandleMethod`), so no name of one is a reading
+ * method.
  */
-const READING_METHODS: ReadonlySet<string> = new Set([
-  "contains",
-  "indexOf",
-  "lastIndexOf",
-  "count",
-  "get",
-  "toSet",
-  "toList",
-  "take",
-  "takeLast",
-  "intersection",
-  "union",
-  "difference",
-  "join",
-  "startsWith",
-  "endsWith",
-  "matches",
-  "find",
-  "capture",
-  "findAll",
-  "substring",
-  "split",
-  "replace",
-  "trim",
-  "trimStart",
-  "trimEnd",
-  "uppercase",
-  "lowercase",
-  "uppercaseFirst",
-  "repeat",
-  "padStart",
-  "padEnd",
-  "toISO",
-  "formatDate",
-  "formatTime",
-  "formatDateTime",
-  "toDateTime",
-  "toAbsoluteDateTime",
-  "toSeconds",
-  "toMilliseconds",
-]);
+export function isReadingMethod(name: string): boolean {
+  return (
+    !isAnyHandleMethod(name) &&
+    (isTextOnlyMethod(name) ||
+      isTemporalMethod(name) ||
+      ((isListMethod(name) || isDictMethod(name)) &&
+        (!isListMethod(name) || onlyReadsList(name)) &&
+        (!isDictMethod(name) || onlyReadsDict(name))))
+  );
+}
 
 const selectiveSays = new WeakMap<SayInstruction, boolean>();
 
@@ -132,8 +74,11 @@ function changesOnlyGenerator(root: ExpressionPlan): boolean {
           node.callee.kind === "identifier"
             ? !READING_FUNCTIONS.has(node.callee.name) &&
               !isConversion(node.callee.name) &&
-              !isRandomFunction(node.callee.name)
-            : node.callee.kind !== "property" || !READING_METHODS.has(node.callee.name)
+              !isListFunction(node.callee.name) &&
+              !isNumericFunction(node.callee.name) &&
+              !isRandomFunction(node.callee.name) &&
+              !isClockFunction(node.callee.name)
+            : node.callee.kind !== "property" || !isReadingMethod(node.callee.name)
         )
           return false;
         break;

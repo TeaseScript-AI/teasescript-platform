@@ -4,26 +4,52 @@ import { compareAngles } from "../angle.js";
 import { compareDurations, durationFamily, durationParts } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
-import { MAX_COLLECTION_LENGTH } from "./collection-size.js";
+import { getArgumentsProblem } from "../argument-rules.js";
+import {
+  countProblem,
+  LIST_METHODS,
+  listArgumentMessage,
+  type ListKind,
+  type ListMethod,
+} from "../list-methods.js";
+import type { ReadingDictMethod } from "../dict-operations.js";
+import { LIST_JOIN } from "../text-operations.js";
+import { checkCollectionLength, MAX_COLLECTION_LENGTH } from "./collection-size.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
-import { valueKey, type SerializableRuntimeValue } from "./serializable-values.js";
-import { compareTemporal } from "./temporal-operations.js";
-import { groupedDigits } from "./text-length.js";
 import {
-  describeRuntimeValue,
+  createCapturedSerializableList,
+  createCapturedSerializableSet,
+  getSerializableDictEntry,
+  serializableEquals,
+  serializableSetContains,
+  valueKey,
+  type SerializableRuntimeDict,
+  type SerializableRuntimeList,
+  type SerializableRuntimeSet,
+  type SerializableRuntimeValue,
+} from "./serializable-values.js";
+import { checkTextArguments } from "./string-operations.js";
+import { compareTemporal } from "./temporal-operations.js";
+import { checkTextLength, groupedDigits } from "./text-length.js";
+import {
   isAngle,
   isAnyDuration,
   isCalendarDuration,
-  isDuration,
+  isList,
   isRange,
+  isSet,
   isTemporal,
 } from "./value-predicates.js";
+import {
+  describeValue,
+  orderedFamily,
+  VALUE_KINDS,
+  valueKindOf,
+  type OrderedFamily,
+} from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
-
-/** The set operations of lists and sets (V30 §16, ADR 0013). */
-export const SET_OPERATIONS: ReadonlySet<string> = new Set(["intersection", "union", "difference"]);
 
 /**
  * The ascending, stable order of sortable list items as their old indexes: numbers (integers and numbers together),
@@ -31,32 +57,19 @@ export const SET_OPERATIONS: ReadonlySet<string> = new Set(["intersection", "uni
  * the same kind; dates, times, datetimes, and absolute dates and times are four kinds (V30 §35).
  */
 export function sortOrder(items: readonly SerializableRuntimeValue[], span: SourceSpan): number[] {
-  let kind: keyof typeof KIND_DESCRIPTIONS | undefined;
+  let kind: OrderedFamily | undefined;
   for (const item of items) {
-    const itemKind =
-      typeof item === "number"
-        ? "number"
-        : typeof item === "string"
-          ? "text"
-          : isDuration(item)
-            ? "duration"
-            : isCalendarDuration(item)
-              ? "calendarDuration"
-              : isAngle(item)
-                ? "angle"
-                : isTemporal(item)
-                  ? item.kind
-                  : undefined;
+    const itemKind = orderedFamily(valueKindOf(item));
     if (itemKind === undefined)
       throw fault(
         "TSR060",
-        `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeRuntimeValue(item)}.`,
+        `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeValue(item)}.`,
         span,
       );
     if (kind !== undefined && itemKind !== kind)
       throw fault(
         "TSR060",
-        `sort() needs elements of one kind, but this list has ${KIND_DESCRIPTIONS[kind]} and ${KIND_DESCRIPTIONS[itemKind]}.`,
+        `sort() needs elements of one kind, but this list has ${VALUE_KINDS[kind].plural} and ${VALUE_KINDS[itemKind].plural}.`,
         span,
       );
     kind = itemKind;
@@ -93,18 +106,6 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
     .sort((left, right) => compare(items[left]!, items[right]!) || left - right);
 }
 
-const KIND_DESCRIPTIONS = {
-  number: "numbers",
-  text: "text",
-  duration: "durations",
-  calendarDuration: "calendar durations",
-  angle: "angles",
-  date: "dates",
-  time: "times",
-  datetime: "dates and times",
-  absoluteDateTime: "absolute dates and times",
-} as const;
-
 function sortKey(value: SerializableRuntimeValue): number {
   return typeof value === "number" ? value : 0;
 }
@@ -124,7 +125,7 @@ function compareCodePoints(left: string, right: string): number {
  * The elements of `intersection`, `union`, or `difference`, each once, in the receiver's order; `union` then adds the
  * argument's new elements in its order. Elements compare with the language's `==`.
  */
-export function setOperationItems(
+function setOperationItems(
   name: string,
   receiver: readonly SerializableRuntimeValue[],
   argument: readonly SerializableRuntimeValue[],
@@ -163,8 +164,183 @@ class ValueIndex {
   }
 }
 
-/** The fix for a range where a list is needed, as for a set (V30 §6). */
-export const RANGE_LIST_FIX = " Make a list of its numbers with toList() first.";
+/**
+ * A call of a method of a dict that only reads it (`onlyReadsDict`) with a text key: whether the dict has the key, or
+ * the key's value, the dict's own, or `undefined` where `get` gives its default. A stored null is a value, so only a
+ * missing key gives the default. The evaluator runs it, and the compiler computes known values with it.
+ */
+export function readDict(
+  receiver: SerializableRuntimeDict,
+  name: ReadingDictMethod,
+  key: string,
+): SerializableRuntimeValue | undefined {
+  const entry = getSerializableDictEntry(receiver, key);
+  switch (name) {
+    case "contains":
+      return entry !== undefined;
+    case "get":
+      return entry?.value;
+    default: {
+      const unhandled: never = name;
+      throw new Error(`Dict method '${String(unhandled)}' has no reading implementation.`);
+    }
+  }
+}
+
+/**
+ * A call of a method of a list or set that only reads it (`onlyReadsList`), with as many arguments as it takes: its
+ * result, or `undefined` when a list's `get` gives its `default:`, which `defaulted` says the call has and `named`
+ * leaves out. `text` shows an element as `join` joins it. The evaluator runs it, and the compiler computes known values
+ * with it.
+ */
+export function readCollection(
+  receiver: SerializableRuntimeList | SerializableRuntimeSet,
+  name: string,
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  defaulted: boolean,
+  span: SourceSpan,
+  text: (item: SerializableRuntimeValue) => string,
+): SerializableRuntimeValue | undefined {
+  if (isSet(receiver))
+    switch (name) {
+      case "contains":
+        return serializableSetContains(receiver, positional[0]!);
+      case "toList":
+        return createCapturedSerializableList(receiver.items);
+      case "intersection":
+      case "union":
+      case "difference":
+        return createCapturedSerializableSet(
+          setOperation("set", name, receiver.items, positional[0]!, span),
+        );
+      default:
+        throw new Error(`Set method '${name}' has no reading implementation.`);
+    }
+  switch (name) {
+    case "contains":
+      return findValue(receiver.items, positional[0]!) >= 0;
+    // A value that no element equals has no position: null (#840).
+    case "indexOf":
+    case "lastIndexOf": {
+      const index = findValue(receiver.items, positional[0]!, name === "lastIndexOf");
+      return index < 0 ? null : index;
+    }
+    case "count": {
+      let count = 0;
+      for (const item of receiver.items) if (serializableEquals(item, positional[0]!)) count += 1;
+      return count;
+    }
+    // A value that is not a position of the list, such as a negative or fractional index, text, or null, gives the
+    // default (#844).
+    case "get": {
+      const problem = getArgumentsProblem("list", positional.length, [
+        ...Object.keys(named),
+        ...(defaulted ? ["default"] : []),
+      ]);
+      if (problem !== undefined) throw fault("TSR028", problem.message, span);
+      const index = positional[0]!;
+      return typeof index === "number" &&
+        Number.isInteger(index) &&
+        index >= 0 &&
+        index < receiver.items.length
+        ? receiver.items[index]!
+        : undefined;
+    }
+    case "toSet":
+      return createCapturedSerializableSet(receiver.items);
+    case "take":
+    case "takeLast": {
+      const count = positional[0]!;
+      if (typeof count !== "number")
+        throw fault(
+          "TSR057",
+          listArgumentMessage(name, "count", describeValue(count), "other"),
+          span,
+        );
+      const problem = countProblem(name, count);
+      if (problem !== undefined) throw fault("TSR057", problem, span);
+      // A count beyond the length takes the whole list.
+      return createCapturedSerializableList(
+        name === "take"
+          ? receiver.items.slice(0, count)
+          : receiver.items.slice(Math.max(0, receiver.items.length - count)),
+      );
+    }
+    case "intersection":
+    case "union":
+    case "difference":
+      return createCapturedSerializableList(
+        setOperation("list", name, receiver.items, positional[0]!, span),
+      );
+    case "join": {
+      checkTextArguments(LIST_JOIN, positional, span);
+      // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
+      const separator = (positional[0] as string | undefined) ?? ", ";
+      let length = separator.length * Math.max(0, receiver.items.length - 1);
+      const texts = receiver.items.map((item) => {
+        const shown = text(item);
+        length += shown.length;
+        return shown;
+      });
+      checkTextLength(length, "join", span);
+      return texts.join(separator);
+    }
+    default:
+      throw new Error(`List method '${name}' has no reading implementation.`);
+  }
+}
+
+/** The index of the first element equal to `value`, or with `last` of the last one; -1 when there is none. */
+export function findValue(
+  items: readonly SerializableRuntimeValue[],
+  value: SerializableRuntimeValue,
+  last = false,
+): number {
+  // A scalar equals only the same scalar, as strict equality compares it; runtime numbers are never NaN.
+  if (value === null || typeof value !== "object")
+    return last ? items.lastIndexOf(value) : items.indexOf(value);
+  for (let step = 0; step < items.length; step += 1) {
+    const index = last ? items.length - 1 - step : step;
+    if (serializableEquals(items[index]!, value)) return index;
+  }
+  return -1;
+}
+
+/**
+ * The elements of `intersection`, `union`, or `difference` of the `items` of a list or set of `kind` and `argument`,
+ * which may be a list or a set whatever the receiver is.
+ */
+function setOperation(
+  kind: ListKind,
+  name: "intersection" | "union" | "difference",
+  items: readonly SerializableRuntimeValue[],
+  argument: SerializableRuntimeValue,
+  span: SourceSpan,
+): SerializableRuntimeValue[] {
+  if (!isList(argument) && !isSet(argument))
+    throw fault(
+      "TSR060",
+      listArgumentMessage(
+        name,
+        "collection",
+        describeValue(argument),
+        isRange(argument) ? "range" : "other",
+      ),
+      span,
+    );
+  const result = setOperationItems(name, items, argument.items);
+  const method: ListMethod = LIST_METHODS[name];
+  if (method.grows === true)
+    checkCollectionLength(
+      kind,
+      result.length,
+      Math.max(items.length, argument.items.length),
+      `${name}(...)`,
+      span,
+    );
+  return result;
+}
 
 /**
  * Whether `toList()` on the range of whole numbers from `start` to `end` gives more numbers than a list can hold
@@ -180,11 +356,6 @@ export function rangeListLengthProblem(
   if (length <= MAX_COLLECTION_LENGTH) return null;
   const range = `${withoutNegativeZero(start)}${inclusive ? "..=" : ".."}${withoutNegativeZero(end)}`;
   return `toList() can make a list of at most ${groupedDigits(MAX_COLLECTION_LENGTH)} numbers, but ${range} holds ${groupedDigits(length)}. Use a smaller range.`;
-}
-
-/** A text for a set operation's argument that is neither a list nor a set. */
-export function setOperationArgumentMessage(name: string, value: SerializableRuntimeValue): string {
-  return `${name}() needs a list or a set, not ${describeRuntimeValue(value)}.${isRange(value) ? RANGE_LIST_FIX : ""}`;
 }
 
 function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {

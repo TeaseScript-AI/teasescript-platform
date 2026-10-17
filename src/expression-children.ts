@@ -307,3 +307,17 @@ export function expressionParts(expression: Expression): readonly Expression[] {
 function showButtonOperands(parts: ShowButtonParts): readonly Expression[] {
   return [parts.label, ...showButtonOptions(parts).map((option) => option.value)];
 }
+
+/** The expression inside any parentheses around it. */
+export function unwrap(expression: Expression): Expression {
+  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
+  return expression;
+}
+
+/** The text of a string literal without interpolation, or `undefined`. */
+export function staticText(expression: Expression): string | undefined {
+  const literal = unwrap(expression);
+  if (literal.kind !== "stringLiteral" || literal.parts.some((part) => part.kind !== "stringText"))
+    return undefined;
+  return literal.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("");
+}

@@ -1,14 +1,35 @@
 import type { RuntimeErrorCode } from "../diagnostic-codes.js";
-import { angleStatisticMessage, angleValue } from "../angle.js";
+import { angleStatisticMessage, angleValue, compareAngles } from "../angle.js";
 import { argumentShapeProblem, type ArgumentShape } from "../argument-rules.js";
-import { exactDuration } from "../duration.js";
-import { LIST_FUNCTION_SHAPES } from "../list-function-rules.js";
-import { percentageFailure } from "../numeric-functions.js";
+import { withoutNegativeZero } from "../conversions.js";
+import {
+  compareDurations,
+  durationFamily,
+  durationParts,
+  exactDuration,
+  isCalendar,
+} from "../duration.js";
+import type { ListFunctionName } from "../language-facts.js";
+import {
+  fewestValuesProblem,
+  isStatistic,
+  LIST_FUNCTION_CONTRACTS,
+  listFunctionShape,
+  listValueMessage,
+  minMaxValuesProblem,
+  mixedListValuesMessage,
+  takesValues,
+  type ListFunction,
+  listValueKind,
+  type ListValueKind,
+  type MinMaxName,
+  type StatisticName,
+} from "../list-function-rules.js";
 import { RANDOM_CONTRACTS } from "../random-functions.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { dateTimeMilliseconds, daysBetween } from "../temporal.js";
-import { RANGE_LIST_FIX } from "./collection-operations.js";
+import { RANGE_LIST_FIX } from "../list-methods.js";
 import { RuntimeFault } from "./errors.js";
 import {
   add,
@@ -30,30 +51,23 @@ import {
   type SerializableRuntimeTemporal,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
+import { compareTemporal } from "./temporal-operations.js";
 import {
-  describeRuntimeValue,
   isAngle,
+  isAnyDuration,
   isDict,
-  isCalendarDuration,
   isDuration,
   isList,
   isObject,
   isRange,
   isTemporal,
 } from "./value-predicates.js";
+import { describeValue, familyOf, VALUE_KINDS, valueKindOf } from "../value-kinds.js";
+import { isTemporalKind } from "../temporal-builtins.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 type Named = Readonly<Record<string, SerializableRuntimeValue>>;
-
-/** The statistics of a list (V30 §16), each with the fewest values it needs. */
-export const LIST_STATISTICS: ReadonlyMap<string, number> = new Map([
-  ["sum", 1],
-  ["average", 1],
-  ["median", 1],
-  ["percentile", 1],
-  ["stddev", 2],
-]);
 
 const MS_PER_DAY = 86_400_000;
 
@@ -61,7 +75,7 @@ const MS_PER_DAY = 86_400_000;
  * The values a statistic of `list` reads: its elements, or with `by` the property of that name of each element, which
  * must then all be objects.
  */
-export function listValues(
+function listValues(
   name: string,
   list: SerializableRuntimeValue,
   by: SerializableRuntimeValue | undefined,
@@ -70,7 +84,7 @@ export function listValues(
   if (!isList(list))
     throw fault(
       "TSR059",
-      `${name}(...) needs a list, not ${describeRuntimeValue(list)}.${isRange(list) ? RANGE_LIST_FIX : ""}`,
+      `${name}(...) needs a list, not ${describeValue(list)}.${isRange(list) ? RANGE_LIST_FIX : ""}`,
       span,
     );
   if (by === undefined) return list.items;
@@ -88,13 +102,13 @@ function propertyValue(
   if (typeof property !== "string")
     throw fault(
       "TSR059",
-      `${name}(...) needs the name of a property as its ${option}:, not ${describeRuntimeValue(property)}.`,
+      `${name}(...) needs the name of a property as its ${option}:, not ${describeValue(property)}.`,
       span,
     );
   if (!isObject(item))
     throw fault(
       "TSR060",
-      `${name}(...) needs a list of objects for ${option}:, not a list that holds ${describeRuntimeValue(item)}.`,
+      `${name}(...) needs a list of objects for ${option}:, not a list that holds ${describeValue(item)}.`,
       span,
     );
   const found = item.properties.find((entry) => entry.name === property);
@@ -118,59 +132,68 @@ type Amounts =
  * average, or interpolate (ADR 0026), and an angle wraps around at 360°, so only `sum` takes angles.
  */
 function amountsOf(
-  name: string,
+  name: StatisticName | "linearRegression",
   values: readonly SerializableRuntimeValue[],
   span: SourceSpan,
 ): Amounts {
-  const numbers = values.filter((value) => typeof value === "number");
-  if (numbers.length === values.length) return { kind: "numbers", values: numbers };
-  const angles = name === "sum";
-  if (!angles && values.some(isAngle)) throw fault("TSR060", angleStatisticMessage(name), span);
-  const other = values.find(
-    (value) => typeof value !== "number" && !isDuration(value) && !isAngle(value),
-  );
+  const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
+  const kinds = contract.takes === "line" ? [] : contract.values;
+  switch (listValuesKind(name, values, kinds, span)) {
+    case "angle":
+      return { kind: "angles", values: values.filter(isAngle).map((value) => value.degrees) };
+    case "duration":
+      return {
+        kind: "durations",
+        values: values.filter(isDuration).map((value) => value.milliseconds),
+      };
+    default:
+      return { kind: "numbers", values: values.filter((value) => typeof value === "number") };
+  }
+}
+
+/** The kind of a value that a list function may read, or `undefined` for another value. */
+function kindOf(value: SerializableRuntimeValue): ListValueKind | undefined {
+  return listValueKind(valueKindOf(value));
+}
+
+/**
+ * The one kind of `values`, each of one of `kinds`, or `undefined` for no values; otherwise it fails as the compiler
+ * reports the problem (`TSR060`): an angle where `kinds` has none first, then the first value of another kind, then
+ * values of several kinds. `x` is as for `listValueMessage`.
+ */
+function listValuesKind(
+  name: string,
+  values: readonly SerializableRuntimeValue[],
+  kinds: readonly ListValueKind[],
+  span: SourceSpan,
+  x = false,
+): ListValueKind | undefined {
+  const angle = kinds.includes("angle") ? undefined : values.find(isAngle);
+  const other = angle ?? values.find((value) => !kinds.some((kind) => kind === kindOf(value)));
   if (other !== undefined)
     throw fault(
       "TSR060",
-      `${name}(...) needs numbers${angles ? ", durations, or angles" : " or durations"}, not ${describeRuntimeValue(other)}.${isCalendarDuration(other) ? " A calendar day or month has no fixed length." : ""}`,
+      listValueMessage(name, kinds, describeValue(other), kindOf(other), x),
       span,
     );
-  if (values.every(isAngle))
-    return { kind: "angles", values: values.filter(isAngle).map((value) => value.degrees) };
-  if (!values.every(isDuration))
-    throw fault(
-      "TSR060",
-      `${name}(...) needs values of one kind: all numbers${angles ? ", all durations, or all angles" : " or all durations"}.`,
-      span,
-    );
-  return {
-    kind: "durations",
-    values: values.filter(isDuration).map((value) => value.milliseconds),
-  };
+  const found = new Set(values.map(kindOf));
+  if (found.size > 1) throw fault("TSR060", mixedListValuesMessage(name, kinds, x), span);
+  return values.length === 0 ? undefined : kindOf(values[0]!);
 }
 
 /**
  * `sum`, `average`, `median`, `percentile`, or `stddev` of a list of numbers or durations, or the `sum` of angles
  * (V30 §16).
  */
-export function listStatistic(
-  name: string,
+function listStatistic(
+  name: StatisticName,
   positional: readonly SerializableRuntimeValue[],
   named: Named,
   span: SourceSpan,
 ): SerializableRuntimeValue {
-  checkArguments(name, positional, named, span);
-  const values = listValues(name, positional[0]!, named.by, span);
-  const fewest = LIST_STATISTICS.get(name)!;
-  if (values.length < fewest)
-    throw fault(
-      "TSR018",
-      fewest === 1
-        ? `${name}(...) of an empty list has no result. Check that the list's length is above 0 first.`
-        : `${name}(...) needs at least ${fewest} values, but the list has ${values.length}.`,
-      span,
-    );
-  const share = name === "percentile" ? percentage(name, positional[1]!, span) : 0;
+  checkArguments(name, listFunctionShape(name), positional, named, span);
+  const values = statisticValues(name, positional[0]!, named.by, span);
+  const [share = 0] = numbersOf(name, positional, span);
   const amounts = amountsOf(name, values, span);
   if (amounts.kind === "durations" && name === "sum") {
     // Exact like the other statistics: milliseconds rounded once.
@@ -205,17 +228,50 @@ export function listStatistic(
   return amounts.kind === "numbers" ? (result === 0 ? 0 : result) : exactDuration(result);
 }
 
-/** A percentage from 0 through 100, as `percentile` takes it. */
-function percentage(name: string, value: SerializableRuntimeValue, span: SourceSpan): number {
-  if (typeof value !== "number")
-    throw fault(
-      "TSR059",
-      `${name}(...) needs a number as its percentage, not ${describeRuntimeValue(value)}.`,
-      span,
+/**
+ * The values a statistic, or `min` or `max` of one list, reads from `list`, as `listValues` gives them, of which there
+ * are as many as it needs (see `ListFunction`): fewer is `TSR018`.
+ */
+function statisticValues(
+  name: ListFunctionName,
+  list: SerializableRuntimeValue,
+  by: SerializableRuntimeValue | undefined,
+  span: SourceSpan,
+): SerializableRuntimeValue[] {
+  const values = listValues(name, list, by, span);
+  const problem = fewestValuesProblem(name, values.length);
+  if (problem !== undefined) throw fault("TSR018", problem, span);
+  return values;
+}
+
+/**
+ * The numbers a statistic takes after its list, such as `percentile`'s percentage, each a number (`TSR059`) valid as
+ * the contract's domains say (`TSR039`).
+ */
+function numbersOf(
+  name: StatisticName,
+  positional: readonly SerializableRuntimeValue[],
+  span: SourceSpan,
+): number[] {
+  const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
+  if (contract.takes !== "values") return [];
+  const numbers = contract.parameters.slice(1).map((parameter, index) => {
+    const value = positional[index + 1]!;
+    if (typeof value !== "number")
+      throw fault(
+        "TSR059",
+        `${name}(...) needs a number as its ${parameter}, not ${describeValue(value)}.`,
+        span,
+      );
+    return value;
+  });
+  for (const domain of contract.domains) {
+    const failure = domain.problem(
+      domain.reads.map((parameter) => numbers[contract.parameters.indexOf(parameter) - 1]!),
     );
-  const failure = percentageFailure(name, value);
-  if (failure !== undefined) throw fault("TSR039", failure, span);
-  return value;
+    if (failure !== undefined) throw fault(domain.code ?? "TSR039", failure, span);
+  }
+  return numbers;
 }
 
 /**
@@ -282,13 +338,13 @@ type Positions =
  * `intercept` the line's value at the first point, `r2` how much of the variation the line explains, and `start` the
  * first point's x, from which `predict` measures.
  */
-export function linearRegression(
+function linearRegression(
   positional: readonly SerializableRuntimeValue[],
   named: Named,
   span: SourceSpan,
 ): SerializableRuntimeValue {
   const name = "linearRegression";
-  checkArguments(name, positional, named, span);
+  checkArguments(name, listFunctionShape(name), positional, named, span);
   if (named.x !== undefined && named.y === undefined)
     throw fault(
       "TSR028",
@@ -300,12 +356,8 @@ export function linearRegression(
     named.y === undefined
       ? items
       : items.map((item) => propertyValue(name, item, "y", named.y!, span));
-  if (ys.length < 2)
-    throw fault(
-      "TSR018",
-      `${name}(...) needs at least 2 points, but the list has ${ys.length}.`,
-      span,
-    );
+  const fewest = fewestValuesProblem(name, ys.length);
+  if (fewest !== undefined) throw fault("TSR018", fewest, span);
   const xs =
     named.x === undefined
       ? undefined
@@ -381,8 +433,9 @@ function positionsOf(
       offsets: Array.from({ length: count }, (_, index) => whole(index)),
       perDay: 1n,
     };
-  const numbers = xs.filter((x) => typeof x === "number");
-  if (numbers.length === xs.length) {
+  const { positions } = LIST_FUNCTION_CONTRACTS.linearRegression;
+  if (listValuesKind("linearRegression", xs, positions, span, true) === "number") {
+    const numbers = xs.filter((x) => typeof x === "number");
     const start = exact(numbers[0]!);
     return {
       kind: "steps",
@@ -391,26 +444,9 @@ function positionsOf(
       perDay: 1n,
     };
   }
-  const first = xs[0]!;
-  const temporals = xs.filter(
-    (x): x is SerializableRuntimeTemporal =>
-      isTemporal(x) && isTemporal(first) && x.kind === first.kind && x.kind !== "time",
-  );
-  const start = temporals[0];
-  if (start === undefined || temporals.length !== xs.length) {
-    const other =
-      xs.find((x) => typeof x !== "number" && !isTemporal(x)) ??
-      xs.find((x) => isTemporal(x) && x.kind === "time");
-    if (other !== undefined && isAngle(other))
-      throw fault("TSR060", angleStatisticMessage("linearRegression"), span);
-    throw fault(
-      "TSR060",
-      other === undefined
-        ? "linearRegression(...) needs x values of one kind: numbers, dates, datetimes, or absolute dates and times."
-        : `linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times as x values, not ${describeRuntimeValue(other)}.`,
-      span,
-    );
-  }
+  // Dates, datetimes, or absolute dates and times, all of one kind.
+  const temporals = xs.filter(isTemporal);
+  const start = temporals[0]!;
   return {
     kind: "days",
     start,
@@ -432,12 +468,12 @@ function unitsFrom(start: SerializableRuntimeTemporal, value: SerializableRuntim
 }
 
 /** The value a line from `linearRegression` expects at `x` (V30 §16). */
-export function predict(
+function predict(
   positional: readonly SerializableRuntimeValue[],
   named: Named,
   span: SourceSpan,
 ): SerializableRuntimeValue {
-  checkArguments("predict", positional, named, span);
+  checkArguments("predict", listFunctionShape("predict"), positional, named, span);
   const line = positional[0]!;
   const x = positional[1]!;
   const property = (key: string): SerializableRuntimeValue | undefined =>
@@ -455,12 +491,11 @@ export function predict(
   const slopeAmount = amount(slope);
   const interceptAmount = amount(intercept);
   const durations = slope !== undefined && isDuration(slope);
+  const kind = start === undefined ? undefined : kindOf(start);
   const startKind =
-    typeof start === "number"
-      ? "number"
-      : start !== undefined && isTemporal(start) && start.kind !== "time"
-        ? start.kind
-        : undefined;
+    kind !== undefined && LIST_FUNCTION_CONTRACTS.predict.positions.includes(kind)
+      ? kind
+      : undefined;
   if (
     slopeAmount === undefined ||
     interceptAmount === undefined ||
@@ -469,7 +504,7 @@ export function predict(
   )
     throw fault(
       "TSR059",
-      `predict(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${describeRuntimeValue(line)}.`,
+      `predict(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${describeValue(line)}.`,
       span,
     );
   // intercept + slope × (x - start), exactly, with x - start in days, and rounded once.
@@ -486,7 +521,7 @@ export function predict(
       "TSR059",
       isAngle(x)
         ? angleStatisticMessage("predict")
-        : `predict(...) needs ${describeRuntimeValue(start!)} as its x, like the line's start, not ${describeRuntimeValue(x)}.`,
+        : `predict(...) needs ${VALUE_KINDS[familyOf(valueKindOf(start!))].description} as its x, like the line's start, not ${describeValue(x)}.`,
       span,
     );
   const value = quotient(
@@ -513,7 +548,7 @@ export function weightedChoices(
 ): { readonly choices: readonly SerializableRuntimeValue[]; readonly weights: readonly number[] } {
   const name = "randomWeighted";
   const contract = RANDOM_CONTRACTS[name];
-  checkArguments(name, positional, named, span, contract.shape);
+  checkArguments(name, contract.shape, positional, named, span);
   const source = positional[0]!;
   const dict = isDict(source);
   // A dict has its weights, and anything else needs weight:, as the compiler checks them.
@@ -539,7 +574,7 @@ export function weightedChoices(
     if (typeof weight !== "number")
       throw fault(
         "TSR060",
-        `${name}(...) needs numbers as weights, not ${describeRuntimeValue(weight)}.`,
+        `${name}(...) needs numbers as weights, not ${describeValue(weight)}.`,
         span,
       );
     const problem = contract.weightProblem(weight);
@@ -569,16 +604,125 @@ export function weightedIndex(weights: readonly number[], draw: number): number 
   return last;
 }
 
+/** A call of a list function (see `LIST_FUNCTION_CONTRACTS`). */
+export function listFunctionValue(
+  name: ListFunctionName,
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  span: SourceSpan,
+): SerializableRuntimeValue {
+  if (isStatistic(name)) return listStatistic(name, positional, named, span);
+  if (takesValues(name)) return minMaxValue(name, positional, named, span);
+  switch (name) {
+    case "linearRegression":
+      return linearRegression(positional, named, span);
+    case "predict":
+      return predict(positional, named, span);
+    default: {
+      const unhandled: never = name;
+      throw new Error(`List function '${String(unhandled)}' has no implementation.`);
+    }
+  }
+}
+
+/**
+ * `min` or `max` of two or more values that are all numbers, all durations, all angles, or all date or time values of
+ * one kind, or of the values of one list.
+ */
+function minMaxValue(
+  name: MinMaxName,
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  span: SourceSpan,
+): SerializableRuntimeValue {
+  // One list, optionally with by:, chooses among its values (V30 §16). As the compiler, which knows the type, the
+  // arguments are checked as one list takes them, else as the values do, also one value that is not a list.
+  const one = positional.length === 1;
+  const names = Object.keys(named);
+  const problem =
+    one && isList(positional[0]!)
+      ? argumentShapeProblem(name, listFunctionShape(name), 1, names)
+      : minMaxValuesProblem(name, positional.length, names);
+  if (problem !== undefined) throw fault("TSR028", problem.message, span);
+  // The values of one list are of one kind it reads, as the compiler checks them (`TSR060`).
+  if (one) {
+    positional = statisticValues(name, positional[0]!, named.by, span);
+    listValuesKind(name, positional, LIST_FUNCTION_CONTRACTS[name].values, span);
+  }
+  // Values of one kind that `min` and `max` compare (`LIST_FUNCTION_CONTRACTS`), as the compiler checks them.
+  const compared = LIST_FUNCTION_CONTRACTS[name].values;
+  const kinds = positional.map((value) => listValueKind(valueKindOf(value)));
+  const kind = kinds[0];
+  if (kind === undefined || !compared.includes(kind) || kinds.some((other) => other !== kind)) {
+    const other = positional.find((_, index) => {
+      const otherKind = kinds[index];
+      return otherKind === undefined || !compared.includes(otherKind);
+    });
+    throw fault(
+      "TSR059",
+      other === undefined
+        ? `${name}(...) needs values of one kind: all numbers, all durations, all calendar durations, all angles, or all dates, times, datetimes, or absolute dates and times.`
+        : `${name}(...) needs numbers, durations, angles, or date and time values, not ${describeValue(other)}.`,
+      span,
+    );
+  }
+  if (kind === "angle") {
+    const values = positional.filter(isAngle);
+    let best = values[0]!;
+    for (const candidate of values) {
+      const order = compareAngles(candidate, best);
+      if (name === "min" ? order < 0 : order > 0) best = candidate;
+    }
+    return { ...best };
+  }
+  if (isTemporalKind(kind)) {
+    const temporals = positional.filter(isTemporal);
+    let best = temporals[0]!;
+    for (const candidate of temporals) {
+      const order = compareTemporal(candidate, best);
+      if (name === "min" ? order < 0 : order > 0) best = candidate;
+    }
+    return cloneSerializableValue(best);
+  }
+  // A loop, not a spread into Math.min/Math.max, so a call with very many arguments cannot overflow the native stack.
+  if (kind === "number") {
+    const values = positional.filter((item): item is number => typeof item === "number");
+    let best = values[0]!;
+    for (const candidate of values)
+      if (name === "min" ? candidate < best : candidate > best) best = candidate;
+    return withoutNegativeZero(best);
+  }
+  // Calendar durations order only within one family (ADR 0026), also those that do not win; zero belongs to every
+  // family. The result keeps its own parts.
+  const values = positional.filter(isAnyDuration);
+  const families = new Set(values.map((item) => durationFamily(durationParts(item))));
+  families.delete("zero");
+  if (values.some(isCalendar) && (families.size > 1 || families.has("mixed")))
+    throw fault(
+      "TSR059",
+      `${name}(...) compares calendar durations of one kind only: months, days, or exact time.`,
+      span,
+    );
+  let best = values[0]!;
+  for (const candidate of values) {
+    const order = compareDurations(candidate, best);
+    if (typeof order === "string")
+      throw fault("TSR059", `${name}(...) cannot compare these durations: ${order}.`, span);
+    if (name === "min" ? order < 0 : order > 0) best = candidate;
+  }
+  return cloneSerializableValue(best);
+}
+
 /**
  * Fails as the compiler reports the first problem with the names and the number of a list function's arguments, or of
  * `randomWeighted`'s, which `shape` gives.
  */
 function checkArguments(
   name: string,
+  shape: ArgumentShape,
   positional: readonly SerializableRuntimeValue[],
   named: Named,
   span: SourceSpan,
-  shape: ArgumentShape = LIST_FUNCTION_SHAPES.get(name)!,
 ): void {
   const problem = argumentShapeProblem(name, shape, positional.length, Object.keys(named));
   if (problem !== undefined) throw fault("TSR028", problem.message, span);

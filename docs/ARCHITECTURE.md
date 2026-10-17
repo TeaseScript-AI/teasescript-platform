@@ -105,8 +105,9 @@ prepared-say dataflow, interaction-result handoffs, and control-flow targets. Th
 support files, `capture-support.ts` and `validation-support.ts`, hold only helpers shared across those owners.
 `src/compiler/compile-program.ts` owns compilation orchestration, while `src/compiler/lowering/compiler.ts` owns the
 cohesive stateful lowering pass.
-`src/static-evaluation.ts` owns the pure AST number and visible-text evaluation shared by semantic validation and
-lowering.
+`src/static-evaluation.ts` owns what the compiler knows of values: the constants the source writes, which semantic
+validation, lowering, and the checks of written values read, and `KnownValues`, the values every run gives an
+expression, which the type checker's value checks read; it computes them with the runtime's own operations.
 
 Serializable pending-action and settlement contracts live in
 `src/runtime/actions/model.ts`; action modules remain pure. The atomic public
@@ -126,6 +127,9 @@ binding, speaker, and collection operations used while evaluating. The internal
 `src/runtime/prepared-references.ts` module owns prepared-reference encoding,
 resolution, detachment, and list-mutation rebasing, while
 `src/runtime/value-predicates.ts` supplies the small shared value-narrowing seam.
+`src/value-kinds.ts` has one entry per kind of value: its type name and description, its runtime predicate and
+stored form, and whether `==`, `<`, `${...}`, `toJson`, buttons, `case`, and dict keys take it; the compiler, the
+runtime, and the editor read these facts there.
 
 No `src/standard-library/` shell exists yet because the implemented ADR 0018 POC forms are fully lowered by the
 parser/compiler/runtime; linked reusable Standard Library modules remain future work.

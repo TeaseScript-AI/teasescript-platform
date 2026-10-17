@@ -7,6 +7,8 @@ import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint
 import { executeValidatedInstruction } from "../src/runtime/engine.js";
 import { captureExecutableData } from "../src/runtime/operations/support.js";
 import { sayStagesSelectively } from "../src/runtime/say-staging.js";
+import { CLOCK_CONTRACTS, TEMPORAL_METHODS } from "../src/temporal-builtins.js";
+import { TEXT_METHODS } from "../src/text-operations.js";
 import {
   builtSerializableDictIndex,
   type SerializableRuntimeDict,
@@ -84,6 +86,42 @@ test("a say whose expressions only read, compute, and draw stages selectively", 
     results.flatMap((admitted, index) => (admitted ? [] : [index])),
     [],
   );
+});
+
+test("a say that calls a method of text stages selectively, unless a list's method of that name changes the list", () => {
+  const argument = {
+    text: '"b"',
+    textOrRegex: '"b"',
+    regex: "/b/",
+    position: "0",
+    count: "1",
+  } as const;
+  const lines = Object.entries(TEXT_METHODS).map(
+    ([name, method]) =>
+      `say tint.${name}(${method.parameters.map((parameter) => argument[parameter.kind]).join(", ")})`,
+  );
+  // Every method of text only reads, but `reverse` reverses a list in place, and the plan does not know the receiver.
+  assert.deepEqual(
+    staging(lines),
+    Object.keys(TEXT_METHODS).map((name) => name !== "reverse"),
+  );
+});
+test("a say that reads the clock or calls a method of a date or time value stages selectively", () => {
+  // A clock read reads the session clock, and a method of a date or time value only reads it (see `ClockFunction` and
+  // `TemporalMethod`); neither changes a value.
+  const clock = Object.keys(CLOCK_CONTRACTS).map((name) => `say ${name}()`);
+  const value = {
+    date: "getDate()",
+    time: "getTime()",
+    datetime: "getDateTime()",
+    absoluteDateTime: "getAbsoluteDateTime()",
+  } as const;
+  const methods = Object.entries(TEMPORAL_METHODS).flatMap(([name, method]) =>
+    method.receivers.map((kind) => `say ${value[kind]}.${name}()`),
+  );
+  const results = staging([...clock, ...methods]);
+  assert.equal(results.length, clock.length + methods.length);
+  assert.ok(results.every(Boolean));
 });
 
 test("a say whose expressions may change state, or whose calls are unknown, stages deeply", () => {
@@ -192,7 +230,7 @@ test("selective and deep staging give the same events and states", () => {
 });
 
 test("a say rejected after its expressions ran keeps nothing, with either staging", () => {
-  const pacing = "let pacing = -1 s";
+  const pacing = "function dynamic(value) {\n    return value\n}\nlet pacing = dynamic(-1 s)";
   for (const source of [
     // Draws and a dict lookup, then a pacing that fails.
     [...DECLARATIONS, pacing, 'say "${items.random} ${random()} ${lookup["a"]}", pacing'],

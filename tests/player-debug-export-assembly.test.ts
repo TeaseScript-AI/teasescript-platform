@@ -51,9 +51,12 @@ function failedSession(answer = SECRET): {
       'let picture = askImage("Picture", allowCamera: false)',
       'save picture as "picture"',
       'say "Hello ${name}"',
-      "let zero = 0",
+      "let zero = dynamic(0)",
       "let result = 1 / zero",
       "exit",
+      "function dynamic(value) {",
+      "    return value",
+      "}",
     ].join("\n"),
     { recorder },
   );
@@ -594,7 +597,7 @@ test("replay data is judged by its actual text: escaped whitespace hides nothing
 test("a recording that stopped early still reports the actual failure, and its incomplete replay says why", async () => {
   const recorder = new DebugRecorder();
   let session = createPlayerRuntimeSession(
-    'let name = askText "Name"\nlet zero = 0\nlet result = 1 / zero\nexit',
+    'let name = askText "Name"\nlet zero = dynamic(0)\nlet result = 1 / zero\nexit\nfunction dynamic(value) {\n    return value\n}',
     { recorder },
   );
   // A value the engine refuses, which leaves the recording incomplete.

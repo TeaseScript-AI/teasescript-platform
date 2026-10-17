@@ -3,6 +3,9 @@
  * rule, then "but this is" and what the operand is (the value at runtime, or its type at compile time), then the fix.
  */
 
+import { isTemporalKind } from "./temporal-builtins.js";
+import { ORDERED_FAMILIES, VALUE_KINDS } from "./value-kinds.js";
+
 /**
  * `and` and `or` take true or false (runtime error `TSR026`). `null` is for a lowered operand whose operator the plan
  * does not show, which only a plan that the compiler did not make has.
@@ -37,4 +40,15 @@ export function notNumberFix(
     : value === "numeric text"
       ? "Convert the text with toNumber(...) first."
       : "Use a number instead.";
+}
+
+/**
+ * `<`, `<=`, `>`, and `>=` order two values of one ordered family (runtime error `TSR009`), named here but for the date
+ * and time values, which order within one kind and have a message of their own.
+ */
+export function orderRule(operator: string): string {
+  const pairs = ORDERED_FAMILIES.filter((kind) => !isTemporalKind(kind)).map(
+    (kind) => `two ${VALUE_KINDS[kind].plural}`,
+  );
+  return `'${operator}' compares ${pairs.slice(0, -1).join(", ")}, or ${pairs.at(-1)!}`;
 }

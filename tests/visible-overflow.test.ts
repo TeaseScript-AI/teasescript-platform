@@ -56,11 +56,15 @@ test("a division by a zero the compiler can see fails at compile time whatever t
     ["let x = 5\nsay x / -0", "2:5"],
     ["let d = 5 s\nsay d / 0 ms", "2:5"],
     ["function f(x) { return x / 0 }", "1:24"],
+    // A variable that keeps its first value counts as that value.
+    ["let x = 5\nlet zero = 2 - 2\nsay x / zero", "3:5"],
   ] as const) {
     assert.deepEqual(diagnostics(source), [`TSV050 ${at}`], source);
   }
-  // A computed divisor is known only at runtime, where the same division fails.
-  const computed = runValidSource("let x = 5\nlet zero = 2 - 2\nsay x / zero\nexit");
+  // A divisor that a function gives is known only at runtime, where the same division fails.
+  const computed = runValidSource(
+    "function zero {\n  return 2 - 2\n}\nlet x = 5\nsay x / zero()\nexit",
+  );
   assert.equal(computed.snapshot.failure?.code, "TSR036");
 });
 
@@ -76,9 +80,11 @@ test("only the overflowing step is reported, once", () => {
 });
 
 test("values the compiler cannot know fail at runtime with the cause, the values, and the fix", () => {
-  for (const [source, code, message] of [
+  // A value that a function gives is known only at runtime.
+  const dynamic = "function dynamic(value) {\n  return value\n}\n";
+  for (const [written, code, message] of [
     [
-      "let big = 1e308\nsay big * 10\nexit",
+      "let big = dynamic(1e308)\nsay big * 10\nexit",
       "TSR036",
       "'big * 10' is 1e+308 * 10, which gives a number too large to represent. Use smaller values.",
     ],
@@ -88,38 +94,39 @@ test("values the compiler cannot know fail at runtime with the cause, the values
       "'x * 10' is 1e+308 * 10, which gives a number too large to represent. Use smaller values.",
     ],
     [
-      "let zero = 0\nsay 1 / zero\nexit",
+      "let zero = dynamic(0)\nsay 1 / zero\nexit",
       "TSR036",
       "Division by zero: '1 / zero' has no result because 'zero' is 0. Check that 'zero' is not 0 first.",
     ],
     [
-      "let count = 0\nsay 7 % count\nexit",
+      "let count = dynamic(0)\nsay 7 % count\nexit",
       "TSR036",
       "Remainder by zero: '7 % count' has no result because 'count' is 0. Check that 'count' is not 0 first.",
     ],
     // An operand the source does not spell as a name or a number shows its value instead.
     [
-      "let zero = 0\nsay (1 + 2) / (zero * 1)\nexit",
+      "let zero = dynamic(0)\nsay (1 + 2) / (zero * 1)\nexit",
       "TSR036",
       "Division by zero: 3 / 0 has no result. Check that the divisor is not 0 first.",
     ],
     // Dividing exact time by zero keeps TSR036, and a calendar duration TSR009.
     [
-      "let n = 0\nsay 1 s / n\nexit",
+      "let n = dynamic(0)\nsay 1 s / n\nexit",
       "TSR036",
       "Division by zero: 1 second / 0 has no result because 'n' is 0. Check that 'n' is not 0 first.",
     ],
     [
-      "let n = 0\nsay 1 calendar month / n\nexit",
+      "let n = dynamic(0)\nsay 1 calendar month / n\nexit",
       "TSR009",
       "Division by zero: 1 calendar month / 0 has no result because 'n' is 0. Check that 'n' is not 0 first.",
     ],
     [
-      "let n = 1e305\nsay 1 h * n\nexit",
+      "let n = dynamic(1e305)\nsay 1 h * n\nexit",
       "TSR036",
       "1 hour * 1e+305 gives a duration too long to represent. Use smaller values.",
     ],
   ] as const) {
+    const source = `${dynamic}${written}`;
     assert.deepEqual(diagnostics(source), [], source);
     const failure = runValidSource(source).snapshot.failure;
     assert.deepEqual([failure?.code, failure?.message], [code, message], source);

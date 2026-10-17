@@ -1,6 +1,7 @@
 import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import { isAskImageCall, isLockCall, isTakePhotoCall } from "./capture-call.js";
 import { IMAGE_REQUEST_OPTIONS } from "./image-input.js";
+import { EXPORT_TEXT_OPTIONS, OPEN_URL_OPTIONS, SHOW_POPUP_OPTIONS } from "./parser.js";
 import type {
   AssignmentTarget,
   Block,
@@ -54,13 +55,9 @@ import {
   timerOperands,
 } from "./expression-children.js";
 import { validateSwitchCases } from "./switch-cases.js";
-import {
-  COLLECTION_CHANGES,
-  LIST_REORDERS,
-  noteSharing,
-  rootName,
-  type Sharing,
-} from "./operation-checks.js";
+import { noteSharing, rootName, type Sharing } from "./operation-checks.js";
+import { changesEntries } from "./dict-operations.js";
+import { changesElements, reordersList } from "./list-methods.js";
 import {
   globMatches,
   isPathGlob,
@@ -214,6 +211,10 @@ export interface FileSemanticResult {
   readonly captures: ReadonlyMap<Block, readonly string[]>;
   /** The declarations of the shared variables that a block assigns or changes in place, with how. */
   readonly sharedWrites: ReadonlyMap<VariableSite, Sharing>;
+  /** The `let` declarations whose variables some code assigns, stores into, or changes or reorders in place. */
+  readonly writtenLets: ReadonlySet<LetStatement>;
+  /** The globals that some code of the file assigns, stores into, or changes or reorders in place. */
+  readonly writtenGlobals: ReadonlySet<string>;
   /** The speaker that each `speaker` names: the one a message names with `as`, or whose properties use it. */
   readonly speakers: ReadonlyMap<Identifier, string>;
   /** Checks the uses of top-level variables after labels, given the labels of this file that are entered afresh. */
@@ -277,6 +278,8 @@ export function validateProjectSemantics(
       picks: validators[index]?.picks ?? new Map<FileTarget, readonly string[]>(),
       captures: validators[index]?.captures ?? new Map<Block, readonly string[]>(),
       sharedWrites: validators[index]?.sharedWrites ?? new Map<VariableSite, Sharing>(),
+      writtenLets: validators[index]?.writtenLets ?? new Set<LetStatement>(),
+      writtenGlobals: validators[index]?.writtenGlobals ?? new Set<string>(),
       speakers: validators[index]?.speakers ?? new Map<Identifier, string>(),
       reachableEntries: (flow: StatementFlow) =>
         validators[index]?.reachableEntries(flow, reachable(flow)) ?? [],
@@ -469,6 +472,15 @@ class SemanticScope {
     for (let scope: SemanticScope | null = this; scope !== null; scope = scope.parent) {
       const binding = scope.bindings.get(name);
       if (binding !== undefined) return scope.captured === null ? undefined : binding.site;
+    }
+    return undefined;
+  }
+
+  /** The binding of `name`, without counting it as a use of a variable that a block shares. */
+  public lookup(name: string): Binding | undefined {
+    for (let scope: SemanticScope | null = this; scope !== null; scope = scope.parent) {
+      const binding = scope.bindings.get(name);
+      if (binding !== undefined) return binding;
     }
     return undefined;
   }
@@ -774,6 +786,22 @@ class SemanticValidator {
 
   /** The speaker that each `speaker` names, where a message names it with `as` or its properties use it. */
   readonly speakers = new Map<Identifier, string>();
+
+  /** The `let` declarations whose variables some code assigns, stores into, or changes or reorders in place. */
+  readonly writtenLets = new Set<LetStatement>();
+
+  /** The globals that some code of this file assigns, stores into, or changes or reorders in place. */
+  readonly writtenGlobals = new Set<string>();
+
+  /**
+   * Records that code assigns, stores into, or changes or reorders in place the variable `name` (the root of a place),
+   * wherever the code is and whether or not it can run.
+   */
+  #recordWrite(name: string | null, scope: SemanticScope): void {
+    const binding = name === null ? undefined : scope.lookup(name);
+    if (binding?.site?.kind === "letStatement") this.writtenLets.add(binding.site);
+    else if (binding?.project?.description === "global") this.writtenGlobals.add(name!);
+  }
 
   /** Records that the running block assigns or changes `name`, when that is a variable it shares. */
   #recordSharedWrite(name: string | null, scope: SemanticScope, how: Sharing): void {
@@ -1408,6 +1436,7 @@ class SemanticValidator {
   }
 
   #validateAssignmentTarget(target: AssignmentTarget, scope: SemanticScope): void {
+    this.#recordWrite(rootName(target), scope);
     // A store into an element or property changes the variable that holds it in place.
     this.#recordSharedWrite(
       rootName(target),
@@ -1664,22 +1693,26 @@ class SemanticValidator {
         if (!authorFunction) this.#validateDistinctNamedArguments(expression);
         // Grouping a method does not detach it from its receiver: `(text.trim)()` calls `text.trim()`.
         const method = unwrapParentheses(expression.callee);
-        // A list of the account changes in place as a list of anything else does, also when it is reordered; a text of
-        // the account reverses into a new text.
+        // A list or dict of the account changes in place as one of anything else does, also when a list is reordered; a
+        // text of the account reverses into a new text.
+        const changes =
+          method.kind === "propertyAccessExpression" &&
+          (changesElements(method.property.name) || changesEntries(method.property.name));
         if (
           method.kind === "propertyAccessExpression" &&
           rootName(method.object) === "account" &&
-          (COLLECTION_CHANGES.has(method.property.name) ||
-            (LIST_REORDERS.has(method.property.name) && isAccountList(method.object)))
+          (changes || (reordersList(method.property.name) && isAccountList(method.object)))
         ) {
           this.#reportAccountChange(method.object, false);
           return;
         }
+        if (method.kind === "propertyAccessExpression" && changes)
+          this.#recordSharedWrite(rootName(method.object), scope, "changes");
         if (
           method.kind === "propertyAccessExpression" &&
-          COLLECTION_CHANGES.has(method.property.name)
+          (changes || reordersList(method.property.name))
         )
-          this.#recordSharedWrite(rootName(method.object), scope, "changes");
+          this.#recordWrite(rootName(method.object), scope);
         if (expression.callee.kind === "identifier") {
           const name = expression.callee.name;
           const binding = scope.resolve(name);
@@ -2125,10 +2158,10 @@ class SemanticValidator {
             argument.name.span,
           );
         message = true;
-      } else if (name !== "buttonText") {
+      } else if (!SHOW_POPUP_OPTIONS.includes(name)) {
         this.#report(
           semanticCode.unknownNamedArgument,
-          unknownNamedArgumentMessage("showPopup", name, ["message", "buttonText"]),
+          unknownNamedArgumentMessage("showPopup", name, ["message", ...SHOW_POPUP_OPTIONS]),
           argument.name.span,
         );
       }
@@ -2169,17 +2202,13 @@ class SemanticValidator {
     for (const argument of statement.arguments)
       if (
         argument.kind === "namedArgument" &&
-        argument.name.name !== "buttonText" &&
-        argument.name.name !== "alwaysButton" &&
+        !OPEN_URL_OPTIONS.includes(argument.name.name) &&
         // A named address without a positional one is the error above.
         (addressed || argument.name.name !== "url")
       )
         this.#report(
           semanticCode.unknownNamedArgument,
-          unknownNamedArgumentMessage("openUrl", argument.name.name, [
-            "buttonText",
-            "alwaysButton",
-          ]),
+          unknownNamedArgumentMessage("openUrl", argument.name.name, OPEN_URL_OPTIONS),
           argument.name.span,
         );
   }
@@ -2205,14 +2234,13 @@ class SemanticValidator {
     for (const argument of statement.arguments)
       if (
         argument.kind === "namedArgument" &&
-        argument.name.name !== "title" &&
-        argument.name.name !== "fileName" &&
+        !EXPORT_TEXT_OPTIONS.includes(argument.name.name) &&
         // A named text without a positional one is the error above.
         (given || argument.name.name !== "text")
       )
         this.#report(
           semanticCode.unknownNamedArgument,
-          unknownNamedArgumentMessage("exportText", argument.name.name, ["title", "fileName"]),
+          unknownNamedArgumentMessage("exportText", argument.name.name, EXPORT_TEXT_OPTIONS),
           argument.name.span,
         );
   }

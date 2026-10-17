@@ -14,29 +14,8 @@ import { messageText } from "./text-length.js";
 import { quotedText } from "./value-text.js";
 import { copySpan } from "./operations/support.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
-import {
-  isAngle,
-  isAnyDuration,
-  isCalendarDuration,
-  isDate,
-  isDateTime,
-  isDict,
-  isDuration,
-  isList,
-  isMediaHandle,
-  isMessageHandle,
-  isPermanentButton,
-  isCameraView,
-  isObject,
-  isRange,
-  isScriptReference,
-  isRegex,
-  isSet,
-  isSpeakerReference,
-  isTime,
-  isTimerHandle,
-  isAbsoluteDateTime,
-} from "./value-predicates.js";
+import { isAngle, isAnyDuration, isDict, isList, isObject, isSet } from "./value-predicates.js";
+import { describeValue, VALUE_KINDS } from "../value-kinds.js";
 
 /**
  * Checks that a value the compiler could not know fits the type of the place that receives it (ADR 0021 rule 1.7);
@@ -232,78 +211,13 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
       }
       return true;
     }
-    case "string":
-      return typeof value === "string";
-    case "boolean":
-      return typeof value === "boolean";
-    case "integer":
-      return typeof value === "number" && Number.isInteger(value);
-    case "number":
-      return typeof value === "number";
-    case "null":
-      return value === null;
-    case "duration":
-      return isDuration(value);
-    case "calendarDuration":
-      return isCalendarDuration(value);
-    case "angle":
-      return isAngle(value);
-    case "range":
-      return isRange(value);
-    case "speaker":
-      return isSpeakerReference(value);
-    case "timer":
-      return isTimerHandle(value);
-    case "media":
-      return isMediaHandle(value);
-    case "camera":
-      return isCameraView(value);
-    case "permanentButton":
-      return isPermanentButton(value);
-    case "messageHandle":
-      return isMessageHandle(value);
-    case "script":
-      return isScriptReference(value);
-    case "regex":
-      return isRegex(value);
-    case "date":
-      return isDate(value);
-    case "time":
-      return isTime(value);
-    case "datetime":
-      return isDateTime(value);
-    case "absoluteDateTime":
-      return isAbsoluteDateTime(value);
     case "never":
       // No value fits, so a list of it is only ever empty, as for an element both list types share.
       return false;
+    default:
+      return VALUE_KINDS[type.kind].is(value);
   }
 }
-
-const NAMED_DESCRIPTIONS: Readonly<Record<string, string>> = {
-  string: "text (string)",
-  integer: "a whole number (integer)",
-  number: "a number",
-  boolean: "true or false (boolean)",
-  duration: "a duration",
-  calendarDuration: "a calendar duration",
-  angle: "an angle",
-  date: "a date",
-  time: "a time",
-  datetime: "a date and time",
-  absoluteDateTime: "an absolute date and time",
-  null: "null",
-  range: "a range",
-  speaker: "a speaker",
-  timer: "a timer handle",
-  media: "a media handle",
-  camera: "a camera view",
-  permanentButton: "a permanent button",
-  messageHandle: "a message handle",
-  script: "a script reference",
-  object: "an object",
-  never: "no value",
-};
 
 /** A plain-language description of the values of `type`, in the compiler's wording. */
 export function describeType(type: TypePlan): string {
@@ -320,7 +234,9 @@ export function describeType(type: TypePlan): string {
         current.element === null ? `a ${current.kind}` : `a ${current.kind} (${typeName(current)})`,
       );
     } else {
-      descriptions.push(NAMED_DESCRIPTIONS[current.kind]!);
+      descriptions.push(
+        current.kind === "never" ? "no value" : VALUE_KINDS[current.kind].description,
+      );
     }
   }
   return descriptions.join(" or ");
@@ -370,37 +286,6 @@ function joinTypeName(type: TypePlan, names: readonly string[]): string {
     }
     default:
       return type.kind;
-  }
-}
-
-/** A plain-language description of a runtime value's kind, in the compiler's wording. */
-export function describeValue(value: SerializableRuntimeValue): string {
-  if (value === null) return "null";
-  if (typeof value === "string") return "text (string)";
-  if (typeof value === "boolean") return "true or false (boolean)";
-  if (typeof value === "number")
-    return Number.isInteger(value) ? "a whole number (integer)" : "a number";
-  switch (value.kind) {
-    case "list":
-      return "a list";
-    case "set":
-      return "a set";
-    case "dict":
-      return "a dict";
-    case "speakerReference":
-      return "a speaker";
-    case "timerHandle":
-      return "a timer handle";
-    case "mediaHandle":
-      return "a media handle";
-    case "cameraView":
-      return "a camera view";
-    case "permanentButtonHandle":
-      return "a permanent button";
-    case "messageHandle":
-      return "a message handle";
-    default:
-      return NAMED_DESCRIPTIONS[value.kind]!;
   }
 }
 

@@ -560,7 +560,8 @@ test("invalid runtime pacing fails without committing say evaluation effects", (
     [
       "speaker vera { }",
       'say as vera "first"',
-      "let pacing = -1 s",
+      "function dynamic(value) {\n    return value\n}",
+      "let pacing = dynamic(-1 s)",
       "say as vera random(), pacing",
       "exit",
     ].join("\n"),
@@ -584,7 +585,13 @@ test("invalid runtime pacing fails without committing say evaluation effects", (
   );
 
   const noWarning = plan(
-    ["speaker ada {}", "let pacing = -1 s", "say as ada random(), pacing", "exit"].join("\n"),
+    [
+      "speaker ada {}",
+      "function dynamic(value) {\n    return value\n}",
+      "let pacing = dynamic(-1 s)",
+      "say as ada random(), pacing",
+      "exit",
+    ].join("\n"),
   );
   const noWarningResult = run(noWarning, createFreshRuntimeSnapshot(noWarning, { seed: 77 }));
   assert.equal(noWarningResult.snapshot.rng.state, 77);
@@ -604,7 +611,9 @@ test("unsupported and overflowing runtime pacing leave message evaluation uncomm
     ["runtimeFailure"],
   );
 
-  const nonFinite = plan("let zero = 0\nsay random(), 1 s / zero\nexit");
+  const nonFinite = plan(
+    "function dynamic(value) {\n    return value\n}\nlet zero = dynamic(0)\nsay random(), 1 s / zero\nexit",
+  );
   const nonFiniteResult = run(nonFinite, createFreshRuntimeSnapshot(nonFinite, { seed: 77 }));
   assert.equal(nonFiniteResult.snapshot.status, "failed");
   assert.equal(nonFiniteResult.snapshot.rng.state, 77);
@@ -637,11 +646,11 @@ test("collection changes and random draws of a rejected say roll back, directly 
   // Each say draws or removes before its pacing is rejected; the binding keeps its unchanged collection.
   const cases = [
     [
-      "let items = [1, 2]\nlet pacing = -1 s\nsay items.removeFirst(), pacing\nexit",
+      "function dynamic(value) {\n    return value\n}\nlet items = [1, 2]\nlet pacing = dynamic(-1 s)\nsay items.removeFirst(), pacing\nexit",
       { kind: "list", items: [1, 2] },
     ],
     [
-      'let items = dict { a: 1, b: 2 }\nlet pacing = -1 s\nsay items.remove("a"), pacing\nexit',
+      'function dynamic(value) {\n    return value\n}\nlet items = dict { a: 1, b: 2 }\nlet pacing = dynamic(-1 s)\nsay items.remove("a"), pacing\nexit',
       {
         kind: "dict",
         entries: [
@@ -650,7 +659,10 @@ test("collection changes and random draws of a rejected say roll back, directly 
         ],
       },
     ],
-    ["let pacing = -1 s\nsay random(), pacing\nexit", null],
+    [
+      "function dynamic(value) {\n    return value\n}\nlet pacing = dynamic(-1 s)\nsay random(), pacing\nexit",
+      null,
+    ],
   ] as const;
   for (const [source, items] of cases) {
     const { events, finalSnapshot } = assertRuntimeResumeEquivalent(source, {

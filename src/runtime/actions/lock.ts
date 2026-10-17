@@ -26,7 +26,6 @@ import {
 import { temporalCaptureAt, wallClockAt } from "../temporal-captures.js";
 import { checkTextLength, messageText } from "../text-length.js";
 import { fieldText } from "../value-text.js";
-import { describeRuntimeValue } from "../value-predicates.js";
 import type { CapturedMediaAdmission } from "./capture.js";
 import type {
   RuntimeLockActionSnapshot,
@@ -34,6 +33,7 @@ import type {
   RuntimeLockNotice,
   RuntimeLockOutcome,
 } from "./model.js";
+import { describeValue } from "../../value-kinds.js";
 
 // The calls that lock and open text and stored files (V30 §13). A `lock` instruction asks the Player and waits, and runs
 // again with each answer, which the completion hands off: in its `work` phase the Player locks or opens with what it has;
@@ -192,7 +192,7 @@ function startLock(
   if (!locks(call) && password !== undefined && typeof password !== "string")
     throw new RuntimeFault(
       "TSR059",
-      `'password:' of ${call}(...) takes text (string), not ${describeRuntimeValue(password)}.`,
+      `'password:' of ${call}(...) takes text (string), not ${describeValue(password)}.`,
       copySpan(span),
     );
   const written = typeof password === "string" ? password : null;
@@ -201,7 +201,7 @@ function startLock(
     if (typeof value !== "string")
       throw new RuntimeFault(
         "TSR059",
-        `decryptText(...) opens locked text (string), not ${describeRuntimeValue(value)}.`,
+        `decryptText(...) opens locked text (string), not ${describeValue(value)}.`,
         copySpan(span),
       );
     // Text that is not Base64 is no lock, as for `fromBase64`.
@@ -223,7 +223,7 @@ function startLock(
   if (typeof text !== "string")
     throw new RuntimeFault(
       "TSR059",
-      `encryptText(...) locks text (string), not ${describeRuntimeValue(text)}.`,
+      `encryptText(...) locks text (string), not ${describeValue(text)}.`,
       copySpan(span),
     );
   if (
@@ -263,13 +263,13 @@ function encryptOpeners(
   if (password !== undefined && typeof password !== "string" && typeof password !== "boolean")
     throw new RuntimeFault(
       "TSR059",
-      `'password:' of ${call}(...) takes text (string), true, or false, not ${describeRuntimeValue(password)}.`,
+      `'password:' of ${call}(...) takes text (string), true, or false, not ${describeValue(password)}.`,
       copySpan(span),
     );
   if (timeLock !== undefined && typeof timeLock !== "boolean" && !isAbsoluteDateTime(timeLock))
     throw new RuntimeFault(
       "TSR059",
-      `'timeLock:' of ${call}(...) takes a moment (absoluteDateTime), true, or false, not ${describeRuntimeValue(timeLock)}.`,
+      `'timeLock:' of ${call}(...) takes a moment (absoluteDateTime), true, or false, not ${describeValue(timeLock)}.`,
       copySpan(span),
     );
   const written =
@@ -318,7 +318,7 @@ function writtenKeys(
   if (key !== undefined && typeof key !== "string")
     throw new RuntimeFault(
       "TSR059",
-      `'key:' of ${call}(...) takes an unlock key as text (string), not ${describeRuntimeValue(key)}.`,
+      `'key:' of ${call}(...) takes an unlock key as text (string), not ${describeValue(key)}.`,
       copySpan(span),
     );
   const written =
@@ -334,8 +334,8 @@ function writtenKeys(
         "TSR059",
         `'publicKey:' of ${call}(...) takes a public key (string), a list of them, true, or false, ${
           item === publicKey
-            ? `not ${describeRuntimeValue(item)}`
-            : `but its list holds ${describeRuntimeValue(item)}`
+            ? `not ${describeValue(item)}`
+            : `but its list holds ${describeValue(item)}`
         }.`,
         copySpan(span),
       );
@@ -593,7 +593,7 @@ function storedFile(
     `${call}(...) ${call === "encryptFile" ? "locks" : "opens"} a stored file, ${
       typeof value === "string"
         ? `but ${JSON.stringify(messageText(value))} is not one`
-        : `not ${describeRuntimeValue(value)}`
+        : `not ${describeValue(value)}`
     }. Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or encryptFile(...) gave for a file.`,
     copySpan(span),
   );

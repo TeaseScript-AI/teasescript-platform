@@ -427,7 +427,7 @@ test("run and stepToEvent do not mutate their caller snapshots", () => {
   assert.equal(run(successfulPlan, successfulInput).snapshot.status, "halted");
   assert.deepEqual(successfulInput, successfulBefore);
 
-  const faultPlan = plan("let values = []\nsay values.first\nexit");
+  const faultPlan = plan("let values = []\nvalues.clear()\nsay values.first\nexit");
   const faultInput = createImmediatePacingRuntimeSnapshot(faultPlan);
   const faultBefore = structuredClone(faultInput);
   assert.equal(run(faultPlan, faultInput).snapshot.status, "failed");

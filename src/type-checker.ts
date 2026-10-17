@@ -17,7 +17,6 @@ import type {
   OpenUrlStatement,
   ExportTextStatement,
   ShowPopupParts,
-  LoadExpression,
   MediaParts,
   Program,
   PropertyAccessExpression,
@@ -42,7 +41,6 @@ import {
 import {
   globMatches,
   isPathGlob,
-  MAIN_FILE_PATH,
   packageGlobProblem,
   packagePathProblem,
 } from "./project-paths.js";
@@ -51,15 +49,13 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import {
   askOperands,
   expressionChildren,
-  expressionParts,
-  handlerBlocks,
   namedAskArguments,
   mediaHandlerBlocks,
   mediaOperands,
-  nestedStatements,
   showButtonOptions,
-  statementExpressions,
+  staticText,
   timerOperands,
+  unwrap,
 } from "./expression-children.js";
 import {
   isBlankTextAnswer,
@@ -69,8 +65,6 @@ import {
 import type {
   FormFieldKind,
   FormNumericKind,
-  PlanImage,
-  PlanTag,
   PreparedFormShape,
   TypeCheckPlan,
   TypePlan,
@@ -110,50 +104,60 @@ import {
 import {
   builtinCallProblems,
   builtinShapeProblems,
-  COLLECTION_CHANGES,
-  COLLECTION_METHODS,
-  noteSharing,
-  rootName,
   type Sharing,
   collectionMethodProblems,
   expressionLabel,
   fallbackFix,
-  HANDLE_KINDS,
-  LIST_REORDERS,
-  LIST_SEARCHES,
   mayBeMessage,
+  dictMethodProblems,
   memberProblems,
   positionalMethodProblems,
-  RANGE_LIST_FIX,
   type OperationProblem,
 } from "./operation-checks.js";
+import {
+  emptyListPropertyFailure,
+  hasListMethod,
+  isListMethod,
+  LIST_METHODS,
+  listArgumentMessage,
+  listDraw,
+  listMethod,
+  listProperty,
+  missingListMethodMessage,
+  missingListPropertyMessage,
+  type ElementProperty,
+  type ListMethod,
+  type ListMethodName,
+} from "./list-methods.js";
 import {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   type ConversionName,
+  type NumericFunctionName,
   type RandomFunctionName,
 } from "./language-facts.js";
 import {
-  NUMERIC_FUNCTIONS,
+  isNumericFailure,
+  isNumericFunction,
+  NUMERIC_CONTRACTS,
+  numericResult,
+  parameterArgument,
+  type NumberDomain,
   type NumberSignature,
   type NumericArgument,
+  type NumericFunction,
 } from "./numeric-functions.js";
 import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "./random-functions.js";
+import { ANGLE_ARITHMETIC_ROUTE, anglePropertyMessage, angleValue, formatAngle } from "./angle.js";
+import { isListFunction, takesValues } from "./list-function-rules.js";
 import {
-  ANGLE_ARITHMETIC_ROUTE,
-  ANGLE_FUNCTIONS,
-  anglePropertyMessage,
-  angleValue,
-  formatAngle,
-  type StoredAngle,
-} from "./angle.js";
-import {
-  LIST_FUNCTIONS,
   listFunctionCheck,
   weightedChoiceCheck,
   type ListFunctionCheck,
 } from "./list-function-checks.js";
 import { rangeListLengthProblem } from "./runtime/collection-operations.js";
+import { messageText } from "./runtime/text-length.js";
+import { quotedText } from "./runtime/value-text.js";
 import { describeShownValue, shownChoice } from "./runtime/value-types.js";
 import {
   buttonBackgroundMessage,
@@ -166,12 +170,8 @@ import {
 } from "./choice-rules.js";
 import {
   blockingRepeatMessage,
-  cameraPlacementMessage,
   FINISH_NEVER_RUNS_MESSAGE,
   fileReferenceRule,
-  handleMemberMessage,
-  hasArgumentlessMethods,
-  isCameraPlacement,
   isMediaPosition,
   isMediaRange,
   isMediaRepeatCount,
@@ -185,8 +185,18 @@ import {
   mediaRangeMessage,
   mediaVolumeMessage,
   timerDisplayMessage,
-  type HandleKind,
 } from "./handle-rules.js";
+import {
+  HANDLE_MEMBERS,
+  handleMemberMessage,
+  handleMethod,
+  handleProperty,
+  isHandleKind,
+  kindsWithMethod,
+  kindsWithProperty,
+  type HandleKind,
+  type HandleValueType,
+} from "./handle-members.js";
 import {
   emptyRangeProblem,
   rangeBoundRule,
@@ -198,6 +208,7 @@ import {
 import {
   logicalOperandRule,
   notNumberFix,
+  orderRule,
   UNIT_AMOUNT_RULE,
   unitAmountFix,
 } from "./operand-rules.js";
@@ -243,27 +254,50 @@ import {
 import {
   findVisibleOverflows,
   isStaticDuration,
-  knownOperands,
+  KnownValues,
   VISIBLE_OVERFLOW_MESSAGES,
-  knownStep,
   staticChoiceValue,
   staticNumber,
   staticVisibleText,
-  type StaticScalar,
+  type KnownValue,
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import { startValueMessage, startValueOwner } from "./start-value-rules.js";
 import {
   argumentShapeProblem,
-  dictArgumentsProblem,
-  NO_ARGUMENTS,
   scriptArgumentCountMessage,
-  temporalArgumentsMessage,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
+import {
+  changesEntries,
+  dictArgumentsProblem,
+  dictKeyMessage,
+  dictMethod,
+  dictProperty,
+  missingDictMethodMessage,
+  missingDictPropertyMessage,
+  missingKeyMessage,
+  type DictMethod,
+} from "./dict-operations.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
-import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
+import { isTextMethod, TEXT_METHODS, type TextMethod } from "./text-operations.js";
+import {
+  CALENDAR_DURATION_PARTS,
+  calendarDurationPropertyMessage,
+  CLOCK_CONTRACTS,
+  hasTemporalField,
+  hasTemporalMethod,
+  isCalendarDurationPart,
+  isClockFunction,
+  isTemporalKind,
+  isTemporalMethod,
+  TEMPORAL_FIELDS,
+  TEMPORAL_METHODS,
+  temporalArgumentsMessage,
+  temporalMemberMessage,
+  type TemporalField,
+} from "./temporal-builtins.js";
 import {
   missingPropertyMessage,
   duplicateEntryMessage,
@@ -273,6 +307,25 @@ import {
 import { GENDER_TERMS, PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 import type { SpeakerFlowInput, SpeakerFlowRead, SpeakerFlowStore } from "./speaker-flow.js";
 import { placeKey, type WayFacts } from "./way-facts.js";
+import type {
+  RuntimeCheckSite,
+  TypeCheckOptions,
+  TypeCheckResult,
+} from "./type-inference/backend.js";
+import type { DeadCode, ProgramEffects, ProjectEffects } from "./type-inference/effects.js";
+import {
+  decidingSlots,
+  heldOnlyNull,
+  nullOnlySlot,
+  replayableDecisions,
+  storedIn,
+  type Copies,
+  type Decided,
+  type Decision,
+  type KeptFallbacks,
+  type UncheckedProperties,
+  type Widened,
+} from "./type-inference/legacy-state.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -325,7 +378,6 @@ import {
   settle,
   STRING_TYPE,
   TIME_TYPE,
-  ABSOLUTE_DATE_TIME_TYPE,
   SCRIPT_TYPE,
   REGEX_TYPE,
   typeFromAnnotation,
@@ -357,93 +409,30 @@ import {
   type Origin,
   type Origins,
   type PartOrigin,
+  valueKindOfType,
+  isIdentityType,
+  isScalarKind,
+  isShown,
   type StaticType,
 } from "./static-types.js";
+import { mayEqualKinds, ordersWith, VALUE_KIND_NAMES, VALUE_KINDS } from "./value-kinds.js";
+import { unreturnableChoiceMessage } from "./choice-values.js";
 import { checksProperties, typePlan } from "./type-plans.js";
 import {
   accountCopy,
   copiesAccount,
   PLAYER_DECLARATION,
   sessionDeclarations,
-  someNode,
 } from "./project-globals.js";
 import {
   detachedType,
-  sameStorageKeyTypes,
   sameDeclaredKeys,
   sameReadKeys,
-  sameReadStorageKeyTypes,
   sameType,
-  storageKeyTypes,
   typeKey,
   type StorageKeyType,
   type StorageLoad,
 } from "./storage-types.js";
-
-export interface TypeCheckOptions {
-  readonly globals?: readonly string[];
-  readonly builtins?: readonly string[];
-  /** The package images that tag queries search, when the compilation was given them. */
-  readonly imageCatalog?: readonly PlanImage[];
-  /** Whether some file of the project takes photos with tags, which join the catalog at runtime. */
-  readonly capturesTaggedPhotos?: boolean;
-  /**
-   * The project's files with the tags of their headers, which script tag queries match; `null` tags for a file of
-   * declarations only, which is never picked or listed.
-   */
-  readonly scriptCatalog?: readonly {
-    readonly path: string;
-    readonly tags: readonly PlanTag[] | null;
-  }[];
-  /**
-   * The declarations of the variables that a timer, media, or button block shares and assigns or changes in place, with
-   * how, from name checking.
-   */
-  readonly sharedWrites?: ReadonlyMap<VariableSite, Sharing>;
-  /**
-   * The speaker that each `speaker` names, where a message names it with `as` or its properties use it, from name
-   * checking.
-   */
-  readonly speakers?: ReadonlyMap<Identifier, string>;
-}
-
-export interface TypeCheckResult {
-  /** The diagnostics of each file, in project order. */
-  readonly diagnostics: readonly (readonly Diagnostic[])[];
-  /** The runtime checks of values the compiler cannot know, by the source of the instruction that stores them. */
-  readonly runtimeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
-  /** The result shape the runtime needs for each `askForm`. */
-  readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
-  /** Which ways through the source can run, which the checks that follow the compiled plan take from the check. */
-  readonly ways: WayFacts;
-  /**
-   * The statements that the check found never run once their function, block, or file runs, which its narrowing and its
-   * loop effects follow: the plan's reachability finds the same ones (tests/reachability-differential.test.ts).
-   */
-  readonly unreachable: ReadonlySet<Statement>;
-  /** What the flow check of speaker properties needs from the check, once the project is lowered (V30 §37). */
-  readonly speakerFlow: SpeakerFlowInput;
-  /**
-   * For each storage key written as a string literal that a load gives a type, the type that every load of it accepts,
-   * which a saved value has to fit when the script runs (ADR 0021 §6), sorted by key.
-   */
-  readonly storageTypes: readonly { readonly key: string; readonly type: TypePlan }[];
-}
-
-/**
- * Where a value is stored in a place of known type: a `let` or assignment, the start value of a `global`, a list or
- * set `add` call, the default of a dict `get` call, an argument of an author function, a parameter default, or a
- * `return`.
- */
-export type RuntimeCheckSite =
-  | LetStatement
-  | GlobalStatement
-  | AssignmentStatement
-  | CallExpression
-  | CallArgument
-  | FunctionParameter
-  | Extract<Statement, { kind: "returnStatement" }>
-  | LoadExpression;
 
 const typeCode = {
   duplicateProperty: "TSV007",
@@ -453,10 +442,8 @@ const typeCode = {
   argumentCount: "TSV020",
   unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
-  invalidTimerHandleMember: "TSV034",
   mixedDurationOperands: "TSV035",
   invalidMedia: "TSV036",
-  invalidMediaHandleMember: "TSV037",
   invalidStorageKey: "TSV038",
   invalidInteractionPrefill: "TSV039",
   listInText: "TSV040",
@@ -473,7 +460,6 @@ const typeCode = {
   conflictingTag: CONFLICTING_TAG_CODE,
   invalidTagQueryFrom: "TST006",
   randomStartValue: "TSV055",
-  invalidCameraHandleMember: "TSV059",
   unusedFallback: "TSV062",
   changedCopy: "TSV067",
   invalidTimerDisplay: "TSV068",
@@ -482,71 +468,18 @@ const typeCode = {
 type TypeErrorCode = OwnedDiagnosticCode<"type checker", "error">;
 
 /**
- * Checks that every variable, list or set element, object property, function parameter, and function result keeps one
- * type, and that operations receive values they support (ADR 0021). It runs after name validation succeeded, so every
- * name resolves; a value it cannot know has the type `unknown` and is never rejected. The files of a project, in
- * project order, are checked together, because globals, global functions, and speakers belong to all of them.
- * `onFile` hears of each file whose source the check enters.
+ * Adds to each file's diagnostics the steps of known values without a finite result (TSV050), with the values that the
+ * last round of the check knows, so they are found once.
  */
-export function checkTypes(
-  files: readonly { readonly path: string; readonly program: Program }[],
-  options: TypeCheckOptions = {},
-  onFile: (file: number) => void = () => {},
-): TypeCheckResult {
-  const programs = files.map((file) => file.program);
-  const lines = lineNamer(files);
-  // Code that never runs changes nothing (rule 5.5). What a loop, function, or block may change leaves out the code that
-  // the previous check found never runs, and each such choice is checked from nothing, since all that a check finds,
-  // such as the types it decides, rests on the effects it followed. The last check must find that code never runs too:
-  // should it not, the next check leaves out only what both found, and the one after that nothing, which always holds.
-  // Otherwise, when what the last check found never running would leave out more, the next check leaves out that, a
-  // bounded number of times.
-  let dead: DeadCode = { statements: new Set(), operands: new Set() };
-  let effects = projectEffects(programs, dead);
-  let growth = 0;
-  let shrinks = 0;
-  for (;;) {
-    const checked = checkWithEffects(programs, options, onFile, lines, effects);
-    const found = checked.dead;
-    if (!coversDeadCode(found, dead)) {
-      dead =
-        shrinks === 0
-          ? {
-              statements: new Set(
-                [...dead.statements].filter((each) => found.statements.has(each)),
-              ),
-              operands: new Set([...dead.operands].filter((place) => found.operands.has(place))),
-            }
-          : { statements: new Set(), operands: new Set() };
-      shrinks += 1;
-      effects = projectEffects(programs, dead);
-      continue;
-    }
-    if (shrinks === 0 && growth < MAX_DEAD_CODE_ROUNDS) {
-      const fewer = projectEffects(programs, found);
-      if (!sameProjectEffects(fewer, effects)) {
-        dead = found;
-        effects = fewer;
-        growth += 1;
-        continue;
-      }
-    }
-    return withVisibleOverflows(checked.result, programs);
-  }
-}
-
-/**
- * Adds to each file's diagnostics the steps of known values without a finite result (TSV050), which the folds of every
- * round of the check share, so they are found once.
- */
-function withVisibleOverflows(
+export function withVisibleOverflows(
   result: TypeCheckResult,
   programs: readonly Program[],
+  known: KnownValues,
 ): TypeCheckResult {
   return {
     ...result,
     diagnostics: result.diagnostics.map((diagnostics, file) => [
-      ...findVisibleOverflows(programs[file]!).map((overflow) =>
+      ...findVisibleOverflows(programs[file]!, known).map((overflow) =>
         createDiagnostic(
           DiagnosticSeverity.Error,
           typeCode.visibleOverflow,
@@ -557,421 +490,6 @@ function withVisibleOverflows(
       ...diagnostics,
     ]),
   };
-}
-
-/** The type check of the project with the effects `effects`, and the code it found never runs (see `checkTypes`). */
-function checkWithEffects(
-  programs: readonly Program[],
-  options: TypeCheckOptions,
-  onFile: (file: number) => void,
-  lines: LineNamer,
-  effects: ProjectEffects,
-): { readonly result: TypeCheckResult; readonly dead: DeadCode } {
-  // An integer variable is a number when one of its assignments can store a non-whole number, also an assignment
-  // after its uses (rule 1.2). A check that finds a new one starts again with that variable declared as a number, so
-  // the last check, which finds none, sees every variable with its final type and alone reports. Likewise, a place
-  // that starts as null and that a read saw before its first other value, also one in another file, starts again with
-  // the type that value gives it, and a fallback for such a place keeps it where that value cannot be carried over.
-  const widened: Widened = new Map();
-  const decided: Decided = new Map();
-  const copies: Copies = new Map();
-  const kept: KeptFallbacks = new Set();
-  // The custom speaker properties that a store reaches unchecked, which keep no type (see `UncheckedProperties`).
-  const unchecked: UncheckedProperties = new Set();
-  // A storage key's type comes from all its loads (ADR 0021 §6), also those checked after a save, so a check reads the
-  // types the previous check found, and starts again until they stay the same. The first check reads the types that the
-  // source alone gives instead (see `storageGuess`): when it found the types it read, as most projects do, it is the
-  // check that reads the found types, so no other check is needed for them. A load's own type never depends on them,
-  // so they settle at once; the bound only guards against a load type that changes with variable types. When they
-  // changed only in what no check reads, such as the loads of a key that a load declares, and nothing else that the
-  // next check would read changed, the next check would repeat this one exactly, so it is not run.
-  let guess: ReadonlyMap<string, StorageKeyType> | null = storageGuess(programs);
-  let guessedAgain = false;
-  let storage: ReadonlyMap<string, StorageKeyType> = guess;
-  let storageRounds = 0;
-  for (;;) {
-    const guessed: boolean = storage === guess;
-    const uncheckedBefore = guessed ? [...unchecked] : [];
-    const checker: TypeChecker = new TypeChecker(
-      options,
-      widened,
-      decided,
-      copies,
-      kept,
-      unchecked,
-      storage,
-      guessed,
-      programs.length,
-      onFile,
-      lines,
-    );
-    checker.check(programs, effects);
-    // A key whose type the runtime cannot check has none.
-    const found: Map<string, StorageKeyType> = new Map(
-      [...storageKeyTypes(checker.storageLoads)].filter(([, kept]) => typePlan(kept.type) !== null),
-    );
-    // What a check found rests on the types its loads read. When a load read a guessed type that is not the one found,
-    // the check starts again from nothing, with the found types as the guess. Its loads then read them, since loads
-    // take them from declarations, which no check changes; should they not, it starts again without a guess.
-    if (guessed && !checker.loadsReadFound(found)) {
-      widened.clear();
-      decided.clear();
-      copies.clear();
-      kept.clear();
-      unchecked.clear();
-      for (const name of uncheckedBefore) unchecked.add(name);
-      guess = guessedAgain ? null : found;
-      guessedAgain = true;
-      storage = guess ?? new Map();
-      storageRounds = 0;
-      continue;
-    }
-    // A check that found more of them read those properties with the types they no longer keep, so what it found rests
-    // on those types: the next check starts again from nothing but the larger set, which only grows.
-    if (checker.uncheckedMore) {
-      widened.clear();
-      decided.clear();
-      copies.clear();
-      kept.clear();
-      storage = guess ?? new Map();
-      storageRounds = 0;
-      continue;
-    }
-    let storageChanged = false;
-    // Whether the key types changed in what a check reads (see `sameReadStorageKeyTypes`).
-    let storageRead = false;
-    if (storageRounds < MAX_STORAGE_ROUNDS) {
-      if (guessed) {
-        // As for a first check that read no types, they changed from none when it found some, but in what it read only
-        // when it found others than it read.
-        storageRead = !checker.readsFound(found);
-        storageChanged = storageRead || found.size > 0;
-        storage = found;
-      } else if (!sameStorageKeyTypes(storage, found)) {
-        storageRead = !sameReadStorageKeyTypes(storage, found);
-        storage = found;
-        storageChanged = true;
-      }
-      if (storageChanged) storageRounds += 1;
-    }
-    // A load that read its default's type reads the type that another load declares from the next check on, so what
-    // this check decided may rest on the wrong type: the next check decides again.
-    if (![...checker.keysReadAsDefault].some((key) => storage.get(key)?.declared === true))
-      checker.recordDecisions();
-    // A check that changed nothing is the last. So is one that changed only key types that no check reads, when it found
-    // no new copy and the places that follow widened ones widen no further: the next check would repeat it exactly.
-    let last =
-      !checker.widenedMore &&
-      !checker.decidedMore &&
-      !checker.keptMore &&
-      (!storageChanged || (!storageRead && !checker.copiedMore));
-    let followed = false;
-    if (last && storageChanged) {
-      checker.widenFollowers();
-      followed = true;
-      last = !checker.widenedMore;
-    }
-    if (last) {
-      const dead = checker.deadCode();
-      return {
-        result: Object.freeze({
-          diagnostics: Object.freeze(
-            checker.fileDiagnostics.map((diagnostics) => Object.freeze(diagnostics)),
-          ),
-          speakerFlow: checker.speakerFlowInput(),
-          runtimeChecks: checker.runtimeChecks(),
-          formShapes: checker.formShapes(),
-          ways: checker.ways(),
-          unreachable: dead.statements,
-          storageTypes: storageTypePlans(storage),
-        }),
-        dead,
-      };
-    }
-    if (!followed) checker.widenFollowers();
-  }
-}
-
-/** How many checks may still change the storage key types (see {@link checkTypes}). */
-const MAX_STORAGE_ROUNDS = 8;
-
-/** How many checks may leave out more code that never runs (see {@link checkTypes}). */
-const MAX_DEAD_CODE_ROUNDS = 4;
-
-/** The runtime checks of the storage keys, sorted by key; a type the runtime cannot check has none. */
-function storageTypePlans(
-  storage: ReadonlyMap<string, StorageKeyType>,
-): readonly { readonly key: string; readonly type: TypePlan }[] {
-  const plans: { readonly key: string; readonly type: TypePlan }[] = [];
-  for (const [key, kept] of storage) {
-    const type = typePlan(kept.type);
-    if (type !== null) plans.push(Object.freeze({ key, type }));
-  }
-  plans.sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
-  return Object.freeze(plans);
-}
-
-/**
- * The storage key types that the source alone gives (ADR 0021 §6), which the first check reads (see {@link checkTypes}).
- * They come from the loads with a key written as a string literal: the type that their `let` or `global` declares, or
- * that every declaration of the variable they are assigned to declares, or else their default's type when the default is
- * a literal. A load whose type only the check can tell, such as one with another default, is left out. The loads are
- * taken as a check takes them: those in the start values of globals and speakers first, then by file, each by position.
- */
-function storageGuess(programs: readonly Program[]): Map<string, StorageKeyType> {
-  const byPosition = (left: LoadExpression, right: LoadExpression): number =>
-    left.span.start.offset - right.span.start.offset;
-  const fileLoads: LoadExpression[][] = [];
-  const starts: Expression[] = [];
-  const declared = new Map<LoadExpression, TypeAnnotation>();
-  const assigned = new Map<LoadExpression, string>();
-  // The types that the `let`s, `global`s, parameters, and loop variables of each name declare, `null` for none.
-  const names = new Map<string, (TypeAnnotation | null)[]>();
-  const declare = (name: Identifier, annotation: TypeAnnotation | null): void => {
-    const annotations = names.get(name.name) ?? [];
-    annotations.push(annotation);
-    names.set(name.name, annotations);
-  };
-  for (const program of programs) {
-    const found: LoadExpression[] = [];
-    someNode(program, (node) => {
-      if (node.kind === "letStatement" || node.kind === "globalStatement") {
-        // EVIDENCE: invariant: the parser gives these kinds only to let and global statements.
-        const statement = node as LetStatement | GlobalStatement;
-        declare(statement.name, statement.typeAnnotation);
-        const value = unwrap(
-          statement.kind === "letStatement" ? statement.initializer : statement.initial,
-        );
-        if (statement.typeAnnotation !== null && value.kind === "loadExpression")
-          declared.set(value, statement.typeAnnotation);
-        if (statement.kind === "globalStatement") starts.push(statement.initial);
-      } else if (node.kind === "speakerDeclaration") {
-        // EVIDENCE: invariant: the parser gives this kind only to speaker declarations.
-        for (const property of (node as SpeakerDeclaration).properties) starts.push(property.value);
-      } else if (node.kind === "functionParameter") {
-        // EVIDENCE: invariant: the parser gives this kind only to function parameters.
-        const parameter = node as FunctionParameter;
-        declare(parameter.name, parameter.typeAnnotation);
-      } else if (node.kind === "forStatement") {
-        // EVIDENCE: invariant: the parser gives this kind only to for statements.
-        const statement = node as ForStatement;
-        declare(statement.variable, null);
-        if (statement.valueVariable !== null) declare(statement.valueVariable, null);
-      } else if (node.kind === "assignmentStatement") {
-        // EVIDENCE: invariant: the parser gives this kind only to assignments.
-        const statement = node as AssignmentStatement;
-        const value = unwrap(statement.value);
-        if (
-          statement.operator === "=" &&
-          statement.target.kind === "identifier" &&
-          value.kind === "loadExpression"
-        )
-          assigned.set(value, statement.target.name);
-      } else if (node.kind === "loadExpression") {
-        // EVIDENCE: invariant: the parser gives this kind only to load expressions.
-        found.push(node as LoadExpression);
-      }
-      return false;
-    });
-    fileLoads.push(found.sort(byPosition));
-  }
-  // The start values of globals and speakers come first, by file and position like the declarations that hold them.
-  const started = new Set<object>();
-  for (const start of starts)
-    someNode(start, (node) => {
-      if (node.kind === "loadExpression") started.add(node);
-      return false;
-    });
-  const loads = [
-    ...fileLoads.flatMap((found) => found.filter((load) => started.has(load))),
-    ...fileLoads.flatMap((found) => found.filter((load) => !started.has(load))),
-  ];
-  // The type that each declaration of a name declares, if they all declare the same one.
-  const byName = new Map<string, StaticType | undefined>();
-  const declaredByName = (name: string): StaticType | undefined => {
-    if (byName.has(name)) return byName.get(name);
-    const types = (names.get(name) ?? []).map((annotation) =>
-      annotation === null ? null : typeFromAnnotation(annotation),
-    );
-    const first = types[0] ?? null;
-    const text = first === null ? null : typeKey(first, false);
-    const type =
-      first !== null && types.every((other) => other !== null && typeKey(other, false) === text)
-        ? first
-        : undefined;
-    byName.set(name, type);
-    return type;
-  };
-  const typed: StorageLoad[] = [];
-  for (const load of loads) {
-    const key = staticText(load.key);
-    if (key === undefined) continue;
-    const annotation = declared.get(load);
-    const name = assigned.get(load);
-    const receiver =
-      annotation !== undefined
-        ? typeFromAnnotation(annotation)
-        : name === undefined
-          ? undefined
-          : declaredByName(name);
-    if (receiver !== undefined) {
-      typed.push({ key, type: nonNullType(receiver), at: load.span, declared: true });
-      continue;
-    }
-    const fallback =
-      load.defaultValue === null ? undefined : runCompileTask(literalTypeTask(load.defaultValue));
-    if (fallback === undefined) continue;
-    // As in the check, a default of null, or with a type that no value decided, gives the load no type.
-    const type = nonNullType(fallback);
-    const kind = resolved(type).kind;
-    if (kind !== "never" && kind !== "unknown" && kind !== "open")
-      typed.push({ key, type, at: load.span, declared: false });
-  }
-  // A key whose type the runtime cannot check has none.
-  return new Map([...storageKeyTypes(typed)].filter(([, kept]) => typePlan(kept.type) !== null));
-}
-
-/** The type that a check gives a literal, also one of literals such as `[1, 2]`, or `undefined` for another expression. */
-function* literalTypeTask(expression: Expression): CompileTask<StaticType | undefined> {
-  switch (expression.kind) {
-    case "booleanLiteral":
-      return BOOLEAN_TYPE;
-    case "nullLiteral":
-      return NULL_TYPE;
-    case "numberLiteral":
-      return expression.numericType === "integer" ? INTEGER_TYPE : NUMBER_TYPE;
-    case "durationLiteral":
-      return expression.calendar ? CALENDAR_DURATION_TYPE : DURATION_TYPE;
-    case "stringLiteral":
-      return STRING_TYPE;
-    case "parenthesizedExpression":
-      return yield* compileChild(literalTypeTask(expression.expression));
-    case "listLiteral":
-    case "setLiteral": {
-      const types: StaticType[] = [];
-      for (const element of expression.elements) {
-        const type = yield* compileChild(literalTypeTask(element));
-        if (type === undefined) return undefined;
-        types.push(type);
-      }
-      // Elements of different types leave the element type unknown, as in the check.
-      const element = types.length === 0 ? openType() : (joinTypes(types) ?? UNKNOWN_TYPE);
-      return { kind: expression.kind === "listLiteral" ? "list" : "set", element };
-    }
-    case "objectLiteral": {
-      const properties = new PropertyTable();
-      for (const property of expression.properties) {
-        const type = yield* compileChild(literalTypeTask(property.value));
-        if (type === undefined) return undefined;
-        properties.set(property.name.name, type);
-      }
-      return { kind: "object", properties };
-    }
-    default:
-      return undefined;
-  }
-}
-
-/**
- * The variables, elements, and properties that one of their assignments gives a non-whole number, with the first such
- * assignment: by the declaration of the variable that holds them, then by their path in it (see {@link PlacePath}).
- */
-type Widened = Map<Declaration, Map<string, SourceSpan>>;
-
-/**
- * The places still undecided when a read saw them, such as a property that so far took only null, with the type and
- * site of the store that later decided them: by the declaration of the variable that holds them, then by their path.
- */
-type Decided = Map<Declaration, Map<string, Decision>>;
-
-/**
- * The places that are a copy of another variable's place taken while that place was undecided, with that variable's
- * name: by the declaration of the variable that holds them, then by their path.
- */
-type Copies = Map<Declaration, Map<string, string>>;
-
-/**
- * The `otherwise` expressions, and the assignments to a variable of unknown type, whose value counted as null so far
- * where they were checked, but which a later value decided in a way that a next check cannot start with: their result
- * keeps that value's place (see {@link fallbackType}).
- */
-type KeptFallbacks = Set<Expression | AssignmentStatement>;
-
-/**
- * The names of custom speaker properties that a store may reach through a speaker the compiler cannot tell apart, such
- * as a parameter or the speaker of a message, or through a value of unknown type. Such a store is not checked, so no
- * speaker keeps a type for a property of that name: its reads stay of unknown type, which a known place checks when the
- * script runs (ADR 0021 rule 1.7), and stores into it are not checked.
- */
-type UncheckedProperties = Set<string>;
-
-/** The type that decided a slot, and the store that decided it. */
-interface Decision {
-  readonly type: StaticType;
-  readonly at: SourceSpan;
-}
-
-/**
- * For each given slot, the slot whose own first value decided it by the end of a check, or `null`. A slot shares the decision of the slot it was copied from, since it may hold what that slot held (ADR 0021
- * rule 1.2), and of a still undecided place stored in it, such as `a = b` while `b` took only null. Of all decisions it
- * shares this way, the first in checking order decides, also around a cycle of copies. Every slot is visited once, so a
- * whole chain of copies and stores needs no check per step.
- */
-function decidingSlots(slots: readonly OpenType[]): {
-  readonly deciding: Map<OpenType, OpenType | null>;
-  /** For a slot that shares no decision, where a value the compiler cannot know reached it, if one did. */
-  readonly unknown: Map<OpenType, SourceSpan>;
-} {
-  const starts = [...new Set(slots)];
-  // The slots each one shares decisions with, found from the given ones, and those a value of their own decided.
-  const sharers = new Map<OpenType, OpenType[]>();
-  const own: OpenType[] = [];
-  const seen = new Set<OpenType>(starts);
-  const work = [...starts];
-  while (work.length > 0) {
-    const slot = work.pop()!;
-    const shared: OpenType[] = [];
-    if (slot.copiedFrom !== undefined) shared.push(slot.copiedFrom);
-    if (slot.resolved !== null) {
-      const stored = storedPlace(slot);
-      if (stored === undefined) own.push(slot);
-      else shared.push(stored);
-    }
-    for (const next of shared) {
-      const list = sharers.get(next) ?? [];
-      list.push(slot);
-      sharers.set(next, list);
-      if (!seen.has(next)) {
-        seen.add(next);
-        work.push(next);
-      }
-    }
-  }
-  const deciding = new Map<OpenType, OpenType | null>();
-  own.sort((left, right) => (left.order ?? Infinity) - (right.order ?? Infinity));
-  for (const decider of own) {
-    const reached = [decider];
-    while (reached.length > 0) {
-      const slot = reached.pop()!;
-      if (deciding.has(slot)) continue;
-      deciding.set(slot, decider);
-      for (const sharer of sharers.get(slot) ?? []) reached.push(sharer);
-    }
-  }
-  for (const slot of starts) if (!deciding.has(slot)) deciding.set(slot, null);
-  // A value the compiler cannot know reaches what shares the slot it was stored in, as a decision would.
-  const unknown = new Map<OpenType, SourceSpan>();
-  for (const holder of seen) {
-    if (holder.heldUnknown === undefined) continue;
-    const reached = [holder];
-    while (reached.length > 0) {
-      const slot = reached.pop()!;
-      if (unknown.has(slot)) continue;
-      unknown.set(slot, holder.heldUnknown);
-      for (const sharer of sharers.get(slot) ?? []) reached.push(sharer);
-    }
-  }
-  return { deciding, unknown };
 }
 
 /**
@@ -1017,132 +535,6 @@ type DeferredCheck = {
       readonly span: SourceSpan;
     }
 );
-
-/**
- * The undecided slot of a type that so far held only null, such as the type of `v` after `let v = null` once nothing
- * narrows it any more, or `undefined` for any other type. A value that a later store gives may still decide the slot.
- */
-function nullOnlySlot(type: StaticType): OpenType | undefined {
-  let slot: OpenType | undefined;
-  let sawNull = false;
-  for (const member of members(type)) {
-    const value = resolved(member);
-    if (value.kind === "null") sawNull = true;
-    else if (
-      value.kind === "open" &&
-      slot === undefined &&
-      value.resolved === null &&
-      value.heldUnknown === undefined
-    )
-      slot = value;
-    else return undefined;
-  }
-  return slot !== undefined && (sawNull || slot.sawNull) ? slot : undefined;
-}
-
-/**
- * Whether an undecided slot held only null to the end of a check: no value decided it or a slot it was copied from, and
- * none of them took a value the compiler cannot know. `known` keeps the answer for each slot walked, so a chain of copies
- * that many slots share is walked once.
- */
-function heldOnlyNull(slot: OpenType, known: Map<OpenType, boolean>): boolean {
-  const walked = new Set<OpenType>();
-  let only = true;
-  for (
-    let current: OpenType | undefined = slot;
-    current !== undefined;
-    current = current.copiedFrom
-  ) {
-    const seen = known.get(current);
-    if (seen !== undefined) {
-      only = seen;
-      break;
-    }
-    if (walked.has(current) || current.resolved !== null || current.heldUnknown !== undefined) {
-      only = false;
-      break;
-    }
-    walked.add(current);
-  }
-  for (const current of walked) known.set(current, only);
-  return only;
-}
-
-/** The slot itself and the still undecided places stored in it, as far as they lead (see {@link decidingSlots}). */
-function storedIn(slot: OpenType): Set<OpenType> {
-  const chain = new Set<OpenType>();
-  for (let current: OpenType | undefined = slot; current !== undefined && !chain.has(current);) {
-    chain.add(current);
-    current = storedPlace(current);
-  }
-  return chain;
-}
-
-/**
- * The still undecided place whose value a decided slot holds, such as `b` after `a = b` while `b` took only null, or
- * `undefined` when a value of its own decided it.
- */
-function storedPlace(slot: OpenType): OpenType | undefined {
-  if (slot.resolved === null) return undefined;
-  const parts = slot.resolved.kind === "union" ? slot.resolved.members : [slot.resolved];
-  const open = parts.find((part): part is OpenType => part.kind === "open");
-  return open !== undefined && parts.every((part) => part.kind === "open" || part.kind === "null")
-    ? open
-    : undefined;
-}
-
-/**
- * Whether a slot's decision may be replayed although parts of it are still undecided (see `recordDecisions`): only when
- * nothing it reaches through copies and decided slots holds itself, which each later check would decide one level
- * deeper, or held a value the compiler cannot know, which a new slot would forget. A value the compiler cannot know
- * that the slot itself held does not count: the next check stores it again, into the decided type (#859). Each slot is
- * visited once.
- */
-function replayableDecisions(): (decider: OpenType) => boolean {
-  /** For each visited slot, whether it reaches neither a cycle nor a value the compiler cannot know. */
-  const verdicts = new Map<OpenType, boolean>();
-  return (decider) => {
-    const onPath = new Set<OpenType>();
-    const frames: { slot: OpenType; next: OpenType[]; clean: boolean }[] = [];
-    const enter = (slot: OpenType, own = false): void => {
-      onPath.add(slot);
-      frames.push({ slot, next: slotEdges(slot), clean: own || slot.heldUnknown === undefined });
-    };
-    // The verdict on the slot's own value is not kept for a slot that reaches this one.
-    const own = decider.heldUnknown !== undefined;
-    if (own || !verdicts.has(decider)) enter(decider, own);
-    let verdict = verdicts.get(decider);
-    while (frames.length > 0) {
-      const frame = frames[frames.length - 1]!;
-      const next = frame.next.pop();
-      if (next === undefined) {
-        frames.pop();
-        onPath.delete(frame.slot);
-        if (frame.slot === decider && own) verdict = frame.clean;
-        else verdicts.set(frame.slot, frame.clean);
-        // What a slot reaches, the slots that reach it reach too.
-        if (!frame.clean && frames.length > 0) frames[frames.length - 1]!.clean = false;
-      } else if (onPath.has(next) || verdicts.get(next) === false) frame.clean = false;
-      else if (!verdicts.has(next)) enter(next);
-    }
-    return verdict ?? verdicts.get(decider)!;
-  };
-}
-
-/** The slots a slot's type depends on: the one it was copied from, and those directly in the type that decided it. */
-function slotEdges(slot: OpenType): OpenType[] {
-  const edges: OpenType[] = slot.copiedFrom === undefined ? [] : [slot.copiedFrom];
-  const pending: StaticType[] = slot.resolved === null ? [] : [slot.resolved];
-  while (pending.length > 0) {
-    const part = pending.pop()!;
-    if (part.kind === "open") edges.push(part);
-    else if (part.kind === "union") for (const member of part.members) pending.push(member);
-    else if (isCollection(part)) pending.push(part.element);
-    else if (part.kind === "object" && part.properties !== null)
-      for (const value of part.properties.values()) pending.push(value);
-  }
-  return edges;
-}
 
 /** The name of the variable a declaration creates. */
 function declaredName(declaration: Declaration): string {
@@ -1249,7 +641,7 @@ function originPlace(origin: Origin): PlacePath {
 }
 
 /** A variable and the type it keeps. Open slots and object property tables inside `type` record later decisions. */
-interface Variable {
+export interface Variable {
   readonly name: string;
   readonly type: StaticType;
   /** For a variable without a type annotation, its declaration, so a non-whole number can widen its integer type. */
@@ -1263,6 +655,12 @@ interface Variable {
    * cancels its narrowing, or for a change in place only the narrowing that the change can undo.
    */
   readonly shared: Sharing | false;
+  /**
+   * For a `let` or global that no code assigns, stores into, or changes in place, its first value, which every read
+   * gets: for a global everywhere (`body` is `null`), since it is set before the story runs, and for a `let` in the
+   * `body` that declares it, after the declaration (see `KnownValues`).
+   */
+  readonly keeps?: { readonly initializer: Expression; readonly body: object | null };
 }
 
 /**
@@ -1357,7 +755,7 @@ class Scope {
 }
 
 /** A function's parameter types and result type, both computed once, when first needed. */
-interface FunctionType {
+export interface FunctionType {
   readonly declaration: FunctionDeclaration;
   /** The file the function is written in. */
   readonly file: number;
@@ -1422,7 +820,7 @@ interface Place {
   readonly fix: (value: StaticType, expression: Expression | null) => string;
 }
 
-class TypeChecker {
+export class TypeChecker {
   /** The diagnostics of each file of the project. */
   readonly fileDiagnostics: Diagnostic[][];
 
@@ -1480,8 +878,23 @@ class TypeChecker {
 
   readonly #types = new Map<Expression, StaticType>();
 
-  /** Numbers and durations known at compile time, folded once per expression (see `#known`). */
-  readonly #knownValues = new Map<Expression, StaticScalar | undefined>();
+  /** The initializer whose value a read of a variable gets (see `Variable.keeps`), by the read. */
+  readonly #initializers = new Map<Identifier, Expression>();
+
+  /** The values known at compile time, computed once per expression (see `#known`). */
+  readonly knownValues = new KnownValues((identifier) => this.#initializers.get(identifier));
+
+  /** `#known`, for the checks of built-in operations. */
+  readonly #knownOf = (expression: Expression): KnownValue | undefined => this.#known(expression);
+
+  /**
+   * The code being checked, in which a `let` declared in it counts its first value: a file's top level, a function's
+   * parameters and body, or a block of a timer, media, or button; before them, the start values.
+   */
+  #body: object = this.#project;
+
+  /** The `let` declarations and globals that some code writes (see `TypeCheckOptions.written`), or `null` for all. */
+  readonly #written: NonNullable<TypeCheckOptions["written"]> | null;
 
   /**
    * Each arithmetic operation that gives a value of unknown type because an operand's type is unknown, with the types it
@@ -1832,6 +1245,7 @@ class TypeChecker {
     this.#unchecked = unchecked;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
     this.#sharedWrites = options.sharedWrites ?? new Map();
+    this.#written = options.written ?? null;
     this.#contextualSpeakers = options.speakers ?? new Map();
     this.#scriptCatalog =
       options.scriptCatalog?.map((file) => ({
@@ -1853,6 +1267,35 @@ class TypeChecker {
         kind: "variable",
         variable: { name, type: UNKNOWN_TYPE, shared: false },
       });
+  }
+
+  /** The author functions of the project, by declaration, once declared (see {@link check}). */
+  readonly #functionTypes = new Map<FunctionDeclaration, FunctionType>();
+
+  /**
+   * The variable of each `let`, `global`, parameter, and loop variable, by its declaration, as declared: a parameter
+   * as the function's parameter list gives it, not as the body accepts it (see `FunctionType.accepted`).
+   */
+  readonly #bindings = new Map<Declaration, Variable>();
+
+  // What the facts of the last check read (see `legacy-facts.ts`): the types the check gave, after it is complete.
+
+  /** The type that the check kept for an expression, or `undefined` for one it did not check. */
+  public checkedType(expression: Expression): StaticType | undefined {
+    return this.#types.get(expression);
+  }
+
+  public get bindings(): ReadonlyMap<Declaration, Variable> {
+    return this.#bindings;
+  }
+
+  public get functionTypes(): ReadonlyMap<FunctionDeclaration, FunctionType> {
+    return this.#functionTypes;
+  }
+
+  /** The custom properties of each declared speaker by its name. */
+  public get speakerProperties(): ReadonlyMap<string, PropertyTable> {
+    return this.#speakerProperties;
   }
 
   /** The diagnostics of the file being checked. */
@@ -1960,6 +1403,7 @@ class TypeChecker {
       const rootStatements = program.statements.filter(
         (statement) => statement.kind !== "functionDeclaration",
       );
+      this.#body = program;
       runCompileTask(this.#statementsTask(rootStatements, this.#root));
       // Every script variable has its type now, so every function body is checked, also one that waited for one.
       this.#scriptChecked = true;
@@ -1977,6 +1421,7 @@ class TypeChecker {
           });
         this.#function = null;
         this.#outer = handler.outer;
+        this.#body = handler;
         // A block does not inherit narrowed facts from the code around it (rule 5.5).
         this.#flow = new Flow();
         runCompileTask(this.#statementsTask(handler.block.statements, scope));
@@ -1998,6 +1443,7 @@ class TypeChecker {
       pending: [],
     };
     scope.declare(declaration.name.name, { kind: "function", fn });
+    this.#functionTypes.set(declaration, fn);
     return fn;
   }
 
@@ -2336,7 +1782,7 @@ class TypeChecker {
       const expression = work.pop()!;
       if (
         expression.kind === "propertyAccessExpression" &&
-        expression.property.name === "random" &&
+        listDraw(expression.property.name, "property") !== undefined &&
         this.#mayBe(expression.object, isListOrSet)
       )
         this.#report(
@@ -2913,8 +2359,10 @@ class TypeChecker {
     this.#widen(body);
     const start = this.#flow.mark();
     const loopScope = new Scope(scope);
-    for (const variable of variables)
+    for (const variable of variables) {
+      if (variable.declaration !== undefined) this.#bindings.set(variable.declaration, variable);
       loopScope.declare(variable.name, { kind: "variable", variable });
+    }
     this.#loops.push({ start, breaks: [], continued: false });
     const continues = yield* compileChild(this.#statementsTask(body.statements, loopScope));
     const { breaks, continued } = this.#loops.pop()!;
@@ -3007,19 +2455,24 @@ class TypeChecker {
       );
       this.#recordRuntimeCheck(statement, type, `'${name}'`, value);
     }
+    const global = statement.kind === "globalStatement";
+    const keeps =
+      this.#written !== null &&
+      !(global ? this.#written.globals.has(name) : this.#written.lets.has(statement));
     const variable: Variable = {
       name,
       type,
-      shared:
-        statement.kind === "globalStatement"
-          ? (this.#sharedGlobals.get(name) ?? false)
-          : scope === this.#root
-            ? (this.#effects.shared.get(name) ?? false)
-            : this.#sharedLocal(statement),
+      shared: global
+        ? (this.#sharedGlobals.get(name) ?? false)
+        : scope === this.#root
+          ? (this.#effects.shared.get(name) ?? false)
+          : this.#sharedLocal(statement),
       declaration: statement.typeAnnotation === null ? statement : undefined,
       annotated: statement.typeAnnotation !== null,
+      ...(keeps ? { keeps: { initializer: written, body: global ? null : this.#body } } : {}),
     };
     if (statement.typeAnnotation === null) this.#declared.set(statement, variable);
+    this.#bindings.set(statement, variable);
     scope.declare(name, { kind: "variable", variable });
     this.#assigned(variable, value);
   }
@@ -3063,9 +2516,10 @@ class TypeChecker {
   }
 
   /**
-   * A camera view's placement, a timer's display, or a media volume that the compiler knows to be wrong, written to what
-   * can only be such a handle, also through an alias, a parameter, a function result, or a collection element. A value
-   * of another type is a type error of the store, and a value the compiler cannot know is checked at runtime (`TSR050`).
+   * A value outside the domain of a handle property (see `HandleDomain`), such as a camera view's placement, that the
+   * compiler knows, written to what can only be such a handle, also through an alias, a parameter, a function result, or
+   * a collection element. A value of another type is a type error of the store, and a value the compiler cannot know is
+   * checked at runtime (`TSR050`).
    */
   #checkHandleValue(
     object: StaticType,
@@ -3075,40 +2529,47 @@ class TypeChecker {
   ): void {
     const receivers = members(nonNullType(object)).map((member) => resolved(member).kind);
     const kind = receivers[0];
-    if (kind === undefined || receivers.some((other) => other !== kind)) return;
+    if (kind === undefined || !isHandleKind(kind) || receivers.some((other) => other !== kind))
+      return;
+    const domain = handleProperty(kind, name)?.assign?.domain;
+    if (domain === undefined) return;
     const report = (message: string) =>
       this.#report(handleMemberCode(kind), message, statement.value.span);
-    const text = isScalar(value, "string") ? staticVisibleText(statement.value) : undefined;
-    if (kind === "camera" && name === "placement") {
-      // Adding text to the placement never gives another placement; any other change is the operation's error.
-      if (statement.operator !== "=") {
-        if (
-          statement.operator === "+=" &&
-          (isScalar(value, "string") || !isKnown(nonNullTypeForUse(value)))
-        )
-          report(cameraPlacementMessage(null));
-      } else if (text !== undefined && !isCameraPlacement(text))
-        report(cameraPlacementMessage(shownChoice(text)));
-    } else if (statement.operator !== "=") return;
-    else if (kind === "timer" && name === "display") {
-      if (text !== undefined && !isTimerDisplay(text))
-        report(timerDisplayMessage(shownChoice(text)));
-    } else if (kind === "media" && name === "volume") {
-      const known = this.#known(statement.value);
-      if (typeof known === "number" && !isMediaVolume(known))
-        report(mediaVolumeMessage(describeShownValue(known)));
+    if (statement.operator !== "=") {
+      // Any other change is the operation's error.
+      if (
+        domain.appended !== undefined &&
+        statement.operator === "+=" &&
+        (isScalar(value, "string") || !isKnown(nonNullTypeForUse(value)))
+      )
+        report(domain.appended);
+      return;
     }
+    let known: string | number | undefined;
+    if (domain.known === "text")
+      known = isScalar(value, "string") ? staticVisibleText(statement.value) : undefined;
+    else {
+      const folded = this.#known(statement.value);
+      if (typeof folded === "number") known = folded;
+    }
+    if (known !== undefined && !domain.accepts(known))
+      report(
+        domain.message(domain.shows === "choice" ? shownChoice(known) : describeShownValue(known)),
+      );
   }
 
   /**
-   * The markup colours of literal text written to what can only be a message handle, checked as `say` checks its text;
-   * text the compiler cannot know falls back when it is shown.
+   * The markup colours of literal text written to a property of message markup, such as a message's text, of what can
+   * only be such a handle, checked as `say` checks its text; text the compiler cannot know falls back when it is shown.
    */
-  #checkMessageText(object: StaticType, statement: AssignmentStatement): void {
+  #checkMessageText(object: StaticType, name: string, statement: AssignmentStatement): void {
     const receivers = members(nonNullType(object));
     if (
       receivers.length > 0 &&
-      receivers.every((member) => resolved(member).kind === "messageHandle")
+      receivers.every((member) => {
+        const kind = resolved(member).kind;
+        return isHandleKind(kind) && handleProperty(kind, name)?.markup === true;
+      })
     )
       this.diagnostics.push(...messageColorDiagnostics(statement.value));
   }
@@ -3251,14 +2712,11 @@ class TypeChecker {
         untyped =
           place === undefined && this.diagnostics.length === before && speakers.includes(false);
         handle = mayBe(receiver, "timer", "media", "camera");
-        // A media position, remaining time, or volume write, and a camera view's placement, first wait for the
-        // previous message's pacing.
-        if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(receiver, "media")) this.#suspend();
-        if (name === "placement" && mayBe(receiver, "camera")) this.#suspend();
-        if (handle)
-          checkValue = (value) => this.#checkHandleValue(receiver, name, statement, value);
-        if (name === "text" && statement.operator === "=")
-          this.#checkMessageText(receiver, statement);
+        // A write that waits for the previous message's pacing, such as a media position's, waits first.
+        const paced = kindsWithProperty(name, (property) => property.paced === true);
+        if (paced.length > 0 && mayBe(receiver, ...paced)) this.#suspend();
+        checkValue = (value) => this.#checkHandleValue(receiver, name, statement, value);
+        if (statement.operator === "=") this.#checkMessageText(receiver, name, statement);
       }
     }
     const loaded = unwrap(statement.value);
@@ -3800,7 +3258,7 @@ class TypeChecker {
       if (node.kind === "indexExpression") steps.push("[]");
       else if (node.kind === "propertyAccessExpression") {
         const owner = members(nonNullType(this.#typeOf(node.object))).map(resolved);
-        const read = LIST_ELEMENT_READS.has(node.property.name);
+        const read = listProperty(node.property.name)?.gives === "element";
         // A set member is read as a copy, so what is stored in it is no part of the variable.
         if (read && owner.some((member) => member.kind === "set")) return undefined;
         steps.push(
@@ -3972,7 +3430,10 @@ class TypeChecker {
     let node = unwrap(expression);
     let property = false;
     while (node.kind === "propertyAccessExpression" || node.kind === "indexExpression") {
-      if (node.kind === "propertyAccessExpression" && !LIST_ELEMENT_READS.has(node.property.name))
+      if (
+        node.kind === "propertyAccessExpression" &&
+        listProperty(node.property.name)?.gives !== "element"
+      )
         property = true;
       node = unwrap(node.object);
     }
@@ -4267,14 +3728,17 @@ class TypeChecker {
     const outerLoops = this.#loops.splice(0);
     const outerReachable = this.#reachable;
     const outerFlow = this.#flow;
+    const outerBody = this.#body;
     this.#function = context;
     this.#reachable = true;
+    this.#body = fn;
     // A function body does not inherit narrowed facts from its caller (rule 5.5).
     this.#flow = new Flow();
     const continues = yield* compileChild(this.#statementsTask(declaration.body.statements, scope));
     this.#function = outer;
     this.#reachable = outerReachable;
     this.#flow = outerFlow;
+    this.#body = outerBody;
     this.#outer = outerScope;
     this.#loops.push(...outerLoops);
     for (const { call, values, literals, file } of fn.pending.splice(0)) {
@@ -4347,6 +3811,9 @@ class TypeChecker {
     if (fn.parameters !== null) return fn.parameters;
     const parameters: Variable[] = [];
     fn.parameters = parameters;
+    // A default runs when the function is called, which may be before a `let` of the code around it ran.
+    const outerBody = this.#body;
+    this.#body = fn;
     const scope = new Scope(fn.scope);
     const outerFlow = this.#flow;
     this.#flow = new Flow();
@@ -4403,12 +3870,14 @@ class TypeChecker {
         parameter,
       };
       if (declaration !== undefined) this.#declared.set(declaration, variable);
+      this.#bindings.set(parameter, variable);
       parameters.push(variable);
       scope.declare(name, { kind: "variable", variable });
     }
     this.#reportMixedLiterals();
     this.#flow = outerFlow;
     this.#outer = outerScope;
+    this.#body = outerBody;
     this.#enterFile(outerFile);
     return parameters;
   }
@@ -4696,7 +4165,12 @@ class TypeChecker {
       }
       case "identifier": {
         const entry = scope.resolve(expression.name);
-        if (entry?.kind === "variable") return placeRead(this.#currentType(entry.variable));
+        if (entry?.kind === "variable") {
+          const keeps = entry.variable.keeps;
+          if (keeps !== undefined && (keeps.body === null || keeps.body === this.#body))
+            this.#initializers.set(expression, keeps.initializer);
+          return placeRead(this.#currentType(entry.variable));
+        }
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
           return { kind: "speaker" };
         if (expression.name === "debugMode") return BOOLEAN_TYPE;
@@ -5143,7 +4617,7 @@ class TypeChecker {
         if (unwrap(value).kind !== "objectLiteral")
           this.#reportUnless(
             type,
-            (member) => isShowable(member) || resolved(member).kind === "object",
+            (member) => isShown(member) || resolved(member).kind === "object",
             value,
             `'${name.name}:' takes text or a button object { text, background? }`,
           );
@@ -5450,7 +4924,7 @@ class TypeChecker {
         this.#reportUnless(
           type,
           (member) =>
-            member.kind === "list" && (!isKnown(member.element) || isShowable(member.element)),
+            member.kind === "list" && (!isKnown(member.element) || isShown(member.element)),
           argument.value,
           "'texts:' takes a list of texts",
         );
@@ -5468,7 +4942,7 @@ class TypeChecker {
         if (unwrap(argument.value).kind !== "objectLiteral")
           this.#reportUnless(
             type,
-            (member) => isShowable(member) || resolved(member).kind === "object",
+            (member) => isShown(member) || resolved(member).kind === "object",
             argument.value,
             "'cancel:' takes text or a button object { text, background? }",
           );
@@ -6144,17 +5618,13 @@ class TypeChecker {
       case "<=":
       case ">":
       case ">=":
-        this.#operation(expression.operator, [left, right], expression, (a, b) =>
-          (isNumeric(a) && isNumeric(b)) ||
-          (isScalar(a, "string") && isScalar(b, "string")) ||
-          (isScalar(a, "duration") && isScalar(b, "duration")) ||
-          (isScalar(a, "calendarDuration") && isScalar(b, "calendarDuration")) ||
-          (isScalar(a, "angle") && isScalar(b, "angle")) ||
-          // Date and time values order only within one kind (V30 §35).
-          (isTemporal(a) && typeName(a) === typeName(b))
+        this.#operation(expression.operator, [left, right], expression, (a, b) => {
+          // Values order only within one family, so date and time values within one kind (V30 §35).
+          const [first, second] = [valueKindOfType(a), valueKindOfType(b)];
+          return first !== undefined && second !== undefined && ordersWith(first, second)
             ? BOOLEAN_TYPE
-            : undefined,
-        );
+            : undefined;
+        });
         return BOOLEAN_TYPE;
       default: {
         // Two lists whose element types mix are reported as `union()` reports them (V30 §16).
@@ -6257,36 +5727,9 @@ class TypeChecker {
     );
   }
 
-  /** The number `expression` is known to have at compile time (see `#known`). */
-  #knownNumber(expression: Expression): number | undefined {
-    const known = this.#known(expression);
-    return typeof known === "number" ? known : undefined;
-  }
-
-  /**
-   * The number, duration, or angle `expression` is known to have at compile time, folded once per expression from its
-   * operands' known values. Iterative, so a long chain of steps does not deepen the native stack.
-   */
-  #known(expression: Expression): StaticScalar | undefined {
-    const pending: Expression[] = [expression];
-    while (pending.length > 0) {
-      const current = pending.at(-1)!;
-      if (this.#knownValues.has(current)) {
-        pending.pop();
-        continue;
-      }
-      const missing = knownOperands(current).filter((operand) => !this.#knownValues.has(operand));
-      if (missing.length > 0) {
-        pending.push(...missing);
-        continue;
-      }
-      this.#knownValues.set(
-        current,
-        knownStep(current, (operand) => this.#knownValues.get(operand)),
-      );
-      pending.pop();
-    }
-    return this.#knownValues.get(expression);
+  /** The value `expression` is known to have at compile time (see `KnownValues`). */
+  #known(expression: Expression): KnownValue | undefined {
+    return this.knownValues.known(expression);
   }
 
   /**
@@ -6832,30 +6275,37 @@ class TypeChecker {
     }
     const method = callee.property.name;
     if (method === "copyFrom") return yield* compileChild(this.#copyFromTask(expression, scope));
-    // A method that changes a list, set, or dict, or reorders a list, changes its receiver.
-    if (COLLECTION_CHANGES.has(method) || LIST_REORDERS.has(method))
-      this.#noteChanged(callee.object);
-    if (
-      (method === "add" || method === "addAll" || method === "get") &&
-      unwrap(callee.object).kind !== "identifier"
-    )
+    // A method that changes a list, set, or dict changes its receiver.
+    const list = listMethod(method);
+    if (list?.changes !== undefined || changesEntries(method)) this.#noteChanged(callee.object);
+    // A call that may decide the element type of a list that no value decided yet.
+    if (list?.decides !== undefined && unwrap(callee.object).kind !== "identifier")
       this.#relaxNarrowedRoot(callee.object, scope);
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
-    if (method === "add" || method === "addAll") this.#noteUncheckedStore(callee.object, scope);
+    if (list?.decides === "element" || list?.decides === "elements")
+      this.#noteUncheckedStore(callee.object, scope);
     // Text `reverse` gives a new text, so a receiver that cannot be a list is not changed and may take a fallback.
     if (method === "reverse" && !mayBe(receiver, "list")) this.#changed.delete(callee.object);
     const value = resolved(receiver);
     // The receiver as it was evaluated, before the arguments run, for the checks of text operations and `join`. Only
     // they use it, so other methods, such as repeated `add` calls on a growing list, do not copy their receiver.
     const receiverAtCall =
-      TEXT_MEMBERS.has(method) || method === "join" ? copyType(receiver) : receiver;
+      isTextMethod(method) || method === "join" ? copyType(receiver) : receiver;
     const typeOf = (argument: Expression): StaticType => this.#typeOf(argument);
     const memberChecks = (): void =>
       this.#reportProblems(
-        memberProblems(callee.object, receiverAtCall, callee.property, expression, typeOf),
+        memberProblems(
+          callee.object,
+          receiverAtCall,
+          callee.property,
+          expression,
+          typeOf,
+          this.#knownOf,
+        ),
       );
-    // Pausing, resuming, or stopping media first waits for the previous message's pacing.
-    if (["pause", "resume", "stop"].includes(method) && mayBe(receiver, "media")) this.#suspend();
+    // A call that waits for the previous message's pacing, such as pausing media, waits first.
+    const paced = kindsWithMethod(method, (contract) => contract.paced === true);
+    if (paced.length > 0 && mayBe(receiver, ...paced)) this.#suspend();
     const collections = members(value).every((member) =>
       ["list", "set"].includes(resolved(member).kind),
     );
@@ -6942,17 +6392,18 @@ class TypeChecker {
       this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0].value, true);
     // A dict method takes a text key; `get` also takes the value it gives for a missing key.
     let fallback: StaticType | undefined;
-    if (isDictReceiver(value) && DICT_METHODS.has(method)) {
-      if (!this.#checkDictArguments(expression, method)) return UNKNOWN_TYPE;
+    const dict = dictMethod(method);
+    if (isDictReceiver(value) && dict !== undefined) {
+      if (!this.#checkDictArguments(expression, dict)) return UNKNOWN_TYPE;
       const key = expression.arguments[0];
       if (key !== undefined) {
         this.#checkDictKey(values[0]!, key.value);
-        if (method === "remove") this.#checkVisibleKey(callee.object, key.value);
+        if (dict.missing === "fails") this.#checkVisibleKey(callee.object, key.value);
       }
       const defaultArgument = expression.arguments.find(
         (argument) => argument.kind === "namedArgument",
       );
-      if (method === "get" && defaultArgument !== undefined) {
+      if (dict.missing === "default" && defaultArgument !== undefined) {
         // The result may be the default itself, so it is a copy that later stores to either cannot share.
         fallback = this.#capture(defaultArgument.value);
         // The default may be of any type, and the result joins it with the value type (V30 §40).
@@ -6969,11 +6420,12 @@ class TypeChecker {
         );
       }
     } else if (
-      (method === "contains" || method === "remove") &&
+      dict?.named === undefined &&
+      dict?.parameters.length === 1 &&
       expression.arguments.length === 1 &&
       members(nonNullType(value)).some((member) => isDict(resolved(member)))
     )
-      // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5).
+      // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5), where it takes only the key.
       this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
     // A range written in the call gives its whole numbers, as `for` does, but at most 1,000,000 of them (V30 §6).
     if (method === "toList") {
@@ -6997,42 +6449,52 @@ class TypeChecker {
         );
     const passing = all.filter((_, index) => results[index] !== undefined);
     if (passing.length === all.length) {
+      // Each member is a handle with the method, which takes its arguments as the first one's does.
       const handle = resolved(all[0]!).kind;
-      const handles = all.every((member) => hasArgumentlessMethods(resolved(member).kind));
-      if (handles && hasArgumentlessMethods(handle)) {
+      const handles = all.every((member) => isHandleKind(resolved(member).kind));
+      if (handles && isHandleKind(handle)) {
         const named = expression.arguments.flatMap((argument) =>
           argument.kind === "namedArgument" ? [argument.name.name] : [],
         );
         const problem = argumentShapeProblem(
           method,
-          NO_ARGUMENTS,
+          handleMethod(handle, method)!.shape,
           expression.arguments.length - named.length,
           named,
         );
         if (problem !== undefined)
           this.#report(handleMemberCode(handle), problem.message, callee.property.span);
       }
-      const textual = TEXT_MEMBERS.has(method) || method === "join";
+      const textual = isTextMethod(method) || method === "join";
       const collection = all.some((member) => {
         const kept = resolved(member);
         return isListOrSet(kept) || kept.kind === "dict" || kept.kind === "range";
       });
-      if (textual || COLLECTION_METHODS.has(method) || collection) {
+      if (textual || isListMethod(method) || collection) {
         // Each member takes the arguments as the one receiver would (ADR 0021 rule 3.5), and the results join. A problem
         // that several members share at one place is reported once.
         const before = this.diagnostics.length;
         const atCall = members(resolved(receiverAtCall));
         // A message or a permanent button takes `remove()` without arguments, which a list, set, or dict member rejects.
-        const removable = mayBe(receiver, "messageHandle", "permanentButton");
+        const removable = mayBe(receiver, ...kindsWithMethod("remove"));
         const memberResults = all.map((member, index) => {
           const kept = resolved(member);
-          // A list or set checks its own methods, also `indexOf`, `lastIndexOf`, and `count`, which take any value on a
-          // list.
-          if (isListOrSet(kept) && COLLECTION_METHODS.has(method))
-            return this.#collectionMethodType(method, kept, callee.property, expression, scope);
-          // Its other methods, a dict's in a union, and a range's `toList` take their arguments without names, in their
-          // number (V30 §16).
-          if (isListOrSet(kept) || kept.kind === "dict" || kept.kind === "range")
+          // A list or set checks its own methods (see `LIST_METHODS`), but `join`, whose separator is checked below as a
+          // text method checks text.
+          if (isListOrSet(kept) && isListMethod(method) && method !== "join")
+            return this.#collectionMethodType(
+              method,
+              kept,
+              callee.property,
+              expression,
+              scope,
+              removable,
+            );
+          // A dict's methods in a union, and a range's `toList`, take their arguments without names, in their number
+          // (V30 §6, §40).
+          if (kept.kind === "dict")
+            this.#reportProblems(dictMethodProblems(method, expression, removable));
+          else if (isListOrSet(kept) || kept.kind === "range")
             this.#reportProblems(positionalMethodProblems(method, expression, removable));
           if (textual)
             this.#reportProblems(
@@ -7042,6 +6504,7 @@ class TypeChecker {
                 callee.property,
                 expression,
                 typeOf,
+                this.#knownOf,
               ),
             );
           if (fallback === undefined) return results[index]!;
@@ -7055,7 +6518,7 @@ class TypeChecker {
         return memberResults.length === 1 ? memberResults[0]! : union(memberResults);
       }
       // The methods of date and time values take no arguments; a format follows the player's settings.
-      if (all.every(isTemporal) && expression.arguments.length > 0)
+      if (all.every(isTemporal) && isTemporalMethod(method) && expression.arguments.length > 0)
         this.#report(
           typeCode.argumentCount,
           temporalArgumentsMessage(method, expression.arguments.length),
@@ -7065,40 +6528,35 @@ class TypeChecker {
     }
     const failing = resolved(all.find((_, index) => results[index] === undefined)!);
     if (passing.length > 0) this.#reportMayBe(callee.object, failing, passing);
+    // A date or time value has the methods of its kind (V30 §35), also in a union.
+    else if (failing.kind === "scalar" && isTemporalKind(failing.name))
+      this.#report(
+        typeCode.invalidOperand,
+        temporalMemberMessage(
+          capitalize(describeValue(failing)),
+          failing.name,
+          method,
+          "method",
+          "value",
+        ),
+        callee.property.span,
+      );
     // Text operations and values without methods name what to write instead (V30 §8).
     else if (all.length === 1 && MEMBER_CHECKED_KINDS.has(failing.kind)) memberChecks();
-    // A set has no order to sort, shuffle, reverse, or take from, and no positions or repeated members to search for
-    // (V30 §16).
-    else if (
-      all.length === 1 &&
-      isListOrSet(failing) &&
-      failing.kind === "set" &&
-      COLLECTION_METHODS.has(method)
-    )
-      this.#reportProblems(
-        collectionMethodProblems(method, failing, callee.property, expression, (argument) =>
-          this.#typeOf(argument),
-        ),
-      );
     else
       this.#report(
         handleMemberCode(failing.kind),
+        // A set has no order to sort, shuffle, reverse, or take from, and no positions or repeated members to search
+        // for (V30 §16).
         failing.kind === "list" || failing.kind === "set"
-          ? `${failing.kind === "list" ? "Lists" : "Sets"} have no method '${method}'.`
+          ? missingListMethodMessage(failing.kind, method)
           : failing.kind === "dict"
-            ? method === "add"
-              ? "Dicts have no method 'add'. Store a value by its key, as in dict[key] = value."
-              : `Dicts have no method '${method}'. Use contains, remove, clear, or get.`
-            : failing.kind === "timer" ||
-                failing.kind === "media" ||
-                failing.kind === "camera" ||
-                failing.kind === "messageHandle"
+            ? missingDictMethodMessage(method)
+            : isHandleKind(failing.kind)
               ? handleMemberMessage(failing.kind, method, "call")
-              : failing.kind === "permanentButton"
-                ? `Permanent buttons have no method '${method}'. Use remove().`
-                : failing.kind === "speaker" && all.length === 1
-                  ? speakerMethodMessage(method, expressionLabel(callee.object))
-                  : `${capitalize(describeValue(failing))} has no method '${method}'.`,
+              : failing.kind === "speaker" && all.length === 1
+                ? speakerMethodMessage(method, expressionLabel(callee.object))
+                : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
       );
     return UNKNOWN_TYPE;
@@ -7117,12 +6575,14 @@ class TypeChecker {
     scope: Scope,
   ): CompileTask<void> {
     const type = yield* compileChild(this.#expressionTask(argument, scope));
-    this.#reportUnless(type, isList, argument, "addAll() needs a list", () =>
-      members(type).some((member) => resolved(member).kind === "set")
-        ? " Copy a set into a list with toList() first."
-        : members(type).some((member) => resolved(member).kind === "range")
-          ? RANGE_LIST_FIX
-          : "",
+    const kinds = members(type).map((member) => resolved(member).kind);
+    this.#reportUnless(type, isList, argument, (given) =>
+      listArgumentMessage(
+        "addAll",
+        "list",
+        given,
+        kinds.includes("set") ? "set" : kinds.includes("range") ? "range" : "other",
+      ),
     );
     const list = isKnown(nonNullTypeForUse(type))
       ? members(type).every(isList)
@@ -7167,23 +6627,29 @@ class TypeChecker {
   }
 
   /**
-   * Checks `sort`, `shuffle`, `reverse`, `take`, `takeLast`, a search, `get`, or a set operation on one list or set, as
-   * evaluated, and gives its result (V30 §16).
+   * Checks a method of lists and sets on one list or set that has it, as evaluated, and gives its result (V30 §16): see
+   * `LIST_METHODS`. Where the receiver may be a message or a permanent button (`removable`), `remove()` may have no
+   * argument.
    */
   #collectionMethodType(
-    method: string,
+    method: ListMethodName,
     value: StaticType & { readonly kind: "list" | "set" },
     property: Identifier,
     expression: CallExpression,
     scope: Scope,
+    removable: boolean,
   ): StaticType {
     const typeOf = (argument: Expression): StaticType => this.#typeOf(argument);
-    const problems = collectionMethodProblems(method, value, property, expression, typeOf);
+    const problems = collectionMethodProblems(
+      method,
+      value,
+      property,
+      expression,
+      typeOf,
+      this.#knownOf,
+      removable,
+    );
     this.#reportProblems(problems);
-    if (LIST_REORDERS.has(method)) return NULL_TYPE;
-    if (method === "take" || method === "takeLast")
-      return { kind: "list", element: copyType(value.element) };
-    if (LIST_SEARCHES.has(method)) return memberMethodType(value, method) ?? UNKNOWN_TYPE;
     // The element, or the default, which may be of another type, so their types join (#844). Where the default has a
     // part that no value decided yet, such as `[]`, they join as in a literal, so that part takes the element type, as
     // for a dict (#853). An element type that is still undecided, such as where a null default decided nothing, keeps
@@ -7199,6 +6665,9 @@ class TypeChecker {
         undecided(other) && !undecided(element) ? joinTypes([element, other]) : undefined;
       return joined ?? union([element, other]);
     }
+    const contract: ListMethod = LIST_METHODS[method];
+    if (contract.parameters[0]?.kind !== "collection")
+      return memberMethodType(value, method) ?? UNKNOWN_TYPE;
     // A set operation's argument that may be null needs a check first (owner decision on #504 Q1).
     const operand = expression.arguments[0]?.value;
     if (operand !== undefined && problems.length === 0) {
@@ -7281,35 +6750,53 @@ class TypeChecker {
   }
 
   /**
-   * Checks the arguments of a numeric function and gives its result type (V30 §13). A call whose arguments the compiler
-   * can see and that has no finite result is a compile error.
+   * Checks a call of a numeric or angle function and gives its result type (see `NUMERIC_CONTRACTS`). A domain of its
+   * numbers is checked as the runtime checks it once the compiler can see the numbers it reads, whatever the call's
+   * other arguments are, and a call whose every argument the compiler can see and that has no finite result is a
+   * compile error.
    */
   #numericFunctionType(
-    name: string,
+    name: NumericFunctionName,
     expression: CallExpression,
     values: readonly StaticType[],
   ): StaticType {
-    const numeric = NUMERIC_FUNCTIONS.get(name)!;
+    const numeric: NumericFunction = NUMERIC_CONTRACTS[name];
     const { checked, inputs, named } = this.#numberArguments(name, numeric, expression, values);
-    if (checked && [...inputs, ...Object.values(named)].every((one) => one.known !== undefined)) {
-      const result = numeric.apply(
+    const failed = this.#checkDomains(numeric, numeric.domains, expression, inputs, named);
+    if (
+      checked &&
+      !failed &&
+      [...inputs, ...Object.values(named)].every((one) => one.known !== undefined)
+    ) {
+      const result = numericResult(
+        numeric,
         inputs.map((one) => one.known!),
         Object.fromEntries(Object.entries(named).map(([key, one]) => [key, one.known!])),
       );
-      if (typeof result !== "number")
+      if (isNumericFailure(result))
         this.#report(typeCode.invalidOperand, result.failure, expression.span);
     }
-    const result = numeric.result(inputs, named);
-    return result === "integer" ? INTEGER_TYPE : result === "number" ? NUMBER_TYPE : UNKNOWN_TYPE;
+    const result =
+      typeof numeric.result === "function" ? numeric.result(inputs, named) : numeric.result;
+    switch (result) {
+      case "integer":
+        return INTEGER_TYPE;
+      case "number":
+        return NUMBER_TYPE;
+      case "angle":
+        return ANGLE_TYPE;
+      case "unknown":
+        return UNKNOWN_TYPE;
+    }
   }
 
   /**
-   * Checks the arguments of a function whose every argument is a number, and gives what the compiler knows about them:
-   * the input of each positional parameter and of each named argument, and whether the call has no problem.
+   * Checks the arguments of a function whose every argument is a number or an angle, and gives what the compiler knows
+   * about them: the input of each positional parameter and of each named argument, and whether the call has no problem.
    */
   #numberArguments(
     name: string,
-    signature: NumberSignature,
+    signature: NumberSignature & { readonly result: unknown },
     expression: CallExpression,
     values: readonly StaticType[],
   ): {
@@ -7317,8 +6804,14 @@ class TypeChecker {
     readonly inputs: readonly NumericArgument[];
     readonly named: Readonly<Record<string, NumericArgument>>;
   } {
-    const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+    const problems = builtinCallProblems(
+      name,
+      expression,
+      (item) => this.#typeOf(item),
+      this.#knownOf,
+    );
     const fitting = problems.every((problem) => problem.kind === "invalidOperand");
+    const angles = signature.takes === "angles";
     // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5,
     // #504 Q1).
     const several = fitting
@@ -7329,19 +6822,30 @@ class TypeChecker {
     const spans = new Set(several.map(({ item }) => item.value.span.start.offset));
     this.#reportProblems(problems.filter((problem) => !spans.has(problem.span.start.offset)));
     for (const { item, type } of several)
-      this.#reportUnless(type, isNumeric, item.value, `${name}(...) takes a number`);
+      this.#reportUnless(
+        type,
+        angles ? (member) => isScalar(member, "angle") : isNumeric,
+        item.value,
+        `${name}(...) takes ${angles ? "an angle" : "a number"}`,
+      );
     const input = (item: CallArgument | undefined, index: number): NumericArgument => {
       if (item === undefined || !fitting) return { type: "unknown", known: undefined };
       const parts = members(nonNullTypeForUse(values[index]!));
       const known = this.#known(item.value);
       return {
         type:
-          parts.length === 0 || !parts.every(isNumeric)
+          angles || parts.length === 0 || !parts.every(isNumeric)
             ? "unknown"
             : parts.every((part) => isScalar(part, "integer"))
               ? "integer"
               : "number",
-        known: typeof known === "number" ? known : undefined,
+        known: angles
+          ? typeof known === "object" && known?.kind === "angle"
+            ? known.degrees
+            : undefined
+          : typeof known === "number"
+            ? known
+            : undefined,
       };
     };
     const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
@@ -7353,6 +6857,40 @@ class TypeChecker {
       if (item.kind === "namedArgument") named[item.name.name] = input(item, index);
     });
     return { checked: problems.length === 0, inputs, named };
+  }
+
+  /**
+   * Reports the first of a call's `domains` that its numbers fail (see `NumberDomain`), of those whose numbers the
+   * compiler can see, whatever the call's other arguments are; a domain of one number names it. Whether one failed.
+   */
+  #checkDomains(
+    signature: NumberSignature,
+    domains: readonly NumberDomain[],
+    expression: CallExpression,
+    inputs: readonly NumericArgument[],
+    named: Readonly<Record<string, NumericArgument>>,
+  ): boolean {
+    const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
+    const namedArguments = Object.fromEntries(
+      expression.arguments.flatMap((item) =>
+        item.kind === "namedArgument" ? [[item.name.name, item]] : [],
+      ),
+    );
+    for (const domain of domains) {
+      const known = domain.reads.flatMap(
+        (parameter) => parameterArgument(signature, parameter, inputs, named)?.known ?? [],
+      );
+      if (known.length < domain.reads.length) continue;
+      const problem = domain.problem(known);
+      if (problem === undefined) continue;
+      const one =
+        domain.reads.length === 1
+          ? parameterArgument<CallArgument>(signature, domain.reads[0]!, positional, namedArguments)
+          : undefined;
+      this.#report(typeCode.invalidOperand, problem, (one?.value ?? expression).span);
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -7368,24 +6906,17 @@ class TypeChecker {
     const random: RandomFunction = RANDOM_CONTRACTS[name];
     switch (random.takes) {
       case "numbers": {
-        const { inputs } = this.#numberArguments(name, random, expression, values);
-        const positional = expression.arguments.filter(
-          (item) => item.kind === "positionalArgument",
-        );
-        // The first domain that fails, as at runtime; a domain of one number names it.
-        for (const domain of random.domains) {
-          const known = domain.reads.flatMap((position) => inputs[position]!.known ?? []);
-          if (known.length < domain.reads.length) continue;
-          const problem = domain.problem(known);
-          if (problem === undefined) continue;
-          const at = domain.reads.length === 1 ? positional[domain.reads[0]!]!.value : expression;
-          this.#report(typeCode.invalidOperand, problem, at.span);
-          break;
-        }
+        const { inputs, named } = this.#numberArguments(name, random, expression, values);
+        this.#checkDomains(random, random.domains, expression, inputs, named);
         return random.result === "boolean" ? BOOLEAN_TYPE : NUMBER_TYPE;
       }
       case "range": {
-        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        const problems = builtinCallProblems(
+          name,
+          expression,
+          (item) => this.#typeOf(item),
+          this.#knownOf,
+        );
         this.#reportProblems(problems);
         // A range's values are checked only when the call's shape is right.
         if (problems.length === 0) {
@@ -7404,11 +6935,7 @@ class TypeChecker {
         return this.#listFunctionType(
           expression,
           values,
-          weightedChoiceCheck(
-            expression,
-            (item) => this.#typeOf(item),
-            (item) => this.#knownNumber(item),
-          ),
+          weightedChoiceCheck(expression, (item) => this.#typeOf(item), this.#knownOf),
         );
     }
   }
@@ -7436,50 +6963,6 @@ class TypeChecker {
   }
 
   /**
-   * Checks the arguments of an angle function and gives its result type (V30 §13). A plain number where an angle is
-   * needed names the unit to write, and a call whose arguments the compiler can see and that has no result is a compile
-   * error.
-   */
-  #angleFunctionType(
-    name: string,
-    expression: CallExpression,
-    values: readonly StaticType[],
-  ): StaticType {
-    const angleFunction = ANGLE_FUNCTIONS.get(name)!;
-    const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
-    const takes = (member: StaticType): boolean =>
-      angleFunction.takes === "angle" ? isScalar(member, "angle") : isNumeric(member);
-    // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5).
-    const several = problems.every((problem) => problem.kind === "invalidOperand")
-      ? expression.arguments.flatMap((item, index) =>
-          members(values[index]!).length > 1 ? [{ item, type: values[index]! }] : [],
-        )
-      : [];
-    const spans = new Set(several.map(({ item }) => item.value.span.start.offset));
-    this.#reportProblems(problems.filter((problem) => !spans.has(problem.span.start.offset)));
-    for (const { item, type } of several)
-      this.#reportUnless(
-        type,
-        takes,
-        item.value,
-        `${name}(...) takes ${angleFunction.takes === "angle" ? "an angle" : "a number"}`,
-      );
-    if (problems.length === 0) {
-      const known = expression.arguments.map((item) => this.#known(item.value));
-      const fits = (value: StaticScalar | undefined): value is number | StoredAngle =>
-        angleFunction.takes === "angle"
-          ? value !== null && typeof value === "object" && value.kind === "angle"
-          : typeof value === "number";
-      if (known.every(fits)) {
-        const result = angleFunction.apply(known);
-        if (typeof result !== "number" && "failure" in result)
-          this.#report(typeCode.invalidOperand, result.failure, expression.span);
-      }
-    }
-    return angleFunction.returns === "angle" ? ANGLE_TYPE : NUMBER_TYPE;
-  }
-
-  /**
    * Checks a call of a conversion and gives its result type (see `CONVERSIONS`): a value of its result type, or with a
    * default that may be any value, or `null` too, the result or the default; what JSON holds is known only when the
    * script runs.
@@ -7490,7 +6973,12 @@ class TypeChecker {
     values: readonly StaticType[],
   ): StaticType {
     const conversion: Conversion = CONVERSIONS[name];
-    const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+    const problems = builtinCallProblems(
+      name,
+      expression,
+      (item) => this.#typeOf(item),
+      this.#knownOf,
+    );
     this.#reportProblems(problems);
     // Without a default, a call fails for anything but text, so a value that may be something else names the check
     // first.
@@ -7528,26 +7016,30 @@ class TypeChecker {
     values: readonly StaticType[],
   ): StaticType {
     if (isRandomFunction(name)) return this.#randomFunctionType(name, expression, values);
-    if (NUMERIC_FUNCTIONS.has(name)) return this.#numericFunctionType(name, expression, values);
-    if (ANGLE_FUNCTIONS.has(name)) return this.#angleFunctionType(name, expression, values);
+    if (isNumericFunction(name)) return this.#numericFunctionType(name, expression, values);
     if (isConversion(name)) return this.#conversionType(name, expression, values);
-    // `min` and `max` of one argument that may be a list are list functions too (V30 §16).
+    if (isClockFunction(name)) {
+      // A clock read takes no arguments (see `ClockFunction`).
+      if (expression.arguments.length > 0)
+        this.#report(
+          typeCode.argumentCount,
+          temporalArgumentsMessage(name, expression.arguments.length),
+          expression.arguments[0]!.value.span,
+        );
+      return scalarType(CLOCK_CONTRACTS[name].result);
+    }
+    // `min` and `max` of one argument that may be a list take its values (V30 §16), and otherwise their arguments' values.
     const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
     const list =
       positional.length === 1 &&
       members(nonNullTypeForUse(this.#typeOf(positional[0]!.value))).some(
         (member) => !isKnown(member) || resolved(member).kind === "list",
       );
-    if (LIST_FUNCTIONS.has(name) || (MIN_MAX_NAMES.has(name) && list))
+    if (isListFunction(name) && (!takesValues(name) || list))
       return this.#listFunctionType(
         expression,
         values,
-        listFunctionCheck(
-          name,
-          expression,
-          (item) => this.#typeOf(item),
-          (item) => this.#knownNumber(item),
-        ),
+        listFunctionCheck(name, expression, (item) => this.#typeOf(item), this.#knownOf),
       );
     const argument = expression.arguments[0];
     const value = values[0];
@@ -7558,7 +7050,12 @@ class TypeChecker {
     switch (name) {
       case "min":
       case "max": {
-        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        const problems = builtinCallProblems(
+          name,
+          expression,
+          (item) => this.#typeOf(item),
+          this.#knownOf,
+        );
         // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5,
         // #504 Q1): each of its members must be of the family the other arguments decide: numbers, durations, or one kind
         // of date or time value.
@@ -7633,7 +7130,12 @@ class TypeChecker {
       case "hashFile": {
         // A stored file from Base64 text, the Base64 text of a stored file, and the SHA-256 of text or a stored file
         // (V30 §13 and §33).
-        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        const problems = builtinCallProblems(
+          name,
+          expression,
+          (item) => this.#typeOf(item),
+          this.#knownOf,
+        );
         this.#reportProblems(problems);
         if (name !== "fileFromBase64" && problems.length === 0)
           this.#reportUnless(
@@ -7659,7 +7161,12 @@ class TypeChecker {
       case "decryptText":
       case "decryptFile": {
         // Locked text as Base64 or a locked stored file, and what a lock opens to, or the default (V30 §13).
-        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        const problems = builtinCallProblems(
+          name,
+          expression,
+          (item) => this.#typeOf(item),
+          this.#knownOf,
+        );
         this.#reportProblems(problems);
         const index = expression.arguments.findIndex((item) => item.kind === "positionalArgument");
         if (index !== -1 && problems.every((problem) => problem.kind !== "argumentCount"))
@@ -7687,24 +7194,6 @@ class TypeChecker {
             "escapeMarkup(...) takes text (string)",
           );
         return STRING_TYPE;
-      case "getDate":
-      case "getTime":
-      case "getDateTime":
-      case "getAbsoluteDateTime":
-        // The current date and time take no arguments (V30 §35).
-        if (expression.arguments.length > 0)
-          this.#report(
-            typeCode.argumentCount,
-            temporalArgumentsMessage(name, expression.arguments.length),
-            expression.arguments[0]!.value.span,
-          );
-        return name === "getDate"
-          ? DATE_TYPE
-          : name === "getTime"
-            ? TIME_TYPE
-            : name === "getDateTime"
-              ? DATETIME_TYPE
-              : ABSOLUTE_DATE_TIME_TYPE;
       case "script": {
         // `script(path)` or `script(path, label: name)`, both text (V30 §29).
         const positional = expression.arguments.filter(
@@ -7740,6 +7229,32 @@ class TypeChecker {
     }
   }
 
+  /** Reports a read of an element, such as `.first`, from a list or set the compiler knows is empty. */
+  #checkEmptyCollection(
+    expression: Extract<Expression, { kind: "propertyAccessExpression" }>,
+  ): void {
+    const name = expression.property.name;
+    if (listProperty(name)?.gives !== "element") return;
+    const value = this.#known(expression.object);
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      (value.kind !== "list" && value.kind !== "set") ||
+      value.items.length > 0
+    )
+      return;
+    this.#report(
+      typeCode.invalidOperand,
+      emptyListPropertyFailure(
+        // EVIDENCE: invariant: the properties that give an element are the names of `ElementProperty`.
+        name as ElementProperty,
+        value.kind,
+        expressionLabel(expression.object),
+      ).message,
+      expression.span,
+    );
+  }
+
   /** The type of `object.name`; every member of a union must have the property (ADR 0021 rule 3.5). */
   #propertyType(
     object: StaticType,
@@ -7751,6 +7266,7 @@ class TypeChecker {
     const passing = all.filter((_, index) => reads[index] !== undefined);
     if (passing.length === all.length) {
       this.#noteMissingAccess(expression, object);
+      this.#checkEmptyCollection(expression);
       const types = reads.map((read) => (read!.kind === "placeRead" ? read!.type : read!));
       const type = all.length === 1 ? types[0]! : union(types);
       // A property or an element is read from the place that keeps it. Any other property gives a new value, such as a
@@ -7763,11 +7279,17 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const value = resolved(failing);
-    // An absolute date and time has no local fields until it is converted through the player's zone.
-    if (isScalar(value, "absoluteDateTime") && temporalFieldType("datetime", name) !== undefined) {
+    // A date or time value has the fields of its kind (V30 §35); an absolute date and time is converted for a local one.
+    if (value.kind === "scalar" && isTemporalKind(value.name)) {
       this.#report(
         typeCode.invalidOperand,
-        `An absolute date and time has no property '${name}'. Convert it first, as in '${expressionLabel(expression.object) ?? "value"}.toDateTime().${name}'.`,
+        temporalMemberMessage(
+          capitalize(describeValue(value)),
+          value.name,
+          name,
+          "property",
+          expressionLabel(expression.object) ?? "value",
+        ),
         expression.property.span,
       );
       return UNKNOWN_TYPE;
@@ -7784,7 +7306,7 @@ class TypeChecker {
     if (isScalar(value, "calendarDuration")) {
       this.#report(
         typeCode.invalidOperand,
-        `A calendar duration has no property '${name}'. Use months, days, or exactOffset.`,
+        calendarDurationPropertyMessage(name),
         expression.property.span,
       );
       return UNKNOWN_TYPE;
@@ -7800,8 +7322,13 @@ class TypeChecker {
     // Text operations and `join` name what to write instead (V30 §8).
     if (MEMBER_CHECKED_KINDS.has(value.kind) || (value.kind === "list" && name === "join")) {
       this.#reportProblems(
-        memberProblems(expression.object, failing, expression.property, null, (item) =>
-          this.#typeOf(item),
+        memberProblems(
+          expression.object,
+          failing,
+          expression.property,
+          null,
+          (item) => this.#typeOf(item),
+          this.#knownOf,
         ),
       );
       return UNKNOWN_TYPE;
@@ -7809,13 +7336,10 @@ class TypeChecker {
     this.#report(
       handleMemberCode(value.kind),
       value.kind === "list" || value.kind === "set"
-        ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'. Use length, first, last, or random.`
+        ? missingListPropertyMessage(value.kind, name)
         : value.kind === "dict"
-          ? `Dicts have no property '${name}'. Use length, keys, or values. To read a value by its key, write '${expressionLabel(expression.object) ?? "dict"}[${JSON.stringify(name)}]'.`
-          : value.kind === "timer" ||
-              value.kind === "media" ||
-              value.kind === "camera" ||
-              value.kind === "messageHandle"
+          ? missingDictPropertyMessage(name, expressionLabel(expression.object))
+          : isHandleKind(value.kind)
             ? handleMemberMessage(value.kind, name, "read")
             : `${capitalize(describeValue(value))} has no property '${name}'.`,
       expression.property.span,
@@ -7902,11 +7426,8 @@ class TypeChecker {
       this.#report(typeCode.invalidListIndex, NEGATIVE_INDEX_MESSAGE, expression.span);
   }
 
-  /**
-   * Checks the arguments of a dict method: `contains(key)` and `remove(key)` take a key, `clear()` none, and
-   * `get(key, default: value)` a key and a `default:`. Returns whether they have that form.
-   */
-  #checkDictArguments(expression: CallExpression, method: string): boolean {
+  /** Checks the names and the number of the arguments of a dict method (see `DICT_METHODS`); returns whether they fit. */
+  #checkDictArguments(expression: CallExpression, method: DictMethod): boolean {
     const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
     const problem = dictArgumentsProblem(
       method,
@@ -7924,21 +7445,24 @@ class TypeChecker {
     return false;
   }
 
-  /** A dict key is text; a number key names the fix, `"${id}"`. */
+  /** A dict key is text (`dictKey`, `dictKeyMessage`). */
   #checkDictKey(type: StaticType, expression: Expression): void {
     this.#reportUnless(
       type,
-      (member) => isScalar(member, "string"),
+      (member) => {
+        const kind = valueKindOfType(member);
+        return kind !== undefined && VALUE_KINDS[kind].dictKey;
+      },
       expression,
-      "A dict key is text (string)",
-      () =>
-        isNumeric(nonNullTypeForUse(type))
-          ? ` Write a number key as text, as in "\${${expressionLabel(expression) ?? "id"}}".`
-          : "",
+      (given) =>
+        dictKeyMessage(given, isNumeric(nonNullTypeForUse(type)), expressionLabel(expression)),
     );
   }
 
-  /** A key that a dict literal certainly does not have is reported, as it would fail when the script runs. */
+  /**
+   * A key that a dict literal certainly does not have, where the operation fails for it (see `MissingKey`), is reported,
+   * as it would fail when the script runs.
+   */
   #checkVisibleKey(dict: Expression, keyExpression: Expression): void {
     const literal = unwrap(dict);
     const key = staticChoiceValue(keyExpression)?.value;
@@ -7947,7 +7471,11 @@ class TypeChecker {
     if (keys.every((written) => typeof written === "string" && written !== key))
       this.#report(
         typeCode.invalidOperand,
-        `Dictionary has no key ${JSON.stringify(key)}.`,
+        missingKeyMessage(
+          quotedText(messageText(key)),
+          expressionLabel(dict),
+          expressionLabel(keyExpression),
+        ),
         keyExpression.span,
       );
   }
@@ -8056,7 +7584,7 @@ class TypeChecker {
             option.expression,
             type,
             (element) =>
-              (written === null ? isChoiceValue(element) : isShowable(element)) ||
+              (written === null ? isChoiceValue(element) : isShown(element)) ||
               resolved(element).kind === "object",
             () =>
               this.#report(
@@ -8150,7 +7678,7 @@ class TypeChecker {
     const accepted = (member: StaticType): boolean => {
       const kind = resolved(member).kind;
       return (
-        (returns ? isChoiceValue(member) : isShowable(member)) ||
+        (returns ? isChoiceValue(member) : isShown(member)) ||
         kind === "object" ||
         (!inList && (kind === "list" || kind === "set"))
       );
@@ -8160,7 +7688,7 @@ class TypeChecker {
         typeCode.invalidInteractionChoice,
         inList && (member.kind === "list" || member.kind === "set")
           ? "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set."
-          : (unreturnableChoiceMessage(member) ??
+          : (unreturnableChoice(member) ??
               "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set."),
         entry.span,
       ),
@@ -8200,11 +7728,11 @@ class TypeChecker {
             this.#checkMembers(
               property.value,
               propertyType,
-              (member) => unreturnableChoiceMessage(member) === undefined,
+              (member) => unreturnableChoice(member) === undefined,
               (member) =>
                 this.#report(
                   typeCode.invalidInteractionChoice,
-                  unreturnableChoiceMessage(member)!,
+                  unreturnableChoice(member)!,
                   property.value.span,
                 ),
             );
@@ -8232,7 +7760,7 @@ class TypeChecker {
     const text = table.get("text");
     if (text === undefined) return;
     const shown = (member: StaticType): boolean =>
-      !isKnown(member) || resolved(member).kind === "null" || isShowable(member);
+      !isKnown(member) || resolved(member).kind === "null" || isShown(member);
     if (!members(text).some(shown))
       this.#checkShownText(expression, text, "the text of a choice option");
   }
@@ -8246,7 +7774,7 @@ class TypeChecker {
       const reported = this.#checkMembers(
         expression,
         type,
-        (member) => isShowable(member) || resolved(member).kind === "list",
+        (member) => isShown(member) || resolved(member).kind === "list",
         (member) =>
           this.#report(
             typeCode.unshowableValue,
@@ -8257,7 +7785,7 @@ class TypeChecker {
           ),
       );
       if (!reported)
-        this.#checkElements(expression, type, isShowable, () =>
+        this.#checkElements(expression, type, isShown, () =>
           this.#report(
             typeCode.unshowableValue,
             "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.",
@@ -8273,7 +7801,7 @@ class TypeChecker {
         value.span,
       );
     for (const element of value.elements)
-      this.#checkMembers(element, this.#typeOf(element), isShowable, () =>
+      this.#checkMembers(element, this.#typeOf(element), isShown, () =>
         this.#report(
           typeCode.unshowableValue,
           "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.",
@@ -8433,7 +7961,7 @@ class TypeChecker {
 
   /** Only `${...}` selects from a list; a list in a text field is an error, at runtime when it is not known here. */
   #checkShownText(expression: Expression, type: StaticType, field: string): void {
-    this.#checkMembers(expression, type, isShowable, (member) =>
+    this.#checkMembers(expression, type, isShown, (member) =>
       member.kind === "list"
         ? this.#report(
             typeCode.listInText,
@@ -9076,14 +8604,15 @@ class TypeChecker {
   }
 
   /**
-   * Reports `rule` when a known value does not satisfy it. Every member of a union must satisfy it; when only some do,
-   * the message names the test the author needs (ADR 0021 rule 3.5).
+   * Reports `rule` when a known value does not satisfy it, or the message `rule` gives for the value's description. Every
+   * member of a union must satisfy it; when only some do, the message names the test the author needs (ADR 0021 rule
+   * 3.5).
    */
   #reportUnless(
     type: StaticType,
     accepts: (member: StaticType) => boolean,
     expression: Expression,
-    rule: string,
+    rule: string | ((given: string) => string),
     fix: () => string = () => "",
     code: TypeErrorCode = typeCode.invalidOperand,
   ): void {
@@ -9110,7 +8639,9 @@ class TypeChecker {
         : "";
     this.#report(
       code,
-      `${rule}, but this is ${describeValue(value)}.${reason}${fix()}`,
+      typeof rule === "string"
+        ? `${rule}, but this is ${describeValue(value)}.${reason}${fix()}`
+        : rule(describeValue(value)),
       expression.span,
     );
   }
@@ -9144,9 +8675,7 @@ class TypeChecker {
     let computed: Extract<Expression, { kind: "propertyAccessExpression" }> | undefined;
     for (let node = start; ;) {
       const type = this.#typeOf(node);
-      const reference = members(type).some(
-        (member) => !isKnown(member) || HANDLE_KINDS.has(resolved(member).kind),
-      );
+      const reference = members(type).some((member) => !isKnown(member) || isIdentityType(member));
       if (nonNullType(type).kind === "never") return;
       if (reference) break;
       if (node.kind === "parenthesizedExpression") node = node.expression;
@@ -9194,12 +8723,16 @@ class TypeChecker {
     const callee = unwrap(expression.callee);
     if (callee.kind !== "propertyAccessExpression") return;
     const method = callee.property.name;
-    if (!COLLECTION_CHANGES.has(method) && !LIST_REORDERS.has(method)) return;
-    // Only a list, set, or dict that has the method changes: text `reverse` gives a new text, and a method that a value
-    // does not have is reported as such.
-    const changes = members(this.#typeOf(callee.object)).some(
-      (member) => isCollection(resolved(member)) && memberMethodType(member, method) !== undefined,
-    );
+    // Only a list, set, or dict whose method changes it: text `reverse` gives a new text, and a method that a value does
+    // not have is reported as such.
+    const changes = members(this.#typeOf(callee.object)).some((member) => {
+      const value = resolved(member);
+      return value.kind === "dict"
+        ? changesEntries(method)
+        : isListOrSet(value) &&
+            hasListMethod(value.kind, method) &&
+            listMethod(method)!.changes !== undefined;
+    });
     if (changes) this.#reportChangedCopy(callee.object, callee.object);
   }
 
@@ -9480,277 +9013,6 @@ function undoneBy(variable: Variable, type: StaticType, how: Sharing | false): b
   });
 }
 
-/**
- * What one iteration of a loop may do before the next test: the variables it assigns or changes in place, and whether it
- * may suspend.
- */
-interface LoopEffects {
-  readonly writes: ReadonlyMap<string, Sharing>;
-  readonly suspends: boolean;
-}
-
-const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
-  "sayStatement",
-  "showButtonStatement",
-  "showPopupStatement",
-  "openUrlStatement",
-  "exportTextStatement",
-  "waitStatement",
-  "timerStatement",
-  "playMediaStatement",
-  "showImageStatement",
-  "hideImageStatement",
-  "showCameraStatement",
-  "hideCameraStatement",
-  "stopAudioStatement",
-  "saveStatement",
-  "deleteStatement",
-  // Blocks of the caller keep running while a called file runs.
-  "callFileStatement",
-]);
-
-/** What a program's loops and functions may change (ADR 0021 rule 5.5). */
-interface ProgramEffects {
-  /** Names that function bodies and timer or media blocks assign or change in place. */
-  readonly shared: ReadonlyMap<string, Sharing>;
-  /** Names that the file's top level assigns or changes, which another file's `call` may run (ADR 0022 §5). */
-  readonly rootAssigned: ReadonlyMap<string, Sharing>;
-  /** Whether the file calls a file, so another file's top level may run during the call. */
-  readonly callsFiles: boolean;
-  /** Whether the file enters `main.tease` again at its top, after the start values have run. */
-  readonly entersMain: boolean;
-  /** The effects of each loop, by its body; a `while` loop includes its condition. */
-  readonly loops: ReadonlyMap<Block, LoopEffects>;
-}
-
-/**
- * The code that a check found never runs: the statements of a branch or loop body that no value takes or after a
- * statement that never continues, and by place the `and`, `or`, and `otherwise` whose right side never runs.
- */
-interface DeadCode {
-  readonly statements: ReadonlySet<Statement>;
-  readonly operands: ReadonlySet<string>;
-}
-
-/** Whether `found` holds all of `dead`. */
-function coversDeadCode(found: DeadCode, dead: DeadCode): boolean {
-  for (const statement of dead.statements) if (!found.statements.has(statement)) return false;
-  for (const place of dead.operands) if (!found.operands.has(place)) return false;
-  return true;
-}
-
-/** What the code of a project may change, as the check uses it. */
-interface ProjectEffects {
-  readonly files: readonly ProgramEffects[];
-  readonly loops: ReadonlyMap<Block, LoopEffects>;
-  /** The globals that a function or a timer or media block of any file assigns or changes in place, with how. */
-  readonly sharedGlobals: ReadonlyMap<string, Sharing>;
-}
-
-/** What the code of each file may change, leaving out the code that never runs. */
-function projectEffects(programs: readonly Program[], dead: DeadCode): ProjectEffects {
-  const files = programs.map((program, file) => programEffects(program, file, dead));
-  const sharedGlobals = new Map<string, Sharing>();
-  for (const fileEffects of files)
-    for (const [name, how] of fileEffects.shared) noteSharing(sharedGlobals, name, how);
-  // While a `call` runs, any file's top level may run and assign globals (ADR 0022 §5, §6).
-  if (files.some((fileEffects) => fileEffects.callsFiles))
-    for (const fileEffects of files)
-      for (const [name, how] of fileEffects.rootAssigned) noteSharing(sharedGlobals, name, how);
-  return {
-    files,
-    loops: new Map(files.flatMap((fileEffects) => [...fileEffects.loops])),
-    sharedGlobals,
-  };
-}
-
-/** Whether two sets of effects give a check the same facts. */
-function sameProjectEffects(left: ProjectEffects, right: ProjectEffects): boolean {
-  const sameSharing = (
-    one: ReadonlyMap<string, Sharing>,
-    other: ReadonlyMap<string, Sharing>,
-  ): boolean => one.size === other.size && [...one].every(([name, how]) => other.get(name) === how);
-  return (
-    sameSharing(left.sharedGlobals, right.sharedGlobals) &&
-    left.files.every(
-      (fileEffects, file) =>
-        fileEffects.entersMain === right.files[file]!.entersMain &&
-        sameSharing(fileEffects.shared, right.files[file]!.shared),
-    ) &&
-    [...left.loops].every(([body, loop]) => {
-      const other = right.loops.get(body);
-      return (
-        other !== undefined &&
-        loop.suspends === other.suspends &&
-        sameSharing(loop.writes, other.writes)
-      );
-    })
-  );
-}
-
-interface LoopNode {
-  readonly body: Block;
-  readonly parent: LoopNode | null;
-  readonly writes: Map<string, Sharing>;
-  suspends: boolean;
-}
-
-/** A node to walk, with the innermost loop around it, whether it stands in a function or block, and whether it runs. */
-type EffectWork = {
-  readonly loop: LoopNode | null;
-  readonly inside: boolean;
-  readonly runs: boolean;
-} & ({ readonly statement: Statement } | { readonly expression: Expression });
-
-/**
- * Collects in one pass the names that functions and blocks assign, and the effects of every loop. A loop's effects
- * include those of the loops inside it, but not those of timer or media blocks it starts, which run later. Code that
- * `dead` holds never runs, so it changes nothing; a loop in it has effects of its own, for the check of its body.
- */
-function programEffects(program: Program, file: number, dead: DeadCode): ProgramEffects {
-  const shared = new Map<string, Sharing>();
-  const rootAssigned = new Map<string, Sharing>();
-  let callsFiles = false;
-  let entersMain = false;
-  const nodes: LoopNode[] = [];
-  const work: EffectWork[] = [];
-  const enter = (
-    statements: readonly Statement[],
-    loop: LoopNode | null,
-    inside: boolean,
-    runs: boolean,
-  ): void => {
-    for (let index = statements.length - 1; index >= 0; index -= 1)
-      work.push({ statement: statements[index]!, loop, inside, runs });
-  };
-  const loopNode = (body: Block, parent: LoopNode | null): LoopNode => {
-    const node: LoopNode = { body, parent, writes: new Map(), suspends: false };
-    nodes.push(node);
-    return node;
-  };
-  enter(program.statements, null, false, true);
-  while (work.length > 0) {
-    const item = work.pop()!;
-    // Code that never runs is part of no loop around it.
-    const runs = item.runs && !("statement" in item && dead.statements.has(item.statement));
-    const loop = runs === item.runs ? item.loop : null;
-    const { inside } = item;
-    const write = (name: string, how: Sharing): void => {
-      if (runs) noteSharing(inside ? shared : rootAssigned, name, how);
-      if (loop !== null) noteSharing(loop.writes, name, how);
-    };
-    const handlers = (node: Statement | Expression): void => {
-      for (const block of handlerBlocks(node)) enter(block.statements, null, true, runs);
-    };
-    if ("expression" in item) {
-      const expression = item.expression;
-      if (
-        loop !== null &&
-        (expression.kind === "interactionExpression" ||
-          expression.kind === "sayExpression" ||
-          expression.kind === "showButtonExpression" ||
-          expression.kind === "showPopupExpression" ||
-          expression.kind === "timerExpression" ||
-          expression.kind === "playMediaExpression" ||
-          expression.kind === "showCameraExpression" ||
-          (expression.kind === "callExpression" && !isPureBuiltinCall(expression)))
-      )
-        loop.suspends = true;
-      // A method that changes a list or set changes the variable that holds it, also called in parentheses.
-      const callee = expression.kind === "callExpression" ? unwrap(expression.callee) : null;
-      if (
-        callee?.kind === "propertyAccessExpression" &&
-        COLLECTION_CHANGES.has(callee.property.name)
-      ) {
-        const root = rootName(callee.object);
-        if (root !== null) write(root, "changes");
-      }
-      handlers(expression);
-      // The right side of an `and`, `or`, or `otherwise` that never runs changes nothing.
-      const skipped =
-        expression.kind === "binaryExpression" &&
-        (expression.operator === "and" ||
-          expression.operator === "or" ||
-          expression.operator === "otherwise") &&
-        dead.operands.has(placeKey(file, expression.span))
-          ? expression.right
-          : null;
-      for (const part of expressionParts(expression))
-        work.push(
-          part === skipped
-            ? { expression: part, loop: null, inside, runs: false }
-            : { expression: part, loop, inside, runs },
-        );
-      continue;
-    }
-    const statement = item.statement;
-    if (loop !== null && SUSPENDING_STATEMENTS.has(statement.kind)) loop.suspends = true;
-    if (runs && statement.kind === "callFileStatement") callsFiles = true;
-    if (
-      runs &&
-      (statement.kind === "gotoStatement" ||
-        statement.kind === "callFileStatement" ||
-        statement.kind === "fallbackStatement") &&
-      statement.target !== null &&
-      entersMainAtTop(statement.target)
-    )
-      entersMain = true;
-    // The `default:` form of a global assigns it where the declaration runs.
-    if (runs && statement.kind === "globalStatement" && statement.assignment !== null)
-      noteSharing(inside ? shared : rootAssigned, statement.name.name, "assigns");
-    if (statement.kind === "assignmentStatement") {
-      // A store into an element or property changes the variable that holds it in place, too.
-      const root = rootName(statement.target);
-      if (root !== null)
-        write(root, statement.target.kind === "identifier" ? "assigns" : "changes");
-      // A timer or media property write may run a block at once.
-      if (statement.target.kind !== "identifier" && loop !== null) loop.suspends = true;
-    }
-    handlers(statement);
-    switch (statement.kind) {
-      case "functionDeclaration":
-        enter(statement.body.statements, null, true, runs);
-        // A parameter default runs in the function too, and the blocks it shows run later.
-        for (const parameter of statement.parameters)
-          if (parameter.defaultValue !== null)
-            work.push({ expression: parameter.defaultValue, loop: null, inside: true, runs });
-        continue;
-      case "whileStatement": {
-        const node = loopNode(statement.body, loop);
-        enter(statement.body.statements, node, inside, runs);
-        work.push({ expression: statement.condition, loop: node, inside, runs });
-        continue;
-      }
-      case "repeatStatement":
-      case "forStatement":
-        enter(statement.body.statements, loopNode(statement.body, loop), inside, runs);
-        break;
-      default:
-        enter(nestedStatements(statement), loop, inside, runs);
-    }
-    for (const expression of statementExpressions(statement))
-      work.push({ expression, loop, inside, runs });
-  }
-  // Inner loops come after the loops around them, so walking backwards adds each loop's effects to its parent.
-  for (let index = nodes.length - 1; index >= 0; index -= 1) {
-    const node = nodes[index]!;
-    if (node.parent === null) continue;
-    for (const [name, how] of node.writes) noteSharing(node.parent.writes, name, how);
-    node.parent.suspends ||= node.suspends;
-  }
-  return {
-    shared,
-    rootAssigned,
-    callsFiles,
-    entersMain,
-    loops: new Map(
-      nodes.map((node) => [node.body, { writes: node.writes, suspends: node.suspends }]),
-    ),
-  };
-}
-
-/** Methods that change the list or set they are called on. */
-/** The value kinds an operand of unknown type might be, to tell whether a known operand could combine with any. */
 /** Whether a value of type `result` may fit a place of type `type` when the script runs, where a number may be whole. */
 function mayFit(type: StaticType, result: StaticType): boolean {
   return (
@@ -9760,18 +9022,9 @@ function mayFit(type: StaticType, result: StaticType): boolean {
   );
 }
 
+/** What an operand the compiler cannot know may be for an operator: a value of a scalar kind, or a list. */
 const OPERAND_KINDS: readonly StaticType[] = [
-  INTEGER_TYPE,
-  NUMBER_TYPE,
-  STRING_TYPE,
-  BOOLEAN_TYPE,
-  DURATION_TYPE,
-  CALENDAR_DURATION_TYPE,
-  ANGLE_TYPE,
-  DATE_TYPE,
-  TIME_TYPE,
-  DATETIME_TYPE,
-  ABSOLUTE_DATE_TIME_TYPE,
+  ...VALUE_KIND_NAMES.flatMap((kind) => (isScalarKind(kind) ? [scalarType(kind)] : [])),
   { kind: "list", element: UNKNOWN_TYPE },
 ];
 
@@ -9795,9 +9048,6 @@ function undecidedValues(type: StaticType): boolean {
     parts.every((part) => part.kind === "open" || part.kind === "null")
   );
 }
-
-/** The methods of a dict. */
-const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
 
 /**
  * The members of a variable's own type that hold what it is known to hold, such as `integer[]` of `integer[] | string[]`
@@ -9828,57 +9078,18 @@ function loopValueType(element: StaticType): StaticType {
   return UNKNOWN_TYPE;
 }
 
-/**
- * Whether a target may enter main.tease at its top: a file target naming it or a glob that may pick it, and any computed
- * target but a `script(...)` whose literal path names another file.
- */
-function entersMainAtTop(target: TransferTarget): boolean {
-  if (target.kind === "labelTarget") return false;
-  if (target.kind === "fileTarget")
-    return target.label === null && globMatches(target.path, [MAIN_FILE_PATH]).length > 0;
-  const reference = unwrap(target.expression);
-  const path =
-    reference.kind === "callExpression" &&
-    reference.callee.kind === "identifier" &&
-    reference.callee.name === "script"
-      ? reference.arguments.find((argument) => argument.kind === "positionalArgument")?.value
-      : undefined;
-  const literal = path === undefined ? null : unwrap(path);
-  const text =
-    literal?.kind === "stringLiteral" && literal.parts.every((part) => part.kind === "stringText")
-      ? literal.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("")
-      : null;
-  // Only a literal path is known, and only one to another file stays out of main.tease.
-  return text === null || text === MAIN_FILE_PATH;
-}
-
-const PURE_BUILTINS: ReadonlySet<string> = new Set([
-  ...CORE_RUNTIME_BUILTINS,
-  ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
-]);
-
-/** A call of a built-in without effects on script variables or time. */
-function isPureBuiltinCall(expression: CallExpression): boolean {
-  const callee = expression.callee;
-  return (
-    callee.kind === "identifier" &&
-    PURE_BUILTINS.has(callee.name) &&
-    !isFileStoreCall(expression) &&
-    !isLockCall(expression)
-  );
-}
-
 // Places -------------------------------------------------------------------------------------------------------------
 
 /** The values that exist only in the current session, as a diagnostic names them. */
 const SESSION_VALUES =
   "Speakers, camera views, permanent buttons, and timer, media, or message handles";
 
-/** Whether a value of this type is or holds one that exists only in the current session and cannot be saved. */
+/**
+ * Whether a value of this type is or holds one that exists only in the current session and cannot be saved: a value with
+ * an identity (`hasIdentity`).
+ */
 function holdsSessionValue(type: StaticType): boolean {
-  return containsType(type, (part) =>
-    ["speaker", "timer", "media", "camera", "permanentButton", "messageHandle"].includes(part.kind),
-  );
+  return containsType(type, isIdentityType);
 }
 
 /**
@@ -10047,9 +9258,9 @@ interface PlaceText {
 }
 
 /** Names a line of a project's sources as seen from file `from` (see `TypeChecker.#line`). */
-type LineNamer = (span: SourceSpan, from: number) => string;
+export type LineNamer = (span: SourceSpan, from: number) => string;
 
-function lineNamer(
+export function lineNamer(
   files: readonly { readonly path: string; readonly program: Program }[],
 ): LineNamer {
   const spanFiles = new WeakMap<object, number>();
@@ -10086,48 +9297,24 @@ function findDecidedSlot(type: StaticType): SourceSpan | null {
 // Types of new places --------------------------------------------------------------------------------------------------
 
 /**
- * The value type of a timer, media, message, or camera view handle property, or `undefined` when it cannot be read or
- * assigned.
+ * The type of a handle property's value (see `HANDLE_MEMBERS`), or `undefined` when it cannot be read or assigned. A
+ * read computes the value, so it is never a place (#941).
  */
 function handlePropertyType(
   handle: HandleKind,
   name: string,
   use: "read" | "assign",
 ): StaticType | undefined {
-  if (handle === "camera") return name === "placement" ? STRING_TYPE : undefined;
-  if (handle === "messageHandle") return name === "text" ? STRING_TYPE : undefined;
-  if (handle === "timer") {
-    switch (name) {
-      case "remaining":
-        return DURATION_TYPE;
-      case "elapsed":
-        return use === "read" ? DURATION_TYPE : undefined;
-      case "display":
-        return STRING_TYPE;
-      case "label":
-        return use === "read" ? optional(STRING_TYPE) : undefined;
-      case "state":
-        return use === "read" ? STRING_TYPE : undefined;
-      case "repeatDuration":
-        return use === "read" ? optional(DURATION_TYPE) : DURATION_TYPE;
-    }
-    return undefined;
-  }
-  switch (name) {
-    case "position":
-      return DURATION_TYPE;
-    case "elapsed":
-      return use === "read" ? DURATION_TYPE : undefined;
-    case "remaining":
-      return use === "read" ? optional(DURATION_TYPE) : DURATION_TYPE;
-    case "duration":
-      return use === "read" ? optional(DURATION_TYPE) : undefined;
-    case "volume":
-      return NUMBER_TYPE;
-    case "state":
-      return use === "read" ? STRING_TYPE : undefined;
-  }
-  return undefined;
+  const property = handleProperty(handle, name);
+  if (property === undefined) return undefined;
+  if (use === "assign")
+    return property.assign === undefined ? undefined : handleValueType(property.assign.type);
+  const type = handleValueType(property.type);
+  return property.nullable === true ? optional(type) : type;
+}
+
+function handleValueType(type: HandleValueType): StaticType {
+  return type === "duration" ? DURATION_TYPE : type === "string" ? STRING_TYPE : NUMBER_TYPE;
 }
 
 // Messages ------------------------------------------------------------------------------------------------------------
@@ -10147,37 +9334,45 @@ function memberPropertyType(type: StaticType, name: string): StaticType | PlaceR
   const value = resolved(type);
   switch (value.kind) {
     case "list":
-    case "set":
-      if (name === "length") return INTEGER_TYPE;
-      if (!LIST_ELEMENT_READS.has(name)) return undefined;
-      // A set member is read as a copy (ADR 0014).
+    case "set": {
+      const property = listProperty(name);
+      if (property === undefined) return undefined;
+      if (property.gives === "length") return INTEGER_TYPE;
+      // A list's element is read from the list, and a set member as a copy (ADR 0014).
       return value.kind === "list" ? placeRead(value.element) : value.element;
+    }
     case "dict":
-      // `keys` and `values` are new lists, in entry order.
-      if (name === "length") return INTEGER_TYPE;
-      if (name === "keys") return { kind: "list", element: STRING_TYPE };
-      return name === "values" ? { kind: "list", element: copyType(value.element) } : undefined;
+      // `keys` and `values` are new lists, so a change through them changes a copy (see `DictProperty`).
+      switch (dictProperty(name)?.gives) {
+        case "length":
+          return INTEGER_TYPE;
+        case "keys":
+          return { kind: "list", element: STRING_TYPE };
+        case "values":
+          return { kind: "list", element: copyType(value.element) };
+        case undefined:
+          return undefined;
+      }
     case "object":
       return placeRead(value.properties?.get(name) ?? UNKNOWN_TYPE);
     case "timer":
     case "media":
     case "camera":
     case "messageHandle":
+    case "permanentButton":
       return handlePropertyType(value.kind, name, "read");
     case "scalar":
       if (isScalar(value, "string")) return name === "length" ? INTEGER_TYPE : undefined;
-      // A calendar duration has its components; an exact duration has none (ADR 0026).
+      // A calendar duration has its parts; an exact duration has none (ADR 0026).
       if (value.name === "calendarDuration")
-        return name === "days" || name === "months"
-          ? INTEGER_TYPE
-          : name === "exactOffset"
-            ? DURATION_TYPE
-            : undefined;
-      if (value.name === "duration" || value.name === "angle") return undefined;
-      return temporalFieldType(value.name, name);
+        return isCalendarDurationPart(name)
+          ? scalarType(CALENDAR_DURATION_PARTS[name].result)
+          : undefined;
+      return isTemporalKind(value.name) && hasTemporalField(value.name, name)
+        ? temporalFieldType(TEMPORAL_FIELDS[name])
+        : undefined;
     case "range":
     case "null":
-    case "permanentButton":
       return undefined;
     default:
       // A speaker keeps its properties, and a value of unknown type may.
@@ -10188,147 +9383,74 @@ function memberPropertyType(type: StaticType, name: string): StaticType | PlaceR
 /** The result type of a method call on one known member type, or `undefined` when it has no such method. */
 function memberMethodType(type: StaticType, method: string): StaticType | undefined {
   const value = resolved(type);
-  if (value.kind === "timer" || value.kind === "media")
-    return ["pause", "resume", "stop"].includes(method) ? NULL_TYPE : undefined;
-  // A message or a permanent button removes itself (#836).
-  if (value.kind === "messageHandle" || value.kind === "permanentButton")
-    return method === "remove" ? NULL_TYPE : undefined;
-  if (value.kind === "camera") return undefined;
+  // Every method of a handle gives null (see `HandleMethod`).
+  if (isHandleKind(value.kind))
+    return handleMethod(value.kind, method) === undefined ? undefined : NULL_TYPE;
   if (value.kind === "speaker" || value.kind === "unknown" || value.kind === "open")
     return UNKNOWN_TYPE;
   // Text operations (V30 §8).
-  if (isScalar(value, "string")) {
-    const member = TEXT_MEMBERS.get(method);
-    return member?.parameters ? textResultType(member) : undefined;
-  }
-  if (value.kind === "scalar") return temporalMethodType(value.name, method);
+  if (isScalar(value, "string"))
+    return isTextMethod(method) ? textResultType(TEXT_METHODS[method]) : undefined;
+  if (value.kind === "scalar")
+    return isTemporalKind(value.name) && hasTemporalMethod(value.name, method)
+      ? scalarType(TEMPORAL_METHODS[method].result)
+      : undefined;
   // A range gives its whole numbers as a new list (V30 §6).
   if (value.kind === "range")
     return method === "toList" ? { kind: "list", element: INTEGER_TYPE } : undefined;
   if (value.kind === "dict") {
-    if (method === "contains") return BOOLEAN_TYPE;
-    if (method === "clear") return NULL_TYPE;
-    // A removed value leaves the dict, and `get` gives a copy, so the type is a copy for the place that keeps it.
-    return method === "remove" || method === "get" ? ownNull(copyType(value.element)) : undefined;
+    switch (dictMethod(method)?.result) {
+      case "null":
+        return NULL_TYPE;
+      case "boolean":
+        return BOOLEAN_TYPE;
+      // A removed value leaves the dict, and `get` gives a copy, so the type is a copy for the place that keeps it; the
+      // default joins it where the call is checked.
+      case "value":
+        return ownNull(copyType(value.element));
+      case undefined:
+        return undefined;
+    }
   }
   if (value.kind !== "list" && value.kind !== "set") return undefined;
-  switch (method) {
-    case "join":
-      return value.kind === "list" ? STRING_TYPE : undefined;
-    // A list reorders in place; a set keeps its insertion order (V30 §16).
-    case "sort":
-    case "shuffle":
-    case "reverse":
-      return value.kind === "list" ? NULL_TYPE : undefined;
-    // A part of a list is a new list.
-    case "take":
-    case "takeLast":
-      return value.kind === "list" ? { kind: "list", element: copyType(value.element) } : undefined;
-    // A set operation builds a new collection of the receiver's kind.
-    case "intersection":
-    case "union":
-    case "difference":
-      return { kind: value.kind, element: copyType(value.element) };
-    case "contains":
-      return BOOLEAN_TYPE;
-    // Only a list has positions; a value that no element equals has none (#840).
-    case "indexOf":
-    case "lastIndexOf":
-      return value.kind === "list" ? optional(INTEGER_TYPE) : undefined;
-    case "count":
-      return value.kind === "list" ? INTEGER_TYPE : undefined;
-    // An element is a copy for the place that keeps it; the default joins it where the call is checked (#844).
-    case "get":
-      return value.kind === "list" ? ownNull(copyType(value.element)) : undefined;
-    // A conversion builds a new collection, so its elements decide their type apart from the original's.
-    case "toSet":
-      return value.kind === "list" ? { kind: "set", element: copyType(value.element) } : undefined;
-    case "toList":
-      return value.kind === "set" ? { kind: "list", element: copyType(value.element) } : undefined;
-    case "add":
-    case "remove":
-    case "clear":
+  const contract = listMethod(method);
+  if (contract === undefined || !contract.receivers.includes(value.kind)) return undefined;
+  switch (contract.result) {
+    case "null":
       return NULL_TYPE;
-    case "addAll":
-      return value.kind === "list" ? NULL_TYPE : undefined;
-    case "removeAt":
-    case "removeFirst":
-    case "removeLast":
-      // The removed element leaves the list, so its type is a copy for the place that keeps it.
-      return value.kind === "list" ? ownNull(copyType(value.element)) : undefined;
-    default:
-      return undefined;
+    case "boolean":
+      return BOOLEAN_TYPE;
+    case "integer":
+      return INTEGER_TYPE;
+    // Only a list has positions; a value that no element equals has none (#840).
+    case "integer?":
+      return optional(INTEGER_TYPE);
+    case "string":
+      return STRING_TYPE;
+    // An element that leaves the list, or that `get` gives, is a copy for the place that keeps it; the default joins it
+    // where the call is checked (#844).
+    case "element":
+      return ownNull(copyType(value.element));
+    // A new collection's elements decide their type apart from the original's.
+    case "list":
+    case "set":
+      return { kind: contract.result, element: copyType(value.element) };
+    case "same":
+      return { kind: value.kind, element: copyType(value.element) };
   }
 }
-
-/** The weekday names a date's `weekday` field is, from Monday (V30 §35). */
-const WEEKDAY_TYPE = withValues(STRING_TYPE, [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-  "Sunday",
-]);
-
-/** A date's ISO `weekdayNumber`: Monday is 1 and Sunday is 7. */
-const WEEKDAY_NUMBER_TYPE = withValues(INTEGER_TYPE, [1, 2, 3, 4, 5, 6, 7]);
-
-const TEMPORAL_KINDS: ReadonlySet<ScalarTypeName> = new Set([
-  "date",
-  "time",
-  "datetime",
-  "absoluteDateTime",
-]);
 
 /** Whether a value of this type is a date, time, date and time, or absolute date and time. */
 function isTemporal(type: StaticType): boolean {
   const value = resolved(type);
-  return value.kind === "scalar" && TEMPORAL_KINDS.has(value.name);
+  return value.kind === "scalar" && isTemporalKind(value.name);
 }
 
-/** The type of a read-only field of a date or time value (V30 §35); an absolute date and time has none. */
-function temporalFieldType(kind: ScalarTypeName, name: string): StaticType | undefined {
-  if (kind === "date" || kind === "datetime") {
-    if (["year", "month", "day", "weekNumber", "weekYear"].includes(name)) return INTEGER_TYPE;
-    if (name === "weekday") return WEEKDAY_TYPE;
-    if (name === "weekdayNumber") return WEEKDAY_NUMBER_TYPE;
-  }
-  if (
-    (kind === "time" || kind === "datetime") &&
-    ["hour", "minute", "second", "millisecond"].includes(name)
-  )
-    return INTEGER_TYPE;
-  return undefined;
+/** The type of a field of a date or time value (see `TemporalField`), narrowed to its values where it has few. */
+function temporalFieldType(field: TemporalField): StaticType {
+  const type = scalarType(field.result);
+  return field.values === undefined ? type : withValues(type, field.values);
 }
-
-/** The result of a method of a date or time value, or `undefined` when it has none (V30 §35). */
-function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | undefined {
-  if (!TEMPORAL_KINDS.has(kind)) return undefined;
-  switch (method) {
-    case "toISO":
-      return STRING_TYPE;
-    case "formatDate":
-      return kind === "time" ? undefined : STRING_TYPE;
-    case "formatTime":
-      return kind === "date" ? undefined : STRING_TYPE;
-    case "formatDateTime":
-      return kind === "datetime" || kind === "absoluteDateTime" ? STRING_TYPE : undefined;
-    case "toAbsoluteDateTime":
-      return kind === "datetime" ? ABSOLUTE_DATE_TIME_TYPE : undefined;
-    case "toDateTime":
-      return kind === "absoluteDateTime" ? DATETIME_TYPE : undefined;
-    case "toSeconds":
-    case "toMilliseconds":
-      return kind === "absoluteDateTime" ? INTEGER_TYPE : undefined;
-    default:
-      return undefined;
-  }
-}
-
-/** Property names whose write on a media handle first waits for the previous message's pacing. */
-const MEDIA_PACED_PROPERTIES: ReadonlySet<string> = new Set(["position", "remaining", "volume"]);
 
 /** Whether a value of this type may be of one of the given kinds, such as a handle, including a value of unknown type. */
 function mayBe(
@@ -10354,12 +9476,7 @@ function assignableProperty(
   name: string,
 ):
   { readonly type: StaticType | null } | { readonly problem: string; readonly receiver?: boolean } {
-  if (
-    member.kind === "timer" ||
-    member.kind === "media" ||
-    member.kind === "camera" ||
-    member.kind === "messageHandle"
-  ) {
+  if (isHandleKind(member.kind)) {
     const type = handlePropertyType(member.kind, name, "assign");
     return type === undefined
       ? { problem: handleMemberMessage(member.kind, name, "assign") }
@@ -10368,7 +9485,11 @@ function assignableProperty(
   if (member.kind === "speaker" || member.kind === "unknown" || member.kind === "open")
     return { type: null };
   if (member.kind === "object" && member.properties === null) return { type: null };
-  if (member.kind === "scalar" && temporalFieldType(member.name, name) !== undefined)
+  if (
+    member.kind === "scalar" &&
+    isTemporalKind(member.name) &&
+    hasTemporalField(member.name, name)
+  )
     return {
       problem: `Property '${name}' of ${describeValue(member)} cannot be assigned. Date and time values do not change.`,
     };
@@ -10489,27 +9610,13 @@ function dictValueType(type: StaticType): StaticType | undefined {
  * name, or `undefined` when the union can be declared.
  */
 function unnamedMixFix(mixed: StaticType): string | undefined {
-  if (containsType(mixed, (part) => part.kind === "camera"))
-    return "a camera view's type cannot be declared, so keep camera views apart from other values";
-  if (containsType(mixed, (part) => part.kind === "permanentButton"))
-    return "a permanent button's type cannot be declared, so keep permanent buttons apart from other values";
+  for (const kind of VALUE_KIND_NAMES) {
+    const { written, description, plural } = VALUE_KINDS[kind];
+    if (!written && containsType(mixed, (part) => valueKindOfType(part) === kind))
+      return `${description}'s type cannot be declared, so keep ${plural} apart from other values`;
+  }
   return undefined;
 }
-
-/** Value kinds that `${...}` cannot show. */
-const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
-  "list",
-  "set",
-  "dict",
-  "object",
-  "range",
-  "timer",
-  "media",
-  "messageHandle",
-  "camera",
-  "permanentButton",
-  "speaker",
-]);
 
 /**
  * The type of a choice whose button values the source shows: one type per family of values, such as text or numbers,
@@ -10561,9 +9668,6 @@ function negatedValues(type: StaticType, operator: string): StaticType {
   );
 }
 
-/** List properties that read one of its elements. */
-const LIST_ELEMENT_READS: ReadonlySet<string> = new Set(["first", "last", "random"]);
-
 /** For a place whose type cannot be declared, such as a property: a union type has no written form there yet. */
 const ONE_TYPE_FIX = "give every button a value of one type";
 
@@ -10598,17 +9702,9 @@ function mayCompareEqual(left: StaticType, right: StaticType): boolean {
   const uncertain = (type: StaticType) =>
     !isKnown(type) || members(type).some((part) => !isKnown(part));
   if (uncertain(left) || uncertain(right)) return true;
-  return members(left)
-    .map(resolved)
-    .some((a) =>
-      members(right)
-        .map(resolved)
-        .some((b) =>
-          a.kind === "scalar" && b.kind === "scalar"
-            ? a.name === b.name || (isNumeric(a) && isNumeric(b))
-            : a.kind === b.kind,
-        ),
-    );
+  // Every member is known, so each has a kind.
+  const kinds = (type: StaticType) => members(type).map((member) => valueKindOfType(member)!);
+  return kinds(left).some((a) => kinds(right).some((b) => mayEqualKinds(a, b)));
 }
 
 function comparedLiteral(expression: Expression): readonly PossibleValue[] | undefined {
@@ -10693,28 +9789,17 @@ function describeLiterals(values: readonly PossibleValue[]): string {
     : `${written.slice(0, -1).join(", ")} or ${written.at(-1)!}`;
 }
 
-/** Whether `${...}` and text fields show a value of this member type as text. */
-function isShowable(member: StaticType): boolean {
-  return !UNSHOWABLE_KINDS.has(resolved(member).kind);
+/** Why a button cannot return a value of this member type, which it shows, such as a script reference or a regex. */
+function unreturnableChoice(member: StaticType): string | undefined {
+  const kind = valueKindOfType(member);
+  return kind === undefined ? undefined : unreturnableChoiceMessage(kind);
 }
 
-/** Why a button cannot return a value of this member type, which it may show: a script reference or a regex. */
-function unreturnableChoiceMessage(member: StaticType): string | undefined {
-  for (const [name, description] of [
-    ["script", "a script reference"],
-    ["regex", "a regex"],
-  ] as const)
-    if (isScalar(member, name))
-      return `A button cannot return ${description}. Give the buttons text or number values, and pick ${description.replace("a ", "the ")} from the answer.`;
-  return undefined;
-}
-
-/** Whether a button may return a value of this member type: one that is shown, other than a script reference or regex. */
+/** Whether a button may return a value of this member type (`choice`), or may. */
 function isChoiceValue(member: StaticType): boolean {
-  return isShowable(member) && unreturnableChoiceMessage(member) === undefined;
+  const kind = valueKindOfType(member);
+  return kind === undefined || VALUE_KINDS[kind].choice;
 }
-
-const MIN_MAX_NAMES: ReadonlySet<string> = new Set(["min", "max"]);
 
 /** The result types of the built-ins that take fixed positional arguments. */
 const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([["escapeMarkup", STRING_TYPE]]);
@@ -10845,11 +9930,6 @@ function isTrueLiteral(expression: Expression): boolean {
   return value.kind === "booleanLiteral" && value.value;
 }
 
-function unwrap(expression: Expression): Expression {
-  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
-  return expression;
-}
-
 /** Whether the compiler knows that a value of `type` is never null: it knows every member, and none is null. */
 function neverNull(type: StaticType): boolean {
   const all = members(type);
@@ -10942,15 +10022,9 @@ function mixDescription(first: StaticType, other: StaticType): string {
   return `${describeValue(first)} and ${describeValue(other)}`;
 }
 
-/** The code of a problem with a member of a handle or permanent button (see `handle-rules.ts`). */
+/** The code of a problem with a member of a handle (see `HANDLE_MEMBERS`), or of another value. */
 function handleMemberCode(kind: StaticType["kind"]): TypeErrorCode {
-  return kind === "timer"
-    ? typeCode.invalidTimerHandleMember
-    : kind === "media"
-      ? typeCode.invalidMediaHandleMember
-      : kind === "camera"
-        ? typeCode.invalidCameraHandleMember
-        : typeCode.invalidOperand;
+  return isHandleKind(kind) ? HANDLE_MEMBERS[kind].code : typeCode.invalidOperand;
 }
 
 /**
@@ -11011,7 +10085,7 @@ function operatorMessage(
     const temporal = isTemporal(left!) ? left! : isTemporal(right!) ? right! : undefined;
     if (temporal !== undefined)
       return `'${operator}' compares ${describeValue(temporal)} only with another ${temporalNoun(temporal)}, not with ${describeValue(temporal === left ? right! : left!)}.${expression.kind === "binaryExpression" ? temporalPairFix(expression, operator, left!, right!) : ""}`;
-    return `'${operator}' compares two numbers, two texts, two durations, two calendar durations, or two angles, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
+    return `${orderRule(operator)}, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
   }
   if (operator === "/" && mixedDurations)
     return "'/' cannot divide a calendar duration and a duration by each other. A calendar day or month has no fixed length. Divide two calendar durations, or two durations.";
@@ -11111,7 +10185,7 @@ function joinMessage(
   }
   if (text(left) !== text(right) && (text(left) || !list(right))) {
     const other = text(left) ? right : left;
-    const fix = isShowable(other)
+    const fix = isShown(other)
       ? ` Put the value in the text instead, as in ${interpolationFix(expression)}.`
       : "";
     return `'+' joins text only with other text, not with ${describeValue(other)}.${fix}`;
@@ -11387,7 +10461,7 @@ function operandFix(operand: StaticType, type: StaticType, statement: Assignment
   const target = expressionLabel(statement.target);
   if (statement.operator !== "+=" || target === null) return "";
   const value = operandLabel(statement.value) ?? "value";
-  if (isScalar(operand, "string") && isShowable(type))
+  if (isScalar(operand, "string") && isShown(type))
     return ` Put the value in the text instead, as in '${target} += "\${${value}}"'.`;
   if (resolved(operand).kind === "list" && resolved(type).kind === "range")
     return ` To add the numbers of a range, use '${target} += ${rangeListText(statement.value)}'.`;
@@ -11411,7 +10485,7 @@ function conversionFix(
   if (isScalar(kept, "angle") && isNumeric(value)) return ` ${unitFix(expression, "deg")}`;
   // Date and time values are written as ISO text and converted.
   const conversion =
-    kept.kind === "scalar" && TEMPORAL_KINDS.has(kept.name) ? conversionTo(kept.name) : undefined;
+    kept.kind === "scalar" && isTemporalKind(kept.name) ? conversionTo(kept.name) : undefined;
   if (conversion !== undefined && isScalar(value, "string"))
     return ` Convert the text with ${conversion}(...).`;
   if (isScalar(kept, "string") && (isNumeric(value) || isScalar(value, "boolean"))) {
@@ -11591,10 +10665,9 @@ function computedCopyMessage(
   const lost = `This changes a copy that no variable holds: ${property}`;
   if (owner === "set")
     return `${lost} gives a copy of the member, so the change is lost. To change the set, replace the member: 'let member = ${receiver}.${name}', '${receiver}.remove(member)', then change 'member' and '${receiver}.add(member)'.`;
-  if (owner === "dict" && name === "keys")
-    return `${lost} gives a new list each time, so the change is lost. Change the dict itself, as in '${receiver}[key] = value' or '${receiver}.remove(key)'.`;
-  if (owner === "dict" && name === "values")
-    return `${lost} gives a new list each time, so the change is lost. Change the dict through its keys, as in '${receiver}[key]'.`;
+  const contract = owner === "dict" ? dictProperty(name) : undefined;
+  if (contract !== undefined && contract.gives !== "length")
+    return `${lost} gives a new list each time, so the change is lost. ${contract.instead(receiver)}`;
   return `${lost} gives a new value each time, so the change is lost. Store it in a variable first, as in 'let value = ${receiver}.${name}', then change the variable.`;
 }
 
@@ -11669,9 +10742,9 @@ const MEMBER_CHECKED_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
   "open",
 ]);
 
-/** The result type of a text member: a new value, so a `string[]` from `split` decides nothing elsewhere. */
-function textResultType(member: TextMember): StaticType {
-  switch (member.result) {
+/** The result type of a method of text: a new value, so a `string[]` from `split` decides nothing elsewhere. */
+function textResultType(method: TextMethod): StaticType {
+  switch (method.result) {
     case "integer?":
       return optional(INTEGER_TYPE);
     case "string?":
@@ -11682,7 +10755,7 @@ function textResultType(member: TextMember): StaticType {
     case "string?[]?":
       return optional({ kind: "list", element: optional(STRING_TYPE) });
     default:
-      return scalarType(member.result);
+      return scalarType(method.result);
   }
 }
 
@@ -11694,11 +10767,10 @@ const GENERIC_FORM_ANSWER_TYPE = union([
   DATE_TYPE,
   TIME_TYPE,
   DATETIME_TYPE,
-  // A cycle may return any choice value but `null`.
-  DURATION_TYPE,
-  CALENDAR_DURATION_TYPE,
-  ANGLE_TYPE,
-  ABSOLUTE_DATE_TIME_TYPE,
+  // A cycle may return any choice value (`choice`) but `null`.
+  ...VALUE_KIND_NAMES.flatMap((kind) =>
+    VALUE_KINDS[kind].choice && isScalarKind(kind) ? [scalarType(kind)] : [],
+  ),
 ]);
 
 /** The kind of an `askForm` field that starts with a value of `type`, or `null` when its kind is not known. */
@@ -11723,14 +10795,6 @@ function formKindOfStart(type: StaticType): FormFieldKind | null {
 
 function formAnswerType(kind: Exclude<FormFieldKind, "boolean" | "cycle">): StaticType {
   return kind === "text" ? STRING_TYPE : interactionResultType(kind);
-}
-
-/** The text of a string literal without interpolation, or `undefined`. */
-function staticText(expression: Expression): string | undefined {
-  const literal = unwrap(expression);
-  if (literal.kind !== "stringLiteral" || literal.parts.some((part) => part.kind !== "stringText"))
-    return undefined;
-  return literal.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("");
 }
 
 /** The type of the answer an `ask...` interaction returns. */

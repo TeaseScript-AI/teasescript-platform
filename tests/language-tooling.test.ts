@@ -4,14 +4,34 @@ import {
   COMMANDS,
   commandFacts,
   CONVERSION_FUNCTIONS,
+  LIST_FUNCTIONS,
+  NUMERIC_FUNCTIONS,
   RANDOM_FUNCTIONS,
   CORE_RUNTIME_BUILTINS,
   TEASESCRIPT_GRAMMAR_KEYWORDS,
   TEASESCRIPT_PROTECTED_TYPE_NAMES,
 } from "../src/language-facts.js";
 import { CONVERSIONS } from "../src/conversions.js";
+import { NUMERIC_CONTRACTS } from "../src/numeric-functions.js";
 import { RANDOM_CONTRACTS } from "../src/random-functions.js";
-import { askOptionNames, requiredAskOptionNames, SHOW_BUTTON_OPTIONS } from "../src/parser.js";
+import { CLOCK_CONTRACTS, TEMPORAL_METHODS } from "../src/temporal-builtins.js";
+import { DICT_METHODS } from "../src/dict-operations.js";
+import { HANDLE_MEMBERS, isAnyHandleMethod } from "../src/handle-members.js";
+import { isTextOnlyMethod, TEXT_METHODS } from "../src/text-operations.js";
+import { LIST_FUNCTION_CONTRACTS } from "../src/list-function-rules.js";
+import { LIST_METHODS, type ListMethod } from "../src/list-methods.js";
+import { MESSAGE_PRESENTATION_OPTIONS } from "../src/message-presentation.js";
+import {
+  askOptionNames,
+  EXPORT_TEXT_OPTIONS,
+  MEDIA_ARGUMENTS,
+  OPEN_URL_OPTIONS,
+  PERMANENT_BUTTON_OPTIONS,
+  requiredAskOptionNames,
+  SHOW_BUTTON_OPTIONS,
+  SHOW_POPUP_OPTIONS,
+  TIMER_ARGUMENTS,
+} from "../src/parser.js";
 import {
   classifyTokens,
   compileSource,
@@ -88,10 +108,63 @@ test("completion offers every command where it starts a statement, and where it 
   }
 });
 
-test("every compact interaction has editor help that names each option the parser accepts", () => {
-  for (const name of engineCommands) {
-    const facts = commandFacts(name)!;
-    if (facts.interaction === undefined || facts.renamed !== undefined) continue;
+/**
+ * The named options of each command that is no compact interaction, as the parser and the name pass accept them, and a
+ * call that gives each of them; the named form of a timer or media needs its first argument.
+ */
+const COMMAND_OPTIONS: Readonly<Record<string, readonly [readonly string[], string]>> = {
+  showPopup: [SHOW_POPUP_OPTIONS, 'showPopup("Done", buttonText: "Continue")'],
+  openUrl: [
+    OPEN_URL_OPTIONS,
+    'openUrl("https://example.com", buttonText: "Open", alwaysButton: true)',
+  ],
+  exportText: [
+    EXPORT_TEXT_OPTIONS,
+    'exportText("Report", title: "Report", fileName: "report.txt")',
+  ],
+  timer: [
+    TIMER_ARGUMENTS.slice(1),
+    'let t = timer(duration: 1 s, async: true, display: "mystery", label: "Beat", repeat: true, persist: true) {\n    say "Beat."\n}',
+  ],
+  showPermanentButton: [
+    PERMANENT_BUTTON_OPTIONS,
+    'let b = showPermanentButton "Stop", persist: true {\n    say "Stopped."\n}',
+  ],
+  playAudio: [
+    MEDIA_ARGUMENTS.slice(1),
+    'let m = playAudio(file: "a.mp3", async: true, repeat: true, startAt: 1 s, endAt: 2 s, volume: 0.5)',
+  ],
+  playVideo: [
+    MEDIA_ARGUMENTS.slice(1),
+    'let m = playVideo(file: "a.mp4", async: true, repeat: 3 times, startAt: 1 s, endAt: 2 s, volume: 0.5)',
+  ],
+};
+
+test("every command has editor help that names each option the parser accepts", () => {
+  for (const name of [...engineCommands, "wait"]) {
+    const facts = commandFacts(name);
+    if (facts?.renamed !== undefined) continue;
+    if (facts?.interaction === undefined) {
+      const document = createLanguageDocument("file:///main.tease", name);
+      const position = languagePositionAt(document, name.length);
+      const help = languageContextHelp(document, position);
+      assert.equal(help?.command, name, name);
+      assert.ok(help.syntax.startsWith(name), name);
+      assert.deepEqual(languageHover(document, position)?.contents, [
+        `**${name}**`,
+        help.summary,
+        `Syntax: \`${help.syntax}\``,
+      ]);
+      const parameters = languageSignatureHelp(document, position)?.parameters ?? [];
+      const [options, call] = COMMAND_OPTIONS[name] ?? [[], null];
+      for (const option of options) {
+        assert.ok(help.syntax.includes(`[, ${option}:`), `${name}: ${option} in ${help.syntax}`);
+        assert.ok(parameters.includes(option), `${name}: ${option} in ${parameters.join(", ")}`);
+      }
+      // The options the help names compile where it names them.
+      if (call !== null) assert.deepEqual(compileSource(`${call}\nexit`).diagnostics, [], call);
+      continue;
+    }
     const source = `let answer = ${name}`;
     const document = createLanguageDocument("file:///main.tease", source);
     const position = languagePositionAt(document, source.length);
@@ -108,6 +181,61 @@ test("every compact interaction has editor help that names each option the parse
       assert.ok(help.syntax.includes(written), `${name}: ${option} in ${help.syntax}`);
     }
     assert.deepEqual(languageSignatureHelp(document, position)?.parameters.slice(2), options, name);
+  }
+});
+
+test("say's help names the options of its message modes", () => {
+  const document = createLanguageDocument("file:///main.tease", 'say "Hi"');
+  const summary = languageContextHelp(document, languagePositionAt(document, 1))?.summary ?? "";
+  for (const option of MESSAGE_PRESENTATION_OPTIONS.prose)
+    assert.ok(summary.includes(option), option);
+});
+
+test("help of a command covers its arguments as the parser reads them, and follows the option being written", () => {
+  // `|` marks the cursor: the command with help there, and the parameter being written.
+  for (const [marked, command, parameter] of [
+    ['showPopup("Done", buttonText: |', "showPopup", "buttonText"],
+    ['let shown = showPopup "Done|"', "showPopup", "message"],
+    ['playAudio(file: "a.mp3", volume: |)', "playAudio", "volume"],
+    ['let t = timer(duration: 1 s, async: true, label: "Go|")', "timer", "label"],
+    ['let b = showPermanentButton "Stop", persist: |', "showPermanentButton", "persist"],
+    ["wait (1..3) s|", "wait", "duration"],
+    // The innermost of a call and a command has the help.
+    ["showPopup toString(count|", "toString", "value"],
+    ['let t = timer async 5 s {\n    say "Hi|"\n}', "say", "text"],
+    ["let t = timer async 5 s {\n    count = 1|\n}", null, null],
+    ["let t = timer(duration: 1 s, async: true)|", null, null],
+    // A comma of the enclosing call ends a command's value, also while it is being written.
+    ['say(showPopup "x", |1 s)', "say", "text"],
+    ['say(showPopup "x", |', "say", "text"],
+    ["say(timer async 5 s, |1 s)", "say", "text"],
+    ["say(showCamera, |1 s)", "say", "text"],
+    // A call form after a space, where the parser reads one, and a value in braces, which is no block.
+    ['showPopup ("x", buttonText: |"Close")', "showPopup", "buttonText"],
+    ['say(showPopup ("x"), |1 s)', "say", "text"],
+    ["timer async { duration: 1 s| }.duration", "timer", "duration"],
+    // Where the parser read a command's arguments in a statement it cannot read yet, such as one without its block.
+    ['showPermanentButton "Go " + { text: "now|" }.text', "showPermanentButton", "text"],
+    ['let t = timer async showPopup "x" "la|bel" {', "timer", "duration"],
+    ['let t = timer async showPopup "x" |"label"', "timer", "duration"],
+    ['let b = showPermanentButton "Stop", |', "showPermanentButton", "text"],
+    // A key or a property named `wait` is no command.
+    ["let x = { wait: 1| }", null, null],
+    ["let x = { wait: 1 }\nsay x.wait|", "say", "text"],
+    ["let t = timer(duration: 1 s, async: true) {\n    wait 1 s\n|}", null, null],
+  ] as const) {
+    const offset = marked.indexOf("|");
+    const document = createLanguageDocument("file:///main.tease", marked.replace("|", ""));
+    const position = languagePositionAt(document, offset);
+    const signature = languageSignatureHelp(document, position);
+    assert.deepEqual(
+      [
+        languageContextHelp(document, position)?.command ?? null,
+        signature === null ? null : signature.parameters[signature.activeParameter],
+      ],
+      [command, parameter],
+      marked,
+    );
   }
 });
 
@@ -231,9 +359,18 @@ test("a conversion call has help from its contract, also while it is being writt
   // The innermost of a command and a call has the help: a call in a say or an interpolation, an ask in a call.
   assert.deepEqual(help('say "${toBase64(text'), ["toBase64", "toBase64(text)", "text"]);
   assert.equal(help('say toString(askText "Name?')[0], "askText");
-  // A method of the same name converts through the player's zone (V30 §35), and a declared name is no call.
-  assert.equal(help("say stamp.toDateTime(", ").toISO()\nexit")[0], "say");
-  assert.equal(help("say local.toAbsoluteDateTime(", ").toISO()\nexit")[0], "say");
+  // A method of the same name converts through the player's zone (V30 §35), so it has its own help, and a declared name
+  // is no call.
+  assert.deepEqual(help("say stamp.toDateTime(", ").toISO()\nexit"), [
+    "toDateTime",
+    "value.toDateTime()",
+    null,
+  ]);
+  assert.deepEqual(help("say local.toAbsoluteDateTime(", ").toISO()\nexit"), [
+    "toAbsoluteDateTime",
+    "value.toAbsoluteDateTime()",
+    null,
+  ]);
   assert.equal(help("function toNumber(")[0], null);
   assert.equal(help("say toString(count) + ")[0], "say");
   assert.equal(help("sa", "y toString(count)\nexit")[0], "say");
@@ -290,6 +427,245 @@ test("a random function's call has help from its contract, also while it is bein
   // A method of the same name, a declared name, and a property are no call of the function.
   assert.equal(help("say items.random(", ")\nexit")[0], "say");
   assert.equal(help("function chance(")[0], null);
+});
+
+test("a numeric or angle function's call has help from its contract, also while it is being written", () => {
+  // The help at the end of `source`: its command, the signature's label, and its active parameter.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    return [
+      languageContextHelp(document, position)?.command ?? null,
+      signature?.label ?? null,
+      signature === null ? null : (signature.parameters[signature.activeParameter] ?? null),
+    ];
+  };
+  for (const name of NUMERIC_FUNCTIONS) {
+    const document = createLanguageDocument("file:///main.tease", `say ${name}(`);
+    const position = languagePositionAt(document, document.text.length);
+    const context = languageContextHelp(document, position);
+    assert.deepEqual([context?.command, context?.summary], [name, NUMERIC_CONTRACTS[name].summary]);
+    assert.deepEqual(languageHover(document, position)?.contents, [
+      `**${name}**`,
+      NUMERIC_CONTRACTS[name].summary,
+      `Syntax: \`${context?.syntax}\``,
+    ]);
+  }
+  // The syntax is the call's shape (V30 §13), and the active parameter the argument being written.
+  const round = "round(value [, decimals: number])";
+  assert.deepEqual(help("say round("), ["round", round, "value"]);
+  assert.deepEqual(help("say round(2.675, "), ["round", round, "decimals"]);
+  assert.deepEqual(help("say round(2.675, decimals: "), ["round", round, "decimals"]);
+  assert.deepEqual(help("let level = clamp(level, 1, "), [
+    "clamp",
+    "clamp(value, min, max)",
+    "max",
+  ]);
+  assert.deepEqual(help("let heading = atan2("), ["atan2", "atan2(y, x)", "y"]);
+  assert.deepEqual(help("say sqrt(abs("), ["abs", "abs(value)", "value"]);
+  assert.deepEqual(help("say sin("), ["sin", "sin(angle)", "angle"]);
+  // A declared name is no call of the function.
+  assert.equal(help("function sqrt(")[0], null);
+});
+
+test("a method that only text has has help from its contract, also while it is being written", () => {
+  // The help at the end of `source`: its command, the signature's label, and its active parameter.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    return [
+      languageContextHelp(document, position)?.command ?? null,
+      signature?.label ?? null,
+      signature === null ? null : (signature.parameters[signature.activeParameter] ?? null),
+    ];
+  };
+  for (const [name, method] of Object.entries(TEXT_METHODS)) {
+    const document = createLanguageDocument("file:///main.tease", `say name.${name}(`);
+    const position = languagePositionAt(document, document.text.length);
+    const context = languageContextHelp(document, position);
+    // A method that lists, sets, dicts, or other values have too may be called on one of them.
+    if (!isTextOnlyMethod(name)) {
+      assert.equal(context?.command, "say", name);
+      continue;
+    }
+    assert.deepEqual([context?.command, context?.summary], [name, method.summary]);
+    assert.deepEqual(languageHover(document, position)?.contents, [
+      `**${name}**`,
+      method.summary,
+      `Syntax: \`${context?.syntax}\``,
+    ]);
+  }
+  // The syntax is the call's shape (V30 §8), and the active parameter the argument being written.
+  assert.deepEqual(help("say name.trim("), ["trim", "text.trim()", null]);
+  assert.deepEqual(help('say "a,b".split('), ["split", "text.split(separator)", "separator"]);
+  assert.deepEqual(help("say name.substring(1, "), [
+    "substring",
+    "text.substring(start [, end])",
+    "end",
+  ]);
+  assert.deepEqual(help('say toNumber(code.padStart(3, "0").replace(/0/, '), [
+    "replace",
+    "text.replace(search, replacement)",
+    "replacement",
+  ]);
+  // `repeat`, which the lexer reads as a keyword, and a call inside another's arguments.
+  assert.deepEqual(help('say "ab".repeat('), ["repeat", "text.repeat(count)", "count"]);
+  assert.equal(help("say toNumber(code.trim(), default: ", "0)")[0], "toNumber");
+  // A function and a property are no call of the method.
+  assert.equal(help("say trim(")[0], "say");
+  assert.equal(help("say (name.trim)(")[0], "say");
+});
+
+test("a clock read or a method of a date or time value has help from its contract, also while it is being written", () => {
+  const help = (source: string) => {
+    const document = createLanguageDocument("file:///main.tease", source);
+    const position = languagePositionAt(document, source.length);
+    const context = languageContextHelp(document, position);
+    return [context?.command ?? null, context?.summary ?? null, context?.syntax ?? null];
+  };
+  for (const [name, read] of Object.entries(CLOCK_CONTRACTS))
+    assert.deepEqual(help(`let now = ${name}(`), [name, read.summary, `${name}()`]);
+  for (const [name, method] of Object.entries(TEMPORAL_METHODS))
+    assert.deepEqual(help(`say stamp.${name}(`), [name, method.summary, `value.${name}()`]);
+  // A method of the same name as a conversion is the method, and the conversion stays the function.
+  assert.equal(help("say stamp.toDateTime(")[1], TEMPORAL_METHODS.toDateTime.summary);
+  assert.equal(help("say toDateTime(")[1], CONVERSIONS.toDateTime.summary);
+  assert.deepEqual(help("say toNumber(getDate().toISO(), default: "), [
+    "toNumber",
+    CONVERSIONS.toNumber.summary,
+    "toNumber(value [, default: number])",
+  ]);
+  // A declared function and a property are no call of the built-in.
+  assert.notEqual(help("function getDate(")[0], "getDate");
+  assert.equal(help("say (stamp.toISO)(")[0], "say");
+});
+
+test("a list function's call has help from its contract, also while it is being written", () => {
+  // The help at the end of `source`: its command, the signature's label, and its active parameter.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    return [
+      languageContextHelp(document, position)?.command ?? null,
+      signature?.label ?? null,
+      signature === null ? null : (signature.parameters[signature.activeParameter] ?? null),
+    ];
+  };
+  for (const name of LIST_FUNCTIONS) {
+    const document = createLanguageDocument("file:///main.tease", `say ${name}(`);
+    const position = languagePositionAt(document, document.text.length);
+    const context = languageContextHelp(document, position);
+    assert.deepEqual(
+      [context?.command, context?.summary],
+      [name, LIST_FUNCTION_CONTRACTS[name].summary],
+    );
+    assert.deepEqual(languageHover(document, position)?.contents, [
+      `**${name}**`,
+      LIST_FUNCTION_CONTRACTS[name].summary,
+      `Syntax: \`${context?.syntax}\``,
+    ]);
+  }
+  // The syntax is the call's shape (V30 §16), and the active parameter the argument being written.
+  const percentile = "percentile(list, percentage [, by: text])";
+  assert.deepEqual(help("say percentile("), ["percentile", percentile, "list"]);
+  assert.deepEqual(help("say percentile(scores, "), ["percentile", percentile, "percentage"]);
+  assert.deepEqual(help("say percentile(scores, 10, "), ["percentile", percentile, "by"]);
+  assert.deepEqual(help('say sum(sessions, by: "count"'), ["sum", "sum(list [, by: text])", "by"]);
+  assert.deepEqual(help("let line = linearRegression(points, x: "), [
+    "linearRegression",
+    "linearRegression(list [, y: text] [, x: text])",
+    "x",
+  ]);
+  assert.deepEqual(help("say predict(line, "), ["predict", "predict(line, x)", "x"]);
+  // `min` and `max` take one list, or any number of values.
+  const min = "min(value, value, ...)  or  min(list [, by: text])";
+  assert.deepEqual(help("say min("), ["min", min, "list"]);
+  assert.deepEqual(help("say min(20, total, "), ["min", min, "value"]);
+  assert.deepEqual(help("say max(sum(scores), "), [
+    "max",
+    "max(value, value, ...)  or  max(list [, by: text])",
+    "value",
+  ]);
+  // A declared name is no call of the function, and a method of the same name is not either.
+  assert.equal(help("function sum(")[0], null);
+  assert.equal(help("say scores.sum(")[0], "say");
+});
+
+test("a method that only lists and sets have has help from its contract, also while it is being written", () => {
+  // The help at the end of `source`: its command, the signature's label, and its active parameter.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    return [
+      languageContextHelp(document, position)?.command ?? null,
+      signature?.label ?? null,
+      signature === null ? null : (signature.parameters[signature.activeParameter] ?? null),
+    ];
+  };
+  for (const method of Object.values(LIST_METHODS)) {
+    const name = method.name;
+    const document = createLanguageDocument("file:///main.tease", `say items.${name}(`);
+    const position = languagePositionAt(document, document.text.length);
+    const context = languageContextHelp(document, position);
+    const contract: ListMethod = method;
+    // A method that text, dicts, handles, or ranges have too may be called on one of them.
+    if (
+      Object.hasOwn(TEXT_METHODS, name) ||
+      Object.hasOwn(DICT_METHODS, name) ||
+      isAnyHandleMethod(name) ||
+      contract.shared === true
+    ) {
+      assert.equal(context?.command, isTextOnlyMethod(name) ? name : "say", name);
+      continue;
+    }
+    assert.deepEqual([context?.command, context?.summary], [name, method.summary]);
+    assert.deepEqual(languageHover(document, position)?.contents, [
+      `**${name}**`,
+      method.summary,
+      `Syntax: \`${context?.syntax}\``,
+    ]);
+  }
+  // The syntax is the call's shape (V30 §16), and the active parameter the argument being written.
+  assert.deepEqual(help("items.add("), ["add", "list.add(value)  or  set.add(value)", "value"]);
+  assert.deepEqual(help("say items.takeLast("), ["takeLast", "list.takeLast(count)", "count"]);
+  assert.deepEqual(help('say items.join(", ".repeat('), ["repeat", "text.repeat(count)", "count"]);
+  assert.deepEqual(help("say items.join("), ["join", "list.join([separator])", "separator"]);
+  assert.deepEqual(help("say mine.union(yours.toSet("), ["toSet", "list.toSet()", null]);
+  assert.deepEqual(help("items.shuffle(", ")"), ["shuffle", "list.shuffle()", null]);
+  // A function of the same name, and a method that dicts or text have too, are no call of the method.
+  assert.equal(help("say add(")[0], "say");
+  assert.equal(help("say items.remove(")[0], "say");
+  assert.equal(help("say items.indexOf(")[0], "say");
+});
+
+test("a method that only timers and media have has help from its contract, also while it is being written", () => {
+  const help = (source: string) => {
+    const document = createLanguageDocument("file:///main.tease", source);
+    const position = languagePositionAt(document, source.length);
+    const context = languageContextHelp(document, position);
+    return [context?.command ?? null, context?.summary ?? null, context?.syntax ?? null];
+  };
+  // Timers and media share the help of each method, which takes no arguments.
+  for (const kind of ["timer", "media"] as const)
+    for (const [name, method] of Object.entries(HANDLE_MEMBERS[kind].methods)) {
+      assert.deepEqual(help(`music.${name}(`), [name, method.summary, `handle.${name}()`]);
+      const document = createLanguageDocument("file:///main.tease", `music.${name}(`);
+      assert.deepEqual(
+        languageSignatureHelp(document, languagePositionAt(document, document.text.length))
+          ?.parameters,
+        [],
+      );
+    }
+  assert.equal(help("say toString(music.stop(")[0], "stop");
+  // Lists, sets, and dicts have a `remove` too, and a message's and a permanent button's differ.
+  assert.equal(help("say toString(line.remove(")[0], "toString");
+  // A declared function and a property are no call of the method.
+  assert.equal(help("say toString(stop(")[0], "toString");
+  assert.equal(help("say toString((music.pause)(")[0], "toString");
 });
 
 test("askChoice help names set options and the prefill after the options (V30 §19)", () => {

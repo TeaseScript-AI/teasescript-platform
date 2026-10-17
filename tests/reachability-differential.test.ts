@@ -11,7 +11,7 @@ import { parse } from "../src/parser.js";
 import { PlanControlFlow } from "../src/plan/control-flow.js";
 import { Reachability } from "../src/reachability.js";
 import { validateProjectSemantics } from "../src/semantic.js";
-import { checkTypes } from "../src/type-checker.js";
+import { checkTypes } from "../src/type-inference/index.js";
 import { DeadWays } from "../src/way-facts.js";
 import { compileAndRunVariants, type FlowKnob } from "./helpers/flow-differential.js";
 

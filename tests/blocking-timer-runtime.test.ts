@@ -294,15 +294,15 @@ test("unsupported and invalid timer forms, members, and handler scope fail with 
 });
 
 test("invalid dynamic timer durations fail deterministically before any action", () => {
-  // The subject is the rejected duration or range operand of the timer or wait. `dynamic` hides a value's type from
-  // the compiler, which rejects a known text or range duration before runtime.
+  // The subject is the rejected duration or range operand of the timer or wait. `dynamic` hides a value from the
+  // compiler, which rejects a known one before runtime.
   const dynamic = "function dynamic(value) {\n  return value\n}\n";
   const cases: ReadonlyArray<readonly [source: string, code: string, subject: string]> = [
     [`${dynamic}let d = dynamic("soon")\ntimer d\nexit`, "TSR050", "d"],
-    ["let d = -1\ntimer d s\nexit", "TSR050", "d"],
-    ["let a = 3\ntimer (a..a) s\nexit", "TSR041", "a..a"],
+    [`${dynamic}let d = dynamic(-1)\ntimer d s\nexit`, "TSR050", "d"],
+    [`${dynamic}let a = dynamic(3)\ntimer (a..a) s\nexit`, "TSR041", "a..a"],
     [`${dynamic}let a = dynamic(0.5)\ntimer (a..3) s\nexit`, "TSR045", "a..3"],
-    ["let a = -3\ntimer (a..3) s\nexit", "TSR050", "a..3"],
+    [`${dynamic}let a = dynamic(-3)\ntimer (a..3) s\nexit`, "TSR050", "a..3"],
     [`${dynamic}let d = dynamic(1..3)\nwait d\nexit`, "TSR050", "d"],
   ];
   for (const [source, code, subject] of cases) {
@@ -326,7 +326,7 @@ test("invalid dynamic timer durations fail deterministically before any action",
   }
   // A range below zero names its own rule, not the kinds a duration may be.
   assert.equal(
-    start("let a = -3\ntimer (a..3) s\nexit").snapshot.failure?.message,
+    start(`${dynamic}let a = dynamic(-3)\ntimer (a..3) s\nexit`).snapshot.failure?.message,
     "A timer range must not start below 0, but this range is -3..3.",
   );
 });

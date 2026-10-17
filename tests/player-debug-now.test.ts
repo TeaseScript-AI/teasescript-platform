@@ -276,7 +276,7 @@ test("a failed session keeps the calls its error happened in, which the error di
         path: "rules.tease",
         source: [
           "global function punish(count: number) {",
-          "    let zero = 0",
+          "    let zero = count - count",
           "    let rounds = count / zero",
           "}",
           "",

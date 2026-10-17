@@ -494,6 +494,7 @@ implementation constraint, not language capacity. Historical diagnostic measurem
 
 Grammar keywords, type names, engine names, and implemented core built-ins are centrally protected from user
 declarations, in `src/language-facts.ts` with the lexer's keywords, the words the parser reads by name, and the units.
+The protected type names come from the kinds of values in `src/value-kinds.ts`.
 Protecting a name reserves it; it does not make that name callable.
 
 A Standard Library export does not automatically become a protected grammar keyword. ADR 0018 explicitly protects its

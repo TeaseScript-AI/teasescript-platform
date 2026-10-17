@@ -1,4 +1,5 @@
 import { isStoredAngleRecord, type StoredAngle } from "../angle.js";
+import { isDictProperty } from "../dict-operations.js";
 import {
   isStoredCalendarDurationRecord,
   isStoredDurationRecord,
@@ -7,6 +8,7 @@ import {
 } from "../duration.js";
 import { captureExternalData, type ExternalDataFailure } from "../external-data-capture.js";
 import { compileRegex, isCanonicalRegexFlags } from "../regex.js";
+import { hasIdentity, VALUE_KIND_NAMES, VALUE_KINDS, valueKindOf } from "../value-kinds.js";
 import {
   isValidDate,
   isValidEpochMilliseconds,
@@ -321,27 +323,27 @@ type CompositeValue =
   | SerializableRuntimeObject
   | SerializableRuntimeDict;
 
+/** The `kind` of each record that holds other values, whose `==` compares its parts (`VALUE_KINDS`). */
+const COMPOSITE_RECORDS: ReadonlySet<string> = new Set(
+  VALUE_KIND_NAMES.filter((kind) => VALUE_KINDS[kind].equality === "parts").map(
+    (kind) => VALUE_KINDS[kind].stored,
+  ),
+);
+
 function isComposite(value: SerializableRuntimeValue): value is CompositeValue {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value.kind === "list" ||
-      value.kind === "set" ||
-      value.kind === "object" ||
-      value.kind === "dict")
-  );
+  return typeof value === "object" && value !== null && COMPOSITE_RECORDS.has(value.kind);
 }
 
 /**
- * Whether a value holds a timer, media, or message handle, permanent button, camera view, or speaker reference: identities the
- * runtime allocates for the current session, which host data and stored values cannot carry. Lists, sets, objects, and
- * dicts are checked iteratively at every depth.
+ * Whether a value holds one with an identity (`hasIdentity`), a speaker reference or a handle: identities the runtime
+ * allocates for the current session, which host data and stored values cannot carry. Lists, sets, objects, and dicts are
+ * checked iteratively at every depth.
  */
 export function containsRuntimeIdentity(value: SerializableRuntimeValue): boolean {
   return findRuntimeIdentity(value) !== null;
 }
 
-/** The first handle, camera view, permanent button, or speaker reference in `value`, which exist only in the session. */
+/** The first value with an identity in `value`, a speaker reference or a handle, which exist only in the session. */
 export function findRuntimeIdentity(
   value: SerializableRuntimeValue,
 ): SerializableRuntimeValue | null {
@@ -349,14 +351,8 @@ export function findRuntimeIdentity(
   while (work.length > 0) {
     const current = work.pop()!;
     if (typeof current !== "object" || current === null) continue;
+    if (hasIdentity(valueKindOf(current))) return current;
     switch (current.kind) {
-      case "timerHandle":
-      case "mediaHandle":
-      case "permanentButtonHandle":
-      case "messageHandle":
-      case "cameraView":
-      case "speakerReference":
-        return current;
       case "list":
       case "set":
         for (const item of current.items) work.push(item);
@@ -374,27 +370,10 @@ export function findRuntimeIdentity(
   return null;
 }
 
+/** A copy of a value, without the values a list, set, object, or dict holds, which the caller copies into it. */
 function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRuntimeValue {
   if (isScalar(value)) return value;
   switch (value.kind) {
-    case "range":
-      return { ...value };
-    case "speakerReference":
-    case "duration":
-    case "calendarDuration":
-    case "angle":
-    case "date":
-    case "time":
-    case "datetime":
-    case "absoluteDateTime":
-    case "timerHandle":
-    case "mediaHandle":
-    case "permanentButtonHandle":
-    case "messageHandle":
-    case "cameraView":
-    case "script":
-    case "regex":
-      return { ...value };
     case "set":
       return { kind: "set", items: new Array(value.items.length) };
     case "list":
@@ -403,6 +382,9 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
       return { kind: "object", properties: new Array(value.properties.length) };
     case "dict":
       return { kind: "dict", entries: new Array(value.entries.length) };
+    default:
+      // A record without parts holds only its own fields.
+      return { ...value };
   }
 }
 
@@ -488,13 +470,14 @@ export function setCapturedSerializableDictValue(
 }
 
 /**
- * A dict's `length`, or a new list of its `keys` or of copies of its `values` in entry order, or `undefined` for
- * another name.
+ * A property of a dict (see `DICT_PROPERTIES`): its `length`, or a new list of its `keys` or of copies of its `values` in
+ * entry order, or `undefined` for a name no property has.
  */
 export function dictProperty(
   dict: SerializableRuntimeDict,
   name: string,
 ): SerializableRuntimeValue | undefined {
+  if (!isDictProperty(name)) return undefined;
   switch (name) {
     case "length":
       return dict.entries.length;
@@ -502,8 +485,10 @@ export function dictProperty(
       return { kind: "list", items: dict.entries.map((entry) => entry.key) };
     case "values":
       return createCapturedSerializableList(dict.entries.map((entry) => entry.value));
-    default:
-      return undefined;
+    default: {
+      const unhandled: never = name;
+      throw new Error(`Dict property '${String(unhandled)}' has no implementation.`);
+    }
   }
 }
 

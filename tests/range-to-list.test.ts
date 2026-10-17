@@ -261,7 +261,7 @@ test("a range given where a list is needed names toList in the fix", () => {
       [
         [
           "TSV043",
-          "addAll() needs a list, but this is a range. Make a list of its numbers with toList() first.",
+          "addAll() needs a list, not a range. Make a list of its numbers with toList() first.",
         ],
       ],
       [

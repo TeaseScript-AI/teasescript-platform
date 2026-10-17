@@ -1,4 +1,4 @@
-import type { MethodParameters } from "./text-operations.js";
+import type { CallShape } from "./conversions.js";
 
 /**
  * Rules of a call's arguments, each with one message, whichever pass checks the call: compile error `TSV020` for their
@@ -30,22 +30,6 @@ export function argumentCountMessage(
   fix?: string,
 ): string {
   return `${callee}() takes ${takes}, received ${received}.${fix === undefined ? "" : ` ${fix}`}`;
-}
-
-/**
- * A call with `received` arguments of a function of the current date and time or a method of a date or time value,
- * which take none (V30 §35), from the compiler (`TSV020`) and the runtime (`TSR028`, `TSR015`). A format follows the
- * player's settings.
- */
-export function temporalArgumentsMessage(name: string, received: number): string {
-  return argumentCountMessage(
-    name,
-    "no arguments",
-    received,
-    name.startsWith("format")
-      ? "It shows the value in the player's own date and time format."
-      : undefined,
-  );
 }
 
 /**
@@ -141,6 +125,51 @@ export function argumentShapeProblem(
   return { kind: "argumentCount", message: argumentCountMessage(callee, shape.takes, received) };
 }
 
+/** The names that a call of `shape` (see `CallShape`) takes: `default:` and `files:` where it takes them. */
+export function callShapeNames(shape: CallShape): readonly string[] {
+  return [...(shape.fallback === null ? [] : ["default"]), ...(shape.files ? ["files"] : [])];
+}
+
+/**
+ * The first problem with a call of `shape` (see `CallShape`), as the compiler reports it first: the first of `named`
+ * that it does not take, then `received` positional arguments where it takes one, or the two of its pair, then a
+ * `default:` that it needs and that the call leaves out (`defaulted` false). `undefined` when the call fits.
+ */
+export function callShapeProblem(
+  callee: string,
+  shape: CallShape,
+  received: number,
+  named: readonly string[],
+  defaulted: boolean,
+): ArgumentProblem | undefined {
+  const names = callShapeNames(shape);
+  const unknown = named.find((name) => !names.includes(name));
+  if (unknown !== undefined)
+    return {
+      kind: "unknownNamedArgument",
+      name: unknown,
+      message: unknownNamedArgumentMessage(callee, unknown, names),
+    };
+  const required = shape.fallback?.required ?? null;
+  if (received !== 1 && (shape.pair === undefined || received !== 2))
+    return {
+      kind: "argumentCount",
+      message: argumentCountMessage(
+        callee,
+        `1 argument (${shape.parameter})${required === null ? "" : " and a 'default:'"}${shape.pair === undefined ? "" : ` or 2 (${shape.pair.join(", ")})`}`,
+        received,
+      ),
+    };
+  if (required === null || defaulted) return undefined;
+  return {
+    kind: "argumentCount",
+    message: missingDefaultMessage(
+      `${callee}(${shape.parameter}, default: value)`,
+      `for ${required}`,
+    ),
+  };
+}
+
 /** The parameters of the built-ins that take a fixed number of positional arguments and no names (V30 §7, §8). */
 export const FIXED_PARAMETERS: ReadonlyMap<string, readonly string[]> = new Map([
   ["escapeMarkup", ["text"]],
@@ -155,56 +184,6 @@ export function scriptArgumentCountMessage(received: number): string {
     `Name a label with 'label:', as in 'script("rooms/hall.tease", label: "start")'.`,
   );
 }
-
-/** A method that takes positional arguments with these names. */
-function positionalMethod(name: string, ...parameters: string[]): [string, MethodParameters] {
-  return [name, { name, parameters: parameters.map((parameter) => ({ name: parameter })) }];
-}
-
-/**
- * The parameters of the methods of lists and sets (V30 §16), timers and media (V30 §22), and date and time values
- * (V30 §35) that take only positional arguments, besides `join`, the searches, `take`, and `takeLast`, which have their
- * own checks. Every other receiver with one of these methods takes as many: text for `contains` and `reverse`, and a dict
- * for `contains`, `remove`, and `clear`. Only a message and a permanent button take `remove()` without arguments (#836).
- */
-export const POSITIONAL_METHODS: ReadonlyMap<string, MethodParameters> = new Map([
-  positionalMethod("add", "value"),
-  positionalMethod("addAll", "other"),
-  positionalMethod("remove", "value"),
-  positionalMethod("removeAt", "index"),
-  positionalMethod("removeFirst"),
-  positionalMethod("removeLast"),
-  positionalMethod("clear"),
-  positionalMethod("contains", "value"),
-  positionalMethod("sort"),
-  positionalMethod("shuffle"),
-  positionalMethod("reverse"),
-  positionalMethod("intersection", "other"),
-  positionalMethod("union", "other"),
-  positionalMethod("difference", "other"),
-  positionalMethod("toSet"),
-  positionalMethod("toList"),
-  positionalMethod("pause"),
-  positionalMethod("resume"),
-  positionalMethod("stop"),
-  positionalMethod("toISO"),
-  positionalMethod("formatDate"),
-  positionalMethod("formatTime"),
-  positionalMethod("formatDateTime"),
-  positionalMethod("toAbsoluteDateTime"),
-  positionalMethod("toDateTime"),
-  positionalMethod("toSeconds"),
-  positionalMethod("toMilliseconds"),
-]);
-
-/** The parameter of `take`, `takeLast`, and the searches of a list (V30 §16), which a set does not have. */
-export const LIST_ONLY_METHODS: ReadonlyMap<string, MethodParameters> = new Map([
-  positionalMethod("take", "count"),
-  positionalMethod("takeLast", "count"),
-  positionalMethod("indexOf", "value"),
-  positionalMethod("lastIndexOf", "value"),
-  positionalMethod("count", "value"),
-]);
 
 /** What `get` reads with a `default:`: an index of a list, a key of a dict, or either, where the compiler knows neither. */
 export type GetReceiver = "list" | "dict" | "either";
@@ -252,22 +231,4 @@ export function getArgumentsProblem(
         ? missingDefaultMessage(`get(${reads}, default: value)`, when, fix)
         : argumentCountMessage("get", `1 argument (${reads}) and a 'default:'`, received),
   };
-}
-
-/**
- * The first problem with the arguments of a dict method (V30 §16): `contains(key)` and `remove(key)` take a key,
- * `clear()` none, and `get(key, default: value)` a key and a `default:`; `named` are the names of the call.
- */
-export function dictArgumentsProblem(
-  method: string,
-  received: number,
-  named: readonly string[],
-): ArgumentProblem | undefined {
-  if (method === "get") return getArgumentsProblem("dict", received, named);
-  return argumentShapeProblem(
-    method,
-    positionalShape(method === "clear" ? [] : ["key"]),
-    received,
-    named,
-  );
 }

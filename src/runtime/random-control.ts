@@ -4,10 +4,13 @@ import type {
   InstructionPlan,
   PlanSourceLocation,
 } from "../plan/model.js";
+import { changesEntries } from "../dict-operations.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
+import { isAnyHandleMethod, kindsWithMethod, kindsWithProperty } from "../handle-members.js";
 import { RANDOM_FUNCTIONS } from "../language-facts.js";
-import type { NumericFailure } from "../numeric-functions.js";
-import { isRandomFunction, numbersProblem, RANDOM_CONTRACTS } from "../random-functions.js";
+import { domainFailure, type NumericFailure } from "../numeric-functions.js";
+import { isRandomFunction, RANDOM_CONTRACTS } from "../random-functions.js";
+import { listDraw, listMethod } from "../list-methods.js";
 import type { SourceSpan } from "../source.js";
 import type { RuntimeDebugRandomOperation, TraceStore } from "./debug-trace.js";
 import type { InterpreterEvent } from "./events.js";
@@ -356,10 +359,10 @@ function drawKindOf(node: ExpressionPlan): RandomDrawKind | null {
   if (node.kind === "call") {
     if (node.callee.kind === "identifier" && isRandomFunction(node.callee.name))
       return node.callee.name;
-    if (node.callee.kind === "property" && node.callee.name === "shuffle") return "shuffle";
+    if (node.callee.kind === "property") return listDraw(node.callee.name, "method") ?? null;
     return null;
   }
-  if (node.kind === "property" && node.name === "random") return "collectionRandom";
+  if (node.kind === "property") return listDraw(node.name, "property") ?? null;
   if (node.kind === "tagQuery" && node.select === "random") return "tagQuery";
   return null;
 }
@@ -465,22 +468,13 @@ function instructionExpressions(instruction: Instruction): readonly ExpressionPl
 /* Which units need a state copy                                                                                    */
 /* ---------------------------------------------------------------------------------------------------------------- */
 
-/** Calls that change runtime state: collection and dict methods that change their receiver, and handle methods. */
-const MUTATING_CALLS: ReadonlySet<string> = new Set([
-  "add",
-  "addAll",
-  "remove",
-  "removeAt",
-  "removeFirst",
-  "removeLast",
-  "clear",
-  "sort",
-  "shuffle",
-  "reverse",
-  "pause",
-  "resume",
-  "stop",
-]);
+/**
+ * Whether a method call changes runtime state: a list, set, or dict method that changes its receiver (see
+ * `LIST_METHODS` and `DICT_METHODS`), or a handle method (see `HandleMethod`).
+ */
+function mutatingCall(name: string): boolean {
+  return listMethod(name)?.changes !== undefined || changesEntries(name) || isAnyHandleMethod(name);
+}
 
 const changesBeforeDraw = new WeakMap<Instruction, boolean>();
 
@@ -501,11 +495,11 @@ function mayChangeBeforeDraw(instruction: Instruction): boolean {
 function analyseChangesBeforeDraw(instruction: Instruction): boolean {
   // A staged say or speaker changes only its stage, which a pause drops.
   if (instruction.kind === "say" || instruction.kind === "declareSpeaker") return false;
-  // `timer.remaining = …` changes the timer, then may end its round, which draws the next one.
+  // A write such as `timer.remaining = …` changes the timer, then may end its round, which draws the next one.
   if (
     instruction.kind === "assign" &&
     instruction.target.kind === "property" &&
-    instruction.target.name === "remaining"
+    kindsWithProperty(instruction.target.name, (property) => property.draws === true).length > 0
   )
     return true;
   const facts = instructionExpressions(instruction).map(analyseExpression);
@@ -557,10 +551,10 @@ function analyseExpression(root: ExpressionPlan): {
           : node.callee.kind === "identifier"
             ? node.callee.name
             : null;
-      if (node.callee.kind === "property" && name !== null && MUTATING_CALLS.has(name)) {
+      if (node.callee.kind === "property" && name !== null && mutatingCall(name)) {
         changes = true;
-        // `pause()` may end a round that is already due, which draws the next one after the change.
-        if (name === "pause") draw();
+        // A call such as `pause()` may end a round that is already due, which draws the next one after the change.
+        if (kindsWithMethod(name, (method) => method.draws === true).length > 0) draw();
       }
     }
   }
@@ -871,7 +865,7 @@ function parseSupport(kind: RandomDrawKind, value: unknown): RandomSupport | str
       if (
         has("percent") &&
         finite(percent) &&
-        numbersProblem(RANDOM_CONTRACTS.chance, [percent]) === undefined
+        domainFailure(RANDOM_CONTRACTS.chance, [percent]) === undefined
       )
         support = { kind: "chance", percent };
       break;
@@ -903,7 +897,7 @@ function parseSupport(kind: RandomDrawKind, value: unknown): RandomSupport | str
         has("mean", "spread") &&
         finite(mean) &&
         finite(spread) &&
-        numbersProblem(RANDOM_CONTRACTS.randomNormal, [mean, spread]) === undefined
+        domainFailure(RANDOM_CONTRACTS.randomNormal, [mean, spread]) === undefined
       )
         support = { kind: "normal", mean, spread };
       break;
@@ -912,7 +906,7 @@ function parseSupport(kind: RandomDrawKind, value: unknown): RandomSupport | str
         has("alpha", "beta") &&
         finite(alpha) &&
         finite(beta) &&
-        numbersProblem(RANDOM_CONTRACTS.randomBeta, [alpha, beta]) === undefined
+        domainFailure(RANDOM_CONTRACTS.randomBeta, [alpha, beta]) === undefined
       )
         support = { kind: "beta", alpha, beta };
       break;
@@ -922,7 +916,7 @@ function parseSupport(kind: RandomDrawKind, value: unknown): RandomSupport | str
         finite(min) &&
         finite(mostLikely) &&
         finite(max) &&
-        numbersProblem(RANDOM_CONTRACTS.randomPert, [min, mostLikely, max]) === undefined
+        domainFailure(RANDOM_CONTRACTS.randomPert, [min, mostLikely, max]) === undefined
       )
         support = { kind: "pert", min, mostLikely, max };
       break;

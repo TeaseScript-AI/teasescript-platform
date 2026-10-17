@@ -19,9 +19,15 @@ theme colours; its own tokenizer marks only strings and line comments, which Mon
 closing read. The Player's palette (`player/theme/palette.ts`) holds the code colours as contrast-checked roles,
 `syntax-keyword`, `syntax-name`, `syntax-string`, `syntax-number`, `syntax-comment`, and `syntax-operator`, which the
 [random draw picker](DEBUGGER.md#random-draws) applies to the same classes; the editor should adopt these roles later
-(owner direction, #512) instead of keeping colours of its own. Hover and signature help of a conversion or random
-function call, such as `toNumber(...)` or `chance(...)`, come from its contract in `src/conversions.ts` or
-`src/random-functions.ts`.
+(owner direction, #512) instead of keeping colours of its own. Hover and signature help of a conversion, numeric,
+angle, random, clock, or list function call, such as `toNumber(...)`, `round(...)`, `sin(...)`, `chance(...)`,
+`getDate()`, or `sum(...)`, of a method that only text has, such as `name.trim()`, of a method of date and time values,
+such as `started.toISO()`, of one that only lists and sets have, such as `items.shuffle()`, and of one that only timers
+and media have, such as `music.pause()`, come from its contract in `src/conversions.ts`, `src/numeric-functions.ts`,
+`src/random-functions.ts`, `src/temporal-builtins.ts`, `src/list-function-rules.ts`, `src/text-operations.ts`,
+`src/list-methods.ts`, or `src/handle-members.ts`, and those of a command cover its
+arguments as the parser reads them and name the options of the parser's tables in `src/parser.ts`, which the parser and
+the name pass check.
 The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
 textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
 validated checkpoint save/restore. Its Player panel provides the first Standard interaction and chat-pacing control POC

@@ -8,6 +8,8 @@ import { canonicalWebUrl } from "../web-url.js";
 import { LOCK_CALLS } from "../capture-call.js";
 import { conversionWaitsForFiles, isConversion, takesDefault, takesFiles } from "../conversions.js";
 import { ANGLE_UNITS, CALENDAR_DURATION_UNITS, DURATION_UNITS } from "../language-facts.js";
+import { dictMethod } from "../dict-operations.js";
+import { listMethod } from "../list-methods.js";
 import { compileRegex, isCanonicalRegexFlags } from "../regex.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -25,6 +27,7 @@ import {
   packagePathProblem,
 } from "../project-paths.js";
 import { isCanonicalTagList, normalizeTagName } from "../tags.js";
+import { VALUE_KIND_NAMES, VALUE_KINDS } from "../value-kinds.js";
 import { isLazyDefaultOperation } from "../lazy-defaults.js";
 import { lazyDefaultArgumentIndex, lazyDefaultCallOperation } from "./expression-children.js";
 import {
@@ -2423,29 +2426,13 @@ function validateTypePlan(root: unknown, rootPath: string, errors: PlanValidatio
   }
 }
 
-const TYPE_PLAN_NAMES = [
-  "string",
-  "boolean",
-  "integer",
-  "number",
-  "duration",
-  "calendarDuration",
-  "angle",
-  "date",
-  "time",
-  "datetime",
-  "absoluteDateTime",
+/**
+ * The types a plan names without parts (`TypePlanName`): every kind of value but collections and objects (`VALUE_KINDS`),
+ * and `never`. Each check of a value of one of them validates the value itself.
+ */
+const TYPE_PLAN_NAMES: readonly string[] = [
+  ...VALUE_KIND_NAMES.filter((kind) => VALUE_KINDS[kind].type !== "parts"),
   "never",
-  "null",
-  "range",
-  "speaker",
-  "timer",
-  "media",
-  "camera",
-  "permanentButton",
-  "messageHandle",
-  "script",
-  "regex",
 ];
 
 function validateExpressionNode(
@@ -2631,19 +2618,24 @@ function validateExpressionNode(
         );
       }
       validateOptionalTypeCheck(value, path, errors);
+      // A call that may decide a list's element type or a dict's value type checks what it adds, or its default, as the
+      // compiler gave it (see `ListMethod.decides` and `DictMethod.decides`).
+      const decides =
+        isRecord(value.callee) && value.callee.kind === "property"
+          ? (listMethod(String(value.callee.name))?.decides ??
+            dictMethod(String(value.callee.name))?.decides)
+          : undefined;
       if (
         "typeCheck" in value &&
         !(
-          isRecord(value.callee) &&
-          value.callee.kind === "property" &&
+          decides !== undefined &&
           Array.isArray(value.arguments) &&
-          (((value.callee.name === "add" || value.callee.name === "addAll") &&
-            value.arguments.length === 1) ||
-            (value.callee.name === "get" &&
-              value.arguments.length === 2 &&
+          (decides === "default"
+            ? value.arguments.length === 2 &&
               isRecord(value.arguments[1]) &&
               value.arguments[1].kind === "named" &&
-              value.arguments[1].name === "default"))
+              value.arguments[1].name === "default"
+            : value.arguments.length === 1)
         )
       )
         errors.push(

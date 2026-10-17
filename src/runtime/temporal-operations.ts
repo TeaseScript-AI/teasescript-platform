@@ -1,4 +1,3 @@
-import { temporalArgumentsMessage } from "../argument-rules.js";
 import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import {
   calendarDuration,
@@ -8,8 +7,18 @@ import {
   negateDuration,
   type AnyDuration,
 } from "../duration.js";
+import type { ClockFunctionName } from "../language-facts.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
+import {
+  CLOCK_CONTRACTS,
+  hasTemporalField,
+  hasTemporalMethod,
+  isCalendarDurationPart,
+  temporalArgumentsMessage,
+  temporalMemberMessage,
+  type TemporalMethodName,
+} from "../temporal-builtins.js";
 import {
   addCalendarParts,
   compareDates,
@@ -34,9 +43,11 @@ import {
   roundToMillisecond,
   weekdayName,
   zonedTimestamp,
+  type DateFields,
   type DateTimeFields,
   type TemporalContext,
   type TemporalResult,
+  type TimeFields,
 } from "../temporal.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
@@ -58,8 +69,8 @@ import {
   isTime,
   isAbsoluteDateTime,
 } from "./value-predicates.js";
-import { describeValue } from "./value-types.js";
 import { wallClockAt, type RuntimeTemporalCapture } from "./temporal-captures.js";
+import { describeValue } from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -84,19 +95,12 @@ export function exactDurationMilliseconds(
   return value.milliseconds;
 }
 
-export const TEMPORAL_GETTERS: ReadonlySet<string> = new Set([
-  "getDate",
-  "getTime",
-  "getDateTime",
-  "getAbsoluteDateTime",
-]);
-
 /**
- * `getDate()`, `getTime()`, `getDateTime()`, or `getAbsoluteDateTime()` (V30 §35) at scene time `atMs`: the wall clock
- * of the capture in force, read through its zone for local values.
+ * A clock read (V30 §35, see `ClockFunction`) at scene time `atMs`: the wall clock of the capture in force, read through
+ * its zone for local values.
  */
 export function temporalNow(
-  name: string,
+  name: ClockFunctionName,
   positional: readonly SerializableRuntimeValue[],
   named: Readonly<Record<string, SerializableRuntimeValue>>,
   capture: RuntimeTemporalCapture,
@@ -117,19 +121,23 @@ export function temporalNow(
       span,
     );
   const now = absoluteDateTime(epochMilliseconds, span);
-  if (name === "getAbsoluteDateTime") return now;
+  const kind = CLOCK_CONTRACTS[name].result;
+  if (kind === "absoluteDateTime") return now;
   const fields = local(capture.context, now.epochMilliseconds, span);
-  if (name === "getDate")
-    return { kind: "date", year: fields.year, month: fields.month, day: fields.day };
-  if (name === "getTime")
-    return {
-      kind: "time",
-      hour: fields.hour,
-      minute: fields.minute,
-      second: fields.second,
-      millisecond: fields.millisecond,
-    };
-  return { kind: "datetime", ...fields };
+  switch (kind) {
+    case "date":
+      return { kind, year: fields.year, month: fields.month, day: fields.day };
+    case "time":
+      return {
+        kind,
+        hour: fields.hour,
+        minute: fields.minute,
+        second: fields.second,
+        millisecond: fields.millisecond,
+      };
+    case "datetime":
+      return { kind, ...fields };
+  }
 }
 
 /** `value` converted to a date or time value of `kind` (V30 §35), or `undefined` when it does not convert. */
@@ -198,78 +206,86 @@ export function combinedDateAndTime(
 }
 
 /**
- * A component of a calendar duration (ADR 0026), or `undefined` when it has no such component. `days` counts calendar
- * days and is not a length.
+ * A part of a calendar duration (see `CalendarDurationPart`), or `undefined` when it has no such part. `days` counts
+ * calendar days and is not a length.
  */
 export function calendarDurationProperty(
   value: SerializableRuntimeCalendarDuration,
   name: string,
 ): SerializableRuntimeValue | undefined {
-  if (name === "months") return value.months;
-  if (name === "days") return value.days;
-  if (name === "exactOffset") return exactDuration(value.milliseconds);
-  return undefined;
+  if (!isCalendarDurationPart(name)) return undefined;
+  switch (name) {
+    case "months":
+      return value.months;
+    case "days":
+      return value.days;
+    case "exactOffset":
+      return exactDuration(value.milliseconds);
+    default: {
+      const unhandled: never = name;
+      throw new Error(`Calendar duration part '${String(unhandled)}' has no implementation.`);
+    }
+  }
 }
 
-/** A field of a date, time, or datetime, or `undefined` when the value has no such field. */
+/** A field of a date, time, or date and time (see `TemporalField`), or `undefined` when the value has no such field. */
 export function temporalProperty(
   value: SerializableRuntimeTemporal,
   name: string,
 ): SerializableRuntimeValue | undefined {
-  if (value.kind === "absoluteDateTime") return undefined;
-  if (value.kind !== "time") {
-    switch (name) {
-      case "year":
-        return value.year;
-      case "month":
-        return value.month;
-      case "day":
-        return value.day;
-      case "weekday":
-        return weekdayName(value);
-      case "weekdayNumber":
-        return isoWeekdayNumber(value);
-      case "weekNumber":
-        return isoWeek(value).weekNumber;
-      case "weekYear":
-        return isoWeek(value).weekYear;
+  if (!hasTemporalField(value.kind, name)) return undefined;
+  // EVIDENCE: invariant: a value has a field only when it has the date or time parts the field reads (`TemporalField`).
+  const parts = value as DateFields & TimeFields;
+  switch (name) {
+    case "year":
+      return parts.year;
+    case "month":
+      return parts.month;
+    case "day":
+      return parts.day;
+    case "weekday":
+      return weekdayName(parts);
+    case "weekdayNumber":
+      return isoWeekdayNumber(parts);
+    case "weekNumber":
+      return isoWeek(parts).weekNumber;
+    case "weekYear":
+      return isoWeek(parts).weekYear;
+    case "hour":
+      return parts.hour;
+    case "minute":
+      return parts.minute;
+    case "second":
+      return parts.second;
+    case "millisecond":
+      return parts.millisecond;
+    default: {
+      const unhandled: never = name;
+      throw new Error(`Date and time field '${String(unhandled)}' has no implementation.`);
     }
   }
-  if (value.kind !== "date") {
-    switch (name) {
-      case "hour":
-        return value.hour;
-      case "minute":
-        return value.minute;
-      case "second":
-        return value.second;
-      case "millisecond":
-        return value.millisecond;
-    }
-  }
-  return undefined;
 }
 
-const METHODS: Readonly<Record<SerializableRuntimeTemporal["kind"], ReadonlySet<string>>> = {
-  date: new Set(["toISO", "formatDate"]),
-  time: new Set(["toISO", "formatTime"]),
-  datetime: new Set(["toISO", "formatDate", "formatTime", "formatDateTime", "toAbsoluteDateTime"]),
-  absoluteDateTime: new Set([
-    "toISO",
-    "formatDate",
-    "formatTime",
-    "formatDateTime",
-    "toDateTime",
-    "toSeconds",
-    "toMilliseconds",
-  ]),
-};
-
-export function hasTemporalMethod(value: SerializableRuntimeTemporal, name: string): boolean {
-  return METHODS[value.kind].has(name);
+/**
+ * Why a date or time value has no member `name`, as the compiler says it (see `temporalMemberMessage`); `label` is how
+ * the source writes the value, where it can.
+ */
+export function missingTemporalMember(
+  value: SerializableRuntimeTemporal,
+  name: string,
+  use: "method" | "property",
+  label: string | null,
+): string {
+  return temporalMemberMessage(
+    capitalize(describeValue(value)),
+    value.kind,
+    name,
+    use,
+    label ?? "value",
+  );
 }
 
-/** A method call on a date or time value; `context` gives the player's zone and presentation. */
+/** A method call on a date or time value (see `TemporalMethod`); `context` gives the player's zone and presentation. */
 export function temporalMethod(
   value: SerializableRuntimeTemporal,
   name: string,
@@ -278,47 +294,85 @@ export function temporalMethod(
   context: TemporalContext,
   span: SourceSpan,
 ): SerializableRuntimeValue {
-  if (!hasTemporalMethod(value, name))
-    throw fault("TSR016", `${capitalize(describeKind(value.kind))} has no method '${name}'.`, span);
+  if (!hasTemporalMethod(value.kind, name))
+    throw fault("TSR016", missingTemporalMember(value, name, "method", null), span);
   if (positional.length > 0 || Object.keys(named).length > 0)
     throw fault(
       "TSR015",
       temporalArgumentsMessage(name, positional.length + Object.keys(named).length),
       span,
     );
-  if (name === "toISO") {
-    switch (value.kind) {
-      case "date":
-        return formatIsoDate(value);
-      case "time":
-        return formatIsoTime(value);
-      case "datetime":
-        return formatIsoDateTime(value);
-      case "absoluteDateTime":
-        return formatIsoTimestamp(value.epochMilliseconds);
+  return methodResult(value, name, context, span);
+}
+
+function methodResult(
+  value: SerializableRuntimeTemporal,
+  name: TemporalMethodName,
+  context: TemporalContext,
+  span: SourceSpan,
+): SerializableRuntimeValue {
+  switch (name) {
+    case "toISO":
+      return isoText(value);
+    case "formatDate":
+      return presentDate(context.presentation, localParts(value, context, span));
+    case "formatTime":
+      return presentTime(context.presentation, localParts(value, context, span));
+    case "formatDateTime":
+      return presentDateTime(context.presentation, localParts(value, context, span));
+    case "toAbsoluteDateTime":
+      return absoluteDateTime(zoned(context, localParts(value, context, span), span), span);
+    case "toDateTime":
+      return { kind: "datetime", ...localParts(value, context, span) };
+    case "toSeconds":
+      return Math.floor(moment(value) / 1_000);
+    case "toMilliseconds":
+      return moment(value);
+    default: {
+      const unhandled: never = name;
+      throw new Error(`Date and time method '${String(unhandled)}' has no implementation.`);
     }
   }
-  if (value.kind === "absoluteDateTime") {
-    if (name === "toSeconds") return Math.floor(value.epochMilliseconds / 1_000);
-    if (name === "toMilliseconds") return value.epochMilliseconds;
+}
+
+function isoText(value: SerializableRuntimeTemporal): string {
+  switch (value.kind) {
+    case "date":
+      return formatIsoDate(value);
+    case "time":
+      return formatIsoTime(value);
+    case "datetime":
+      return formatIsoDateTime(value);
+    case "absoluteDateTime":
+      return formatIsoTimestamp(value.epochMilliseconds);
   }
-  if (value.kind === "datetime" && name === "toAbsoluteDateTime")
-    return absoluteDateTime(zoned(context, value, span), span);
-  const fields =
-    value.kind === "absoluteDateTime" ? local(context, value.epochMilliseconds, span) : value;
-  if (name === "toDateTime") return { kind: "datetime", ...fields };
-  // The remaining methods are formatDate, formatTime, and formatDateTime, on values that have those parts.
-  // EVIDENCE: invariant: METHODS admits these names only for kinds whose fields include the formatted parts.
-  const parts = fields as DateTimeFields;
-  if (name === "formatDate") return presentDate(context.presentation, parts);
-  if (name === "formatTime") return presentTime(context.presentation, parts);
-  return presentDateTime(context.presentation, parts);
 }
 
 /**
- * Ordering and arithmetic with a date or time operand (V30 §35, ADR 0026), or `undefined` when neither operand is one.
- * No operator reads a zone: exact durations apply only to an absolute date and time, and calendar units only to local
- * dates and dates and times.
+ * The parts of a local value, or of an absolute date and time in the player's zone. A method reads only the parts that
+ * every one of its receivers has (see `TemporalMethod`).
+ */
+function localParts(
+  value: SerializableRuntimeTemporal,
+  context: TemporalContext,
+  span: SourceSpan,
+): DateTimeFields {
+  if (value.kind === "absoluteDateTime") return local(context, value.epochMilliseconds, span);
+  // EVIDENCE: invariant: `hasTemporalMethod` admits a method only for its receivers, which have the parts it reads.
+  return value as DateTimeFields;
+}
+
+/** The moment of an absolute date and time, the only receiver of `toSeconds()` and `toMilliseconds()`. */
+function moment(value: SerializableRuntimeTemporal): number {
+  if (value.kind !== "absoluteDateTime")
+    throw new Error("Only an absolute date and time is a moment.");
+  return value.epochMilliseconds;
+}
+
+/**
+ * Arithmetic with a date or time operand (V30 §35, ADR 0026), or `undefined` when neither operand is one; the evaluator
+ * orders them. No operator reads a zone: exact durations apply only to an absolute date and time, and calendar units
+ * only to local dates and dates and times.
  */
 export function temporalBinary(
   operator: string,
@@ -327,19 +381,6 @@ export function temporalBinary(
   span: SourceSpan,
 ): SerializableRuntimeValue | undefined {
   if (!isTemporal(left) && !isTemporal(right)) return undefined;
-  if (["<", "<=", ">", ">="].includes(operator)) {
-    if (!isTemporal(left) || !isTemporal(right) || left.kind !== right.kind)
-      throw fault(
-        "TSR009",
-        `'${operator}' orders two values of the same kind, such as two dates or two absolute dates and times, but these are ${describeValue(left)} and ${describeValue(right)}.`,
-        span,
-      );
-    const order = compareTemporal(left, right);
-    if (operator === "<") return order < 0;
-    if (operator === "<=") return order <= 0;
-    if (operator === ">") return order > 0;
-    return order >= 0;
-  }
   if (operator === "+" || operator === "-") {
     // A duration is added to or subtracted from the value written first, as in `started + 1 h`.
     if (isAnyDuration(right) && (isDate(left) || isAbsoluteDateTime(left) || isDateTime(left)))
@@ -432,11 +473,7 @@ function absoluteDateTime(
   return { kind: "absoluteDateTime", epochMilliseconds };
 }
 
-function zoned(
-  context: TemporalContext,
-  value: SerializableRuntimeDateTime,
-  span: SourceSpan,
-): number {
+function zoned(context: TemporalContext, value: DateTimeFields, span: SourceSpan): number {
   return unwrap(zonedTimestamp(context.zone, value), span);
 }
 
@@ -462,16 +499,6 @@ function isKind(
   | SerializableRuntimeDateTime
   | SerializableRuntimeAbsoluteDateTime {
   return isTemporal(value) && value.kind === kind;
-}
-
-function describeKind(kind: SerializableRuntimeTemporal["kind"]): string {
-  return kind === "date"
-    ? "a date"
-    : kind === "time"
-      ? "a time"
-      : kind === "datetime"
-        ? "a date and time"
-        : "an absolute date and time";
 }
 
 function capitalize(text: string): string {

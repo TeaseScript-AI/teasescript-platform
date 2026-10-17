@@ -3,7 +3,8 @@
  * read: the keywords, the protected names (V30 §38), the words the parser reads by name, and the units.
  */
 import type { InteractionExpression } from "./ast.js";
-import { TokenKind } from "./token.js";
+import { TokenKind, type Token } from "./token.js";
+import { VALUE_KIND_NAMES, VALUE_KINDS } from "./value-kinds.js";
 
 /** Names reserved by the accepted V30 TeaseScript specification. */
 export const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
@@ -78,30 +79,6 @@ export const KEYWORD_TOKENS: ReadonlyMap<string, TokenKind> = new Map([
   ["otherwise", TokenKind.KeywordOtherwise],
 ]);
 
-export const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
-  "string",
-  "boolean",
-  "integer",
-  "number",
-  "date",
-  "time",
-  "datetime",
-  "absoluteDateTime",
-  "calendarDuration",
-  // The earlier name stays reserved, so its use is a compile error that names the fix (ADR 0026).
-  "timestamp",
-  "duration",
-  "angle",
-  "list",
-  "dict",
-  "object",
-  "range",
-  "media",
-  "messageHandle",
-  "script",
-  "regex",
-] as const);
-
 /** The conversions (V30 §8, §13, §35), whose contracts are in `conversions.ts`. */
 export const CONVERSION_FUNCTIONS = Object.freeze([
   "toString",
@@ -134,29 +111,17 @@ export const RANDOM_FUNCTIONS = Object.freeze([
 
 export type RandomFunctionName = (typeof RANDOM_FUNCTIONS)[number];
 
-const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
-  "player",
-  ...RANDOM_FUNCTIONS,
+/** The functions of numbers and angles (V30 §13), whose contracts are in `numeric-functions.ts`. */
+export const NUMERIC_FUNCTIONS = Object.freeze([
   "round",
   "floor",
   "ceil",
-  "min",
-  "max",
   "abs",
+  "sign",
   "sqrt",
   "pow",
-  "sign",
   "mod",
   "clamp",
-  "pi",
-  "debugMode",
-  "sum",
-  "average",
-  "median",
-  "percentile",
-  "stddev",
-  "linearRegression",
-  "predict",
   "exp",
   "ln",
   "log10",
@@ -169,6 +134,42 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "atan2",
   "toDeg",
   "toRad",
+] as const);
+
+export type NumericFunctionName = (typeof NUMERIC_FUNCTIONS)[number];
+
+/** The clock reads (V30 §35), whose contracts are in `temporal-builtins.ts`. */
+export const CLOCK_FUNCTIONS = Object.freeze([
+  "getDate",
+  "getTime",
+  "getDateTime",
+  "getAbsoluteDateTime",
+] as const);
+
+export type ClockFunctionName = (typeof CLOCK_FUNCTIONS)[number];
+
+/** The list functions (V30 §16), with `min` and `max` (V30 §13), whose contracts are in `list-function-rules.ts`. */
+export const LIST_FUNCTIONS = Object.freeze([
+  "sum",
+  "average",
+  "median",
+  "percentile",
+  "stddev",
+  "min",
+  "max",
+  "linearRegression",
+  "predict",
+] as const);
+
+export type ListFunctionName = (typeof LIST_FUNCTIONS)[number];
+
+const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
+  "player",
+  ...RANDOM_FUNCTIONS,
+  ...NUMERIC_FUNCTIONS,
+  ...LIST_FUNCTIONS,
+  "pi",
+  "debugMode",
   ...CONVERSION_FUNCTIONS,
   "fileFromBase64",
   "fileToBase64",
@@ -178,10 +179,7 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "encryptFile",
   "decryptText",
   "decryptFile",
-  "getDate",
-  "getTime",
-  "getDateTime",
-  "getAbsoluteDateTime",
+  ...CLOCK_FUNCTIONS,
   // The earlier names stay reserved, so their calls are compile errors that name the fix (ADR 0026).
   "toTimestamp",
   "getTimestamp",
@@ -244,39 +242,26 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "findScripts",
 ] as const);
 
+/**
+ * The protected type names (V30 §38): the name of every kind that an annotation writes (`VALUE_KINDS`) that is no grammar
+ * keyword or engine name, as `null`, `set`, `speaker`, and `timer` are. The earlier name `timestamp` stays reserved, so
+ * its use is a compile error that names the fix (ADR 0026).
+ */
+export const TEASESCRIPT_PROTECTED_TYPE_NAMES: readonly string[] = Object.freeze([
+  ...VALUE_KIND_NAMES.filter(
+    (kind) =>
+      VALUE_KINDS[kind].written &&
+      !TEASESCRIPT_GRAMMAR_KEYWORDS.some((keyword) => keyword === kind) &&
+      !TEASESCRIPT_PROTECTED_ENGINE_NAMES.some((name) => name === kind),
+  ),
+  "timestamp",
+]);
+
 export const CORE_RUNTIME_BUILTINS = Object.freeze([
   ...RANDOM_FUNCTIONS,
   ...CONVERSION_FUNCTIONS,
-  "round",
-  "floor",
-  "ceil",
-  "min",
-  "max",
-  "abs",
-  "sqrt",
-  "pow",
-  "sign",
-  "mod",
-  "clamp",
-  "sum",
-  "average",
-  "median",
-  "percentile",
-  "stddev",
-  "linearRegression",
-  "predict",
-  "exp",
-  "ln",
-  "log10",
-  "sin",
-  "cos",
-  "tan",
-  "asin",
-  "acos",
-  "atan",
-  "atan2",
-  "toDeg",
-  "toRad",
+  ...NUMERIC_FUNCTIONS,
+  ...LIST_FUNCTIONS,
   "fileFromBase64",
   "fileToBase64",
   "hashText",
@@ -285,10 +270,7 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "encryptFile",
   "decryptText",
   "decryptFile",
-  "getDate",
-  "getTime",
-  "getDateTime",
-  "getAbsoluteDateTime",
+  ...CLOCK_FUNCTIONS,
   "script",
 ] as const);
 
@@ -350,6 +332,11 @@ export interface CommandFacts {
   readonly renamed?: string;
   /** The words that may stand between a play command and its file, as in `playAudio async repeat "a.mp3"`. */
   readonly fileModifiers?: readonly string[];
+  /**
+   * Where a `(` after the word starts its call form: `adjacent` only right after it, as in `timer(duration: 10 s)`, so
+   * `timer (5..10) s` has a value in parentheses, and `any` also after a space, as in `showPopup ("Done")`.
+   */
+  readonly callForm?: "adjacent" | "any";
 }
 
 /**
@@ -368,20 +355,30 @@ export const COMMANDS = Object.freeze({
   fallback: { statement: "line" },
   end: { statement: "line" },
   global: { statement: "start" },
-  load: { value: true },
+  load: { value: true, callForm: "any" },
   showButton: { statement: "line", value: true, interaction: "button" },
-  showPopup: { statement: "line", value: true },
+  showPopup: { statement: "line", value: true, callForm: "any" },
   showImage: { statement: "line" },
   hideImage: { statement: "line" },
   hideCamera: { statement: "line" },
-  openUrl: { statement: "line" },
-  exportText: { statement: "line" },
+  openUrl: { statement: "line", callForm: "any" },
+  exportText: { statement: "line", callForm: "any" },
   stopAudio: { statement: "line" },
-  timer: { statement: "start", value: true },
+  timer: { statement: "start", value: true, callForm: "adjacent" },
   showCamera: { statement: "start", value: true },
   showPermanentButton: { statement: "start", value: true },
-  playAudio: { statement: "start", value: true, fileModifiers: ["async", "repeat"] },
-  playVideo: { statement: "start", value: true, fileModifiers: ["async", "repeat"] },
+  playAudio: {
+    statement: "start",
+    value: true,
+    fileModifiers: ["async", "repeat"],
+    callForm: "adjacent",
+  },
+  playVideo: {
+    statement: "start",
+    value: true,
+    fileModifiers: ["async", "repeat"],
+    callForm: "adjacent",
+  },
   askText: { value: true, interaction: "text" },
   askNumber: { value: true, interaction: "number" },
   askInteger: { value: true, interaction: "integer" },
@@ -427,6 +424,15 @@ export function isAsk(word: string): word is AskCommand {
 /** How the parser reads `word`, or `undefined` for a word it does not read by name (see `COMMANDS`). */
 export function commandFacts(word: string): CommandFacts | undefined {
   return isCommand(word) ? COMMANDS[word] : undefined;
+}
+
+/** Whether `next`, the token after the word `command`, starts the word's call form (see `CommandFacts.callForm`). */
+export function startsCallForm(command: Token, next: Token | undefined): boolean {
+  const form = commandFacts(command.lexeme)?.callForm;
+  return (
+    next?.kind === TokenKind.LeftParenthesis &&
+    (form === "any" || (form === "adjacent" && next.span.start.offset === command.span.end.offset))
+  );
 }
 
 /** The exact units of a duration, from milliseconds to weeks (ADR 0026). */

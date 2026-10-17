@@ -143,11 +143,12 @@ test("a range, handle member, or media position problem has one code and one tex
         ["say randomInteger(3..=1)", "3..=1"],
         ["say randomInteger((3..=1))", "3..=1"],
         ["say randomInteger(3..=(2 - 1))", "3..=(2 - 1)"],
+        ["let high = 3\nsay randomInteger(high..=1)", "high..=1"],
       ],
       "TSV010",
       "randomInteger(range) needs a range that holds at least one whole number, but 3..=1 holds none. Check that the range is not empty first.",
       [
-        "let high = 3\nsay randomInteger(high..=1)",
+        `${PICK}let high = pick(3)\nsay randomInteger(high..=1)`,
         "TSR041",
         "randomInteger(range) needs a range that holds at least one whole number, but 3..=1 holds none. Check that the range is not empty first.",
       ],
@@ -156,11 +157,12 @@ test("a range, handle member, or media position problem has one code and one tex
       [
         ["wait (3..=1) s", "3..=1"],
         ["wait ((3..=1)) s", "3..=1"],
+        ["let high = 3\nwait (high..=1) s", "high..=1"],
       ],
       "TSV010",
       "A wait needs a range that holds at least one whole number, but 3..=1 holds none. Check that the range is not empty first.",
       [
-        "let high = 3\nwait (high..=1) s",
+        `${PICK}let high = pick(3)\nwait (high..=1) s`,
         "TSR041",
         "A wait needs a range that holds at least one whole number, but 3..=1 holds none. Check that the range is not empty first.",
       ],
@@ -169,21 +171,25 @@ test("a range, handle member, or media position problem has one code and one tex
       [
         ["wait (-1..=3) s", "-1..=3"],
         ["wait ((0 - 1)..=3) s", "(0 - 1)..=3"],
+        ["let low = -1\nwait (low..=3) s", "low..=3"],
       ],
       "TSV010",
       "A wait range must not start below 0, but this range is -1..=3.",
       [
-        "let low = -1\nwait (low..=3) s",
+        `${PICK}let low = pick(-1)\nwait (low..=3) s`,
         "TSR050",
         "A wait range must not start below 0, but this range is -1..=3.",
       ],
     ],
     [
-      [["let t = timer(duration: (0..=3) s, async: true, repeat: true)", "0..=3"]],
+      [
+        ["let t = timer(duration: (0..=3) s, async: true, repeat: true)", "0..=3"],
+        ["let low = 0\nlet t = timer(duration: (low..=3) s, async: true, repeat: true)", "low..=3"],
+      ],
       "TSV010",
       "A repeating timer needs every round to last longer than zero, but this range can draw 0 seconds. Start the range at 1 or more.",
       [
-        "let low = 0\nlet t = timer(duration: (low..=3) s, async: true, repeat: true)",
+        `${PICK}let low = pick(0)\nlet t = timer(duration: (low..=3) s, async: true, repeat: true)`,
         "TSR050",
         "A repeating timer needs every round to last longer than zero, but this range can draw 0 seconds. Start the range at 1 or more.",
       ],
@@ -304,11 +310,12 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
         ["wait -1 s", "-1 s"],
         ["wait (-1 s)", "(-1 s)"],
         ["wait ((1 - 2) s)", "((1 - 2) s)"],
+        ["let d = -1 s\nwait d", "d"],
       ],
       "TSV011",
       "Wait duration must not be negative, but this is -1 second.",
       [
-        "let d = -1 s\nwait d",
+        `${PICK}let d = pick(-1 s)\nwait d`,
         "TSR050",
         "Wait duration must not be negative, but this is -1 second.",
       ],
@@ -317,20 +324,26 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
       [
         ["wait (1 - 2) s", "(1 - 2)"],
         ["wait (-1) s", "(-1)"],
+        ["let n = -1\nwait n s", "n"],
       ],
       "TSV011",
       "Wait duration must not be negative, but this is -1.",
-      ["let n = -1\nwait n s", "TSR050", "Wait duration must not be negative, but this is -1."],
+      [
+        `${PICK}let n = pick(-1)\nwait n s`,
+        "TSR050",
+        "Wait duration must not be negative, but this is -1.",
+      ],
     ],
     [
       [
         ["let t = timer(duration: 0 s, async: true, repeat: true)", "0 s"],
         ["let t = timer(duration: ((1 - 1) s), async: true, repeat: true)", "((1 - 1) s)"],
+        ["let d = 0 s\nlet t = timer(duration: d, async: true, repeat: true)", "d"],
       ],
       "TSV011",
       "A repeating timer needs every round to last longer than zero, but this round can be 0 seconds. Use a duration of at least 1 second.",
       [
-        "let d = 0 s\nlet t = timer(duration: d, async: true, repeat: true)",
+        `${PICK}let d = pick(0 s)\nlet t = timer(duration: d, async: true, repeat: true)`,
         "TSR050",
         "A repeating timer needs every round to last longer than zero, but this round can be 0 seconds. Use a duration of at least 1 second.",
       ],
@@ -362,11 +375,12 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
       [
         ['say "a", -1 s', "-1 s"],
         ['say "a", (0 - 1) s', "(0 - 1) s"],
+        ['let d = -1 s\nsay "a", d', "d"],
       ],
       "TSV011",
       "Say pacing must be a duration of at least 0 seconds, but this is -1 second.",
       [
-        'let d = -1 s\nsay "a", d',
+        `${PICK}let d = pick(-1 s)\nsay "a", d`,
         "TSR050",
         "Say pacing must be a duration of at least 0 seconds, but this is -1 second.",
       ],
@@ -375,11 +389,12 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
       [
         ['showButton "Go", timeout: 0 s', "0 s"],
         ['showButton "Go", timeout: (1 - 1) s', "(1 - 1) s"],
+        ['let d = 0 s\nshowButton "Go", timeout: d', "d"],
       ],
       "TSV011",
       `A showButton timeout must be a duration greater than zero, but this is 0 seconds. ${timeout}`,
       [
-        'let d = 0 s\nshowButton "Go", timeout: d',
+        `${PICK}let d = pick(0 s)\nshowButton "Go", timeout: d`,
         "TSR050",
         `A showButton timeout must be a duration greater than zero, but this is 0 seconds. ${timeout}`,
       ],
@@ -392,11 +407,12 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
           'let a = askForm("Q", fields: { rope: false }, timeout: 0 ms, onTimeout: "submit")',
           "0 ms",
         ],
+        [`let d = 0 s\n${form}timeout: d, onTimeout: "submit"`, "d"],
       ],
       "TSV011",
       `An askForm timeout must be a duration greater than zero, but this is 0 seconds. ${formTimeout}`,
       [
-        `let d = 0 s\n${form}timeout: d, onTimeout: "submit"`,
+        `${PICK}let d = pick(0 s)\n${form}timeout: d, onTimeout: "submit"`,
         "TSR052",
         `An askForm timeout must be a duration greater than zero, but this is 0 seconds. ${formTimeout}`,
       ],
@@ -451,11 +467,12 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
       [
         [`${playing}volume: 2)`, "2"],
         [`${playing}volume: 1 + 1)`, "1 + 1"],
+        [`let v = 2\n${playing}volume: v)`, "v"],
       ],
       "TSV036",
       "Media volume must be a number from 0 through 1, but this is 2.",
       [
-        `let v = 2\n${playing}volume: v)`,
+        `${PICK}let v = pick(2)\n${playing}volume: v)`,
         "TSR050",
         "Media volume must be a number from 0 through 1, but this is 2.",
       ],
@@ -464,11 +481,12 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
       [
         [`${playing}repeat: 0 s)`, "0 s"],
         [`${playing}repeat: (1 - 1) s)`, "(1 - 1) s"],
+        [`let d = 0 s\n${playing}repeat: d)`, "d"],
       ],
       "TSV036",
       "Media repeat must be true, false, a count such as '3 times', or a positive duration, but this is 0 seconds.",
       [
-        `let d = 0 s\n${playing}repeat: d)`,
+        `${PICK}let d = pick(0 s)\n${playing}repeat: d)`,
         "TSR050",
         "Media repeat must be true, false, a count such as '3 times', or a positive duration, but this is 0 seconds.",
       ],
@@ -477,11 +495,12 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
       [
         [`${playing}repeat: 0 times)`, "0"],
         [`${playing}repeat: (1 - 1) times)`, "(1 - 1)"],
+        [`let n = 0\n${playing}repeat: n times)`, "n"],
       ],
       "TSV036",
       "A repeat count must be a whole number of at least 1, such as '3 times', but this is 0.",
       [
-        `let n = 0\n${playing}repeat: n times)`,
+        `${PICK}let n = pick(0)\n${playing}repeat: n times)`,
         "TSR050",
         "A repeat count must be a whole number of at least 1, such as '3 times', but this is 0.",
       ],

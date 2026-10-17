@@ -1,5 +1,6 @@
 import { DURATION_UNIT_MILLISECONDS } from "../duration.js";
 import type { DelayDisplay, DurationUnitPlan } from "../plan/model.js";
+import type { HandlePropertyName } from "../handle-members.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 import { cloneCaptures, type RuntimeCaptureSnapshot } from "./captures.js";
 
@@ -330,23 +331,12 @@ export function skipSilentRounds(
   timer.deadlineMs = anchoredDeadlineMs(anchorMs, last, roundMs);
 }
 
-/** The properties a timer handle has, which {@link timerProperty} reads and restore validation accepts. */
-export const TIMER_PROPERTIES: ReadonlySet<string> = new Set([
-  "remaining",
-  "elapsed",
-  "display",
-  "label",
-  "state",
-  "repeatDuration",
-]);
-
-/** Handle property reads; `undefined` means the property does not exist. */
+/** Reads the property `name` of a timer handle (see `HANDLE_MEMBERS`). */
 export function timerProperty(
   timer: TimerHandleRecord,
-  name: string,
+  name: HandlePropertyName<"timer">,
   nowMs: number,
-): SerializableRuntimeValue | undefined {
-  if (!TIMER_PROPERTIES.has(name)) return undefined;
+): SerializableRuntimeValue {
   switch (name) {
     case "remaining":
       return { kind: "duration", milliseconds: timerRemainingMs(timer, nowMs) };
@@ -362,8 +352,10 @@ export function timerProperty(
       return timer.repeatDurationMs === null
         ? null
         : { kind: "duration", milliseconds: timer.repeatDurationMs };
-    default:
-      return undefined;
+    default: {
+      const unhandled: never = name;
+      throw new Error(`Timer property '${String(unhandled)}' has no implementation.`);
+    }
   }
 }
 
