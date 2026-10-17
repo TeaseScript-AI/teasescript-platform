@@ -79,7 +79,7 @@ import { lazyDefaultArgument } from "../../lazy-defaults.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralValue } from "../../duration.js";
-import type { RuntimeCheckSite } from "../../type-checker.js";
+import type { RuntimeCheckSite } from "../../type-inference/backend.js";
 import { typeFromAnnotation } from "../../static-types.js";
 import { typePlan } from "../../type-plans.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";

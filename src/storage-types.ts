@@ -232,36 +232,58 @@ export function sameType(left: StaticType, right: StaticType): boolean {
 
 /**
  * A text that equal types share: union members and object properties in a fixed order, or with `sorted` false, in the
- * order the type has them.
+ * order the type has them. With `detail`, the text also tells what the check knows beyond the type: the values a scalar
+ * is restricted to (`integer{1|2}`), a `!` after a place that a value the compiler cannot know reached, and a `+` in
+ * an object whose properties may be more than the known ones (see `SolvedTypeFacts`).
  */
-export function typeKey(type: StaticType, sorted = true): string {
-  return runCompileTask(typeKeyTask(type, sorted));
+export function typeKey(type: StaticType, sorted = true, detail = false): string {
+  return runCompileTask(typeKeyTask(type, sorted, detail));
 }
 
-function* typeKeyTask(typeToName: StaticType, sorted: boolean): CompileTask<string> {
+function* typeKeyTask(
+  typeToName: StaticType,
+  sorted: boolean,
+  detail: boolean,
+): CompileTask<string> {
   const type = resolved(typeToName);
+  // A value the compiler cannot know may have reached the slot, or a slot it was decided through.
+  let held = false;
+  if (detail)
+    for (let slot = typeToName; slot.kind === "open"; slot = slot.resolved) {
+      if (slot.heldUnknown !== undefined) held = true;
+      if (slot.resolved === null) break;
+    }
+  const text = yield* compileChild(typeKeyPartTask(type, sorted, detail));
+  return held ? `${text}!` : text;
+}
+
+function* typeKeyPartTask(type: StaticType, sorted: boolean, detail: boolean): CompileTask<string> {
   switch (type.kind) {
     case "open":
       return type.sawNull ? "?null" : "?";
-    case "scalar":
-      return type.name;
+    case "scalar": {
+      if (!detail || type.values === undefined) return type.name;
+      const values = type.values.map((value) => JSON.stringify(value));
+      return `${type.name}{${(sorted ? values.sort() : values).join("|")}}`;
+    }
     case "list":
     case "set":
     case "dict":
-      return `${type.kind}<${yield* compileChild(typeKeyTask(type.element, sorted))}>`;
+      return `${type.kind}<${yield* compileChild(typeKeyTask(type.element, sorted, detail))}>`;
     case "object": {
       if (type.properties === null) return "object";
       const properties: string[] = [];
       for (const [name, value] of type.properties)
         properties.push(
-          `${JSON.stringify(name)}:${yield* compileChild(typeKeyTask(value, sorted))}`,
+          `${JSON.stringify(name)}:${yield* compileChild(typeKeyTask(value, sorted, detail))}`,
         );
+      if (detail && type.properties.open) properties.push("+");
       return `{${(sorted ? properties.sort() : properties).join(",")}}`;
     }
     case "union": {
       const parts: string[] = [];
       for (const member of type.members)
-        parts.push(yield* compileChild(typeKeyTask(member, sorted)));
+        parts.push(yield* compileChild(typeKeyTask(member, sorted, detail)));
       return `(${(sorted ? parts.sort() : parts).join("|")})`;
     }
     default:

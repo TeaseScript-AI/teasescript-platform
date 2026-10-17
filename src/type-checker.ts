@@ -17,7 +17,6 @@ import type {
   OpenUrlStatement,
   ExportTextStatement,
   ShowPopupParts,
-  LoadExpression,
   MediaParts,
   Program,
   PropertyAccessExpression,
@@ -42,7 +41,6 @@ import {
 import {
   globMatches,
   isPathGlob,
-  MAIN_FILE_PATH,
   packageGlobProblem,
   packagePathProblem,
 } from "./project-paths.js";
@@ -51,15 +49,13 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import {
   askOperands,
   expressionChildren,
-  expressionParts,
-  handlerBlocks,
   namedAskArguments,
   mediaHandlerBlocks,
   mediaOperands,
-  nestedStatements,
   showButtonOptions,
-  statementExpressions,
+  staticText,
   timerOperands,
+  unwrap,
 } from "./expression-children.js";
 import {
   isBlankTextAnswer,
@@ -69,8 +65,6 @@ import {
 import type {
   FormFieldKind,
   FormNumericKind,
-  PlanImage,
-  PlanTag,
   PreparedFormShape,
   TypeCheckPlan,
   TypePlan,
@@ -110,8 +104,6 @@ import {
 import {
   builtinCallProblems,
   builtinShapeProblems,
-  noteSharing,
-  rootName,
   type Sharing,
   collectionMethodProblems,
   expressionLabel,
@@ -123,7 +115,6 @@ import {
   type OperationProblem,
 } from "./operation-checks.js";
 import {
-  changesElements,
   emptyListPropertyFailure,
   hasListMethod,
   isListMethod,
@@ -316,6 +307,25 @@ import {
 import { GENDER_TERMS, PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 import type { SpeakerFlowInput, SpeakerFlowRead, SpeakerFlowStore } from "./speaker-flow.js";
 import { placeKey, type WayFacts } from "./way-facts.js";
+import type {
+  RuntimeCheckSite,
+  TypeCheckOptions,
+  TypeCheckResult,
+} from "./type-inference/backend.js";
+import type { DeadCode, ProgramEffects, ProjectEffects } from "./type-inference/effects.js";
+import {
+  decidingSlots,
+  heldOnlyNull,
+  nullOnlySlot,
+  replayableDecisions,
+  storedIn,
+  type Copies,
+  type Decided,
+  type Decision,
+  type KeptFallbacks,
+  type UncheckedProperties,
+  type Widened,
+} from "./type-inference/legacy-state.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -413,94 +423,16 @@ import {
   copiesAccount,
   PLAYER_DECLARATION,
   sessionDeclarations,
-  someNode,
 } from "./project-globals.js";
 import {
   detachedType,
-  sameStorageKeyTypes,
   sameDeclaredKeys,
   sameReadKeys,
-  sameReadStorageKeyTypes,
   sameType,
-  storageKeyTypes,
   typeKey,
   type StorageKeyType,
   type StorageLoad,
 } from "./storage-types.js";
-
-export interface TypeCheckOptions {
-  readonly globals?: readonly string[];
-  readonly builtins?: readonly string[];
-  /** The package images that tag queries search, when the compilation was given them. */
-  readonly imageCatalog?: readonly PlanImage[];
-  /** Whether some file of the project takes photos with tags, which join the catalog at runtime. */
-  readonly capturesTaggedPhotos?: boolean;
-  /**
-   * The project's files with the tags of their headers, which script tag queries match; `null` tags for a file of
-   * declarations only, which is never picked or listed.
-   */
-  readonly scriptCatalog?: readonly {
-    readonly path: string;
-    readonly tags: readonly PlanTag[] | null;
-  }[];
-  /**
-   * The declarations of the variables that a timer, media, or button block shares and assigns or changes in place, with
-   * how, from name checking.
-   */
-  readonly sharedWrites?: ReadonlyMap<VariableSite, Sharing>;
-  /**
-   * The `let` declarations and globals whose variables some code assigns, stores into, or changes or reorders in place,
-   * from name checking. Every other one keeps its first value, which counts as known (see `KnownValues`). Without it,
-   * no variable counts as known.
-   */
-  readonly written?: {
-    readonly lets: ReadonlySet<LetStatement>;
-    readonly globals: ReadonlySet<string>;
-  };
-  /**
-   * The speaker that each `speaker` names, where a message names it with `as` or its properties use it, from name
-   * checking.
-   */
-  readonly speakers?: ReadonlyMap<Identifier, string>;
-}
-
-export interface TypeCheckResult {
-  /** The diagnostics of each file, in project order. */
-  readonly diagnostics: readonly (readonly Diagnostic[])[];
-  /** The runtime checks of values the compiler cannot know, by the source of the instruction that stores them. */
-  readonly runtimeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
-  /** The result shape the runtime needs for each `askForm`. */
-  readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
-  /** Which ways through the source can run, which the checks that follow the compiled plan take from the check. */
-  readonly ways: WayFacts;
-  /**
-   * The statements that the check found never run once their function, block, or file runs, which its narrowing and its
-   * loop effects follow: the plan's reachability finds the same ones (tests/reachability-differential.test.ts).
-   */
-  readonly unreachable: ReadonlySet<Statement>;
-  /** What the flow check of speaker properties needs from the check, once the project is lowered (V30 §37). */
-  readonly speakerFlow: SpeakerFlowInput;
-  /**
-   * For each storage key written as a string literal that a load gives a type, the type that every load of it accepts,
-   * which a saved value has to fit when the script runs (ADR 0021 §6), sorted by key.
-   */
-  readonly storageTypes: readonly { readonly key: string; readonly type: TypePlan }[];
-}
-
-/**
- * Where a value is stored in a place of known type: a `let` or assignment, the start value of a `global`, a list or
- * set `add` call, the default of a dict `get` call, an argument of an author function, a parameter default, or a
- * `return`.
- */
-export type RuntimeCheckSite =
-  | LetStatement
-  | GlobalStatement
-  | AssignmentStatement
-  | CallExpression
-  | CallArgument
-  | FunctionParameter
-  | Extract<Statement, { kind: "returnStatement" }>
-  | LoadExpression;
 
 const typeCode = {
   duplicateProperty: "TSV007",
@@ -536,64 +468,10 @@ const typeCode = {
 type TypeErrorCode = OwnedDiagnosticCode<"type checker", "error">;
 
 /**
- * Checks that every variable, list or set element, object property, function parameter, and function result keeps one
- * type, and that operations receive values they support (ADR 0021). It runs after name validation succeeded, so every
- * name resolves; a value it cannot know has the type `unknown` and is never rejected. The files of a project, in
- * project order, are checked together, because globals, global functions, and speakers belong to all of them.
- * `onFile` hears of each file whose source the check enters.
- */
-export function checkTypes(
-  files: readonly { readonly path: string; readonly program: Program }[],
-  options: TypeCheckOptions = {},
-  onFile: (file: number) => void = () => {},
-): TypeCheckResult {
-  const programs = files.map((file) => file.program);
-  const lines = lineNamer(files);
-  // Code that never runs changes nothing (rule 5.5). What a loop, function, or block may change leaves out the code that
-  // the previous check found never runs, and each such choice is checked from nothing, since all that a check finds,
-  // such as the types it decides, rests on the effects it followed. The last check must find that code never runs too:
-  // should it not, the next check leaves out only what both found, and the one after that nothing, which always holds.
-  // Otherwise, when what the last check found never running would leave out more, the next check leaves out that, a
-  // bounded number of times.
-  let dead: DeadCode = { statements: new Set(), operands: new Set() };
-  let effects = projectEffects(programs, dead);
-  let growth = 0;
-  let shrinks = 0;
-  for (;;) {
-    const checked = checkWithEffects(programs, options, onFile, lines, effects);
-    const found = checked.dead;
-    if (!coversDeadCode(found, dead)) {
-      dead =
-        shrinks === 0
-          ? {
-              statements: new Set(
-                [...dead.statements].filter((each) => found.statements.has(each)),
-              ),
-              operands: new Set([...dead.operands].filter((place) => found.operands.has(place))),
-            }
-          : { statements: new Set(), operands: new Set() };
-      shrinks += 1;
-      effects = projectEffects(programs, dead);
-      continue;
-    }
-    if (shrinks === 0 && growth < MAX_DEAD_CODE_ROUNDS) {
-      const fewer = projectEffects(programs, found);
-      if (!sameProjectEffects(fewer, effects)) {
-        dead = found;
-        effects = fewer;
-        growth += 1;
-        continue;
-      }
-    }
-    return withVisibleOverflows(checked.result, programs, checked.known);
-  }
-}
-
-/**
  * Adds to each file's diagnostics the steps of known values without a finite result (TSV050), with the values that the
  * last round of the check knows, so they are found once.
  */
-function withVisibleOverflows(
+export function withVisibleOverflows(
   result: TypeCheckResult,
   programs: readonly Program[],
   known: KnownValues,
@@ -612,422 +490,6 @@ function withVisibleOverflows(
       ...diagnostics,
     ]),
   };
-}
-
-/** The type check of the project with the effects `effects`, and the code it found never runs (see `checkTypes`). */
-function checkWithEffects(
-  programs: readonly Program[],
-  options: TypeCheckOptions,
-  onFile: (file: number) => void,
-  lines: LineNamer,
-  effects: ProjectEffects,
-): { readonly result: TypeCheckResult; readonly dead: DeadCode; readonly known: KnownValues } {
-  // An integer variable is a number when one of its assignments can store a non-whole number, also an assignment
-  // after its uses (rule 1.2). A check that finds a new one starts again with that variable declared as a number, so
-  // the last check, which finds none, sees every variable with its final type and alone reports. Likewise, a place
-  // that starts as null and that a read saw before its first other value, also one in another file, starts again with
-  // the type that value gives it, and a fallback for such a place keeps it where that value cannot be carried over.
-  const widened: Widened = new Map();
-  const decided: Decided = new Map();
-  const copies: Copies = new Map();
-  const kept: KeptFallbacks = new Set();
-  // The custom speaker properties that a store reaches unchecked, which keep no type (see `UncheckedProperties`).
-  const unchecked: UncheckedProperties = new Set();
-  // A storage key's type comes from all its loads (ADR 0021 §6), also those checked after a save, so a check reads the
-  // types the previous check found, and starts again until they stay the same. The first check reads the types that the
-  // source alone gives instead (see `storageGuess`): when it found the types it read, as most projects do, it is the
-  // check that reads the found types, so no other check is needed for them. A load's own type never depends on them,
-  // so they settle at once; the bound only guards against a load type that changes with variable types. When they
-  // changed only in what no check reads, such as the loads of a key that a load declares, and nothing else that the
-  // next check would read changed, the next check would repeat this one exactly, so it is not run.
-  let guess: ReadonlyMap<string, StorageKeyType> | null = storageGuess(programs);
-  let guessedAgain = false;
-  let storage: ReadonlyMap<string, StorageKeyType> = guess;
-  let storageRounds = 0;
-  for (;;) {
-    const guessed: boolean = storage === guess;
-    const uncheckedBefore = guessed ? [...unchecked] : [];
-    const checker: TypeChecker = new TypeChecker(
-      options,
-      widened,
-      decided,
-      copies,
-      kept,
-      unchecked,
-      storage,
-      guessed,
-      programs.length,
-      onFile,
-      lines,
-    );
-    checker.check(programs, effects);
-    // A key whose type the runtime cannot check has none.
-    const found: Map<string, StorageKeyType> = new Map(
-      [...storageKeyTypes(checker.storageLoads)].filter(([, kept]) => typePlan(kept.type) !== null),
-    );
-    // What a check found rests on the types its loads read. When a load read a guessed type that is not the one found,
-    // the check starts again from nothing, with the found types as the guess. Its loads then read them, since loads
-    // take them from declarations, which no check changes; should they not, it starts again without a guess.
-    if (guessed && !checker.loadsReadFound(found)) {
-      widened.clear();
-      decided.clear();
-      copies.clear();
-      kept.clear();
-      unchecked.clear();
-      for (const name of uncheckedBefore) unchecked.add(name);
-      guess = guessedAgain ? null : found;
-      guessedAgain = true;
-      storage = guess ?? new Map();
-      storageRounds = 0;
-      continue;
-    }
-    // A check that found more of them read those properties with the types they no longer keep, so what it found rests
-    // on those types: the next check starts again from nothing but the larger set, which only grows.
-    if (checker.uncheckedMore) {
-      widened.clear();
-      decided.clear();
-      copies.clear();
-      kept.clear();
-      storage = guess ?? new Map();
-      storageRounds = 0;
-      continue;
-    }
-    let storageChanged = false;
-    // Whether the key types changed in what a check reads (see `sameReadStorageKeyTypes`).
-    let storageRead = false;
-    if (storageRounds < MAX_STORAGE_ROUNDS) {
-      if (guessed) {
-        // As for a first check that read no types, they changed from none when it found some, but in what it read only
-        // when it found others than it read.
-        storageRead = !checker.readsFound(found);
-        storageChanged = storageRead || found.size > 0;
-        storage = found;
-      } else if (!sameStorageKeyTypes(storage, found)) {
-        storageRead = !sameReadStorageKeyTypes(storage, found);
-        storage = found;
-        storageChanged = true;
-      }
-      if (storageChanged) storageRounds += 1;
-    }
-    // A load that read its default's type reads the type that another load declares from the next check on, so what
-    // this check decided may rest on the wrong type: the next check decides again.
-    if (![...checker.keysReadAsDefault].some((key) => storage.get(key)?.declared === true))
-      checker.recordDecisions();
-    // A check that changed nothing is the last. So is one that changed only key types that no check reads, when it found
-    // no new copy and the places that follow widened ones widen no further: the next check would repeat it exactly.
-    let last =
-      !checker.widenedMore &&
-      !checker.decidedMore &&
-      !checker.keptMore &&
-      (!storageChanged || (!storageRead && !checker.copiedMore));
-    let followed = false;
-    if (last && storageChanged) {
-      checker.widenFollowers();
-      followed = true;
-      last = !checker.widenedMore;
-    }
-    if (last) {
-      const dead = checker.deadCode();
-      return {
-        result: Object.freeze({
-          diagnostics: Object.freeze(
-            checker.fileDiagnostics.map((diagnostics) => Object.freeze(diagnostics)),
-          ),
-          speakerFlow: checker.speakerFlowInput(),
-          runtimeChecks: checker.runtimeChecks(),
-          formShapes: checker.formShapes(),
-          ways: checker.ways(),
-          unreachable: dead.statements,
-          storageTypes: storageTypePlans(storage),
-        }),
-        dead,
-        known: checker.knownValues,
-      };
-    }
-    if (!followed) checker.widenFollowers();
-  }
-}
-
-/** How many checks may still change the storage key types (see {@link checkTypes}). */
-const MAX_STORAGE_ROUNDS = 8;
-
-/** How many checks may leave out more code that never runs (see {@link checkTypes}). */
-const MAX_DEAD_CODE_ROUNDS = 4;
-
-/** The runtime checks of the storage keys, sorted by key; a type the runtime cannot check has none. */
-function storageTypePlans(
-  storage: ReadonlyMap<string, StorageKeyType>,
-): readonly { readonly key: string; readonly type: TypePlan }[] {
-  const plans: { readonly key: string; readonly type: TypePlan }[] = [];
-  for (const [key, kept] of storage) {
-    const type = typePlan(kept.type);
-    if (type !== null) plans.push(Object.freeze({ key, type }));
-  }
-  plans.sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
-  return Object.freeze(plans);
-}
-
-/**
- * The storage key types that the source alone gives (ADR 0021 §6), which the first check reads (see {@link checkTypes}).
- * They come from the loads with a key written as a string literal: the type that their `let` or `global` declares, or
- * that every declaration of the variable they are assigned to declares, or else their default's type when the default is
- * a literal. A load whose type only the check can tell, such as one with another default, is left out. The loads are
- * taken as a check takes them: those in the start values of globals and speakers first, then by file, each by position.
- */
-function storageGuess(programs: readonly Program[]): Map<string, StorageKeyType> {
-  const byPosition = (left: LoadExpression, right: LoadExpression): number =>
-    left.span.start.offset - right.span.start.offset;
-  const fileLoads: LoadExpression[][] = [];
-  const starts: Expression[] = [];
-  const declared = new Map<LoadExpression, TypeAnnotation>();
-  const assigned = new Map<LoadExpression, string>();
-  // The types that the `let`s, `global`s, parameters, and loop variables of each name declare, `null` for none.
-  const names = new Map<string, (TypeAnnotation | null)[]>();
-  const declare = (name: Identifier, annotation: TypeAnnotation | null): void => {
-    const annotations = names.get(name.name) ?? [];
-    annotations.push(annotation);
-    names.set(name.name, annotations);
-  };
-  for (const program of programs) {
-    const found: LoadExpression[] = [];
-    someNode(program, (node) => {
-      if (node.kind === "letStatement" || node.kind === "globalStatement") {
-        // EVIDENCE: invariant: the parser gives these kinds only to let and global statements.
-        const statement = node as LetStatement | GlobalStatement;
-        declare(statement.name, statement.typeAnnotation);
-        const value = unwrap(
-          statement.kind === "letStatement" ? statement.initializer : statement.initial,
-        );
-        if (statement.typeAnnotation !== null && value.kind === "loadExpression")
-          declared.set(value, statement.typeAnnotation);
-        if (statement.kind === "globalStatement") starts.push(statement.initial);
-      } else if (node.kind === "speakerDeclaration") {
-        // EVIDENCE: invariant: the parser gives this kind only to speaker declarations.
-        for (const property of (node as SpeakerDeclaration).properties) starts.push(property.value);
-      } else if (node.kind === "functionParameter") {
-        // EVIDENCE: invariant: the parser gives this kind only to function parameters.
-        const parameter = node as FunctionParameter;
-        declare(parameter.name, parameter.typeAnnotation);
-      } else if (node.kind === "forStatement") {
-        // EVIDENCE: invariant: the parser gives this kind only to for statements.
-        const statement = node as ForStatement;
-        declare(statement.variable, null);
-        if (statement.valueVariable !== null) declare(statement.valueVariable, null);
-      } else if (node.kind === "assignmentStatement") {
-        // EVIDENCE: invariant: the parser gives this kind only to assignments.
-        const statement = node as AssignmentStatement;
-        const value = unwrap(statement.value);
-        if (
-          statement.operator === "=" &&
-          statement.target.kind === "identifier" &&
-          value.kind === "loadExpression"
-        )
-          assigned.set(value, statement.target.name);
-      } else if (node.kind === "loadExpression") {
-        // EVIDENCE: invariant: the parser gives this kind only to load expressions.
-        found.push(node as LoadExpression);
-      }
-      return false;
-    });
-    fileLoads.push(found.sort(byPosition));
-  }
-  // The start values of globals and speakers come first, by file and position like the declarations that hold them.
-  const started = new Set<object>();
-  for (const start of starts)
-    someNode(start, (node) => {
-      if (node.kind === "loadExpression") started.add(node);
-      return false;
-    });
-  const loads = [
-    ...fileLoads.flatMap((found) => found.filter((load) => started.has(load))),
-    ...fileLoads.flatMap((found) => found.filter((load) => !started.has(load))),
-  ];
-  // The type that each declaration of a name declares, if they all declare the same one.
-  const byName = new Map<string, StaticType | undefined>();
-  const declaredByName = (name: string): StaticType | undefined => {
-    if (byName.has(name)) return byName.get(name);
-    const types = (names.get(name) ?? []).map((annotation) =>
-      annotation === null ? null : typeFromAnnotation(annotation),
-    );
-    const first = types[0] ?? null;
-    const text = first === null ? null : typeKey(first, false);
-    const type =
-      first !== null && types.every((other) => other !== null && typeKey(other, false) === text)
-        ? first
-        : undefined;
-    byName.set(name, type);
-    return type;
-  };
-  const typed: StorageLoad[] = [];
-  for (const load of loads) {
-    const key = staticText(load.key);
-    if (key === undefined) continue;
-    const annotation = declared.get(load);
-    const name = assigned.get(load);
-    const receiver =
-      annotation !== undefined
-        ? typeFromAnnotation(annotation)
-        : name === undefined
-          ? undefined
-          : declaredByName(name);
-    if (receiver !== undefined) {
-      typed.push({ key, type: nonNullType(receiver), at: load.span, declared: true });
-      continue;
-    }
-    const fallback =
-      load.defaultValue === null ? undefined : runCompileTask(literalTypeTask(load.defaultValue));
-    if (fallback === undefined) continue;
-    // As in the check, a default of null, or with a type that no value decided, gives the load no type.
-    const type = nonNullType(fallback);
-    const kind = resolved(type).kind;
-    if (kind !== "never" && kind !== "unknown" && kind !== "open")
-      typed.push({ key, type, at: load.span, declared: false });
-  }
-  // A key whose type the runtime cannot check has none.
-  return new Map([...storageKeyTypes(typed)].filter(([, kept]) => typePlan(kept.type) !== null));
-}
-
-/** The type that a check gives a literal, also one of literals such as `[1, 2]`, or `undefined` for another expression. */
-function* literalTypeTask(expression: Expression): CompileTask<StaticType | undefined> {
-  switch (expression.kind) {
-    case "booleanLiteral":
-      return BOOLEAN_TYPE;
-    case "nullLiteral":
-      return NULL_TYPE;
-    case "numberLiteral":
-      return expression.numericType === "integer" ? INTEGER_TYPE : NUMBER_TYPE;
-    case "durationLiteral":
-      return expression.calendar ? CALENDAR_DURATION_TYPE : DURATION_TYPE;
-    case "stringLiteral":
-      return STRING_TYPE;
-    case "parenthesizedExpression":
-      return yield* compileChild(literalTypeTask(expression.expression));
-    case "listLiteral":
-    case "setLiteral": {
-      const types: StaticType[] = [];
-      for (const element of expression.elements) {
-        const type = yield* compileChild(literalTypeTask(element));
-        if (type === undefined) return undefined;
-        types.push(type);
-      }
-      // Elements of different types leave the element type unknown, as in the check.
-      const element = types.length === 0 ? openType() : (joinTypes(types) ?? UNKNOWN_TYPE);
-      return { kind: expression.kind === "listLiteral" ? "list" : "set", element };
-    }
-    case "objectLiteral": {
-      const properties = new PropertyTable();
-      for (const property of expression.properties) {
-        const type = yield* compileChild(literalTypeTask(property.value));
-        if (type === undefined) return undefined;
-        properties.set(property.name.name, type);
-      }
-      return { kind: "object", properties };
-    }
-    default:
-      return undefined;
-  }
-}
-
-/**
- * The variables, elements, and properties that one of their assignments gives a non-whole number, with the first such
- * assignment: by the declaration of the variable that holds them, then by their path in it (see {@link PlacePath}).
- */
-type Widened = Map<Declaration, Map<string, SourceSpan>>;
-
-/**
- * The places still undecided when a read saw them, such as a property that so far took only null, with the type and
- * site of the store that later decided them: by the declaration of the variable that holds them, then by their path.
- */
-type Decided = Map<Declaration, Map<string, Decision>>;
-
-/**
- * The places that are a copy of another variable's place taken while that place was undecided, with that variable's
- * name: by the declaration of the variable that holds them, then by their path.
- */
-type Copies = Map<Declaration, Map<string, string>>;
-
-/**
- * The `otherwise` expressions, and the assignments to a variable of unknown type, whose value counted as null so far
- * where they were checked, but which a later value decided in a way that a next check cannot start with: their result
- * keeps that value's place (see {@link fallbackType}).
- */
-type KeptFallbacks = Set<Expression | AssignmentStatement>;
-
-/**
- * The names of custom speaker properties that a store may reach through a speaker the compiler cannot tell apart, such
- * as a parameter or the speaker of a message, or through a value of unknown type. Such a store is not checked, so no
- * speaker keeps a type for a property of that name: its reads stay of unknown type, which a known place checks when the
- * script runs (ADR 0021 rule 1.7), and stores into it are not checked.
- */
-type UncheckedProperties = Set<string>;
-
-/** The type that decided a slot, and the store that decided it. */
-interface Decision {
-  readonly type: StaticType;
-  readonly at: SourceSpan;
-}
-
-/**
- * For each given slot, the slot whose own first value decided it by the end of a check, or `null`. A slot shares the decision of the slot it was copied from, since it may hold what that slot held (ADR 0021
- * rule 1.2), and of a still undecided place stored in it, such as `a = b` while `b` took only null. Of all decisions it
- * shares this way, the first in checking order decides, also around a cycle of copies. Every slot is visited once, so a
- * whole chain of copies and stores needs no check per step.
- */
-function decidingSlots(slots: readonly OpenType[]): {
-  readonly deciding: Map<OpenType, OpenType | null>;
-  /** For a slot that shares no decision, where a value the compiler cannot know reached it, if one did. */
-  readonly unknown: Map<OpenType, SourceSpan>;
-} {
-  const starts = [...new Set(slots)];
-  // The slots each one shares decisions with, found from the given ones, and those a value of their own decided.
-  const sharers = new Map<OpenType, OpenType[]>();
-  const own: OpenType[] = [];
-  const seen = new Set<OpenType>(starts);
-  const work = [...starts];
-  while (work.length > 0) {
-    const slot = work.pop()!;
-    const shared: OpenType[] = [];
-    if (slot.copiedFrom !== undefined) shared.push(slot.copiedFrom);
-    if (slot.resolved !== null) {
-      const stored = storedPlace(slot);
-      if (stored === undefined) own.push(slot);
-      else shared.push(stored);
-    }
-    for (const next of shared) {
-      const list = sharers.get(next) ?? [];
-      list.push(slot);
-      sharers.set(next, list);
-      if (!seen.has(next)) {
-        seen.add(next);
-        work.push(next);
-      }
-    }
-  }
-  const deciding = new Map<OpenType, OpenType | null>();
-  own.sort((left, right) => (left.order ?? Infinity) - (right.order ?? Infinity));
-  for (const decider of own) {
-    const reached = [decider];
-    while (reached.length > 0) {
-      const slot = reached.pop()!;
-      if (deciding.has(slot)) continue;
-      deciding.set(slot, decider);
-      for (const sharer of sharers.get(slot) ?? []) reached.push(sharer);
-    }
-  }
-  for (const slot of starts) if (!deciding.has(slot)) deciding.set(slot, null);
-  // A value the compiler cannot know reaches what shares the slot it was stored in, as a decision would.
-  const unknown = new Map<OpenType, SourceSpan>();
-  for (const holder of seen) {
-    if (holder.heldUnknown === undefined) continue;
-    const reached = [holder];
-    while (reached.length > 0) {
-      const slot = reached.pop()!;
-      if (unknown.has(slot)) continue;
-      unknown.set(slot, holder.heldUnknown);
-      for (const sharer of sharers.get(slot) ?? []) reached.push(sharer);
-    }
-  }
-  return { deciding, unknown };
 }
 
 /**
@@ -1073,132 +535,6 @@ type DeferredCheck = {
       readonly span: SourceSpan;
     }
 );
-
-/**
- * The undecided slot of a type that so far held only null, such as the type of `v` after `let v = null` once nothing
- * narrows it any more, or `undefined` for any other type. A value that a later store gives may still decide the slot.
- */
-function nullOnlySlot(type: StaticType): OpenType | undefined {
-  let slot: OpenType | undefined;
-  let sawNull = false;
-  for (const member of members(type)) {
-    const value = resolved(member);
-    if (value.kind === "null") sawNull = true;
-    else if (
-      value.kind === "open" &&
-      slot === undefined &&
-      value.resolved === null &&
-      value.heldUnknown === undefined
-    )
-      slot = value;
-    else return undefined;
-  }
-  return slot !== undefined && (sawNull || slot.sawNull) ? slot : undefined;
-}
-
-/**
- * Whether an undecided slot held only null to the end of a check: no value decided it or a slot it was copied from, and
- * none of them took a value the compiler cannot know. `known` keeps the answer for each slot walked, so a chain of copies
- * that many slots share is walked once.
- */
-function heldOnlyNull(slot: OpenType, known: Map<OpenType, boolean>): boolean {
-  const walked = new Set<OpenType>();
-  let only = true;
-  for (
-    let current: OpenType | undefined = slot;
-    current !== undefined;
-    current = current.copiedFrom
-  ) {
-    const seen = known.get(current);
-    if (seen !== undefined) {
-      only = seen;
-      break;
-    }
-    if (walked.has(current) || current.resolved !== null || current.heldUnknown !== undefined) {
-      only = false;
-      break;
-    }
-    walked.add(current);
-  }
-  for (const current of walked) known.set(current, only);
-  return only;
-}
-
-/** The slot itself and the still undecided places stored in it, as far as they lead (see {@link decidingSlots}). */
-function storedIn(slot: OpenType): Set<OpenType> {
-  const chain = new Set<OpenType>();
-  for (let current: OpenType | undefined = slot; current !== undefined && !chain.has(current);) {
-    chain.add(current);
-    current = storedPlace(current);
-  }
-  return chain;
-}
-
-/**
- * The still undecided place whose value a decided slot holds, such as `b` after `a = b` while `b` took only null, or
- * `undefined` when a value of its own decided it.
- */
-function storedPlace(slot: OpenType): OpenType | undefined {
-  if (slot.resolved === null) return undefined;
-  const parts = slot.resolved.kind === "union" ? slot.resolved.members : [slot.resolved];
-  const open = parts.find((part): part is OpenType => part.kind === "open");
-  return open !== undefined && parts.every((part) => part.kind === "open" || part.kind === "null")
-    ? open
-    : undefined;
-}
-
-/**
- * Whether a slot's decision may be replayed although parts of it are still undecided (see `recordDecisions`): only when
- * nothing it reaches through copies and decided slots holds itself, which each later check would decide one level
- * deeper, or held a value the compiler cannot know, which a new slot would forget. A value the compiler cannot know
- * that the slot itself held does not count: the next check stores it again, into the decided type (#859). Each slot is
- * visited once.
- */
-function replayableDecisions(): (decider: OpenType) => boolean {
-  /** For each visited slot, whether it reaches neither a cycle nor a value the compiler cannot know. */
-  const verdicts = new Map<OpenType, boolean>();
-  return (decider) => {
-    const onPath = new Set<OpenType>();
-    const frames: { slot: OpenType; next: OpenType[]; clean: boolean }[] = [];
-    const enter = (slot: OpenType, own = false): void => {
-      onPath.add(slot);
-      frames.push({ slot, next: slotEdges(slot), clean: own || slot.heldUnknown === undefined });
-    };
-    // The verdict on the slot's own value is not kept for a slot that reaches this one.
-    const own = decider.heldUnknown !== undefined;
-    if (own || !verdicts.has(decider)) enter(decider, own);
-    let verdict = verdicts.get(decider);
-    while (frames.length > 0) {
-      const frame = frames[frames.length - 1]!;
-      const next = frame.next.pop();
-      if (next === undefined) {
-        frames.pop();
-        onPath.delete(frame.slot);
-        if (frame.slot === decider && own) verdict = frame.clean;
-        else verdicts.set(frame.slot, frame.clean);
-        // What a slot reaches, the slots that reach it reach too.
-        if (!frame.clean && frames.length > 0) frames[frames.length - 1]!.clean = false;
-      } else if (onPath.has(next) || verdicts.get(next) === false) frame.clean = false;
-      else if (!verdicts.has(next)) enter(next);
-    }
-    return verdict ?? verdicts.get(decider)!;
-  };
-}
-
-/** The slots a slot's type depends on: the one it was copied from, and those directly in the type that decided it. */
-function slotEdges(slot: OpenType): OpenType[] {
-  const edges: OpenType[] = slot.copiedFrom === undefined ? [] : [slot.copiedFrom];
-  const pending: StaticType[] = slot.resolved === null ? [] : [slot.resolved];
-  while (pending.length > 0) {
-    const part = pending.pop()!;
-    if (part.kind === "open") edges.push(part);
-    else if (part.kind === "union") for (const member of part.members) pending.push(member);
-    else if (isCollection(part)) pending.push(part.element);
-    else if (part.kind === "object" && part.properties !== null)
-      for (const value of part.properties.values()) pending.push(value);
-  }
-  return edges;
-}
 
 /** The name of the variable a declaration creates. */
 function declaredName(declaration: Declaration): string {
@@ -1305,7 +641,7 @@ function originPlace(origin: Origin): PlacePath {
 }
 
 /** A variable and the type it keeps. Open slots and object property tables inside `type` record later decisions. */
-interface Variable {
+export interface Variable {
   readonly name: string;
   readonly type: StaticType;
   /** For a variable without a type annotation, its declaration, so a non-whole number can widen its integer type. */
@@ -1419,7 +755,7 @@ class Scope {
 }
 
 /** A function's parameter types and result type, both computed once, when first needed. */
-interface FunctionType {
+export interface FunctionType {
   readonly declaration: FunctionDeclaration;
   /** The file the function is written in. */
   readonly file: number;
@@ -1484,7 +820,7 @@ interface Place {
   readonly fix: (value: StaticType, expression: Expression | null) => string;
 }
 
-class TypeChecker {
+export class TypeChecker {
   /** The diagnostics of each file of the project. */
   readonly fileDiagnostics: Diagnostic[][];
 
@@ -1933,6 +1269,35 @@ class TypeChecker {
       });
   }
 
+  /** The author functions of the project, by declaration, once declared (see {@link check}). */
+  readonly #functionTypes = new Map<FunctionDeclaration, FunctionType>();
+
+  /**
+   * The variable of each `let`, `global`, parameter, and loop variable, by its declaration, as declared: a parameter
+   * as the function's parameter list gives it, not as the body accepts it (see `FunctionType.accepted`).
+   */
+  readonly #bindings = new Map<Declaration, Variable>();
+
+  // What the facts of the last check read (see `legacy-facts.ts`): the types the check gave, after it is complete.
+
+  /** The type that the check kept for an expression, or `undefined` for one it did not check. */
+  public checkedType(expression: Expression): StaticType | undefined {
+    return this.#types.get(expression);
+  }
+
+  public get bindings(): ReadonlyMap<Declaration, Variable> {
+    return this.#bindings;
+  }
+
+  public get functionTypes(): ReadonlyMap<FunctionDeclaration, FunctionType> {
+    return this.#functionTypes;
+  }
+
+  /** The custom properties of each declared speaker by its name. */
+  public get speakerProperties(): ReadonlyMap<string, PropertyTable> {
+    return this.#speakerProperties;
+  }
+
   /** The diagnostics of the file being checked. */
   get diagnostics(): Diagnostic[] {
     return this.fileDiagnostics[this.#file]!;
@@ -2078,6 +1443,7 @@ class TypeChecker {
       pending: [],
     };
     scope.declare(declaration.name.name, { kind: "function", fn });
+    this.#functionTypes.set(declaration, fn);
     return fn;
   }
 
@@ -2993,8 +2359,10 @@ class TypeChecker {
     this.#widen(body);
     const start = this.#flow.mark();
     const loopScope = new Scope(scope);
-    for (const variable of variables)
+    for (const variable of variables) {
+      if (variable.declaration !== undefined) this.#bindings.set(variable.declaration, variable);
       loopScope.declare(variable.name, { kind: "variable", variable });
+    }
     this.#loops.push({ start, breaks: [], continued: false });
     const continues = yield* compileChild(this.#statementsTask(body.statements, loopScope));
     const { breaks, continued } = this.#loops.pop()!;
@@ -3104,6 +2472,7 @@ class TypeChecker {
       ...(keeps ? { keeps: { initializer: written, body: global ? null : this.#body } } : {}),
     };
     if (statement.typeAnnotation === null) this.#declared.set(statement, variable);
+    this.#bindings.set(statement, variable);
     scope.declare(name, { kind: "variable", variable });
     this.#assigned(variable, value);
   }
@@ -4501,6 +3870,7 @@ class TypeChecker {
         parameter,
       };
       if (declaration !== undefined) this.#declared.set(declaration, variable);
+      this.#bindings.set(parameter, variable);
       parameters.push(variable);
       scope.declare(name, { kind: "variable", variable });
     }
@@ -9643,277 +9013,6 @@ function undoneBy(variable: Variable, type: StaticType, how: Sharing | false): b
   });
 }
 
-/**
- * What one iteration of a loop may do before the next test: the variables it assigns or changes in place, and whether it
- * may suspend.
- */
-interface LoopEffects {
-  readonly writes: ReadonlyMap<string, Sharing>;
-  readonly suspends: boolean;
-}
-
-const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
-  "sayStatement",
-  "showButtonStatement",
-  "showPopupStatement",
-  "openUrlStatement",
-  "exportTextStatement",
-  "waitStatement",
-  "timerStatement",
-  "playMediaStatement",
-  "showImageStatement",
-  "hideImageStatement",
-  "showCameraStatement",
-  "hideCameraStatement",
-  "stopAudioStatement",
-  "saveStatement",
-  "deleteStatement",
-  // Blocks of the caller keep running while a called file runs.
-  "callFileStatement",
-]);
-
-/** What a program's loops and functions may change (ADR 0021 rule 5.5). */
-interface ProgramEffects {
-  /** Names that function bodies and timer or media blocks assign or change in place. */
-  readonly shared: ReadonlyMap<string, Sharing>;
-  /** Names that the file's top level assigns or changes, which another file's `call` may run (ADR 0022 §5). */
-  readonly rootAssigned: ReadonlyMap<string, Sharing>;
-  /** Whether the file calls a file, so another file's top level may run during the call. */
-  readonly callsFiles: boolean;
-  /** Whether the file enters `main.tease` again at its top, after the start values have run. */
-  readonly entersMain: boolean;
-  /** The effects of each loop, by its body; a `while` loop includes its condition. */
-  readonly loops: ReadonlyMap<Block, LoopEffects>;
-}
-
-/**
- * The code that a check found never runs: the statements of a branch or loop body that no value takes or after a
- * statement that never continues, and by place the `and`, `or`, and `otherwise` whose right side never runs.
- */
-interface DeadCode {
-  readonly statements: ReadonlySet<Statement>;
-  readonly operands: ReadonlySet<string>;
-}
-
-/** Whether `found` holds all of `dead`. */
-function coversDeadCode(found: DeadCode, dead: DeadCode): boolean {
-  for (const statement of dead.statements) if (!found.statements.has(statement)) return false;
-  for (const place of dead.operands) if (!found.operands.has(place)) return false;
-  return true;
-}
-
-/** What the code of a project may change, as the check uses it. */
-interface ProjectEffects {
-  readonly files: readonly ProgramEffects[];
-  readonly loops: ReadonlyMap<Block, LoopEffects>;
-  /** The globals that a function or a timer or media block of any file assigns or changes in place, with how. */
-  readonly sharedGlobals: ReadonlyMap<string, Sharing>;
-}
-
-/** What the code of each file may change, leaving out the code that never runs. */
-function projectEffects(programs: readonly Program[], dead: DeadCode): ProjectEffects {
-  const files = programs.map((program, file) => programEffects(program, file, dead));
-  const sharedGlobals = new Map<string, Sharing>();
-  for (const fileEffects of files)
-    for (const [name, how] of fileEffects.shared) noteSharing(sharedGlobals, name, how);
-  // While a `call` runs, any file's top level may run and assign globals (ADR 0022 §5, §6).
-  if (files.some((fileEffects) => fileEffects.callsFiles))
-    for (const fileEffects of files)
-      for (const [name, how] of fileEffects.rootAssigned) noteSharing(sharedGlobals, name, how);
-  return {
-    files,
-    loops: new Map(files.flatMap((fileEffects) => [...fileEffects.loops])),
-    sharedGlobals,
-  };
-}
-
-/** Whether two sets of effects give a check the same facts. */
-function sameProjectEffects(left: ProjectEffects, right: ProjectEffects): boolean {
-  const sameSharing = (
-    one: ReadonlyMap<string, Sharing>,
-    other: ReadonlyMap<string, Sharing>,
-  ): boolean => one.size === other.size && [...one].every(([name, how]) => other.get(name) === how);
-  return (
-    sameSharing(left.sharedGlobals, right.sharedGlobals) &&
-    left.files.every(
-      (fileEffects, file) =>
-        fileEffects.entersMain === right.files[file]!.entersMain &&
-        sameSharing(fileEffects.shared, right.files[file]!.shared),
-    ) &&
-    [...left.loops].every(([body, loop]) => {
-      const other = right.loops.get(body);
-      return (
-        other !== undefined &&
-        loop.suspends === other.suspends &&
-        sameSharing(loop.writes, other.writes)
-      );
-    })
-  );
-}
-
-interface LoopNode {
-  readonly body: Block;
-  readonly parent: LoopNode | null;
-  readonly writes: Map<string, Sharing>;
-  suspends: boolean;
-}
-
-/** A node to walk, with the innermost loop around it, whether it stands in a function or block, and whether it runs. */
-type EffectWork = {
-  readonly loop: LoopNode | null;
-  readonly inside: boolean;
-  readonly runs: boolean;
-} & ({ readonly statement: Statement } | { readonly expression: Expression });
-
-/**
- * Collects in one pass the names that functions and blocks assign, and the effects of every loop. A loop's effects
- * include those of the loops inside it, but not those of timer or media blocks it starts, which run later. Code that
- * `dead` holds never runs, so it changes nothing; a loop in it has effects of its own, for the check of its body.
- */
-function programEffects(program: Program, file: number, dead: DeadCode): ProgramEffects {
-  const shared = new Map<string, Sharing>();
-  const rootAssigned = new Map<string, Sharing>();
-  let callsFiles = false;
-  let entersMain = false;
-  const nodes: LoopNode[] = [];
-  const work: EffectWork[] = [];
-  const enter = (
-    statements: readonly Statement[],
-    loop: LoopNode | null,
-    inside: boolean,
-    runs: boolean,
-  ): void => {
-    for (let index = statements.length - 1; index >= 0; index -= 1)
-      work.push({ statement: statements[index]!, loop, inside, runs });
-  };
-  const loopNode = (body: Block, parent: LoopNode | null): LoopNode => {
-    const node: LoopNode = { body, parent, writes: new Map(), suspends: false };
-    nodes.push(node);
-    return node;
-  };
-  enter(program.statements, null, false, true);
-  while (work.length > 0) {
-    const item = work.pop()!;
-    // Code that never runs is part of no loop around it.
-    const runs = item.runs && !("statement" in item && dead.statements.has(item.statement));
-    const loop = runs === item.runs ? item.loop : null;
-    const { inside } = item;
-    const write = (name: string, how: Sharing): void => {
-      if (runs) noteSharing(inside ? shared : rootAssigned, name, how);
-      if (loop !== null) noteSharing(loop.writes, name, how);
-    };
-    const handlers = (node: Statement | Expression): void => {
-      for (const block of handlerBlocks(node)) enter(block.statements, null, true, runs);
-    };
-    if ("expression" in item) {
-      const expression = item.expression;
-      if (
-        loop !== null &&
-        (expression.kind === "interactionExpression" ||
-          expression.kind === "sayExpression" ||
-          expression.kind === "showButtonExpression" ||
-          expression.kind === "showPopupExpression" ||
-          expression.kind === "timerExpression" ||
-          expression.kind === "playMediaExpression" ||
-          expression.kind === "showCameraExpression" ||
-          (expression.kind === "callExpression" && !isPureBuiltinCall(expression)))
-      )
-        loop.suspends = true;
-      // A method that changes a list, set, or dict changes the variable that holds it, also called in parentheses.
-      const callee = expression.kind === "callExpression" ? unwrap(expression.callee) : null;
-      if (
-        callee?.kind === "propertyAccessExpression" &&
-        (changesElements(callee.property.name) || changesEntries(callee.property.name))
-      ) {
-        const root = rootName(callee.object);
-        if (root !== null) write(root, "changes");
-      }
-      handlers(expression);
-      // The right side of an `and`, `or`, or `otherwise` that never runs changes nothing.
-      const skipped =
-        expression.kind === "binaryExpression" &&
-        (expression.operator === "and" ||
-          expression.operator === "or" ||
-          expression.operator === "otherwise") &&
-        dead.operands.has(placeKey(file, expression.span))
-          ? expression.right
-          : null;
-      for (const part of expressionParts(expression))
-        work.push(
-          part === skipped
-            ? { expression: part, loop: null, inside, runs: false }
-            : { expression: part, loop, inside, runs },
-        );
-      continue;
-    }
-    const statement = item.statement;
-    if (loop !== null && SUSPENDING_STATEMENTS.has(statement.kind)) loop.suspends = true;
-    if (runs && statement.kind === "callFileStatement") callsFiles = true;
-    if (
-      runs &&
-      (statement.kind === "gotoStatement" ||
-        statement.kind === "callFileStatement" ||
-        statement.kind === "fallbackStatement") &&
-      statement.target !== null &&
-      entersMainAtTop(statement.target)
-    )
-      entersMain = true;
-    // The `default:` form of a global assigns it where the declaration runs.
-    if (runs && statement.kind === "globalStatement" && statement.assignment !== null)
-      noteSharing(inside ? shared : rootAssigned, statement.name.name, "assigns");
-    if (statement.kind === "assignmentStatement") {
-      // A store into an element or property changes the variable that holds it in place, too.
-      const root = rootName(statement.target);
-      if (root !== null)
-        write(root, statement.target.kind === "identifier" ? "assigns" : "changes");
-      // A timer or media property write may run a block at once.
-      if (statement.target.kind !== "identifier" && loop !== null) loop.suspends = true;
-    }
-    handlers(statement);
-    switch (statement.kind) {
-      case "functionDeclaration":
-        enter(statement.body.statements, null, true, runs);
-        // A parameter default runs in the function too, and the blocks it shows run later.
-        for (const parameter of statement.parameters)
-          if (parameter.defaultValue !== null)
-            work.push({ expression: parameter.defaultValue, loop: null, inside: true, runs });
-        continue;
-      case "whileStatement": {
-        const node = loopNode(statement.body, loop);
-        enter(statement.body.statements, node, inside, runs);
-        work.push({ expression: statement.condition, loop: node, inside, runs });
-        continue;
-      }
-      case "repeatStatement":
-      case "forStatement":
-        enter(statement.body.statements, loopNode(statement.body, loop), inside, runs);
-        break;
-      default:
-        enter(nestedStatements(statement), loop, inside, runs);
-    }
-    for (const expression of statementExpressions(statement))
-      work.push({ expression, loop, inside, runs });
-  }
-  // Inner loops come after the loops around them, so walking backwards adds each loop's effects to its parent.
-  for (let index = nodes.length - 1; index >= 0; index -= 1) {
-    const node = nodes[index]!;
-    if (node.parent === null) continue;
-    for (const [name, how] of node.writes) noteSharing(node.parent.writes, name, how);
-    node.parent.suspends ||= node.suspends;
-  }
-  return {
-    shared,
-    rootAssigned,
-    callsFiles,
-    entersMain,
-    loops: new Map(
-      nodes.map((node) => [node.body, { writes: node.writes, suspends: node.suspends }]),
-    ),
-  };
-}
-
-/** Methods that change the list or set they are called on. */
-/** The value kinds an operand of unknown type might be, to tell whether a known operand could combine with any. */
 /** Whether a value of type `result` may fit a place of type `type` when the script runs, where a number may be whole. */
 function mayFit(type: StaticType, result: StaticType): boolean {
   return (
@@ -9977,46 +9076,6 @@ function loopValueType(element: StaticType): StaticType {
   if (!readsHeldUnknown(element)) return ownNull(copyType(plainType(element)));
   observe(element);
   return UNKNOWN_TYPE;
-}
-
-/**
- * Whether a target may enter main.tease at its top: a file target naming it or a glob that may pick it, and any computed
- * target but a `script(...)` whose literal path names another file.
- */
-function entersMainAtTop(target: TransferTarget): boolean {
-  if (target.kind === "labelTarget") return false;
-  if (target.kind === "fileTarget")
-    return target.label === null && globMatches(target.path, [MAIN_FILE_PATH]).length > 0;
-  const reference = unwrap(target.expression);
-  const path =
-    reference.kind === "callExpression" &&
-    reference.callee.kind === "identifier" &&
-    reference.callee.name === "script"
-      ? reference.arguments.find((argument) => argument.kind === "positionalArgument")?.value
-      : undefined;
-  const literal = path === undefined ? null : unwrap(path);
-  const text =
-    literal?.kind === "stringLiteral" && literal.parts.every((part) => part.kind === "stringText")
-      ? literal.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("")
-      : null;
-  // Only a literal path is known, and only one to another file stays out of main.tease.
-  return text === null || text === MAIN_FILE_PATH;
-}
-
-const PURE_BUILTINS: ReadonlySet<string> = new Set([
-  ...CORE_RUNTIME_BUILTINS,
-  ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
-]);
-
-/** A call of a built-in without effects on script variables or time. */
-function isPureBuiltinCall(expression: CallExpression): boolean {
-  const callee = expression.callee;
-  return (
-    callee.kind === "identifier" &&
-    PURE_BUILTINS.has(callee.name) &&
-    !isFileStoreCall(expression) &&
-    !isLockCall(expression)
-  );
 }
 
 // Places -------------------------------------------------------------------------------------------------------------
@@ -10199,9 +9258,9 @@ interface PlaceText {
 }
 
 /** Names a line of a project's sources as seen from file `from` (see `TypeChecker.#line`). */
-type LineNamer = (span: SourceSpan, from: number) => string;
+export type LineNamer = (span: SourceSpan, from: number) => string;
 
-function lineNamer(
+export function lineNamer(
   files: readonly { readonly path: string; readonly program: Program }[],
 ): LineNamer {
   const spanFiles = new WeakMap<object, number>();
@@ -10869,11 +9928,6 @@ const NEGATIVE_INDEX_MESSAGE =
 function isTrueLiteral(expression: Expression): boolean {
   const value = unwrap(expression);
   return value.kind === "booleanLiteral" && value.value;
-}
-
-function unwrap(expression: Expression): Expression {
-  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
-  return expression;
 }
 
 /** Whether the compiler knows that a value of `type` is never null: it knows every member, and none is null. */
@@ -11741,14 +10795,6 @@ function formKindOfStart(type: StaticType): FormFieldKind | null {
 
 function formAnswerType(kind: Exclude<FormFieldKind, "boolean" | "cycle">): StaticType {
   return kind === "text" ? STRING_TYPE : interactionResultType(kind);
-}
-
-/** The text of a string literal without interpolation, or `undefined`. */
-function staticText(expression: Expression): string | undefined {
-  const literal = unwrap(expression);
-  if (literal.kind !== "stringLiteral" || literal.parts.some((part) => part.kind !== "stringText"))
-    return undefined;
-  return literal.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("");
 }
 
 /** The type of the answer an `ask...` interaction returns. */
