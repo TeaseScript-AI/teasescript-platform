@@ -335,9 +335,10 @@ test("a recording outgrowing its limits starts again before a Player call and st
 
 test("a failure freezes the recording, from the first run on, and a too large call makes it incomplete", async () => {
   const recorder = new DebugRecorder();
-  const failed = createPlayerRuntimeSession("let zero = 0\nlet result = 1 / zero\nexit", {
-    recorder,
-  });
+  const failed = createPlayerRuntimeSession(
+    "let zero = dynamic(0)\nlet result = 1 / zero\nexit\nfunction dynamic(value) {\n    return value\n}",
+    { recorder },
+  );
   assert.equal(failed.state.status, "failed");
   const failedSnapshot = playerRuntimeSnapshot(failed);
   // The Player still observes time after a failure, as on hiding the page; the published state moves on.
@@ -359,7 +360,7 @@ test("a failure freezes the recording, from the first run on, and a too large ca
   // A development time jump past a failure: the recording reaches the failure, not the later observed time.
   const jumped = new DebugRecorder();
   const waiting = createPlayerRuntimeSession(
-    "wait 1 s\nlet zero = 0\nlet result = 1 / zero\nexit",
+    "wait 1 s\nlet zero = dynamic(0)\nlet result = 1 / zero\nexit\nfunction dynamic(value) {\n    return value\n}",
     { recorder: jumped },
   );
   const advanced = advancePlayerRuntimeTime(waiting, 5_000);
@@ -391,7 +392,7 @@ test("a failed state the session cannot export leaves the recording incomplete, 
   });
   const recorder = new DebugRecorder();
   const failed = createPlayerRuntimeSession(
-    "let xs = (1..=1500).toList()\nlet zero = 0\nlet result = 1 / zero\nexit",
+    "let xs = (1..=1500).toList()\nlet zero = dynamic(0)\nlet result = 1 / zero\nexit\nfunction dynamic(value) {\n    return value\n}",
     { recorder },
   );
   context.mock.restoreAll();
@@ -818,7 +819,7 @@ test("an argument JSON cannot copy exactly leaves the recording incomplete inste
 test("a value the engine produced, such as a saved list, is recorded as an argument and replays", async () => {
   const recorder = new DebugRecorder();
   let session = createPlayerRuntimeSession(
-    'save [1, null] as "a"\nlet name = askText "Name"\nlet copy = load("b", default: [])\nlet zero = 0\nlet result = 1 / zero\nexit',
+    'save [1, null] as "a"\nlet name = askText "Name"\nlet copy = load("b", default: [])\nlet zero = dynamic(0)\nlet result = 1 / zero\nexit\nfunction dynamic(value) {\n    return value\n}',
     { recorder, persistentScriptStorage: true, scriptStorage: [] },
   );
   session = completePlayerRuntimeStorageWrite(

@@ -207,7 +207,9 @@ test("a script error and a Player error release the lock", async (context) => {
   const browser = stubBrowser(context, "granting");
   const { host, time } = mountPlayer(context);
   host.prepare(() =>
-    runtime.createPlayerRuntimeSession('let zero = 0\nwait 10 s\nsay "${1 / zero}"\nexit'),
+    runtime.createPlayerRuntimeSession(
+      'let zero = dynamic(0)\nwait 10 s\nsay "${1 / zero}"\nexit\nfunction dynamic(value) {\n    return value\n}',
+    ),
   );
   await host.activate();
   await settle();
