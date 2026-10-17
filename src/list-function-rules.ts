@@ -165,7 +165,7 @@ export const LIST_FUNCTION_CONTRACTS = {
     positions: POSITIONS,
     fewest: 2,
     summary:
-      "Fits the straight line closest to the points of a list, by least squares, and gives { slope, intercept, r2, start }. The values are numbers or durations at x = 0, 1, 2, and so on; y: names the property of a list of objects that holds them, and x: one that holds x as well, numbers or one kind of date and time value. It needs at least 2 points.",
+      "Fits the straight line closest to the points of a list, by least squares, and gives { slope, intercept, r2, start }. The values are numbers or durations at x = 0, 1, 2, and so on; y: names the property of a list of objects that holds them, and x: one that holds x as well: numbers, or dates, datetimes, or absolute dates and times of one kind. It needs at least 2 points.",
   },
   predict: {
     takes: "line",
