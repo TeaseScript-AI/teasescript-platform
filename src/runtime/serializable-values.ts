@@ -1,4 +1,5 @@
 import { isStoredAngleRecord, type StoredAngle } from "../angle.js";
+import { isDictProperty } from "../dict-operations.js";
 import {
   isStoredCalendarDurationRecord,
   isStoredDurationRecord,
@@ -488,13 +489,14 @@ export function setCapturedSerializableDictValue(
 }
 
 /**
- * A dict's `length`, or a new list of its `keys` or of copies of its `values` in entry order, or `undefined` for
- * another name.
+ * A property of a dict (see `DICT_PROPERTIES`): its `length`, or a new list of its `keys` or of copies of its `values` in
+ * entry order, or `undefined` for a name no property has.
  */
 export function dictProperty(
   dict: SerializableRuntimeDict,
   name: string,
 ): SerializableRuntimeValue | undefined {
+  if (!isDictProperty(name)) return undefined;
   switch (name) {
     case "length":
       return dict.entries.length;
@@ -502,8 +504,10 @@ export function dictProperty(
       return { kind: "list", items: dict.entries.map((entry) => entry.key) };
     case "values":
       return createCapturedSerializableList(dict.entries.map((entry) => entry.value));
-    default:
-      return undefined;
+    default: {
+      const unhandled: never = name;
+      throw new Error(`Dict property '${String(unhandled)}' has no implementation.`);
+    }
   }
 }
 

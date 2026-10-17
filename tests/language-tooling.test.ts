@@ -15,7 +15,8 @@ import { CONVERSIONS } from "../src/conversions.js";
 import { NUMERIC_CONTRACTS } from "../src/numeric-functions.js";
 import { RANDOM_CONTRACTS } from "../src/random-functions.js";
 import { CLOCK_CONTRACTS, TEMPORAL_METHODS } from "../src/temporal-builtins.js";
-import { HANDLE_MEMBERS } from "../src/handle-members.js";
+import { DICT_METHODS } from "../src/dict-operations.js";
+import { HANDLE_MEMBERS, isAnyHandleMethod } from "../src/handle-members.js";
 import { isTextOnlyMethod, TEXT_METHODS } from "../src/text-operations.js";
 import { LIST_FUNCTION_CONTRACTS } from "../src/list-function-rules.js";
 import { LIST_METHODS, type ListMethod } from "../src/list-methods.js";
@@ -611,8 +612,13 @@ test("a method that only lists and sets have has help from its contract, also wh
     const position = languagePositionAt(document, document.text.length);
     const context = languageContextHelp(document, position);
     const contract: ListMethod = method;
-    // A method that text, dicts, or other values have too may be called on one of them.
-    if (Object.hasOwn(TEXT_METHODS, name) || contract.shared === true) {
+    // A method that text, dicts, handles, or ranges have too may be called on one of them.
+    if (
+      Object.hasOwn(TEXT_METHODS, name) ||
+      Object.hasOwn(DICT_METHODS, name) ||
+      isAnyHandleMethod(name) ||
+      contract.shared === true
+    ) {
       assert.equal(context?.command, isTextOnlyMethod(name) ? name : "say", name);
       continue;
     }

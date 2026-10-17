@@ -23,11 +23,12 @@ import {
 } from "./duration.js";
 import { lazyDefaultArgument } from "./lazy-defaults.js";
 import { isListFunction } from "./list-function-rules.js";
+import { DICT_METHODS, onlyReadsDict, type DictMethod } from "./dict-operations.js";
 import { hasListMethod, LIST_METHODS, onlyReadsList, type ListMethod } from "./list-methods.js";
 import { isNumericFunction } from "./numeric-functions.js";
 import { canonicalRegexFlags, regexFlagProblem } from "./regex.js";
 import { withRegexWorkPool } from "./regex-engine.js";
-import { readCollection } from "./runtime/collection-operations.js";
+import { readCollection, readDict } from "./runtime/collection-operations.js";
 import { listFunctionValue } from "./runtime/list-statistics.js";
 import { conversionResult, joinedValue, numericFunction } from "./runtime/pure-operations.js";
 import {
@@ -41,7 +42,7 @@ import {
 import { callStringMethod } from "./runtime/string-operations.js";
 import { temporalMethod } from "./runtime/temporal-operations.js";
 import { withTextLengthLimit } from "./runtime/text-length.js";
-import { isList, isSet, isTemporal } from "./runtime/value-predicates.js";
+import { isDict, isList, isSet, isTemporal } from "./runtime/value-predicates.js";
 import { joinedText, visibleText } from "./runtime/value-text.js";
 import type { SourceSpan } from "./source.js";
 import type { TemporalContext } from "./temporal.js";
@@ -432,8 +433,8 @@ export const KNOWN_VALUE_WORK = 10_000_000;
  * - arithmetic on numbers, durations, and angles, and `+` on two texts;
  * - `otherwise`, which gives its left side unless that is null, and then its right side;
  * - a list, set, or dict written with known elements;
- * - a call of a conversion, a numeric or list function, or a method of text, lists, sets, or date and time values that
- *   only reads them, with known arguments; a call that needs the player's zone or presentation is not known, and a
+ * - a call of a conversion, a numeric or list function, or a method of text, lists, sets, dicts, or date and time values
+ *   that only reads them, with known arguments; a call that needs the player's zone or presentation is not known, and a
  *   `default:` counts where the call gives it;
  * - a variable that keeps its first value: `initializer` gives that value's expression where a read counts.
  * A step without a finite result, one that the runtime rejects, or one past `KNOWN_VALUE_WORK` is not known.
@@ -721,10 +722,24 @@ function callValue(
   if (callee.kind !== "propertyAccessExpression") return undefined;
   const receiver = known(callee.object);
   const name = callee.property.name;
-  // Only a list's `get` takes a named argument, its `default:`.
+  // Only the `get` of a list or a dict takes a named argument, its `default:`.
   if (receiver === undefined || Object.keys(named).length > 0) return undefined;
   if (typeof receiver === "string") return callStringMethod(receiver, name, positional, span);
   if (isTemporal(receiver)) return temporalMethod(receiver, name, positional, {}, NO_SESSION, span);
+  if (isDict(receiver)) {
+    if (!onlyReadsDict(name)) return undefined;
+    const method: DictMethod = DICT_METHODS[name];
+    const key = positional[0];
+    // A key that is not text fails the run.
+    if (
+      positional.length !== method.parameters.length ||
+      (method.named !== undefined) !== defaulted ||
+      typeof key !== "string"
+    )
+      return undefined;
+    const value = readDict(receiver, name, key);
+    return value === undefined ? fallback() : value;
+  }
   if (!isList(receiver) && !isSet(receiver)) return undefined;
   if (!onlyReadsList(name) || !hasListMethod(isList(receiver) ? "list" : "set", name))
     return undefined;

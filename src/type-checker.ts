@@ -118,6 +118,7 @@ import {
   fallbackFix,
   HANDLE_KINDS,
   mayBeMessage,
+  dictMethodProblems,
   memberProblems,
   positionalMethodProblems,
   type OperationProblem,
@@ -125,6 +126,7 @@ import {
 import {
   changesElements,
   emptyListPropertyFailure,
+  hasListMethod,
   isListMethod,
   LIST_METHODS,
   listArgumentMessage,
@@ -164,6 +166,8 @@ import {
   type ListFunctionCheck,
 } from "./list-function-checks.js";
 import { rangeListLengthProblem } from "./runtime/collection-operations.js";
+import { messageText } from "./runtime/text-length.js";
+import { quotedText } from "./runtime/value-text.js";
 import { describeShownValue, shownChoice } from "./runtime/value-types.js";
 import {
   buttonBackgroundMessage,
@@ -270,11 +274,21 @@ import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import { startValueMessage, startValueOwner } from "./start-value-rules.js";
 import {
   argumentShapeProblem,
-  dictArgumentsProblem,
   scriptArgumentCountMessage,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
+import {
+  changesEntries,
+  dictArgumentsProblem,
+  dictKeyMessage,
+  dictMethod,
+  dictProperty,
+  missingDictMethodMessage,
+  missingDictPropertyMessage,
+  missingKeyMessage,
+  type DictMethod,
+} from "./dict-operations.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import { isTextMethod, TEXT_METHODS, type TextMethod } from "./text-operations.js";
 import {
@@ -6890,9 +6904,9 @@ class TypeChecker {
     }
     const method = callee.property.name;
     if (method === "copyFrom") return yield* compileChild(this.#copyFromTask(expression, scope));
-    // A method that changes a list or set, or a dict, which has some of their names, changes its receiver.
+    // A method that changes a list, set, or dict changes its receiver.
     const list = listMethod(method);
-    if (list?.changes !== undefined) this.#noteChanged(callee.object);
+    if (list?.changes !== undefined || changesEntries(method)) this.#noteChanged(callee.object);
     // A call that may decide the element type of a list that no value decided yet.
     if (list?.decides !== undefined && unwrap(callee.object).kind !== "identifier")
       this.#relaxNarrowedRoot(callee.object, scope);
@@ -7007,17 +7021,18 @@ class TypeChecker {
       this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0].value, true);
     // A dict method takes a text key; `get` also takes the value it gives for a missing key.
     let fallback: StaticType | undefined;
-    if (isDictReceiver(value) && DICT_METHODS.has(method)) {
-      if (!this.#checkDictArguments(expression, method)) return UNKNOWN_TYPE;
+    const dict = dictMethod(method);
+    if (isDictReceiver(value) && dict !== undefined) {
+      if (!this.#checkDictArguments(expression, dict)) return UNKNOWN_TYPE;
       const key = expression.arguments[0];
       if (key !== undefined) {
         this.#checkDictKey(values[0]!, key.value);
-        if (method === "remove") this.#checkVisibleKey(callee.object, key.value);
+        if (dict.missing === "fails") this.#checkVisibleKey(callee.object, key.value);
       }
       const defaultArgument = expression.arguments.find(
         (argument) => argument.kind === "namedArgument",
       );
-      if (method === "get" && defaultArgument !== undefined) {
+      if (dict.missing === "default" && defaultArgument !== undefined) {
         // The result may be the default itself, so it is a copy that later stores to either cannot share.
         fallback = this.#capture(defaultArgument.value);
         // The default may be of any type, and the result joins it with the value type (V30 §40).
@@ -7034,11 +7049,12 @@ class TypeChecker {
         );
       }
     } else if (
-      (method === "contains" || method === "remove") &&
+      dict?.named === undefined &&
+      dict?.parameters.length === 1 &&
       expression.arguments.length === 1 &&
       members(nonNullType(value)).some((member) => isDict(resolved(member)))
     )
-      // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5).
+      // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5), where it takes only the key.
       this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
     // A range written in the call gives its whole numbers, as `for` does, but at most 1,000,000 of them (V30 §6).
     if (method === "toList") {
@@ -7104,8 +7120,10 @@ class TypeChecker {
               removable,
             );
           // A dict's methods in a union, and a range's `toList`, take their arguments without names, in their number
-          // (V30 §16).
-          if (isListOrSet(kept) || kept.kind === "dict" || kept.kind === "range")
+          // (V30 §6, §40).
+          if (kept.kind === "dict")
+            this.#reportProblems(dictMethodProblems(method, expression, removable));
+          else if (isListOrSet(kept) || kept.kind === "range")
             this.#reportProblems(positionalMethodProblems(method, expression, removable));
           if (textual)
             this.#reportProblems(
@@ -7162,9 +7180,7 @@ class TypeChecker {
         failing.kind === "list" || failing.kind === "set"
           ? missingListMethodMessage(failing.kind, method)
           : failing.kind === "dict"
-            ? method === "add"
-              ? "Dicts have no method 'add'. Store a value by its key, as in dict[key] = value."
-              : `Dicts have no method '${method}'. Use contains, remove, clear, or get.`
+            ? missingDictMethodMessage(method)
             : isHandleKind(failing.kind)
               ? handleMemberMessage(failing.kind, method, "call")
               : failing.kind === "speaker" && all.length === 1
@@ -7951,7 +7967,7 @@ class TypeChecker {
       value.kind === "list" || value.kind === "set"
         ? missingListPropertyMessage(value.kind, name)
         : value.kind === "dict"
-          ? `Dicts have no property '${name}'. Use length, keys, or values. To read a value by its key, write '${expressionLabel(expression.object) ?? "dict"}[${JSON.stringify(name)}]'.`
+          ? missingDictPropertyMessage(name, expressionLabel(expression.object))
           : isHandleKind(value.kind)
             ? handleMemberMessage(value.kind, name, "read")
             : `${capitalize(describeValue(value))} has no property '${name}'.`,
@@ -8039,11 +8055,8 @@ class TypeChecker {
       this.#report(typeCode.invalidListIndex, NEGATIVE_INDEX_MESSAGE, expression.span);
   }
 
-  /**
-   * Checks the arguments of a dict method: `contains(key)` and `remove(key)` take a key, `clear()` none, and
-   * `get(key, default: value)` a key and a `default:`. Returns whether they have that form.
-   */
-  #checkDictArguments(expression: CallExpression, method: string): boolean {
+  /** Checks the names and the number of the arguments of a dict method (see `DICT_METHODS`); returns whether they fit. */
+  #checkDictArguments(expression: CallExpression, method: DictMethod): boolean {
     const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
     const problem = dictArgumentsProblem(
       method,
@@ -8061,21 +8074,21 @@ class TypeChecker {
     return false;
   }
 
-  /** A dict key is text; a number key names the fix, `"${id}"`. */
+  /** A dict key is text (`dictKeyMessage`). */
   #checkDictKey(type: StaticType, expression: Expression): void {
     this.#reportUnless(
       type,
       (member) => isScalar(member, "string"),
       expression,
-      "A dict key is text (string)",
-      () =>
-        isNumeric(nonNullTypeForUse(type))
-          ? ` Write a number key as text, as in "\${${expressionLabel(expression) ?? "id"}}".`
-          : "",
+      (given) =>
+        dictKeyMessage(given, isNumeric(nonNullTypeForUse(type)), expressionLabel(expression)),
     );
   }
 
-  /** A key that a dict literal certainly does not have is reported, as it would fail when the script runs. */
+  /**
+   * A key that a dict literal certainly does not have, where the operation fails for it (see `MissingKey`), is reported,
+   * as it would fail when the script runs.
+   */
   #checkVisibleKey(dict: Expression, keyExpression: Expression): void {
     const literal = unwrap(dict);
     const key = staticChoiceValue(keyExpression)?.value;
@@ -8084,7 +8097,11 @@ class TypeChecker {
     if (keys.every((written) => typeof written === "string" && written !== key))
       this.#report(
         typeCode.invalidOperand,
-        `Dictionary has no key ${JSON.stringify(key)}.`,
+        missingKeyMessage(
+          quotedText(messageText(key)),
+          expressionLabel(dict),
+          expressionLabel(keyExpression),
+        ),
         keyExpression.span,
       );
   }
@@ -9334,12 +9351,16 @@ class TypeChecker {
     const callee = unwrap(expression.callee);
     if (callee.kind !== "propertyAccessExpression") return;
     const method = callee.property.name;
-    if (listMethod(method)?.changes === undefined) return;
-    // Only a list, set, or dict that has the method changes: text `reverse` gives a new text, and a method that a value
-    // does not have is reported as such.
-    const changes = members(this.#typeOf(callee.object)).some(
-      (member) => isCollection(resolved(member)) && memberMethodType(member, method) !== undefined,
-    );
+    // Only a list, set, or dict whose method changes it: text `reverse` gives a new text, and a method that a value does
+    // not have is reported as such.
+    const changes = members(this.#typeOf(callee.object)).some((member) => {
+      const value = resolved(member);
+      return value.kind === "dict"
+        ? changesEntries(method)
+        : isListOrSet(value) &&
+            hasListMethod(value.kind, method) &&
+            listMethod(method)!.changes !== undefined;
+    });
     if (changes) this.#reportChangedCopy(callee.object, callee.object);
   }
 
@@ -9796,9 +9817,12 @@ function programEffects(program: Program, file: number, dead: DeadCode): Program
           (expression.kind === "callExpression" && !isPureBuiltinCall(expression)))
       )
         loop.suspends = true;
-      // A method that changes a list or set changes the variable that holds it, also called in parentheses.
+      // A method that changes a list, set, or dict changes the variable that holds it, also called in parentheses.
       const callee = expression.kind === "callExpression" ? unwrap(expression.callee) : null;
-      if (callee?.kind === "propertyAccessExpression" && changesElements(callee.property.name)) {
+      if (
+        callee?.kind === "propertyAccessExpression" &&
+        (changesElements(callee.property.name) || changesEntries(callee.property.name))
+      ) {
         const root = rootName(callee.object);
         if (root !== null) write(root, "changes");
       }
@@ -9932,9 +9956,6 @@ function undecidedValues(type: StaticType): boolean {
     parts.every((part) => part.kind === "open" || part.kind === "null")
   );
 }
-
-/** The methods of a dict. */
-const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
 
 /**
  * The members of a variable's own type that hold what it is known to hold, such as `integer[]` of `integer[] | string[]`
@@ -10268,10 +10289,17 @@ function memberPropertyType(type: StaticType, name: string): StaticType | PlaceR
       return value.kind === "list" ? placeRead(value.element) : value.element;
     }
     case "dict":
-      // `keys` and `values` are new lists, in entry order.
-      if (name === "length") return INTEGER_TYPE;
-      if (name === "keys") return { kind: "list", element: STRING_TYPE };
-      return name === "values" ? { kind: "list", element: copyType(value.element) } : undefined;
+      // `keys` and `values` are new lists, so a change through them changes a copy (see `DictProperty`).
+      switch (dictProperty(name)?.gives) {
+        case "length":
+          return INTEGER_TYPE;
+        case "keys":
+          return { kind: "list", element: STRING_TYPE };
+        case "values":
+          return { kind: "list", element: copyType(value.element) };
+        case undefined:
+          return undefined;
+      }
     case "object":
       return placeRead(value.properties?.get(name) ?? UNKNOWN_TYPE);
     case "timer":
@@ -10318,10 +10346,18 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
   if (value.kind === "range")
     return method === "toList" ? { kind: "list", element: INTEGER_TYPE } : undefined;
   if (value.kind === "dict") {
-    if (method === "contains") return BOOLEAN_TYPE;
-    if (method === "clear") return NULL_TYPE;
-    // A removed value leaves the dict, and `get` gives a copy, so the type is a copy for the place that keeps it.
-    return method === "remove" || method === "get" ? ownNull(copyType(value.element)) : undefined;
+    switch (dictMethod(method)?.result) {
+      case "null":
+        return NULL_TYPE;
+      case "boolean":
+        return BOOLEAN_TYPE;
+      // A removed value leaves the dict, and `get` gives a copy, so the type is a copy for the place that keeps it; the
+      // default joins it where the call is checked.
+      case "value":
+        return ownNull(copyType(value.element));
+      case undefined:
+        return undefined;
+    }
   }
   if (value.kind !== "list" && value.kind !== "set") return undefined;
   const contract = listMethod(method);
@@ -11612,10 +11648,9 @@ function computedCopyMessage(
   const lost = `This changes a copy that no variable holds: ${property}`;
   if (owner === "set")
     return `${lost} gives a copy of the member, so the change is lost. To change the set, replace the member: 'let member = ${receiver}.${name}', '${receiver}.remove(member)', then change 'member' and '${receiver}.add(member)'.`;
-  if (owner === "dict" && name === "keys")
-    return `${lost} gives a new list each time, so the change is lost. Change the dict itself, as in '${receiver}[key] = value' or '${receiver}.remove(key)'.`;
-  if (owner === "dict" && name === "values")
-    return `${lost} gives a new list each time, so the change is lost. Change the dict through its keys, as in '${receiver}[key]'.`;
+  const contract = owner === "dict" ? dictProperty(name) : undefined;
+  if (contract !== undefined && contract.gives !== "length")
+    return `${lost} gives a new list each time, so the change is lost. ${contract.instead(receiver)}`;
   return `${lost} gives a new value each time, so the change is lost. Store it in a variable first, as in 'let value = ${receiver}.${name}', then change the variable.`;
 }
 

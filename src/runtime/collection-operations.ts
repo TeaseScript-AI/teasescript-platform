@@ -12,6 +12,7 @@ import {
   type ListKind,
   type ListMethod,
 } from "../list-methods.js";
+import type { ReadingDictMethod } from "../dict-operations.js";
 import { LIST_JOIN } from "../text-operations.js";
 import { checkCollectionLength, MAX_COLLECTION_LENGTH } from "./collection-size.js";
 import { RuntimeFault } from "./errors.js";
@@ -19,9 +20,11 @@ import { copySpan } from "./operations/support.js";
 import {
   createCapturedSerializableList,
   createCapturedSerializableSet,
+  getSerializableDictEntry,
   serializableEquals,
   serializableSetContains,
   valueKey,
+  type SerializableRuntimeDict,
   type SerializableRuntimeList,
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
@@ -178,6 +181,29 @@ class ValueIndex {
 
   has(value: SerializableRuntimeValue): boolean {
     return this.#keys.has(valueKey(value));
+  }
+}
+
+/**
+ * A call of a method of a dict that only reads it (`onlyReadsDict`) with a text key: whether the dict has the key, or
+ * the key's value, the dict's own, or `undefined` where `get` gives its default. A stored null is a value, so only a
+ * missing key gives the default. The evaluator runs it, and the compiler computes known values with it.
+ */
+export function readDict(
+  receiver: SerializableRuntimeDict,
+  name: ReadingDictMethod,
+  key: string,
+): SerializableRuntimeValue | undefined {
+  const entry = getSerializableDictEntry(receiver, key);
+  switch (name) {
+    case "contains":
+      return entry !== undefined;
+    case "get":
+      return entry?.value;
+    default: {
+      const unhandled: never = name;
+      throw new Error(`Dict method '${String(unhandled)}' has no reading implementation.`);
+    }
   }
 }
 

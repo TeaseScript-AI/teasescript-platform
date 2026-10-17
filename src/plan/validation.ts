@@ -8,6 +8,7 @@ import { canonicalWebUrl } from "../web-url.js";
 import { LOCK_CALLS } from "../capture-call.js";
 import { conversionWaitsForFiles, isConversion, takesDefault, takesFiles } from "../conversions.js";
 import { ANGLE_UNITS, CALENDAR_DURATION_UNITS, DURATION_UNITS } from "../language-facts.js";
+import { dictMethod } from "../dict-operations.js";
 import { listMethod } from "../list-methods.js";
 import { compileRegex, isCanonicalRegexFlags } from "../regex.js";
 import {
@@ -2632,11 +2633,12 @@ function validateExpressionNode(
         );
       }
       validateOptionalTypeCheck(value, path, errors);
-      // A call that may decide a list's element type checks what it adds, or its default, as the compiler gave it (see
-      // `ListMethod.decides`); a dict's `get` checks its default as a list's does.
+      // A call that may decide a list's element type or a dict's value type checks what it adds, or its default, as the
+      // compiler gave it (see `ListMethod.decides` and `DictMethod.decides`).
       const decides =
         isRecord(value.callee) && value.callee.kind === "property"
-          ? listMethod(String(value.callee.name))?.decides
+          ? (listMethod(String(value.callee.name))?.decides ??
+            dictMethod(String(value.callee.name))?.decides)
           : undefined;
       if (
         "typeCheck" in value &&

@@ -1,3 +1,4 @@
+import { givesNewDictList } from "../dict-operations.js";
 import { PlanControlFlow } from "../plan/control-flow.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import type {
@@ -230,11 +231,7 @@ function scanPreparation(root: ExpressionPlan): PreparationScan {
     const expression = pending.pop()!;
     if (expression.kind === "call") calls = true;
     else if (expression.kind === "preparedReference") leaves.push(expression.temporaryId);
-    else if (
-      expression.kind === "property" &&
-      (expression.name === "keys" || expression.name === "values")
-    )
-      derived = true;
+    else if (expression.kind === "property" && givesNewDictList(expression.name)) derived = true;
     // One by one: a wide list must not depend on the host's argument-spread limit.
     for (const child of expressionPlanChildren(expression)) pending.push(child);
   }

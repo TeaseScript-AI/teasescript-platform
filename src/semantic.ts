@@ -56,6 +56,7 @@ import {
 } from "./expression-children.js";
 import { validateSwitchCases } from "./switch-cases.js";
 import { noteSharing, rootName, type Sharing } from "./operation-checks.js";
+import { changesEntries } from "./dict-operations.js";
 import { changesElements, reordersList } from "./list-methods.js";
 import {
   globMatches,
@@ -1692,22 +1693,24 @@ class SemanticValidator {
         if (!authorFunction) this.#validateDistinctNamedArguments(expression);
         // Grouping a method does not detach it from its receiver: `(text.trim)()` calls `text.trim()`.
         const method = unwrapParentheses(expression.callee);
-        // A list of the account changes in place as a list of anything else does, also when it is reordered; a text of
-        // the account reverses into a new text.
+        // A list or dict of the account changes in place as one of anything else does, also when a list is reordered; a
+        // text of the account reverses into a new text.
+        const changes =
+          method.kind === "propertyAccessExpression" &&
+          (changesElements(method.property.name) || changesEntries(method.property.name));
         if (
           method.kind === "propertyAccessExpression" &&
           rootName(method.object) === "account" &&
-          (changesElements(method.property.name) ||
-            (reordersList(method.property.name) && isAccountList(method.object)))
+          (changes || (reordersList(method.property.name) && isAccountList(method.object)))
         ) {
           this.#reportAccountChange(method.object, false);
           return;
         }
-        if (method.kind === "propertyAccessExpression" && changesElements(method.property.name))
+        if (method.kind === "propertyAccessExpression" && changes)
           this.#recordSharedWrite(rootName(method.object), scope, "changes");
         if (
           method.kind === "propertyAccessExpression" &&
-          (changesElements(method.property.name) || reordersList(method.property.name))
+          (changes || reordersList(method.property.name))
         )
           this.#recordWrite(rootName(method.object), scope);
         if (expression.callee.kind === "identifier") {

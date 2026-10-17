@@ -168,10 +168,16 @@ test("a missing key, a key that is not text, and ${dict} fail with the fix", () 
       "toys",
     ],
   ]);
+  // With the runtime's text.
+  const literal = 'Dictionary has no key "b". Check it with contains("b") first.';
   assert.deepEqual(diagnostics('say dict{ a: 1 }["b"]\nsay dict{ a: 1 }.remove("b")\nexit'), [
-    ["TSV043", 'Dictionary has no key "b".', '"b"'],
-    ["TSV043", 'Dictionary has no key "b".', '"b"'],
+    ["TSV043", literal, '"b"'],
+    ["TSV043", literal, '"b"'],
   ]);
+  assert.deepEqual(
+    failure('function pick(key) { return key }\nsay dict{ a: 1 }[pick("b")]\nexit'),
+    ["TSR061", literal],
+  );
 });
 
 test("a loop goes through the keys as they were when it started", () => {
