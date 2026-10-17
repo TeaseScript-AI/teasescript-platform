@@ -951,13 +951,14 @@ class Parser {
         : null;
 
     let skipPolicy: SayParts["skipPolicy"] = null;
+    let skipPolicySpan: SourceSpan | null = null;
     if (
       (this.#checkIdentifier("skippable") || this.#checkIdentifier("unskippable")) &&
       ((!statement && this.#peek(1).kind === TokenKind.LeftParenthesis) ||
         !(yield* parseChild(this.#canParseCompleteSayValue(statement, this.#peek(1).kind))))
     ) {
       skipPolicy = this.#peek().lexeme === "skippable" ? "skippable" : "unskippable";
-      this.#advance();
+      skipPolicySpan = copySpan(this.#advance().span);
     }
 
     if (
@@ -973,8 +974,10 @@ class Parser {
         presentation,
         speaker,
         skipPolicy,
+        skipPolicySpan,
         value: bounded.value,
         pacing: bounded.pacing,
+        instantSpan: bounded.instantSpan,
         span: spanFrom(keyword.span, bounded.end),
       });
     }
@@ -991,11 +994,13 @@ class Parser {
       return null;
     }
     let pacing: SayParts["pacing"] = null;
+    let instantSpan: SourceSpan | null = null;
     let endSpan = value.span;
     if (this.#match(TokenKind.Comma)) {
       if (this.#canParseInstantPacingAlias(statement)) {
         endSpan = this.#advance().span;
         pacing = "instant";
+        instantSpan = copySpan(endSpan);
       } else {
         const parsedPacing = yield* parseChild(this.#parseOr());
         if (parsedPacing === null) {
@@ -1014,8 +1019,10 @@ class Parser {
       presentation,
       speaker,
       skipPolicy,
+      skipPolicySpan,
       value,
       pacing,
+      instantSpan,
       span: spanFrom(keyword.span, endSpan),
     });
   }
@@ -1066,6 +1073,7 @@ class Parser {
   *#parseBoundedSayText(): ParseTask<{
     readonly value: Expression;
     readonly pacing: SayParts["pacing"];
+    readonly instantSpan: SourceSpan | null;
     readonly end: SourceSpan;
   } | null> {
     this.#advance();
@@ -1074,6 +1082,7 @@ class Parser {
     if (value === null) return null;
     this.#skipNewlines();
     let pacing: SayParts["pacing"] = null;
+    let instantSpan: SourceSpan | null = null;
     if (this.#match(TokenKind.Comma)) {
       this.#skipNewlines();
       let after = 1;
@@ -1082,7 +1091,7 @@ class Parser {
         this.#checkIdentifier("instant") &&
         this.#peek(after).kind === TokenKind.RightParenthesis
       ) {
-        this.#advance();
+        instantSpan = copySpan(this.#advance().span);
         pacing = "instant";
       } else {
         pacing = yield* parseChild(this.#parseRequiredExpressionTask());
@@ -1097,7 +1106,7 @@ class Parser {
       );
       return null;
     }
-    return { value, pacing, end: copySpan(this.#previous().span) };
+    return { value, pacing, instantSpan, end: copySpan(this.#previous().span) };
   }
 
   /**

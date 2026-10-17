@@ -431,7 +431,7 @@ test("the picker's code has the compiler's classes, lexed as the parser reads th
     [
       ["say", "keyword"],
       [" ", null],
-      ["prose", "name"],
+      ["prose", "keyword"],
       [" ", null],
       ["/[a-z]+/", "regex"],
     ],

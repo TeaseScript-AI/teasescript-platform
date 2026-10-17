@@ -444,16 +444,16 @@ export function applyLanguageTextEdits(
  * is lexed as `parsed`, its parse, read it, by default the parse editor help and formatting share, so a `/` the parser
  * read as a regex starts one (V30 §8). A word's class comes from the protected names (V30 §38): a grammar keyword is a
  * `keyword`, a protected type name a `type`, and a protected engine name, a command, built-in function, or engine
- * reference such as `player`, a `command`; a word in a written type is a `type`, and a unit and a word after `.` are
- * `name`s. A source with errors still has a class for every token the lexer reads. Whitespace and line breaks have
- * none.
+ * reference such as `player`, a `command`; a word in a written type is a `type`, a message mode, skip word, or `instant`
+ * where the parse read it so a `keyword`, and a unit and a word after `.` are `name`s. A source with errors still has a
+ * class for every token the lexer reads. Whitespace and line breaks have none.
  */
 export function classifyTokens(
   text: string,
   parsed: ParseResult = parseDocument(text),
 ): readonly LanguageToken[] {
   const { tokens, comments } = lex(text, parsed.regexStarts);
-  const { types, unitEnds } = syntaxReadings(parsed.program);
+  const { types, unitEnds, modifiers } = syntaxReadings(parsed.program);
   const classified: LanguageToken[] = [];
   let comment = 0;
   // The written types that start at or before the token, and the furthest end among them.
@@ -467,7 +467,9 @@ export function classifyTokens(
       classified.push(Object.freeze({ kind: "comment", span: comments[comment++]! }));
     while (type < types.length && types[type]!.start.offset <= start)
       typeEnd = Math.max(typeEnd, types[type++]!.end.offset);
-    const kind = tokenClass(token, tokens[index - 1], start < typeEnd, unitEnds);
+    const kind = modifiers.has(start)
+      ? "keyword"
+      : tokenClass(token, tokens[index - 1], start < typeEnd, unitEnds);
     if (kind !== null) classified.push(Object.freeze({ kind, span: token.span }));
   }
   return Object.freeze(classified);
@@ -538,13 +540,18 @@ const TYPE_ANNOTATION_KINDS = {
   unionType: true,
 } satisfies Record<TypeAnnotation["kind"], true>;
 
-/** Where the parse read words for what they are there: the written types, by start, and the end of every unit. */
+/**
+ * Where the parse read words for what they are there: the written types, by start, the end of every unit, and the start
+ * of every message mode, skip word, and `instant` it read as one.
+ */
 function syntaxReadings(program: Program): {
   readonly types: readonly SourceSpan[];
   readonly unitEnds: ReadonlySet<number>;
+  readonly modifiers: ReadonlySet<number>;
 } {
   const types: SourceSpan[] = [];
   const unitEnds = new Set<number>();
+  const modifiers = new Set<number>();
   // The tree is walked with a list rather than by recursion, as valid source may nest deeper than the call stack
   // reaches.
   const pending: unknown[] = [program.statements];
@@ -563,6 +570,9 @@ function syntaxReadings(program: Program): {
       readonly unit?: unknown;
       readonly unitSpan?: SourceSpan;
       readonly lengthSpan?: SourceSpan;
+      readonly presentation?: { readonly span: SourceSpan } | null;
+      readonly skipPolicySpan?: SourceSpan | null;
+      readonly instantSpan?: SourceSpan | null;
     };
     if (
       typeof record.kind === "string" &&
@@ -576,11 +586,14 @@ function syntaxReadings(program: Program): {
     // A wait or a timer keeps the unit after its length apart; the length as written ends with it.
     if (typeof record.unit === "string" && record.lengthSpan !== undefined)
       unitEnds.add(record.lengthSpan.end.offset);
+    // A presentation, of a `say` or an ask's question, starts with its mode word.
+    for (const span of [record.presentation?.span, record.skipPolicySpan, record.instantSpan])
+      if (span !== undefined && span !== null) modifiers.add(span.start.offset);
     for (const key in record)
       if (key !== "span" && !key.endsWith("Span")) pending.push(record[key]);
   }
   types.sort((left, right) => left.start.offset - right.start.offset);
-  return { types, unitEnds };
+  return { types, unitEnds, modifiers };
 }
 
 function command(label: string, detail: string): LanguageCompletionItem {

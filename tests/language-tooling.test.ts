@@ -440,10 +440,10 @@ test("token classes are the compiler's reading of numbers, names, comments, and 
   // what starts a comment elsewhere; a comment stays one right after an operator and before a division.
   assert.deepEqual(tokenClasses("say prose /[a-z]+/\nsay prose /[/*]/"), [
     "say:keyword",
-    "prose:name",
+    "prose:keyword",
     "/[a-z]+/:regex",
     "say:keyword",
-    "prose:name",
+    "prose:keyword",
     "/[/*]/:regex",
   ]);
   assert.deepEqual(tokenClasses("let x = /* c */ 6\nsay x /* c */ / 2"), [
@@ -523,6 +523,44 @@ test("token classes follow the parse where a word means something else", () => {
   // A keyword after `.` names a property too.
   assert.deepEqual(compileSource("say {set: 1}.set\nexit").diagnostics, []);
   assert.equal(tokenClasses("say {set: 1}.set").at(-1), "set:name");
+});
+
+test("token classes take a message mode, a skip word, and instant from the parse", () => {
+  // They are keywords where the parse reads them as a say's or a question's mode, a skip word, or the pacing, and
+  // names where they are values.
+  const source = [
+    'say prose(align: "center") skippable "x", instant',
+    'let line = say bubble unskippable ("y", instant)',
+    'let name = askText prose "Name?"',
+    'let pic = askImage bubble ("Image?")',
+    "let prose = 3",
+    'let skippable = "s"',
+    "let instant = 2 s",
+    "say prose",
+    "say skippable, instant + 1 s",
+  ].join("\n");
+  assert.deepEqual(compileSource(`${source}\nexit`).diagnostics, []);
+  assert.deepEqual(
+    tokenClasses(source).filter((token) =>
+      /^(prose|bubble|skippable|unskippable|instant):/u.test(token),
+    ),
+    [
+      "prose:keyword",
+      "skippable:keyword",
+      "instant:keyword",
+      "bubble:keyword",
+      "unskippable:keyword",
+      "instant:keyword",
+      "prose:keyword",
+      "bubble:keyword",
+      "prose:name",
+      "skippable:name",
+      "instant:name",
+      "prose:name",
+      "skippable:name",
+      "instant:name",
+    ],
+  );
 });
 
 test("token classes keep a string's text, its interpolations, and their code apart", () => {
