@@ -89,3 +89,8 @@ export function leadingArgumentMessage(callee: string, what: string, example: st
 export function leadingArgumentTwiceMessage(callee: string, name: string): string {
   return `${callee}() takes one ${name}: give it without a name or as '${name}:', not both.`;
 }
+
+/** A call of `callee` without `what` it needs, such as `a value for 'a'`; `fix` says how to give it. */
+export function missingArgumentMessage(callee: string, what: string, fix: string): string {
+  return `${callee}() needs ${what}. ${fix}`;
+}

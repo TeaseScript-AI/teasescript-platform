@@ -69,7 +69,7 @@ test("a positional argument after a named one and a parameter given twice are re
   ]);
   assert.deepEqual(diagnostics(SHOW + "say show(b: 2)")[0]?.slice(0, 2), [
     "TSV024",
-    "Function 'show' needs a value for 'a'. Add it by position or as 'a: ...'.",
+    "show() needs a value for 'a'. Add it by position or as 'a: ...'.",
   ]);
 });
 

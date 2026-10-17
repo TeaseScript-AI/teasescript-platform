@@ -92,7 +92,8 @@ test("a name that a literal gives twice has one text in both passes", () => {
 });
 
 test("each argument rule has one text in both passes", () => {
-  const F = "function f(a) {\n    return a\n}\nfunction g {\n    return 1\n}\n";
+  const F =
+    "function f(a) {\n    return a\n}\nfunction g {\n    return 1\n}\nfunction h(a, b = 1) {\n    return a\n}\n";
   for (const [source, code, message] of [
     // The number of arguments: of a script's function, by the name pass; of a method or built-in, by the type checker.
     [`${F}say g(1)`, "TSV020", "g() takes no arguments, received 1."],
@@ -126,6 +127,13 @@ test("each argument rule has one text in both passes", () => {
       'let x = fromJson("1")',
       "TSV020",
       "'fromJson(text, default: value)' needs a 'default:' for text that is not valid JSON. Add one, such as 'default: null'.",
+    ],
+    // A value the callee needs, which named arguments leave out.
+    [`${F}say h(b: 2)`, "TSV024", "h() needs a value for 'a'. Add it by position or as 'a: ...'."],
+    [
+      'showPopup(buttonText: "Go")',
+      "TSV024",
+      `showPopup() needs a message. Give it first, as in 'showPopup "Task completed"'.`,
     ],
   ] as const)
     assert.deepEqual(diagnostics(source), [[code, message]], source);

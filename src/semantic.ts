@@ -83,6 +83,7 @@ import {
   argumentsTaken,
   leadingArgumentMessage,
   leadingArgumentTwiceMessage,
+  missingArgumentMessage,
   missingDefaultMessage,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
@@ -2035,7 +2036,11 @@ class SemanticValidator {
       if (parameter.defaultValue === null && !supplied.has(parameter.name.name)) {
         this.#report(
           semanticCode.missingNamedArgument,
-          `Function '${functionName}' needs a value for '${parameter.name.name}'. Add it by position or as '${parameter.name.name}: ...'.`,
+          missingArgumentMessage(
+            functionName,
+            `a value for '${parameter.name.name}'`,
+            `Add it by position or as '${parameter.name.name}: ...'.`,
+          ),
           expression.span,
         );
       }
@@ -2131,7 +2136,11 @@ class SemanticValidator {
     if (!message)
       this.#report(
         semanticCode.missingNamedArgument,
-        "showPopup needs a message, as in 'showPopup \"Task completed\"'.",
+        missingArgumentMessage(
+          "showPopup",
+          "a message",
+          `Give it first, as in 'showPopup "Task completed"'.`,
+        ),
         parts.span,
       );
   }
