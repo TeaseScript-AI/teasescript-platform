@@ -587,16 +587,16 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
     [
       [
         "TSV020",
-        "get(key, default: value) needs a 'default:' for a missing key. Read a key that must exist as dict[key].",
+        "'get(key, default: value)' needs a 'default:' for a missing key. Read a key that must exist as 'dict[key]'.",
         'c.get("a")',
       ],
       [
         "TSV022",
-        "get(...) has no parameter 'fallback'. Its only named argument is 'default:'.",
+        "get() has no parameter 'fallback'. Its only named argument is 'default:'.",
         "fallback",
       ],
-      ["TSV020", "contains(key) takes one key.", "c.contains()"],
-      ["TSV020", "clear() takes no arguments.", "c.clear(1)"],
+      ["TSV020", "contains() takes 1 argument (key), received 0.", "c.contains()"],
+      ["TSV020", "clear() takes no arguments, received 1.", "c.clear(1)"],
     ],
   );
 

@@ -161,22 +161,21 @@ test("written tags and the tags argument are checked at compile time", () => {
     ],
   ]);
   assert.deepEqual(errors('let photo = takePhoto(tags: ["level: 1", "level: 2"])'), [
-    ["TST005", "The tag 'level' has two different numbers."],
+    ["TST004", "The tag 'level' has two different numbers, 1 and 2. Keep one, such as 'level: 1'."],
   ]);
   assert.deepEqual(
     errors('let photo = takePhoto(tags: "bedroom")').map(([code]) => code),
     ["TSV043"],
   );
-  for (const source of [
-    'let photo = takePhoto("bedroom")',
-    'let photo = takePhoto(labels: ["a"])',
-  ]) {
-    assert.deepEqual(
-      errors(source).map(([, message]) => message),
-      ['takePhoto() takes only tags:, such as takePhoto(tags: ["bedroom"]).'],
-      source,
-    );
-  }
+  assert.deepEqual(errors('let photo = takePhoto("bedroom")'), [
+    [
+      "TSV020",
+      `takePhoto() takes no arguments without a name, received 1. Name its tags, as in 'takePhoto(tags: ["bedroom"])'.`,
+    ],
+  ]);
+  assert.deepEqual(errors('let photo = takePhoto(labels: ["a"])'), [
+    ["TSV022", "takePhoto() has no parameter 'labels'. Its only named argument is 'tags:'."],
+  ]);
 });
 
 test("a pending capture keeps its tags across a restore, and a repeated completion adds no second entry", () => {

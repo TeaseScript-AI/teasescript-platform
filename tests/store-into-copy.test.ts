@@ -31,7 +31,7 @@ function copyError(
   span: string,
 ): [string, string, string] {
   return [
-    "TSV004",
+    "TSV067",
     `This changes a copy that no variable holds: '${call}' gives a new value each time, so the change is lost. Store it in a variable first, as in 'let ${name} = ${call}', then change '${changed}'.`,
     span,
   ];
@@ -51,10 +51,10 @@ test("a change of a value no variable holds, through members and elements, is a 
     copyError("things()", "t", "t", "things()"),
     copyError("things()", "t", "t", "things()"),
     copyError("xs.take(...)", "t", "t[0]", "xs.take(2)[0]"),
-    ["TSV004", UNNAMED_ERROR, "[1, 2][0]"],
-    ["TSV004", UNNAMED_ERROR, "{ n: 1 }.n"],
-    ["TSV004", UNNAMED_ERROR, "(xs + [4])[0]"],
-    ["TSV004", UNNAMED_ERROR, 'load("k", default: [1])'],
+    ["TSV067", UNNAMED_ERROR, "[1, 2][0]"],
+    ["TSV067", UNNAMED_ERROR, "{ n: 1 }.n"],
+    ["TSV067", UNNAMED_ERROR, "(xs + [4])[0]"],
+    ["TSV067", UNNAMED_ERROR, 'load("k", default: [1])'],
   ]);
   // A method that the value does not have is no change of it, and text `reverse` gives a new text.
   assert.deepEqual(
@@ -106,7 +106,7 @@ function computedError(property: string, span: string): [string, string, string]
   const receiver = property.slice(0, property.lastIndexOf("."));
   const message = `This changes a copy that no variable holds: '${property}'`;
   return [
-    "TSV004",
+    "TSV067",
     property.endsWith(".keys")
       ? `${message} gives a new list each time, so the change is lost. Change the dict itself, as in '${receiver}[key] = value' or '${receiver}.remove(key)'.`
       : property.endsWith(".values")

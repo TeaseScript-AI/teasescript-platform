@@ -1,3 +1,4 @@
+import { unknownNamedArgumentMessage } from "../argument-rules.js";
 import type { DeveloperWarningCode, RuntimeErrorCode } from "../diagnostic-codes.js";
 import { temporalCaptureAt } from "./temporal-captures.js";
 import {
@@ -2497,7 +2498,7 @@ export class Evaluator {
       if (name !== undefined)
         throw fault(
           "TSR015",
-          `${expression.callee.name}() takes its arguments without names. Remove '${name}:'.`,
+          unknownNamedArgumentMessage(expression.callee.name, name, []),
           expression.span,
         );
       return callStringMethod(receiver, expression.callee.name, positional, expression.span);
@@ -2572,11 +2573,7 @@ export class Evaluator {
     const namedArgument = Object.keys(named)[0];
     // Only a list's `get` takes a named argument, its `default:`; a set has no `get`.
     if (namedArgument !== undefined && name !== "get")
-      throw fault(
-        "TSR015",
-        `${name}() takes its arguments without names. Remove '${namedArgument}:'.`,
-        span,
-      );
+      throw fault("TSR015", unknownNamedArgumentMessage(name, namedArgument, []), span);
     const expect = (count: number): void => {
       if (positional.length !== count)
         throw fault(

@@ -85,7 +85,7 @@ export const DIAGNOSTIC_CODES = {
 
   TSP001: entry(["parser"], "error", "Expected a statement", DOCS.parser),
   TSP002: entry(["parser"], "error", "Expected the end of the statement", DOCS.parser),
-  TSP003: entry(["parser"], "error", "Expected a speaker name", DOCS.parser),
+  TSP003: entry(["parser"], "error", "Expected a speaker name after `speaker`", DOCS.parser),
   TSP004: entry(["parser"], "error", "Expected a property, option, or key name", DOCS.parser),
   TSP005: entry(["parser"], "error", "Expected `:`", DOCS.parser),
   TSP006: entry(["parser"], "error", "Expected a string", DOCS.parser),
@@ -135,7 +135,10 @@ export const DIAGNOSTIC_CODES = {
   TSH009: entry(["parser"], "error", "Invalid tag name", DOCS.header),
   TSH010: entry(["parser"], "error", "Invalid tag value", DOCS.header),
   TSH011: entry(["parser"], "warning", "Repeated tag", DOCS.header),
-  TSH012: entry(["parser"], "error", "Tag with two different numbers", DOCS.header),
+  TSH012: {
+    ...entry(["parser"], "error", "Tag with two different numbers, now `TST004`", DOCS.header),
+    retired: true,
+  },
   TSH013: entry(["parser"], "error", "Empty keyword", DOCS.header),
   TSH014: entry(["parser"], "warning", "Repeated keyword", DOCS.header),
   TSH015: entry(["parser"], "error", "Expected the end of the line", DOCS.header),
@@ -160,27 +163,18 @@ export const DIAGNOSTIC_CODES = {
   },
   TSV002: entry(["name pass"], "error", "Unknown variable", DOCS.values),
   TSV003: entry(["name pass"], "error", "Assignment to an unknown variable", DOCS.values),
-  TSV004: {
-    ...entry(["name pass", "type checker"], "error", "Invalid assignment", DOCS.values),
-    shared: {
-      problems: "two",
-      parts: [
-        "an assignment to `debugMode`, `account`, a speaker, or a global that the host gives, " +
-          "and a change of the account",
-        "a change of a copy that no variable holds, such as a property of a call's result, " +
-          "which is lost",
-      ],
-    },
-  },
+  TSV004: entry(["name pass"], "error", "Assignment to a read-only name", DOCS.values),
   TSV005: entry(["name pass"], "error", "Unknown speaker", DOCS.values),
   TSV007: {
     ...entry(["name pass", "type checker"], "error", "Duplicate property or key", DOCS.values),
     shared: {
       problems: "one",
-      texts: "different",
+      texts: "same",
       parts: [
-        "a property name that a speaker declaration or an object literal gives twice",
-        "a key that a dict literal gives twice, also through a computed key whose text is known",
+        "a property name that a speaker declaration or an object literal gives twice " +
+          "(`duplicateEntryMessage`)",
+        "the same rule with the same text for a key that a dict literal gives twice, also " +
+          "through a computed key whose text is known",
       ],
     },
   },
@@ -210,11 +204,13 @@ export const DIAGNOSTIC_CODES = {
     ),
     shared: {
       problems: "one",
-      texts: "different",
+      texts: "same",
       parts: [
-        "calls of the script's functions and of built-ins by name, such as `load` without " +
-          "`default:`, `askImage`, `showPopup`, `openUrl`, `exportText`, and `takePhoto`",
-        "method calls, `script(...)`, and the functions of the current date and time",
+        "calls of the script's functions and of the commands it knows by name, such as `load` " +
+          "without `default:`, `askImage`, `showPopup`, `openUrl`, `exportText`, and " +
+          "`takePhoto`, with the messages of `argument-rules.ts`",
+        "the same rules with the same texts for method calls, `script(...)`, the functions of " +
+          "the current date and time, and the other built-ins",
       ],
     },
   },
@@ -222,10 +218,12 @@ export const DIAGNOSTIC_CODES = {
     ...entry(["name pass", "type checker"], "error", "Unknown named argument", DOCS.values),
     shared: {
       problems: "one",
-      texts: "different",
+      texts: "same",
       parts: [
-        "calls of the script's functions and of built-ins by name",
-        "method calls and `script(...)`",
+        "calls of the script's functions and of the commands it knows by name " +
+          "(`unknownNamedArgumentMessage`)",
+        "the same rule with the same text for method calls, `script(...)`, and the other " +
+          "built-ins",
       ],
     },
   },
@@ -234,49 +232,12 @@ export const DIAGNOSTIC_CODES = {
   TSV025: entry(["name pass"], "error", "Default that uses a later parameter", DOCS.values),
   TSV026: entry(["name pass"], "error", "Assignment to a function", DOCS.values),
   TSV028: entry(["name pass"], "error", "Function or built-in used as a value", DOCS.values),
-  TSV029: {
-    ...entry(["name pass", "type checker"], "error", "Invalid choice", DOCS.values),
-    shared: {
-      problems: "one",
-      texts: "different",
-      parts: [
-        "a choice without options, which the parser already rejects with `TSP030`, so no " +
-          "source reaches it",
-        "option lists that are known to be empty, and the values, objects, number, and " +
-          "backgrounds of the options",
-      ],
-    },
-  },
+  TSV029: entry(["type checker"], "error", "Invalid choice", DOCS.values),
   TSV032: entry(["name pass"], "error", "Blocking command in a parameter default", DOCS.values),
-  TSV033: {
-    ...entry(
-      ["name pass", "type checker"],
-      "error",
-      "Invalid timer or handler return",
-      DOCS.values,
-    ),
-    shared: {
-      problems: "two",
-      parts: [
-        "a blocking timer with a block, `repeat`, `persist`, or a handle, and `return` with a " +
-          "value in a timer, media, or button block",
-        "a timer's `display:` value",
-      ],
-    },
-  },
+  TSV033: entry(["name pass"], "error", "Invalid timer or handler return", DOCS.values),
   TSV034: entry(["type checker"], "error", "Invalid timer handle member", DOCS.values),
   TSV035: entry(["type checker"], "error", "Duration combined with a number", DOCS.values),
-  TSV036: {
-    ...entry(["name pass", "type checker"], "error", "Invalid media", DOCS.values),
-    shared: {
-      problems: "two",
-      parts: [
-        "blocking media with a handle, and `finish` twice in a media block",
-        "a play command's or `showImage`'s file, `volume:`, `repeat:`, `startAt:`, `endAt:`, " +
-          "and cue positions, and `finish` with a repeat that never ends",
-      ],
-    },
-  },
+  TSV036: entry(["type checker"], "error", "Invalid media file, option, or cue", DOCS.values),
   TSV037: entry(["type checker"], "error", "Invalid media handle member", DOCS.values),
   TSV038: entry(["type checker"], "error", "Invalid storage key", DOCS.values),
   TSV039: entry(["type checker"], "error", "Invalid prefill", DOCS.values),
@@ -292,11 +253,13 @@ export const DIAGNOSTIC_CODES = {
     ),
     shared: {
       problems: "one",
-      texts: "different",
+      texts: "same",
       parts: [
         "every operation that its operands do not support, among them a speaker property that " +
-          "no declaration or assignment gives a speaker the read may reach",
-        "a speaker property that a way to the read misses (V30 §37)",
+          "no declaration or assignment gives a speaker the read may reach " +
+          "(`missingSpeakerPropertyMessage`)",
+        "the same rule with the same text for a speaker property that a way to the read " +
+          "misses (V30 §37)",
       ],
     },
   },
@@ -320,12 +283,12 @@ export const DIAGNOSTIC_CODES = {
     ...entry(["name pass", "type checker"], "error", "Invalid start value", DOCS.values),
     shared: {
       problems: "one",
-      texts: "different",
+      texts: "same",
       parts: [
         "a start value that says, asks, waits, plays media, calls a function, or uses a local " +
-          "or a later global",
-        "a start value that selects at random, with `.random` or a list in `${...}`, which " +
-          "needs the value's type",
+          "or a later global (`startValueMessage`)",
+        "the same rule with the same text for a start value that selects at random, with " +
+          "`.random` or a list in `${...}`, which needs the value's type",
       ],
     },
   },
@@ -339,29 +302,34 @@ export const DIAGNOSTIC_CODES = {
   TSV064: entry(["name pass"], "error", "Invalid regex", DOCS.values),
   TSV065: entry(["plan analysis"], "warning", "Code that never runs", DOCS.values),
   TSV066: entry(["plan analysis"], "warning", "`exit` that never runs", DOCS.values),
+  TSV067: entry(["type checker"], "error", "Change of a copy that no variable holds", DOCS.values),
+  TSV068: entry(["type checker"], "error", "Invalid timer display", DOCS.values),
+  TSV069: entry(["name pass"], "error", "Blocking media handle, or `finish` twice", DOCS.values),
 
   TST001: entry(["parser"], "error", "Invalid tag query", DOCS.tags),
   TST002: entry(["type checker"], "error", "Tag query that matches nothing", DOCS.tags),
   TST003: entry(["compiler"], "warning", "Image keywords that are not tags", DOCS.tags),
-  TST004: entry(["compiler"], "error", "Image tag with two different numbers", DOCS.tags),
-  TST005: entry(["type checker"], "error", "Invalid tag", DOCS.tags),
-  TST006: entry(["type checker"], "error", "Invalid `from:` of a tag query", DOCS.tags),
-
-  TSC001: {
+  TST004: {
     ...entry(
-      ["parser", "plan validation"],
+      ["parser", "compiler", "type checker"],
       "error",
-      "Literal that is not finite, or unsupported plan format",
-      DOCS.compiler,
+      "Tag with two different numbers",
+      DOCS.tags,
     ),
     shared: {
-      problems: "two",
+      problems: "one",
+      texts: "same",
       parts: [
-        "a number or duration literal that is not finite",
-        "an instruction plan of an unsupported format or version",
+        "a tag that a file header gives two different numbers (`conflictingTagMessage`)",
+        "the same rule with the same text, naming the image, for the keywords of an image",
+        "the same rule with the same text for the written tags of `takePhoto(tags: [...])`",
       ],
     },
   },
+  TST005: entry(["type checker"], "error", "Invalid tag", DOCS.tags),
+  TST006: entry(["type checker"], "error", "Invalid `from:` of a tag query", DOCS.tags),
+
+  TSC001: entry(["parser"], "error", "Literal that is not finite", DOCS.compiler),
   TSC002: entry(["plan validation"], "error", "Malformed instruction plan", DOCS.compiler),
   TSC003: entry(["lowering"], "error", "Lowering failure", DOCS.compiler),
   TSC006: entry(["compiler"], "error", "Compiled plan rejected by plan validation", DOCS.compiler),
@@ -373,6 +341,12 @@ export const DIAGNOSTIC_CODES = {
     DOCS.compiler,
   ),
   TSC009: entry(["compiler"], "error", "Invalid or repeated package path", DOCS.compiler),
+  TSC010: entry(
+    ["plan validation"],
+    "error",
+    "Unsupported instruction plan format or version",
+    DOCS.compiler,
+  ),
 
   TSR001: entry(["runtime"], "error", "Declaration set up twice (defect)", DOCS.runtime),
   TSR002: entry(["runtime"], "error", "Assignment without a variable (defect)", DOCS.runtime),

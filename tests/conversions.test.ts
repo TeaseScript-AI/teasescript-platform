@@ -196,13 +196,13 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       'say toNumber("5", fallback: 0)\nexit',
       "TSV022",
-      "toNumber(...) has no parameter 'fallback'. Its only named argument is 'default:'.",
+      "toNumber() has no parameter 'fallback'. Its only named argument is 'default:'.",
       "fallback",
     ],
     [
       "say toNumber()\nexit",
       "TSV020",
-      "toNumber(...) takes 1 argument (value), received 0.",
+      "toNumber() takes 1 argument (value), received 0.",
       "toNumber()",
     ],
     [
@@ -214,13 +214,13 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       "say floor(2, 3)\nexit",
       "TSV020",
-      "floor(...) takes 1 argument (value), received 2.",
+      "floor() takes 1 argument (value), received 2.",
       "floor(2, 3)",
     ],
     [
       "say ceil(2, to: 1)\nexit",
       "TSV022",
-      "ceil(...) takes no named arguments. Remove 'to:'.",
+      "ceil() takes its arguments without names. Remove 'to:'.",
       "to",
     ],
   ];

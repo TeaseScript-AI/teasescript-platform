@@ -123,7 +123,7 @@ test("statistics report empty lists, values they cannot read, and percentages ou
     ],
   ]);
   assert.deepEqual(diagnostics("say sum([1, 2], scale: 2)\nexit"), [
-    ["TSV022", "sum(...) has no parameter 'scale'. Its only named argument is 'by:'.", "scale"],
+    ["TSV022", "sum() has no parameter 'scale'. Its only named argument is 'by:'.", "scale"],
   ]);
   const cases: [string, string, string][] = [
     [
@@ -500,7 +500,7 @@ test("indexOf, lastIndexOf, and count find a value by ==, and a missing value ha
     ],
     [
       "say [1].count(value: 1)\nexit",
-      [["TSV022", "count() takes its value without a name. Remove 'value:'.", "value"]],
+      [["TSV022", "count() takes its arguments without names. Remove 'value:'.", "value"]],
     ],
     // Only lists count, and lists search for any value, so the arguments are checked whatever the receiver is.
     [
@@ -657,7 +657,7 @@ test("get gives the element at an index, or its default for an index the list do
       [
         [
           "TSV020",
-          "'get(index, default: value)' takes one index and a 'default:'.",
+          "get() takes 1 argument (index) and a 'default:', received 2.",
           'deck.get(0, "")',
         ],
       ],
@@ -667,7 +667,7 @@ test("get gives the element at an index, or its default for an index the list do
       [
         [
           "TSV022",
-          "get(...) has no parameter 'fallback'. Its only named argument is 'default:'.",
+          "get() has no parameter 'fallback'. Its only named argument is 'default:'.",
           "fallback",
         ],
       ],

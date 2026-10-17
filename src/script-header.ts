@@ -2,7 +2,13 @@ import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import type { LexResult } from "./lexer.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
-import { addTag, normalizeTagName, type Tag } from "./tags.js";
+import {
+  addTag,
+  CONFLICTING_TAG_CODE,
+  conflictingTagMessage,
+  normalizeTagName,
+  type Tag,
+} from "./tags.js";
 import { TokenKind, type Token } from "./token.js";
 
 /** The metadata of a file, written between `---` lines at its start (ADR 0023). It never executes. */
@@ -38,7 +44,7 @@ const headerDiagnosticCode = {
   invalidTagName: "TSH009",
   invalidTagValue: "TSH010",
   repeatedTag: "TSH011",
-  conflictingTagValue: "TSH012",
+  conflictingTagValue: CONFLICTING_TAG_CODE,
   emptyKeyword: "TSH013",
   repeatedKeyword: "TSH014",
   expectedLineEnd: "TSH015",
@@ -405,7 +411,7 @@ class HeaderReader {
     if (outcome === "conflict") {
       return this.#fail(
         headerDiagnosticCode.conflictingTagValue,
-        `The tag '${tag.name}' has two different numbers.`,
+        conflictingTagMessage(tags.get(tag.name)!, tag),
         span,
       );
     }

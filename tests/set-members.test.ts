@@ -146,7 +146,7 @@ test("what changes a read set member decides and widens nothing in the set, unli
       codes(`let s = set[[]]\ns.${selector}.add("x")\ns.add([1])\nexit`),
       [
         ["TSV041", '"x"'],
-        ["TSV004", `s.${selector}`],
+        ["TSV067", `s.${selector}`],
       ],
       selector,
     );
@@ -154,13 +154,13 @@ test("what changes a read set member decides and widens nothing in the set, unli
     codes('let s = set[{ items: [] }]\ns.first.items.add("x")\ns.add({ items: [1] })\nexit'),
     [
       ["TSV041", '"x"'],
-      ["TSV004", "s.first.items"],
+      ["TSV067", "s.first.items"],
     ],
   );
   // A read member is a computed value like a literal, so a number does not widen the set's integer lists.
   assert.deepEqual(codes("let s = set[[1]]\ns.first.add(2.5)\nlet xs: integer[] = s.first\nexit"), [
     ["TSV041", "2.5"],
-    ["TSV004", "s.first"],
+    ["TSV067", "s.first"],
   ]);
   // A list element is a place: what changes it also changes the list and its element type.
   assert.deepEqual(says('let l = [[]]\nl.first.add("x")\nsay l\nexit'), ['[["x"]]']);

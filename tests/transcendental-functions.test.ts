@@ -105,7 +105,7 @@ test("a call without a finite result is a compile error when the arguments are k
   }
   assert.deepEqual(diagnostics('say sin("30")\nexit')[0]?.[0], "TSV043");
   assert.deepEqual(diagnostics("say atan2(1)\nexit"), [
-    ["TSV020", "atan2(...) takes 2 arguments (y, x), received 1.", "atan2(1)"],
+    ["TSV020", "atan2() takes 2 arguments (y, x), received 1.", "atan2(1)"],
   ]);
   assert.deepEqual(diagnostics("let ln = 2\nexit")[0]?.[0], "TSV001");
 });

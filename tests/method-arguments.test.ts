@@ -151,13 +151,13 @@ test("a call that no receiver with the method takes is a compile error on a valu
     [
       'say v.get(0, "none")',
       "TSV020",
-      "'get(index or key, default: value)' takes one index or key and a 'default:'.",
+      "get() takes 1 argument (index or key) and a 'default:', received 2.",
       'v.get(0, "none")',
     ],
     [
       'say v.get(0, default: "none", fallback: "")',
       "TSV022",
-      "get(...) has no parameter 'fallback'. Its only named argument is 'default:'.",
+      "get() has no parameter 'fallback'. Its only named argument is 'default:'.",
       "fallback",
     ],
     // A message and a permanent button take `remove()` without arguments, and the collections take one.

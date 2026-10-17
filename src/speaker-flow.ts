@@ -10,6 +10,7 @@ import {
 import { instructionExpressions } from "./plan/instruction-expressions.js";
 import type { CompiledFunctionDefinition, ExpressionPlan, InstructionPlan } from "./plan/model.js";
 import type { SourceSpan } from "./source.js";
+import { missingSpeakerPropertyMessage } from "./object-properties.js";
 import { PERSON_FIELDS, PLAYER } from "./speaker-terms.js";
 import { placeKey, type DeadWays } from "./way-facts.js";
 
@@ -876,7 +877,20 @@ class SpeakerFlow {
     const bit = this.#bit(speaker, name);
     if (field || (mustState & bit) !== 0n) return null;
     const way = this.#missingWay(node, bit);
-    return someWaysMessage(speaker, name, way === null ? null : this.#describe(way, file, read));
+    const text = way === null ? null : this.#describe(way, file, read);
+    return missingSpeakerPropertyMessage(
+      { speaker, name, sources: [], example: speaker },
+      {
+        kind: "someWays",
+        missing:
+          text === null
+            ? "not every way to this line assigns it"
+            : text.complete === true
+              ? text.phrase
+              : `${text.phrase}, nothing assigns it before this line`,
+        assign: text?.fix ?? "on every way to this line",
+      },
+    );
   }
 
   /**
@@ -919,20 +933,10 @@ class SpeakerFlow {
           ? ` The copy on ${line} ${when === "never" ? "never runs" : when === "later" ? "comes only later" : "runs only on a way that does not reach this line"}.`
           : ` ${capitalize(line)} assigns ${sources.length === 1 ? "it" : `'${store.source}'`}, but ${when === "never" ? "that line never runs" : when === "later" ? "only later" : "only on a way that does not reach this line"}.`;
     }
-    if (!field)
-      return `Speaker '${speaker}' has no '${name}' yet here: nothing assigns it before this line runs.${named} ${
-        speaker === PLAYER
-          ? `Assign it before this line, as in 'player.${name} = ...'.`
-          : `Give it a start value, as in 'speaker ${speaker} { ${name}: ... }', or assign it before this line.`
-      }`;
-    const quoted = alternatives(sources);
-    if (speaker === PLAYER)
-      return `Speaker 'player' has no '${name}' yet here: nothing copies the account or assigns ${quoted} before this line runs.${named} Copy the account before this line, as in 'player.copyFrom(account)' at the start of the script, or assign ${sources.includes("gender") ? `'player.gender' or 'player.${name}'` : `'player.${name}'`} first.`;
-    return `Speaker '${speaker}' has no '${name}' yet here: nothing assigns ${quoted} before this line runs.${named} ${
-      sources.includes("gender")
-        ? `Give it a gender, as in 'speaker ${speaker} { gender: "female" }', or assign it before this line.`
-        : `Give it a start value, as in 'speaker ${speaker} { ${name}: ... }', or assign it before this line.`
-    }`;
+    return missingSpeakerPropertyMessage(
+      { speaker, name, sources: field ? sources : [], example: speaker },
+      { kind: "notYet", late: named },
+    );
   }
 
   /** `line N`, with the file when it is not `from`. */
@@ -1330,29 +1334,6 @@ function defaultOwner(
   return expression.kind === "loadExpression"
     ? "load"
     : (lazyDefaultArgument(expression)?.operation ?? "call");
-}
-
-function someWaysMessage(speaker: string, name: string, way: WayText | null): string {
-  const missing =
-    way === null
-      ? "not every way to this line assigns it"
-      : way.complete === true
-        ? way.phrase
-        : `${way.phrase}, nothing assigns it before this line`;
-  const fix = `Assign it ${way?.fix ?? "on every way to this line"}`;
-  return `Speaker '${speaker}' may have no '${name}' here: ${missing}. ${
-    speaker === PLAYER
-      ? `${fix}.`
-      : `${fix}, or give it a start value, as in 'speaker ${speaker} { ${name}: ... }'.`
-  }`;
-}
-
-/** Names in quotes as alternatives, as in `'a' or 'b'` and `'a', 'b', or 'c'`. */
-function alternatives(names: readonly string[]): string {
-  const quoted = names.map((name) => `'${name}'`);
-  return quoted.length <= 2
-    ? quoted.join(" or ")
-    : `${quoted.slice(0, -1).join(", ")}, or ${quoted.at(-1)}`;
 }
 
 function capitalize(text: string): string {

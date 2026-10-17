@@ -91,7 +91,14 @@ import {
   imageFilterTextProblem,
 } from "./image-input.js";
 import { evaluateTagSteps, passesTagList } from "./tag-query.js";
-import { addTag, normalizeTagName, readTagText, type Tag } from "./tags.js";
+import {
+  addTag,
+  CONFLICTING_TAG_CODE,
+  conflictingTagMessage,
+  normalizeTagName,
+  readTagText,
+  type Tag,
+} from "./tags.js";
 import { CONVERSION_RESULTS, isTemporalConversionResult, numberFromText } from "./conversions.js";
 import {
   builtinCallProblems,
@@ -224,12 +231,19 @@ import {
   type StaticScalar,
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
+import { startValueMessage } from "./start-value-rules.js";
+import {
+  argumentCountMessage,
+  missingDefaultMessage,
+  temporalArgumentsMessage,
+  unknownNamedArgumentMessage,
+} from "./argument-rules.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
 import {
   missingPropertyMessage,
-  missingSpeakerFieldMessage,
+  duplicateEntryMessage,
   missingSpeakerPropertyMessage,
   misspelledPropertyHint,
 } from "./object-properties.js";
@@ -409,7 +423,6 @@ export type RuntimeCheckSite =
   | LoadExpression;
 
 const typeCode = {
-  invalidAssignment: "TSV004",
   duplicateProperty: "TSV007",
   invalidRangeOperand: "TSV010",
   invalidRepeatCount: "TSV011",
@@ -417,7 +430,6 @@ const typeCode = {
   argumentCount: "TSV020",
   unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
-  invalidTimer: "TSV033",
   invalidTimerHandleMember: "TSV034",
   mixedDurationOperands: "TSV035",
   invalidMedia: "TSV036",
@@ -435,10 +447,13 @@ const typeCode = {
   visibleOverflow: "TSV050",
   emptyTagQuery: "TST002",
   invalidCaptureTag: "TST005",
+  conflictingTag: CONFLICTING_TAG_CODE,
   invalidTagQueryFrom: "TST006",
   randomStartValue: "TSV055",
   invalidCameraHandleMember: "TSV059",
   unusedFallback: "TSV062",
+  changedCopy: "TSV067",
+  invalidTimerDisplay: "TSV068",
 } as const satisfies Record<string, OwnedDiagnosticCode<"type checker">>;
 
 type TypeErrorCode = OwnedDiagnosticCode<"type checker", "error">;
@@ -1973,7 +1988,7 @@ class TypeChecker {
     this.#reachable = true;
     if (declaration.kind === "globalStatement") {
       yield* compileChild(this.#letTask(declaration, this.#project));
-      this.#rejectRandomSelection(declaration.initial);
+      this.#rejectRandomSelection(declaration.initial, declaration);
       return;
     }
     // A custom property keeps the type of its first value, as a property of an object (V30 §37), in an object that the
@@ -2016,7 +2031,7 @@ class TypeChecker {
         this.diagnostics.push(...presentationPropertyDiagnostics(name, property.value));
       const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
       this.#checkSpeakerProperty(name, property.value, type);
-      this.#rejectRandomSelection(property.value);
+      this.#rejectRandomSelection(property.value, declaration);
       if (!this.#keepsType(name)) continue;
       properties.set(
         name,
@@ -2095,11 +2110,8 @@ class TypeChecker {
         // A store that the compiler cannot check may give any speaker a property too.
         const custom = [...new Set([...properties, ...this.#unchecked])];
         return missingSpeakerPropertyMessage(
-          speaker ?? this.#onlySpeaker(),
-          name,
-          custom,
-          [...custom, ...SPEAKER_FIELDS],
-          example,
+          { speaker: speaker ?? this.#onlySpeaker(), name, sources: [], example },
+          { kind: "never", properties: custom, names: [...custom, ...SPEAKER_FIELDS] },
         );
       },
     );
@@ -2295,7 +2307,7 @@ class TypeChecker {
    * Reports a start value that would select a random element: a list shown in `${...}`, or `.random`. A start value is
    * set up before the story runs and uses no random numbers (ADR 0022 §6); the runtime rejects a value of unknown type.
    */
-  #rejectRandomSelection(value: Expression): void {
+  #rejectRandomSelection(value: Expression, owner: GlobalStatement | SpeakerDeclaration): void {
     const work = [value];
     while (work.length > 0) {
       const expression = work.pop()!;
@@ -2306,7 +2318,7 @@ class TypeChecker {
       )
         this.#report(
           typeCode.randomStartValue,
-          "A start value cannot select a random element with '.random': it is set up at the start of the session, before the story runs. Pick the element in the story instead.",
+          startValueMessage(owner, { kind: "random" }),
           expression.span,
         );
       if (expression.kind === "stringLiteral")
@@ -2314,7 +2326,7 @@ class TypeChecker {
           if (part.kind === "stringInterpolation" && this.#mayBe(part.expression, isList))
             this.#report(
               typeCode.randomStartValue,
-              "A start value cannot show a list in '${...}', which selects a random element: it is set up at the start of the session, before the story runs. Show one element, as in '${items[0]}'.",
+              startValueMessage(owner, { kind: "shownList" }),
               part.expression.span,
             );
       for (const child of expressionChildren(expression)) work.push(child);
@@ -4701,7 +4713,7 @@ class TypeChecker {
           if (typeof text === "string" && keys.has(text))
             this.#report(
               typeCode.duplicateProperty,
-              `Duplicate dict key ${JSON.stringify(text)}. Each key may appear only once. Remove one of the entries.`,
+              duplicateEntryMessage("dict", text),
               entry.key.span,
             );
           if (typeof text === "string") keys.add(text);
@@ -5621,8 +5633,8 @@ class TypeChecker {
         );
       } else if (addTag(seen, tag) === "conflict") {
         this.#report(
-          typeCode.invalidCaptureTag,
-          `The tag '${tag.name}' has two different numbers.`,
+          typeCode.conflictingTag,
+          conflictingTagMessage(seen.get(tag.name)!, tag),
           element.span,
         );
       }
@@ -6544,11 +6556,14 @@ class TypeChecker {
           const before = this.diagnostics.length;
           this.#report(
             typeCode.invalidOperand,
-            missingSpeakerFieldMessage(
-              check.speaker ?? this.#onlySpeaker(),
-              check.name,
-              fieldSources(check.name),
-              check.speaker ?? this.#exampleSpeaker(),
+            missingSpeakerPropertyMessage(
+              {
+                speaker: check.speaker ?? this.#onlySpeaker(),
+                name: check.name,
+                sources: fieldSources(check.name),
+                example: check.speaker ?? this.#exampleSpeaker(),
+              },
+              { kind: "never", properties: [], names: [] },
             ),
             check.span,
           );
@@ -7011,9 +7026,7 @@ class TypeChecker {
       if (all.every(isTemporal) && expression.arguments.length > 0)
         this.#report(
           typeCode.argumentCount,
-          method.startsWith("format")
-            ? `${method}() takes no arguments: it shows the value in the player's own date and time format.`
-            : `${method}() takes no arguments.`,
+          temporalArgumentsMessage(method, expression.arguments.length),
           callee.property.span,
         );
       return all.length === 1 ? results[0]! : union(results.map((result) => result!));
@@ -7594,7 +7607,7 @@ class TypeChecker {
         if (expression.arguments.length > 0)
           this.#report(
             typeCode.argumentCount,
-            `${name}() takes no arguments.`,
+            temporalArgumentsMessage(name, expression.arguments.length),
             expression.arguments[0]!.value.span,
           );
         return name === "getDate"
@@ -7612,14 +7625,19 @@ class TypeChecker {
         if (positional !== 1)
           this.#report(
             typeCode.argumentCount,
-            `script(...) takes 1 argument (path), received ${positional}. Name a label with label:, as in script("rooms/hall.tease", label: "start").`,
+            argumentCountMessage(
+              "script",
+              "1 argument (path)",
+              positional,
+              `Name a label with 'label:', as in 'script("rooms/hall.tease", label: "start")'.`,
+            ),
             expression.span,
           );
         for (const [index, item] of expression.arguments.entries()) {
           if (item.kind === "namedArgument" && item.name.name !== "label")
             this.#report(
               typeCode.unknownNamedArgument,
-              `script(...) has no parameter '${item.name.name}'. Its only named argument is 'label:'.`,
+              unknownNamedArgumentMessage("script", item.name.name, ["label"]),
               item.name.span,
             );
           else if (item.kind === "namedArgument" || positional === 1)
@@ -7814,9 +7832,7 @@ class TypeChecker {
     if (unknown !== undefined) {
       this.#report(
         typeCode.unknownNamedArgument,
-        method === "get"
-          ? `get(...) has no parameter '${unknown.name.name}'. Its only named argument is 'default:'.`
-          : `${method}(...) takes no named arguments.`,
+        unknownNamedArgumentMessage(method, unknown.name.name, method === "get" ? ["default"] : []),
         unknown.name.span,
       );
       return false;
@@ -7825,13 +7841,21 @@ class TypeChecker {
     if (positional.length === keys && (method !== "get" || named.length === 1)) return true;
     this.#report(
       typeCode.argumentCount,
-      method === "get"
-        ? named.length === 0 && positional.length === 1
-          ? "get(key, default: value) needs a 'default:' for a missing key. Read a key that must exist as dict[key]."
-          : "get(key, default: value) takes one key and a 'default:'."
-        : method === "clear"
-          ? "clear() takes no arguments."
-          : `${method}(key) takes one key.`,
+      method === "get" && named.length === 0 && positional.length === 1
+        ? missingDefaultMessage(
+            "get(key, default: value)",
+            "for a missing key",
+            "Read a key that must exist as 'dict[key]'.",
+          )
+        : argumentCountMessage(
+            method,
+            method === "get"
+              ? "1 argument (key) and a 'default:'"
+              : method === "clear"
+                ? "no arguments"
+                : "1 argument (key)",
+            positional.length,
+          ),
       expression.span,
     );
     return false;
@@ -8634,11 +8658,15 @@ class TypeChecker {
           operand,
           "A timer display is text (string)",
           undefined,
-          typeCode.invalidTimer,
+          typeCode.invalidTimerDisplay,
         );
         const text = isScalar(type, "string") ? staticVisibleText(operand) : undefined;
         if (text !== undefined && !isTimerDisplay(text))
-          this.#report(typeCode.invalidTimer, timerDisplayMessage(shownChoice(text)), operand.span);
+          this.#report(
+            typeCode.invalidTimerDisplay,
+            timerDisplayMessage(shownChoice(text)),
+            operand.span,
+          );
       }
     }
     if (timer.handler !== null) this.#pendHandler(timer.handler, null, scope);
@@ -9065,7 +9093,7 @@ class TypeChecker {
         node = node.object;
       } else {
         if (node.kind !== "identifier") {
-          this.#report(typeCode.invalidAssignment, changedCopyMessage(changed, node), changed.span);
+          this.#report(typeCode.changedCopy, changedCopyMessage(changed, node), changed.span);
           return;
         }
         break;
@@ -9073,7 +9101,7 @@ class TypeChecker {
     }
     if (computed === undefined) return;
     const owner = resolved(members(nonNullType(this.#typeOf(computed.object)))[0]!).kind;
-    this.#report(typeCode.invalidAssignment, computedCopyMessage(computed, owner), changed.span);
+    this.#report(typeCode.changedCopy, computedCopyMessage(computed, owner), changed.span);
   }
 
   /**

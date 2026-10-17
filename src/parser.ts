@@ -176,7 +176,7 @@ const parserDiagnosticCode = {
   expectedParameter: "TSP025",
   emptyFunctionParameters: "TSP026",
   expectedInteractionText: "TSP028",
-  expectedInteractionSpeaker: "TSP029",
+  expectedSpeakerAfterAs: "TSP029",
   expectedChoiceOption: "TSP030",
   expectedChoiceSeparator: "TSP031",
   unsupportedInteractionForm: "TSP032",
@@ -711,10 +711,7 @@ class Parser {
     if (!this.#atStorageDelimiter() && this.#match(TokenKind.KeywordAs)) {
       asSpan = copySpan(this.#previous().span);
       if (!this.#check(TokenKind.Identifier)) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedInteractionSpeaker,
-          "Expected a speaker identifier after 'as'.",
-        );
+        this.#reportMissingSpeakerAfterAs();
         this.#synchronizeStatement();
         return null;
       }
@@ -921,10 +918,7 @@ class Parser {
     let speaker: Identifier | null = null;
     if (this.#match(TokenKind.KeywordAs)) {
       if (!this.#check(TokenKind.Identifier)) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedSpeakerIdentifier,
-          "Expected a speaker identifier after 'as'.",
-        );
+        this.#reportMissingSpeakerAfterAs();
         if (statement) this.#synchronizeStatement();
         return null;
       }
@@ -4418,10 +4412,7 @@ class Parser {
     if (!this.#atStorageDelimiter() && this.#match(TokenKind.KeywordAs)) {
       asSpan = copySpan(this.#previous().span);
       if (!this.#check(TokenKind.Identifier)) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedInteractionSpeaker,
-          "Expected a speaker identifier after 'as'.",
-        );
+        this.#reportMissingSpeakerAfterAs();
         return null;
       }
       speaker = this.#identifier(this.#advance());
@@ -5618,6 +5609,14 @@ class Parser {
       parserDiagnosticCode.mixedArguments,
       "A positional argument may not follow a named argument. Move it before the named arguments, or name it too.",
       span,
+    );
+  }
+
+  /** Reports `as` without the speaker after it, in a `say`, a `showButton`, or an ask. */
+  #reportMissingSpeakerAfterAs(): void {
+    this.#reportInsertion(
+      parserDiagnosticCode.expectedSpeakerAfterAs,
+      "Expected a speaker identifier after 'as'.",
     );
   }
 

@@ -57,6 +57,18 @@ export function isCanonicalTagList(value: unknown): value is readonly Tag[] {
   return true;
 }
 
+/** The code of a tag given two different numbers: in a file header, an image's keywords, or `takePhoto(tags: [...])`. */
+export const CONFLICTING_TAG_CODE = "TST004";
+
+/**
+ * The message for `tag`, which `addTag` found with a number other than that of `kept`, the tag it keeps. An image's
+ * keywords name the image, which has no source line to point at.
+ */
+export function conflictingTagMessage(kept: Tag, tag: Tag, image?: string): string {
+  const of = image === undefined ? "" : ` of the image '${image}'`;
+  return `The tag '${tag.name}'${of} has two different numbers, ${kept.value} and ${tag.value}. Keep one, such as '${tag.name}: ${kept.value}'.`;
+}
+
 /**
  * Adds `tag` to `tags`, keyed by name. A repeated name is merged: a number wins over its absence. Two different numbers
  * for one name conflict and leave the first.

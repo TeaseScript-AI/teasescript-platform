@@ -52,7 +52,7 @@ The codes that more than one owner reports are listed in
 | --- | --- | --- | --- |
 | `TSP001` | Expected a statement | error | parser |
 | `TSP002` | Expected the end of the statement | error | parser |
-| `TSP003` | Expected a speaker name | error | parser |
+| `TSP003` | Expected a speaker name after `speaker` | error | parser |
 | `TSP004` | Expected a property, option, or key name | error | parser |
 | `TSP005` | Expected `:` | error | parser |
 | `TSP006` | Expected a string | error | parser |
@@ -108,7 +108,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSH009` | Invalid tag name | error | parser |
 | `TSH010` | Invalid tag value | error | parser |
 | `TSH011` | Repeated tag | warning | parser |
-| `TSH012` | Tag with two different numbers | error | parser |
+| `TSH012` | Tag with two different numbers, now `TST004` | error | parser |
 | `TSH013` | Empty keyword | error | parser |
 | `TSH014` | Repeated keyword | warning | parser |
 | `TSH015` | Expected the end of the line | error | parser |
@@ -121,7 +121,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV001` | Protected name, or name already in use | error | parser, name pass |
 | `TSV002` | Unknown variable | error | name pass |
 | `TSV003` | Assignment to an unknown variable | error | name pass |
-| `TSV004` | Invalid assignment | error | name pass, type checker |
+| `TSV004` | Assignment to a read-only name | error | name pass |
 | `TSV005` | Unknown speaker | error | name pass |
 | `TSV007` | Duplicate property or key | error | name pass, type checker |
 | `TSV008` | `break` or `continue` outside a loop | error | name pass |
@@ -143,12 +143,12 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV025` | Default that uses a later parameter | error | name pass |
 | `TSV026` | Assignment to a function | error | name pass |
 | `TSV028` | Function or built-in used as a value | error | name pass |
-| `TSV029` | Invalid choice | error | name pass, type checker |
+| `TSV029` | Invalid choice | error | type checker |
 | `TSV032` | Blocking command in a parameter default | error | name pass |
-| `TSV033` | Invalid timer or handler return | error | name pass, type checker |
+| `TSV033` | Invalid timer or handler return | error | name pass |
 | `TSV034` | Invalid timer handle member | error | type checker |
 | `TSV035` | Duration combined with a number | error | type checker |
-| `TSV036` | Invalid media | error | name pass, type checker |
+| `TSV036` | Invalid media file, option, or cue | error | type checker |
 | `TSV037` | Invalid media handle member | error | type checker |
 | `TSV038` | Invalid storage key | error | type checker |
 | `TSV039` | Invalid prefill | error | type checker |
@@ -178,6 +178,9 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV064` | Invalid regex | error | name pass |
 | `TSV065` | Code that never runs | warning | plan analysis |
 | `TSV066` | `exit` that never runs | warning | plan analysis |
+| `TSV067` | Change of a copy that no variable holds | error | type checker |
+| `TSV068` | Invalid timer display | error | type checker |
+| `TSV069` | Blocking media handle, or `finish` twice | error | name pass |
 
 ## Tags (TST)
 
@@ -186,7 +189,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TST001` | Invalid tag query | error | parser |
 | `TST002` | Tag query that matches nothing | error | type checker |
 | `TST003` | Image keywords that are not tags | warning | compiler |
-| `TST004` | Image tag with two different numbers | error | compiler |
+| `TST004` | Tag with two different numbers | error | parser, compiler, type checker |
 | `TST005` | Invalid tag | error | type checker |
 | `TST006` | Invalid `from:` of a tag query | error | type checker |
 
@@ -194,13 +197,14 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 
 | Code | Title | Severity | Owner |
 | --- | --- | --- | --- |
-| `TSC001` | Literal that is not finite, or unsupported plan format | error | parser, plan validation |
+| `TSC001` | Literal that is not finite | error | parser |
 | `TSC002` | Malformed instruction plan | error | plan validation |
 | `TSC003` | Lowering failure | error | lowering |
 | `TSC006` | Compiled plan rejected by plan validation | error | compiler |
 | `TSC007` | Host call stack exhausted | error | compiler |
 | `TSC008` | Invalid presentation option or markup colour | error | type checker |
 | `TSC009` | Invalid or repeated package path | error | compiler |
+| `TSC010` | Unsupported instruction plan format or version | error | plan validation |
 
 ## Codes with more than one owner
 
@@ -211,33 +215,22 @@ which each need a code of their own.
 - `TSV001` (one problem, same text)
   - parser: a declaration whose name is a keyword or another protected name, where it reads the name
   - name pass: the same rule with the same text (`protectedNameMessage`) where it finds such a declaration, and a name that is already in use
-- `TSV004` (two problems)
-  - name pass: an assignment to `debugMode`, `account`, a speaker, or a global that the host gives, and a change of the account
-  - type checker: a change of a copy that no variable holds, such as a property of a call's result, which is lost
-- `TSV007` (one problem, different texts)
-  - name pass: a property name that a speaker declaration or an object literal gives twice
-  - type checker: a key that a dict literal gives twice, also through a computed key whose text is known
-- `TSV020` (one problem, different texts)
-  - name pass: calls of the script's functions and of built-ins by name, such as `load` without `default:`, `askImage`, `showPopup`, `openUrl`, `exportText`, and `takePhoto`
-  - type checker: method calls, `script(...)`, and the functions of the current date and time
-- `TSV022` (one problem, different texts)
-  - name pass: calls of the script's functions and of built-ins by name
-  - type checker: method calls and `script(...)`
-- `TSV029` (one problem, different texts)
-  - name pass: a choice without options, which the parser already rejects with `TSP030`, so no source reaches it
-  - type checker: option lists that are known to be empty, and the values, objects, number, and backgrounds of the options
-- `TSV033` (two problems)
-  - name pass: a blocking timer with a block, `repeat`, `persist`, or a handle, and `return` with a value in a timer, media, or button block
-  - type checker: a timer's `display:` value
-- `TSV036` (two problems)
-  - name pass: blocking media with a handle, and `finish` twice in a media block
-  - type checker: a play command's or `showImage`'s file, `volume:`, `repeat:`, `startAt:`, `endAt:`, and cue positions, and `finish` with a repeat that never ends
-- `TSV043` (one problem, different texts)
-  - type checker: every operation that its operands do not support, among them a speaker property that no declaration or assignment gives a speaker the read may reach
-  - plan analysis: a speaker property that a way to the read misses (V30 §37)
-- `TSV055` (one problem, different texts)
-  - name pass: a start value that says, asks, waits, plays media, calls a function, or uses a local or a later global
-  - type checker: a start value that selects at random, with `.random` or a list in `${...}`, which needs the value's type
-- `TSC001` (two problems)
-  - parser: a number or duration literal that is not finite
-  - plan validation: an instruction plan of an unsupported format or version
+- `TSV007` (one problem, same text)
+  - name pass: a property name that a speaker declaration or an object literal gives twice (`duplicateEntryMessage`)
+  - type checker: the same rule with the same text for a key that a dict literal gives twice, also through a computed key whose text is known
+- `TSV020` (one problem, same text)
+  - name pass: calls of the script's functions and of the commands it knows by name, such as `load` without `default:`, `askImage`, `showPopup`, `openUrl`, `exportText`, and `takePhoto`, with the messages of `argument-rules.ts`
+  - type checker: the same rules with the same texts for method calls, `script(...)`, the functions of the current date and time, and the other built-ins
+- `TSV022` (one problem, same text)
+  - name pass: calls of the script's functions and of the commands it knows by name (`unknownNamedArgumentMessage`)
+  - type checker: the same rule with the same text for method calls, `script(...)`, and the other built-ins
+- `TSV043` (one problem, same text)
+  - type checker: every operation that its operands do not support, among them a speaker property that no declaration or assignment gives a speaker the read may reach (`missingSpeakerPropertyMessage`)
+  - plan analysis: the same rule with the same text for a speaker property that a way to the read misses (V30 §37)
+- `TSV055` (one problem, same text)
+  - name pass: a start value that says, asks, waits, plays media, calls a function, or uses a local or a later global (`startValueMessage`)
+  - type checker: the same rule with the same text for a start value that selects at random, with `.random` or a list in `${...}`, which needs the value's type
+- `TST004` (one problem, same text)
+  - parser: a tag that a file header gives two different numbers (`conflictingTagMessage`)
+  - compiler: the same rule with the same text, naming the image, for the keywords of an image
+  - type checker: the same rule with the same text for the written tags of `takePhoto(tags: [...])`

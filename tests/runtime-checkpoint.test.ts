@@ -181,7 +181,7 @@ test("accepts current internal format revisions and rejects non-current or malfo
     const validation = validateInstructionPlan(invalidPlan);
     assert.equal(validation.valid, false, String(replacement));
     assert.ok(
-      validation.errors.some((error) => error.code === "TSC001" && error.path === "$.version"),
+      validation.errors.some((error) => error.code === "TSC010" && error.path === "$.version"),
       String(replacement),
     );
 

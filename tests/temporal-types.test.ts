@@ -178,9 +178,9 @@ test("conversions report wrong arguments, argument counts, and named arguments",
       ].join("\n"),
     ).map(([code, message]) => [code, message]),
     [
-      ["TSV020", "toDate(...) takes 1 argument (value), received 0."],
-      ["TSV020", "toDateTime(...) takes 1 argument (value) or 2 (date, time), received 3."],
-      ["TSV022", "toDate(...) has no parameter 'fallback'. Its only named argument is 'default:'."],
+      ["TSV020", "toDate() takes 1 argument (value), received 0."],
+      ["TSV020", "toDateTime() takes 1 argument (value) or 2 (date, time), received 3."],
+      ["TSV022", "toDate() has no parameter 'fallback'. Its only named argument is 'default:'."],
     ],
   );
   assert.deepEqual(diagnostics('let day: date = "2026-10-04"\nexit'), [
@@ -237,7 +237,7 @@ test("date and time values have read-only fields and methods by kind", () => {
       ["TSV043", "A time has no method 'toAbsoluteDateTime'.", "toAbsoluteDateTime"],
       [
         "TSV020",
-        "formatDate() takes no arguments: it shows the value in the player's own date and time format.",
+        "formatDate() takes no arguments, received 1. It shows the value in the player's own date and time format.",
         "formatDate",
       ],
       [

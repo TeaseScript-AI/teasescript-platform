@@ -133,7 +133,7 @@ test("cue words stay ordinary identifiers outside cue positions", () => {
 
 test("invalid media forms are rejected with focused diagnostics", () => {
   const cases: readonly (readonly [string, string, string])[] = [
-    ['let s = playAudio "bell.mp3"', "TSV036", 'playAudio "bell.mp3"'],
+    ['let s = playAudio "bell.mp3"', "TSV069", 'playAudio "bell.mp3"'],
     ['playAudio repeat "beat.mp3"', "TSV036", "repeat"],
     ['playVideo(file: "a.mp4", repeat: true)', "TSV036", "true"],
     ['playAudio(file: "a.mp3", repeat: 3)', "TSV036", "3"],
@@ -145,7 +145,7 @@ test("invalid media forms are rejected with focused diagnostics", () => {
     ['playAudio(file: "a.mp3", startAt: 10 s, endAt: 5 s)', "TSV036", "5 s"],
     ['playAudio(file: "a.mp3", startAt: "x")', "TSV036", '"x"'],
     ['playAudio(file: "a.mp3", volume: 2)', "TSV036", "2"],
-    ['playAudio async "a.mp3" {\n  finish {\n  }\n  finish {\n  }\n}', "TSV036", "finish"],
+    ['playAudio async "a.mp3" {\n  finish {\n  }\n  finish {\n  }\n}', "TSV069", "finish"],
     ['playAudio async repeat "a.mp3" {\n  finish {\n  }\n}', "TSV036", "finish"],
     ['playAudio async "a.mp3" {\n  at -1 s {\n  }\n}', "TSV036", "-1 s"],
     ['playAudio async "a.mp3" {\n  say "x"\n  at 1 s {\n  }\n}', "TSP035", "at"],

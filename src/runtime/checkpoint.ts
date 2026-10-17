@@ -281,7 +281,7 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
   if (!planValidation.valid) {
     const first = planValidation.errors[0];
     throw checkpointError(
-      first?.code === "TSC001" ? "TSK001" : "TSK002",
+      first?.code === "TSC010" ? "TSK001" : "TSK002",
       first?.message ?? "Instruction plan is malformed.",
       `$.plan${first?.path.slice(1) ?? ""}`,
     );
@@ -312,7 +312,7 @@ function capturePlan(value: unknown, path: string): InstructionPlan {
   if (!captured.validation.valid || captured.plan === null) {
     const first = captured.validation.errors[0];
     throw checkpointError(
-      first?.code === "TSC001" ? "TSK001" : "TSK002",
+      first?.code === "TSC010" ? "TSK001" : "TSK002",
       checkpointExternalDataMessage(
         captured.failureKind,
         first?.message ?? "Instruction plan is malformed.",

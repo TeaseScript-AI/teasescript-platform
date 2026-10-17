@@ -238,7 +238,7 @@ test("a script(...) with literal text is checked like a file target, and a compu
   assert.deepEqual(check('let next = script("rooms/hall.tease", "start")\nexit'), [
     [
       "TSV020",
-      'script(...) takes 1 argument (path), received 2. Name a label with label:, as in script("rooms/hall.tease", label: "start").',
+      "script() takes 1 argument (path), received 2. Name a label with 'label:', as in 'script(\"rooms/hall.tease\", label: \"start\")'.",
     ],
   ]);
   assert.deepEqual(check('let next = script(1, at: "start")\nexit'), [
@@ -246,7 +246,7 @@ test("a script(...) with literal text is checked like a file target, and a compu
       "TSV043",
       "script(...) takes the path of a file as text (string), but this is a whole number (integer).",
     ],
-    ["TSV022", "script(...) has no parameter 'at'. Its only named argument is 'label:'."],
+    ["TSV022", "script() has no parameter 'at'. Its only named argument is 'label:'."],
   ]);
   // A button cannot return a reference, also through its text; with a value written before ':' it may show one.
   const noReturn =

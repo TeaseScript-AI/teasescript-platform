@@ -2,12 +2,12 @@ import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
-  argumentCountMessage,
   argumentFix,
   argumentTypeMessage,
   beyondLengthMessage,
   emptyTextMessage,
   endBeforeStartMessage,
+  methodArgumentCountMessage,
   needsNonEmptyText,
   negativeMessage,
   regexMemberMessage,
@@ -535,7 +535,7 @@ export function checkTextArguments(
   const parameters = member.parameters!;
   const required = parameters.filter((parameter) => parameter.optional !== true).length;
   if (positional.length < required || positional.length > parameters.length)
-    throw fault("TSR028", argumentCountMessage(member, positional.length), span);
+    throw fault("TSR028", methodArgumentCountMessage(member, positional.length), span);
   for (const [index, value] of positional.entries()) {
     const parameter = parameters[index]!;
     const position = parameter.kind === "position";

@@ -126,7 +126,7 @@ test("a repeated tag is merged with a warning; two different numbers are an erro
   assert.notEqual(repeated.plan, null);
 
   assert.deepEqual(codes("---\ntags: punishment: 4, punishment: 5, punishment: 6\n---\nexit"), [
-    ["TSH012", "error", 1],
+    ["TST004", "error", 1],
   ]);
 });
 

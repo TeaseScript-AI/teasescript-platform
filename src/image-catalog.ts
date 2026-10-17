@@ -4,7 +4,13 @@ import { createDiagnostic, DiagnosticSeverity } from "./diagnostics.js";
 import type { PlanImage } from "./plan/model.js";
 import { packageAssetPathProblem } from "./project-paths.js";
 import { createSourcePosition, createSourceSpan } from "./source.js";
-import { addTag, readTagText, type Tag } from "./tags.js";
+import {
+  addTag,
+  CONFLICTING_TAG_CODE,
+  conflictingTagMessage,
+  readTagText,
+  type Tag,
+} from "./tags.js";
 
 /** A package image by its path, with the keywords a host read from its XMP metadata (ADR 0023). */
 export interface ProjectImageFile {
@@ -15,7 +21,7 @@ export interface ProjectImageFile {
 const imageDiagnosticCode = {
   invalidPath: "TSC009",
   ignoredKeywords: "TST003",
-  conflictingTagValue: "TST004",
+  conflictingTagValue: CONFLICTING_TAG_CODE,
 } as const satisfies Record<string, OwnedDiagnosticCode<"compiler">>;
 
 /**
@@ -56,7 +62,7 @@ export function imageCatalog(images: readonly ProjectImageFile[]): {
             image.path,
             DiagnosticSeverity.Error,
             imageDiagnosticCode.conflictingTagValue,
-            `The image '${image.path}' has two different numbers for the tag '${tag.name}'. Keep one keyword such as '${tag.name}: ${tag.value}'.`,
+            conflictingTagMessage(tags.get(tag.name)!, tag, image.path),
           ),
         );
       }
