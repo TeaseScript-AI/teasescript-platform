@@ -138,6 +138,7 @@ const ASK_KINDS = {
   askDate: "date",
   askTime: "time",
   askDateTime: "datetime",
+  askPassword: "password",
   askChoice: "choice",
 } as const satisfies Record<string, InteractionExpression["interactionKind"]>;
 
@@ -191,6 +192,11 @@ const HELP = Object.freeze({
     "Waits for a local date and time from the Player's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional prefill fills the control at first.",
     ASK_HEAD,
     "datetime",
+  ),
+  askPassword: help(
+    "askPassword",
+    "Waits for a password in a masked field and returns the SHA-256 of what was typed, as hashText gives it, never the text itself. Written directly as 'password:' of an encrypt or decrypt call, the typed text locks or opens instead and never becomes a value.",
+    ASK_HEAD,
   ),
   askChoice: help(
     "askChoice",
@@ -290,6 +296,7 @@ export function languageCompletions(
     items.push(command("askDate", "Compact date input expression"));
     items.push(command("askTime", "Compact time input expression"));
     items.push(command("askDateTime", "Compact date and time input expression"));
+    items.push(command("askPassword", "Compact password input expression"));
     items.push(command("askChoice", "Compact choice expression"));
     items.push(command("showCamera", "Show the camera view and give its handle"));
     items.push(

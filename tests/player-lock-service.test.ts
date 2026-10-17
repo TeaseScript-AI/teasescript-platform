@@ -4,10 +4,12 @@ import test from "node:test";
 import { CapturedMediaStore } from "../player/captured-media.js";
 import { rebuildRecordedSession } from "../player/debug-export.js";
 import { DebugRecorder } from "../player/debug-recorder.js";
-import { loadTlock, readLock, type LockServices } from "../player/encryption/lock.js";
+import { loadAge, loadTlock, readLock, type LockServices } from "../player/encryption/lock.js";
 import { roundTimeMs } from "../player/encryption/drand.js";
 import { LockService, type LockDialog, type LockDialogInput } from "../player/lock-service.js";
 import {
+  activePlayerRuntimeLock,
+  answerPlayerRuntimeLock,
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   playerRuntimeSnapshot,
@@ -16,6 +18,7 @@ import {
 } from "../player/runtime-adapter.js";
 import { bytesFromBase64 } from "../player/stored-files.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
+import { fromBase64, openAge, sshIdentity, x25519Identity } from "./helpers/age-keyholder.js";
 
 /*
  * The Player's lock service (V30 §13): it answers each lock step with real locks, presents the lock and unlock dialogs,
@@ -72,6 +75,8 @@ class Harness {
       readonly media?: CapturedMediaStore;
       readonly files?: readonly string[];
       readonly recorder?: DebugRecorder;
+      /** Whether the service starts at once; a test may first answer a step itself. */
+      readonly start?: boolean;
     } = {},
   ) {
     this.media = options.media ?? new CapturedMediaStore(null, urls, "locks");
@@ -82,6 +87,7 @@ class Harness {
     });
     const services: LockServices = {
       tlock: loadTlock,
+      age: loadAge,
       fetch: relays(() => this.relaysDown),
       nowMs: () => this.nowMs,
     };
@@ -105,7 +111,7 @@ class Harness {
       subtle: "subtle" in options ? options.subtle : crypto.subtle,
       crypto: services,
     });
-    this.service.request();
+    if (options.start !== false) this.service.request();
   }
 
   /** The dialog shown now, not busy, once one is. */
@@ -149,7 +155,7 @@ test("locks with a written password and time lock open with the password, and on
   const player = new Harness(
     [
       'let friday = toAbsoluteDateTime("2023-08-23T15:09:27Z")',
-      'let locked = encryptText("corner time", password: "corner", timeLock: friday)',
+      'let locked = encryptText("corner time", password: "corner", publicKey: false, timeLock: friday)',
       'let byPassword = decryptText(locked, password: "corner", default: null)',
       'let wrong = decryptText(locked, password: "Corner", default: "no")',
       "let byTime = decryptText(locked, default: null)",
@@ -180,9 +186,9 @@ test("the lock dialog asks for each opener, suggests 7 days, locks with what the
   const lock = await player.dialog();
   assert.equal(lock.kind, "lock");
   assert.deepEqual(lock.kind === "lock" && [lock.choices, lock.suggestedTimeLockMs, lock.given], [
-    ["timeLock", "password"],
+    ["timeLock", "password", "publicKey"],
     NOW_MS + 7 * 24 * 60 * 60 * 1000,
-    { password: false, timeLock: false },
+    { password: false, timeLock: false, publicKeys: 0 },
   ]);
   const moment = NOW_MS + 3_600_000;
   player.answer({ password: "secret words", timeLockMs: moment });
@@ -255,16 +261,16 @@ test("the lock dialog's time lock may be switched off: the lock opens only with 
 test("the lock dialog asks only for the openers written true, and locks with the call's own openers too", async () => {
   const player = new Harness(
     [
-      'let given = encryptText("given", password: "words", timeLock: true)',
+      'let given = encryptText("given", password: "words", publicKey: false, timeLock: true)',
       'let opened = decryptText(given, password: "words", default: "closed")',
-      'let typed = encryptText("typed", password: true, timeLock: false)',
+      'let typed = encryptText("typed", password: true, publicKey: false, timeLock: false)',
       "exit",
     ].join("\n"),
   );
   const timeOnly = await player.dialog();
   assert.deepEqual(timeOnly.kind === "lock" && [timeOnly.choices, timeOnly.given], [
     ["timeLock"],
-    { password: true, timeLock: false },
+    { password: true, timeLock: false, publicKeys: 0 },
   ]);
   // Switched off, the time lock leaves the call's password.
   player.answer({ password: null, timeLockMs: null });
@@ -275,7 +281,7 @@ test("the lock dialog asks only for the openers written true, and locks with the
       passwordOnly.suggestedTimeLockMs,
       passwordOnly.given,
     ],
-    [["password"], null, { password: false, timeLock: false }],
+    [["password"], null, { password: false, timeLock: false, publicKeys: 0 }],
   );
   player.answer({ password: "chosen words", timeLockMs: null });
   const values = await player.ended();
@@ -290,10 +296,259 @@ test("the lock dialog asks only for the openers written true, and locks with the
   }
 });
 
+test("password: askPassword(...) asks in the password field, locks with the typed password and its time lock, and a wrong one gives the default", async () => {
+  const player = new Harness(
+    [
+      'let locked = encryptText("fielded", password: askPassword("Choose a code", hint: "The code"), publicKey: false, timeLock: getAbsoluteDateTime() + 7 days)',
+      'let opened = decryptText(locked, password: askPassword("Your code?"), default: "closed")',
+      'let wrong = decryptText(locked, password: askPassword("Again?"), default: "closed")',
+      'let timed = decryptText(locked, default: "closed")',
+      "exit",
+    ].join("\n"),
+  );
+  const field = await player.dialog();
+  // The encrypt call's field has a "Repeat password"; the decrypt calls' have one field.
+  assert.deepEqual(field.kind === "password" && [field.repeat, field.hint], [true, "The code"]);
+  player.answer({ password: "field words", timeLockMs: null });
+  const open = await player.dialog();
+  assert.deepEqual(open.kind === "password" && [open.repeat, open.hint], [false, null]);
+  player.answer({ password: "field words", timeLockMs: null });
+  const again = await player.dialog();
+  assert.equal(again.kind, "password");
+  player.answer({ password: "not field words", timeLockMs: null });
+  // The lock also has its time lock, 7 days ahead, which the unlock dialog shows.
+  const unlock = await player.dialog();
+  assert.ok(
+    unlock.kind === "unlock" &&
+      unlock.password &&
+      Math.abs(unlock.moments[0]! - (NOW_MS + 7 * 24 * 60 * 60 * 1000)) < 4_000,
+  );
+  player.service.cancel();
+  const values = await player.ended();
+  player.stop();
+  assert.deepEqual([values.opened, values.wrong, values.timed], ["fielded", "closed", "closed"]);
+  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  assert.ok(!recorded.includes("field words"));
+});
+
+test("an encrypt call's password field asks first, then the lock dialog for the openers written true, and the lock has both", async () => {
+  const player = new Harness(
+    [
+      'let both = encryptText("both", password: askPassword("Code?"), publicKey: false, timeLock: true)',
+      'let opened = decryptText(both, password: askPassword("Again?"), default: "closed")',
+      "exit",
+    ].join("\n"),
+  );
+  const field = await player.dialog();
+  assert.deepEqual(field.kind === "password" && field.repeat, true);
+  player.answer({ password: "both words", timeLockMs: null });
+  // The same step's lock dialog follows, with the field's password as an opener the call gives.
+  const dialog = await player.dialog();
+  assert.deepEqual(
+    dialog.kind === "lock" && [dialog.actionId === field.actionId, dialog.choices, dialog.given],
+    [true, ["timeLock"], { password: true, timeLock: false, publicKeys: 0 }],
+  );
+  const moment = NOW_MS + 3_600_000;
+  player.answer({ password: null, timeLockMs: moment });
+  const open = await player.dialog();
+  assert.equal(open.kind, "password");
+  player.answer({ password: "both words", timeLockMs: null });
+  const values = await player.ended();
+  player.stop();
+  assert.equal(values.opened, "both");
+  const read = readLock(bytesFromBase64(String(values.both))!);
+  assert.deepEqual([read?.passwords.length, read?.times.length], [1, 1]);
+  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  assert.ok(!recorded.includes("both words"));
+});
+
+test("a password field whose typed password was lost, as on a reload, asks again", async () => {
+  const player = new Harness(
+    [
+      'let locked = encryptText("again", password: askPassword("Code?"), publicKey: false, timeLock: false)',
+      "exit",
+    ].join("\n"),
+    { start: false },
+  );
+  // Another Player answered the field and was reloaded: this one has nothing typed for the step after it.
+  const field = activePlayerRuntimeLock(player.session.state)!;
+  assert.deepEqual([field.phase, field.passwordField], ["ask", { hint: null }]);
+  player.session = answerPlayerRuntimeLock(
+    player.session,
+    field.actionId,
+    { kind: "submitted" },
+    player.media,
+  ).session;
+  player.service.request();
+  const again = await player.dialog();
+  assert.deepEqual(again.kind === "password" && again.actionId > field.actionId, true);
+  player.answer({ password: "kept words", timeLockMs: null });
+  const values = await player.ended();
+  player.stop();
+  assert.equal(typeof values.locked, "string");
+});
+
+/** The age file in the armor that the unlock dialog shows the player for their keyholder. */
+function unarmored(armor: string): Uint8Array {
+  return fromBase64(
+    armor
+      .split("\n")
+      .filter((line) => line !== "" && !line.startsWith("-----"))
+      .join(""),
+  );
+}
+
+test("the lock dialog takes public keys, and the unlock dialog sends the unlock request and opens with the unlock key sent back", async () => {
+  const keyholder = x25519Identity();
+  const player = new Harness(
+    [
+      'let locked = encryptText("kept for her")',
+      'let opened = decryptText(locked, default: "closed")',
+      "exit",
+    ].join("\n"),
+  );
+  const lock = await player.dialog();
+  assert.deepEqual(lock.kind === "lock" && lock.choices, ["timeLock", "password", "publicKey"]);
+  player.answer({
+    password: null,
+    timeLockMs: NOW_MS + 3_600_000,
+    publicKeys: [keyholder.recipient, sshIdentity().recipient],
+  });
+  const unlock = await player.dialog();
+  assert.ok(unlock.kind === "unlock" && unlock.ageText !== null && !unlock.password);
+  // The owner of the private key opens the unlock request with it and sends back the unlock key it holds.
+  const key = new TextDecoder().decode(openAge(unarmored(unlock.ageText), keyholder)!);
+  player.answer({
+    password: null,
+    timeLockMs: null,
+    key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  });
+  const again = await player.dialog();
+  assert.deepEqual(again.kind === "unlock" && again.notice, "wrongKey");
+  player.answer({ password: null, timeLockMs: null, key });
+  const values = await player.ended();
+  player.stop();
+  assert.equal(values.opened, "kept for her");
+  // The key never reached the state or an event.
+  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  assert.ok(!recorded.includes(key.trim()));
+});
+
+test("the lock dialog's time lock may be switched off with only a public key, whose private key then alone opens the lock", async () => {
+  const keyholder = x25519Identity();
+  const player = new Harness(
+    [
+      'let locked = encryptText("only hers")',
+      'let opened = decryptText(locked, default: "closed")',
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal((await player.dialog()).kind, "lock");
+  player.answer({ password: null, timeLockMs: null, publicKeys: [keyholder.recipient] });
+  // Its unlock dialog sends the unlock request, has no password field and no moment, and waits for nothing by itself.
+  const unlock = await player.dialog();
+  assert.ok(unlock.kind === "unlock" && unlock.ageText !== null && !unlock.password);
+  assert.deepEqual(unlock.moments, []);
+  assert.deepEqual(player.wakes, []);
+  const key = new TextDecoder().decode(openAge(unarmored(unlock.ageText), keyholder)!);
+  player.answer({ password: null, timeLockMs: null, key });
+  const values = await player.ended();
+  player.stop();
+  assert.equal(values.opened, "only hers");
+  const read = readLock(bytesFromBase64(String(values.locked))!);
+  assert.deepEqual([read?.passwords.length, read?.times.length, read?.ages.length], [0, 0, 1]);
+});
+
+test("publicKey: written in the script locks for its private keys, and key: opens, while a wrong key gives the default; publicKey: true asks for keys alone", async () => {
+  const keyholder = sshIdentity();
+  const locking = new Harness(
+    [
+      `let locked = encryptText("written", password: false, publicKey: ["${keyholder.recipient}"], timeLock: false)`,
+      'let chosen = encryptText("chosen", password: "corner", publicKey: true, timeLock: false)',
+      "exit",
+    ].join("\n"),
+  );
+  // The dialog of `publicKey: true` asks for public keys alone, the call's password being an opener it gives.
+  const dialog = await locking.dialog();
+  assert.deepEqual(dialog.kind === "lock" && [dialog.choices, dialog.given], [
+    ["publicKey"],
+    { password: true, timeLock: false, publicKeys: 0 },
+  ]);
+  locking.answer({ password: null, timeLockMs: null, publicKeys: [keyholder.recipient] });
+  const { locked, chosen } = await locking.ended();
+  locking.stop();
+  const chosenRead = readLock(fromBase64(String(chosen)))!;
+  assert.deepEqual(
+    [chosenRead.passwords.length, chosenRead.times.length, chosenRead.ages.length],
+    [1, 0, 1],
+  );
+  const bytes = fromBase64(String(locked));
+  const read = readLock(bytes)!;
+  assert.deepEqual([read.passwords.length, read.times.length, read.ages.length], [0, 0, 1]);
+  const key = new TextDecoder().decode(openAge(read.ages[0]!, keyholder)!).trim();
+  const opening = new Harness(
+    [
+      `let opened = decryptText("${String(locked)}", key: "${key}", default: "closed")`,
+      `let wrong = decryptText("${String(locked)}", key: "${key.replace(/^./u, key.startsWith("A") ? "B" : "A")}", default: "closed")`,
+      "exit",
+    ].join("\n"),
+  );
+  const values = await opening.ended();
+  opening.stop();
+  assert.deepEqual([values.opened, values.wrong], ["written", "closed"]);
+  // A call that writes its key shows no dialog.
+  assert.ok(opening.dialogs.every((shown) => shown === null));
+});
+
+test("a password field with a written key asks again for a password the Player lost, and the lock dialog asks again for more keys than a lock holds", async () => {
+  const locking = new Harness(
+    'let locked = encryptText("both", password: "corner", publicKey: false, timeLock: false)\nexit',
+  );
+  const { locked } = await locking.ended();
+  locking.stop();
+  const player = new Harness(
+    [
+      `let opened = decryptText("${String(locked)}", password: askPassword("Code?"), key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", default: "closed")`,
+      'let many = encryptText("many")',
+      "exit",
+    ].join("\n"),
+    { start: false },
+  );
+  // Another Player answered the field and was reloaded.
+  const field = activePlayerRuntimeLock(player.session.state)!;
+  player.session = answerPlayerRuntimeLock(
+    player.session,
+    field.actionId,
+    { kind: "submitted" },
+    player.media,
+  ).session;
+  player.service.request();
+  const again = await player.dialog();
+  assert.deepEqual(again.kind === "password" && again.actionId > field.actionId, true);
+  player.answer({ password: "corner", timeLockMs: null });
+  const lock = await player.dialog();
+  assert.equal(lock.kind, "lock");
+  // 595 keys do not fit into a lock: the dialog asks again rather than failing.
+  const keyholder = sshIdentity().recipient;
+  player.answer({
+    password: null,
+    timeLockMs: NOW_MS + 3_600_000,
+    publicKeys: Array.from({ length: 595 }, () => keyholder),
+  });
+  const fewer = await player.dialog();
+  assert.ok(fewer.kind === "lock" && fewer.key !== lock.key);
+  player.answer({ password: null, timeLockMs: NOW_MS + 3_600_000, publicKeys: [keyholder] });
+  const values = await player.ended();
+  player.stop();
+  assert.equal(values.opened, "both");
+  assert.equal(typeof values.many, "string");
+  assert.deepEqual(player.diagnostics, []);
+});
+
 test("a cancelled unlock dialog gives the default, and a passed time lock out of reach asks only when a password can open it", async () => {
   const cancelled = new Harness(
     [
-      'let locked = encryptText("x", password: "p", timeLock: getAbsoluteDateTime() + 7 days)',
+      'let locked = encryptText("x", password: "p", publicKey: false, timeLock: getAbsoluteDateTime() + 7 days)',
       'let opened = decryptText(locked, default: "default")',
       "exit",
     ].join("\n"),
@@ -309,7 +564,7 @@ test("a cancelled unlock dialog gives the default, and a passed time lock out of
   const unreachable = new Harness(
     [
       past,
-      'let both = encryptText("x", password: "p", timeLock: past)',
+      'let both = encryptText("x", password: "p", publicKey: false, timeLock: past)',
       'let opened = decryptText(both, default: "default")',
       "exit",
     ].join("\n"),
@@ -326,7 +581,7 @@ test("a cancelled unlock dialog gives the default, and a passed time lock out of
   const timeOnly = new Harness(
     [
       past,
-      'let locked = encryptText("y", password: false, timeLock: past)',
+      'let locked = encryptText("y", password: false, publicKey: false, timeLock: past)',
       'let opened = decryptText(locked, default: "default")',
       "exit",
     ].join("\n"),
@@ -347,7 +602,7 @@ test("encryptFile locks a stored file into a locked file, and decryptFile opens 
   const player = new Harness(
     [
       `let photo = "${photo}"`,
-      'let locked = encryptFile(photo, password: "p", timeLock: false)',
+      'let locked = encryptFile(photo, password: "p", publicKey: false, timeLock: false)',
       'let opened = decryptFile(locked, password: "p", default: null)',
       'let wrong = decryptFile(locked, password: "q", default: null)',
       "exit",
@@ -371,7 +626,10 @@ test("encryptFile locks a stored file into a locked file, and decryptFile opens 
 
 test("without WebCrypto, as on a Player page over plain HTTP, a lock fails with TSR086", async () => {
   const player = new Harness(
-    ['let locked = encryptText("x", password: "p", timeLock: false)', "exit"].join("\n"),
+    [
+      'let locked = encryptText("x", password: "p", publicKey: false, timeLock: false)',
+      "exit",
+    ].join("\n"),
     { subtle: undefined },
   );
   await player.until(() => player.session.state.status === "failed");
@@ -383,7 +641,7 @@ test("without WebCrypto, as on a Player page over plain HTTP, a lock fails with 
 test("a dialog waits for a distant time lock in bounded wakes, and none opens it early", async () => {
   const player = new Harness(
     [
-      'let locked = encryptText("x", password: false, timeLock: getAbsoluteDateTime() + 30 days)',
+      'let locked = encryptText("x", password: false, publicKey: false, timeLock: getAbsoluteDateTime() + 30 days)',
       'let opened = decryptText(locked, default: "closed")',
       "exit",
     ].join("\n"),
@@ -408,7 +666,7 @@ test("a dialog waits for a distant time lock in bounded wakes, and none opens it
 test("an empty password is a password: the unlock dialog opens a lock made with one", async () => {
   const player = new Harness(
     [
-      'let locked = encryptText("empty", password: "", timeLock: false)',
+      'let locked = encryptText("empty", password: "", publicKey: false, timeLock: false)',
       'let opened = decryptText(locked, default: "closed")',
       "exit",
     ].join("\n"),
@@ -423,7 +681,7 @@ test("an empty password is a password: the unlock dialog opens a lock made with 
 test("a time lock's open dialog offers Try again when its moment comes but the relays are out of reach", async () => {
   const player = new Harness(
     [
-      'let locked = encryptText("y", password: false, timeLock: getAbsoluteDateTime() + 1 min)',
+      'let locked = encryptText("y", password: false, publicKey: false, timeLock: getAbsoluteDateTime() + 1 min)',
       'let opened = decryptText(locked, default: "closed")',
       "exit",
     ].join("\n"),

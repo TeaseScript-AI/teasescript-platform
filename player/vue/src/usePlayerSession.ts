@@ -580,7 +580,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     ...(options.lockServices === undefined ? {} : { crypto: options.lockServices }),
   });
   watch(servicedSession, () => locks.request());
-  // A script that locks or opens loads the lock code while the Player is online, so locking works offline later.
+  // A script that locks or opens loads the lock code while the Player is online, so locking works offline later; one
+  // that locks also loads the public keys' code.
   watch(
     () => servicedSession.value?.plan,
     (plan) => {
@@ -589,6 +590,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       void (options.lockServices?.tlock ?? (() => import("../../encryption/tlock.js")))().catch(
         () => {},
       );
+      const encrypts = plan.instructions.some(
+        (instruction) =>
+          instruction.kind === "lock" &&
+          (instruction.call === "encryptText" || instruction.call === "encryptFile"),
+      );
+      if (encrypts)
+        void (options.lockServices?.age ?? (() => import("../../encryption/age.js")))().catch(
+          () => {},
+        );
     },
   );
   // A session that ended releases its camera.
@@ -1301,14 +1311,19 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     keepSessionLater();
     while (keeping !== null) await keeping;
   }
-  // The session is kept at each interaction it newly presents and when it ends, and when the page is hidden.
-  let keptActionId: number | null = null;
+  // The session is kept at each interaction it newly presents, a lock's dialog or password field too, also when one
+  // asks again after a block, and when it ends, and when the page is hidden.
+  let keptPresentation: string | null = null;
   watch(session, (current) => {
     if (current === null || inspecting.value) return;
-    const actionId = activePlayerRuntimeInteraction(current.state)?.actionId ?? null;
+    const foreground = current.state.foregroundAction;
+    const presentation =
+      foreground?.kind === "lock" && foreground.phase === "ask"
+        ? `lock ${foreground.actionId} ${foreground.resumes}`
+        : (activePlayerRuntimeInteraction(current.state)?.actionId.toString() ?? null);
     const ended = current.state.status === "halted" || current.state.status === "failed";
-    if ((actionId === null || actionId === keptActionId) && !ended) return;
-    keptActionId = actionId;
+    if ((presentation === null || presentation === keptPresentation) && !ended) return;
+    keptPresentation = presentation;
     keepSessionLater();
   });
   useEventListener(
@@ -1499,7 +1514,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         const replacing = live && debugRoom.value !== null;
         room.value = "debug";
         kept = { plan: false, count: 0, last: null };
-        keptActionId = null;
+        keptPresentation = null;
         await switchStorage(async () => {
           if (replacing) await debugRooms.discard(scope).catch(() => {});
           const durable = making ? await createDebugRoom(scope, false) : new Set<string>();
@@ -1576,7 +1591,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         while (keeping !== null) await keeping;
         endSession();
         kept = { plan: false, count: 0, last: null };
-        keptActionId = null;
+        keptPresentation = null;
         if (clear === "reset")
           await switchStorage(async () => {
             await debugRooms.discard(scope).catch(() => {});
@@ -1827,7 +1842,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // A new session replaces the one kept before.
     if (pending.kind === "start") {
       kept = { plan: false, count: 0, last: null };
-      keptActionId = null;
+      keptPresentation = null;
     }
     if (pending.marks !== undefined) {
       debugEdits.value = pending.marks.editedWhileDebugging;

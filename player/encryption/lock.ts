@@ -10,6 +10,7 @@
 //   1, password: PBKDF2 iterations (uint32 BE) | salt (16) | AES-256-GCM(KEK, zero nonce, K) (48), where the KEK is
 //      PBKDF2-HMAC-SHA-256 of "teasescript-lock-password:" and the password's UTF-8
 //   2, time:     round (uint64 BE) | drand tlock IBE ciphertext of K for quicknet (160)
+//   3, public key: an age v1 file for the lock's public keys, whose content is K in standard Base64 and a line feed
 
 import {
   fetchBeacon,
@@ -19,11 +20,15 @@ import {
   roundTimeMs,
   type BeaconAnswer,
 } from "./drand.js";
+import type { PublicKey } from "../../src/public-keys.js";
 
 const MAGIC = [0x54, 0x53, 0x4c, 0x4b];
 const VERSION = 1;
 const PASSWORD_OPENER = 1;
 const TIME_OPENER = 2;
+const PUBLIC_KEY_OPENER = 3;
+/** An opener's body length is two bytes. */
+const MAX_OPENER_BYTES = 0xffff;
 
 /** OWASP's current work factor for PBKDF2-HMAC-SHA-256 (Password Storage Cheat Sheet). */
 export const PASSWORD_ITERATIONS = 600_000;
@@ -43,17 +48,29 @@ export function loadTlock(): Promise<TlockModule> {
   return import("./tlock.js");
 }
 
-/** What locking and opening use besides WebCrypto: the time lock's code, the relays, and the device clock. */
+/** The public key opener's age code, loaded on demand. */
+export type AgeModule = typeof import("./age.js");
+
+export function loadAge(): Promise<AgeModule> {
+  return import("./age.js");
+}
+
+/**
+ * What locking and opening use besides WebCrypto: the time lock's and the public keys' code, the relays, and the device
+ * clock.
+ */
 export interface LockServices {
   readonly tlock: () => Promise<TlockModule>;
+  readonly age: () => Promise<AgeModule>;
   readonly fetch: typeof fetch;
   /** The device clock, in epoch milliseconds. */
   readonly nowMs: () => number;
 }
 
-/** The openers of a lock to make: a password, and a moment the time lock opens at. */
+/** The openers of a lock to make: a password, public keys, and a moment the time lock opens at. */
 export interface LockOpeners {
   readonly password: string | null;
+  readonly publicKeys?: readonly PublicKey[];
   readonly timeLockMs: number | null;
 }
 
@@ -76,11 +93,17 @@ export async function lock(
   openers: LockOpeners,
   services: LockServices,
 ): Promise<MadeLock> {
-  if (openers.password === null && openers.timeLockMs === null)
+  const publicKeys = openers.publicKeys ?? [];
+  if (openers.password === null && publicKeys.length === 0 && openers.timeLockMs === null)
     throw new Error("A lock needs an opener.");
   const key = randomBytes(KEY_BYTES);
   const parts: Uint8Array[] = [];
   if (openers.password !== null) parts.push(await passwordOpener(openers.password, key));
+  if (publicKeys.length > 0) {
+    const age = await services.age();
+    const file = await age.ageFile(new TextEncoder().encode(`${keyText(key)}\n`), publicKeys);
+    parts.push(opener(PUBLIC_KEY_OPENER, file));
+  }
   let timeLockMs = openers.timeLockMs;
   if (timeLockMs !== null) {
     const tlock = await services.tlock();
@@ -117,6 +140,8 @@ export async function lock(
 export interface ReadLock {
   readonly passwords: readonly PasswordOpener[];
   readonly times: readonly TimeOpener[];
+  /** The age file of the public key opener, which only a matching private key opens, or none. */
+  readonly ages: readonly Uint8Array[];
   readonly header: Uint8Array<ArrayBuffer>;
   readonly nonce: Uint8Array<ArrayBuffer>;
   readonly sealed: Uint8Array<ArrayBuffer>;
@@ -147,6 +172,7 @@ export function readLock(bytes: Uint8Array): ReadLock | null {
   const count = bytes[5]!;
   const passwords: PasswordOpener[] = [];
   const times: TimeOpener[] = [];
+  const ages: Uint8Array[] = [];
   let at = 6;
   for (let index = 0; index < count; index += 1) {
     if (at + 3 > bytes.length) return null;
@@ -168,6 +194,9 @@ export function readLock(bytes: Uint8Array): ReadLock | null {
       const round = view.getBigUint64(0);
       if (round < 1n || round > BigInt(Number.MAX_SAFE_INTEGER)) return null;
       times.push({ round: Number(round), ciphertext: body.slice(8) });
+    } else if (kind === PUBLIC_KEY_OPENER) {
+      if (ages.length > 0) return null;
+      ages.push(body);
     }
     // An opener of a kind this Player does not know may still be followed by one it knows.
   }
@@ -175,6 +204,7 @@ export function readLock(bytes: Uint8Array): ReadLock | null {
   return {
     passwords,
     times,
+    ages,
     header: bytes.slice(0, at),
     nonce: bytes.slice(at, at + NONCE_BYTES),
     sealed: bytes.slice(at + NONCE_BYTES),
@@ -199,6 +229,25 @@ export async function openWithPassword(
     if (content !== null) return content;
   }
   return null;
+}
+
+/**
+ * The content that the unlock key sent back opens: K in standard Base64, as `age` gives it, with any white
+ * space around it; `null` for text that is not such a key, a key that does not open it, or a lock that was changed.
+ */
+export async function openWithKey(read: ReadLock, text: string): Promise<Uint8Array | null> {
+  const trimmed = text.trim();
+  if (!/^[A-Za-z0-9+/]{43}=$/u.test(trimmed)) return null;
+  return openContent(
+    read,
+    Uint8Array.from(atob(trimmed), (character) => character.charCodeAt(0)),
+  );
+}
+
+/** The ASCII armor of a lock's age file, the unlock request, which `age -d` reads like the binary file. */
+export function armoredAge(file: Uint8Array): string {
+  const lines = base64(file).match(/.{1,64}/gu) ?? [];
+  return `-----BEGIN AGE ENCRYPTED FILE-----\n${lines.join("\n")}\n-----END AGE ENCRYPTED FILE-----\n`;
 }
 
 /** The content a content key opens, or `null` for a key that does not open it, or a lock that was changed. */
@@ -312,7 +361,19 @@ async function unseal(
 
 function opener(kind: number, ...body: Uint8Array[]): Uint8Array {
   const joined = concat(...body);
+  if (joined.length > MAX_OPENER_BYTES) throw new Error("An opener holds at most 65,535 bytes.");
   return concat(new Uint8Array([kind, joined.length >> 8, joined.length & 0xff]), joined);
+}
+
+/** K as the text that `age -d` gives the owner of the private key: standard Base64. */
+function keyText(key: Uint8Array): string {
+  return base64(key);
+}
+
+function base64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 function uint64(value: number): Uint8Array {

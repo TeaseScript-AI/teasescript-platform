@@ -42,6 +42,7 @@ import type {
   StoreTemporaryInstruction,
   MediaCuePlan,
   JumpInstruction,
+  LockInstruction,
   LoopControlInstruction,
   LoopStartInstruction,
   PrepareParameterDefaultInstruction,
@@ -69,6 +70,7 @@ import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import {
   isAskImageCall,
   isFileStoreCall,
+  directPasswordField,
   isLockCall,
   isTakePhotoCall,
 } from "../../capture-call.js";
@@ -1978,7 +1980,7 @@ export class InstructionCompiler {
         ? ("choice" as const)
         : expression.interactionKind === "number" || expression.interactionKind === "integer"
           ? ("number" as const)
-          : expression.interactionKind === "text"
+          : expression.interactionKind === "text" || expression.interactionKind === "password"
             ? ("string" as const)
             : ("temporal" as const);
 
@@ -2028,89 +2030,41 @@ export class InstructionCompiler {
     let preparedUi: PreparedInteractionUiPayload;
     const preparedTemporaryIds: number[] = [speakerTemporary];
 
-    let question: Extract<Instruction, { kind: "say" }> | null = null;
     if (expression.interactionKind !== "choice") {
-      let questionTemporaryIds: number[] = [];
-      if (expression.question !== null) {
-        const sayTemporaries = this.#prepareQuestionSpeaker(
-          expression.speaker?.name ?? null,
-          expression.asSpan ?? expression.commandSpan,
-        );
-        const presentation = yield* compileChild(
-          this.#lowerQuestionPresentationTask(
-            expression.presentation ?? undefined,
-            speakerTemporary,
-          ),
-        );
-        const lowered = yield* compileChild(
-          this.#lowerInteractionPayloadTask(expression.question, speakerTemporary),
-        );
-        const textTemporary = this.#allocateTemporary();
-        this.instructions.push({
-          kind: "prepareSayText",
-          value: lowered.plan,
-          destinationTemporary: textTemporary,
-          field: true,
-          span: copySpan(expression.question.span),
-        });
-        this.#emitTemporaryCleanup(lowered.temporaryIds, expression.question.span);
-        question = {
-          kind: "say",
-          presentation: presentation?.plan ?? null,
-          speaker: expression.speaker?.name ?? null,
-          value: lowered.plan,
-          ...sayTemporaries,
-          textTemporary,
-          skipPolicy: null,
-          pacing: "instant",
-          span: copySpan(expression.span),
-        };
-        questionTemporaryIds = [
-          sayTemporaries.speakerTemporary,
-          sayTemporaries.contextualSpeakerTemporary,
-          ...(presentation?.temporaryIds ?? []),
-          textTemporary,
-        ];
-      }
-      let hint: { readonly temporaryId: number } | null = null;
-      let prefill: { readonly temporaryId: number } | null = null;
-      for (const operand of askOperands(expression)) {
-        if (operand === expression.question || operand === expression.presentation) continue;
-        const materialized = this.#materializeDedicatedInteractionValue(
-          yield* compileChild(this.#lowerInteractionPayloadTask(operand, speakerTemporary)),
-          operand.span,
-        );
-        preparedTemporaryIds.push(materialized.temporaryId);
-        if (operand === expression.hint) hint = materialized;
-        else prefill = materialized;
-      }
-      if (question !== null) {
-        this.instructions.push(question);
-        this.#emitTemporaryCleanup(questionTemporaryIds, expression.span);
-      }
+      const { hint, prefill } = yield* compileChild(
+        this.#lowerAskQuestionTask(expression, speakerTemporary),
+      );
+      if (hint !== null) preparedTemporaryIds.push(hint.temporaryId);
+      if (prefill !== null) preparedTemporaryIds.push(prefill.temporaryId);
       preparedUi =
-        expression.interactionKind === "text"
+        expression.interactionKind === "password"
           ? {
-              kind: "text",
+              kind: "password",
               hintTemporary: hint?.temporaryId ?? null,
-              ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
-              accessibleName: { kind: "localizedDefault", key: "answer" },
+              accessibleName: { kind: "localizedDefault", key: "password" },
             }
-          : expression.interactionKind === "number" || expression.interactionKind === "integer"
+          : expression.interactionKind === "text"
             ? {
-                kind: "number",
-                hintTemporary: hint?.temporaryId ?? null,
-                ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
-                ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
-                accessibleName: { kind: "localizedDefault", key: "number" },
-              }
-            : {
-                kind: "temporal",
-                temporalKind: expression.interactionKind,
+                kind: "text",
                 hintTemporary: hint?.temporaryId ?? null,
                 ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
                 accessibleName: { kind: "localizedDefault", key: "answer" },
-              };
+              }
+            : expression.interactionKind === "number" || expression.interactionKind === "integer"
+              ? {
+                  kind: "number",
+                  hintTemporary: hint?.temporaryId ?? null,
+                  ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
+                  ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
+                  accessibleName: { kind: "localizedDefault", key: "number" },
+                }
+              : {
+                  kind: "temporal",
+                  temporalKind: expression.interactionKind,
+                  hintTemporary: hint?.temporaryId ?? null,
+                  ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
+                  accessibleName: { kind: "localizedDefault", key: "answer" },
+                };
     } else {
       // The `prefill:` after the options is evaluated after them.
       const loweredValues = yield* compileChild(
@@ -2168,6 +2122,76 @@ export class InstructionCompiler {
     );
     this.#emitTemporaryCleanup(preparedTemporaryIds, expression.span);
     return lowered;
+  }
+
+  /**
+   * A basic ask's question and its `hint:` and `prefill:`: the question's speaker, mode, and text are prepared, the named
+   * arguments are evaluated in written order into temporaries, and then the question is said. The caller clears the
+   * temporaries it is given.
+   */
+  *#lowerAskQuestionTask(
+    expression: InteractionExpression,
+    speakerTemporary: number,
+  ): CompileTask<{
+    readonly hint: { readonly temporaryId: number } | null;
+    readonly prefill: { readonly temporaryId: number } | null;
+  }> {
+    let question: Extract<Instruction, { kind: "say" }> | null = null;
+    let questionTemporaryIds: number[] = [];
+    if (expression.question !== null) {
+      const sayTemporaries = this.#prepareQuestionSpeaker(
+        expression.speaker?.name ?? null,
+        expression.asSpan ?? expression.commandSpan,
+      );
+      const presentation = yield* compileChild(
+        this.#lowerQuestionPresentationTask(expression.presentation ?? undefined, speakerTemporary),
+      );
+      const lowered = yield* compileChild(
+        this.#lowerInteractionPayloadTask(expression.question, speakerTemporary),
+      );
+      const textTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "prepareSayText",
+        value: lowered.plan,
+        destinationTemporary: textTemporary,
+        field: true,
+        span: copySpan(expression.question.span),
+      });
+      this.#emitTemporaryCleanup(lowered.temporaryIds, expression.question.span);
+      question = {
+        kind: "say",
+        presentation: presentation?.plan ?? null,
+        speaker: expression.speaker?.name ?? null,
+        value: lowered.plan,
+        ...sayTemporaries,
+        textTemporary,
+        skipPolicy: null,
+        pacing: "instant",
+        span: copySpan(expression.span),
+      };
+      questionTemporaryIds = [
+        sayTemporaries.speakerTemporary,
+        sayTemporaries.contextualSpeakerTemporary,
+        ...(presentation?.temporaryIds ?? []),
+        textTemporary,
+      ];
+    }
+    let hint: { readonly temporaryId: number } | null = null;
+    let prefill: { readonly temporaryId: number } | null = null;
+    for (const operand of askOperands(expression)) {
+      if (operand === expression.question || operand === expression.presentation) continue;
+      const materialized = this.#materializeDedicatedInteractionValue(
+        yield* compileChild(this.#lowerInteractionPayloadTask(operand, speakerTemporary)),
+        operand.span,
+      );
+      if (operand === expression.hint) hint = materialized;
+      else prefill = materialized;
+    }
+    if (question !== null) {
+      this.instructions.push(question);
+      this.#emitTemporaryCleanup(questionTemporaryIds, expression.span);
+    }
+    return { hint, prefill };
   }
 
   /**
@@ -2618,36 +2642,73 @@ export class InstructionCompiler {
       throw new TypeError(`'${call}' is not a lock call.`);
     const lazy = lazyDefaultArgument(expression);
     const written = expression.arguments.filter((argument) => argument !== lazy?.argument);
-    const lowered = yield* compileChild(
-      this.#lowerOrderedExpressionsTask(written.map((argument) => argument.value)),
-    );
-    const operands: Record<"value" | "password" | "timeLock", ExpressionPlan | null> = {
-      value: null,
-      password: null,
-      timeLock: null,
-    };
+    const operands: Record<
+      "value" | "password" | "publicKey" | "key" | "timeLock",
+      ExpressionPlan | null
+    > = { value: null, password: null, publicKey: null, key: null, timeLock: null };
     const temporaryIds: number[] = [];
-    written.forEach((argument, index) => {
-      const operand = lowered[index]!;
-      temporaryIds.push(...operand.temporaryIds);
-      let plan = operand.plan;
-      if (plan.kind !== "temporary" && plan.kind !== "literal") {
-        const temporaryId = this.#allocateTemporary();
-        this.instructions.push({
-          kind: "storeTemporary",
-          temporaryId,
-          value: plan,
-          expectBoolean: false,
-          span: copySpan(argument.value.span),
-        });
-        temporaryIds.push(temporaryId);
-        plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
+    let passwordField: LockInstruction["passwordField"] = null;
+    // A password field written directly says its question where `password:` stands; the arguments before it are kept
+    // in temporaries first, and those after it are evaluated after the question.
+    const fieldIndex = written.findIndex(
+      (argument) =>
+        argument.kind === "namedArgument" &&
+        argument.name.name === "password" &&
+        directPasswordField(argument.value) !== null,
+    );
+    const groups =
+      fieldIndex === -1 ? [written] : [written.slice(0, fieldIndex), written.slice(fieldIndex + 1)];
+    for (const [group, part] of groups.entries()) {
+      if (group === 1) {
+        const field = directPasswordField(written[fieldIndex]!.value)!;
+        const speakerTemporary = this.#prepareInteractionSpeaker(
+          field.speaker?.name ?? null,
+          field.asSpan ?? field.commandSpan,
+        );
+        const { hint } = yield* compileChild(this.#lowerAskQuestionTask(field, speakerTemporary));
+        temporaryIds.push(speakerTemporary, ...(hint === null ? [] : [hint.temporaryId]));
+        passwordField = {
+          hint:
+            hint === null
+              ? null
+              : {
+                  kind: "temporary",
+                  temporaryId: hint.temporaryId,
+                  span: copySpan(field.hint!.span),
+                },
+        };
       }
-      const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
-      if (name !== "value" && name !== "password" && name !== "timeLock")
-        throw new TypeError(`${call}(...) reached lowering with '${name}:'.`);
-      operands[name] = plan;
-    });
+      const lowered = yield* compileChild(
+        this.#lowerOrderedExpressionsTask(part.map((argument) => argument.value)),
+      );
+      part.forEach((argument, index) => {
+        const operand = lowered[index]!;
+        temporaryIds.push(...operand.temporaryIds);
+        let plan = operand.plan;
+        if (plan.kind !== "temporary" && plan.kind !== "literal") {
+          const temporaryId = this.#allocateTemporary();
+          this.instructions.push({
+            kind: "storeTemporary",
+            temporaryId,
+            value: plan,
+            expectBoolean: false,
+            span: copySpan(argument.value.span),
+          });
+          temporaryIds.push(temporaryId);
+          plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
+        }
+        const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
+        if (
+          name !== "value" &&
+          name !== "password" &&
+          name !== "publicKey" &&
+          name !== "key" &&
+          name !== "timeLock"
+        )
+          throw new TypeError(`${call}(...) reached lowering with '${name}:'.`);
+        operands[name] = plan;
+      });
+    }
     const value = operands.value;
     if (value === null) throw new TypeError(`${call}(...) reached lowering without its value.`);
     const lock = (destinationTemporary: number, defaultTemporary: number | null): void => {
@@ -2656,6 +2717,9 @@ export class InstructionCompiler {
         call,
         value,
         password: operands.password,
+        passwordField,
+        publicKey: operands.publicKey,
+        key: operands.key,
         timeLock: operands.timeLock,
         defaultTemporary,
         destinationTemporary,
@@ -3551,6 +3615,12 @@ function staticInteractionUi(expression: InteractionExpression): InteractionUiPa
     const hint = expression.hint === null ? null : staticVisibleText(expression.hint);
     const prefill = expression.prefill === null ? null : staticInteractionPrefill(expression);
     if (hint === undefined || prefill === undefined) return undefined;
+    if (expression.interactionKind === "password")
+      return {
+        kind: "password",
+        hint,
+        accessibleName: { kind: "localizedDefault", key: "password" },
+      };
     return expression.interactionKind === "text"
       ? {
           kind: "text",

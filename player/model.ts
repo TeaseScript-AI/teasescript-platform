@@ -135,6 +135,15 @@ export type PlayerForegroundPresentation =
       readonly isoText?: true;
     }
   | {
+      /**
+       * `askPassword`: a masked field. The Player answers with the SHA-256 of what was typed, never the text, and adds
+       * nothing to the transcript.
+       */
+      readonly kind: "ask-password";
+      readonly accessibleName: string;
+      readonly hint: string;
+    }
+  | {
       /** `askForm`: its fields and answers, which change with each edit, are `PlayerFormPresentation`. */
       readonly kind: "form";
       readonly accessibleName: string;

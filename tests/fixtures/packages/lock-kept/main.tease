@@ -1,0 +1,8 @@
+let stage = "before the block"
+timer async 1 s {
+    showButton "Resume"
+    stage = "after the block returned"
+}
+let locked = encryptText("x")
+say "Locked.", instant
+exit

@@ -1784,6 +1784,12 @@ function materializeInteractionUi(
       ...(integer ? { integer: true as const } : {}),
       accessibleName: prepared.accessibleName,
     };
+  } else if (prepared.kind === "password") {
+    ui = {
+      kind: "password",
+      hint: prepared.hintTemporary === null ? null : readText(prepared.hintTemporary),
+      accessibleName: prepared.accessibleName,
+    };
   } else if (prepared.kind === "temporal") {
     const hint = prepared.hintTemporary === null ? null : readText(prepared.hintTemporary);
     let prefill: string | undefined;
@@ -2073,6 +2079,8 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
     // Item by item: a long computed filter must reach the limit below, not the native argument limit of a spread.
     for (const text of ui.types ?? []) strings.push(text);
     for (const text of ui.mime ?? []) strings.push(text);
+  } else if (ui.kind === "password") {
+    if (ui.hint !== null) strings.push(ui.hint);
   } else if (ui.kind !== "choice") {
     if (ui.hint !== null) strings.push(ui.hint);
     if (ui.prefill !== undefined) strings.push(ui.prefill);
@@ -2789,6 +2797,7 @@ function cloneInteractionUi(
     };
   if (ui.kind === "image") return cloneImageUi(ui, accessibleName);
   if (ui.kind === "form") return cloneFormUi(ui, accessibleName);
+  if (ui.kind === "password") return { kind: "password", hint: ui.hint, accessibleName };
   return {
     kind: ui.kind,
     hint: ui.hint,

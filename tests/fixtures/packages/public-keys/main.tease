@@ -1,0 +1,5 @@
+let locked = encryptText("For the owner of the key", password: false, publicKey: true, timeLock: false)
+say "Locked.", instant
+let opened = decryptText(locked, default: "closed")
+say "Opened: ${opened}", instant
+exit

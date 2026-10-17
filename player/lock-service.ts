@@ -7,6 +7,7 @@ import {
   type RuntimeLockNotice,
 } from "../src/index.js";
 import type { LockServices, ReadLock } from "./encryption/lock.js";
+import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey, type PublicKey } from "../src/public-keys.js";
 import {
   activePlayerRuntimeLock,
   answerPlayerRuntimeLock,
@@ -18,7 +19,8 @@ import { base64FromBytes, bytesFromBase64, type FileStoreMedia } from "./stored-
 
 /**
  * A dialog of a lock (V30 §13, PLAYER-UI "Foreground interaction presentation"): the lock dialog of an encrypt call, with
- * the openers the player chooses, or the unlock dialog of a decrypt call, with what opens this lock.
+ * the openers the player chooses, the unlock dialog of a decrypt call, with what opens this lock, or the composer's
+ * password field of `password: askPassword(...)`.
  */
 export type LockDialog =
   | {
@@ -29,8 +31,12 @@ export type LockDialog =
       readonly choices: readonly RuntimeLockChoice[];
       /** The moment the lock dialog suggests for a chosen time lock, 7 days from now, in epoch milliseconds. */
       readonly suggestedTimeLockMs: number | null;
-      /** The openers the call itself gives besides them: a password, and a time lock. */
-      readonly given: { readonly password: boolean; readonly timeLock: boolean };
+      /** The openers the call itself gives besides them: a password, a time lock, and how many public keys. */
+      readonly given: {
+        readonly password: boolean;
+        readonly timeLock: boolean;
+        readonly publicKeys: number;
+      };
     }
   | {
       readonly kind: "unlock";
@@ -38,18 +44,35 @@ export type LockDialog =
       readonly actionId: number;
       /** Whether a password opens it. */
       readonly password: boolean;
+      /**
+       * The ASCII armor of its age file, the unlock request for the owners of its private keys, or `null` without a
+       * public key opener.
+       */
+      readonly ageText: string | null;
       /** The moments its time locks open at, in epoch milliseconds. */
       readonly moments: readonly number[];
       readonly notice: RuntimeLockNotice | null;
+    }
+  | {
+      readonly kind: "password";
+      readonly key: string;
+      readonly actionId: number;
+      /** Whether a "Repeat password" field asks for it again, as for an encrypt call. */
+      readonly repeat: boolean;
+      /** The `hint:` of `askPassword`, or `null`. */
+      readonly hint: string | null;
     };
 
 /**
  * What the player gave in a dialog: a password, and the lock dialog's moment, `null` where the player switched its time
- * lock off or the dialog does not ask for one; nothing for "Try again".
+ * lock off or the dialog does not ask for one, and the public keys the player gave, one per line, or the unlock dialog's
+ * unlock key; nothing for "Try again".
  */
 export interface LockDialogInput {
   readonly password: string | null;
   readonly timeLockMs: number | null;
+  readonly publicKeys?: readonly string[];
+  readonly key?: string | null;
 }
 
 export interface LockServiceHost {
@@ -81,6 +104,7 @@ function lockCode() {
 
 const browserLockServices: LockServices = {
   tlock: () => import("./encryption/tlock.js"),
+  age: () => import("./encryption/age.js"),
   fetch: (input, init) => fetch(input, init),
   nowMs: () => Date.now(),
 };
@@ -104,6 +128,12 @@ export class LockService {
   #answer: { readonly key: string; readonly promise: Promise<PlayerLockAnswer> } | null = null;
   /** What the player typed, by `generation:actionId` of the `ask` step whose dialog they answered. */
   readonly #typed = new Map<string, LockDialogInput>();
+  /**
+   * An encrypt call's lock dialog, for the openers the player chooses, that follows its password field in the same step,
+   * and then the password typed in that field, by the step's key.
+   */
+  #followUp: { readonly key: string; readonly dialog: LockDialog; password: string | null } | null =
+    null;
   #dialog: LockDialog | null = null;
   #busy = false;
   #preparing: string | null = null;
@@ -137,6 +167,7 @@ export class LockService {
   reset(): void {
     this.#answer = null;
     this.#typed.clear();
+    this.#followUp = null;
     this.#showDialog(null);
   }
 
@@ -144,7 +175,18 @@ export class LockService {
   submit(input: LockDialogInput): void {
     const dialog = this.#dialog;
     if (dialog === null || this.#answer?.key === dialog.key) return;
-    this.#typed.set(`${this.#host.generation()}:${dialog.actionId}`, input);
+    const followUp = this.#followUp?.key === dialog.key ? this.#followUp : null;
+    // The password field's password waits, in memory, for the lock dialog that follows it.
+    if (followUp !== null && dialog.kind === "password") {
+      followUp.password = input.password;
+      this.#showDialog(followUp.dialog);
+      return;
+    }
+    this.#followUp = null;
+    this.#typed.set(
+      `${this.#host.generation()}:${dialog.actionId}`,
+      followUp === null ? input : { ...input, password: followUp.password },
+    );
     this.#answer = { key: dialog.key, promise: Promise.resolve({ kind: "submitted" }) };
     this.#showDialog(dialog, true);
     this.request();
@@ -235,22 +277,27 @@ export class LockService {
       this.request();
       return;
     }
-    if (action.call === "encryptText" || action.call === "encryptFile") {
-      const timed = action.choices.includes("timeLock");
+    const encrypts = action.call === "encryptText" || action.call === "encryptFile";
+    if (action.passwordField !== null) {
+      // The password field asks first, and the lock dialog for the openers the player chooses after it.
+      this.#followUp =
+        encrypts && action.choices.length > 0
+          ? { key, dialog: lockDialog(action, key), password: null }
+          : null;
       this.#showDialog(
         {
-          kind: "lock",
+          kind: "password",
           key,
           actionId: action.actionId,
-          choices: action.choices,
-          suggestedTimeLockMs: timed ? action.timeLockMs : null,
-          given: {
-            password: action.password !== null,
-            timeLock: !timed && action.timeLockMs !== null,
-          },
+          repeat: encrypts,
+          hint: action.passwordField.hint,
         },
         false,
       );
+      return;
+    }
+    if (encrypts) {
+      this.#showDialog(lockDialog(action, key), false);
       return;
     }
     this.#preparing = key;
@@ -273,13 +320,15 @@ export class LockService {
       this.request();
       return;
     }
-    const moments = (await lockCode()).timeLockMoments(read);
+    const code = await lockCode();
+    const moments = code.timeLockMoments(read);
     this.#showDialog(
       {
         kind: "unlock",
         key,
         actionId: action.actionId,
         password: read.passwords.length > 0,
+        ageText: read.ages.length > 0 ? code.armoredAge(read.ages[0]!) : null,
         moments,
         notice: action.notice,
       },
@@ -301,7 +350,8 @@ export class LockService {
   }
 
   #showDialog(dialog: LockDialog | null, busy = false): void {
-    if (this.#dialog?.key === dialog?.key && this.#busy === busy) return;
+    // The lock dialog after a password field is the same step's: the same key, another dialog.
+    if (this.#dialog === dialog && this.#busy === busy) return;
     if (this.#dialog?.key !== dialog?.key || busy) {
       this.#cancelRetry?.();
       this.#cancelRetry = null;
@@ -327,8 +377,9 @@ export class LockService {
 
   /**
    * The answer of a `work` step: the lock or the opened content, or why not. `typed` is what the player typed in the
-   * dialog before this step; `undefined` when this step follows a dialog whose typed answer this Player no longer has.
-   * An encrypt call locks with the openers it gives and, for those the player chose, what they typed.
+   * dialog or password field before this step; `undefined` when this step follows one whose typed answer this Player no
+   * longer has. An encrypt call locks with the openers it gives and, for its password field and the openers the player
+   * chose, what they typed; a decrypt call's password field opens with the typed password alone.
    */
   async #work(
     action: RuntimeLockActionSnapshot,
@@ -338,14 +389,26 @@ export class LockService {
     try {
       if (action.call === "encryptText" || action.call === "encryptFile") {
         if (typed === undefined) return { kind: "ask" };
-        // A step without the dialog chooses nothing.
+        // A step without the dialog or password field takes nothing typed.
         const answer = typed ?? { password: null, timeLockMs: null };
         const openers = {
-          password: action.choices.includes("password") ? answer.password : action.password,
+          password:
+            action.passwordField !== null || action.choices.includes("password")
+              ? answer.password
+              : action.password,
+          publicKeys: publicKeys(
+            action.choices.includes("publicKey") ? (answer.publicKeys ?? []) : action.publicKeys,
+          ),
           timeLockMs: action.choices.includes("timeLock") ? answer.timeLockMs : action.timeLockMs,
         };
-        // A lock needs an opener. The dialog does not submit without one, and an answer without one asks again.
-        if (openers.password === null && openers.timeLockMs === null) return { kind: "ask" };
+        // No lock is without an opener or above its key limit: the dialog submits neither, and either asks again.
+        if (
+          (openers.password === null &&
+            openers.publicKeys.length === 0 &&
+            openers.timeLockMs === null) ||
+          openers.publicKeys.length > MAX_LOCK_PUBLIC_KEYS
+        )
+          return { kind: "ask" };
         const content =
           action.call === "encryptText"
             ? new TextEncoder().encode(action.value)
@@ -357,21 +420,30 @@ export class LockService {
         const entry = this.#host.media.add("file", new Blob([made.bytes], { type: OCTET_STREAM }));
         return { kind: "locked", file: entry.reference };
       }
+      if (action.passwordField !== null && typed === undefined) return { kind: "ask" };
       const read = await this.#readLock(action);
       if (read === "unreadable") return { kind: "failed", reason: "unreadable" };
       if (read === null) return { kind: "notOpened" };
+      // A password or key written in the call, also through its password field, gives the default when it does not
+      // open; one typed in the dialog asks again. The dialog gives a key or a password.
+      const written =
+        action.password !== null || action.key !== null || action.passwordField !== null;
+      const key = action.key ?? typed?.key ?? null;
+      if (key !== null) {
+        const content = await (await lockCode()).openWithKey(read, key);
+        if (content !== null) return this.#opened(action, content);
+        if (!written) return { kind: "ask", notice: "wrongKey" };
+      }
       const password = action.password ?? typed?.password ?? null;
       if (password !== null) {
         const content = await (await lockCode()).openWithPassword(read, password);
         if (content !== null) return this.#opened(action, content);
-        // A password written in the call gives the default; one typed in the dialog asks again.
-        return action.password !== null
-          ? { kind: "notOpened" }
-          : { kind: "ask", notice: "wrongPassword" };
+        return written ? { kind: "notOpened" } : { kind: "ask", notice: "wrongPassword" };
       }
+      if (written) return { kind: "notOpened" };
       const timed = await (await lockCode()).openWithTime(read, this.#crypto);
       if (timed.kind === "opened") return this.#opened(action, timed.content);
-      const other = read.passwords.length > 0;
+      const other = read.passwords.length > 0 || read.ages.length > 0;
       if (timed.kind === "notYet") return { kind: "ask" };
       // Unreachable relays ask again where a password could open it or the dialog is already open, so it can try
       // again; otherwise a call with nothing else to try gives its default.
@@ -406,6 +478,31 @@ export class LockService {
     );
     return { kind: "opened", file: entry.reference, type };
   }
+}
+
+/**
+ * The lock dialog of an encrypt step, for the openers the player chooses: a chosen time lock suggests the step's moment,
+ * and the call's own openers, also its password field's, are given.
+ */
+function lockDialog(action: RuntimeLockActionSnapshot, key: string): LockDialog {
+  const timed = action.choices.includes("timeLock");
+  return {
+    kind: "lock",
+    key,
+    actionId: action.actionId,
+    choices: action.choices,
+    suggestedTimeLockMs: timed ? action.timeLockMs : null,
+    given: {
+      password: action.password !== null || action.passwordField !== null,
+      timeLock: !timed && action.timeLockMs !== null,
+      publicKeys: action.publicKeys.length,
+    },
+  };
+}
+
+/** Public keys as the engine and the lock dialog checked them; one that does not read is left out. */
+function publicKeys(texts: readonly string[]): PublicKey[] {
+  return texts.flatMap((text) => parsePublicKey(text) ?? []);
 }
 
 /** The first bytes of a file, as the one-byte characters that `fileType` reads. */

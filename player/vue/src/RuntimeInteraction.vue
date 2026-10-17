@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import ForegroundControls, { type ImageControl, type ImageControls } from "./ForegroundControls.vue";
+import ForegroundControls, {
+  type ImageControl,
+  type ImageControls,
+} from "./ForegroundControls.vue";
 import FormControls from "./FormControls.vue";
 import PopupDialog from "./PopupDialog.vue";
 import ExportTextDialog from "./ExportTextDialog.vue";
@@ -32,6 +35,7 @@ import {
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
+import { invalidAnswerMessage } from "../../../src/interaction-answers.js";
 import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
 import Transcript from "./Transcript.vue";
@@ -100,15 +104,29 @@ const props = defineProps<{
     readonly cancel: () => void;
   };
 }>();
-// A lock step waits for the Player or its dialog; the composer takes no answer meanwhile.
+// A lock step waits for the Player or its dialog; the composer takes no answer meanwhile, except in the password field
+// of `password: askPassword(...)`, which the composer itself shows.
 const locking = computed(
   () =>
     props.session?.state.status === "waiting" &&
     props.session.state.foregroundAction?.kind === "lock",
 );
+const lockField = computed(() => {
+  const shown = props.lock?.dialog.value;
+  return shown?.dialog.kind === "password" ? { ...shown.dialog, busy: shown.busy } : null;
+});
+const lockDialog = computed(() => {
+  const shown = props.lock?.dialog.value;
+  return shown && shown.dialog.kind !== "password" ? { ...shown, dialog: shown.dialog } : null;
+});
 const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession] }>();
 const actionId = computed(() =>
   props.session ? activePlayerRuntimeInteraction(props.session.state)?.actionId : undefined,
+);
+// A password field that a block interrupted is presented anew, without what was typed, also after a block that returned
+// at once.
+const passwordResumes = computed(() =>
+  props.session ? (activePlayerRuntimeInteraction(props.session.state)?.resumes ?? 0) : 0,
 );
 // An interaction's presentation is fixed for its lifetime. Keep one object per action so frequent time and media
 // observations do not re-render, and re-measure, the controls on every update.
@@ -283,11 +301,18 @@ const composition = computed(() => root.value?.closest<HTMLElement>(".player-com
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
 const composer = ref<{ focusInput(): void; selectInput(): void; openPicker(): void } | null>(null);
 const draft = ref("");
+/** The "Repeat password" of a lock's password field, which, like its password, is never kept. */
+const repeated = ref("");
 const feedback = ref("");
 const submitting = ref(false);
 let feedbackTimeout: ReturnType<typeof setTimeout> | undefined;
 let restoreChoiceFocus = false;
 let suppressComposerRefocus = false;
+/**
+ * Whether the player was typing in the composer when the last interaction gave way to none, so a lock's password field
+ * that shows next takes the focus back, also on a touch device, whose keyboard would otherwise close.
+ */
+let typingBeforeField = false;
 
 function clearFeedback() {
   if (feedbackTimeout !== undefined) clearTimeout(feedbackTimeout);
@@ -303,6 +328,8 @@ function showFeedback(message: string) {
 }
 
 watch(draft, clearFeedback);
+// Typing the repeat again clears the notice that the passwords do not match, which empties it.
+watch(repeated, (text) => text !== "" && clearFeedback());
 
 // The composer edits one form field at a time: it opens with the field's text selected, so typing replaces it and
 // Enter keeps it; after the field closes, focus returns to the field's button.
@@ -342,7 +369,12 @@ watch(
 let draftTimer: ReturnType<typeof setTimeout> | undefined;
 watch(draft, (text) => {
   clearTimeout(draftTimer);
-  if (actionId.value !== undefined && form.value === null)
+  // A password typed but not sent is never kept: a question that resumes after a block asks for it again.
+  if (
+    actionId.value !== undefined &&
+    form.value === null &&
+    foreground.value?.kind !== "ask-password"
+  )
     typedTexts()?.set(typedKey(actionId.value, ""), text);
   if (!ownsPresentedEditor() || !props.session) return;
   const target = composerOwner!;
@@ -419,7 +451,7 @@ function focusInput() {
 
 const { hoverAvailable } = usePlayerConditions();
 watch(
-  [actionId, () => props.reset],
+  [actionId, () => props.reset, passwordResumes],
   async () => {
     presentedAt.value = performance.now();
     // Text typed for another action, or for a replaced session, reaches the form only when it shows that field again.
@@ -432,6 +464,7 @@ watch(
       active instanceof HTMLElement && active.matches("[data-composer-input]");
     const wasEditing =
       (active instanceof HTMLTextAreaElement || composerFocused) && !suppressComposerRefocus;
+    typingBeforeField = wasEditing && actionId.value === undefined;
     suppressComposerRefocus = false;
     const returnToChoice = restoreChoiceFocus;
     restoreChoiceFocus = false;
@@ -741,7 +774,45 @@ async function imageControl(control: ImageControl) {
   else capture.retry();
 }
 
+// The password field of `password: askPassword(...)` starts empty each time it shows, also after a block interrupted it,
+// and takes focus as an ask's field does.
+watch(
+  () => lockField.value?.key,
+  async (key) => {
+    repeated.value = "";
+    // A question or form that came back meanwhile already holds the composer; its text stays.
+    if (key !== undefined || actionId.value === undefined) {
+      draft.value = "";
+      clearFeedback();
+    }
+    if (key === undefined) return;
+    presentedAt.value = performance.now();
+    const active = document.activeElement;
+    const unowned = (!active || active === document.body) && hoverAvailable.value;
+    const owned = !!active && !!root.value?.contains(active);
+    const typing = typingBeforeField;
+    typingBeforeField = false;
+    await nextTick();
+    if (unowned || owned || typing) focusInput();
+  },
+);
+
 function submit(source: "input" | "button") {
+  const field = lockField.value;
+  if (field) {
+    // As for askPassword, an empty field answers nothing.
+    if (field.busy || draft.value === "") return focusInput();
+    // After a mismatch both are typed again: the repeat is emptied, and the password selected, so typing replaces it.
+    if (field.repeat && repeated.value !== draft.value) {
+      repeated.value = "";
+      showFeedback(invalidAnswerMessage("passwordMismatch"));
+      composer.value?.selectInput();
+      return;
+    }
+    // The fields keep what was typed, read-only, while the Player locks or opens with it; they empty once it is done.
+    props.lock?.submit({ password: draft.value, timeLockMs: null });
+    return;
+  }
   void complete(
     answer(source === "input" ? "enter" : "send", (session) =>
       submitPlayerRuntimeComposer(session, draft.value),
@@ -779,7 +850,9 @@ function submit(source: "input" | "button") {
                   )
               "
               @submit="
-                complete(answer('button', (session) => submitPlayerRuntimeForm(session, formDraft())))
+                complete(
+                  answer('button', (session) => submitPlayerRuntimeForm(session, formDraft())),
+                )
               "
               @cancel="complete(answer('button', cancelPlayerRuntimeForm))"
               @dismiss="complete(dismissPlayerRuntimeFormField, false)"
@@ -842,10 +915,10 @@ function submit(source: "input" | "button") {
           @close="complete(answer('button', closePlayerRuntimeExport))"
         />
         <LockDialog
-          v-if="lock?.dialog.value"
-          :key="lock.dialog.value.dialog.key"
-          :dialog="lock.dialog.value.dialog"
-          :busy="lock.dialog.value.busy"
+          v-if="lock && lockDialog"
+          :key="lockDialog.dialog.key"
+          :dialog="lockDialog.dialog"
+          :busy="lockDialog.busy"
           :modal="popupModal ?? true"
           :area="composition"
           @submit="lock.submit"
@@ -855,7 +928,7 @@ function submit(source: "input" | "button") {
           ref="composer"
           v-model="draft"
           :disabled="
-            (!foreground && !pacing) ||
+            (!foreground && !pacing && !lockField) ||
             foreground?.kind === 'popup' ||
             foreground?.kind === 'export-text' ||
             foreground?.kind === 'open-url'
@@ -868,21 +941,28 @@ function submit(source: "input" | "button") {
             (foreground?.kind === 'form' && !formEditor)
           "
           :fresh-after="presentedAt"
-          :submitting="submitting || readingImage"
+          :submitting="submitting || readingImage || !!lockField?.busy"
           :placeholder="
-            locking ||
-            foreground?.kind === 'popup' ||
-            foreground?.kind === 'export-text' ||
-            foreground?.kind === 'open-url'
-              ? ''
-              : formEditor
-                ? formEditor.hint
-                : foreground && 'hint' in foreground
-                  ? foreground.hint
-                  : 'Type your response…'
+            lockField
+              ? (lockField.hint ?? 'Type your response…')
+              : locking ||
+                  foreground?.kind === 'popup' ||
+                  foreground?.kind === 'export-text' ||
+                  foreground?.kind === 'open-url'
+                ? ''
+                : formEditor
+                  ? formEditor.hint
+                  : foreground && 'hint' in foreground
+                    ? foreground.hint
+                    : 'Type your response…'
           "
           :attach="attach"
-          :accessible-name="formEditor?.label ?? foreground?.accessibleName ?? 'Response'"
+          :password="foreground?.kind === 'ask-password' || lockField !== null"
+          :repeat="lockField?.repeat ?? false"
+          v-model:repeated="repeated"
+          :accessible-name="
+            lockField ? 'Password' : (formEditor?.label ?? foreground?.accessibleName ?? 'Response')
+          "
           :input-mode="
             formEditor
               ? formEditor.inputMode

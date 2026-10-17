@@ -18,6 +18,7 @@ import { LOCK_CALLS } from "./capture-call.js";
 import { NUMERIC_FUNCTIONS } from "./numeric-functions.js";
 import { ANGLE_FUNCTIONS, angleArgumentMessage } from "./angle.js";
 import { misspelledPropertyHint } from "./object-properties.js";
+import { parsePublicKey } from "./public-keys.js";
 import type { SourceSpan } from "./source.js";
 import { canonicalRegexFlags, compileRegex, regexFlagProblem, replacementParts } from "./regex.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
@@ -416,8 +417,8 @@ export function builtinCallProblems(
 /**
  * Problems with `encryptText(text, ...)`, `encryptFile(file, ...)`, `decryptText(text, ..., default:)`, or
  * `decryptFile(file, ..., default:)` (V30 §13): their arguments, a named argument the call does not take, a missing
- * `default:`, an option whose value can never fit it, and an encrypt call that gives some of its openers but not all, or
- * gives each as `false`. The text or file is checked where it is called.
+ * `default:`, an option whose value can never fit it, a written text that is no public key, and an encrypt call that
+ * gives some of its openers but not all, or gives each as `false`. The text or file is checked where it is called.
  */
 function lockProblems(
   name: string,
@@ -425,18 +426,25 @@ function lockProblems(
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
   const decrypts = name === "decryptText" || name === "decryptFile";
-  const openers = ["password", "timeLock"];
-  const parameters = decrypts ? ["password", "default"] : openers;
+  const openers = ["password", "publicKey", "timeLock"];
+  const parameters = decrypts ? ["password", "key", "default"] : openers;
   const problems: OperationProblem[] = [];
   const named = new Map<string, Expression>();
   let positional = 0;
+  const quoted = (options: readonly string[], conjunction: string) =>
+    options.length < 3
+      ? options.map((option) => `'${option}:'`).join(` ${conjunction} `)
+      : `${options
+          .slice(0, -1)
+          .map((option) => `'${option}:'`)
+          .join(", ")}, ${conjunction} '${options.at(-1)}:'`;
   for (const argument of call.arguments) {
     if (argument.kind === "positionalArgument") positional += 1;
     else if (parameters.includes(argument.name.name)) named.set(argument.name.name, argument.value);
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: `${name}(...) has no parameter '${argument.name.name}'. Its named arguments are ${parameters.map((parameter) => `'${parameter}:'`).join(" and ")}.`,
+        message: `${name}(...) has no parameter '${argument.name.name}'. Its named arguments are ${quoted(parameters, "and")}.`,
         span: argument.name.span,
       });
   }
@@ -457,40 +465,69 @@ function lockProblems(
     option: string,
     fits: (type: StaticType) => boolean,
     expected: string,
-  ): void => {
+  ): boolean => {
     const value = named.get(option);
-    if (value === undefined) return;
+    if (value === undefined) return false;
     const type = typeOf(value);
     const candidates = members(forUse(type)).map(resolved);
     if (
       candidates.length > 0 &&
       candidates.every(
         (candidate) =>
-          isKnown(candidate) && !fits(candidate) && (decrypts || !isScalar(candidate, "boolean")),
+          isKnown(candidate) &&
+          !fits(candidate) &&
+          (decrypts || option === "key" || !isScalar(candidate, "boolean")),
       )
-    )
+    ) {
       problems.push({
         kind: "invalidOperand",
-        message: `'${option}:' takes ${expected}${decrypts ? "" : ", true, or false"}, not ${describeValue(type)}.`,
+        message: `'${option}:' takes ${expected}${decrypts || option === "key" ? "" : ", true, or false"}, not ${describeValue(type)}.`,
         span: value.span,
       });
+      return true;
+    }
+    return false;
   };
   optionProblem("password", (type) => isScalar(type, "string"), "text (string)");
-  if (decrypts) return problems;
+  if (decrypts) {
+    optionProblem("key", (type) => isScalar(type, "string"), "an unlock key as text (string)");
+    return problems;
+  }
   optionProblem(
     "timeLock",
     (type) => isScalar(type, "absoluteDateTime"),
     "a moment (absoluteDateTime)",
   );
+  // A public key, or a list of them, each an age recipient or an OpenSSH Ed25519 key; the written ones are read here.
+  const keyText = (candidate: StaticType) =>
+    isScalar(candidate, "string") ||
+    (candidate.kind === "list" &&
+      members(candidate.element)
+        .map(resolved)
+        .every((element) => !isKnown(element) || isScalar(element, "string")));
+  const publicKey = named.get("publicKey");
+  if (
+    publicKey !== undefined &&
+    !optionProblem("publicKey", keyText, "a public key (string), a list of them")
+  ) {
+    let written = publicKey;
+    while (written.kind === "parenthesizedExpression") written = written.expression;
+    const literals = written.kind === "listLiteral" ? written.elements : [written];
+    const wrong = literals.find((element) => {
+      let literal = element;
+      while (literal.kind === "parenthesizedExpression") literal = literal.expression;
+      const text = literal.kind === "stringLiteral" ? staticVisibleText(literal) : undefined;
+      return text !== undefined && parsePublicKey(text) === null;
+    });
+    if (wrong !== undefined)
+      problems.push({
+        kind: "invalidOperand",
+        message: `'publicKey:' takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
+        span: wrong.span,
+      });
+  }
   const given = openers.filter((option) => named.has(option));
   const missing = openers.filter((option) => !named.has(option));
-  const quoted = (options: readonly string[], conjunction: string) =>
-    options.length < 3
-      ? options.map((option) => `'${option}:'`).join(` ${conjunction} `)
-      : `${options
-          .slice(0, -1)
-          .map((option) => `'${option}:'`)
-          .join(", ")}, ${conjunction} '${options.at(-1)}:'`;
   if (given.length > 0 && missing.length > 0)
     problems.push({
       kind: "argumentCount",
