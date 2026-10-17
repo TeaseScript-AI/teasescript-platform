@@ -96,7 +96,7 @@ test("mixing plain numbers with durations fails instead of guessing a unit", () 
     [
       "let n = 1",
       "1 s + n",
-      `'+' cannot combine a duration (1 second) and a number (1). ${arithmetic}`,
+      `'+' cannot combine a duration (1 second) and the number 1. ${arithmetic}`,
     ],
     [
       "let n = 1",

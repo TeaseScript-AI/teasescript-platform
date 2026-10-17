@@ -46,7 +46,7 @@ import {
   isTemporal,
   isTimerHandle,
 } from "./value-predicates.js";
-import { describeValue } from "../value-kinds.js";
+import { describeValue, VALUE_KINDS, valueKindOf } from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -156,19 +156,9 @@ function prefix(text: string, limit: number): string {
   return text.length > limit ? text.slice(0, limit) : text;
 }
 
-/** Whether `visibleText` accepts the value. */
+/** Whether `visibleText` accepts the value: one of a kind that is `shown`, and a finite number. */
 export function isVisibleScalar(value: SerializableRuntimeValue): boolean {
-  return (
-    typeof value === "string" ||
-    isFiniteNumber(value) ||
-    typeof value === "boolean" ||
-    value === null ||
-    isAnyDuration(value) ||
-    isAngle(value) ||
-    isTemporal(value) ||
-    isScriptReference(value) ||
-    isRegex(value)
-  );
+  return typeof value === "number" ? Number.isFinite(value) : VALUE_KINDS[valueKindOf(value)].shown;
 }
 
 /** An element as `join` shows it: a value `visibleText` shows, and otherwise a failure. */

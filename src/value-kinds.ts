@@ -482,6 +482,9 @@ export type WrittenKind = KindsWith<"written", true>;
 /** The kinds `toJson` writes. */
 export type JsonKind = Exclude<ValueKind, KindsWith<"json", null>>;
 
+/** The families `<` orders, each named by its kind (`familyOf`). */
+export type OrderedFamily = Exclude<KindsWith<"ordered", true>, KindsWith<"family", "number">>;
+
 // Every record a snapshot may hold is of a kind: a new kind of record needs its entry above.
 type KindlessRecord = Exclude<RecordTag, (typeof VALUE_KINDS)[ValueKind]["stored"]>;
 const everyRecordHasAKind: [KindlessRecord] extends [never] ? true : KindlessRecord = true;
@@ -533,10 +536,28 @@ export function ordersWith(left: ValueKind, right: ValueKind): boolean {
   return VALUE_KINDS[left].ordered && familyOf(left) === familyOf(right);
 }
 
-/** The families `<` orders, each named by its kind, in the order of `VALUE_KINDS`. */
-export const ORDERED_FAMILIES: readonly ValueKind[] = Object.freeze(
-  VALUE_KIND_NAMES.filter((kind) => VALUE_KINDS[kind].ordered && familyOf(kind) === kind),
+/** The family `<` orders a value of `kind` in, or `undefined` for a kind without order. */
+export function orderedFamily(kind: ValueKind): OrderedFamily | undefined {
+  // EVIDENCE: invariant: the family of an ordered kind is an ordered kind without a family of its own.
+  return VALUE_KINDS[kind].ordered ? (familyOf(kind) as OrderedFamily) : undefined;
+}
+
+/** The families `<` orders, in the order of `VALUE_KINDS`. */
+export const ORDERED_FAMILIES: readonly OrderedFamily[] = Object.freeze(
+  VALUE_KIND_NAMES.flatMap((kind) => {
+    const family = orderedFamily(kind);
+    return family === kind ? [family] : [];
+  }),
 );
+
+// Only text is a dict key, as `isDictKey` tells the compiler: a key of another kind needs a wider type there.
+const onlyTextIsADictKey: [KindsWith<"dictKey", true>] extends ["string"] ? true : never = true;
+void onlyTextIsADictKey;
+
+/** Whether a runtime value may be a dict key (`dictKey`). */
+export function isDictKey(value: SerializableRuntimeValue): value is string {
+  return VALUE_KINDS[valueKindOf(value)].dictKey;
+}
 
 /** Whether a value has an identity: a speaker or a handle, which exists only in the session (`equality`). */
 export function hasIdentity(kind: ValueKind): boolean {

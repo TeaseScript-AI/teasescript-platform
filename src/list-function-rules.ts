@@ -8,6 +8,7 @@ import {
 import { angleStatisticMessage } from "./angle.js";
 import type { ListFunctionName } from "./language-facts.js";
 import { percentageFailure, type NumberDomain } from "./numeric-functions.js";
+import { orderedFamily, VALUE_KINDS, type OrderedFamily, type ValueKind } from "./value-kinds.js";
 
 /**
  * The list functions (V30 §16, and `min` and `max`, V30 §13): one contract each, which the type checker, the runtime,
@@ -18,18 +19,16 @@ import { percentageFailure, type NumberDomain } from "./numeric-functions.js";
  */
 
 /**
- * A kind of value a list function reads: numbers (integers and numbers together), exact durations, calendar durations,
- * angles, or one kind of date and time value.
+ * A kind of value a list function reads: every ordered family but text, so numbers (integers and numbers together),
+ * exact durations, calendar durations, angles, or one kind of date and time value.
  */
-export type ListValueKind =
-  | "number"
-  | "duration"
-  | "calendarDuration"
-  | "angle"
-  | "date"
-  | "time"
-  | "datetime"
-  | "absoluteDateTime";
+export type ListValueKind = Exclude<OrderedFamily, "string">;
+
+/** The kind a list function reads a value of `kind` as, or `undefined` for a kind it reads none of. */
+export function listValueKind(kind: ValueKind): ListValueKind | undefined {
+  const family = orderedFamily(kind);
+  return family === "string" ? undefined : family;
+}
 
 export type ListFunction = {
   /** The positional parameters, which also give the number of positional arguments. */
@@ -238,21 +237,9 @@ export function listFunctionSyntax(name: ListFunctionName): string {
   return takesValues(name) ? `${name}(value, value, ...)  or  ${call}` : call;
 }
 
-/** The kinds as a message names them, such as `numbers or durations`. */
+/** The kinds as a message names them (`plural`), such as `numbers or durations`. */
 function describeKinds(kinds: readonly ListValueKind[]): string {
-  const words = kinds.map((kind) =>
-    kind === "number"
-      ? "numbers"
-      : kind === "duration"
-        ? "durations"
-        : kind === "calendarDuration"
-          ? "calendar durations"
-          : kind === "datetime"
-            ? "datetimes"
-            : kind === "absoluteDateTime"
-              ? "absolute dates and times"
-              : `${kind}s`,
-  );
+  const words = kinds.map((kind) => VALUE_KINDS[kind].plural);
   return words.length === 1
     ? words[0]!
     : `${words.slice(0, -1).join(", ")}${words.length > 2 ? "," : ""} or ${words.at(-1)!}`;

@@ -53,9 +53,16 @@ import {
   union,
   ABSOLUTE_DATE_TIME_TYPE,
   valueKindOfType,
+  isIdentityType,
   type StaticType,
 } from "./static-types.js";
-import { unwritableJsonReason, VALUE_KINDS, type ValueKind } from "./value-kinds.js";
+import {
+  orderedFamily,
+  unwritableJsonReason,
+  VALUE_KINDS,
+  type OrderedFamily,
+  type ValueKind,
+} from "./value-kinds.js";
 import {
   argumentCountMessage,
   argumentShapeProblem,
@@ -1267,19 +1274,6 @@ function getProblems(
 }
 
 /**
- * The kinds of speakers and of handles to what a script started or showed, which no literal can write. Every copy of
- * one names the same speaker or handle, so a change through any copy reaches it.
- */
-export const HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
-  "timer",
-  "media",
-  "camera",
-  "permanentButton",
-  "messageHandle",
-  "speaker",
-]);
-
-/**
  * The message for a value that may be of a member type an operation does not support, naming the test that makes it
  * safe: `!= null` for null, which also narrows it. Only a plain variable narrows, so a property or element is first
  * kept in a variable. For null, the message also names a fallback, unless the value is what the operation changes.
@@ -1310,7 +1304,7 @@ export function mayBeMessage(
  * media, has no value to write as a fallback, so it gets none.
  */
 export function fallbackFix(label: string, passing: readonly StaticType[]): string {
-  if (passing.some((type) => HANDLE_KINDS.has(resolved(type).kind))) return "";
+  if (passing.some(isIdentityType)) return "";
   const every = (...names: ScalarTypeName[]) =>
     passing.length > 0 && passing.every((type) => isScalar(type, ...names));
   const value = every("integer", "number")
@@ -1347,35 +1341,19 @@ function nullCheckProblem(
   };
 }
 
-/** Why elements of `element` type cannot be sorted, or `undefined` when they can or may. */
+/** Why elements of `element` type cannot be sorted, or `undefined` when they can or may: one ordered family only. */
 function sortProblem(element: StaticType): string | undefined {
   const candidates = members(element).map(resolved);
   if (candidates.some((candidate) => !isKnown(candidate))) return undefined;
-  const kindOf = (candidate: StaticType): string | undefined =>
-    isScalar(candidate, "integer", "number")
-      ? "numbers"
-      : isScalar(candidate, "string")
-        ? "text"
-        : isScalar(candidate, "duration")
-          ? "durations"
-          : isScalar(candidate, "calendarDuration")
-            ? "calendar durations"
-            : isScalar(candidate, "angle")
-              ? "angles"
-              : isScalar(candidate, "date")
-                ? "dates"
-                : isScalar(candidate, "time")
-                  ? "times"
-                  : isScalar(candidate, "datetime")
-                    ? "dates and times"
-                    : isScalar(candidate, "absoluteDateTime")
-                      ? "absolute dates and times"
-                      : undefined;
-  const unsortable = candidates.find((candidate) => kindOf(candidate) === undefined);
+  const familyOfType = (candidate: StaticType): OrderedFamily | undefined => {
+    const kind = valueKindOfType(candidate);
+    return kind === undefined ? undefined : orderedFamily(kind);
+  };
+  const unsortable = candidates.find((candidate) => familyOfType(candidate) === undefined);
   if (unsortable !== undefined)
     return `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeValue(unsortable)}.`;
-  const kinds = new Set(candidates.map(kindOf));
-  return kinds.size > 1
-    ? `sort() needs elements of one kind, but this list may hold ${[...kinds].join(" and ")}.`
+  const families = new Set(candidates.map(familyOfType));
+  return families.size > 1
+    ? `sort() needs elements of one kind, but this list may hold ${[...families].map((family) => VALUE_KINDS[family!].plural).join(" and ")}.`
     : undefined;
 }

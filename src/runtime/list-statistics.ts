@@ -20,6 +20,7 @@ import {
   mixedListValuesMessage,
   takesValues,
   type ListFunction,
+  listValueKind,
   type ListValueKind,
   type MinMaxName,
   type StatisticName,
@@ -62,7 +63,7 @@ import {
   isRange,
   isTemporal,
 } from "./value-predicates.js";
-import { describeValue } from "../value-kinds.js";
+import { describeValue, valueKindOf } from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -152,11 +153,7 @@ function amountsOf(
 
 /** The kind of a value that a list function may read, or `undefined` for another value. */
 function kindOf(value: SerializableRuntimeValue): ListValueKind | undefined {
-  if (typeof value === "number") return "number";
-  if (isDuration(value)) return "duration";
-  if (isCalendarDuration(value)) return "calendarDuration";
-  if (isAngle(value)) return "angle";
-  return isTemporal(value) ? value.kind : undefined;
+  return listValueKind(valueKindOf(value));
 }
 
 /**

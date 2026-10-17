@@ -11,7 +11,13 @@ import type {
 } from "./ast.js";
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import type { SourceSpan } from "./source.js";
-import { VALUE_KINDS, type PlainKind, type ValueKind } from "./value-kinds.js";
+import {
+  familyOf,
+  hasIdentity,
+  VALUE_KINDS,
+  type PlainKind,
+  type ValueKind,
+} from "./value-kinds.js";
 
 /**
  * A compile-time value type (ADR 0021). `unknown` stands for values the compiler cannot know, such as untyped storage,
@@ -325,16 +331,16 @@ function isSubset(inner: readonly ScalarValue[], outer: readonly ScalarValue[]):
 }
 
 /** Whether two scalar types belong together in a union: the same type, or both numbers. */
+/** Whether two scalar types are of one family (`familyOf`), as an integer and a number are. */
 function sameFamily(left: StaticType, right: StaticType): boolean {
-  return (
-    left.kind === "scalar" &&
-    right.kind === "scalar" &&
-    (left.name === right.name || (isNumberName(left.name) && isNumberName(right.name)))
-  );
+  return left.kind === "scalar" && right.kind === "scalar" && sameScalarFamily(left, right);
 }
 
-function isNumberName(name: ScalarTypeName): boolean {
-  return name === "integer" || name === "number";
+function sameScalarFamily(
+  left: Extract<StaticType, { kind: "scalar" }>,
+  right: Extract<StaticType, { kind: "scalar" }>,
+): boolean {
+  return familyOf(left.name) === familyOf(right.name);
 }
 
 /** One scalar type for two of the same family; it keeps only values that both restrict. */
@@ -383,8 +389,10 @@ export function isScalar(type: StaticType, ...names: ScalarTypeName[]): boolean 
   return value.kind === "scalar" && names.includes(value.name);
 }
 
+/** Whether a type is of the number family (`familyOf`): an integer or a number. */
 export function isNumeric(type: StaticType): boolean {
-  return isScalar(type, "integer", "number");
+  const kind = valueKindOfType(type);
+  return kind !== undefined && familyOf(kind) === "number";
 }
 
 /** Whether the compiler knows anything about values of this type. */
@@ -465,7 +473,8 @@ function namedType(name: TypeName): StaticType {
   }
 }
 
-function isScalarKind(kind: ValueKind): kind is ScalarTypeName {
+/** Whether the compiler holds a type of `kind` as a `scalar` type of its name. */
+export function isScalarKind(kind: ValueKind): kind is ScalarTypeName {
   return VALUE_KINDS[kind].type === "scalar";
 }
 
@@ -1884,8 +1893,7 @@ function scalarOverlap(
   left: Extract<StaticType, { kind: "scalar" }>,
   right: Extract<StaticType, { kind: "scalar" }>,
 ): StaticType {
-  if (left.name !== right.name && !(isNumberName(left.name) && isNumberName(right.name)))
-    return NEVER_TYPE;
+  if (!sameScalarFamily(left, right)) return NEVER_TYPE;
   const name = left.name === right.name ? left.name : "integer";
   let values = left.values ?? right.values;
   if (left.values !== undefined && right.values !== undefined)
@@ -2014,6 +2022,15 @@ export function isAnnotatable(type: StaticType): boolean {
         (part.kind === "object" && part.properties !== null),
     )
   );
+}
+
+/**
+ * Whether a value of a type without members has an identity (`hasIdentity`): a speaker or a handle, which exists only in
+ * the session, and every copy of which names the same one.
+ */
+export function isIdentityType(type: StaticType): boolean {
+  const kind = valueKindOfType(type);
+  return kind !== undefined && hasIdentity(kind);
 }
 
 /** Whether an annotation can name the kind a type without members holds (`written`). */

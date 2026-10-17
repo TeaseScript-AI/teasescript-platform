@@ -36,13 +36,18 @@ import {
   isAngle,
   isAnyDuration,
   isCalendarDuration,
-  isDuration,
   isList,
   isRange,
   isSet,
   isTemporal,
 } from "./value-predicates.js";
-import { describeValue } from "../value-kinds.js";
+import {
+  describeValue,
+  orderedFamily,
+  VALUE_KINDS,
+  valueKindOf,
+  type OrderedFamily,
+} from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -52,22 +57,9 @@ type SourceSpan = RichSourceSpan | PlanSourceLocation;
  * the same kind; dates, times, datetimes, and absolute dates and times are four kinds (V30 §35).
  */
 export function sortOrder(items: readonly SerializableRuntimeValue[], span: SourceSpan): number[] {
-  let kind: keyof typeof KIND_DESCRIPTIONS | undefined;
+  let kind: OrderedFamily | undefined;
   for (const item of items) {
-    const itemKind =
-      typeof item === "number"
-        ? "number"
-        : typeof item === "string"
-          ? "text"
-          : isDuration(item)
-            ? "duration"
-            : isCalendarDuration(item)
-              ? "calendarDuration"
-              : isAngle(item)
-                ? "angle"
-                : isTemporal(item)
-                  ? item.kind
-                  : undefined;
+    const itemKind = orderedFamily(valueKindOf(item));
     if (itemKind === undefined)
       throw fault(
         "TSR060",
@@ -77,7 +69,7 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
     if (kind !== undefined && itemKind !== kind)
       throw fault(
         "TSR060",
-        `sort() needs elements of one kind, but this list has ${KIND_DESCRIPTIONS[kind]} and ${KIND_DESCRIPTIONS[itemKind]}.`,
+        `sort() needs elements of one kind, but this list has ${VALUE_KINDS[kind].plural} and ${VALUE_KINDS[itemKind].plural}.`,
         span,
       );
     kind = itemKind;
@@ -113,18 +105,6 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
     .map((_, index) => index)
     .sort((left, right) => compare(items[left]!, items[right]!) || left - right);
 }
-
-const KIND_DESCRIPTIONS = {
-  number: "numbers",
-  text: "text",
-  duration: "durations",
-  calendarDuration: "calendar durations",
-  angle: "angles",
-  date: "dates",
-  time: "times",
-  datetime: "dates and times",
-  absoluteDateTime: "absolute dates and times",
-} as const;
 
 function sortKey(value: SerializableRuntimeValue): number {
   return typeof value === "number" ? value : 0;

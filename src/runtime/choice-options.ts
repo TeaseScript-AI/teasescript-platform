@@ -25,16 +25,9 @@ import {
   serializableEquals,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
-import {
-  isAngle,
-  isAnyDuration,
-  isList,
-  isObject,
-  isScriptReference,
-  isRegex,
-  isSet,
-  isTemporal,
-} from "./value-predicates.js";
+import { isList, isObject, isSet } from "./value-predicates.js";
+import { unreturnableChoiceMessage } from "../choice-values.js";
+import { VALUE_KINDS, valueKindOf } from "../value-kinds.js";
 import { fieldText, isVisibleScalar, visibleText } from "./value-text.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
@@ -130,23 +123,20 @@ function choiceButton(
   };
 }
 
-/** A scalar that `isVisibleScalar` accepted, as a choice value; a script reference or regex is shown but not returned. */
+/**
+ * A scalar that `isVisibleScalar` accepted, as a choice value (`choice`); a value that is shown but not returned, such as
+ * a script reference or a regex, fails with `TSR052`.
+ */
 function choiceValue(value: SerializableRuntimeValue, span: SourceSpan): InteractionChoiceValue {
-  if (isAnyDuration(value) || isAngle(value)) return { ...value };
-  if (isTemporal(value)) return { ...value };
+  const kind = valueKindOf(value);
+  const unreturnable = unreturnableChoiceMessage(kind);
+  if (unreturnable !== undefined) throw fault("TSR052", unreturnable, span);
+  if (!VALUE_KINDS[kind].choice) throw new Error("A choice value must be a visible scalar.");
   if (typeof value === "number") return Object.is(value, -0) ? 0 : value;
-  if (typeof value === "string" || typeof value === "boolean" || value === null) return value;
-  for (const [shown, description] of [
-    [isScriptReference(value), "a script reference"],
-    [isRegex(value), "a regex"],
-  ] as const)
-    if (shown)
-      throw fault(
-        "TSR052",
-        `A button cannot return ${description}. Give the buttons text or number values, and pick ${description.replace("a ", "the ")} from the answer.`,
-        span,
-      );
-  throw new Error("A choice value must be a visible scalar.");
+  // EVIDENCE: invariant: a value of a kind whose `choice` is set is a choice value; a record is copied.
+  return (
+    typeof value === "object" && value !== null ? { ...value } : value
+  ) as InteractionChoiceValue;
 }
 
 function backgroundColor(value: SerializableRuntimeValue, span: SourceSpan): string {

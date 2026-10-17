@@ -167,7 +167,7 @@ test("statistics report empty lists, values they cannot read, and percentages ou
     [
       'median(dynamic([1]), by: "count")',
       "TSR060",
-      "median(...) needs a list of objects for by:, not a list that holds a number.",
+      "median(...) needs a list of objects for by:, not a list that holds a whole number (integer).",
     ],
     ["sum(dynamic(5))", "TSR059", "sum(...) needs a list, not a number."],
     [
@@ -911,7 +911,7 @@ test("linearRegression and predict report too few points, one x, and values of t
       'say linearRegression([{ at: "a", n: 1 }, { at: "b", n: 2 }], x: "at", y: "n").slope\nexit',
     ).map(([, message]) => message),
     [
-      "linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times as x values, not text (string).",
+      "linearRegression(...) needs numbers, dates, dates and times, or absolute dates and times as x values, not text (string).",
     ],
   );
   assert.deepEqual(diagnostics('say linearRegression([{ day: 1 }], x: "day")\nexit'), [
@@ -943,7 +943,7 @@ test("linearRegression and predict report too few points, one x, and values of t
     [
       'linearRegression(dynamic([{ x: toTime("08:00"), y: 2 }, { x: toTime("09:00"), y: 3 }]), x: "x", y: "y")',
       "TSR060",
-      "linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times as x values, not a time.",
+      "linearRegression(...) needs numbers, dates, dates and times, or absolute dates and times as x values, not a time.",
     ],
     [
       "predict(dynamic({ slope: 1 }), 2)",

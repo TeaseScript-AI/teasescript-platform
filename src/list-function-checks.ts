@@ -13,8 +13,10 @@ import {
   listValueMessage,
   mixedListValuesMessage,
   type ListFunction,
+  listValueKind,
   type ListValueKind,
 } from "./list-function-rules.js";
+import { TEMPORAL_KINDS, type TemporalKind } from "./temporal-builtins.js";
 import { RANGE_LIST_FIX } from "./list-methods.js";
 import type { OperationProblem } from "./operation-checks.js";
 import { RANDOM_CONTRACTS } from "./random-functions.js";
@@ -37,6 +39,7 @@ import {
   union,
   UNKNOWN_TYPE,
   type StaticType,
+  valueKindOfType,
 } from "./static-types.js";
 
 /** The problems with a call of a list function, the properties it reads by name, and its result type. */
@@ -61,9 +64,7 @@ export interface ListPropertyRead {
 }
 
 /** The kind of the values a list function reads, when the compiler knows it: one it takes, or integers. */
-type ValueKind = ListValueKind | "integer";
-
-const TEMPORAL_KINDS: readonly ValueKind[] = ["date", "time", "datetime", "absoluteDateTime"];
+type ReadKind = ListValueKind | "integer";
 
 interface Context {
   readonly name: string;
@@ -327,15 +328,15 @@ function valueKind(
   allowed: readonly ListValueKind[],
   at: Expression,
   x = false,
-): ValueKind | undefined {
+): ReadKind | undefined {
   const parts = members(type).map(resolved);
   if (parts.length === 0 || !parts.every(isKnown)) return undefined;
-  const kinds = new Set<ValueKind>();
+  const kinds = new Set<ReadKind>();
   for (const part of parts) {
-    const kind = (
-      ["integer", "number", "duration", "calendarDuration", "angle", ...TEMPORAL_KINDS] as const
-    ).find((one) => isScalar(part, one));
-    const listKind = kind === "integer" ? "number" : kind;
+    const valueKind = valueKindOfType(part);
+    const listKind = valueKind === undefined ? undefined : listValueKind(valueKind);
+    // An integer stays one, for the kind of what the function gives.
+    const kind = valueKind === "integer" ? valueKind : listKind;
     if (listKind === undefined || !allowed.includes(listKind)) {
       problem(
         context,
@@ -352,7 +353,7 @@ function valueKind(
   return undefined;
 }
 
-function typeOfKind(kind: ValueKind | undefined): StaticType {
+function typeOfKind(kind: ReadKind | undefined): StaticType {
   if (kind === undefined) return UNKNOWN_TYPE;
   if (kind === "integer") return INTEGER_TYPE;
   if (kind === "number") return NUMBER_TYPE;
@@ -440,8 +441,8 @@ function predictType(context: Context, positions: readonly ListValueKind[]): Sta
       : UNKNOWN_TYPE;
 }
 
-/** The single scalar kind of a type, or `undefined`. */
-function knownKind(type: StaticType): ValueKind | undefined {
+/** The single kind of a type that a line's start or intercept may have, or `undefined`. */
+function knownKind(type: StaticType): "integer" | "number" | "duration" | TemporalKind | undefined {
   const value = resolved(forUse(type));
   return (["integer", "number", "duration", ...TEMPORAL_KINDS] as const).find((kind) =>
     isScalar(value, kind),
