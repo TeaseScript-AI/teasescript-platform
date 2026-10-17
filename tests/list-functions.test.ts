@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { LIST_FUNCTIONS } from "../src/language-facts.js";
+import { LIST_FUNCTION_CONTRACTS, type ListFunction } from "../src/list-function-rules.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -1064,4 +1066,27 @@ test("list results survive checkpoint resume", () => {
     equivalent.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["11 11, 18, 16 2.5 20 true", "2 null 2", "plank rest"],
   );
+});
+
+test("a domain of a list function's numbers fails alike when the compiler can see them, whatever the list is", () => {
+  for (const name of LIST_FUNCTIONS) {
+    const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
+    if (contract.takes !== "values") continue;
+    for (const domain of contract.domains)
+      for (const value of [-1, 101, 100.5]) {
+        const call = (list: string, number: string): string =>
+          `${name}(${contract.parameters.map((parameter) => (parameter === "list" ? list : domain.reads.includes(parameter) ? number : "1")).join(", ")})`;
+        const message = domain.problem([value]);
+        assert.notEqual(message, undefined, `${name} ${value}`);
+        assert.deepEqual(
+          failure(`${DYNAMIC}say ${call("dynamic([1, 2])", `dynamic(${value})`)}\nexit`),
+          ["TSR039", message],
+        );
+        for (const source of [
+          `say ${call("[1, 2]", String(value))}\nexit`,
+          `function f(xs) {\n    return ${call("xs", String(value))}\n}\nexit`,
+        ])
+          assert.deepEqual(diagnostics(source), [["TSV043", message, String(value)]], source);
+      }
+  }
 });

@@ -171,21 +171,28 @@ export const CLOCK_FUNCTIONS = Object.freeze([
 
 export type ClockFunctionName = (typeof CLOCK_FUNCTIONS)[number];
 
-const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
-  "player",
-  ...RANDOM_FUNCTIONS,
-  ...NUMERIC_FUNCTIONS,
-  "min",
-  "max",
-  "pi",
-  "debugMode",
+/** The list functions (V30 §16), with `min` and `max` (V30 §13), whose contracts are in `list-function-rules.ts`. */
+export const LIST_FUNCTIONS = Object.freeze([
   "sum",
   "average",
   "median",
   "percentile",
   "stddev",
+  "min",
+  "max",
   "linearRegression",
   "predict",
+] as const);
+
+export type ListFunctionName = (typeof LIST_FUNCTIONS)[number];
+
+const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
+  "player",
+  ...RANDOM_FUNCTIONS,
+  ...NUMERIC_FUNCTIONS,
+  ...LIST_FUNCTIONS,
+  "pi",
+  "debugMode",
   ...CONVERSION_FUNCTIONS,
   "fileFromBase64",
   "fileToBase64",
@@ -262,15 +269,7 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   ...RANDOM_FUNCTIONS,
   ...CONVERSION_FUNCTIONS,
   ...NUMERIC_FUNCTIONS,
-  "min",
-  "max",
-  "sum",
-  "average",
-  "median",
-  "percentile",
-  "stddev",
-  "linearRegression",
-  "predict",
+  ...LIST_FUNCTIONS,
   "fileFromBase64",
   "fileToBase64",
   "hashText",

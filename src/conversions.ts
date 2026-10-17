@@ -372,9 +372,6 @@ function isConversionResult(result: ConversionResult, value: unknown): boolean {
   return result === "integer" ? Number.isInteger(value) : typeof value === result;
 }
 
-/** `min` and `max` of two or more numbers or durations (V30 §13). */
-export const MIN_MAX_BUILTINS: ReadonlySet<string> = new Set(["min", "max"]);
-
 /**
  * Why `toJson` cannot write a value, after "which": a handle exists only in the current session, and a calendar duration,
  * a range, and a script reference have no JSON form.

@@ -155,8 +155,8 @@ import {
 } from "./numeric-functions.js";
 import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "./random-functions.js";
 import { ANGLE_ARITHMETIC_ROUTE, anglePropertyMessage, angleValue, formatAngle } from "./angle.js";
+import { isListFunction, takesValues } from "./list-function-rules.js";
 import {
-  LIST_FUNCTIONS,
   listFunctionCheck,
   weightedChoiceCheck,
   type ListFunctionCheck,
@@ -7592,14 +7592,14 @@ class TypeChecker {
         );
       return scalarType(CLOCK_CONTRACTS[name].result);
     }
-    // `min` and `max` of one argument that may be a list are list functions too (V30 §16).
+    // `min` and `max` of one argument that may be a list take its values (V30 §16), and otherwise their arguments' values.
     const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
     const list =
       positional.length === 1 &&
       members(nonNullTypeForUse(this.#typeOf(positional[0]!.value))).some(
         (member) => !isKnown(member) || resolved(member).kind === "list",
       );
-    if (LIST_FUNCTIONS.has(name) || (MIN_MAX_NAMES.has(name) && list))
+    if (isListFunction(name) && (!takesValues(name) || list))
       return this.#listFunctionType(
         expression,
         values,
@@ -10689,8 +10689,6 @@ function unreturnableChoiceMessage(member: StaticType): string | undefined {
 function isChoiceValue(member: StaticType): boolean {
   return isShowable(member) && unreturnableChoiceMessage(member) === undefined;
 }
-
-const MIN_MAX_NAMES: ReadonlySet<string> = new Set(["min", "max"]);
 
 /** The result types of the built-ins that take fixed positional arguments. */
 const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([["escapeMarkup", STRING_TYPE]]);

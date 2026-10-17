@@ -9,7 +9,14 @@ import {
   scriptArgumentCountMessage,
   unknownNamedArgumentMessage,
 } from "../argument-rules.js";
-import { LIST_FUNCTION_SHAPES, minMaxValuesProblem } from "../list-function-rules.js";
+import {
+  isListFunction,
+  isStatistic,
+  listFunctionShape,
+  minMaxValuesProblem,
+  takesValues,
+  type MinMaxName,
+} from "../list-function-rules.js";
 import {
   countProblem,
   emptyListPropertyFailure,
@@ -80,7 +87,7 @@ import {
   type NumericFunction,
 } from "../numeric-functions.js";
 import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "../random-functions.js";
-import type { NumericFunctionName } from "../language-facts.js";
+import type { ListFunctionName, NumericFunctionName } from "../language-facts.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
   angleArithmetic,
@@ -100,10 +107,9 @@ import {
 } from "../speaker-terms.js";
 import { accountFieldValue } from "./account.js";
 import {
-  LIST_STATISTICS,
   linearRegression,
   listStatistic,
-  listValues,
+  statisticValues,
   predict,
   weightedChoices,
   weightedIndex,
@@ -351,7 +357,6 @@ import {
   fitsDefault,
   isConversion,
   numberFromText,
-  MIN_MAX_BUILTINS,
   withoutNegativeZero,
   type Conversion,
   type ValueConversion,
@@ -2363,11 +2368,7 @@ export class Evaluator {
       if (isRandomFunction(name))
         return this.#randomFunction(name, positional, named, expression.span);
       if (isNumericFunction(name)) return numericFunction(name, positional, named, expression.span);
-      if (MIN_MAX_BUILTINS.has(name))
-        return this.#minMaxBuiltin(name, positional, named, expression.span);
-      if (LIST_STATISTICS.has(name)) return listStatistic(name, positional, named, expression.span);
-      if (name === "linearRegression") return linearRegression(positional, named, expression.span);
-      if (name === "predict") return predict(positional, named, expression.span);
+      if (isListFunction(name)) return this.#listFunction(name, positional, named, expression.span);
       if (name === "script") return scriptReference(positional, named, expression.span);
       const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
@@ -3617,12 +3618,33 @@ export class Evaluator {
     );
   }
 
+  /** A list function (see `LIST_FUNCTION_CONTRACTS`). */
+  #listFunction(
+    name: ListFunctionName,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    if (isStatistic(name)) return listStatistic(name, positional, named, span);
+    if (takesValues(name)) return this.#minMaxBuiltin(name, positional, named, span);
+    switch (name) {
+      case "linearRegression":
+        return linearRegression(positional, named, span);
+      case "predict":
+        return predict(positional, named, span);
+      default: {
+        const unhandled: never = name;
+        throw new Error(`List function '${String(unhandled)}' has no implementation.`);
+      }
+    }
+  }
+
   /**
    * `min` or `max` of two or more values that are all numbers, all durations, all angles, or all date or time values of
-   * one kind.
+   * one kind, or of the values of one list.
    */
   #minMaxBuiltin(
-    name: string,
+    name: MinMaxName,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
@@ -3633,19 +3655,10 @@ export class Evaluator {
     const names = Object.keys(named);
     const problem =
       one && isList(positional[0]!)
-        ? argumentShapeProblem(name, LIST_FUNCTION_SHAPES.get(name)!, 1, names)
+        ? argumentShapeProblem(name, listFunctionShape(name), 1, names)
         : minMaxValuesProblem(name, positional.length, names);
     if (problem !== undefined) throw fault("TSR028", problem.message, span);
-    if (one) {
-      const values = listValues(name, positional[0]!, named.by, span);
-      if (values.length === 0)
-        throw fault(
-          "TSR018",
-          `${name}(...) of an empty list has no result. Check that the list's length is above 0 first.`,
-          span,
-        );
-      positional = values;
-    }
+    if (one) positional = statisticValues(name, positional[0]!, named.by, span);
     const numbers = positional.every((value) => typeof value === "number");
     const first = positional[0]!;
     const temporals = positional.filter(
@@ -4985,9 +4998,9 @@ const callingExpressions = new WeakMap<ExpressionPlan, boolean>();
 
 /**
  * Whether evaluating an expression can run a call that may change a value: any call but a conversion's, a random
- * function's, a numeric or angle function's, a clock read's, or a method's that only reads (see `Conversion`,
- * `RandomFunction`, `NumericFunction`, `ClockFunction`, and `isReadingMethod`). Results are cached per plan node, so
- * nested checks stay linear.
+ * function's, a numeric or angle function's, a list function's, a clock read's, or a method's that only reads (see
+ * `Conversion`, `RandomFunction`, `NumericFunction`, `ListFunction`, `ClockFunction`, and `isReadingMethod`). Results
+ * are cached per plan node, so nested checks stay linear.
  */
 function mayRunCall(expression: ExpressionPlan): boolean {
   // A node is decided after its children, which are pushed above it.
@@ -5004,6 +5017,7 @@ function mayRunCall(expression: ExpressionPlan): boolean {
         ? !isConversion(callee.name) &&
           !isRandomFunction(callee.name) &&
           !isNumericFunction(callee.name) &&
+          !isListFunction(callee.name) &&
           !isClockFunction(callee.name)
         : callee.kind !== "property" || !isReadingMethod(callee.name))
     ) {

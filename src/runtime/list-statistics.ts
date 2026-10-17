@@ -2,8 +2,13 @@ import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import { angleStatisticMessage, angleValue } from "../angle.js";
 import { argumentShapeProblem, type ArgumentShape } from "../argument-rules.js";
 import { exactDuration } from "../duration.js";
-import { LIST_FUNCTION_SHAPES } from "../list-function-rules.js";
-import { percentageFailure } from "../numeric-functions.js";
+import type { ListFunctionName } from "../language-facts.js";
+import {
+  LIST_FUNCTION_CONTRACTS,
+  listFunctionShape,
+  type ListFunction,
+  type StatisticName,
+} from "../list-function-rules.js";
 import { RANDOM_CONTRACTS } from "../random-functions.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
@@ -45,15 +50,6 @@ import {
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 type Named = Readonly<Record<string, SerializableRuntimeValue>>;
-
-/** The statistics of a list (V30 §16), each with the fewest values it needs. */
-export const LIST_STATISTICS: ReadonlyMap<string, number> = new Map([
-  ["sum", 1],
-  ["average", 1],
-  ["median", 1],
-  ["percentile", 1],
-  ["stddev", 2],
-]);
 
 const MS_PER_DAY = 86_400_000;
 
@@ -118,13 +114,14 @@ type Amounts =
  * average, or interpolate (ADR 0026), and an angle wraps around at 360°, so only `sum` takes angles.
  */
 function amountsOf(
-  name: string,
+  name: StatisticName | "linearRegression",
   values: readonly SerializableRuntimeValue[],
   span: SourceSpan,
 ): Amounts {
   const numbers = values.filter((value) => typeof value === "number");
   if (numbers.length === values.length) return { kind: "numbers", values: numbers };
-  const angles = name === "sum";
+  const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
+  const angles = contract.takes === "values" && contract.values.includes("angle");
   if (!angles && values.some(isAngle)) throw fault("TSR060", angleStatisticMessage(name), span);
   const other = values.find(
     (value) => typeof value !== "number" && !isDuration(value) && !isAngle(value),
@@ -154,23 +151,14 @@ function amountsOf(
  * (V30 §16).
  */
 export function listStatistic(
-  name: string,
+  name: StatisticName,
   positional: readonly SerializableRuntimeValue[],
   named: Named,
   span: SourceSpan,
 ): SerializableRuntimeValue {
-  checkArguments(name, positional, named, span);
-  const values = listValues(name, positional[0]!, named.by, span);
-  const fewest = LIST_STATISTICS.get(name)!;
-  if (values.length < fewest)
-    throw fault(
-      "TSR018",
-      fewest === 1
-        ? `${name}(...) of an empty list has no result. Check that the list's length is above 0 first.`
-        : `${name}(...) needs at least ${fewest} values, but the list has ${values.length}.`,
-      span,
-    );
-  const share = name === "percentile" ? percentage(name, positional[1]!, span) : 0;
+  checkArguments(name, listFunctionShape(name), positional, named, span);
+  const values = statisticValues(name, positional[0]!, named.by, span);
+  const [share = 0] = numbersOf(name, positional, span);
   const amounts = amountsOf(name, values, span);
   if (amounts.kind === "durations" && name === "sum") {
     // Exact like the other statistics: milliseconds rounded once.
@@ -205,17 +193,58 @@ export function listStatistic(
   return amounts.kind === "numbers" ? (result === 0 ? 0 : result) : exactDuration(result);
 }
 
-/** A percentage from 0 through 100, as `percentile` takes it. */
-function percentage(name: string, value: SerializableRuntimeValue, span: SourceSpan): number {
-  if (typeof value !== "number")
+/**
+ * The values a statistic, or `min` or `max` of one list, reads from `list`, as `listValues` gives them, of which there
+ * are as many as it needs (see `ListFunction`): fewer is `TSR018`.
+ */
+export function statisticValues(
+  name: ListFunctionName,
+  list: SerializableRuntimeValue,
+  by: SerializableRuntimeValue | undefined,
+  span: SourceSpan,
+): SerializableRuntimeValue[] {
+  const values = listValues(name, list, by, span);
+  const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
+  const fewest = contract.takes === "values" ? contract.fewest : 0;
+  if (values.length < fewest)
     throw fault(
-      "TSR059",
-      `${name}(...) needs a number as its percentage, not ${describeRuntimeValue(value)}.`,
+      "TSR018",
+      fewest === 1
+        ? `${name}(...) of an empty list has no result. Check that the list's length is above 0 first.`
+        : `${name}(...) needs at least ${fewest} values, but the list has ${values.length}.`,
       span,
     );
-  const failure = percentageFailure(name, value);
-  if (failure !== undefined) throw fault("TSR039", failure, span);
-  return value;
+  return values;
+}
+
+/**
+ * The numbers a statistic takes after its list, such as `percentile`'s percentage, each a number (`TSR059`) valid as
+ * the contract's domains say (`TSR039`).
+ */
+function numbersOf(
+  name: StatisticName,
+  positional: readonly SerializableRuntimeValue[],
+  span: SourceSpan,
+): number[] {
+  const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
+  if (contract.takes !== "values") return [];
+  const numbers = contract.parameters.slice(1).map((parameter, index) => {
+    const value = positional[index + 1]!;
+    if (typeof value !== "number")
+      throw fault(
+        "TSR059",
+        `${name}(...) needs a number as its ${parameter}, not ${describeRuntimeValue(value)}.`,
+        span,
+      );
+    return value;
+  });
+  for (const domain of contract.domains) {
+    const failure = domain.problem(
+      domain.reads.map((parameter) => numbers[contract.parameters.indexOf(parameter) - 1]!),
+    );
+    if (failure !== undefined) throw fault(domain.code ?? "TSR039", failure, span);
+  }
+  return numbers;
 }
 
 /**
@@ -288,7 +317,7 @@ export function linearRegression(
   span: SourceSpan,
 ): SerializableRuntimeValue {
   const name = "linearRegression";
-  checkArguments(name, positional, named, span);
+  checkArguments(name, listFunctionShape(name), positional, named, span);
   if (named.x !== undefined && named.y === undefined)
     throw fault(
       "TSR028",
@@ -300,10 +329,11 @@ export function linearRegression(
     named.y === undefined
       ? items
       : items.map((item) => propertyValue(name, item, "y", named.y!, span));
-  if (ys.length < 2)
+  const { fewest } = LIST_FUNCTION_CONTRACTS[name];
+  if (ys.length < fewest)
     throw fault(
       "TSR018",
-      `${name}(...) needs at least 2 points, but the list has ${ys.length}.`,
+      `${name}(...) needs at least ${fewest} points, but the list has ${ys.length}.`,
       span,
     );
   const xs =
@@ -437,7 +467,7 @@ export function predict(
   named: Named,
   span: SourceSpan,
 ): SerializableRuntimeValue {
-  checkArguments("predict", positional, named, span);
+  checkArguments("predict", listFunctionShape("predict"), positional, named, span);
   const line = positional[0]!;
   const x = positional[1]!;
   const property = (key: string): SerializableRuntimeValue | undefined =>
@@ -513,7 +543,7 @@ export function weightedChoices(
 ): { readonly choices: readonly SerializableRuntimeValue[]; readonly weights: readonly number[] } {
   const name = "randomWeighted";
   const contract = RANDOM_CONTRACTS[name];
-  checkArguments(name, positional, named, span, contract.shape);
+  checkArguments(name, contract.shape, positional, named, span);
   const source = positional[0]!;
   const dict = isDict(source);
   // A dict has its weights, and anything else needs weight:, as the compiler checks them.
@@ -575,10 +605,10 @@ export function weightedIndex(weights: readonly number[], draw: number): number 
  */
 function checkArguments(
   name: string,
+  shape: ArgumentShape,
   positional: readonly SerializableRuntimeValue[],
   named: Named,
   span: SourceSpan,
-  shape: ArgumentShape = LIST_FUNCTION_SHAPES.get(name)!,
 ): void {
   const problem = argumentShapeProblem(name, shape, positional.length, Object.keys(named));
   if (problem !== undefined) throw fault("TSR028", problem.message, span);

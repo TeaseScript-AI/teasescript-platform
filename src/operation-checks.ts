@@ -5,7 +5,6 @@ import {
   defaultDescription,
   FILE_TEXT_FUNCTIONS,
   isConversion,
-  MIN_MAX_BUILTINS,
   unwritableJsonReason,
   WRITABLE_JSON_FIX,
   type CallShape,
@@ -68,7 +67,7 @@ import {
   POSITIONAL_METHODS,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
-import { minMaxValuesProblem } from "./list-function-rules.js";
+import { isListFunction, minMaxValuesProblem, takesValues } from "./list-function-rules.js";
 import {
   countProblem,
   LIST_METHODS,
@@ -397,7 +396,7 @@ export function builtinCallProblems(
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
-  if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
+  if (isListFunction(name) && takesValues(name)) return minMaxProblems(name, call, typeOf);
   if (isNumericFunction(name))
     return numberArgumentProblems(name, NUMERIC_CONTRACTS[name], call, typeOf);
   if (isRandomFunction(name)) {
