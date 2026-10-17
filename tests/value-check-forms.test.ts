@@ -412,7 +412,7 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
         ['let t = timer(duration: 1 s, async: true, display: "loud")', '"loud"'],
         ['let t = timer(duration: 1 s, async: true, display: ("loud"))', '("loud")'],
       ],
-      "TSV033",
+      "TSV068",
       'Timer display must be "visible", "mystery", or "hidden", but this is "loud".',
       [
         'let s = "loud"\nlet t = timer(duration: 1 s, async: true, display: s)',
@@ -648,7 +648,7 @@ test("a value problem does not hide a type error elsewhere in the script", () =>
     ['playAudio(file: "a.mp3", startAt: -1 s)', "TSV036"],
     ["wait (-1 s)", "TSV011"],
     ["repeat -1 {\n}", "TSV011"],
-    ['let t = timer(duration: 1 s, async: true, display: "loud")', "TSV033"],
+    ['let t = timer(duration: 1 s, async: true, display: "loud")', "TSV068"],
     ['playAudio(file: "a.mp3", volume: 2)', "TSV036"],
     ["let l = [1]\nsay l[-1]", "TSV045"],
     ["say 1 / 0", "TSV050"],

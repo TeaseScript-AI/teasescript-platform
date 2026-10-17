@@ -160,18 +160,7 @@ export const DIAGNOSTIC_CODES = {
   },
   TSV002: entry(["name pass"], "error", "Unknown variable", DOCS.values),
   TSV003: entry(["name pass"], "error", "Assignment to an unknown variable", DOCS.values),
-  TSV004: {
-    ...entry(["name pass", "type checker"], "error", "Invalid assignment", DOCS.values),
-    shared: {
-      problems: "two",
-      parts: [
-        "an assignment to `debugMode`, `account`, a speaker, or a global that the host gives, " +
-          "and a change of the account",
-        "a change of a copy that no variable holds, such as a property of a call's result, " +
-          "which is lost",
-      ],
-    },
-  },
+  TSV004: entry(["name pass"], "error", "Assignment to a read-only name", DOCS.values),
   TSV005: entry(["name pass"], "error", "Unknown speaker", DOCS.values),
   TSV007: {
     ...entry(["name pass", "type checker"], "error", "Duplicate property or key", DOCS.values),
@@ -248,35 +237,10 @@ export const DIAGNOSTIC_CODES = {
     },
   },
   TSV032: entry(["name pass"], "error", "Blocking command in a parameter default", DOCS.values),
-  TSV033: {
-    ...entry(
-      ["name pass", "type checker"],
-      "error",
-      "Invalid timer or handler return",
-      DOCS.values,
-    ),
-    shared: {
-      problems: "two",
-      parts: [
-        "a blocking timer with a block, `repeat`, `persist`, or a handle, and `return` with a " +
-          "value in a timer, media, or button block",
-        "a timer's `display:` value",
-      ],
-    },
-  },
+  TSV033: entry(["name pass"], "error", "Invalid timer or handler return", DOCS.values),
   TSV034: entry(["type checker"], "error", "Invalid timer handle member", DOCS.values),
   TSV035: entry(["type checker"], "error", "Duration combined with a number", DOCS.values),
-  TSV036: {
-    ...entry(["name pass", "type checker"], "error", "Invalid media", DOCS.values),
-    shared: {
-      problems: "two",
-      parts: [
-        "blocking media with a handle, and `finish` twice in a media block",
-        "a play command's or `showImage`'s file, `volume:`, `repeat:`, `startAt:`, `endAt:`, " +
-          "and cue positions, and `finish` with a repeat that never ends",
-      ],
-    },
-  },
+  TSV036: entry(["type checker"], "error", "Invalid media file, option, or cue", DOCS.values),
   TSV037: entry(["type checker"], "error", "Invalid media handle member", DOCS.values),
   TSV038: entry(["type checker"], "error", "Invalid storage key", DOCS.values),
   TSV039: entry(["type checker"], "error", "Invalid prefill", DOCS.values),
@@ -339,6 +303,9 @@ export const DIAGNOSTIC_CODES = {
   TSV064: entry(["name pass"], "error", "Invalid regex", DOCS.values),
   TSV065: entry(["plan analysis"], "warning", "Code that never runs", DOCS.values),
   TSV066: entry(["plan analysis"], "warning", "`exit` that never runs", DOCS.values),
+  TSV067: entry(["type checker"], "error", "Change of a copy that no variable holds", DOCS.values),
+  TSV068: entry(["type checker"], "error", "Invalid timer display", DOCS.values),
+  TSV069: entry(["name pass"], "error", "Blocking media handle, or `finish` twice", DOCS.values),
 
   TST001: entry(["parser"], "error", "Invalid tag query", DOCS.tags),
   TST002: entry(["type checker"], "error", "Tag query that matches nothing", DOCS.tags),
@@ -347,21 +314,7 @@ export const DIAGNOSTIC_CODES = {
   TST005: entry(["type checker"], "error", "Invalid tag", DOCS.tags),
   TST006: entry(["type checker"], "error", "Invalid `from:` of a tag query", DOCS.tags),
 
-  TSC001: {
-    ...entry(
-      ["parser", "plan validation"],
-      "error",
-      "Literal that is not finite, or unsupported plan format",
-      DOCS.compiler,
-    ),
-    shared: {
-      problems: "two",
-      parts: [
-        "a number or duration literal that is not finite",
-        "an instruction plan of an unsupported format or version",
-      ],
-    },
-  },
+  TSC001: entry(["parser"], "error", "Literal that is not finite", DOCS.compiler),
   TSC002: entry(["plan validation"], "error", "Malformed instruction plan", DOCS.compiler),
   TSC003: entry(["lowering"], "error", "Lowering failure", DOCS.compiler),
   TSC006: entry(["compiler"], "error", "Compiled plan rejected by plan validation", DOCS.compiler),
@@ -373,6 +326,12 @@ export const DIAGNOSTIC_CODES = {
     DOCS.compiler,
   ),
   TSC009: entry(["compiler"], "error", "Invalid or repeated package path", DOCS.compiler),
+  TSC010: entry(
+    ["plan validation"],
+    "error",
+    "Unsupported instruction plan format or version",
+    DOCS.compiler,
+  ),
 
   TSR001: entry(["runtime"], "error", "Declaration set up twice (defect)", DOCS.runtime),
   TSR002: entry(["runtime"], "error", "Assignment without a variable (defect)", DOCS.runtime),

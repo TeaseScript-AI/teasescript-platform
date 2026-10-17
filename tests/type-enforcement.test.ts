@@ -511,7 +511,7 @@ test("a fix writes another type where the place declares its type, and the code 
         "2",
       ],
       [
-        "TSV004",
+        "TSV067",
         "This changes a copy that no variable holds: 'd.keys' gives a new list each time, so the change is lost. Change the dict itself, as in 'd[key] = value' or 'd.remove(key)'.",
         "d.keys",
       ],

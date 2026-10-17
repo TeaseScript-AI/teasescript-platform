@@ -409,7 +409,6 @@ export type RuntimeCheckSite =
   | LoadExpression;
 
 const typeCode = {
-  invalidAssignment: "TSV004",
   duplicateProperty: "TSV007",
   invalidRangeOperand: "TSV010",
   invalidRepeatCount: "TSV011",
@@ -417,7 +416,6 @@ const typeCode = {
   argumentCount: "TSV020",
   unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
-  invalidTimer: "TSV033",
   invalidTimerHandleMember: "TSV034",
   mixedDurationOperands: "TSV035",
   invalidMedia: "TSV036",
@@ -439,6 +437,8 @@ const typeCode = {
   randomStartValue: "TSV055",
   invalidCameraHandleMember: "TSV059",
   unusedFallback: "TSV062",
+  changedCopy: "TSV067",
+  invalidTimerDisplay: "TSV068",
 } as const satisfies Record<string, OwnedDiagnosticCode<"type checker">>;
 
 type TypeErrorCode = OwnedDiagnosticCode<"type checker", "error">;
@@ -8634,11 +8634,15 @@ class TypeChecker {
           operand,
           "A timer display is text (string)",
           undefined,
-          typeCode.invalidTimer,
+          typeCode.invalidTimerDisplay,
         );
         const text = isScalar(type, "string") ? staticVisibleText(operand) : undefined;
         if (text !== undefined && !isTimerDisplay(text))
-          this.#report(typeCode.invalidTimer, timerDisplayMessage(shownChoice(text)), operand.span);
+          this.#report(
+            typeCode.invalidTimerDisplay,
+            timerDisplayMessage(shownChoice(text)),
+            operand.span,
+          );
       }
     }
     if (timer.handler !== null) this.#pendHandler(timer.handler, null, scope);
@@ -9065,7 +9069,7 @@ class TypeChecker {
         node = node.object;
       } else {
         if (node.kind !== "identifier") {
-          this.#report(typeCode.invalidAssignment, changedCopyMessage(changed, node), changed.span);
+          this.#report(typeCode.changedCopy, changedCopyMessage(changed, node), changed.span);
           return;
         }
         break;
@@ -9073,7 +9077,7 @@ class TypeChecker {
     }
     if (computed === undefined) return;
     const owner = resolved(members(nonNullType(this.#typeOf(computed.object)))[0]!).kind;
-    this.#report(typeCode.invalidAssignment, computedCopyMessage(computed, owner), changed.span);
+    this.#report(typeCode.changedCopy, computedCopyMessage(computed, owner), changed.span);
   }
 
   /**

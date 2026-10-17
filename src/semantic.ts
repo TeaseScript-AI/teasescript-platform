@@ -149,7 +149,6 @@ const semanticCode = {
   invalidInteractionChoice: "TSV029",
   unsupportedBlockingContext: "TSV032",
   invalidTimer: "TSV033",
-  invalidMedia: "TSV036",
   invalidLabel: "TSV051",
   skippedInitialization: "TSV054",
   invalidStartValue: "TSV055",
@@ -157,6 +156,7 @@ const semanticCode = {
   invalidFileTarget: "TSV057",
   noSpeaker: "TSV063",
   invalidRegex: "TSV064",
+  invalidMediaForm: "TSV069",
 } as const satisfies Record<string, NamePassCode>;
 
 type NamePassCode = OwnedDiagnosticCode<"name pass", "error">;
@@ -841,7 +841,7 @@ class SemanticValidator {
     }
     if (!media.async && valuePosition) {
       this.#report(
-        semanticCode.invalidMedia,
+        semanticCode.invalidMediaForm,
         `Blocking media returns no handle. Use '${command} async ...' to keep one.`,
         media.span,
       );
@@ -853,7 +853,7 @@ class SemanticValidator {
           finishes += 1;
           if (finishes > 1) {
             this.#report(
-              semanticCode.invalidMedia,
+              semanticCode.invalidMediaForm,
               "A media block may declare 'finish' only once.",
               cue.keywordSpan,
             );
