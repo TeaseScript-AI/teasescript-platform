@@ -26,6 +26,12 @@ import {
   type RandomFunction,
 } from "./random-functions.js";
 import {
+  isTextOnlyMethod,
+  TEXT_METHODS,
+  textMethodSyntax,
+  type TextMethodName,
+} from "./text-operations.js";
+import {
   askParts,
   sayOperands,
   mediaHandlerBlocks,
@@ -114,7 +120,7 @@ export interface LanguageCompletionItem {
 }
 
 export interface LanguageContextHelp {
-  /** A command, or a conversion or random function called at the position (see `ContractCall`). */
+  /** A command, or a built-in function or a method of text called at the position (see `ContractCall`). */
   readonly command: CompactCommand | OtherCommand | ContractName;
   readonly summary: string;
   readonly syntax: string;
@@ -892,10 +898,11 @@ function declaredSpeakers(source: string): readonly string[] {
 }
 
 /**
- * A built-in whose help comes from its contract: a conversion, a numeric or angle function, or a random function
- * (`CONVERSIONS`, `NUMERIC_CONTRACTS`, `RANDOM_CONTRACTS`).
+ * A built-in whose help comes from its contract: a conversion, a numeric or angle function, a random function, or a
+ * method that only text has (`CONVERSIONS`, `NUMERIC_CONTRACTS`, `RANDOM_CONTRACTS`, `TEXT_METHODS`). A method that other
+ * values have too, such as `contains`, may be called on a value the editor does not know, so it has none.
  */
-type ContractName = ConversionName | NumericFunctionName | RandomFunctionName;
+type ContractName = ConversionName | NumericFunctionName | RandomFunctionName | TextMethodName;
 
 /** A call of a built-in with a contract in the source: its name, where the name is, and where its `(` is. */
 interface ContractCall {
@@ -943,11 +950,17 @@ function locateHelp(
                 summary: NUMERIC_CONTRACTS[call.name].summary,
                 syntax: numericSyntax(call.name),
               }
-            : {
-                command: call.name,
-                summary: RANDOM_CONTRACTS[call.name].summary,
-                syntax: randomSyntax(call.name),
-              },
+            : isRandomFunction(call.name)
+              ? {
+                  command: call.name,
+                  summary: RANDOM_CONTRACTS[call.name].summary,
+                  syntax: randomSyntax(call.name),
+                }
+              : {
+                  command: call.name,
+                  summary: TEXT_METHODS[call.name].summary,
+                  syntax: textMethodSyntax(call.name),
+                },
       ),
       range: call.range,
       call,
@@ -1231,19 +1244,27 @@ function locateContractCall(tokens: readonly Token[], offset: number): ContractC
   for (const [index, token] of tokens.entries()) {
     if (OPENING_DELIMITERS.has(token.kind)) {
       const name = tokens[index - 1];
-      // A method of the same name, such as a datetime's `toAbsoluteDateTime()`, and a declared function are not calls of
-      // the built-in.
+      // After a dot, a method that only text has, also `repeat`, which the lexer reads as a keyword. A method of the same
+      // name as a function, such as a datetime's `toAbsoluteDateTime()`, and a declared function are not calls of the
+      // built-in.
       const before = tokens[index - 2]?.kind;
+      const word = name?.lexeme ?? "";
+      const contract: ContractName | null =
+        token.kind !== TokenKind.LeftParenthesis || name === undefined
+          ? null
+          : before === TokenKind.Dot
+            ? isTextOnlyMethod(word)
+              ? word
+              : null
+            : name.kind === TokenKind.Identifier &&
+                before !== TokenKind.KeywordFunction &&
+                (isConversion(word) || isNumericFunction(word) || isRandomFunction(word))
+              ? word
+              : null;
       open.push(
-        token.kind === TokenKind.LeftParenthesis &&
-          name?.kind === TokenKind.Identifier &&
-          (isConversion(name.lexeme) ||
-            isNumericFunction(name.lexeme) ||
-            isRandomFunction(name.lexeme)) &&
-          before !== TokenKind.Dot &&
-          before !== TokenKind.KeywordFunction
-          ? { name: name.lexeme, range: name.span, opener: token.span.start.offset }
-          : null,
+        contract === null || name === undefined
+          ? null
+          : { name: contract, range: name.span, opener: token.span.start.offset },
       );
     } else if (CLOSING_DELIMITERS.has(token.kind))
       holds(open.pop() ?? null, token.span.start.offset);
@@ -1309,10 +1330,13 @@ function callParameters(
     const numeric: NumericFunction = NUMERIC_CONTRACTS[call.name];
     form = numeric.parameters;
     parameters = Object.freeze([...form, ...(numeric.named ?? [])]);
-  } else {
+  } else if (isRandomFunction(call.name)) {
     const random: RandomFunction = RANDOM_CONTRACTS[call.name];
     form = random.takes === "choices" ? ["dict"] : random.parameters;
     parameters = Object.freeze([...form, ...(random.takes === "choices" ? ["weight"] : [])]);
+  } else {
+    form = TEXT_METHODS[call.name].parameters.map((parameter) => parameter.name);
+    parameters = Object.freeze(form);
   }
   return {
     parameters,

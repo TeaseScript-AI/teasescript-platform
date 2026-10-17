@@ -13,6 +13,7 @@ import {
 import { CONVERSIONS } from "../src/conversions.js";
 import { NUMERIC_CONTRACTS } from "../src/numeric-functions.js";
 import { RANDOM_CONTRACTS } from "../src/random-functions.js";
+import { isTextOnlyMethod, TEXT_METHODS } from "../src/text-operations.js";
 import { MESSAGE_PRESENTATION_OPTIONS } from "../src/message-presentation.js";
 import {
   askOptionNames,
@@ -451,6 +452,56 @@ test("a numeric or angle function's call has help from its contract, also while 
   assert.deepEqual(help("say sin("), ["sin", "sin(angle)", "angle"]);
   // A declared name is no call of the function.
   assert.equal(help("function sqrt(")[0], null);
+});
+
+test("a method that only text has has help from its contract, also while it is being written", () => {
+  // The help at the end of `source`: its command, the signature's label, and its active parameter.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    return [
+      languageContextHelp(document, position)?.command ?? null,
+      signature?.label ?? null,
+      signature === null ? null : (signature.parameters[signature.activeParameter] ?? null),
+    ];
+  };
+  for (const [name, method] of Object.entries(TEXT_METHODS)) {
+    const document = createLanguageDocument("file:///main.tease", `say name.${name}(`);
+    const position = languagePositionAt(document, document.text.length);
+    const context = languageContextHelp(document, position);
+    // A method that lists, sets, dicts, or other values have too may be called on one of them.
+    if (!isTextOnlyMethod(name)) {
+      assert.equal(context?.command, "say", name);
+      continue;
+    }
+    assert.deepEqual([context?.command, context?.summary], [name, method.summary]);
+    assert.deepEqual(languageHover(document, position)?.contents, [
+      `**${name}**`,
+      method.summary,
+      `Syntax: \`${context?.syntax}\``,
+    ]);
+  }
+  // The syntax is the call's shape (V30 §8), and the active parameter the argument being written.
+  assert.deepEqual(help("say name.trim("), ["trim", "text.trim()", null]);
+  assert.deepEqual(help('say "a,b".split('), ["split", "text.split(separator)", "separator"]);
+  assert.deepEqual(help("say name.substring(1, "), [
+    "substring",
+    "text.substring(start [, end])",
+    "end",
+  ]);
+  assert.deepEqual(help('say toNumber(code.padStart(3, "0").replace(/0/, '), [
+    "replace",
+    "text.replace(search, replacement)",
+    "replacement",
+  ]);
+  // `repeat`, which the lexer reads as a keyword, and a call inside another's arguments.
+  assert.deepEqual(help('say "ab".repeat('), ["repeat", "text.repeat(count)", "count"]);
+  assert.equal(help("say toNumber(code.trim(), default: ", "0)")[0], "toNumber");
+  // A function, a method of another value, and a property are no call of the method.
+  assert.equal(help("say trim(")[0], "say");
+  assert.equal(help("say stamp.toDateTime(")[0], "say");
+  assert.equal(help("say (name.trim)(")[0], "say");
 });
 
 test("askChoice help names set options and the prefill after the options (V30 §19)", () => {
