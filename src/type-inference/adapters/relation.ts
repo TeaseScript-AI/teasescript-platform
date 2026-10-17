@@ -69,11 +69,6 @@ export type OperationResult =
 export interface OperationRelation {
   readonly contract: ContractRef;
   /**
-   * Whether the contract reads a copy of its receiver as it was when the call began, before the arguments ran (text
-   * methods, `join`), instead of the held receiver.
-   */
-  readonly receiver?: "copy";
-  /**
    * The result for operands known as `inputs` says. Called again whenever an operand's view grows, so it must be a
    * function of its inputs alone: no state, no reading of other places.
    */

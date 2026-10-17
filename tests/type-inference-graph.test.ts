@@ -9,7 +9,11 @@ import { compareProjectPaths } from "../src/project-paths.js";
 import { validateProjectSemantics } from "../src/semantic.js";
 import type { TypeAnalysisRequest } from "../src/type-inference/backend.js";
 import { collectGraph } from "../src/type-inference/collector.js";
-import { graphText, type ConstraintGraph } from "../src/type-inference/graph.js";
+import {
+  graphText,
+  type ConstraintGraph,
+  type SyntaxEvidence,
+} from "../src/type-inference/graph.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
 import { registryView } from "../src/type-inference/registry-view.js";
 
@@ -222,7 +226,7 @@ test("asks carry the evidence their result rules read, and handlers are regions 
   rejectLine(lines, /^read .* -> @23#\d+ /);
   expectLine(
     lines,
-    /^operation interaction\.choice\(@29#\d+, @37#\d+\) -> @\d+#\d+ \{"kind":"choice","options":\[\{"label":"back","expression":"other","objects":"computed"\},\{"label":null,"expression":"other","objects":"computed"\}\]\} /,
+    /^operation interaction\.choice\(@29#\d+, @37#\d+\) -> @\d+#\d+ \{"kind":"choice","options":\[\{"label":\{"kind":"string","value":"back"\},"place":\d+,"literal":\{"value":"Back"\},"content":\{"kind":"other"\}\},\{"label":null,"place":\d+,"literal":\{"value":"Lines"\},"content":\{"kind":"other"\}\}\]\} /,
   );
   expectLine(
     lines,
@@ -251,6 +255,57 @@ test("asks carry the evidence their result rules read, and handlers are regions 
   expectLine(lines, /^has m#\d+ media @0:\d+-\d+ initializer in handler#1$/);
   expectLine(lines, /^read m#\d+ -> @\d+#\d+ at 0:\d+-\d+ @0:\d+-\d+ read in handler#1$/);
   expectLine(lines, /^project @\d+#\d+\.volume -> @\d+#\d+ @0:\d+-\d+ read in handler#1$/);
+});
+
+test("form evidence keeps each written field and option element with its place", () => {
+  const { lines } = collect(
+    [
+      'let buttons = [{ text: "Low", value: 1 }]',
+      'let answers = askForm "Adjust", fields: {',
+      "    enabled: { value: false },",
+      '    intensity: [{ text: "Low" }, { text: "High" }],',
+      '    level: { options: [{ text: "Low", value: 1 }, buttons[0]], value: 3 },',
+      '    cycle: { options: buttons, type: "integer", optional: false, min: 1, max: 9 }',
+      '}, cancel: "Back"',
+      "exit",
+    ].join("\n"),
+  );
+  const form = lines.find((line) => line.startsWith("operation interaction.form("));
+  assert.notEqual(form, undefined);
+  // EVIDENCE: the dump prints a constraint's evidence as the JSON of its `SyntaxEvidence`.
+  const evidence = JSON.parse(
+    form!.slice(form!.indexOf("{"), form!.lastIndexOf("}") + 1),
+  ) as SyntaxEvidence;
+  if (evidence.kind !== "form" || evidence.fields === "computed") assert.fail("a written form");
+  // A toggle: its written `value:` by place. A shorthand list: its written elements, each with its text's place and
+  // its literal. Written objects beside a computed element keep their `value`/`text` places; the computed element
+  // keeps its place only. A computed `options:` keeps its place; `type:`, `optional:`, `min:`, `max:` are read.
+  assert.deepEqual(
+    evidence.fields.entries.map((entry) => [entry.name, entry.written.kind]),
+    [
+      ["enabled", "object"],
+      ["intensity", "list"],
+      ["level", "object"],
+      ["cycle", "object"],
+    ],
+  );
+  const level = evidence.fields.entries[2]!.written;
+  if (level.kind !== "object" || level.options === null || level.options.elements === null)
+    assert.fail("written options");
+  assert.deepEqual(
+    level.options.elements.map((element) => [element.literal, element.object !== null]),
+    [
+      [{ value: 1 }, true],
+      [null, false],
+    ],
+  );
+  const cycle = evidence.fields.entries[3]!.written;
+  if (cycle.kind !== "object" || cycle.options === null) assert.fail("a cycle with options");
+  assert.deepEqual(
+    [cycle.type, cycle.optional, cycle.min !== null, cycle.max !== null, cycle.options.elements],
+    ["integer", false, true, true, null],
+  );
+  assert.equal(evidence.cancel, true);
 });
 
 test("reads of unwritten variables link to their initializers; host globals and unknown callees are dynamic", () => {

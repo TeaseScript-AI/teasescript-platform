@@ -37,6 +37,7 @@ import { isNumericFunction } from "../numeric-functions.js";
 import { accountCopy, sessionDeclarations, someNode } from "../project-globals.js";
 import { isRandomFunction } from "../random-functions.js";
 import type { SourceSpan } from "../source.js";
+import { staticChoiceValue } from "../static-evaluation.js";
 import { PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "../speaker-terms.js";
 import { isClockFunction } from "../temporal-builtins.js";
 import type { ValueKind } from "../value-kinds.js";
@@ -60,9 +61,11 @@ import type {
   StoreKind,
   SyntaxEvidence,
   TypeTerm,
+  ChoiceElementEvidence,
   ChoiceObjectEvidence,
   ChoiceOptionEvidence,
-  FormFieldEvidence,
+  FormDescriptorEvidence,
+  WrittenLiteral,
 } from "./graph.js";
 
 // The collector of the constraint graph (O4 stage 2): one walk over the project's programs, which emits the places
@@ -282,6 +285,14 @@ class Collector {
 
   #add(constraint: Constraint): void {
     this.#constraints.push(constraint);
+  }
+
+  /** The place of an expression that was visited, which every operand of an interaction was. */
+  #placeOf(expression: Expression): PlaceId {
+    const place = this.#values.get(expression);
+    if (place === undefined)
+      throw new Error("The collector did not visit an expression it cites as evidence.");
+    return place;
   }
 
   #has(place: PlaceId, type: TypeTerm, node: Spanned, role: Role): void {
@@ -1195,7 +1206,10 @@ class Collector {
     }
     if (isAskImageCall(expression)) {
       // The options of the question's mode are evaluated first, as for `say`.
-      if (expression.presentation !== undefined) this.#expression(expression.presentation, scope);
+      const presentation: NamedPlace[] =
+        expression.presentation === undefined
+          ? []
+          : [{ name: "presentation", value: this.#expression(expression.presentation, scope) }];
       const args = this.#arguments(expression, scope);
       const allowSkip = expression.arguments.find(
         (argument) => argument.kind === "namedArgument" && argument.name.name === "allowSkip",
@@ -1205,7 +1219,7 @@ class Collector {
         { family: "interaction", name: "askImage" },
         null,
         args.positional,
-        args.named,
+        [...presentation, ...args.named],
         expression,
         "operand",
         {
@@ -1375,7 +1389,7 @@ class Collector {
       named,
       expression,
       "operand",
-      interactionEvidence(expression, (node) => this.#values.get(node) ?? null),
+      interactionEvidence(expression, (node) => this.#placeOf(node)),
     );
   }
 }
@@ -1401,78 +1415,117 @@ function label(expression: Expression): string {
 /** What the source says about an ask beyond its operands' types (see `SyntaxEvidence`). */
 function interactionEvidence(
   expression: InteractionExpression,
-  placeOf: (node: Expression) => PlaceId | null,
+  placeOf: (node: Expression) => PlaceId,
 ): SyntaxEvidence | undefined {
   const argument = (name: string): Expression | undefined =>
     namedAskArguments(expression).find((candidate) => candidate.name === name)?.value;
-  /** The written `value` and `text` of a choice object literal. */
-  const choiceObject = (node: Expression): ChoiceObjectEvidence | undefined => {
-    const literal = unwrap(node);
-    if (literal.kind !== "objectLiteral") return undefined;
-    const property = (key: string): PlaceId | null => {
-      const found = literal.properties.find((candidate) => candidate.name.name === key);
-      return found === undefined ? null : placeOf(found.value);
-    };
-    return { value: property("value"), text: property("text") };
+  const literal = (node: Expression): WrittenLiteral => {
+    const known = staticChoiceValue(node);
+    return known === undefined ? null : { value: known.value };
   };
-  /** The written choice objects of a literal list or set, or `"computed"`. */
-  const choiceObjects = (node: Expression): readonly ChoiceObjectEvidence[] | "computed" => {
-    const literal = unwrap(node);
-    if (literal.kind !== "listLiteral" && literal.kind !== "setLiteral") return "computed";
-    const objects: ChoiceObjectEvidence[] = [];
-    for (const element of literal.elements) {
-      const object = choiceObject(element);
-      if (object === undefined) return "computed";
-      objects.push(object);
-    }
-    return objects;
+  const property = (
+    literal: Extract<Expression, { kind: "objectLiteral" }>,
+    key: string,
+  ): Expression | undefined =>
+    literal.properties.find((candidate) => candidate.name.name === key)?.value;
+  /** A written choice object's `value` and `text` places. */
+  const choiceObject = (
+    literal: Extract<Expression, { kind: "objectLiteral" }>,
+  ): ChoiceObjectEvidence => {
+    const value = property(literal, "value");
+    const text = property(literal, "text");
+    return {
+      value: value === undefined ? null : placeOf(value),
+      text: text === undefined ? null : placeOf(text),
+    };
+  };
+  /** The written literal a button returns: the element's, or a written object's `value`, else its `text`. */
+  const buttonLiteral = (node: Expression): WrittenLiteral => {
+    const content = unwrap(node);
+    if (content.kind !== "objectLiteral") return literal(content);
+    const returned = property(content, "value") ?? property(content, "text");
+    return returned === undefined ? null : literal(returned);
+  };
+  const element = (node: Expression): ChoiceElementEvidence => {
+    const content = unwrap(node);
+    return {
+      place: placeOf(node),
+      literal: buttonLiteral(node),
+      object: content.kind === "objectLiteral" ? choiceObject(content) : null,
+    };
+  };
+  const elements = (node: Expression): readonly ChoiceElementEvidence[] | null => {
+    const content = unwrap(node);
+    return content.kind === "listLiteral" || content.kind === "setLiteral"
+      ? content.elements.map(element)
+      : null;
   };
   switch (expression.interactionKind) {
     case "form": {
       const fields = argument("fields");
-      const literal = fields === undefined ? undefined : unwrap(fields);
+      const container = fields === undefined ? undefined : unwrap(fields);
       const written =
-        literal?.kind === "objectLiteral"
-          ? literal.properties.map((property) => ({
-              name: property.name.name,
-              value: property.value,
-            }))
-          : literal?.kind === "dictLiteral"
-            ? literal.entries.map((entry) => ({
-                name: staticText(entry.key) ?? "?",
+        container?.kind === "objectLiteral"
+          ? {
+              shape: "object" as const,
+              entries: container.properties.map((entry) => ({
+                name: entry.name.name,
                 value: entry.value,
-              }))
+              })),
+            }
+          : container?.kind === "dictLiteral"
+            ? {
+                shape: "dict" as const,
+                entries: container.entries.map((entry) => ({
+                  name: staticText(entry.key) ?? "?",
+                  value: entry.value,
+                })),
+              }
             : undefined;
+      const descriptor = (node: Expression): FormDescriptorEvidence => {
+        const content = unwrap(node);
+        if (content.kind === "nullLiteral") return { kind: "null" };
+        if (content.kind === "listLiteral")
+          return { kind: "list", elements: content.elements.map(element) };
+        if (content.kind !== "objectLiteral") return { kind: "other" };
+        const type = property(content, "type");
+        const optional = property(content, "optional");
+        const optionalLiteral = optional === undefined ? undefined : unwrap(optional);
+        const place = (key: string): PlaceId | null => {
+          const found = property(content, key);
+          return found === undefined ? null : placeOf(found);
+        };
+        const options = property(content, "options");
+        return {
+          kind: "object",
+          type: type === undefined ? null : (staticText(type) ?? "computed"),
+          optional:
+            optional === undefined
+              ? null
+              : optionalLiteral?.kind === "booleanLiteral"
+                ? optionalLiteral.value
+                : "computed",
+          value: place("value"),
+          min: place("min"),
+          max: place("max"),
+          options:
+            options === undefined ? null : { place: placeOf(options), elements: elements(options) },
+        };
+      };
       const onTimeout = argument("onTimeout");
       return {
         kind: "form",
         fields:
           written === undefined
             ? "computed"
-            : written.map(({ name, value }): FormFieldEvidence => {
-                const descriptor = unwrap(value);
-                if (descriptor.kind === "nullLiteral")
-                  return { name, descriptor: "null", value: null, options: null };
-                if (descriptor.kind !== "objectLiteral")
-                  return { name, descriptor: "computed", value: null, options: null };
-                const property = (key: string): Expression | undefined =>
-                  descriptor.properties.find((candidate) => candidate.name.name === key)?.value;
-                const type = property("type");
-                const optional = property("optional");
-                const optionalLiteral = optional === undefined ? undefined : unwrap(optional);
-                const start = property("value");
-                const options = property("options");
-                return {
+            : {
+                shape: written.shape,
+                entries: written.entries.map(({ name, value }) => ({
                   name,
-                  descriptor: "object",
-                  ...(type === undefined ? {} : { type: staticText(type) ?? "computed" }),
-                  ...(optionalLiteral?.kind === "booleanLiteral"
-                    ? { optional: optionalLiteral.value }
-                    : {}),
-                  value: start === undefined ? null : placeOf(start),
-                  options: options === undefined ? null : choiceObjects(options),
-                };
-              }),
+                  place: placeOf(value),
+                  written: descriptor(value),
+                })),
+              },
         cancel: argument("cancel") !== undefined,
         timeout: argument("timeout") !== undefined,
         onTimeout: onTimeout === undefined ? null : (staticText(onTimeout) ?? "computed"),
@@ -1483,28 +1536,27 @@ function interactionEvidence(
         kind: "choice",
         options: expression.options.map((option): ChoiceOptionEvidence => {
           const content = unwrap(option.expression);
-          const object = choiceObject(content);
           return {
             label:
               option.value === null
                 ? null
                 : option.value.kind === "identifier"
-                  ? option.value.name
-                  : option.value.value,
-            expression:
-              content.kind === "objectLiteral"
-                ? "object"
-                : content.kind === "listLiteral"
-                  ? "list"
-                  : content.kind === "setLiteral"
-                    ? "set"
-                    : "other",
-            objects:
-              object !== undefined
-                ? [object]
-                : content.kind === "listLiteral" || content.kind === "setLiteral"
-                  ? choiceObjects(content)
-                  : "computed",
+                  ? { kind: "string", value: option.value.name }
+                  : {
+                      kind: option.value.numericType === "integer" ? "integer" : "number",
+                      value: option.value.value,
+                    },
+            place: placeOf(option.expression),
+            literal: buttonLiteral(option.expression),
+            content:
+              content.kind === "listLiteral" || content.kind === "setLiteral"
+                ? {
+                    kind: content.kind === "listLiteral" ? "list" : "set",
+                    elements: content.elements.map(element),
+                  }
+                : content.kind === "objectLiteral"
+                  ? { kind: "object", object: choiceObject(content) }
+                  : { kind: "other" },
           };
         }),
       };
