@@ -59,6 +59,26 @@ test("a string may follow every command that gives a value, also inside an inter
   }
 });
 
+test("a play command's file may follow its words, also inside an interpolation", () => {
+  // The reported source, and each word of each play command alone and all together.
+  const sources = ['say "${playAudio async "a.mp3"}"'];
+  for (const [name, facts] of Object.entries(COMMANDS))
+    if ("fileModifiers" in facts)
+      for (const words of [...facts.fileModifiers.map((word) => [word]), facts.fileModifiers])
+        sources.push(`say "\${${name} ${words.join(" ")} "x"}"`);
+  for (const source of sources) {
+    const { tokens, diagnostics } = lex(source);
+    assert.deepEqual(diagnostics, [], source);
+    assert.equal(tokens.filter((token) => token.kind === TokenKind.StringStart).length, 2, source);
+    // The parser reads the words, so what remains is that "${...}" cannot show the handle the command gives.
+    assert.deepEqual(
+      compileSource(`${source}\nexit`).diagnostics.map(({ code }) => code),
+      [source.includes(" async ") ? "TSV042" : "TSV036"],
+      source,
+    );
+  }
+});
+
 test("a host cannot configure a command, an ask, or another name the language reads itself", () => {
   for (const name of [...engineCommands, "takePhoto", "askImage", "pi", "debugMode"])
     for (const options of [{ globals: [name] }, { builtins: [name] }])

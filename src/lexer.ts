@@ -7,7 +7,7 @@ import {
   type SourcePosition,
   type SourceSpan,
 } from "./source.js";
-import { commandFacts, KEYWORD_TOKENS } from "./language-facts.js";
+import { COMMANDS, commandFacts, type CommandFacts, KEYWORD_TOKENS } from "./language-facts.js";
 import { createToken, TokenKind, type Token } from "./token.js";
 
 export interface LexResult {
@@ -579,10 +579,28 @@ class Lexer {
     return this.#offset < this.#quoteSearch.secondToLastQuote;
   }
 
+  /**
+   * Whether the token at `index` ends the words that a play command takes before its file, right after that command, as
+   * `async` in `playAudio async "a.mp3"`; a member such as `obj.playAudio` takes none (see `COMMANDS`).
+   */
+  #endsFileModifiers(index: number): boolean {
+    let command = index;
+    while (command >= 0 && FILE_MODIFIERS.has(this.#tokens[command]!.lexeme)) command -= 1;
+    const modifiers = commandFacts(this.#tokens[command]?.lexeme ?? "")?.fileModifiers;
+    return (
+      command < index &&
+      modifiers !== undefined &&
+      this.#tokens[command - 1]?.kind !== TokenKind.Dot &&
+      this.#tokens.slice(command + 1, index + 1).every((token) => modifiers.includes(token.lexeme))
+    );
+  }
+
   #canStartNestedString(): boolean {
     let index = this.#tokens.length - 1;
     while (this.#tokens[index]?.kind === TokenKind.Newline) index -= 1;
 
+    // A play command takes its file after its words, as in `"${playAudio async "a.mp3"}"`.
+    if (this.#endsFileModifiers(index)) return true;
     const previous = this.#tokens[index];
     const previousKind = previous?.kind;
     if (
@@ -833,6 +851,11 @@ class Lexer {
     return this.#peek() === "\n" || (this.#peek() === "\r" && this.#peek(1) === "\n");
   }
 }
+
+/** Every word that a play command takes before its file (see `COMMANDS`). */
+const FILE_MODIFIERS: ReadonlySet<string> = new Set(
+  Object.values(COMMANDS).flatMap((facts: CommandFacts) => facts.fileModifiers ?? []),
+);
 
 /** Whether `value` is a compact interaction, which may take `as speaker` and a question's mode (see `COMMANDS`). */
 function isInteractionCommand(value: string | undefined): boolean {
