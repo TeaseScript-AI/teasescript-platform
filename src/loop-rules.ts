@@ -10,15 +10,20 @@ export function isRepeatCount(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
+export const REPEAT_COUNT_RULE = "A repeat count must be a whole number (integer) of at least 0";
+
 /** `fix` starts with a space. */
 export function repeatCountMessage(subject: string, shown: string, fix: string): string {
-  return `A repeat count must be a whole number (integer) of at least 0, but ${subject} is ${shown}.${fix}`;
+  return `${REPEAT_COUNT_RULE}, but ${subject} is ${shown}.${fix}`;
 }
+
+/** The fix for a count that may not be whole. */
+export const ROUND_COUNT_FIX = " Round it with floor(...), round(...), or ceil(...) first.";
 
 /** The fix for a number that `repeat` cannot count. */
 export function repeatCountFix(value: number): string {
   return !Number.isInteger(value)
-    ? " Round it with floor(...), round(...), or ceil(...) first."
+    ? ROUND_COUNT_FIX
     : value < 0
       ? " Check that it is at least 0 first."
       : " Use a smaller count.";

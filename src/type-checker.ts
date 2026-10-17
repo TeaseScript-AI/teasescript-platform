@@ -33,7 +33,11 @@ import type {
   TransferTarget,
   TypeAnnotation,
 } from "./ast.js";
-import { messageColorDiagnostics } from "./authored-presentation.js";
+import {
+  messageColorDiagnostics,
+  presentationPropertyDiagnostics,
+  SPEAKER_PRESENTATION_PROPERTIES,
+} from "./authored-presentation.js";
 import {
   globMatches,
   isPathGlob,
@@ -122,15 +126,31 @@ import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
 import { rangeListLengthProblem } from "./runtime/collection-operations.js";
 import { describeShownValue, shownChoice } from "./runtime/value-types.js";
 import {
+  buttonBackgroundMessage,
+  CHOICE_TEXT_MESSAGE,
+  CHOICE_VALUES_MESSAGE,
+  choicePropertyMessage,
+  EMPTY_CHOICE_MESSAGE,
+  isButtonBackground,
+  isChoiceObjectProperty,
+} from "./choice-rules.js";
+import {
+  blockingRepeatMessage,
   cameraPlacementMessage,
+  FINISH_NEVER_RUNS_MESSAGE,
+  fileReferenceRule,
   handleArgumentsMessage,
   handleMemberMessage,
   hasArgumentlessMethods,
   isCameraPlacement,
   isMediaPosition,
   isMediaRange,
+  isMediaRepeatCount,
   isMediaVolume,
   isTimerDisplay,
+  MEDIA_REPEAT_COUNT_RULE,
+  MEDIA_REPEAT_RULE,
+  MEDIA_VOLUME_RULE,
   mediaPositionMessage,
   mediaRangeMessage,
   mediaVolumeMessage,
@@ -153,6 +173,24 @@ import {
 } from "./operand-rules.js";
 import { withoutNegativeZero } from "./conversions.js";
 import {
+  buttonTimeoutMessage,
+  negativeDelayMessage,
+  pacingMessage,
+  reachesSceneTime,
+  sceneTimeMessage,
+  timeoutSceneTimeMessage,
+  zeroRoundMessage,
+} from "./delay-rules.js";
+import {
+  FOR_SOURCE_RULE,
+  isRepeatCount,
+  pairLoopRule,
+  REPEAT_COUNT_RULE,
+  ROUND_COUNT_FIX,
+  repeatCountFix,
+  repeatCountMessage,
+} from "./loop-rules.js";
+import {
   compareDurations,
   divideDuration,
   durationFamily,
@@ -160,16 +198,20 @@ import {
   durationParts,
   durationPropertyMessage,
   durationQuotient,
+  DURATION_UNIT_MILLISECONDS,
   formatDuration,
   isCalendar,
   scaleDuration,
   unitValue,
   UNIT_OPERANDS,
+  ZERO_DIVISOR,
   type AnyDuration,
 } from "./duration.js";
 import {
+  findVisibleOverflows,
   isStaticDuration,
   knownOperands,
+  VISIBLE_OVERFLOW_MESSAGES,
   knownStep,
   staticChoiceValue,
   staticNumber,
@@ -363,13 +405,19 @@ export type RuntimeCheckSite =
 
 const typeCode = {
   invalidAssignment: "TSV004",
+  duplicateProperty: "TSV007",
   invalidRangeOperand: "TSV010",
+  invalidRepeatCount: "TSV011",
+  invalidLoopSource: "TSV012",
   argumentCount: "TSV020",
   unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
+  invalidTimer: "TSV033",
   invalidTimerHandleMember: "TSV034",
+  mixedDurationOperands: "TSV035",
   invalidMedia: "TSV036",
   invalidMediaHandleMember: "TSV037",
+  invalidStorageKey: "TSV038",
   invalidInteractionPrefill: "TSV039",
   listInText: "TSV040",
   unshowableValue: "TSV042",
@@ -377,7 +425,9 @@ const typeCode = {
   typeMismatch: "TSV041",
   invalidOperand: "TSV043",
   mixedTypes: "TSV044",
+  invalidListIndex: "TSV045",
   impossibleCase: "TSV049",
+  visibleOverflow: "TSV050",
   emptyTagQuery: "TST002",
   invalidCaptureTag: "TST005",
   invalidTagQueryFrom: "TST006",
@@ -436,8 +486,32 @@ export function checkTypes(
         continue;
       }
     }
-    return checked.result;
+    return withVisibleOverflows(checked.result, programs);
   }
+}
+
+/**
+ * Adds to each file's diagnostics the steps of known values without a finite result (TSV050), which the folds of every
+ * round of the check share, so they are found once.
+ */
+function withVisibleOverflows(
+  result: TypeCheckResult,
+  programs: readonly Program[],
+): TypeCheckResult {
+  return {
+    ...result,
+    diagnostics: result.diagnostics.map((diagnostics, file) => [
+      ...findVisibleOverflows(programs[file]!).map((overflow) =>
+        createDiagnostic(
+          DiagnosticSeverity.Error,
+          typeCode.visibleOverflow,
+          VISIBLE_OVERFLOW_MESSAGES[overflow.cause],
+          overflow.span,
+        ),
+      ),
+      ...diagnostics,
+    ]),
+  };
 }
 
 /** The type check of the project with the effects `effects`, and the code it found never runs (see `checkTypes`). */
@@ -1931,6 +2005,8 @@ class TypeChecker {
     for (const property of declaration.properties) {
       const name = property.name.name;
       gets.add(name);
+      if (SPEAKER_PRESENTATION_PROPERTIES.has(name))
+        this.diagnostics.push(...presentationPropertyDiagnostics(name, property.value));
       const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
       this.#checkSpeakerProperty(name, property.value, type);
       this.#rejectRandomSelection(property.value);
@@ -2581,10 +2657,21 @@ class TypeChecker {
       case "repeatStatement": {
         const counted = yield* compileChild(this.#expressionTask(statement.count, scope));
         const count = nonNullTypeForUse(counted);
+        const known = this.#known(statement.count);
         if (isScalar(count, "number"))
           this.#report(
-            typeCode.invalidOperand,
-            `A repeat count must be a whole number (integer), but this is ${describeValue(count)}.${this.#widenedNote(statement.count)}${ROUND_FIX}.`,
+            typeCode.invalidRepeatCount,
+            repeatCountMessage(
+              "this",
+              describeValue(count),
+              `${this.#widenedNote(statement.count)}${ROUND_COUNT_FIX}`,
+            ),
+            statement.count.span,
+          );
+        else if (typeof known === "number" && !isRepeatCount(known))
+          this.#report(
+            typeCode.invalidRepeatCount,
+            repeatCountMessage("this", describeShownValue(known), repeatCountFix(known)),
             statement.count.span,
           );
         else
@@ -2592,7 +2679,9 @@ class TypeChecker {
             counted,
             (member) => isScalar(member, "integer"),
             statement.count,
-            "A repeat count is a whole number (integer)",
+            REPEAT_COUNT_RULE,
+            undefined,
+            typeCode.invalidRepeatCount,
           );
         const times = staticNumber(statement.count);
         this.#notePaths(statement, [
@@ -2619,7 +2708,9 @@ class TypeChecker {
           iterable,
           (member) => elementType(member, true) !== undefined,
           statement.iterable,
-          "A for-loop goes through a list, a set, a dict, or a range",
+          FOR_SOURCE_RULE,
+          undefined,
+          typeCode.invalidLoopSource,
         );
         const loopType = element === undefined ? UNKNOWN_TYPE : loopValueType(element);
         this.#follow({ root: statement, path: [] }, loopType, statement.iterable.span);
@@ -2733,7 +2824,9 @@ class TypeChecker {
       iterable,
       (member) => dictValueType(member) !== undefined,
       statement.iterable,
-      "A for-loop with a key and a value goes through a dict",
+      pairLoopRule(statement.variable.name, valueName.name),
+      undefined,
+      typeCode.invalidLoopSource,
     );
     const key: Variable = {
       name: statement.variable.name,
@@ -2791,8 +2884,11 @@ class TypeChecker {
   }
 
   *#sayTask(statement: SayParts, scope: Scope): CompileTask<void> {
-    if (statement.presentation !== null)
+    if (statement.presentation !== null) {
       yield* compileChild(this.#expressionTask(statement.presentation, scope));
+      this.#checkPresentation(statement.presentation);
+    }
+    this.diagnostics.push(...messageColorDiagnostics(statement.value));
     yield* compileChild(this.#expressionTask(statement.value, scope));
     if (statement.pacing !== null && statement.pacing !== "instant") {
       const pacing = statement.pacing;
@@ -2800,7 +2896,24 @@ class TypeChecker {
       this.#reportNonDuration(pacing, type, "Say pacing is a duration or instant", "3 s", () =>
         unitFix(pacing),
       );
+      const known = this.#knownLength(pacing);
+      if (known !== undefined && known.milliseconds < 0)
+        this.#report(
+          typeCode.invalidRepeatCount,
+          pacingMessage(formatDuration(known)),
+          pacing.span,
+        );
     }
+  }
+
+  /**
+   * The options of a message mode written for a `say` or an ask's question, such as `prose(align: "center")`, whose
+   * known values must name a colour, an alignment, or a mode; a value the compiler cannot know falls back when shown.
+   */
+  #checkPresentation(presentation: ObjectLiteral | null): void {
+    if (presentation === null) return;
+    for (const property of presentation.properties)
+      this.diagnostics.push(...presentationPropertyDiagnostics(property.name.name, property.value));
   }
 
   /** A `let`, or the start value of a `global`, which declares the global in the project's names. */
@@ -4400,7 +4513,7 @@ class TypeChecker {
   /**
    * A range written where `randomInteger` draws a number from it, or a wait or timer a number of units (`delay`), in
    * the runtime's order: a start that gives a wait or timer no length, whole-number bounds, and at least one number to
-   * draw. A bound the compiler cannot know is checked at runtime.
+   * draw. A bound the compiler cannot know is checked at runtime. Returns whether it reported a problem.
    */
   #checkDrawnRange(
     expression: Expression,
@@ -4410,9 +4523,9 @@ class TypeChecker {
       readonly repeat: boolean;
       readonly unit: DurationUnit;
     },
-  ): void {
+  ): boolean {
     const range = unwrap(expression);
-    if (range.kind !== "rangeExpression") return;
+    if (range.kind !== "rangeExpression") return false;
     const start = this.#known(range.start);
     const end = this.#known(range.end);
     const known: RangeBounds | undefined =
@@ -4431,12 +4544,13 @@ class TypeChecker {
       );
       if (problem !== null) {
         this.#report(typeCode.invalidRangeOperand, problem, range.span);
-        return;
+        return true;
       }
     }
-    if (!this.#checkWholeRangeBounds(range, subject) || known === undefined) return;
-    const empty = emptyRangeProblem(subject, known);
+    if (!this.#checkWholeRangeBounds(range, subject)) return true;
+    const empty = known === undefined ? null : emptyRangeProblem(subject, known);
     if (empty !== null) this.#report(typeCode.invalidRangeOperand, empty, range.span);
+    return empty !== null;
   }
 
   /**
@@ -4569,11 +4683,21 @@ class TypeChecker {
         return { kind: expression.kind === "listLiteral" ? "list" : "set", element };
       }
       case "dictLiteral": {
-        // Each key is text; the values share one type like the elements of a list (rule 1.3).
+        // Each key is text; the values share one type like the elements of a list (rule 1.3). Keys the compiler knows
+        // must differ; keys known only at runtime replace earlier entries instead.
         const types: StaticType[] = [];
+        const keys = new Set<string>();
         for (const entry of expression.entries) {
           const key = yield* compileChild(this.#expressionTask(entry.key, scope));
           this.#checkDictKey(key, entry.key);
+          const text = staticChoiceValue(entry.key)?.value;
+          if (typeof text === "string" && keys.has(text))
+            this.#report(
+              typeCode.duplicateProperty,
+              `Duplicate dict key ${JSON.stringify(text)}. Each key may appear only once. Remove one of the entries.`,
+              entry.key.span,
+            );
+          if (typeof text === "string") keys.add(text);
           yield* compileChild(this.#expressionTask(entry.value, scope));
           types.push(this.#capture(entry.value));
         }
@@ -4741,7 +4865,7 @@ class TypeChecker {
         yield* compileChild(this.#permanentButtonTask(expression, scope));
         return { kind: "permanentButton" };
       case "loadExpression": {
-        yield* compileChild(this.#storageKeyTask(expression.key, scope));
+        yield* compileChild(this.#storageKeyTask(expression.key, scope, true));
         let fallback: StaticType = UNKNOWN_TYPE;
         if (expression.defaultValue !== null) {
           // The default runs only for a missing key.
@@ -5333,8 +5457,10 @@ class TypeChecker {
    * answer. The answer is an image reference, or also `null` unless `allowSkip:` is left out or written `false`.
    */
   *#askImageTask(expression: CallExpression, scope: Scope): CompileTask<StaticType> {
-    if (expression.presentation !== undefined)
+    if (expression.presentation !== undefined) {
       yield* compileChild(this.#expressionTask(expression.presentation, scope));
+      this.#checkPresentation(expression.presentation);
+    }
     const sources: boolean[] = [];
     let skippable = false;
     for (const argument of expression.arguments) {
@@ -6070,7 +6196,8 @@ class TypeChecker {
       if (value !== undefined && factor !== undefined)
         problem = operator === "*" ? scaleDuration(value, factor) : divideDuration(value, factor);
     }
-    if (typeof problem === "string")
+    // A zero divisor the compiler can see is a visible overflow (TSV050), reported once for the step.
+    if (typeof problem === "string" && problem !== ZERO_DIVISOR)
       this.#report(typeCode.invalidOperand, `'${operator}': ${problem}.`, expression.span);
   }
 
@@ -6181,7 +6308,9 @@ class TypeChecker {
     } else failed = outcome.failed;
     const command = this.#timeOperands.get(expression);
     this.#report(
-      typeCode.invalidOperand,
+      mixesDurationAndNumber(operator, failed)
+        ? typeCode.mixedDurationOperands
+        : typeCode.invalidOperand,
       (command === undefined ? null : groupedUnitMessage(command, expression, failed)) ??
         operatorMessage(operator, expression, failed, (item) => this.#typeOf(item)),
       expression.span,
@@ -6713,6 +6842,13 @@ class TypeChecker {
     }
     if (method === "removeAt" && values.length === 1 && members(value).every(isList))
       this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
+    // Only a list has removeAt, so its position is a list index on any receiver.
+    else if (
+      method === "removeAt" &&
+      expression.arguments.length === 1 &&
+      expression.arguments[0]!.kind === "positionalArgument"
+    )
+      this.#checkNegativeIndex(expression.arguments[0]!.value);
     // As for a dict, the default may decide the element type of a list that no value decided yet (V30 §16), before
     // anything reads the element.
     const listDefault = expression.arguments[1];
@@ -6743,7 +6879,7 @@ class TypeChecker {
       members(value).some(isList) &&
       members(value).every((member) => memberMethodType(member, method) !== undefined)
     )
-      this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0].value);
+      this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0].value, true);
     // A dict method takes a text key; `get` also takes the value it gives for a missing key.
     let fallback: StaticType | undefined;
     if (isDictReceiver(value) && DICT_METHODS.has(method)) {
@@ -7568,13 +7704,15 @@ class TypeChecker {
 
   /**
    * Checks `object[index]`: only lists, indexed by a whole number, and dicts, by a text key, are indexed, and every
-   * member of a union must be the same one. An object has fixed properties, so it points to a dict.
+   * member of a union must be the same one. An object has fixed properties, so it points to a dict. A list's `get`
+   * gives its default for any index the list does not have, also one below 0 (`negative`).
    */
   #checkIndex(
     object: StaticType,
     objectExpression: Expression,
     index: StaticType,
     expression: Expression,
+    negative = false,
   ): void {
     const known = members(nonNullType(object)).filter(isKnown).map(resolved);
     if (known.length > 0 && known.every((member) => member.kind === "object")) {
@@ -7615,7 +7753,7 @@ class TypeChecker {
         `A list index must be a whole number (integer), but this is ${describeValue(position)}.${this.#widenedNote(expression)}${ROUND_FIX}.`,
         expression.span,
       );
-    else
+    else {
       this.#reportUnless(
         index,
         (member) => isScalar(member, "integer") || (keyed && isScalar(member, "string")),
@@ -7624,6 +7762,15 @@ class TypeChecker {
           ? "An index is a whole number (integer) for a list, or text (string) for a dict"
           : "A list index is a whole number (integer)",
       );
+      if (isScalar(position, "integer") && !negative) this.#checkNegativeIndex(expression);
+    }
+  }
+
+  /** A list index the compiler knows is below 0, which no element has. */
+  #checkNegativeIndex(expression: Expression): void {
+    const known = this.#known(expression);
+    if (typeof known === "number" && known < 0)
+      this.#report(typeCode.invalidListIndex, NEGATIVE_INDEX_MESSAGE, expression.span);
   }
 
   /**
@@ -7716,6 +7863,7 @@ class TypeChecker {
       return BOOLEAN_TYPE;
     }
     if (expression.interactionKind !== "choice") {
+      this.#checkPresentation(expression.presentation);
       for (const operand of askOperands(expression)) {
         if (operand === expression.presentation) continue;
         const type = yield* compileChild(this.#expressionTask(operand, scope));
@@ -7740,8 +7888,15 @@ class TypeChecker {
       else literals?.push(literal);
     };
     let buttons = 0;
+    // Whether every option is a list or set written without elements.
+    let empty = true;
     for (const option of expression.options) {
       const content = unwrap(option.expression);
+      if (
+        (content.kind !== "listLiteral" && content.kind !== "setLiteral") ||
+        content.elements.length > 0
+      )
+        empty = false;
       const written: StaticType | null =
         option.value === null
           ? null
@@ -7832,6 +7987,8 @@ class TypeChecker {
         `A choice can show at most ${MAX_INTERACTION_OPTION_ENTRIES} buttons.`,
         expression.span,
       );
+    if (empty && expression.options.length > 0)
+      this.#report(typeCode.invalidInteractionChoice, EMPTY_CHOICE_MESSAGE, expression.span);
     // The button whose value `prefill:` gives is preselected; a value no button has preselects none (V30 §19).
     if (expression.prefill !== null)
       yield* compileChild(this.#expressionTask(expression.prefill, scope));
@@ -7901,6 +8058,20 @@ class TypeChecker {
         if (member.kind === "object" && member.properties !== null)
           this.#checkChoiceText(entry, member.properties);
       return value.kind === "object" ? UNKNOWN_TYPE : type;
+    }
+    // What a choice object written as a literal may hold; the runtime checks a computed one, whose properties may change.
+    if (!literal.properties.some((property) => property.name.name === "text"))
+      this.#report(typeCode.invalidInteractionChoice, CHOICE_TEXT_MESSAGE, literal.span);
+    for (const property of literal.properties) {
+      const name = property.name.name;
+      if (!isChoiceObjectProperty(name))
+        this.#report(
+          typeCode.invalidInteractionChoice,
+          choicePropertyMessage(name),
+          property.name.span,
+        );
+      else if (name === "value" && !returns)
+        this.#report(typeCode.invalidInteractionChoice, CHOICE_VALUES_MESSAGE, property.name.span);
     }
     let returned: StaticType = UNKNOWN_TYPE;
     for (const property of literal.properties) {
@@ -8015,16 +8186,43 @@ class TypeChecker {
           "30 s",
           () => unitFix(option.value),
         );
+        const known = this.#knownLength(option.value);
+        const problem =
+          known === undefined
+            ? undefined
+            : !(known.milliseconds > 0)
+              ? buttonTimeoutMessage(formatDuration(known))
+              : !reachesSceneTime(known.milliseconds)
+                ? timeoutSceneTimeMessage("showButton")
+                : undefined;
+        if (problem !== undefined)
+          this.#report(typeCode.invalidRepeatCount, problem, option.value.span);
       }
     }
   }
 
   #checkBackground(expression: Expression, type: StaticType): void {
-    if (this.#reportedMayBe(expression, type, (member) => isScalar(member, "string"))) return;
-    if (isKnown(nonNullType(type)) && !isScalar(nonNullType(type), "string"))
+    if (
+      this.#reportedMayBe(
+        expression,
+        type,
+        (member) => isScalar(member, "string"),
+        typeCode.invalidInteractionChoice,
+      )
+    )
+      return;
+    const value = nonNullType(type);
+    const text = isScalar(type, "string") ? staticVisibleText(expression) : undefined;
+    if (isKnown(value) && !isScalar(value, "string"))
       this.#report(
         typeCode.invalidInteractionChoice,
-        'A button background must be an opaque CSS colour, such as "#336699".',
+        buttonBackgroundMessage(describeValue(value)),
+        expression.span,
+      );
+    else if (text !== undefined && !isButtonBackground(text))
+      this.#report(
+        typeCode.invalidInteractionChoice,
+        buttonBackgroundMessage(describeShownValue(text)),
         expression.span,
       );
   }
@@ -8084,6 +8282,7 @@ class TypeChecker {
     expression: Expression,
     type: StaticType,
     accepts: (member: StaticType) => boolean,
+    code: string = typeCode.invalidOperand,
   ): boolean {
     const all = members(nonNullType(type)).filter(isKnown);
     const passing = all.filter(accepts);
@@ -8092,6 +8291,7 @@ class TypeChecker {
       expression,
       all.find((member) => !accepts(member))!,
       passing,
+      code,
     );
     return true;
   }
@@ -8270,6 +8470,7 @@ class TypeChecker {
   ): void {
     const isRange = (member: StaticType): boolean =>
       command !== "media" && resolved(member).kind === "range";
+    const delay = command === "wait" ? "wait" : "timer";
     if (unit !== null) {
       this.#reportUnless(
         type,
@@ -8279,11 +8480,28 @@ class TypeChecker {
         () =>
           unitAmountFix(unit, isScalar(nonNullTypeForUse(type), "duration", "calendarDuration")),
       );
-      // A range counts whole units, as `for` counts whole numbers.
-      if (command !== "media") {
-        const delay = command === "wait" ? "wait" : "timer";
-        this.#checkDrawnRange(expression, `A ${delay}`, { command: delay, repeat, unit });
+      if (command === "media") return;
+      // A range counts whole units, as `for` counts whole numbers. Every draw is at least its start.
+      const range = unwrap(expression);
+      if (range.kind === "rangeExpression") {
+        const start = this.#known(range.start);
+        if (
+          !this.#checkDrawnRange(expression, `A ${delay}`, { command: delay, repeat, unit }) &&
+          typeof start === "number" &&
+          !reachesSceneTime(start * DURATION_UNIT_MILLISECONDS[unit])
+        )
+          this.#report(typeCode.invalidRepeatCount, sceneTimeMessage(delay), range.span);
+        return;
       }
+      const known = this.#known(expression);
+      if (typeof known === "number")
+        this.#checkDelayLength(
+          expression,
+          delay,
+          repeat,
+          known * DURATION_UNIT_MILLISECONDS[unit],
+          describeShownValue(known),
+        );
       return;
     }
     const range = resolved(nonNullTypeForUse(type)).kind === "range";
@@ -8297,6 +8515,37 @@ class TypeChecker {
       () => timeUnitFix(expression, command, range),
       command === "media" ? typeCode.invalidMedia : typeCode.invalidOperand,
     );
+    const known = this.#knownLength(expression);
+    if (command !== "media" && known !== undefined)
+      this.#checkDelayLength(expression, delay, repeat, known.milliseconds, formatDuration(known));
+  }
+
+  /**
+   * A known wait or timer length, as the runtime checks it before it waits: not below zero, not zero for a round of a
+   * repeating timer, and short enough for scene time to reach.
+   */
+  #checkDelayLength(
+    expression: Expression,
+    command: "wait" | "timer",
+    repeat: boolean,
+    milliseconds: number,
+    shown: string,
+  ): void {
+    const problem =
+      milliseconds < 0
+        ? negativeDelayMessage(command, shown)
+        : repeat && milliseconds === 0
+          ? zeroRoundMessage(shown)
+          : !reachesSceneTime(milliseconds)
+            ? sceneTimeMessage(command)
+            : undefined;
+    if (problem !== undefined) this.#report(typeCode.invalidRepeatCount, problem, expression.span);
+  }
+
+  /** The exact duration `expression` is known to have; a calendar duration has no fixed length. */
+  #knownLength(expression: Expression): AnyDuration | undefined {
+    const known = this.#known(expression);
+    return isStaticDuration(known) && !isCalendar(known) ? known : undefined;
   }
 
   /**
@@ -8346,15 +8595,20 @@ class TypeChecker {
           yield* compileChild(this.#expressionTask(operand, scope)),
           "a timer label",
         );
-      else
-        yield* compileChild(
-          this.#requireTask(
-            operand,
-            scope,
-            (type) => isScalar(type, "string"),
-            "A timer display is text (string)",
-          ),
+      else {
+        const type = yield* compileChild(this.#expressionTask(operand, scope));
+        this.#reportUnless(
+          type,
+          (member) => isScalar(member, "string"),
+          operand,
+          "A timer display is text (string)",
+          undefined,
+          typeCode.invalidTimer,
         );
+        const text = isScalar(type, "string") ? staticVisibleText(operand) : undefined;
+        if (text !== undefined && !isTimerDisplay(text))
+          this.#report(typeCode.invalidTimer, timerDisplayMessage(shownChoice(text)), operand.span);
+      }
     }
     if (timer.handler !== null) this.#pendHandler(timer.handler, null, scope);
   }
@@ -8381,37 +8635,71 @@ class TypeChecker {
   }
 
   *#mediaTask(media: MediaParts, scope: Scope, selfHandle: string | null): CompileTask<StaticType> {
+    const command = media.media === "audio" ? "playAudio" : "playVideo";
     // Media first waits for the previous message's pacing, and later for loading; handlers may run at both.
     this.#suspend();
     for (const operand of mediaOperands(media)) {
-      if (operand === media.file)
-        yield* compileChild(
-          this.#fileTask(operand, scope, media.media === "audio" ? "playAudio" : "playVideo"),
+      if (operand === media.file) yield* compileChild(this.#fileTask(operand, scope, command));
+      else if (operand === media.volume) {
+        const type = yield* compileChild(
+          this.#requireTask(operand, scope, isNumeric, MEDIA_VOLUME_RULE, typeCode.invalidMedia),
         );
-      else if (operand === media.volume)
-        yield* compileChild(
-          this.#requireTask(operand, scope, isNumeric, "Volume is a number from 0 through 1"),
-        );
-      else if (media.repeat?.kind === "times" && operand === media.repeat.count)
-        yield* compileChild(
+        const known = isNumeric(type) ? this.#known(operand) : undefined;
+        if (typeof known === "number" && !isMediaVolume(known))
+          this.#report(
+            typeCode.invalidMedia,
+            mediaVolumeMessage(describeShownValue(known)),
+            operand.span,
+          );
+      } else if (media.repeat?.kind === "times" && operand === media.repeat.count) {
+        const type = yield* compileChild(
           this.#requireTask(
             operand,
             scope,
-            (type) => isScalar(type, "integer"),
-            "A repeat count is a whole number (integer)",
+            (member) => isScalar(member, "integer"),
+            MEDIA_REPEAT_COUNT_RULE,
+            typeCode.invalidMedia,
           ),
         );
-      else if (media.repeat?.kind === "value" && operand === media.repeat.value) {
-        yield* compileChild(
-          this.#requireTask(
-            operand,
-            scope,
-            (type) => isScalar(type, "boolean", "duration"),
-            "Repeat is true, false, or a duration",
-          ),
+        const known = isScalar(type, "integer") ? this.#known(operand) : undefined;
+        if (typeof known === "number" && !isMediaRepeatCount(known))
+          this.#report(
+            typeCode.invalidMedia,
+            `${MEDIA_REPEAT_COUNT_RULE}, but this is ${describeShownValue(known)}.`,
+            operand.span,
+          );
+      } else if (media.repeat?.kind === "value" && operand === media.repeat.value) {
+        const type = yield* compileChild(this.#expressionTask(operand, scope));
+        this.#reportUnless(
+          type,
+          (member) => isScalar(member, "boolean", "duration"),
+          operand,
+          MEDIA_REPEAT_RULE,
+          () =>
+            isNumeric(nonNullTypeForUse(type))
+              ? ` Write a count with 'times', such as 'repeat: ${expressionLabel(operand) ?? "3"} times'.`
+              : "",
+          typeCode.invalidMedia,
         );
+        const known = this.#knownLength(operand);
+        if (known !== undefined && !(known.milliseconds > 0))
+          this.#report(
+            typeCode.invalidMedia,
+            `${MEDIA_REPEAT_RULE}, but this is ${formatDuration(known)}.`,
+            operand.span,
+          );
       } else yield* compileChild(this.#timeTask(operand, "media", null, scope));
     }
+    // `repeat` before the file, or `repeat: true`.
+    const indefinite =
+      media.repeat?.kind === "indefinite" ||
+      (media.repeat?.kind === "value" && isTrueLiteral(media.repeat.value));
+    if (indefinite && !media.async)
+      this.#report(typeCode.invalidMedia, blockingRepeatMessage(command), media.repeat!.span);
+    if (indefinite && media.handlers?.kind === "cues")
+      for (const cue of media.handlers.cues)
+        if (cue.kind === "finish")
+          this.#report(typeCode.invalidMedia, FINISH_NEVER_RUNS_MESSAGE, cue.keywordSpan);
     this.#checkMediaPositions(media);
     for (const block of mediaHandlerBlocks(media))
       this.#pendHandler(block, media.async ? selfHandle : null, scope);
@@ -8426,10 +8714,9 @@ class TypeChecker {
    */
   #checkMediaPositions(media: MediaParts): void {
     const position = (expression: Expression, subject: string): AnyDuration | undefined => {
-      const known = this.#known(expression);
       // A calendar duration is a type error of its own.
-      if (!isStaticDuration(known) || isCalendar(known)) return undefined;
-      if (isMediaPosition(known.milliseconds)) return known;
+      const known = this.#knownLength(expression);
+      if (known === undefined || isMediaPosition(known.milliseconds)) return known;
       this.#report(
         typeCode.invalidMedia,
         mediaPositionMessage(subject, formatDuration(known)),
@@ -8463,7 +8750,8 @@ class TypeChecker {
           members(type).every(
             (member) => isScalar(member, "string") || resolved(member).kind === "null",
           ),
-        `${command} needs a file reference in text (string) or null`,
+        fileReferenceRule(command),
+        typeCode.invalidMedia,
       ),
     );
   }
@@ -8495,15 +8783,29 @@ class TypeChecker {
     );
   }
 
-  *#storageKeyTask(expression: Expression, scope: Scope): CompileTask<void> {
-    yield* compileChild(
-      this.#requireTask(
+  /**
+   * A storage key is text (V30 §25). `load "k" == null` loads the key `"k" == null`, so a load names the grouping that
+   * compares the loaded value instead.
+   */
+  *#storageKeyTask(expression: Expression, scope: Scope, load = false): CompileTask<void> {
+    const type = yield* compileChild(this.#expressionTask(expression, scope));
+    const text = (member: StaticType): boolean => isScalar(member, "string");
+    const all = members(type);
+    const failing = all.filter((member) => !text(member));
+    if (!isKnown(nonNullTypeForUse(type)) || failing.length === 0) return;
+    if (failing.length < all.length)
+      this.#reportMayBe(
         expression,
-        scope,
-        (type) => isScalar(type, "string"),
-        "A storage key is text (string)",
-      ),
-    );
+        failing.find((member) => member.kind !== "null") ?? failing[0]!,
+        all.filter(text),
+        typeCode.invalidStorageKey,
+      );
+    else
+      this.#report(
+        typeCode.invalidStorageKey,
+        load ? LOAD_KEY_MESSAGE : STORAGE_KEY_MESSAGE,
+        expression.span,
+      );
   }
 
   /**
@@ -8542,9 +8844,11 @@ class TypeChecker {
     scope: Scope,
     accepts: (type: StaticType) => boolean,
     rule: string,
-  ): CompileTask<void> {
+    code: string = typeCode.invalidOperand,
+  ): CompileTask<StaticType> {
     const type = yield* compileChild(this.#expressionTask(expression, scope));
-    this.#reportUnless(type, accepts, expression, rule);
+    this.#reportUnless(type, accepts, expression, rule, undefined, code);
+    return type;
   }
 
   /**
@@ -10030,6 +10334,10 @@ function capitalize(text: string): string {
 
 const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
 
+const STORAGE_KEY_MESSAGE = "Storage key must be a string.";
+
+const LOAD_KEY_MESSAGE = `${STORAGE_KEY_MESSAGE} To compare the loaded value, write 'load("k", default: null) == null'.`;
+
 /** The name of the variable a declaration declares. */
 function declarationName(declaration: Declaration): string {
   if (declaration.kind === "identifier") return declaration.name;
@@ -10405,6 +10713,15 @@ function numberPrefillFix(expression: Expression): string {
     : " Use a number, such as 'prefill: 10'.";
 }
 
+const NEGATIVE_INDEX_MESSAGE =
+  "A list index cannot be negative. The first element is at index 0, and the last at length - 1.";
+
+/** Whether `expression` is `true` as written, also in parentheses. */
+function isTrueLiteral(expression: Expression): boolean {
+  const value = unwrap(expression);
+  return value.kind === "booleanLiteral" && value.value;
+}
+
 function unwrap(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;
@@ -10538,6 +10855,17 @@ function groupedUnitMessage(
   const amount = expressionText(right.kind === "durationLiteral" ? right.amount : right.operand);
   if (left === null || amount === null) return null;
   return `A duration and a number cannot be combined with '${expression.operator}'. Put the expression in parentheses with the unit after them, such as '${command} (${left} ${expression.operator} ${amount}) ${right.unit}'.`;
+}
+
+/**
+ * Whether an operation failed on a duration and a number, which have their own code (TSV035). `%` takes no duration
+ * whatever the other operand is.
+ */
+function mixesDurationAndNumber(operator: string, operands: readonly StaticType[]): boolean {
+  if (operands.length !== 2 || operator === "%") return false;
+  const duration = (type: StaticType): boolean => isScalar(type, "duration", "calendarDuration");
+  const [left, right] = [operands[0]!, operands[1]!];
+  return (duration(left) && isNumeric(right)) || (isNumeric(left) && duration(right));
 }
 
 function operatorMessage(

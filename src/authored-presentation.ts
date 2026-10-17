@@ -5,6 +5,14 @@ import { staticVisibleText } from "./static-evaluation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { parseMessageMarkup } from "./message-markup.js";
 
+/** The speaker properties that are presentation options, which `presentationPropertyDiagnostics` checks. */
+export const SPEAKER_PRESENTATION_PROPERTIES: ReadonlySet<string> = new Set([
+  "presentation",
+  "color",
+  "bubble",
+  "prose",
+]);
+
 export function presentationPropertyDiagnostics(
   name: string,
   expression: Expression,

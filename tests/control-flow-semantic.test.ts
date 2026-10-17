@@ -31,14 +31,17 @@ test("validates loop sources and body identifiers", () => {
 });
 
 test("rejects statically known non-iterable loop sources", () => {
-  for (const source of ["for item in 1 { say item }", 'for item in "text" { say item }']) {
+  for (const [source, value] of [
+    ["for item in 1 { say item }", "a whole number (integer)"],
+    ['for item in "text" { say item }', "text (string)"],
+  ] as const) {
     const result = compileSource(source);
     assert.equal(result.plan, null);
     assert.deepEqual(
       result.semanticDiagnostics
         .filter((item) => item.code === "TSV012")
         .map((item) => item.message),
-      ["A for-loop source must be a list, set, dict, or integer range."],
+      [`A 'for' loop goes through a list, set, dict, or range, but this is ${value}.`],
     );
   }
 });

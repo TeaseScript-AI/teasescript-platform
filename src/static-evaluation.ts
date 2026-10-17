@@ -266,6 +266,14 @@ export function staticChoiceValue(
     : known;
 }
 
+/** The message of a visible overflow by its cause. */
+export const VISIBLE_OVERFLOW_MESSAGES = {
+  zero: "This divides by zero, so it has no result. Divide by a value other than zero.",
+  number: "This calculation gives a number too large to represent. Use smaller values.",
+  duration: "This calculation gives a duration too long to represent. Use a shorter duration.",
+  angle: "This calculation gives an angle too large to represent. Use a smaller angle.",
+} as const;
+
 /**
  * An arithmetic step the runtime always rejects: known operands with a non-finite result (`TSR036`), or a known zero
  * divisor, which fails for every dividend.

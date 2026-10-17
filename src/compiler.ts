@@ -296,9 +296,7 @@ function checkProject(
       files[index]!.picks = result.picks;
       files[index]!.captures = result.captures;
     });
-    if (
-      files.some((file) => file.parsed === null || file.result.diagnostics.some(stopsTypeCheck))
-    )
+    if (files.some((file) => file.parsed === null || file.result.diagnostics.some(stopsTypeCheck)))
       return null;
     // Types are checked once every name resolves, so a type message never repeats a name or structure error.
     const types = checkTypes(

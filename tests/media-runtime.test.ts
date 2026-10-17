@@ -751,7 +751,8 @@ test("a media position or repeat duration the compiler can compute is checked li
     `Media ${name} must be a duration of at least 0 seconds, but this is ${shown}.`;
   const later = (end: string, start: string) =>
     `Media endAt must be later than startAt, but endAt is ${end} and startAt is ${start}.`;
-  const zero = "A repeat duration must be greater than zero.";
+  const zero = (shown: string) =>
+    `Media repeat must be true, false, a count such as '3 times', or a positive duration, but this is ${shown}.`;
   const hidden = "function dynamic(value) {\n    return value\n}\n";
   // [the source with $ for the value, the value, the compile error, which the runtime gives too]
   for (const [template, value, expected, runtime] of [
@@ -771,8 +772,8 @@ test("a media position or repeat duration the compiler can compute is checked li
       true,
     ],
     ['playAudio(file: "a", endAt: $)', "1 s - 1 s", later("0 seconds", "0 seconds"), true],
-    ['playAudio(file: "a", repeat: $)', "0 s", zero, false],
-    ['playAudio(file: "a", repeat: $)', "(1 - 1) s", zero, false],
+    ['playAudio(file: "a", repeat: $)', "0 s", zero("0 seconds"), true],
+    ['playAudio(file: "a", repeat: $)', "(1 - 1) s", zero("0 seconds"), true],
     ['playAudio "a" {\n  at $ {\n  }\n}', "1 s - 2 s", negative("at position", "-1 second"), true],
     [
       'playAudio "a" {\n  beforeEnd $ {\n  }\n}',

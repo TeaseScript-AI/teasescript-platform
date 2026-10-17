@@ -138,7 +138,7 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     grouped.map(({ code, message }) => [code, message]),
     [
       [
-        "TSV043",
+        "TSV035",
         "A duration and a number cannot be combined with '+'. Put the expression in parentheses with the unit after them, such as 'wait (15 + randomInteger(0..35)) s'.",
       ],
     ],

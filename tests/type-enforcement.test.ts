@@ -84,13 +84,13 @@ test("an unannotated integer variable is a number when one of its assignments ca
       ],
     ],
   );
-  for (const [source, use] of [
-    ["let items = [1, 2]\nlet i = 1\ni = i * 0.5\nlet x = items.removeAt(i)\nexit", "i"],
-    ['let n = 2\nn = n / 2\nrepeat n {\n    say "x"\n}\nexit', "n"],
-    ["let items = [1]\nlet x = null\nx = 0\nx = 0.5\nsay items[x]\nexit", "x"],
-    ["let items = [1]\nfor i in [0] {\n    i = i / 2\n    say items[i]\n}\nexit", "i"],
+  for (const [source, use, code] of [
+    ["let items = [1, 2]\nlet i = 1\ni = i * 0.5\nlet x = items.removeAt(i)\nexit", "i", "TSV043"],
+    ['let n = 2\nn = n / 2\nrepeat n {\n    say "x"\n}\nexit', "n", "TSV011"],
+    ["let items = [1]\nlet x = null\nx = 0\nx = 0.5\nsay items[x]\nexit", "x", "TSV043"],
+    ["let items = [1]\nfor i in [0] {\n    i = i / 2\n    say items[i]\n}\nexit", "i", "TSV043"],
   ] as const)
-    assert.deepEqual(codes(source), [["TSV043", use]], source);
+    assert.deepEqual(codes(source), [[code, use]], source);
   // A variable that takes another widened variable widens too, wherever the assignment is checked.
   assert.deepEqual(codes("let b = 0\nlet a = 1\na = a / 2\nb = a\nlet k: integer = b\nexit"), [
     ["TSV041", "b"],
@@ -609,12 +609,16 @@ test("optional types keep their non-null type in operations, elements, and loops
   );
   // A possibly null value is used only after a check, which narrows it (owner decision on #504 Q1).
   const nullable = "let items = [1]\nfunction f(n: integer?) {\n    BODY\n}\nexit";
-  for (const body of ['say "${items[n]}"', 'say "${n + 1}"', 'repeat n {\n        say "x"\n    }'])
+  for (const [body, code] of [
+    ['say "${items[n]}"', "TSV043"],
+    ['say "${n + 1}"', "TSV043"],
+    ['repeat n {\n        say "x"\n    }', "TSV011"],
+  ] as const)
     assert.deepEqual(
       mismatches(nullable.replace("BODY", body)),
       [
         [
-          "TSV043",
+          code,
           "'n' may be null. Check it first: if n != null { ... }, or give a fallback: n otherwise 0",
           "n",
         ],
@@ -642,18 +646,18 @@ test("optional types keep their non-null type in operations, elements, and loops
   assert.deepEqual(codes('let t: string? = "a"\nlet r = round(t)\nexit'), [["TSV043", "t"]]);
   // Also beside an operand of unknown type, as a timer range, or as the receiver of a new property. The fallback the
   // message names is of the value's type, or a placeholder for a type without a short literal (owner decision on #850).
-  for (const [source, fallback] of [
-    ["function f(n: integer?, other) {\n    return n + other\n}\nexit", "0"],
-    ["function f(n: integer?) {\n    return n + n\n}\nexit", "0"],
+  for (const [source, fallback, code] of [
+    ["function f(n: integer?, other) {\n    return n + other\n}\nexit", "0", "TSV043"],
+    ["function f(n: integer?) {\n    return n + n\n}\nexit", "0", "TSV043"],
     // Text joins other text, so beside an operand of unknown type only null needs a check.
-    ["function f(n: string?, other) {\n    return n + other\n}\nexit", '""'],
-    ["function f(n: range?) {\n    timer async n s\n}\nexit", "..."],
+    ["function f(n: string?, other) {\n    return n + other\n}\nexit", '""', "TSV043"],
+    ["function f(n: range?) {\n    timer async n s\n}\nexit", "...", "TSV043"],
   ] as const)
     assert.deepEqual(
       mismatches(source).map(([code, message]) => [code, message]),
       [
         [
-          "TSV043",
+          code,
           `'n' may be null. Check it first: if n != null { ... }, or give a fallback: n otherwise ${fallback}`,
         ],
       ],
@@ -1727,7 +1731,7 @@ test("only integers convert implicitly: division gives a number, and durations n
       "10",
     ],
     [
-      "TSV043",
+      "TSV035",
       "A duration and a number cannot be combined with '+'. Give the number a unit, such as '5 s'.",
       "pause + 5",
     ],

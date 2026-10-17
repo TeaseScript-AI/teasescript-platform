@@ -195,7 +195,7 @@ test("a script query yields script references, which only transfers and script v
     errors('let found = findScripts(where: "chastity")\nshowImage found[0]\nexit').map(
       ([code]) => code,
     ),
-    ["TSV043"],
+    ["TSV036"],
   );
 });
 

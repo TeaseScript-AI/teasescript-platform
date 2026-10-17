@@ -453,7 +453,7 @@ test("a loop goes through the answers of a dict of fields where the form is aske
     compileSource(
       'for id in askForm("Which?", fields: { rope: false }) { say id }\nexit',
     ).diagnostics.map((diagnostic) => diagnostic.message),
-    ["A for-loop goes through a list, a set, a dict, or a range, but this is an object."],
+    ["A 'for' loop goes through a list, set, dict, or range, but this is an object."],
   );
 });
 
