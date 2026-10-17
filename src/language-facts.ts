@@ -102,7 +102,7 @@ export const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "regex",
 ] as const);
 
-export const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
+const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "player",
   "random",
   "randomInteger",
