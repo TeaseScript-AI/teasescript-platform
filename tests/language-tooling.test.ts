@@ -201,6 +201,30 @@ test("formatting and help reach a say used as a value, which keeps its parenthes
   assert.ok(hover?.contents.some((line) => line.includes("messageHandle")));
 });
 
+test("formatting and help reach a command in a named timer's label and display and in an askChoice's parts", () => {
+  // The parts come from the shared order helpers: a named timer's label may come first, and an askChoice's prefill
+  // follows its options.
+  const source = [
+    'let t = timer(label: askText   "Label?", duration: 5 s, display: askText   "Display?", async: true)',
+    'let c = askChoice yes: askText   "Yes?", no: "No", prefill: askText   "Which?"',
+    "exit",
+  ].join("\n");
+  const document = createLanguageDocument("file:///main.tease", source);
+  assert.equal(formatLanguageDocument(document).text, source.replaceAll("   ", " "));
+  for (const question of ['"Label?"', '"Display?"', '"Yes?"', '"Which?"']) {
+    const offset = source.indexOf(question);
+    const command = source.lastIndexOf("askText", offset);
+    assert.deepEqual(
+      languageHover(document, languagePositionAt(document, offset + 1))?.range,
+      {
+        start: languagePositionAt(document, command),
+        end: languagePositionAt(document, command + "askText".length),
+      },
+      question,
+    );
+  }
+});
+
 const DEEP_SAY = 'say   "deep"  ,instant';
 
 /** The deepest `say` has irregular owned whitespace, so formatting that stops descending leaves it unchanged. */
@@ -436,11 +460,27 @@ test("token classes are the compiler's reading of numbers, names, comments, and 
     "exit:keyword",
     "// done:comment",
   ]);
-  // After a message mode the parser expects a value, so the slash starts a regex (V30 §8).
-  assert.deepEqual(tokenClasses("say prose /[a-z]+/"), [
+  // After a message mode the parser expects a value, so the slash starts a regex (V30 §8), also one whose class holds
+  // what starts a comment elsewhere; a comment stays one right after an operator and before a division.
+  assert.deepEqual(tokenClasses("say prose /[a-z]+/\nsay prose /[/*]/"), [
     "say:keyword",
-    "prose:name",
+    "prose:keyword",
     "/[a-z]+/:regex",
+    "say:keyword",
+    "prose:keyword",
+    "/[/*]/:regex",
+  ]);
+  assert.deepEqual(tokenClasses("let x = /* c */ 6\nsay x /* c */ / 2"), [
+    "let:keyword",
+    "x:name",
+    "=:operator",
+    "/* c */:comment",
+    "6:number",
+    "say:keyword",
+    "x:name",
+    "/* c */:comment",
+    "/:operator",
+    "2:number",
   ]);
 });
 
@@ -507,6 +547,74 @@ test("token classes follow the parse where a word means something else", () => {
   // A keyword after `.` names a property too.
   assert.deepEqual(compileSource("say {set: 1}.set\nexit").diagnostics, []);
   assert.equal(tokenClasses("say {set: 1}.set").at(-1), "set:name");
+});
+
+test("token classes take a message mode, a skip word, and instant from the parse", () => {
+  // They are keywords where the parse reads them as a say's or a question's mode, a skip word, or the pacing, and
+  // names where they are values.
+  const source = [
+    'say prose(align: "center") skippable "x", instant',
+    'let line = say bubble unskippable ("y", instant)',
+    'let name = askText prose "Name?"',
+    'let pic = askImage bubble ("Image?")',
+    "let prose = 3",
+    'let skippable = "s"',
+    "let instant = 2 s",
+    "say prose",
+    "say skippable, instant + 1 s",
+  ].join("\n");
+  assert.deepEqual(compileSource(`${source}\nexit`).diagnostics, []);
+  assert.deepEqual(
+    tokenClasses(source).filter((token) =>
+      /^(prose|bubble|skippable|unskippable|instant):/u.test(token),
+    ),
+    [
+      "prose:keyword",
+      "skippable:keyword",
+      "instant:keyword",
+      "bubble:keyword",
+      "unskippable:keyword",
+      "instant:keyword",
+      "prose:keyword",
+      "bubble:keyword",
+      "prose:name",
+      "skippable:name",
+      "instant:name",
+      "prose:name",
+      "skippable:name",
+      "instant:name",
+    ],
+  );
+});
+
+test("token classes make a key or a label in name: a name, also a protected word", () => {
+  const source = [
+    'let o = { min: 1, set: 2, string: "s" }',
+    "let d = dict{ max: 3 }",
+    'let m = max(o.min, d.get("cap", default: 0))',
+    'let n = load("count", default: 0)',
+    'let c = load "count", default: 0',
+    "switch m {",
+    '  case 1 { say "one" }',
+    '  default { say "other" }',
+    "}",
+  ].join("\n");
+  assert.deepEqual(compileSource(`${source}\nexit`).diagnostics, []);
+  assert.deepEqual(
+    tokenClasses(source).filter((token) => /^(min|set|string|max|default):/u.test(token)),
+    [
+      "min:name",
+      "set:name",
+      "string:name",
+      "max:name",
+      "max:command",
+      "min:name",
+      "default:name",
+      "default:name",
+      "default:name",
+      "default:keyword",
+    ],
+  );
 });
 
 test("token classes keep a string's text, its interpolations, and their code apart", () => {

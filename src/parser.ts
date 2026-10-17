@@ -944,18 +944,21 @@ class Parser {
       this.#check(TokenKind.Identifier) &&
       ["bubble", "prose"].includes(this.#peek().lexeme) &&
       (this.#atSayModeBeforeBoundedText() ||
-        !(yield* parseChild(this.#canParseCompleteSayValue(statement))))
+        !(yield* parseChild(
+          this.#canParseCompleteSayValue(statement, this.#peekAfterSayMode()?.kind),
+        )))
         ? yield* parseChild(this.#parseSayPresentation())
         : null;
 
     let skipPolicy: SayParts["skipPolicy"] = null;
+    let skipPolicySpan: SourceSpan | null = null;
     if (
       (this.#checkIdentifier("skippable") || this.#checkIdentifier("unskippable")) &&
       ((!statement && this.#peek(1).kind === TokenKind.LeftParenthesis) ||
-        !(yield* parseChild(this.#canParseCompleteSayValue(statement))))
+        !(yield* parseChild(this.#canParseCompleteSayValue(statement, this.#peek(1).kind))))
     ) {
       skipPolicy = this.#peek().lexeme === "skippable" ? "skippable" : "unskippable";
-      this.#advance();
+      skipPolicySpan = copySpan(this.#advance().span);
     }
 
     if (
@@ -971,8 +974,10 @@ class Parser {
         presentation,
         speaker,
         skipPolicy,
+        skipPolicySpan,
         value: bounded.value,
         pacing: bounded.pacing,
+        instantSpan: bounded.instantSpan,
         span: spanFrom(keyword.span, bounded.end),
       });
     }
@@ -989,11 +994,13 @@ class Parser {
       return null;
     }
     let pacing: SayParts["pacing"] = null;
+    let instantSpan: SourceSpan | null = null;
     let endSpan = value.span;
     if (this.#match(TokenKind.Comma)) {
       if (this.#canParseInstantPacingAlias(statement)) {
         endSpan = this.#advance().span;
         pacing = "instant";
+        instantSpan = copySpan(endSpan);
       } else {
         const parsedPacing = yield* parseChild(this.#parseOr());
         if (parsedPacing === null) {
@@ -1012,8 +1019,10 @@ class Parser {
       presentation,
       speaker,
       skipPolicy,
+      skipPolicySpan,
       value,
       pacing,
+      instantSpan,
       span: spanFrom(keyword.span, endSpan),
     });
   }
@@ -1064,6 +1073,7 @@ class Parser {
   *#parseBoundedSayText(): ParseTask<{
     readonly value: Expression;
     readonly pacing: SayParts["pacing"];
+    readonly instantSpan: SourceSpan | null;
     readonly end: SourceSpan;
   } | null> {
     this.#advance();
@@ -1072,6 +1082,7 @@ class Parser {
     if (value === null) return null;
     this.#skipNewlines();
     let pacing: SayParts["pacing"] = null;
+    let instantSpan: SourceSpan | null = null;
     if (this.#match(TokenKind.Comma)) {
       this.#skipNewlines();
       let after = 1;
@@ -1080,7 +1091,7 @@ class Parser {
         this.#checkIdentifier("instant") &&
         this.#peek(after).kind === TokenKind.RightParenthesis
       ) {
-        this.#advance();
+        instantSpan = copySpan(this.#advance().span);
         pacing = "instant";
       } else {
         pacing = yield* parseChild(this.#parseRequiredExpressionTask());
@@ -1095,7 +1106,7 @@ class Parser {
       );
       return null;
     }
-    return { value, pacing, end: copySpan(this.#previous().span) };
+    return { value, pacing, instantSpan, end: copySpan(this.#previous().span) };
   }
 
   /**
@@ -1103,20 +1114,28 @@ class Parser {
    * a bounded `say`: `bubble() ("Plain", instant)` is no chained call.
    */
   #atSayModeBeforeBoundedText(): boolean {
-    if (this.#peek(1).kind !== TokenKind.LeftParenthesis) return false;
+    return (
+      this.#peek(1).kind === TokenKind.LeftParenthesis &&
+      this.#peekAfterSayMode()?.kind === TokenKind.LeftParenthesis
+    );
+  }
+
+  /**
+   * The token after the `bubble` or `prose` here and its options, or `null` when the parentheses after it cannot hold
+   * them: they hold none or named ones only.
+   */
+  #peekAfterSayMode(): Token | null {
+    if (this.#peek(1).kind !== TokenKind.LeftParenthesis) return this.#peek(1);
     let first = 2;
     while (this.#peek(first).kind === TokenKind.Newline) first += 1;
     if (
       this.#peek(first).kind !== TokenKind.RightParenthesis &&
       !(isPropertyName(this.#peek(first)) && this.#peek(first + 1).kind === TokenKind.Colon)
     )
-      return false;
+      return null;
     this.#shared.closers ??= delimiterClosers(this.tokens);
     const closer = this.#shared.closers.get(this.#current + 1);
-    return (
-      closer !== undefined &&
-      this.#peek(closer + 1 - this.#current).kind === TokenKind.LeftParenthesis
-    );
+    return closer === undefined ? null : this.#peek(closer + 1 - this.#current);
   }
 
   /**
@@ -1195,9 +1214,14 @@ class Parser {
    * identifiers. Keep that interpretation whenever the existing say grammar
    * can consume a complete value (and optional pacing) from this position,
    * also one that recovered from an error, such as a string with a failed
-   * interpolation.
+   * interpolation. When a `/` follows the modifier (`afterModifier`), only a
+   * value without errors counts: a regex may start there (V30 §8), and the
+   * tokens after the `/` do not show its pattern, as in `say prose /[/*]/`.
    */
-  *#canParseCompleteSayValue(statement: boolean): ParseTask<boolean> {
+  *#canParseCompleteSayValue(
+    statement: boolean,
+    afterModifier: TokenKind | undefined,
+  ): ParseTask<boolean> {
     const speculative = new Parser(this.tokens, this.#shared);
     speculative.#current = this.#current;
 
@@ -1216,7 +1240,10 @@ class Parser {
       }
     }
 
-    return speculative.#isSayBoundary(statement);
+    return (
+      speculative.#isSayBoundary(statement) &&
+      (afterModifier !== TokenKind.Slash || speculative.#diagnostics.length === 0)
+    );
   }
 
   /**
@@ -4853,22 +4880,9 @@ class Parser {
     if (!this.#check(TokenKind.Identifier) || !PRESENTATION_MODES.has(this.#peek().lexeme))
       return false;
     if (this.#atSayModeBeforeBoundedText()) return true;
-    let after = 1;
-    if (this.#peek(1).kind === TokenKind.LeftParenthesis) {
-      let first = 2;
-      while (this.#peek(first).kind === TokenKind.Newline) first += 1;
-      if (
-        this.#peek(first).kind !== TokenKind.RightParenthesis &&
-        !(isPropertyName(this.#peek(first)) && this.#peek(first + 1).kind === TokenKind.Colon)
-      )
-        return false;
-      this.#shared.closers ??= delimiterClosers(this.tokens);
-      const closer = this.#shared.closers.get(this.#current + 1);
-      if (closer === undefined) return false;
-      after = closer + 1 - this.#current;
-    }
-    const next = this.#peek(after);
+    const next = this.#peekAfterSayMode();
     return (
+      next !== null &&
       isExpressionStart(next) &&
       !EXPRESSION_CONTINUATIONS.has(next.kind) &&
       !(this.#blockEndsCompactInteraction && next.kind === TokenKind.LeftBrace)

@@ -1501,6 +1501,11 @@ instructions, functions, and blocks of `main.tease` and to global functions of a
 file's code is malformed until `goto` and `call` can enter it. A runtime failure, in the snapshot's `failure` and the
 `runtimeFailure` event, carries the `path` of the file whose source its span is in.
 
+When a message's speaker, other than `player`, has no `displayName` and the name derived from its name fields
+([V30 §37](specifications/accepted-syntaxes-v30.md#names-titles-and-presentation)) is empty, the message shows the
+speaker's identifier and reports developer warning `TSW001`, once per speaker in a session: the snapshot's
+`warnedSpeakerIds` keeps the speakers that reported it, so a restored session does not report it again.
+
 ## Visible text boundary
 
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, `null`, durations, angles, and date
@@ -1515,7 +1520,9 @@ formatted again after restore. List text follows
 
 - `${...}` interpolation checks that every element is a scalar visible-text value, then selects exactly one element
   with the session RNG. An empty list fails with `TSR019` and any other element with `TSR021`, both before any RNG
-  draw. A dict fails with `TSR021`, which names the fix ([§40](specifications/accepted-syntaxes-v30.md#40-dictionaries)).
+  draw. Any other value that is not a scalar, such as a dict, an object, a set, a range, a speaker, or a handle, fails
+  with `TSR021`; for a dict ([§40](specifications/accepted-syntaxes-v30.md#40-dictionaries)), an object, and a set
+  the message names the fix.
 - `say` shows any other value in code-like notation, written iteratively so that deep nesting does not recurse
   natively. A timer or media handle shows the state the snapshot holds when `say` evaluates its value, so the text is
   deterministic and the same after checkpoint resume. The engine escapes the notation with `escapeMarkup`, so the
