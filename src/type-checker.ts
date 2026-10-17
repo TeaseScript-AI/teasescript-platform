@@ -87,7 +87,7 @@ import {
 } from "./image-input.js";
 import { evaluateTagSteps, passesTagList } from "./tag-query.js";
 import { addTag, normalizeTagName, readTagText, type Tag } from "./tags.js";
-import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
+import { CONVERSION_RESULTS, isTemporalConversionResult, numberFromText } from "./conversions.js";
 import {
   builtinCallProblems,
   builtinShapeProblems,
@@ -139,11 +139,18 @@ import {
 } from "./handle-rules.js";
 import {
   emptyRangeProblem,
+  rangeBoundRule,
   rangeStartProblem,
   rangeText,
   wholeRangeMessage,
   type RangeBounds,
 } from "./range-checks.js";
+import {
+  logicalOperandRule,
+  notNumberFix,
+  UNIT_AMOUNT_RULE,
+  unitAmountFix,
+} from "./operand-rules.js";
 import { withoutNegativeZero } from "./conversions.js";
 import {
   compareDurations,
@@ -4639,32 +4646,23 @@ class TypeChecker {
             expression.span,
           );
         const unit = expression.calendar ? `calendar ${expression.unit}` : expression.unit;
-        this.#reportUnless(
-          operand,
-          isNumeric,
-          expression.operand,
-          "A unit follows a number",
-          () => {
-            if (isScalar(value, "duration", "calendarDuration"))
-              return ` Remove the '${unit}' after it.`;
-            if (resolved(value).kind !== "range") return ` Use a number before the '${unit}'.`;
-            // A wait refuses a calendar range, so the example takes the exact unit of the same name, if any.
-            const range = expressionText(expression.operand);
-            const exact =
-              expression.unit === "mo" || expression.unit === "y" ? null : expression.unit;
-            return range === null || exact === null
-              ? " Only a wait or timer takes a range with a unit."
-              : ` Only a wait or timer takes a range with a unit, as in 'wait ${range} ${exact}'.`;
-          },
-        );
+        this.#reportUnless(operand, isNumeric, expression.operand, UNIT_AMOUNT_RULE, () => {
+          if (isScalar(value, "duration", "calendarDuration")) return unitAmountFix(unit, true);
+          if (resolved(value).kind !== "range") return unitAmountFix(unit, false);
+          // A wait refuses a calendar range, so the example takes the exact unit of the same name, if any.
+          const range = expressionText(expression.operand);
+          const exact =
+            expression.unit === "mo" || expression.unit === "y" ? null : expression.unit;
+          return range === null || exact === null
+            ? " Only a wait or timer takes a range with a unit."
+            : ` Only a wait or timer takes a range with a unit, as in 'wait ${range} ${exact}'.`;
+        });
         return type;
       }
       case "angleExpression": {
         const operand = yield* compileChild(this.#expressionTask(expression.operand, scope));
-        this.#reportUnless(operand, isNumeric, expression.operand, "A unit follows a number", () =>
-          isScalar(nonNullTypeForUse(operand), "angle")
-            ? ` Remove the '${expression.unit}' after it.`
-            : ` Use a number before the '${expression.unit}'.`,
+        this.#reportUnless(operand, isNumeric, expression.operand, UNIT_AMOUNT_RULE, () =>
+          unitAmountFix(expression.unit, isScalar(nonNullTypeForUse(operand), "angle")),
         );
         return ANGLE_TYPE;
       }
@@ -4681,14 +4679,33 @@ class TypeChecker {
       case "binaryExpression":
         return yield* compileChild(this.#binaryTask(expression, scope));
       case "rangeExpression": {
-        for (const bound of [expression.start, expression.end]) {
+        // The bounds as the runtime spells them: a variable, a property path, or a number.
+        const spelled = (bound: Expression): string | null => {
+          const literal = unwrap(bound);
+          return (
+            expressionLabel(bound) ??
+            (literal.kind === "numberLiteral" ? String(literal.value) : null)
+          );
+        };
+        const labels = { start: spelled(expression.start), end: spelled(expression.end) };
+        for (const place of ["start", "end"] as const) {
+          const bound = expression[place];
           const type = yield* compileChild(this.#expressionTask(bound, scope));
           this.#reportUnless(
             type,
             isNumeric,
             bound,
-            "A range bound is a number",
-            undefined,
+            rangeBoundRule(labels.start, labels.end, expression.inclusive, place),
+            () => {
+              const text = isScalar(type, "string") ? staticVisibleText(bound) : undefined;
+              const value =
+                nonNullType(type).kind === "never"
+                  ? "null"
+                  : text !== undefined && numberFromText(text) !== undefined
+                    ? "numeric text"
+                    : "other";
+              return ` ${notNumberFix(labels[place], value)}`;
+            },
             typeCode.invalidRangeOperand,
           );
         }
@@ -5597,7 +5614,7 @@ class TypeChecker {
       }
       case "binaryExpression": {
         if (node.operator === "and" || node.operator === "or") {
-          const rule = `'${node.operator}' needs true or false (boolean) values`;
+          const rule = logicalOperandRule(node.operator);
           const left = yield* compileChild(this.#branchTask(node.left, scope));
           this.#requireBoolean(left.type, node.left, rule);
           // The right operand runs only when the left one did not decide the result. When no value lets it run, it is
@@ -8258,7 +8275,9 @@ class TypeChecker {
         type,
         (member) => isNumeric(member) || isRange(member),
         expression,
-        "A time before a unit is a number",
+        UNIT_AMOUNT_RULE,
+        () =>
+          unitAmountFix(unit, isScalar(nonNullTypeForUse(type), "duration", "calendarDuration")),
       );
       // A range counts whole units, as `for` counts whole numbers.
       if (command !== "media") {
@@ -8654,7 +8673,7 @@ class TypeChecker {
     }
     // Where a duration is wanted, a calendar duration needs the reason it does not fit (ADR 0026).
     const reason =
-      isScalar(value, "calendarDuration") && rule.includes("duration")
+      isScalar(value, "calendarDuration") && accepts(DURATION_TYPE)
         ? " A calendar day or month has no fixed length. Use a fixed length such as '1 day' or '24 h'."
         : "";
     this.#report(

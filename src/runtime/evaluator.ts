@@ -122,7 +122,20 @@ import {
 } from "./collection-size.js";
 import { base64Text, jsonText, textFromBase64, valueFromJson } from "./json-base64.js";
 import { textSha256 } from "./sha256.js";
-import { emptyRangeProblem, rangeLength, rangeText, wholeRangeMessage } from "../range-checks.js";
+import {
+  emptyRangeProblem,
+  rangeBoundRule,
+  rangeLength,
+  rangeText,
+  wholeRangeMessage,
+} from "../range-checks.js";
+import {
+  logicalOperandRule,
+  notNumberFix,
+  UNIT_AMOUNT_RULE,
+  unitAmountFix,
+} from "../operand-rules.js";
+import { loweredOperand } from "./lowered-operands.js";
 import {
   cameraPlacementMessage,
   handleArgumentsMessage,
@@ -1102,6 +1115,7 @@ export class Evaluator {
                 expression.operand,
                 result.value,
                 expression.operand.span,
+                this.plan,
               );
             value = !result.value;
           } else if (isAnyDuration(result.value)) {
@@ -1110,7 +1124,7 @@ export class Evaluator {
             value = expression.operator === "+" ? result.value : angleValue(-result.value.degrees);
           } else {
             if (typeof result.value !== "number") {
-              const operand = operandLabel(expression.operand);
+              const operand = operandLabel(expression.operand, this.plan);
               throw notNumber(
                 `'${expression.operator}${operand ?? ""}'`,
                 operand,
@@ -1132,7 +1146,7 @@ export class Evaluator {
           if (typeof result.value !== "number")
             throw fault(
               "TSR027",
-              `A unit follows a number, but this is ${describeShownValue(result.value)}. ${isAnyDuration(result.value) ? `Remove the '${unit}' after it.` : `Use a number before the '${unit}'.`}`,
+              `${UNIT_AMOUNT_RULE}, but this is ${describeShownValue(result.value)}.${unitAmountFix(unit, isAnyDuration(result.value))}`,
               expression.operand.span,
             );
           const duration = unitValue(result.value, expression);
@@ -1165,7 +1179,7 @@ export class Evaluator {
           if (typeof result.value !== "number")
             throw fault(
               "TSR027",
-              `A unit follows a number, but this is ${describeShownValue(result.value)}. ${isAngle(result.value) ? `Remove the '${expression.unit}' after it.` : `Use a number before the '${expression.unit}'.`}`,
+              `${UNIT_AMOUNT_RULE}, but this is ${describeShownValue(result.value)}.${unitAmountFix(expression.unit, isAngle(result.value))}`,
               expression.operand.span,
             );
           const degrees = angleDegrees(result.value, expression.unit);
@@ -1200,11 +1214,11 @@ export class Evaluator {
               frame.value = cloneCapturedSerializableValue(frame.value);
             if (expression.operator === "and" || expression.operator === "or") {
               if (typeof frame.value !== "boolean")
-                throw notBoolean(
-                  `'${expression.operator}' needs true or false (boolean) values`,
+                throw notLogicalOperand(
+                  expression.operator,
                   expression.left,
                   frame.value,
-                  expression.left.span,
+                  this.plan,
                 );
               if (expression.operator === "and" ? !frame.value : frame.value) {
                 value = frame.value;
@@ -1229,7 +1243,7 @@ export class Evaluator {
             continue;
           }
           if (frame.stage === 1) {
-            frame.value = rangeBound(expression, "start", result.value);
+            frame.value = rangeBound(expression, "start", result.value, this.plan);
             frame.stage = 2;
             pending.push(evaluationFrame(expression.end));
             continue;
@@ -1239,7 +1253,7 @@ export class Evaluator {
             kind: "range",
             // EVIDENCE: invariant: range stage 1 validates and retains the numeric start.
             start: frame.value as number,
-            end: rangeBound(expression, "end", result.value),
+            end: rangeBound(expression, "end", result.value, this.plan),
             inclusive: expression.inclusive,
           };
           break;
@@ -2118,12 +2132,7 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     if (expression.operator === "and" || expression.operator === "or") {
       if (typeof right !== "boolean")
-        throw notBoolean(
-          `'${expression.operator}' needs true or false (boolean) values`,
-          expression.right,
-          right,
-          expression.right.span,
-        );
+        throw notLogicalOperand(expression.operator, expression.right, right, this.plan);
       return right;
     }
     if (expression.operator === "otherwise") return right;
@@ -2153,7 +2162,7 @@ export class Evaluator {
       return this.#joined(expression, left, right);
     const temporal = temporalBinary(expression.operator, left, right, expression.span);
     if (temporal !== undefined) return temporal;
-    if (isAngle(left) || isAngle(right)) return angleBinary(expression, left, right);
+    if (isAngle(left) || isAngle(right)) return angleBinary(expression, left, right, this.plan);
     if (isAnyDuration(left) || isAnyDuration(right))
       return this.#durationBinary(expression, left, right);
     if (["<", "<=", ">", ">="].includes(expression.operator)) {
@@ -2161,15 +2170,15 @@ export class Evaluator {
         (typeof left !== "number" || typeof right !== "number") &&
         (typeof left !== "string" || typeof right !== "string")
       ) {
-        throw notComparable(expression, left, right);
+        throw notComparable(expression, left, right, this.plan);
       }
       if (expression.operator === "<") return left < right;
       if (expression.operator === "<=") return left <= right;
       if (expression.operator === ">") return left > right;
       return left >= right;
     }
-    const leftNumber = operandNumber(expression, "left", left);
-    const rightNumber = operandNumber(expression, "right", right);
+    const leftNumber = operandNumber(expression, "left", left, this.plan);
+    const rightNumber = operandNumber(expression, "right", right, this.plan);
     let result: number;
     switch (expression.operator) {
       case "+":
@@ -2194,7 +2203,7 @@ export class Evaluator {
           expression.span,
         );
     }
-    if (!Number.isFinite(result)) throw noArithmeticResult(expression, left, right);
+    if (!Number.isFinite(result)) throw noArithmeticResult(expression, left, right, this.plan);
     return result;
   }
 
@@ -2244,8 +2253,8 @@ export class Evaluator {
       // An exact duration divided by zero has no result like a number; a calendar one keeps its parts' error code.
       if (duration === ZERO_DIVISOR)
         throw isAnyDuration(left) && isCalendar(left)
-          ? noArithmeticResult(expression, left, right, "TSR009")
-          : noArithmeticResult(expression, left, right);
+          ? noArithmeticResult(expression, left, right, this.plan, "TSR009")
+          : noArithmeticResult(expression, left, right, this.plan);
       if (typeof duration === "string")
         throw fault("TSR009", `Operator '${operator}': ${duration}.`, span);
       // Calendar parts must stay whole numbers that a value can store, like the milliseconds' finite range.
@@ -2255,7 +2264,7 @@ export class Evaluator {
         !Number.isSafeInteger(parts.days) ||
         !Number.isFinite(parts.milliseconds)
       )
-        throw noArithmeticResult(expression, left, right);
+        throw noArithmeticResult(expression, left, right, this.plan);
       return duration;
     };
     if (isAnyDuration(left) && isAnyDuration(right)) {
@@ -2269,15 +2278,15 @@ export class Evaluator {
           // An exact zero divisor has no result like a number's; a calendar one has no family to divide in.
           if (ratio === ZERO_DIVISOR)
             throw isCalendar(left)
-              ? noArithmeticResult(expression, left, right, "TSR009")
-              : noArithmeticResult(expression, left, right);
+              ? noArithmeticResult(expression, left, right, this.plan, "TSR009")
+              : noArithmeticResult(expression, left, right, this.plan);
           if (typeof ratio === "string")
             throw fault(
               "TSR009",
               `${formatDuration(left)} cannot be divided by ${formatDuration(right)}: ${ratio}.`,
               span,
             );
-          if (!Number.isFinite(ratio)) throw noArithmeticResult(expression, left, right);
+          if (!Number.isFinite(ratio)) throw noArithmeticResult(expression, left, right, this.plan);
           return ratio;
         }
         case "<":
@@ -2535,7 +2544,8 @@ export class Evaluator {
             { check: expression.typeCheck, span: expression.arguments.at(-1)!.value.span },
       );
     }
-    const callee = expression.callee.kind === "literal" ? null : planLabel(expression.callee);
+    const callee =
+      expression.callee.kind === "literal" ? null : planLabel(expression.callee, this.plan);
     throw fault(
       "TSR014",
       `Only a function or a method can be called, but ${callee === null ? "this" : `'${callee}'`} is neither. Call a function by its name instead.`,
@@ -2857,7 +2867,7 @@ export class Evaluator {
       }
       default: {
         if (getSerializableDictEntry(receiver, key) === undefined)
-          throw missingKey(key, this.#receiverLabel(callee.object), keyPlan, span);
+          throw missingKey(key, this.#receiverLabel(callee.object), keyPlan, span, this.plan);
         freezePreparedReferenceDescendants(this.snapshot, receiver, key);
         return removeSerializableDictEntry(receiver, key)!.value;
       }
@@ -3554,7 +3564,7 @@ export class Evaluator {
         `toDateTime(date, time) combines a date and a time, not ${describeRuntimeValue(value)} and ${describeRuntimeValue(positional[1]!)}.`,
         span,
       );
-    throw fault("TSR058", conversionFailure(name, result, value, argument), span);
+    throw fault("TSR058", conversionFailure(name, result, value, argument, this.plan), span);
   }
 
   /** The converted value, or `undefined` when `value` cannot be converted. */
@@ -4041,6 +4051,7 @@ export class Evaluator {
         this.#receiverLabel(expression.object),
         expression.index,
         expression.span,
+        this.plan,
       );
     return entry.value;
   }
@@ -4052,7 +4063,7 @@ export class Evaluator {
 
   /** How the source spells a dict receiver, also one prepared before the rest of its statement, or `null`. */
   #receiverLabel(plan: ExpressionPlan): string | null {
-    if (plan.kind !== "preparedReference") return planLabel(plan);
+    if (plan.kind !== "preparedReference") return planLabel(plan, this.plan);
     const descriptor = readPreparedReference(
       readTemporary(this.snapshot.temporaries, plan.temporaryId, plan.span),
       plan.span,
@@ -4080,14 +4091,15 @@ export class Evaluator {
     const whole = typeof value === "number" && Number.isInteger(value);
     if (whole && value >= 0 && value < list.items.length) return value;
     // A label is only written for the failure.
+    const index = indexPlan === null ? null : loweredOperand(this.plan, indexPlan);
     const indexLabel =
-      indexPlan === null
+      index === null
         ? null
-        : indexPlan.kind === "literal"
-          ? typeof indexPlan.value === "number"
-            ? String(indexPlan.value)
+        : index.kind === "literal"
+          ? typeof index.value === "number"
+            ? String(index.value)
             : null
-          : planLabel(indexPlan);
+          : planLabel(index, this.plan);
     if (!whole) {
       const subject = indexLabel === null ? "this" : `'${indexLabel}'`;
       const fix =
@@ -4233,9 +4245,10 @@ function missingKey(
   owner: string | null,
   keyPlan: ExpressionPlan,
   span: SourceSpan,
+  program: InstructionPlan,
 ): RuntimeFault {
   const shown = quotedText(messageText(key));
-  const check = `contains(${planLabel(keyPlan) ?? shown})`;
+  const check = `contains(${planLabel(keyPlan, program) ?? shown})`;
   return fault(
     "TSR061",
     `Dictionary has no key ${shown}. Check ${owner === null ? `it with ${check}` : `${owner}.${check}`} first.`,
@@ -4243,19 +4256,22 @@ function missingKey(
   );
 }
 
-/** How the source spells an arithmetic operand: a variable, a property path, or a number, or `null` for anything else. */
-function operandLabel(plan: ExpressionPlan): string | null {
-  let current = plan;
+/**
+ * How the source spells an arithmetic operand: a variable, a property path, or a number, or `null` for anything else. An
+ * operand that the lowering kept in a temporary is spelled as written.
+ */
+function operandLabel(plan: ExpressionPlan, program: InstructionPlan): string | null {
+  let current = loweredOperand(program, plan);
   while (current.kind === "group") current = current.expression;
   if (current.kind === "literal")
     return typeof current.value === "number" ? String(current.value) : null;
-  return planLabel(current);
+  return planLabel(current, program);
 }
 
 /** How the source spells `left operator right`, when it spells both operands, or `null`. */
-function binaryLabel(expression: BinaryExpressionPlan): string | null {
-  const left = operandLabel(expression.left);
-  const right = operandLabel(expression.right);
+function binaryLabel(expression: BinaryExpressionPlan, program: InstructionPlan): string | null {
+  const left = operandLabel(expression.left, program);
+  const right = operandLabel(expression.right, program);
   return left === null || right === null ? null : `${left} ${expression.operator} ${right}`;
 }
 
@@ -4264,42 +4280,38 @@ function operandNumber(
   expression: BinaryExpressionPlan,
   side: "left" | "right",
   value: SerializableRuntimeValue,
+  program: InstructionPlan,
 ): number {
   if (typeof value === "number") return value;
-  const label = binaryLabel(expression);
+  const label = binaryLabel(expression, program);
   throw notNumber(
     label === null ? `'${expression.operator}'` : `'${label}'`,
-    operandLabel(expression[side]),
+    operandLabel(expression[side], program),
     ` on its ${side} side`,
     value,
     expression[side].span,
   );
 }
 
-/** A bound of `range` as a number, or `TSR027`, which names the range and the bound. */
+/** A bound of `range` as a number, or `TSR027` with the compiler's text (`rangeBoundRule`). */
 function rangeBound(
   range: RangeExpressionPlan,
   bound: "start" | "end",
   value: SerializableRuntimeValue,
+  program: InstructionPlan,
 ): number {
   if (typeof value === "number") return value;
-  const start = operandLabel(range.start);
-  const end = operandLabel(range.end);
-  throw notNumber(
-    start === null || end === null
-      ? "A range"
-      : `'${start}${range.inclusive ? "..=" : ".."}${end}'`,
-    operandLabel(range[bound]),
-    ` as its ${bound}`,
-    value,
+  const start = operandLabel(range.start, program);
+  const end = operandLabel(range.end, program);
+  const rule = rangeBoundRule(start, end, range.inclusive, bound);
+  throw fault(
+    "TSR027",
+    `${rule}, but this is ${describeShownValue(value)}. ${notNumberFix(bound === "start" ? start : end, notNumberKind(value))}`,
     range[bound].span,
   );
 }
 
-/**
- * `TSR027`: `subject` needs a number for the operand the source spells `operand`, or else `place`, but got `value`. The
- * fix depends on the value: a null check, a conversion of numeric text, or another value.
- */
+/** `TSR027`: `subject` needs a number for the operand the source spells `operand`, or else `place`, but got `value`. */
 function notNumber(
   subject: string,
   operand: string | null,
@@ -4307,17 +4319,20 @@ function notNumber(
   value: SerializableRuntimeValue,
   span: SourceSpan,
 ): RuntimeFault {
-  const fix =
-    value === null
-      ? `Check that ${operand === null ? "the value" : `'${operand}'`} is not null before using it.`
-      : typeof value === "string" && numberFromText(value) !== undefined
-        ? "Convert the text with toNumber(...) first."
-        : "Use a number instead.";
   return fault(
     "TSR027",
-    `${subject} needs a number${operand === null ? place : ` for '${operand}'`}, but received ${describeShownValue(value)}. ${fix}`,
+    `${subject} needs a number${operand === null ? place : ` for '${operand}'`}, but received ${describeShownValue(value)}. ${notNumberFix(operand, notNumberKind(value))}`,
     span,
   );
+}
+
+/** What a value that is not a number is, for its fix (`notNumberFix`). */
+function notNumberKind(value: SerializableRuntimeValue): "null" | "numeric text" | "other" {
+  return value === null
+    ? "null"
+    : typeof value === "string" && numberFromText(value) !== undefined
+      ? "numeric text"
+      : "other";
 }
 
 /**
@@ -4329,8 +4344,9 @@ function conversionFailure(
   result: ConversionResult,
   value: SerializableRuntimeValue,
   argument: ExpressionPlan | undefined,
+  program: InstructionPlan,
 ): string {
-  const label = (argument === undefined ? null : planLabel(argument)) ?? "value";
+  const label = (argument === undefined ? null : planLabel(argument, program)) ?? "value";
   const fallback = " Give a fallback with 'default:' if the value may not convert.";
   const shown = describeShownValue(value);
   // `toBoolean` keeps 1, 0, and other texts invalid: an explicit comparison says what the script means.
@@ -4364,8 +4380,10 @@ export function notBoolean(
   plan: ExpressionPlan,
   value: SerializableRuntimeValue,
   span: SourceSpan,
+  program: InstructionPlan,
 ): RuntimeFault {
-  const label = plan.kind === "literal" ? null : planLabel(plan);
+  const source = loweredOperand(program, plan);
+  const label = source.kind === "literal" ? null : planLabel(source, program);
   let fix = "";
   if (value === null || typeof value === "number" || typeof value === "string")
     fix = ` Compare it instead${label === null ? "" : `, such as '${label} ${value === null ? "== true" : typeof value === "number" ? "> 0" : '!= ""'}'`}.`;
@@ -4379,6 +4397,19 @@ export function notBoolean(
 }
 
 /**
+ * `TSR026` for an operand of `operator` that is not true or false. The lazy `and` and `or` and the lowered ones, which
+ * keep their operands in a temporary, all report it here.
+ */
+export function notLogicalOperand(
+  operator: "and" | "or" | null,
+  plan: ExpressionPlan,
+  value: SerializableRuntimeValue,
+  program: InstructionPlan,
+): RuntimeFault {
+  return notBoolean(logicalOperandRule(operator), plan, value, plan.span, program);
+}
+
+/**
  * Why an arithmetic step has no finite result: a division or remainder by zero, or a number or duration too large. It
  * names the operands as the source spells them, where the plan still does, and shows their values.
  */
@@ -4386,14 +4417,15 @@ function noArithmeticResult(
   expression: BinaryExpressionPlan,
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
+  program: InstructionPlan,
   code = "TSR036",
 ): RuntimeFault {
   const { operator } = expression;
-  const label = binaryLabel(expression);
+  const label = binaryLabel(expression, program);
   const values = `${operandText(left)} ${operator} ${operandText(right)}`;
   const subject = label === null ? values : `'${label}'`;
   if ((operator === "/" || operator === "%") && isZero(right)) {
-    const divisor = operandLabel(expression.right);
+    const divisor = operandLabel(expression.right, program);
     const zero = operandText(right);
     const cause = divisor === null ? "" : ` because '${divisor}' is ${zero}`;
     return fault(
@@ -4459,6 +4491,7 @@ function angleBinary(
   expression: BinaryExpressionPlan,
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
+  program: InstructionPlan,
 ): SerializableRuntimeValue {
   const operator = expression.operator;
   const compares = ["<", "<=", ">", ">="].includes(operator);
@@ -4476,7 +4509,7 @@ function angleBinary(
   const result = a === undefined || b === undefined ? undefined : angleArithmetic(operator, a, b);
   if (result !== undefined) {
     if (!Number.isFinite(typeof result === "number" ? result : result.degrees))
-      throw noArithmeticResult(expression, left, right);
+      throw noArithmeticResult(expression, left, right, program);
     return result;
   }
   throw fault(
@@ -4548,10 +4581,13 @@ function emptyCollection(
   );
 }
 
-/** The source spelling of a variable, property path, or text literal plan, or `null` for anything else. */
-export function planLabel(plan: ExpressionPlan): string | null {
+/**
+ * The source spelling of a variable, property path, or text literal plan, also one that the lowering kept in a
+ * temporary of `program`, or `null` for anything else.
+ */
+export function planLabel(plan: ExpressionPlan, program: InstructionPlan): string | null {
   const names: string[] = [];
-  let current = plan;
+  let current = loweredOperand(program, plan);
   for (;;) {
     if (current.kind === "group") current = current.expression;
     else if (current.kind === "property") {
@@ -4838,10 +4874,11 @@ function notComparable(
   expression: BinaryExpressionPlan,
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
+  program: InstructionPlan,
 ): RuntimeFault {
   let fix = "";
   if (left === null || right === null) {
-    const label = planLabel(left === null ? expression.left : expression.right);
+    const label = planLabel(left === null ? expression.left : expression.right, program);
     fix = ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.`;
   } else if (
     (typeof left === "number" &&

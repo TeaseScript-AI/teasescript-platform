@@ -43,6 +43,7 @@ import {
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
 } from "../interaction-limits.js";
 import { rangeLength, rangeStartProblem, rangeText } from "../range-checks.js";
+import { UNIT_AMOUNT_RULE, unitAmountFix } from "../operand-rules.js";
 import {
   isMediaPosition,
   isMediaRange,
@@ -60,6 +61,7 @@ import {
   assertIntegerRange,
   findBinding,
   notBoolean,
+  notLogicalOperand,
   planLabel,
   RuntimeExecutionContext,
   type RuntimeCapabilities,
@@ -111,6 +113,7 @@ import {
   executeTransfer,
 } from "./operations/transfers.js";
 import { activeFunctionFrame, contextRootId } from "./activations.js";
+import { loweredLogicalOperator } from "./lowered-operands.js";
 import {
   bindingKey,
   loopKey,
@@ -1073,6 +1076,7 @@ function executePlannedInstruction(
           instruction.condition,
           condition,
           instruction.condition.span,
+          plan,
         );
       }
       evaluator.trace?.branch(condition, instruction.target, instruction.span);
@@ -1083,7 +1087,7 @@ function executePlannedInstruction(
       snapshot.nextInstruction = instruction.target;
       return;
     case "loopStart":
-      executeLoopStart(instruction, snapshot, evaluator);
+      executeLoopStart(plan, instruction, snapshot, evaluator);
       return;
     case "loopControl":
       executeLoopControl(instruction, snapshot);
@@ -1105,15 +1109,14 @@ function executePlannedInstruction(
         return;
       }
       let value = evaluator.evaluate(instruction.value);
-      if (instruction.expectBoolean && typeof value !== "boolean") {
-        // Only the operands of a lowered 'and' or 'or' expect true or false.
-        throw notBoolean(
-          "'and' and 'or' need true or false (boolean) values",
+      // Only the operands of a lowered 'and' or 'or' expect true or false.
+      if (instruction.expectBoolean && typeof value !== "boolean")
+        throw notLogicalOperand(
+          loweredLogicalOperator(plan, instruction.temporaryId),
           instruction.value,
           value,
-          instruction.value.span,
+          plan,
         );
-      }
       if (instruction.defaultOf !== undefined)
         value = acceptedDefault(
           instruction.defaultOf,
@@ -2471,6 +2474,7 @@ function declareFunctionBinding(
 }
 
 function executeLoopStart(
+  plan: InstructionPlan,
   instruction: Extract<Instruction, { kind: "loopStart" }>,
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
@@ -2494,7 +2498,7 @@ function executeLoopStart(
     if (instruction.loopKind === "repeat") {
       const value = evaluator.evaluate(instruction.expression);
       if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
-        throw badRepeatCount(instruction.expression, value);
+        throw badRepeatCount(instruction.expression, value, plan);
       frame = {
         kind: "repeat",
         loopId: instruction.loopId,
@@ -2513,7 +2517,7 @@ function executeLoopStart(
       const evaluated = evaluator.evaluate(instruction.expression);
       const pair = instruction.valueVariable !== undefined;
       if (pair && !isDict(evaluated)) {
-        const label = planLabel(instruction.expression);
+        const label = planLabel(instruction.expression, plan);
         throw fault(
           "TSR044",
           `'for ${instruction.variable}, ${instruction.valueVariable}' goes through the keys and values of a dict, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(evaluated)}.${isList(evaluated) || isSet(evaluated) ? ` Go through a ${isList(evaluated) ? "list" : "set"} with one variable${label === null ? "" : `, such as 'for ${instruction.variable} in ${label}'`}.` : ""}`,
@@ -2526,7 +2530,7 @@ function executeLoopStart(
           ? createCapturedSerializableList(evaluated.entries.map((entry) => entry.key))
           : evaluated;
       if (!isList(source) && !isSet(source) && !isRange(source) && !isDict(source)) {
-        const label = planLabel(instruction.expression);
+        const label = planLabel(instruction.expression, plan);
         throw fault(
           "TSR044",
           `A 'for' loop goes through a list, set, dict, or range, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(source)}.${source === null ? ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.` : typeof source === "number" && label !== null ? ` To count up to it, write a range, such as '1..=${label}'.` : ""}`,
@@ -2592,6 +2596,7 @@ function executeLoopStart(
         instruction.expression,
         condition,
         instruction.expression.span,
+        plan,
       );
     }
     if (!condition) {
@@ -2699,8 +2704,12 @@ function iterationValue(
 }
 
 /** `TSR043` for a `repeat` count that is not a whole number of at least 0, with the fix for the value it is. */
-function badRepeatCount(plan: ExpressionPlan, value: SerializableRuntimeValue): RuntimeFault {
-  const label = planLabel(plan);
+function badRepeatCount(
+  plan: ExpressionPlan,
+  value: SerializableRuntimeValue,
+  program: InstructionPlan,
+): RuntimeFault {
+  const label = planLabel(plan, program);
   let fix = "";
   if (value === null)
     fix = ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.`;
@@ -3436,6 +3445,13 @@ export function timerDurationMs(
       `A ${command} takes a duration, but this is the range ${rangeText(drawn)}. Give the range a unit, such as '(${rangeText(drawn)}) s'.`,
       span,
     );
+  // The unit after the duration is kept apart for a range, but the amount before it is a number as before any unit.
+  if (unit !== null && typeof drawn !== "number")
+    throw fault(
+      "TSR027",
+      `${UNIT_AMOUNT_RULE}, but this is ${describeShownValue(drawn)}.${unitAmountFix(unit, isAnyDuration(drawn))}`,
+      span,
+    );
   if (
     typeof amount !== "number" ||
     (unit === null && !isDuration(drawn)) ||
@@ -3446,9 +3462,7 @@ export function timerDurationMs(
       "TSR050",
       typeof amount === "number" && amount < 0 && (unit !== null || isDuration(drawn))
         ? `${commandName(command)} duration must not be negative, but this is ${describeShownValue(drawn)}.`
-        : unit !== null
-          ? `A time before a unit is a number, but this is ${describeShownValue(drawn)}.${isDuration(drawn) ? ` Remove the '${unit}' after it.` : ""}`
-          : `A ${command} takes a duration, but this is ${describeShownValue(drawn)}. ${durationFix(drawn, "30 s")}`,
+        : `A ${command} takes a duration, but this is ${describeShownValue(drawn)}. ${durationFix(drawn, "30 s")}`,
       span,
     );
   }

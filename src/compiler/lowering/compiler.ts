@@ -539,7 +539,7 @@ export class InstructionCompiler {
         }
         // A compound assignment reads the current value before any instruction-emitting operand runs.
         const current =
-          statement.operator === "=" || !this.#containsUserCall(statement.value)
+          statement.operator === "=" || !this.#emitsInstructions(statement.value)
             ? null
             : this.#materializeExpression(
                 { plan: target.plan, temporaryIds: [] },
@@ -876,9 +876,9 @@ export class InstructionCompiler {
    * the instruction sets once the message is shown.
    */
   *#lowerSayTask(say: SayParts, value: boolean): CompileTask<LoweredExpression | null> {
-    const textCanSuspend = say.presentation !== null || this.#containsUserCall(say.value);
+    const textCanSuspend = say.presentation !== null || this.#emitsInstructions(say.value);
     const pacingCanSuspend =
-      say.pacing !== null && say.pacing !== "instant" && this.#containsUserCall(say.pacing);
+      say.pacing !== null && say.pacing !== "instant" && this.#emitsInstructions(say.pacing);
     const pacingOf = (lowered: LoweredExpression | null): SayInstruction["pacing"] =>
       say.pacing === null ? "smart" : lowered === null ? "instant" : lowered.plan;
     let destinationTemporary: number | undefined;
@@ -1358,7 +1358,7 @@ export class InstructionCompiler {
 
   *#lowerExpressionTask(expression: Expression): CompileTask<LoweredExpression> {
     expression = unwrapParentheses(expression);
-    if (this.#contextualSpeakerTemporary === null && !this.#containsUserCall(expression))
+    if (this.#contextualSpeakerTemporary === null && !this.#emitsInstructions(expression))
       return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
     if (expression.kind === "interactionExpression") {
       return yield* compileChild(this.#lowerInteractionTask(expression));
@@ -1454,14 +1454,14 @@ export class InstructionCompiler {
     if (
       expression.kind === "binaryExpression" &&
       (expression.operator === "and" || expression.operator === "or") &&
-      this.#containsUserCall(expression)
+      this.#emitsInstructions(expression)
     ) {
       return yield* compileChild(this.#lowerLogicalExpressionTask(expression));
     }
     if (
       expression.kind === "binaryExpression" &&
       expression.operator === "otherwise" &&
-      this.#containsUserCall(expression.right)
+      this.#emitsInstructions(expression.right)
     ) {
       return yield* compileChild(this.#lowerFallbackTask(expression));
     }
@@ -1561,7 +1561,7 @@ export class InstructionCompiler {
       }
       case "indexExpression": {
         let object = yield* compileChild(this.#lowerExpressionTask(expression.object));
-        if (this.#containsUserCall(expression.index)) {
+        if (this.#emitsInstructions(expression.index)) {
           object = this.#prepareReferenceExpression(object, expression.object.span);
         }
         const index = yield* compileChild(this.#lowerExpressionTask(expression.index));
@@ -1578,7 +1578,7 @@ export class InstructionCompiler {
       case "callExpression": {
         const lazy = lazyDefaultArgument(expression);
         // A `default:` that runs as instructions runs after the call, and only when the call needs it.
-        if (lazy === null || !this.#containsUserCall(lazy.argument.value))
+        if (lazy === null || !this.#emitsInstructions(lazy.argument.value))
           return yield* compileChild(this.#lowerCallTask(expression, null));
         const call = yield* compileChild(this.#lowerCallTask(expression, lazy.argument));
         const span = copySpan(expression.span);
@@ -1647,8 +1647,8 @@ export class InstructionCompiler {
         const rightExpression = expression.right;
         if (
           this.#contextualSpeakerTemporary === null &&
-          !this.#containsUserCall(leftExpression) &&
-          !this.#containsUserCall(rightExpression)
+          !this.#emitsInstructions(leftExpression) &&
+          !this.#emitsInstructions(rightExpression)
         ) {
           return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
         }
@@ -2943,7 +2943,7 @@ export class InstructionCompiler {
     expressions: readonly Expression[],
     materializeInstructionEmitting = false,
   ): CompileTask<LoweredExpression[]> {
-    const emitsInstructions = expressions.map((expression) => this.#containsUserCall(expression));
+    const emitsInstructions = expressions.map((expression) => this.#emitsInstructions(expression));
     const laterEmitsInstructions = new Array<boolean>(expressions.length);
     let suffixEmitsInstructions = false;
     for (let index = expressions.length - 1; index >= 0; index -= 1) {
@@ -3078,7 +3078,7 @@ export class InstructionCompiler {
     const method = unwrapParentheses(expression.callee);
     if (method.kind === "propertyAccessExpression") {
       let receiver = yield* compileChild(this.#lowerExpressionTask(method.object));
-      if (written.some((argument) => this.#containsUserCall(argument.value))) {
+      if (written.some((argument) => this.#emitsInstructions(argument.value))) {
         receiver = this.#prepareReferenceExpression(receiver, method.object.span);
         this.instructions.push({
           kind: "validateCallReceiver",
@@ -3185,7 +3185,7 @@ export class InstructionCompiler {
     const key = yield* compileChild(this.#lowerExpressionTask(expression.key));
     const defaultValue = expression.defaultValue;
     const type = this.typeChecks.get(expression)?.type ?? null;
-    if (defaultValue === null || !this.#containsUserCall(defaultValue)) {
+    if (defaultValue === null || !this.#emitsInstructions(defaultValue)) {
       const lowered =
         defaultValue === null ? null : yield* compileChild(this.#lowerExpressionTask(defaultValue));
       return {
@@ -3367,7 +3367,12 @@ export class InstructionCompiler {
     };
   }
 
-  #containsUserCall(expression: Expression): boolean {
+  /**
+   * Whether `expression` runs instructions, so it cannot be one expression plan: it holds an interaction, a `say`, a
+   * button, popup, timer, media, or camera command, a photo or image ask, a file store or lock call, or a call of a user
+   * function. Its lowering keeps the operands before it in temporaries and evaluates them in order.
+   */
+  #emitsInstructions(expression: Expression): boolean {
     const cached = this.#instructionEmissionByExpression.get(expression);
     if (cached !== undefined) return cached;
 

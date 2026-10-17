@@ -207,7 +207,7 @@ test("wait accepts duration values and keeps its trailing unit form", () => {
   assert.deepEqual(diagnostics("wait -(1 s)\nexit"), ["TSV011"]);
   assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(-1 s)\nwait d\nexit`), "TSR050");
   assert.deepEqual(diagnostics("let d = 1 s\nwait d ms\nexit"), ["TSV043"]);
-  assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(1 s)\nwait d ms\nexit`), "TSR050");
+  assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(1 s)\nwait d ms\nexit`), "TSR027");
 });
 
 test("duration values persist through checkpoint JSON and reject malformed data", () => {
