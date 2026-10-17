@@ -4,6 +4,7 @@ import {
   COMMANDS,
   commandFacts,
   CONVERSION_FUNCTIONS,
+  LIST_FUNCTIONS,
   NUMERIC_FUNCTIONS,
   RANDOM_FUNCTIONS,
   CORE_RUNTIME_BUILTINS,
@@ -15,6 +16,8 @@ import { NUMERIC_CONTRACTS } from "../src/numeric-functions.js";
 import { RANDOM_CONTRACTS } from "../src/random-functions.js";
 import { CLOCK_CONTRACTS, TEMPORAL_METHODS } from "../src/temporal-builtins.js";
 import { isTextOnlyMethod, TEXT_METHODS } from "../src/text-operations.js";
+import { LIST_FUNCTION_CONTRACTS } from "../src/list-function-rules.js";
+import { LIST_METHODS, type ListMethod } from "../src/list-methods.js";
 import { MESSAGE_PRESENTATION_OPTIONS } from "../src/message-presentation.js";
 import {
   askOptionNames,
@@ -535,6 +538,101 @@ test("a clock read or a method of a date or time value has help from its contrac
   // A declared function and a property are no call of the built-in.
   assert.notEqual(help("function getDate(")[0], "getDate");
   assert.equal(help("say (stamp.toISO)(")[0], "say");
+});
+
+test("a list function's call has help from its contract, also while it is being written", () => {
+  // The help at the end of `source`: its command, the signature's label, and its active parameter.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    return [
+      languageContextHelp(document, position)?.command ?? null,
+      signature?.label ?? null,
+      signature === null ? null : (signature.parameters[signature.activeParameter] ?? null),
+    ];
+  };
+  for (const name of LIST_FUNCTIONS) {
+    const document = createLanguageDocument("file:///main.tease", `say ${name}(`);
+    const position = languagePositionAt(document, document.text.length);
+    const context = languageContextHelp(document, position);
+    assert.deepEqual(
+      [context?.command, context?.summary],
+      [name, LIST_FUNCTION_CONTRACTS[name].summary],
+    );
+    assert.deepEqual(languageHover(document, position)?.contents, [
+      `**${name}**`,
+      LIST_FUNCTION_CONTRACTS[name].summary,
+      `Syntax: \`${context?.syntax}\``,
+    ]);
+  }
+  // The syntax is the call's shape (V30 §16), and the active parameter the argument being written.
+  const percentile = "percentile(list, percentage [, by: text])";
+  assert.deepEqual(help("say percentile("), ["percentile", percentile, "list"]);
+  assert.deepEqual(help("say percentile(scores, "), ["percentile", percentile, "percentage"]);
+  assert.deepEqual(help("say percentile(scores, 10, "), ["percentile", percentile, "by"]);
+  assert.deepEqual(help('say sum(sessions, by: "count"'), ["sum", "sum(list [, by: text])", "by"]);
+  assert.deepEqual(help("let line = linearRegression(points, x: "), [
+    "linearRegression",
+    "linearRegression(list [, y: text] [, x: text])",
+    "x",
+  ]);
+  assert.deepEqual(help("say predict(line, "), ["predict", "predict(line, x)", "x"]);
+  // `min` and `max` take one list, or any number of values.
+  const min = "min(value, value, ...)  or  min(list [, by: text])";
+  assert.deepEqual(help("say min("), ["min", min, "list"]);
+  assert.deepEqual(help("say min(20, total, "), ["min", min, "value"]);
+  assert.deepEqual(help("say max(sum(scores), "), [
+    "max",
+    "max(value, value, ...)  or  max(list [, by: text])",
+    "value",
+  ]);
+  // A declared name is no call of the function, and a method of the same name is not either.
+  assert.equal(help("function sum(")[0], null);
+  assert.equal(help("say scores.sum(")[0], "say");
+});
+
+test("a method that only lists and sets have has help from its contract, also while it is being written", () => {
+  // The help at the end of `source`: its command, the signature's label, and its active parameter.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    return [
+      languageContextHelp(document, position)?.command ?? null,
+      signature?.label ?? null,
+      signature === null ? null : (signature.parameters[signature.activeParameter] ?? null),
+    ];
+  };
+  for (const method of Object.values(LIST_METHODS)) {
+    const name = method.name;
+    const document = createLanguageDocument("file:///main.tease", `say items.${name}(`);
+    const position = languagePositionAt(document, document.text.length);
+    const context = languageContextHelp(document, position);
+    const contract: ListMethod = method;
+    // A method that text, dicts, or other values have too may be called on one of them.
+    if (Object.hasOwn(TEXT_METHODS, name) || contract.shared === true) {
+      assert.equal(context?.command, isTextOnlyMethod(name) ? name : "say", name);
+      continue;
+    }
+    assert.deepEqual([context?.command, context?.summary], [name, method.summary]);
+    assert.deepEqual(languageHover(document, position)?.contents, [
+      `**${name}**`,
+      method.summary,
+      `Syntax: \`${context?.syntax}\``,
+    ]);
+  }
+  // The syntax is the call's shape (V30 §16), and the active parameter the argument being written.
+  assert.deepEqual(help("items.add("), ["add", "list.add(value)  or  set.add(value)", "value"]);
+  assert.deepEqual(help("say items.takeLast("), ["takeLast", "list.takeLast(count)", "count"]);
+  assert.deepEqual(help('say items.join(", ".repeat('), ["repeat", "text.repeat(count)", "count"]);
+  assert.deepEqual(help("say items.join("), ["join", "list.join([separator])", "separator"]);
+  assert.deepEqual(help("say mine.union(yours.toSet("), ["toSet", "list.toSet()", null]);
+  assert.deepEqual(help("items.shuffle(", ")"), ["shuffle", "list.shuffle()", null]);
+  // A function of the same name, and a method that dicts or text have too, are no call of the method.
+  assert.equal(help("say add(")[0], "say");
+  assert.equal(help("say items.remove(")[0], "say");
+  assert.equal(help("say items.indexOf(")[0], "say");
 });
 
 test("askChoice help names set options and the prefill after the options (V30 §19)", () => {

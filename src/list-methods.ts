@@ -61,6 +61,11 @@ export interface ListMethod {
    * `default:` it gives.
    */
   readonly decides?: "element" | "elements" | "default";
+  /**
+   * Whether a dict, a range, a message, or a permanent button has a method of this name too, so that a call of it may be
+   * another value's; the methods of text are in `TEXT_METHODS`.
+   */
+  readonly shared?: true;
   /** What the call does, for the editor's help. */
   readonly summary: string;
 }
@@ -105,6 +110,7 @@ export const LIST_METHODS = byName({
   },
   remove: {
     name: "remove",
+    shared: true,
     receivers: BOTH,
     parameters: [value],
     result: "null",
@@ -139,6 +145,7 @@ export const LIST_METHODS = byName({
   },
   clear: {
     name: "clear",
+    shared: true,
     receivers: BOTH,
     parameters: [],
     result: "null",
@@ -177,6 +184,7 @@ export const LIST_METHODS = byName({
   },
   contains: {
     name: "contains",
+    shared: true,
     receivers: BOTH,
     parameters: [value],
     result: "boolean",
@@ -211,6 +219,7 @@ export const LIST_METHODS = byName({
   },
   get: {
     name: "get",
+    shared: true,
     receivers: LIST,
     notOnSet: "A set has no positions, so it has no 'get()'. Use 'contains(...)' instead.",
     parameters: [index],
@@ -281,6 +290,7 @@ export const LIST_METHODS = byName({
   },
   toList: {
     name: "toList",
+    shared: true,
     receivers: ["set"],
     parameters: [],
     result: "list",
@@ -385,12 +395,18 @@ export function listArgumentMessage(
 /** The fix for a range where a list is needed, as for a set (V30 §6). */
 export const RANGE_LIST_FIX = " Make a list of its numbers with toList() first.";
 
-/** The call as the editor's help writes it, such as `list.take(count)` or `list.add(value)  or  set.add(value)`. */
+/**
+ * The call as the editor's help writes it, such as `list.take(count)`, `list.join([separator])`, or
+ * `list.add(value)  or  set.add(value)`.
+ */
 export function listMethodSyntax(name: ListMethodName): string {
   const method: ListMethod = LIST_METHODS[name];
-  const required = method.parameters.filter((parameter) => parameter.optional !== true);
-  const optional = method.parameters.filter((parameter) => parameter.optional === true);
-  const call = `${name}(${[...required.map((parameter) => parameter.name), ...(method.named ?? []).map((parameter) => `${parameter}: value`)].join(", ")}${optional.map((parameter) => ` [, ${parameter.name}]`).join("")})`;
+  const required = [
+    ...method.parameters.filter((parameter) => !parameter.optional).map(({ name }) => name),
+    ...(method.named ?? []).map((parameter) => `${parameter}: value`),
+  ];
+  const optional = method.parameters.filter((parameter) => parameter.optional);
+  const call = `${name}(${required.join(", ")}${optional.map((parameter, index) => (required.length === 0 && index === 0 ? `[${parameter.name}]` : ` [, ${parameter.name}]`)).join("")})`;
   return method.receivers.map((kind) => `${kind}.${call}`).join("  or  ");
 }
 
