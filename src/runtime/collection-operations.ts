@@ -1,3 +1,4 @@
+import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import { withoutNegativeZero } from "../conversions.js";
 import { compareAngles } from "../angle.js";
 import { compareDurations, durationFamily, durationParts } from "../duration.js";
@@ -186,6 +187,6 @@ export function setOperationArgumentMessage(name: string, value: SerializableRun
   return `${name}() needs a list or a set, not ${describeRuntimeValue(value)}.${isRange(value) ? RANGE_LIST_FIX : ""}`;
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }

@@ -1,3 +1,4 @@
+import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import { parseChild, runParse, type ParseTask } from "./parse-continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
@@ -26,7 +27,7 @@ const diagnosticCodes = {
   unterminatedComment: "TSL007",
   physicalNewlineInString: "TSL008",
   unterminatedRegex: "TSL009",
-} as const;
+} as const satisfies Record<string, OwnedDiagnosticCode<"lexer", "error">>;
 
 /**
  * Tokenizes the accepted core-language milestone. A `/` at an offset of `regexStarts` starts a regex literal, as one does

@@ -1,3 +1,4 @@
+import type { OwnedDiagnosticCode } from "../diagnostic-codes.js";
 import { createCapturedArray } from "../external-data-capture.js";
 import { MAX_TEXT_LENGTH } from "./text-length.js";
 import { type InstructionPlan } from "../plan/model.js";
@@ -24,7 +25,7 @@ export interface RuntimeCheckpoint {
 }
 
 export interface CheckpointErrorInfo {
-  readonly code: "TSK001" | "TSK002" | "TSK003" | "TSK004";
+  readonly code: OwnedDiagnosticCode<"checkpoint">;
   readonly message: string;
   readonly path: string;
 }

@@ -1,3 +1,4 @@
+import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import { findScope } from "./activations.js";
 import {
@@ -616,6 +617,6 @@ function allTemporaryCollections(snapshot: RuntimeSnapshot): RuntimeTemporarySna
   return [snapshot.temporaries, ...snapshot.callFrames.map((frame) => frame.callerTemporaries)];
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }

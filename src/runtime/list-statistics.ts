@@ -1,3 +1,4 @@
+import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import { angleStatisticMessage, angleValue } from "../angle.js";
 import { exactDuration } from "../duration.js";
 import { percentageFailure } from "../numeric-functions.js";
@@ -582,6 +583,6 @@ export function weightedIndex(weights: readonly number[], draw: number): number 
   return last;
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }

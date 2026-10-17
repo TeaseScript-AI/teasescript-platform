@@ -1,3 +1,4 @@
+import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import type { InstructionPlan, PlanSourceLocation, TypePlan } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
@@ -187,6 +188,10 @@ export function cloneScriptStorage(
   }));
 }
 
-function fault(code: string, message: string, span: SourceSpan | PlanSourceLocation): RuntimeFault {
+function fault(
+  code: RuntimeErrorCode,
+  message: string,
+  span: SourceSpan | PlanSourceLocation,
+): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }

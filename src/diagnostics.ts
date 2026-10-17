@@ -1,3 +1,4 @@
+import type { DiagnosticCode, DiagnosticCodeSeverity } from "./diagnostic-codes.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 
 export const DiagnosticSeverity = { Error: "error", Warning: "warning" } as const;
@@ -11,9 +12,10 @@ export interface Diagnostic {
   readonly span: SourceSpan;
 }
 
-export function createDiagnostic(
-  severity: DiagnosticSeverity,
-  code: string,
+/** A diagnostic with a registered code, at the severity that the code is registered with. */
+export function createDiagnostic<C extends DiagnosticCode>(
+  severity: DiagnosticCodeSeverity<C>,
+  code: C,
   message: string,
   span: SourceSpan,
 ): Diagnostic {

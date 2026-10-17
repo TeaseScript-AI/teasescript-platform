@@ -1,3 +1,4 @@
+import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import type {
   ObjectLiteral,
   AssignmentStatement,
@@ -438,7 +439,9 @@ const typeCode = {
   randomStartValue: "TSV055",
   invalidCameraHandleMember: "TSV059",
   unusedFallback: "TSV062",
-} as const;
+} as const satisfies Record<string, OwnedDiagnosticCode<"type checker">>;
+
+type TypeErrorCode = OwnedDiagnosticCode<"type checker", "error">;
 
 /**
  * Checks that every variable, list or set element, object property, function parameter, and function result keeps one
@@ -8306,7 +8309,7 @@ class TypeChecker {
     expression: Expression,
     type: StaticType,
     accepts: (member: StaticType) => boolean,
-    code: string = typeCode.invalidOperand,
+    code: TypeErrorCode = typeCode.invalidOperand,
   ): boolean {
     const all = members(nonNullType(type)).filter(isKnown);
     const passing = all.filter(accepts);
@@ -8581,7 +8584,7 @@ class TypeChecker {
     rule: string,
     example: string,
     fix: () => string,
-    code: string = typeCode.invalidOperand,
+    code: TypeErrorCode = typeCode.invalidOperand,
   ): void {
     const value = nonNullTypeForUse(type);
     const unitless = isNumeric(value) || resolved(value).kind === "range";
@@ -8873,7 +8876,7 @@ class TypeChecker {
     scope: Scope,
     accepts: (type: StaticType) => boolean,
     rule: string,
-    code: string = typeCode.invalidOperand,
+    code: TypeErrorCode = typeCode.invalidOperand,
   ): CompileTask<StaticType> {
     const type = yield* compileChild(this.#expressionTask(expression, scope));
     this.#reportUnless(type, accepts, expression, rule, undefined, code);
@@ -8986,7 +8989,7 @@ class TypeChecker {
     expression: Expression,
     rule: string,
     fix: () => string = () => "",
-    code: string = typeCode.invalidOperand,
+    code: TypeErrorCode = typeCode.invalidOperand,
   ): void {
     const value = nonNullTypeForUse(type);
     if (!isKnown(value)) return;
@@ -9109,7 +9112,7 @@ class TypeChecker {
     expression: Expression,
     failing: StaticType,
     passing: readonly StaticType[],
-    code: string = typeCode.invalidOperand,
+    code: TypeErrorCode = typeCode.invalidOperand,
   ): void {
     this.#report(
       code,
@@ -9166,7 +9169,7 @@ class TypeChecker {
     this.diagnostics.splice(start, this.diagnostics.length - start, ...kept);
   }
 
-  #report(code: string, message: string, span: SourceSpan): void {
+  #report(code: TypeErrorCode, message: string, span: SourceSpan): void {
     this.diagnostics.push(createDiagnostic(DiagnosticSeverity.Error, code, message, span));
   }
 }
@@ -10849,7 +10852,7 @@ function mixDescription(first: StaticType, other: StaticType): string {
 }
 
 /** The code of a problem with a member of a handle or permanent button (see `handle-rules.ts`). */
-function handleMemberCode(kind: StaticType["kind"]): string {
+function handleMemberCode(kind: StaticType["kind"]): TypeErrorCode {
   return kind === "timer"
     ? typeCode.invalidTimerHandleMember
     : kind === "media"
