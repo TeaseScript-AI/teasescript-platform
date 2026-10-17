@@ -230,7 +230,7 @@ test("selective and deep staging give the same events and states", () => {
 });
 
 test("a say rejected after its expressions ran keeps nothing, with either staging", () => {
-  const pacing = "let pacing = -1 s";
+  const pacing = "function dynamic(value) {\n    return value\n}\nlet pacing = dynamic(-1 s)";
   for (const source of [
     // Draws and a dict lookup, then a pacing that fails.
     [...DECLARATIONS, pacing, 'say "${items.random} ${random()} ${lookup["a"]}", pacing'],

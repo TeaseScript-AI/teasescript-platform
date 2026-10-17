@@ -1331,7 +1331,7 @@ test("work due exactly at the observed time settles once execution waits or ends
 
 test("a failed session accepts no host input and schedules no further observation", () => {
   const failed = new Session(
-    'let t = timer async 60 s { }\nsay "first", 10 s\nlet zero = 0\nlet x = 1 / zero\nexit',
+    'function dynamic(value) {\n    return value\n}\nlet t = timer async 60 s { }\nsay "first", 10 s\nlet zero = dynamic(0)\nlet x = 1 / zero\nexit',
     { pacing: true },
   );
   const gate = failed.snapshot.foregroundAction;
@@ -1445,7 +1445,7 @@ test("late fractional rounds match on time, tiny rounds end normally, zero remai
   );
 
   const range = plan(
-    "let n = 0\ntimer(duration: (n..2) s, async: true, repeat: true)\nwait 10 s\nexit",
+    "function dynamic(value) {\n    return value\n}\nlet n = dynamic(0)\ntimer(duration: (n..2) s, async: true, repeat: true)\nwait 10 s\nexit",
   );
   const fresh = createImmediatePacingRuntimeSnapshot(range, { seed: 0x1234_5678 });
   const failed = run(range, fresh).snapshot;
@@ -1607,7 +1607,7 @@ test("restore rejects a non-string display, and a failed session settles nothing
   assertForgedRejected(json, ["snapshot", "backgroundActions", 0, "timer", "display"], ["hidden"]);
 
   const failed = new Session(
-    'timer async 1 ms { let n = 0\nlet x = 1 / n }\nsay "pacing", 0.001 s\nwait 2 ms\nexit',
+    'function dynamic(value) {\n    return value\n}\ntimer async 1 ms { let n = dynamic(0)\nlet x = 1 / n }\nsay "pacing", 0.001 s\nwait 2 ms\nexit',
     { pacing: true },
   ).at(1);
   assert.equal(failed.snapshot.status, "failed");

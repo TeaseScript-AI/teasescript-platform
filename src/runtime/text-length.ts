@@ -12,6 +12,27 @@ type SourceSpan = RichSourceSpan | PlanSourceLocation;
  */
 export const MAX_TEXT_LENGTH = 536_870_888;
 
+let textLimit = MAX_TEXT_LENGTH;
+
+/** The longest text an operation may make now: `MAX_TEXT_LENGTH`, or less inside `withTextLengthLimit`. */
+export function textLengthLimit(): number {
+  return textLimit;
+}
+
+/**
+ * Runs `run` with texts limited to `limit` UTF-16 code units, where that is less, so that its operations fail with
+ * `TSR084` before they make a longer one. The compiler computes known values so (see `KnownValues`).
+ */
+export function withTextLengthLimit<T>(limit: number, run: () => T): T {
+  const outer = textLimit;
+  textLimit = Math.min(limit, outer);
+  try {
+    return run();
+  } finally {
+    textLimit = outer;
+  }
+}
+
 /**
  * `TSR084`: `operation` would make a text longer than `MAX_TEXT_LENGTH`; `length` is how long, in UTF-16 code units,
  * or `null` when it is not known. A length too large for a number is not shown either.
@@ -31,9 +52,12 @@ export function textTooLong(
   );
 }
 
-/** Fails with `TSR084` before `operation` makes a text of `length` UTF-16 code units that is longer than any text can be. */
+/**
+ * Fails with `TSR084` before `operation` makes a text of `length` UTF-16 code units that is longer than any text can be
+ * (see `textLengthLimit`).
+ */
 export function checkTextLength(length: number, operation: string, span: SourceSpan): void {
-  if (length > MAX_TEXT_LENGTH) throw textTooLong(operation, span, length);
+  if (length > textLimit) throw textTooLong(operation, span, length);
 }
 
 /**

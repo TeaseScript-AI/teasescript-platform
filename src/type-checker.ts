@@ -124,6 +124,7 @@ import {
 } from "./operation-checks.js";
 import {
   changesElements,
+  emptyListPropertyFailure,
   isListMethod,
   LIST_METHODS,
   listArgumentMessage,
@@ -132,6 +133,7 @@ import {
   listProperty,
   missingListMethodMessage,
   missingListPropertyMessage,
+  type ElementProperty,
   type ListMethod,
   type ListMethodName,
 } from "./list-methods.js";
@@ -257,13 +259,12 @@ import {
 import {
   findVisibleOverflows,
   isStaticDuration,
-  knownOperands,
+  KnownValues,
   VISIBLE_OVERFLOW_MESSAGES,
-  knownStep,
   staticChoiceValue,
   staticNumber,
   staticVisibleText,
-  type StaticScalar,
+  type KnownValue,
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import { startValueMessage, startValueOwner } from "./start-value-rules.js";
@@ -429,6 +430,15 @@ export interface TypeCheckOptions {
    */
   readonly sharedWrites?: ReadonlyMap<VariableSite, Sharing>;
   /**
+   * The `let` declarations and globals whose variables some code assigns, stores into, or changes or reorders in place,
+   * from name checking. Every other one keeps its first value, which counts as known (see `KnownValues`). Without it,
+   * no variable counts as known.
+   */
+  readonly written?: {
+    readonly lets: ReadonlySet<LetStatement>;
+    readonly globals: ReadonlySet<string>;
+  };
+  /**
    * The speaker that each `speaker` names, where a message names it with `as` or its properties use it, from name
    * checking.
    */
@@ -556,22 +566,23 @@ export function checkTypes(
         continue;
       }
     }
-    return withVisibleOverflows(checked.result, programs);
+    return withVisibleOverflows(checked.result, programs, checked.known);
   }
 }
 
 /**
- * Adds to each file's diagnostics the steps of known values without a finite result (TSV050), which the folds of every
- * round of the check share, so they are found once.
+ * Adds to each file's diagnostics the steps of known values without a finite result (TSV050), with the values that the
+ * last round of the check knows, so they are found once.
  */
 function withVisibleOverflows(
   result: TypeCheckResult,
   programs: readonly Program[],
+  known: KnownValues,
 ): TypeCheckResult {
   return {
     ...result,
     diagnostics: result.diagnostics.map((diagnostics, file) => [
-      ...findVisibleOverflows(programs[file]!).map((overflow) =>
+      ...findVisibleOverflows(programs[file]!, known).map((overflow) =>
         createDiagnostic(
           DiagnosticSeverity.Error,
           typeCode.visibleOverflow,
@@ -591,7 +602,7 @@ function checkWithEffects(
   onFile: (file: number) => void,
   lines: LineNamer,
   effects: ProjectEffects,
-): { readonly result: TypeCheckResult; readonly dead: DeadCode } {
+): { readonly result: TypeCheckResult; readonly dead: DeadCode; readonly known: KnownValues } {
   // An integer variable is a number when one of its assignments can store a non-whole number, also an assignment
   // after its uses (rule 1.2). A check that finds a new one starts again with that variable declared as a number, so
   // the last check, which finds none, sees every variable with its final type and alone reports. Likewise, a place
@@ -711,6 +722,7 @@ function checkWithEffects(
           storageTypes: storageTypePlans(storage),
         }),
         dead,
+        known: checker.knownValues,
       };
     }
     if (!followed) checker.widenFollowers();
@@ -1288,6 +1300,12 @@ interface Variable {
    * cancels its narrowing, or for a change in place only the narrowing that the change can undo.
    */
   readonly shared: Sharing | false;
+  /**
+   * For a `let` or global that no code assigns, stores into, or changes in place, its first value, which every read
+   * gets: for a global everywhere (`body` is `null`), since it is set before the story runs, and for a `let` in the
+   * `body` that declares it, after the declaration (see `KnownValues`).
+   */
+  readonly keeps?: { readonly initializer: Expression; readonly body: object | null };
 }
 
 /**
@@ -1505,8 +1523,23 @@ class TypeChecker {
 
   readonly #types = new Map<Expression, StaticType>();
 
-  /** Numbers and durations known at compile time, folded once per expression (see `#known`). */
-  readonly #knownValues = new Map<Expression, StaticScalar | undefined>();
+  /** The initializer whose value a read of a variable gets (see `Variable.keeps`), by the read. */
+  readonly #initializers = new Map<Identifier, Expression>();
+
+  /** The values known at compile time, computed once per expression (see `#known`). */
+  readonly knownValues = new KnownValues((identifier) => this.#initializers.get(identifier));
+
+  /** `#known`, for the checks of built-in operations. */
+  readonly #knownOf = (expression: Expression): KnownValue | undefined => this.#known(expression);
+
+  /**
+   * The code being checked, in which a `let` declared in it counts its first value: a file's top level, a function's
+   * parameters and body, or a block of a timer, media, or button; before them, the start values.
+   */
+  #body: object = this.#project;
+
+  /** The `let` declarations and globals that some code writes (see `TypeCheckOptions.written`), or `null` for all. */
+  readonly #written: NonNullable<TypeCheckOptions["written"]> | null;
 
   /**
    * Each arithmetic operation that gives a value of unknown type because an operand's type is unknown, with the types it
@@ -1857,6 +1890,7 @@ class TypeChecker {
     this.#unchecked = unchecked;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
     this.#sharedWrites = options.sharedWrites ?? new Map();
+    this.#written = options.written ?? null;
     this.#contextualSpeakers = options.speakers ?? new Map();
     this.#scriptCatalog =
       options.scriptCatalog?.map((file) => ({
@@ -1985,6 +2019,7 @@ class TypeChecker {
       const rootStatements = program.statements.filter(
         (statement) => statement.kind !== "functionDeclaration",
       );
+      this.#body = program;
       runCompileTask(this.#statementsTask(rootStatements, this.#root));
       // Every script variable has its type now, so every function body is checked, also one that waited for one.
       this.#scriptChecked = true;
@@ -2002,6 +2037,7 @@ class TypeChecker {
           });
         this.#function = null;
         this.#outer = handler.outer;
+        this.#body = handler;
         // A block does not inherit narrowed facts from the code around it (rule 5.5).
         this.#flow = new Flow();
         runCompileTask(this.#statementsTask(handler.block.statements, scope));
@@ -3032,17 +3068,21 @@ class TypeChecker {
       );
       this.#recordRuntimeCheck(statement, type, `'${name}'`, value);
     }
+    const global = statement.kind === "globalStatement";
+    const keeps =
+      this.#written !== null &&
+      !(global ? this.#written.globals.has(name) : this.#written.lets.has(statement));
     const variable: Variable = {
       name,
       type,
-      shared:
-        statement.kind === "globalStatement"
-          ? (this.#sharedGlobals.get(name) ?? false)
-          : scope === this.#root
-            ? (this.#effects.shared.get(name) ?? false)
-            : this.#sharedLocal(statement),
+      shared: global
+        ? (this.#sharedGlobals.get(name) ?? false)
+        : scope === this.#root
+          ? (this.#effects.shared.get(name) ?? false)
+          : this.#sharedLocal(statement),
       declaration: statement.typeAnnotation === null ? statement : undefined,
       annotated: statement.typeAnnotation !== null,
+      ...(keeps ? { keeps: { initializer: written, body: global ? null : this.#body } } : {}),
     };
     if (statement.typeAnnotation === null) this.#declared.set(statement, variable);
     scope.declare(name, { kind: "variable", variable });
@@ -4300,14 +4340,17 @@ class TypeChecker {
     const outerLoops = this.#loops.splice(0);
     const outerReachable = this.#reachable;
     const outerFlow = this.#flow;
+    const outerBody = this.#body;
     this.#function = context;
     this.#reachable = true;
+    this.#body = fn;
     // A function body does not inherit narrowed facts from its caller (rule 5.5).
     this.#flow = new Flow();
     const continues = yield* compileChild(this.#statementsTask(declaration.body.statements, scope));
     this.#function = outer;
     this.#reachable = outerReachable;
     this.#flow = outerFlow;
+    this.#body = outerBody;
     this.#outer = outerScope;
     this.#loops.push(...outerLoops);
     for (const { call, values, literals, file } of fn.pending.splice(0)) {
@@ -4380,6 +4423,9 @@ class TypeChecker {
     if (fn.parameters !== null) return fn.parameters;
     const parameters: Variable[] = [];
     fn.parameters = parameters;
+    // A default runs when the function is called, which may be before a `let` of the code around it ran.
+    const outerBody = this.#body;
+    this.#body = fn;
     const scope = new Scope(fn.scope);
     const outerFlow = this.#flow;
     this.#flow = new Flow();
@@ -4442,6 +4488,7 @@ class TypeChecker {
     this.#reportMixedLiterals();
     this.#flow = outerFlow;
     this.#outer = outerScope;
+    this.#body = outerBody;
     this.#enterFile(outerFile);
     return parameters;
   }
@@ -4729,7 +4776,12 @@ class TypeChecker {
       }
       case "identifier": {
         const entry = scope.resolve(expression.name);
-        if (entry?.kind === "variable") return placeRead(this.#currentType(entry.variable));
+        if (entry?.kind === "variable") {
+          const keeps = entry.variable.keeps;
+          if (keeps !== undefined && (keeps.body === null || keeps.body === this.#body))
+            this.#initializers.set(expression, keeps.initializer);
+          return placeRead(this.#currentType(entry.variable));
+        }
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
           return { kind: "speaker" };
         if (expression.name === "debugMode") return BOOLEAN_TYPE;
@@ -6290,36 +6342,9 @@ class TypeChecker {
     );
   }
 
-  /** The number `expression` is known to have at compile time (see `#known`). */
-  #knownNumber(expression: Expression): number | undefined {
-    const known = this.#known(expression);
-    return typeof known === "number" ? known : undefined;
-  }
-
-  /**
-   * The number, duration, or angle `expression` is known to have at compile time, folded once per expression from its
-   * operands' known values. Iterative, so a long chain of steps does not deepen the native stack.
-   */
-  #known(expression: Expression): StaticScalar | undefined {
-    const pending: Expression[] = [expression];
-    while (pending.length > 0) {
-      const current = pending.at(-1)!;
-      if (this.#knownValues.has(current)) {
-        pending.pop();
-        continue;
-      }
-      const missing = knownOperands(current).filter((operand) => !this.#knownValues.has(operand));
-      if (missing.length > 0) {
-        pending.push(...missing);
-        continue;
-      }
-      this.#knownValues.set(
-        current,
-        knownStep(current, (operand) => this.#knownValues.get(operand)),
-      );
-      pending.pop();
-    }
-    return this.#knownValues.get(expression);
+  /** The value `expression` is known to have at compile time (see `KnownValues`). */
+  #known(expression: Expression): KnownValue | undefined {
+    return this.knownValues.known(expression);
   }
 
   /**
@@ -6884,7 +6909,14 @@ class TypeChecker {
     const typeOf = (argument: Expression): StaticType => this.#typeOf(argument);
     const memberChecks = (): void =>
       this.#reportProblems(
-        memberProblems(callee.object, receiverAtCall, callee.property, expression, typeOf),
+        memberProblems(
+          callee.object,
+          receiverAtCall,
+          callee.property,
+          expression,
+          typeOf,
+          this.#knownOf,
+        ),
       );
     // A call that waits for the previous message's pacing, such as pausing media, waits first.
     const paced = kindsWithMethod(method, (contract) => contract.paced === true);
@@ -7083,6 +7115,7 @@ class TypeChecker {
                 callee.property,
                 expression,
                 typeOf,
+                this.#knownOf,
               ),
             );
           if (fallback === undefined) return results[index]!;
@@ -7226,6 +7259,7 @@ class TypeChecker {
       property,
       expression,
       typeOf,
+      this.#knownOf,
       removable,
     );
     this.#reportProblems(problems);
@@ -7383,7 +7417,12 @@ class TypeChecker {
     readonly inputs: readonly NumericArgument[];
     readonly named: Readonly<Record<string, NumericArgument>>;
   } {
-    const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+    const problems = builtinCallProblems(
+      name,
+      expression,
+      (item) => this.#typeOf(item),
+      this.#knownOf,
+    );
     const fitting = problems.every((problem) => problem.kind === "invalidOperand");
     const angles = signature.takes === "angles";
     // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5,
@@ -7485,7 +7524,12 @@ class TypeChecker {
         return random.result === "boolean" ? BOOLEAN_TYPE : NUMBER_TYPE;
       }
       case "range": {
-        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        const problems = builtinCallProblems(
+          name,
+          expression,
+          (item) => this.#typeOf(item),
+          this.#knownOf,
+        );
         this.#reportProblems(problems);
         // A range's values are checked only when the call's shape is right.
         if (problems.length === 0) {
@@ -7504,11 +7548,7 @@ class TypeChecker {
         return this.#listFunctionType(
           expression,
           values,
-          weightedChoiceCheck(
-            expression,
-            (item) => this.#typeOf(item),
-            (item) => this.#knownNumber(item),
-          ),
+          weightedChoiceCheck(expression, (item) => this.#typeOf(item), this.#knownOf),
         );
     }
   }
@@ -7546,7 +7586,12 @@ class TypeChecker {
     values: readonly StaticType[],
   ): StaticType {
     const conversion: Conversion = CONVERSIONS[name];
-    const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+    const problems = builtinCallProblems(
+      name,
+      expression,
+      (item) => this.#typeOf(item),
+      this.#knownOf,
+    );
     this.#reportProblems(problems);
     // Without a default, a call fails for anything but text, so a value that may be something else names the check
     // first.
@@ -7607,12 +7652,7 @@ class TypeChecker {
       return this.#listFunctionType(
         expression,
         values,
-        listFunctionCheck(
-          name,
-          expression,
-          (item) => this.#typeOf(item),
-          (item) => this.#knownNumber(item),
-        ),
+        listFunctionCheck(name, expression, (item) => this.#typeOf(item), this.#knownOf),
       );
     const argument = expression.arguments[0];
     const value = values[0];
@@ -7623,7 +7663,12 @@ class TypeChecker {
     switch (name) {
       case "min":
       case "max": {
-        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        const problems = builtinCallProblems(
+          name,
+          expression,
+          (item) => this.#typeOf(item),
+          this.#knownOf,
+        );
         // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5,
         // #504 Q1): each of its members must be of the family the other arguments decide: numbers, durations, or one kind
         // of date or time value.
@@ -7698,7 +7743,12 @@ class TypeChecker {
       case "hashFile": {
         // A stored file from Base64 text, the Base64 text of a stored file, and the SHA-256 of text or a stored file
         // (V30 §13 and §33).
-        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        const problems = builtinCallProblems(
+          name,
+          expression,
+          (item) => this.#typeOf(item),
+          this.#knownOf,
+        );
         this.#reportProblems(problems);
         if (name !== "fileFromBase64" && problems.length === 0)
           this.#reportUnless(
@@ -7724,7 +7774,12 @@ class TypeChecker {
       case "decryptText":
       case "decryptFile": {
         // Locked text as Base64 or a locked stored file, and what a lock opens to, or the default (V30 §13).
-        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        const problems = builtinCallProblems(
+          name,
+          expression,
+          (item) => this.#typeOf(item),
+          this.#knownOf,
+        );
         this.#reportProblems(problems);
         const index = expression.arguments.findIndex((item) => item.kind === "positionalArgument");
         if (index !== -1 && problems.every((problem) => problem.kind !== "argumentCount"))
@@ -7787,6 +7842,32 @@ class TypeChecker {
     }
   }
 
+  /** Reports a read of an element, such as `.first`, from a list or set the compiler knows is empty. */
+  #checkEmptyCollection(
+    expression: Extract<Expression, { kind: "propertyAccessExpression" }>,
+  ): void {
+    const name = expression.property.name;
+    if (listProperty(name)?.gives !== "element") return;
+    const value = this.#known(expression.object);
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      (value.kind !== "list" && value.kind !== "set") ||
+      value.items.length > 0
+    )
+      return;
+    this.#report(
+      typeCode.invalidOperand,
+      emptyListPropertyFailure(
+        // EVIDENCE: invariant: the properties that give an element are the names of `ElementProperty`.
+        name as ElementProperty,
+        value.kind,
+        expressionLabel(expression.object),
+      ).message,
+      expression.span,
+    );
+  }
+
   /** The type of `object.name`; every member of a union must have the property (ADR 0021 rule 3.5). */
   #propertyType(
     object: StaticType,
@@ -7798,6 +7879,7 @@ class TypeChecker {
     const passing = all.filter((_, index) => reads[index] !== undefined);
     if (passing.length === all.length) {
       this.#noteMissingAccess(expression, object);
+      this.#checkEmptyCollection(expression);
       const types = reads.map((read) => (read!.kind === "placeRead" ? read!.type : read!));
       const type = all.length === 1 ? types[0]! : union(types);
       // A property or an element is read from the place that keeps it. Any other property gives a new value, such as a
@@ -7853,8 +7935,13 @@ class TypeChecker {
     // Text operations and `join` name what to write instead (V30 §8).
     if (MEMBER_CHECKED_KINDS.has(value.kind) || (value.kind === "list" && name === "join")) {
       this.#reportProblems(
-        memberProblems(expression.object, failing, expression.property, null, (item) =>
-          this.#typeOf(item),
+        memberProblems(
+          expression.object,
+          failing,
+          expression.property,
+          null,
+          (item) => this.#typeOf(item),
+          this.#knownOf,
         ),
       );
       return UNKNOWN_TYPE;

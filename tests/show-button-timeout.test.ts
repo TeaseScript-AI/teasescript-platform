@@ -242,8 +242,14 @@ test("the compiler rejects a timeout it can see is invalid and names the fix", (
 
 test("a timeout the compiler cannot know fails at runtime before the button appears", () => {
   for (const { source, message } of [
-    { source: "let limit = 0 s", message: "greater than zero" },
-    { source: "let limit = -3 s", message: "greater than zero" },
+    {
+      source: "function pick(value) {\n  return value\n}\nlet limit = pick(0 s)",
+      message: "greater than zero",
+    },
+    {
+      source: "function pick(value) {\n  return value\n}\nlet limit = pick(-3 s)",
+      message: "greater than zero",
+    },
     {
       source: 'function pick(value) {\n  return value\n}\nlet limit = pick("5")',
       message: "greater than zero",
@@ -252,7 +258,10 @@ test("a timeout the compiler cannot know fails at runtime before the button appe
       source: "function pick(value) {\n  return value\n}\nlet limit = pick(5)",
       message: "a duration",
     },
-    { source: "let limit = 1e300 s", message: "too long for scene time to reach" },
+    {
+      source: "function pick(value) {\n  return value\n}\nlet limit = pick(1e300 s)",
+      message: "too long for scene time to reach",
+    },
   ]) {
     const plan = compileValidPlan(`${source}\nlet elapsed = showButton "Go", timeout: limit\nexit`);
     const result = run(plan, createFreshRuntimeSnapshot(plan));

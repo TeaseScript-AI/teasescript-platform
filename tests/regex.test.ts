@@ -548,7 +548,7 @@ test("a replacement that refers to a group the regex does not have is a compile 
   // A replacement or regex the compiler cannot know fails when it runs, also when nothing matches.
   for (const source of [
     'let t = "ab".replace(/x(y)/, replacement)\nexit',
-    'let r = toRegex("x", default: null)\nif r != null {\n  let t = "ab".replace(r, "$1")\n}\nexit',
+    'function dynamic(value) {\n  return value\n}\nlet r = toRegex(dynamic("x"), default: null)\nif r != null {\n  let t = "ab".replace(r, "$1")\n}\nexit',
   ]) {
     const runtime = runWithGlobals(source, { replacement: "$2" });
     assert.equal(runtime.snapshot.failure?.code, "TSR057", source);

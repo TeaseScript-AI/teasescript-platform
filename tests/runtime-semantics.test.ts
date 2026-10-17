@@ -274,7 +274,7 @@ test("errors for first, last, and random on empty lists and sets", () => {
   ] as const;
 
   for (const [literal, property, code] of cases) {
-    const source = `let values = ${literal}\nsay values.${property}\nexit`;
+    const source = `function dynamic(value) {\n    return value\n}\nlet values = dynamic(${literal})\nsay values.${property}\nexit`;
     const result = executeSource(source);
     const start = source.indexOf(`values.${property}`);
     assert.deepEqual(
@@ -298,7 +298,7 @@ test("does not advance RNG state for empty list or set random", () => {
       },
     };
     const result = executeSource(
-      `let values = ${literal}\nsay values.random\nexit`,
+      `function dynamic(value) {\n    return value\n}\nlet values = dynamic(${literal})\nsay values.random\nexit`,
       undefined,
       random,
     );

@@ -113,7 +113,9 @@ test("a malformed edit, or one an ended session cannot take, changes nothing", (
     kind: "invalidState",
     status: "halted",
   });
-  const failed = start("let zero = 0\nlet broken = 1 / zero\nexit");
+  const failed = start(
+    "function dynamic(value) {\n    return value\n}\nlet zero = dynamic(0)\nlet broken = 1 / zero\nexit",
+  );
   assert.equal(failed.snapshot.status, "failed");
   assert.equal(
     edit(failed.plan, failed.snapshot, { key: "k", value: 1 }).outcome.kind,

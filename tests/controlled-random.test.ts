@@ -179,7 +179,8 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
     plan: project(
       [
         'let colors = ["red", "green", "blue"]',
-        "let pacing = -1 s",
+        "function dynamic(value) {\n    return value\n}",
+        "let pacing = dynamic(-1 s)",
         'say "${colors.random} ${randomInteger(1..=6)}", pacing',
         "exit",
       ].join("\n"),

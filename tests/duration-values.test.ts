@@ -133,8 +133,8 @@ test("mixing plain numbers with durations fails instead of guessing a unit", () 
       ["TSV043"],
       declaration,
     );
-  assert.equal(runtimeFailure('let n = 0\nsay "${1 s / n}"\nexit'), "TSR036");
-  assert.equal(runtimeFailure('let d = 0 s\nsay "${d / d}"\nexit'), "TSR036");
+  assert.equal(runtimeFailure(`${DYNAMIC}let n = dynamic(0)\nsay "\${1 s / n}"\nexit`), "TSR036");
+  assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(0 s)\nsay "\${d / d}"\nexit`), "TSR036");
   for (const source of [
     'say "${1 s + 1}"',
     "wait 1 + 2 ms",

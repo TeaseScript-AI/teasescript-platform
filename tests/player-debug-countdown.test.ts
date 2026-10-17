@@ -134,10 +134,13 @@ test("a restored session counts down to the same deadline, and an ended or faile
     W(5_000),
   );
   assert.deepEqual(countdowns("exit", []), [null]);
-  assert.deepEqual(countdowns('say "A", 5 s\nlet x = 0\nlet y = 1 / x\nexit', [5_000]), [
-    P(5_000),
-    null,
-  ]);
+  assert.deepEqual(
+    countdowns(
+      'say "A", 5 s\nlet x = dynamic(0)\nlet y = 1 / x\nexit\nfunction dynamic(value) {\n    return value\n}',
+      [5_000],
+    ),
+    [P(5_000), null],
+  );
 });
 
 test("the countdown text rounds whole seconds up and says when a deadline elapsed before its action settled", () => {
