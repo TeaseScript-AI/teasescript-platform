@@ -4,6 +4,7 @@ import type {
   Block,
   CallArgument,
   CallExpression,
+  DurationUnit,
   Expression,
   FunctionDeclaration,
   ForStatement,
@@ -119,6 +120,31 @@ import {
 } from "./angle.js";
 import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
 import { rangeListLengthProblem } from "./runtime/collection-operations.js";
+import { describeShownValue, shownChoice } from "./runtime/value-types.js";
+import {
+  cameraPlacementMessage,
+  handleArgumentsMessage,
+  handleMemberMessage,
+  hasArgumentlessMethods,
+  isCameraPlacement,
+  isMediaPosition,
+  isMediaRange,
+  isMediaVolume,
+  isTimerDisplay,
+  mediaPositionMessage,
+  mediaRangeMessage,
+  mediaVolumeMessage,
+  timerDisplayMessage,
+  type HandleKind,
+} from "./handle-rules.js";
+import {
+  emptyRangeProblem,
+  rangeStartProblem,
+  rangeText,
+  wholeRangeMessage,
+  type RangeBounds,
+} from "./range-checks.js";
+import { withoutNegativeZero } from "./conversions.js";
 import {
   compareDurations,
   divideDuration,
@@ -330,9 +356,13 @@ export type RuntimeCheckSite =
 
 const typeCode = {
   invalidAssignment: "TSV004",
+  invalidRangeOperand: "TSV010",
   argumentCount: "TSV020",
   unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
+  invalidTimerHandleMember: "TSV034",
+  invalidMedia: "TSV036",
+  invalidMediaHandleMember: "TSV037",
   invalidInteractionPrefill: "TSV039",
   listInText: "TSV040",
   unshowableValue: "TSV042",
@@ -345,7 +375,7 @@ const typeCode = {
   invalidCaptureTag: "TST005",
   invalidTagQueryFrom: "TST006",
   randomStartValue: "TSV055",
-  invalidCameraPlacement: "TSV059",
+  invalidCameraHandleMember: "TSV059",
   unusedFallback: "TSV062",
 } as const;
 
@@ -2323,9 +2353,7 @@ class TypeChecker {
         this.#suspend();
         return true;
       case "waitStatement":
-        yield* compileChild(
-          this.#timeTask(statement.duration, "wait", statement.unit !== null, scope),
-        );
+        yield* compileChild(this.#timeTask(statement.duration, "wait", statement.unit, scope));
         this.#suspend();
         return true;
       case "timerStatement":
@@ -2576,7 +2604,7 @@ class TypeChecker {
           return yield* compileChild(
             this.#pairLoopTask(statement, statement.valueVariable, iterable, scope),
           );
-        this.#checkWholeRangeBounds(statement.iterable, "A for-loop range bound");
+        this.#checkWholeRangeBounds(statement.iterable, "A 'for' loop");
         this.#warnEmptyRange(statement.iterable, "the loop never runs");
         // A loop over a dict goes through its keys.
         const element = elementType(iterable, true);
@@ -2873,20 +2901,36 @@ class TypeChecker {
   }
 
   /**
-   * A placement the compiler knows to be wrong, written to what can only be a camera view, also through an alias, a
-   * function result, or a collection element; a value it cannot know is checked at runtime (`TSR050`).
+   * A camera view's placement, a timer's display, or a media volume that the compiler knows to be wrong, written to what
+   * can only be such a handle, also through an alias, a parameter, a function result, or a collection element. A value
+   * of another type is a type error of the store, and a value the compiler cannot know is checked at runtime (`TSR050`).
    */
-  #checkCameraPlacement(object: StaticType, statement: AssignmentStatement): void {
-    const receivers = members(nonNullType(object));
-    if (receivers.length === 0 || !receivers.every((member) => resolved(member).kind === "camera"))
-      return;
-    const text = staticVisibleText(statement.value);
-    if (statement.operator !== "=" || (text !== undefined && text !== "window" && text !== "stage"))
-      this.#report(
-        typeCode.invalidCameraPlacement,
-        'Camera placement must be "window" or "stage".',
-        statement.value.span,
-      );
+  #checkHandleValue(
+    object: StaticType,
+    name: string,
+    statement: AssignmentStatement,
+    value: StaticType,
+  ): void {
+    const receivers = members(nonNullType(object)).map((member) => resolved(member).kind);
+    const kind = receivers[0];
+    if (kind === undefined || receivers.some((other) => other !== kind)) return;
+    const report = (message: string) =>
+      this.#report(handleMemberCode(kind), message, statement.value.span);
+    const text = isScalar(value, "string") ? staticVisibleText(statement.value) : undefined;
+    if (kind === "camera" && name === "placement") {
+      // A compound assignment adds to the placement, which never gives another placement.
+      if (statement.operator !== "=") report(cameraPlacementMessage(null));
+      else if (text !== undefined && !isCameraPlacement(text))
+        report(cameraPlacementMessage(shownChoice(text)));
+    } else if (statement.operator !== "=") return;
+    else if (kind === "timer" && name === "display") {
+      if (text !== undefined && !isTimerDisplay(text))
+        report(timerDisplayMessage(shownChoice(text)));
+    } else if (kind === "media" && name === "volume") {
+      const known = this.#known(statement.value);
+      if (typeof known === "number" && !isMediaVolume(known))
+        report(mediaVolumeMessage(describeShownValue(known)));
+    }
   }
 
   /**
@@ -2907,6 +2951,8 @@ class TypeChecker {
     let place: Place | undefined;
     let variable: Variable | undefined;
     let handle = false;
+    /** The check of the value written to a handle property, once the value's type is known. */
+    let checkValue: ((value: StaticType) => void) | undefined;
     /** For an element, the type it may hold now, which can be wider than what may be stored. */
     let read: StaticType | undefined;
     /** The name of a speaker property the store may write, which the runtime checks. */
@@ -3041,10 +3087,9 @@ class TypeChecker {
         // A media position, remaining time, or volume write, and a camera view's placement, first wait for the
         // previous message's pacing.
         if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(receiver, "media")) this.#suspend();
-        if (name === "placement" && mayBe(receiver, "camera")) {
-          this.#suspend();
-          this.#checkCameraPlacement(receiver, statement);
-        }
+        if (name === "placement" && mayBe(receiver, "camera")) this.#suspend();
+        if (handle)
+          checkValue = (value) => this.#checkHandleValue(receiver, name, statement, value);
         if (name === "text" && statement.operator === "=")
           this.#checkMessageText(receiver, statement);
       }
@@ -3059,6 +3104,7 @@ class TypeChecker {
     // What the variable holds where it is read, before a call in the value may end what is known about it.
     const before = variable === undefined ? undefined : this.#currentType(variable);
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
+    checkValue?.(value);
     // A mixed `askChoice` that C2 rejects for the other receivers needs no second message here.
     if (speakerProperty !== null && !(untyped && this.#mixedChoices.has(unwrap(statement.value)))) {
       if (statement.operator === "=" || speakerProperty !== "defaultSaySkippable")
@@ -3894,7 +3940,7 @@ class TypeChecker {
         if (passing.length > 0) this.#reportMayBe(objectExpression, all[index]!, passing);
         else
           this.#report(
-            typeCode.invalidOperand,
+            handleMemberCode(all[index]!.kind),
             target.problem,
             target.receiver === true ? objectExpression.span : property.span,
           );
@@ -4311,22 +4357,74 @@ class TypeChecker {
   }
 
   /**
-   * A range that `for` goes through, `randomInteger` draws from, `toList` gives, or a wait or timer counts in units has
-   * whole-number bounds (V30 §6): a bound of type `number` is an error rather than a truncation. A bound the compiler
-   * cannot know is checked at runtime.
+   * A range that `for` goes through, `randomInteger` draws from, `toList` gives, or a wait or timer counts in units
+   * (`subject`) has whole-number bounds (V30 §6): a bound of type `number` is an error rather than a truncation. Returns
+   * whether the bounds may be whole; a bound the compiler cannot know is checked at runtime.
    */
-  #checkWholeRangeBounds(expression: Expression, bound: string): void {
+  #checkWholeRangeBounds(expression: Expression, subject: string): boolean {
+    const range = unwrap(expression);
+    if (range.kind !== "rangeExpression") return true;
+    let whole = true;
+    for (const [part, side] of [
+      [range.start, "start"],
+      [range.end, "end"],
+    ] as const) {
+      const type = this.#typeOf(part);
+      if (!isScalar(type, "number")) continue;
+      whole = false;
+      this.#report(
+        typeCode.invalidRangeOperand,
+        wholeRangeMessage(
+          subject,
+          `its ${side} is ${describeValue(type)}`,
+          this.#widenedNote(part),
+        ),
+        part.span,
+      );
+    }
+    return whole;
+  }
+
+  /**
+   * A range written where `randomInteger` draws a number from it, or a wait or timer a number of units (`delay`), in
+   * the runtime's order: a start that gives a wait or timer no length, whole-number bounds, and at least one number to
+   * draw. A bound the compiler cannot know is checked at runtime.
+   */
+  #checkDrawnRange(
+    expression: Expression,
+    subject: string,
+    delay?: {
+      readonly command: "wait" | "timer";
+      readonly repeat: boolean;
+      readonly unit: DurationUnit;
+    },
+  ): void {
     const range = unwrap(expression);
     if (range.kind !== "rangeExpression") return;
-    for (const part of [range.start, range.end]) {
-      const type = this.#typeOf(part);
-      if (isScalar(type, "number"))
-        this.#report(
-          typeCode.invalidOperand,
-          `${bound} must be a whole number (integer), but this is ${describeValue(type)}.${this.#widenedNote(part)}${ROUND_FIX}.`,
-          part.span,
-        );
+    const start = this.#known(range.start);
+    const end = this.#known(range.end);
+    const known: RangeBounds | undefined =
+      typeof start === "number" && typeof end === "number"
+        ? { start, end, inclusive: range.inclusive }
+        : undefined;
+    if (delay !== undefined && typeof start === "number") {
+      const problem = rangeStartProblem(
+        delay.command,
+        delay.repeat,
+        start,
+        delay.unit,
+        known === undefined
+          ? `this range starts at ${withoutNegativeZero(start)}`
+          : `this range is ${rangeText(known)}`,
+      );
+      if (problem !== null) {
+        this.#report(typeCode.invalidRangeOperand, problem, range.span);
+        return;
+      }
     }
+    if (!this.#checkWholeRangeBounds(range, subject) || known === undefined) return;
+    const empty = emptyRangeProblem(subject, known);
+    if (empty !== null) this.#report(typeCode.invalidRangeOperand, empty, range.span);
   }
 
   /**
@@ -4580,7 +4678,14 @@ class TypeChecker {
       case "rangeExpression": {
         for (const bound of [expression.start, expression.end]) {
           const type = yield* compileChild(this.#expressionTask(bound, scope));
-          this.#reportUnless(type, isNumeric, bound, "A range bound is a number");
+          this.#reportUnless(
+            type,
+            isNumeric,
+            bound,
+            "A range bound is a number",
+            undefined,
+            typeCode.invalidRangeOperand,
+          );
         }
         return { kind: "range" };
       }
@@ -6654,7 +6759,7 @@ class TypeChecker {
       this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
     // A range written in the call gives its whole numbers, as `for` does, but at most 1,000,000 of them (V30 §6).
     if (method === "toList") {
-      this.#checkWholeRangeBounds(callee.object, "A toList range bound");
+      this.#checkWholeRangeBounds(callee.object, "toList()");
       this.#checkRangeListLength(callee.object);
       // A call with arguments is an error, which says enough.
       if (expression.arguments.length === 0)
@@ -6674,12 +6779,12 @@ class TypeChecker {
         );
     const passing = all.filter((_, index) => results[index] !== undefined);
     if (passing.length === all.length) {
-      const handle = HANDLE_LABELS.get(resolved(all[0]!).kind);
-      const handles = all.every((member) => HANDLE_LABELS.has(resolved(member).kind));
-      if (handles && expression.arguments.length > 0)
+      const handle = resolved(all[0]!).kind;
+      const handles = all.every((member) => hasArgumentlessMethods(resolved(member).kind));
+      if (handles && hasArgumentlessMethods(handle) && expression.arguments.length > 0)
         this.#report(
-          typeCode.invalidOperand,
-          `${handle} ${method}() takes no arguments.`,
+          handleMemberCode(handle),
+          handleArgumentsMessage(handle, method),
           callee.property.span,
         );
       const textual = TEXT_MEMBERS.has(method) || method === "join";
@@ -6754,7 +6859,7 @@ class TypeChecker {
       );
     else
       this.#report(
-        typeCode.invalidOperand,
+        handleMemberCode(failing.kind),
         failing.kind === "list" || failing.kind === "set"
           ? `${failing.kind === "list" ? "Lists" : "Sets"} have no method '${method}'.`
           : failing.kind === "dict"
@@ -7131,7 +7236,8 @@ class TypeChecker {
             argument.value,
             "randomInteger(...) takes a range such as 1..=6",
           );
-          this.#checkWholeRangeBounds(argument.value, "A randomInteger range bound");
+          if (argument.kind === "positionalArgument")
+            this.#checkDrawnRange(argument.value, "randomInteger(range)");
         }
         return INTEGER_TYPE;
       case "min":
@@ -7422,7 +7528,7 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     this.#report(
-      typeCode.invalidOperand,
+      handleMemberCode(value.kind),
       value.kind === "list" || value.kind === "set"
         ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'. Use length, first, last, or random.`
         : value.kind === "dict"
@@ -8120,12 +8226,12 @@ class TypeChecker {
   *#timeTask(
     expression: Expression,
     command: "wait" | "media",
-    unit: boolean,
+    unit: DurationUnit | null,
     scope: Scope,
   ): CompileTask<StaticType> {
     if (command === "wait") this.#timeOperands.set(expression, "wait");
     const type = yield* compileChild(this.#expressionTask(expression, scope));
-    this.#reportTime(expression, type, command, unit);
+    this.#reportTime(expression, type, command, unit, false);
     return type;
   }
 
@@ -8137,11 +8243,12 @@ class TypeChecker {
     expression: Expression,
     type: StaticType,
     command: "wait" | "timer" | "named timer" | "media",
-    unit: boolean,
+    unit: DurationUnit | null,
+    repeat: boolean,
   ): void {
     const isRange = (member: StaticType): boolean =>
       command !== "media" && resolved(member).kind === "range";
-    if (unit) {
+    if (unit !== null) {
       this.#reportUnless(
         type,
         (member) => isNumeric(member) || isRange(member),
@@ -8149,11 +8256,10 @@ class TypeChecker {
         "A time before a unit is a number",
       );
       // A range counts whole units, as `for` counts whole numbers.
-      if (command !== "media")
-        this.#checkWholeRangeBounds(
-          expression,
-          command === "wait" ? "A wait range bound" : "A timer range bound",
-        );
+      if (command !== "media") {
+        const delay = command === "wait" ? "wait" : "timer";
+        this.#checkDrawnRange(expression, `A ${delay}`, { command: delay, repeat, unit });
+      }
       return;
     }
     const range = resolved(nonNullTypeForUse(type)).kind === "range";
@@ -8165,6 +8271,7 @@ class TypeChecker {
         : `A ${command === "wait" ? "wait" : "timer"} takes a duration`,
       "30 s",
       () => timeUnitFix(expression, command, range),
+      command === "media" ? typeCode.invalidMedia : typeCode.invalidOperand,
     );
   }
 
@@ -8178,6 +8285,7 @@ class TypeChecker {
     rule: string,
     example: string,
     fix: () => string,
+    code: string = typeCode.invalidOperand,
   ): void {
     const value = nonNullTypeForUse(type);
     const unitless = isNumeric(value) || resolved(value).kind === "range";
@@ -8191,6 +8299,7 @@ class TypeChecker {
         isScalar(value, "calendarDuration")
           ? ""
           : ` ${unitless ? fix() : `Use a duration such as '${example}'.`}`,
+      code,
     );
   }
 
@@ -8204,7 +8313,8 @@ class TypeChecker {
           operand,
           duration,
           timer.form === "short" ? "timer" : "named timer",
-          timer.unit !== null,
+          timer.unit,
+          timer.repeat,
         );
       } else if (operand === timer.label)
         this.#checkShownText(
@@ -8276,12 +8386,48 @@ class TypeChecker {
             "Repeat is true, false, or a duration",
           ),
         );
-      } else yield* compileChild(this.#timeTask(operand, "media", false, scope));
+      } else yield* compileChild(this.#timeTask(operand, "media", null, scope));
     }
+    this.#checkMediaPositions(media);
     for (const block of mediaHandlerBlocks(media))
       this.#pendHandler(block, media.async ? selfHandle : null, scope);
     this.#suspend();
     return media.async ? { kind: "media" } : UNKNOWN_TYPE;
+  }
+
+  /**
+   * The media positions of a play command that the compiler knows: `startAt`, `endAt`, and each cue position are at
+   * least zero, and `endAt` is later than `startAt`, which is the start of the file when left out (V30 §35). A
+   * position it cannot know is checked at runtime (`TSR050`).
+   */
+  #checkMediaPositions(media: MediaParts): void {
+    const position = (expression: Expression, subject: string): AnyDuration | undefined => {
+      const known = this.#known(expression);
+      // A calendar duration is a type error of its own.
+      if (!isStaticDuration(known) || isCalendar(known)) return undefined;
+      if (isMediaPosition(known.milliseconds)) return known;
+      this.#report(
+        typeCode.invalidMedia,
+        mediaPositionMessage(subject, formatDuration(known)),
+        expression.span,
+      );
+      return undefined;
+    };
+    const start = media.startAt === null ? 0 : position(media.startAt, "startAt");
+    const end = media.endAt === null ? undefined : position(media.endAt, "endAt");
+    if (
+      start !== undefined &&
+      end !== undefined &&
+      !isMediaRange(typeof start === "number" ? start : start.milliseconds, end.milliseconds)
+    )
+      this.#report(
+        typeCode.invalidMedia,
+        mediaRangeMessage(formatDuration(end), formatDuration(start)),
+        media.endAt!.span,
+      );
+    if (media.handlers?.kind === "cues")
+      for (const cue of media.handlers.cues)
+        if (cue.offset !== null) position(cue.offset, `${cue.kind} position`);
   }
 
   *#fileTask(expression: Expression, scope: Scope, command: string): CompileTask<void> {
@@ -8483,6 +8629,7 @@ class TypeChecker {
     expression: Expression,
     rule: string,
     fix: () => string = () => "",
+    code: string = typeCode.invalidOperand,
   ): void {
     const value = nonNullTypeForUse(type);
     if (!isKnown(value)) return;
@@ -8496,6 +8643,7 @@ class TypeChecker {
         expression,
         failing.find((member) => member.kind !== "null") ?? failing[0]!,
         passing,
+        code,
       );
       return;
     }
@@ -8505,7 +8653,7 @@ class TypeChecker {
         ? " A calendar day or month has no fixed length. Use a fixed length such as '1 day' or '24 h'."
         : "";
     this.#report(
-      typeCode.invalidOperand,
+      code,
       `${rule}, but this is ${describeValue(value)}.${reason}${fix()}`,
       expression.span,
     );
@@ -8600,9 +8748,14 @@ class TypeChecker {
   }
 
   /** A value that may be of a member type the operation does not support: name the test that makes it safe. */
-  #reportMayBe(expression: Expression, failing: StaticType, passing: readonly StaticType[]): void {
+  #reportMayBe(
+    expression: Expression,
+    failing: StaticType,
+    passing: readonly StaticType[],
+    code: string = typeCode.invalidOperand,
+  ): void {
     this.#report(
-      typeCode.invalidOperand,
+      code,
       mayBeMessage(expression, failing, passing, !this.#changed.has(expression)),
       expression.span,
     );
@@ -10325,16 +10478,16 @@ function mixDescription(first: StaticType, other: StaticType): string {
   return `${describeValue(first)} and ${describeValue(other)}`;
 }
 
-/** The kinds of handle whose properties scripts read or assign. */
-type HandleKind = "timer" | "media" | "camera" | "messageHandle";
-
-/** The handles whose methods take no arguments, as their messages name them. */
-const HANDLE_LABELS: ReadonlyMap<string, string> = new Map([
-  ["timer", "Timer"],
-  ["media", "Media"],
-  ["messageHandle", "Message"],
-  ["permanentButton", "Permanent button"],
-]);
+/** The code of a problem with a member of a handle or permanent button (see `handle-rules.ts`). */
+function handleMemberCode(kind: StaticType["kind"]): string {
+  return kind === "timer"
+    ? typeCode.invalidTimerHandleMember
+    : kind === "media"
+      ? typeCode.invalidMediaHandleMember
+      : kind === "camera"
+        ? typeCode.invalidCameraHandleMember
+        : typeCode.invalidOperand;
+}
 
 /**
  * The message for a method call on a receiver that is a speaker, which has properties but no methods (V30 §37). In a
@@ -10342,29 +10495,6 @@ const HANDLE_LABELS: ReadonlyMap<string, string> = new Map([
  */
 function speakerMethodMessage(method: string, label: string | null): string {
   return `A speaker has no methods, so it has no '${method}'. Use one of its properties instead, such as '${label === null ? "" : `${label}.`}title'.`;
-}
-
-/** The message for a timer, media, message, or camera view handle member that does not exist or cannot be assigned. */
-function handleMemberMessage(
-  handle: HandleKind,
-  name: string,
-  use: "read" | "assign" | "call",
-): string {
-  if (handle === "messageHandle")
-    return use === "call"
-      ? `Message handles have no method '${name}'. Use remove(), or change the message with its text property.`
-      : `Message handles have no property '${name}'. Use the text property.`;
-  if (handle === "camera")
-    return use === "call"
-      ? `Camera views have no method '${name}'. Hide them with hideCamera.`
-      : `Camera views have no property '${name}'. Use the placement property.`;
-  const kind = handle === "timer" ? "Timer" : "Media";
-  if (use === "call")
-    return `${kind} handles have no method '${name}'. Use pause(), resume(), or stop().`;
-  if (use === "read") return `${kind} handles have no property '${name}'.`;
-  return handle === "timer"
-    ? `Timer handle property '${name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`
-    : `Media handle property '${name}' cannot be assigned. You can assign position, remaining, or volume.`;
 }
 
 /**

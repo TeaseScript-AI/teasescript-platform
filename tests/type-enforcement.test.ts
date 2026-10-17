@@ -1753,7 +1753,7 @@ test("only integers convert implicitly: division gives a number, and durations n
     [
       ["TSV043", "n"],
       ["TSV043", "n"],
-      ["TSV043", "n"],
+      ["TSV036", "n"],
     ],
   );
   assert.deepEqual(codes('wait "soon"\nexit'), [["TSV043", '"soon"']]);
@@ -1932,13 +1932,13 @@ test("timer ranges and handle members are checked by type, wherever the value co
       "function make {\n    return timer async 1 s\n}\nlet t = make()\nt.nope()\nt.elapsed = 1 s\nsay t.colour\nexit",
     ).map(([code, message, text]) => [code, text, message]),
     [
-      ["TSV043", "nope", "Timer handles have no method 'nope'. Use pause(), resume(), or stop()."],
+      ["TSV034", "nope", "Timer handles have no method 'nope'. Use pause(), resume(), or stop()."],
       [
-        "TSV043",
+        "TSV034",
         "elapsed",
         "Timer handle property 'elapsed' cannot be assigned. You can assign remaining, display, or repeatDuration.",
       ],
-      ["TSV043", "colour", "Timer handles have no property 'colour'."],
+      ["TSV034", "colour", "Timer handles have no property 'colour'."],
     ],
   );
 });
@@ -1947,15 +1947,15 @@ test("a for-loop, randomInteger, wait, or timer range takes whole-number bounds,
   // V30 §6: a bound that may hold a fraction is an error, never truncated.
   assert.deepEqual(mismatches('let count = 5\nfor i in 1..=count / 2 {\n    say "${i}"\n}\nexit'), [
     [
-      "TSV043",
-      "A for-loop range bound must be a whole number (integer), but this is a number. Round it with floor(...), round(...), or ceil(...).",
+      "TSV010",
+      "A 'for' loop needs a range of whole numbers, but its end is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
       "count / 2",
     ],
   ]);
   assert.deepEqual(mismatches("let n = 4\nlet r = randomInteger((0..n))\nn = n / 2\nexit"), [
     [
-      "TSV043",
-      "A randomInteger range bound must be a whole number (integer), but this is a number. 'n' is a number because line 3 can store a non-whole number in it. Round it with floor(...), round(...), or ceil(...).",
+      "TSV010",
+      "randomInteger(range) needs a range of whole numbers, but its end is a number. 'n' is a number because line 3 can store a non-whole number in it. Round its bounds with floor(...), round(...), or ceil(...) first.",
       "n",
     ],
   ]);
@@ -1964,16 +1964,16 @@ test("a for-loop, randomInteger, wait, or timer range takes whole-number bounds,
       'let low: number = 1\nfor i in low..2.0 {\n    say "${i}"\n}\nlet r = randomInteger(low..=6)\nexit',
     ),
     [
-      ["TSV043", "low"],
-      ["TSV043", "2.0"],
-      ["TSV043", "low"],
+      ["TSV010", "low"],
+      ["TSV010", "2.0"],
+      ["TSV010", "low"],
     ],
   );
   // A wait or timer range counts whole units.
   assert.deepEqual(mismatches("let n = 17 / 2\nwait (1..n) s\nexit"), [
     [
-      "TSV043",
-      "A wait range bound must be a whole number (integer), but this is a number. Round it with floor(...), round(...), or ceil(...).",
+      "TSV010",
+      "A wait needs a range of whole numbers, but its end is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
       "n",
     ],
   ]);
@@ -1982,17 +1982,19 @@ test("a for-loop, randomInteger, wait, or timer range takes whole-number bounds,
       'let n = 17 / 2\ntimer (1..=n) s\nlet t = timer async (n..10) min {\n    say "late"\n}\nexit',
     ),
     [
-      ["TSV043", "n"],
-      ["TSV043", "n"],
+      ["TSV010", "n"],
+      ["TSV010", "n"],
     ],
   );
   assert.equal(
-    mismatches("let n = 17 / 2\ntimer (1..=n) s\nexit")[0]?.[1].startsWith("A timer range bound"),
+    mismatches("let n = 17 / 2\ntimer (1..=n) s\nexit")[0]?.[1].startsWith(
+      "A timer needs a range of whole numbers",
+    ),
     true,
   );
   // As for `for`, the type decides, not the value it holds when the script runs (V30 §6).
   for (const use of ['for i in 1..=n {\n    say "${i}"\n}', "wait (1..=n) s"])
-    assert.deepEqual(codes(`let n: number = 2\n${use}\nexit`), [["TSV043", "n"]], use);
+    assert.deepEqual(codes(`let n: number = 2\n${use}\nexit`), [["TSV010", "n"]], use);
   // Rounded bounds run; a switch case range matches a fraction; a bound the compiler cannot know is checked at runtime.
   assert.deepEqual(
     sayTexts('let count = 5\nfor i in 1..=floor(count / 2) {\n    say "${i}"\n}\nexit'),
@@ -2324,7 +2326,7 @@ test("a message handle has one text property, takes text, and stays out of text,
   for (const [source, message] of [
     [
       'line.color = "red"',
-      "Message handles have no property 'color'. Use the text property.",
+      "Message handle property 'color' cannot be assigned. You can assign text.",
     ] as const,
     ["say line.speaker", "Message handles have no property 'speaker'. Use the text property."],
     [

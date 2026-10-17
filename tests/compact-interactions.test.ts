@@ -551,11 +551,11 @@ test("interaction result domains participate in existing numeric semantic checks
     'let values = (askChoice { text: "A" })..3\nexit',
     'let values = (askChoice [{ text: "A" }, { text: 1, value: "b" }])..3\nexit',
   ]) {
-    // The type check knows what a choice returns, so it reports the text range bound.
+    // The type check knows what a choice returns, so it reports the text range bound, as for askText.
     const textChoice = compileSource(source);
     assert.equal(textChoice.plan, null, source);
     assert.ok(
-      textChoice.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV043"),
+      textChoice.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV010"),
       source,
     );
   }

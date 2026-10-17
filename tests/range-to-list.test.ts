@@ -132,15 +132,15 @@ test("toList needs whole-number bounds, checked when the script compiles where i
     [
       [
         [
-          "TSV043",
-          "A toList range bound must be a whole number (integer), but this is a number. Round it with floor(...), round(...), or ceil(...).",
+          "TSV010",
+          "toList() needs a range of whole numbers, but its end is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
           "n",
         ],
       ],
       [
         [
-          "TSV043",
-          "A toList range bound must be a whole number (integer), but this is a number. Round it with floor(...), round(...), or ceil(...).",
+          "TSV010",
+          "toList() needs a range of whole numbers, but its start is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
           "0.5",
         ],
       ],

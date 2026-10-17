@@ -8,7 +8,6 @@ import {
 import type {
   AssignmentTarget,
   Block,
-  CallArgument,
   DurationUnit,
   Identifier,
   InteractionChoiceOption,
@@ -64,6 +63,7 @@ import {
   tagQueryOperands,
 } from "./expression-children.js";
 import { DURATION_UNIT_MILLISECONDS, isCalendar } from "./duration.js";
+import { isTimerDisplay } from "./handle-rules.js";
 import { validateSwitchCases } from "./switch-cases.js";
 import {
   COLLECTION_CHANGES,
@@ -112,8 +112,6 @@ type BindingKind = "variable" | "speaker" | "global" | "function";
 
 interface Binding {
   readonly kind: BindingKind;
-  /** Set while a variable statically holds an async timer or media handle. */
-  handle?: "timer" | "media" | "camera" | null;
   /** The declaration of a function. */
   readonly declaration?: FunctionDeclaration;
   /** Where the project declares a global, a speaker, or a global function, which every file sees. */
@@ -136,32 +134,6 @@ interface ProjectDeclaration {
   readonly order: number | null;
 }
 
-const TIMER_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
-  "remaining",
-  "elapsed",
-  "display",
-  "label",
-  "state",
-  "repeatDuration",
-]);
-const TIMER_HANDLE_ASSIGNABLE: ReadonlySet<string> = new Set([
-  "remaining",
-  "display",
-  "repeatDuration",
-]);
-const TIMER_HANDLE_METHODS: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);
-const TIMER_DISPLAYS: ReadonlySet<string> = new Set(["visible", "mystery", "hidden"]);
-const CAMERA_PLACEMENTS: ReadonlySet<string> = new Set(["window", "stage"]);
-const MEDIA_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
-  "position",
-  "elapsed",
-  "remaining",
-  "duration",
-  "volume",
-  "state",
-]);
-const MEDIA_HANDLE_ASSIGNABLE: ReadonlySet<string> = new Set(["position", "remaining", "volume"]);
-
 const semanticCode = {
   duplicateDeclaration: "TSV001",
   unknownVariable: "TSV002",
@@ -171,7 +143,6 @@ const semanticCode = {
   duplicateProperty: "TSV007",
   invalidLoopControl: "TSV008",
   chainedRange: "TSV009",
-  invalidRangeOperand: "TSV010",
   invalidRepeatCount: "TSV011",
   invalidLoopSource: "TSV012",
   duplicateFunction: "TSV013",
@@ -191,10 +162,8 @@ const semanticCode = {
   invalidInteractionChoice: "TSV029",
   unsupportedBlockingContext: "TSV032",
   invalidTimer: "TSV033",
-  invalidTimerHandleMember: "TSV034",
   mixedDurationOperands: "TSV035",
   invalidMedia: "TSV036",
-  invalidMediaHandleMember: "TSV037",
   invalidStorageKey: "TSV038",
   invalidListIndex: "TSV045",
   visibleOverflow: "TSV050",
@@ -203,7 +172,6 @@ const semanticCode = {
   invalidStartValue: "TSV055",
   fileName: "TSV056",
   invalidFileTarget: "TSV057",
-  invalidCameraHandleMember: "TSV059",
   noSpeaker: "TSV063",
   invalidRegex: "TSV064",
 } as const;
@@ -750,7 +718,7 @@ class SemanticValidator {
     try {
       const scope = new SemanticScope(handler.scope);
       if (handler.selfHandle !== null) {
-        scope.bindings.set(handler.selfHandle, { kind: "variable", handle: "media" });
+        scope.bindings.set(handler.selfHandle, { kind: "variable" });
       }
       runCompileTask(this.#validateStatements(handler.block.statements, scope, 0));
     } finally {
@@ -850,7 +818,7 @@ class SemanticValidator {
       this.#validateExpression(timer.display, scope, null);
       const display = staticVisibleText(timer.display);
       if (
-        (display !== undefined && !TIMER_DISPLAYS.has(display)) ||
+        (display !== undefined && !isTimerDisplay(display)) ||
         isDefinitelyNonText(timer.display)
       ) {
         this.#report(
@@ -884,8 +852,9 @@ class SemanticValidator {
   }
 
   /**
-   * The checks of a `wait` or timer duration that the compiler can see: a second unit, a range of whole units, and a
-   * length below zero, zero for a repeating round, or beyond scene time. A range without a unit is a type error.
+   * The checks of a `wait` or timer duration that the compiler can see: a second unit, and a length below zero, zero for
+   * a repeating round, or beyond scene time. A range without a unit is a type error, and the type check checks the
+   * bounds of a range of units.
    */
   #validateDelayDuration(
     command: "wait" | "timer",
@@ -904,32 +873,7 @@ class SemanticValidator {
     if (duration.kind === "rangeExpression") {
       if (unit === null) return;
       const start = staticNumber(duration.start);
-      const end = staticNumber(duration.end);
-      if (!isKnownInteger(duration.start) || !isKnownInteger(duration.end)) {
-        this.#report(
-          semanticCode.invalidRangeOperand,
-          `A ${command} range counts whole units, so its bounds must be whole numbers.`,
-          duration.span,
-        );
-      } else if (start !== undefined && start < (repeat ? 1 : 0)) {
-        this.#report(
-          semanticCode.invalidRangeOperand,
-          repeat
-            ? "A repeating timer range must start at 1 or more."
-            : `A ${command} range must not start below 0.`,
-          duration.span,
-        );
-      } else if (
-        start !== undefined &&
-        end !== undefined &&
-        (duration.inclusive ? end < start : end <= start)
-      ) {
-        this.#report(
-          semanticCode.invalidRangeOperand,
-          `A ${command} range must contain at least one whole number.`,
-          duration.span,
-        );
-      } else if (
+      if (
         start !== undefined &&
         !(start * DURATION_UNIT_MILLISECONDS[unit] <= Number.MAX_SAFE_INTEGER)
       ) {
@@ -1042,17 +986,6 @@ class SemanticValidator {
         );
       }
     }
-    const startMs = this.#validateMediaPosition(media.startAt, "startAt");
-    const endMs = this.#validateMediaPosition(media.endAt, "endAt");
-    // An omitted startAt is the start of the file.
-    const effectiveStartMs = media.startAt === null ? 0 : startMs;
-    if (effectiveStartMs !== undefined && endMs !== undefined && endMs <= effectiveStartMs) {
-      this.#report(
-        semanticCode.invalidMedia,
-        "endAt must be later than startAt.",
-        media.endAt!.span,
-      );
-    }
     if (media.volume !== null) {
       const volume = staticNumber(media.volume);
       if (
@@ -1085,173 +1018,13 @@ class SemanticValidator {
               cue.keywordSpan,
             );
           }
-          continue;
         }
-        this.#validateMediaPosition(cue.offset, cue.kind);
       }
     }
     // The blocks of one media share its variables.
     const captures = this.#captureScope(scope);
     for (const block of mediaHandlerBlocks(media))
       this.#pendHandler(block, "media", media.async ? selfHandle : null, captures);
-  }
-
-  /** A media position is a duration that is not negative. Returns its value in milliseconds when known. */
-  #validateMediaPosition(expression: Expression | null, name: string): number | undefined {
-    if (expression === null) return undefined;
-    const known = knownMilliseconds(expression, null);
-    if (known !== undefined && known < 0) {
-      this.#report(semanticCode.invalidMedia, `${name} must not be negative.`, expression.span);
-    } else if (
-      known === undefined &&
-      literalKind(expression) !== "durationLiteral" &&
-      isDefinitelyNonNumeric(expression)
-    ) {
-      this.#report(
-        semanticCode.invalidMedia,
-        `${name} must be a duration such as '30 s'.`,
-        expression.span,
-      );
-    }
-    return known;
-  }
-
-  /** Rejects unknown members of a variable that statically holds an async timer handle. */
-  #validateTimerHandleMember(
-    object: Expression,
-    name: Identifier,
-    scope: SemanticScope,
-    use: "read" | "assign" | "call",
-    value?: Expression,
-    callArguments?: readonly CallArgument[],
-    compound = false,
-  ): void {
-    object = unwrapParentheses(object);
-    if (object.kind !== "identifier") return;
-    const handle = scope.resolve(object.name)?.handle;
-    if (handle === "media") {
-      this.#validateMediaHandleMember(name, use, value, callArguments, compound);
-      return;
-    }
-    if (handle === "camera") {
-      this.#validateCameraHandleMember(name, use, value, compound);
-      return;
-    }
-    if (handle !== "timer") return;
-    // Timer compound assignments keep their runtime operand check.
-    if (compound) value = undefined;
-    const known =
-      use === "call"
-        ? TIMER_HANDLE_METHODS
-        : use === "assign"
-          ? TIMER_HANDLE_ASSIGNABLE
-          : TIMER_HANDLE_PROPERTIES;
-    if (known.has(name.name)) {
-      const invalidOperand =
-        use === "call"
-          ? callArguments !== undefined && callArguments.length > 0
-            ? `Timer ${name.name}() takes no arguments.`
-            : null
-          : use === "assign" && value !== undefined
-            ? invalidTimerAssignment(name.name, value)
-            : null;
-      if (invalidOperand !== null) {
-        this.#report(semanticCode.invalidTimerHandleMember, invalidOperand, name.span);
-      }
-      return;
-    }
-    this.#report(
-      semanticCode.invalidTimerHandleMember,
-      use === "call"
-        ? `Timer handles have no method '${name.name}'. Use pause(), resume(), or stop().`
-        : use === "assign"
-          ? `Timer handle property '${name.name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`
-          : `Timer handles have no property '${name.name}'.`,
-      name.span,
-    );
-  }
-
-  /** A camera view handle has one property, `placement`, which is readable and assignable, and no methods. */
-  #validateCameraHandleMember(
-    name: Identifier,
-    use: "read" | "assign" | "call",
-    value: Expression | undefined,
-    compound: boolean,
-  ): void {
-    if (use === "call" || name.name !== "placement") {
-      this.#report(
-        semanticCode.invalidCameraHandleMember,
-        use === "call"
-          ? `Camera views have no method '${name.name}'. Hide them with hideCamera.`
-          : `Camera views have no property '${name.name}'. Use the placement property.`,
-        name.span,
-      );
-      return;
-    }
-    if (use !== "assign" || value === undefined) return;
-    const text = staticVisibleText(value);
-    if (
-      compound ||
-      isDefinitelyNonText(value) ||
-      (text !== undefined && !CAMERA_PLACEMENTS.has(text))
-    )
-      this.#report(
-        semanticCode.invalidCameraHandleMember,
-        'Camera placement must be "window" or "stage".',
-        value.span,
-      );
-  }
-
-  #validateMediaHandleMember(
-    name: Identifier,
-    use: "read" | "assign" | "call",
-    value?: Expression,
-    callArguments?: readonly CallArgument[],
-    compound = false,
-  ): void {
-    const known =
-      use === "call"
-        ? TIMER_HANDLE_METHODS
-        : use === "assign"
-          ? MEDIA_HANDLE_ASSIGNABLE
-          : MEDIA_HANDLE_PROPERTIES;
-    if (!known.has(name.name)) {
-      this.#report(
-        semanticCode.invalidMediaHandleMember,
-        use === "call"
-          ? `Media handles have no method '${name.name}'. Use pause(), resume(), or stop().`
-          : use === "assign"
-            ? `Media handle property '${name.name}' cannot be assigned. You can assign position, remaining, or volume.`
-            : `Media handles have no property '${name.name}'.`,
-        name.span,
-      );
-      return;
-    }
-    if (use === "call" && callArguments !== undefined && callArguments.length > 0) {
-      this.#report(
-        semanticCode.invalidMediaHandleMember,
-        `Media ${name.name}() takes no arguments.`,
-        name.span,
-      );
-    } else if (use === "assign" && value !== undefined) {
-      // A compound volume operand is a change, so only its type is known statically.
-      const invalid =
-        name.name === "volume"
-          ? isDefinitelyNonNumeric(value) ||
-            (!compound &&
-              staticNumber(value) !== undefined &&
-              !(staticNumber(value)! >= 0 && staticNumber(value)! <= 1))
-          : literalKind(value) !== "durationLiteral" && isDefinitelyNonDuration(value);
-      if (invalid) {
-        this.#report(
-          semanticCode.invalidMediaHandleMember,
-          name.name === "volume"
-            ? "Media volume must be a number from 0 through 1."
-            : `Media ${name.name} must be assigned a duration such as 10 s.`,
-          name.span,
-        );
-      }
-    }
   }
 
   *#validateStatements(
@@ -1294,9 +1067,7 @@ class SemanticValidator {
           this.#validateExpression(statement.initializer, scope, null);
         }
         if (this.#declare(statement.name.name, "variable", statement.name.span, scope)) {
-          const binding = scope.bindings.get(statement.name.name)!;
-          binding.handle = handleKind(statement.initializer);
-          binding.site = statement;
+          scope.bindings.get(statement.name.name)!.site = statement;
         }
         return;
       }
@@ -1409,21 +1180,6 @@ class SemanticValidator {
       case "assignmentStatement":
         this.#validateAssignmentTarget(statement.target, scope);
         this.#validateExpression(statement.value, scope, null);
-        if (statement.target.kind === "identifier") {
-          const binding = scope.resolve(statement.target.name);
-          // Reassignment may happen on any path, so the variable is no longer known to hold a handle.
-          if (binding?.kind === "variable") binding.handle = null;
-        } else if (statement.target.kind === "propertyAccessExpression") {
-          this.#validateTimerHandleMember(
-            statement.target.object,
-            statement.target.property,
-            scope,
-            "assign",
-            statement.value,
-            undefined,
-            statement.operator !== "=",
-          );
-        }
         return;
       case "expressionStatement":
         this.#validateExpression(statement.expression, scope, null);
@@ -1479,16 +1235,6 @@ class SemanticValidator {
             statement.valueVariable === null
               ? "A for-loop source must be a list, set, dict, or integer range."
               : "A for-loop with a key and a value goes through a dict.",
-            statement.iterable.span,
-          );
-        }
-        if (
-          statement.iterable.kind === "rangeExpression" &&
-          (!isKnownInteger(statement.iterable.start) || !isKnownInteger(statement.iterable.end))
-        ) {
-          this.#report(
-            semanticCode.invalidRangeOperand,
-            "A statically known iterated range must have integer bounds.",
             statement.iterable.span,
           );
         }
@@ -2075,7 +1821,6 @@ class SemanticValidator {
         yield* compileChild(
           this.#validateExpressionTask(expression.object, scope, contextualSpeaker),
         );
-        this.#validateTimerHandleMember(expression.object, expression.property, scope, "read");
         return;
       case "showButtonExpression":
         yield* compileChild(this.#validateShowButtonTask(expression, scope));
@@ -2251,14 +1996,6 @@ class SemanticValidator {
               `Unknown method '${method.property.name}'. Use '${renamed}()'.`,
               method.property.span,
             );
-          this.#validateTimerHandleMember(
-            method.object,
-            method.property,
-            scope,
-            "call",
-            undefined,
-            expression.arguments,
-          );
         } else {
           yield* compileChild(
             this.#validateExpressionTask(expression.callee, scope, contextualSpeaker),
@@ -2303,40 +2040,6 @@ class SemanticValidator {
           expression.arguments[0]!.kind === "positionalArgument"
         )
           this.#validateListIndex(expression.arguments[0]!.value);
-        if (
-          expression.callee.kind === "identifier" &&
-          expression.callee.name === "randomInteger" &&
-          expression.arguments.length === 1
-        ) {
-          const written = expression.arguments[0]!.value;
-          const argument = unwrapParentheses(written);
-          if (argument.kind === "rangeExpression") {
-            const start = staticNumber(argument.start);
-            const end = staticNumber(argument.end);
-            if (!isKnownInteger(argument.start) || !isKnownInteger(argument.end)) {
-              // The type check names the rounding fix for a range in parentheses.
-              if (written === argument)
-                this.#report(
-                  semanticCode.invalidRangeOperand,
-                  "A statically known randomInteger range must have integer bounds.",
-                  argument.span,
-                );
-            } else if (
-              // A named argument is the error the call check reports.
-              expression.arguments[0]!.kind === "positionalArgument" &&
-              start !== undefined &&
-              end !== undefined &&
-              (argument.inclusive ? end < start : end <= start)
-            ) {
-              // As for a wait or timer range (`#validateDelayDuration`); bounds it cannot see fail at runtime (TSR041).
-              this.#report(
-                semanticCode.invalidRangeOperand,
-                "A randomInteger range must contain at least one whole number.",
-                argument.span,
-              );
-            }
-          }
-        }
         return;
       }
       case "binaryExpression": {
@@ -2376,13 +2079,6 @@ class SemanticValidator {
           expression.end.kind === "rangeExpression"
         ) {
           this.#report(semanticCode.chainedRange, "Ranges may not be chained.", expression.span);
-        }
-        if (isDefinitelyNonNumeric(expression.start) || isDefinitelyNonNumeric(expression.end)) {
-          this.#report(
-            semanticCode.invalidRangeOperand,
-            "Range bounds must be numeric values.",
-            expression.span,
-          );
         }
         return;
       case "typeTestExpression":
@@ -3259,15 +2955,6 @@ function argumentRange(required: number, parameterNames: readonly string[]): str
   return total === 0 ? "no arguments" : `${count} (${parameterNames.join(", ")})`;
 }
 
-/** The handle kind statically held by a variable initialized from `expression`. */
-function handleKind(expression: Expression): "timer" | "media" | "camera" | null {
-  expression = unwrapParentheses(expression);
-  if (expression.kind === "timerExpression" && expression.async) return "timer";
-  if (expression.kind === "playMediaExpression" && expression.async) return "media";
-  if (expression.kind === "showCameraExpression") return "camera";
-  return null;
-}
-
 function isTrueLiteral(expression: Expression): boolean {
   expression = unwrapParentheses(expression);
   return expression.kind === "booleanLiteral" && expression.value;
@@ -3275,19 +2962,6 @@ function isTrueLiteral(expression: Expression): boolean {
 
 function isIndefiniteRepeatValue(repeat: MediaParts["repeat"]): boolean {
   return repeat?.kind === "value" && isTrueLiteral(repeat.value);
-}
-
-/** A statically evident wrong value for an assignable timer handle property. */
-function invalidTimerAssignment(name: string, value: Expression): string | null {
-  if (name === "display") {
-    const text = staticVisibleText(value);
-    return isDefinitelyNonText(value) || (text !== undefined && !TIMER_DISPLAYS.has(text))
-      ? 'Timer display must be "visible", "mystery", or "hidden".'
-      : null;
-  }
-  return literalKind(value) !== "durationLiteral" && isDefinitelyNonDuration(value)
-    ? `Timer ${name} must be assigned a duration such as 10 s.`
-    : null;
 }
 
 function isDefinitelyNonDuration(expression: Expression): boolean {
@@ -3362,11 +3036,6 @@ function knownMilliseconds(expression: Expression, unit: DurationUnit | null): n
 function beyondSceneTime(expression: Expression, unit: DurationUnit | null): boolean {
   const milliseconds = knownMilliseconds(expression, unit);
   return milliseconds !== undefined && !(milliseconds <= Number.MAX_SAFE_INTEGER);
-}
-
-function isKnownInteger(expression: Expression): boolean {
-  const value = staticNumber(expression);
-  return value === undefined || Number.isInteger(value);
 }
 
 /**
