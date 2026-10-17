@@ -7080,8 +7080,8 @@ class TypeChecker {
     }
     const failing = resolved(all.find((_, index) => results[index] === undefined)!);
     if (passing.length > 0) this.#reportMayBe(callee.object, failing, passing);
-    // A date or time value has the methods of its kind (V30 §35).
-    else if (all.length === 1 && failing.kind === "scalar" && isTemporalKind(failing.name))
+    // A date or time value has the methods of its kind (V30 §35), also in a union.
+    else if (failing.kind === "scalar" && isTemporalKind(failing.name))
       this.#report(
         typeCode.invalidOperand,
         temporalMemberMessage(

@@ -77,7 +77,7 @@ export const TEMPORAL_METHODS = {
     receivers: TEMPORAL_KINDS,
     result: "string",
     summary:
-      'Gives the value as ISO text. A local value has no offset and shows seconds and milliseconds only when they are not zero, as in "2026-10-04T18:00". An absolute date and time is in UTC with seconds, as in "2026-10-04T12:30:00Z".',
+      'Gives the value as ISO text. A local value has no offset, as in "2026-10-04T18:00", and shows seconds when the seconds or milliseconds are not zero, and milliseconds when they are not zero. An absolute date and time is in UTC with seconds, as in "2026-10-04T12:30:00Z".',
   },
   formatDate: {
     receivers: ["date", "datetime", "absoluteDateTime"],

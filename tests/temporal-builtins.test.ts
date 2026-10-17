@@ -97,6 +97,15 @@ test("a member of a date or time value has its contract's receivers and type whe
         `${kind} ${name}`,
       );
     }
+  // A union of kinds that all lack the member names the first, as the runtime names that kind.
+  const union = errors(`let u: date | time = ${VALUES.date}\nsay u.trim()\nsay u.length\nexit`);
+  assert.deepEqual(
+    union.map(([, message]) => message),
+    [
+      outcome(`${DYNAMIC}say dynamic(${VALUES.date}).trim()`).failure![1],
+      outcome(`${DYNAMIC}say dynamic(${VALUES.date}).length`).failure![1],
+    ],
+  );
   // A field of a local value names the conversion of an absolute date and time, as the source writes it.
   assert.deepEqual(
     errors(`let moment = ${VALUES.absoluteDateTime}\nsay moment.hour\nexit`)[0]![1],
