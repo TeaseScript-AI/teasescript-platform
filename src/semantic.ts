@@ -50,6 +50,7 @@ import {
   sayOperands,
   showButtonOptions,
   tagQueryOperands,
+  timerOperands,
 } from "./expression-children.js";
 import { validateSwitchCases } from "./switch-cases.js";
 import {
@@ -795,10 +796,7 @@ class SemanticValidator {
   #handlerOwner: "timer" | "media" | "button" = "timer";
 
   #validateTimer(timer: TimerParts, scope: SemanticScope, valuePosition: boolean): void {
-    if (typeof timer.display === "object" && timer.display !== null)
-      this.#validateExpression(timer.display, scope, null);
-    this.#validateExpression(timer.duration, scope, null);
-    if (timer.label !== null) this.#validateExpression(timer.label, scope, null);
+    for (const operand of timerOperands(timer)) this.#validateExpression(operand, scope, null);
     if (!timer.async) {
       const invalid = timer.handler ?? (timer.repeat || timer.persist ? timer : null);
       if (invalid !== null) {

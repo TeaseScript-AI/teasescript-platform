@@ -81,6 +81,15 @@ test("keeps parser and semantic diagnostics distinct", () => {
   );
 });
 
+test("the name pass checks a timer's named parts in the order they are written", () => {
+  assert.deepEqual(
+    compileSource(
+      "let t = timer(label: a, duration: b s, display: c, async: true)\nexit",
+    ).diagnostics.map(({ code, message }) => [code, message]),
+    ["a", "b", "c"].map((name) => ["TSV002", `Unknown variable '${name}'.`]),
+  );
+});
+
 test("accepts explicitly declared injected built-ins and globals", () => {
   const result = compileSource("capture(player)\nexit", {
     builtins: ["capture"],
