@@ -153,7 +153,6 @@ import {
 import { loweredOperand } from "./lowered-operands.js";
 import {
   cameraPlacementMessage,
-  handleArgumentsMessage,
   handleMemberMessage,
   isCameraPlacement,
   isMediaVolume,
@@ -2889,8 +2888,8 @@ export class Evaluator {
     span: SourceSpan,
   ): null {
     if (name !== "remove") throw fault("TSR016", removableHandleMethodMessage(button, name), span);
-    if (positional.length !== 0 || Object.keys(named).length !== 0)
-      throw fault("TSR028", handleArgumentsMessage("permanentButton", name), span);
+    const problem = argumentShapeProblem(name, NO_ARGUMENTS, positional.length, Object.keys(named));
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     removePermanentButtons(
       this.snapshot,
       (shown) => shown.button.buttonId === button.buttonId,
@@ -2922,9 +2921,8 @@ export class Evaluator {
     if (!["pause", "resume", "stop"].includes(name)) {
       throw fault("TSR016", handleMemberMessage("timer", name, "call"), span);
     }
-    if (positional.length !== 0 || Object.keys(named).length !== 0) {
-      throw fault("TSR028", handleArgumentsMessage("timer", name), span);
-    }
+    const problem = argumentShapeProblem(name, NO_ARGUMENTS, positional.length, Object.keys(named));
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     const timer = this.#timer(handle, span);
     const action = activeTimerAction(this.snapshot, handle.timerId);
     const now = this.snapshot.currentSessionTimeMs;
@@ -3024,9 +3022,8 @@ export class Evaluator {
     if (!["pause", "resume", "stop"].includes(name)) {
       throw fault("TSR016", handleMemberMessage("media", name, "call"), span);
     }
-    if (positional.length !== 0 || Object.keys(named).length !== 0) {
-      throw fault("TSR028", handleArgumentsMessage("media", name), span);
-    }
+    const problem = argumentShapeProblem(name, NO_ARGUMENTS, positional.length, Object.keys(named));
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     const media = this.#media(handle, span);
     const action = activeMediaAction(this.snapshot, handle.mediaId);
     if (name === "stop") {
@@ -3134,8 +3131,8 @@ export class Evaluator {
     span: SourceSpan,
   ): null {
     if (name !== "remove") throw fault("TSR016", removableHandleMethodMessage(handle, name), span);
-    if (positional.length !== 0 || Object.keys(named).length !== 0)
-      throw fault("TSR028", handleArgumentsMessage("messageHandle", name), span);
+    const problem = argumentShapeProblem(name, NO_ARGUMENTS, positional.length, Object.keys(named));
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     const index = this.#liveMessage(handle, span);
     const record = this.snapshot.liveMessages[index]!;
     if (record.removed === true) return null;

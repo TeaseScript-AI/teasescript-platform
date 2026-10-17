@@ -157,7 +157,6 @@ import {
   cameraPlacementMessage,
   FINISH_NEVER_RUNS_MESSAGE,
   fileReferenceRule,
-  handleArgumentsMessage,
   handleMemberMessage,
   hasArgumentlessMethods,
   isCameraPlacement,
@@ -243,7 +242,9 @@ import {
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import { startValueMessage } from "./start-value-rules.js";
 import {
+  argumentShapeProblem,
   dictArgumentsProblem,
+  NO_ARGUMENTS,
   scriptArgumentCountMessage,
   temporalArgumentsMessage,
   unknownNamedArgumentMessage,
@@ -6984,12 +6985,19 @@ class TypeChecker {
     if (passing.length === all.length) {
       const handle = resolved(all[0]!).kind;
       const handles = all.every((member) => hasArgumentlessMethods(resolved(member).kind));
-      if (handles && hasArgumentlessMethods(handle) && expression.arguments.length > 0)
-        this.#report(
-          handleMemberCode(handle),
-          handleArgumentsMessage(handle, method),
-          callee.property.span,
+      if (handles && hasArgumentlessMethods(handle)) {
+        const named = expression.arguments.flatMap((argument) =>
+          argument.kind === "namedArgument" ? [argument.name.name] : [],
         );
+        const problem = argumentShapeProblem(
+          method,
+          NO_ARGUMENTS,
+          expression.arguments.length - named.length,
+          named,
+        );
+        if (problem !== undefined)
+          this.#report(handleMemberCode(handle), problem.message, callee.property.span);
+      }
       const textual = TEXT_MEMBERS.has(method) || method === "join";
       const collection = all.some((member) => {
         const kept = resolved(member);
