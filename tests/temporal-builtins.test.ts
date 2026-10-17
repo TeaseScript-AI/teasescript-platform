@@ -98,7 +98,7 @@ test("a member of a date or time value has its contract's receivers and type whe
       );
     }
   // A union of kinds that all lack the member names the first, as the runtime names that kind.
-  const union = errors(`let u: date | time = ${VALUES.date}\nsay u.trim()\nsay u.length\nexit`);
+  const union = errors("function f(u: date | time) {\n    say u.trim()\n    say u.length\n}\nexit");
   assert.deepEqual(
     union.map(([, message]) => message),
     [
