@@ -3,10 +3,12 @@ import test from "node:test";
 import {
   COMMANDS,
   commandFacts,
+  CONVERSION_FUNCTIONS,
   CORE_RUNTIME_BUILTINS,
   TEASESCRIPT_GRAMMAR_KEYWORDS,
   TEASESCRIPT_PROTECTED_TYPE_NAMES,
 } from "../src/language-facts.js";
+import { CONVERSIONS } from "../src/conversions.js";
 import { askOptionNames, requiredAskOptionNames, SHOW_BUTTON_OPTIONS } from "../src/parser.js";
 import {
   classifyTokens,
@@ -165,6 +167,70 @@ test("context, hover, and signature help select the compact command and its slot
   const signature = languageSignatureHelp(document, position);
   assert.deepEqual(signature?.parameters, ["speaker", "question", "prefill", "hint"]);
   assert.equal(signature?.activeParameter, 1);
+});
+
+test("a conversion call has help from its contract, also while it is being written", () => {
+  // The help at the end of `source`: its command, the signature's label, and its active parameter.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    return [
+      languageContextHelp(document, position)?.command ?? null,
+      signature?.label ?? null,
+      signature === null ? null : (signature.parameters[signature.activeParameter] ?? null),
+    ];
+  };
+  for (const name of CONVERSION_FUNCTIONS) {
+    const document = createLanguageDocument("file:///main.tease", `say ${name}(value`);
+    const position = languagePositionAt(document, document.text.length);
+    const context = languageContextHelp(document, position);
+    assert.deepEqual([context?.command, context?.summary], [name, CONVERSIONS[name].summary]);
+    assert.deepEqual(languageHover(document, position)?.contents, [
+      `**${name}**`,
+      CONVERSIONS[name].summary,
+      `Syntax: \`${context?.syntax}\``,
+    ]);
+    assert.deepEqual(languageHover(document, position)?.range, {
+      start: languagePositionAt(document, 4),
+      end: languagePositionAt(document, 4 + name.length),
+    });
+  }
+  // The syntax is the call's shape (V30 §8, §13, §35), and the active parameter the argument being written.
+  assert.deepEqual(help("say toNumber("), [
+    "toNumber",
+    "toNumber(value [, default: number])",
+    "value",
+  ]);
+  assert.deepEqual(help("say toNumber(text, default: "), [
+    "toNumber",
+    "toNumber(value [, default: number])",
+    "default",
+  ]);
+  assert.deepEqual(help("let rule = toRegex(text, ", ")\nexit"), [
+    "toRegex",
+    "toRegex(text, default: regex?)",
+    "default",
+  ]);
+  assert.deepEqual(help("say fromJson(text, files: false, default: "), [
+    "fromJson",
+    "fromJson(text, default: value [, files: boolean])",
+    "default",
+  ]);
+  assert.deepEqual(help("say toJson(value, "), [
+    "toJson",
+    "toJson(value [, files: boolean])",
+    "files",
+  ]);
+  const dateTime =
+    "toDateTime(value [, default: datetime])  or  toDateTime(date, time [, default: datetime])";
+  assert.deepEqual(help("let at = toDateTime(text"), ["toDateTime", dateTime, "value"]);
+  assert.deepEqual(help("let at = toDateTime(day, "), ["toDateTime", dateTime, "time"]);
+  // The innermost of a command and a call has the help: a call in a say or an interpolation, an ask in a call.
+  assert.deepEqual(help('say "${toBase64(text'), ["toBase64", "toBase64(text)", "text"]);
+  assert.equal(help('say toString(askText "Name?')[0], "askText");
+  assert.equal(help("say toString(count) + ")[0], "say");
+  assert.equal(help("sa", "y toString(count)\nexit")[0], "say");
 });
 
 test("askChoice help names set options and the prefill after the options (V30 §19)", () => {
