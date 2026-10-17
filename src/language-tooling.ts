@@ -827,10 +827,15 @@ function locateConversionCall(document: LanguageDocument, offset: number): Conve
   for (const [index, token] of tokens.entries()) {
     if (OPENING_DELIMITERS.has(token.kind)) {
       const name = tokens[index - 1];
+      // A method of the same name, such as a datetime's `toAbsoluteDateTime()`, and a declared function are not calls of
+      // the conversion.
+      const before = tokens[index - 2]?.kind;
       open.push(
         token.kind === TokenKind.LeftParenthesis &&
           name?.kind === TokenKind.Identifier &&
-          isConversion(name.lexeme)
+          isConversion(name.lexeme) &&
+          before !== TokenKind.Dot &&
+          before !== TokenKind.KeywordFunction
           ? { name: name.lexeme, range: name.span, opener: token.span.start.offset }
           : null,
       );

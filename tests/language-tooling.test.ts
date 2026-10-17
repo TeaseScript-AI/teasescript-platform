@@ -229,6 +229,10 @@ test("a conversion call has help from its contract, also while it is being writt
   // The innermost of a command and a call has the help: a call in a say or an interpolation, an ask in a call.
   assert.deepEqual(help('say "${toBase64(text'), ["toBase64", "toBase64(text)", "text"]);
   assert.equal(help('say toString(askText "Name?')[0], "askText");
+  // A method of the same name converts through the player's zone (V30 §35), and a declared name is no call.
+  assert.equal(help("say stamp.toDateTime(", ").toISO()\nexit")[0], "say");
+  assert.equal(help("say local.toAbsoluteDateTime(", ").toISO()\nexit")[0], "say");
+  assert.equal(help("function toNumber(")[0], null);
   assert.equal(help("say toString(count) + ")[0], "say");
   assert.equal(help("sa", "y toString(count)\nexit")[0], "say");
 });
