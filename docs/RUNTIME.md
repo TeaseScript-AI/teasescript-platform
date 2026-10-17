@@ -1643,12 +1643,12 @@ playground answers each file store as `failed`.
 `encryptText`, `encryptFile`, `decryptText`, and `decryptFile` implement [V30
 §13](specifications/accepted-syntaxes-v30.md#encryption); the scheme, format, and drand relays are in
 [`ENCRYPTION.md`](ENCRYPTION.md). They are protected core built-ins that lower to a `lock` instruction, whose operands,
-the value, `password:`, `timeLock:` (encrypt only), and the required `default:` (decrypt only, `TSV020`), are temporaries
-or literals evaluated once in written order; another named argument is `TSV022`, a value the compiler knows is of the
-wrong type `TSV043`, an encrypt call that gives one of its openers but not each `TSV020`, one that writes each as
-`false` `TSV043`, and plan validation rejects them as ordinary calls, and an encrypt instruction with one opener only.
-They are not allowed in a parameter default, as they may ask the player. A decrypt call gives text or the default's
-type.
+the value, `password:`, and `timeLock:` (encrypt only), are temporaries or literals evaluated once in written order, and
+whose required `default:` (decrypt only, `TSV020`) runs after it, only when it is used; another named argument is
+`TSV022`, a value the compiler knows is of the wrong type `TSV043`, an encrypt call that gives one of its openers but
+not each `TSV020`, one that writes each as `false` `TSV043`, and plan validation rejects them as ordinary calls, and an
+encrypt instruction with one opener only. They are not allowed in a parameter default, as they may ask the player. A
+decrypt call gives text or the default's type.
 
 The instruction's first run checks its operands: `encryptText` needs text, the file calls a stored file of the session
 (`TSR059`, as for `fileToBase64`), `password:` text, for an encrypt call also `true` or `false`, and `timeLock:` an
@@ -2007,7 +2007,7 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 98 | Encryption (owner decisions, 2026-10-13 and 2026-10-14): a `lock` instruction runs `encryptText`, `encryptFile`, `decryptText`, and `decryptFile`, with temporaries or literals as operands, which plan validation previously rejected, and an unlowered call of one of them is invalid; previously such a call failed with `TSR011` or called a host built-in of that name. |
+| Instruction plan | 98 | Encryption (owner decisions, 2026-10-13 and 2026-10-14): a `lock` instruction runs `encryptText`, `encryptFile`, `decryptText`, and `decryptFile`, with temporaries or literals as operands and a decrypt call's `defaultTemporary`, after which its default follows as for a `fileStore`, which plan validation previously rejected, and an unlowered call of one of them is invalid; previously such a call failed with `TSR011` or called a host built-in of that name. |
 | Runtime snapshot | 85 | Encryption (owner decisions, 2026-10-13 and 2026-10-14): a foreground `lock` action in its `work` or `ask` step, an `ask` step suspended by an expiry block, its settlement with its outcome and stored file, and its answer handoff; previously validation rejected them. |
 | Checkpoint | 121 | The encryption plan and snapshot contracts. |
 

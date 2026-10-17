@@ -1588,11 +1588,12 @@ content never opens.
 
 `decryptText` and `decryptFile` need their `default:`, which may be any value, also `null`; a call without one is a
 compile error. A wrong password, a changed lock, text that is not a lock, a time lock whose moment has not come, and a
-cancelled dialog give the default, never a runtime error. With `password:` a call tries only that password. Without it,
-a lock whose time lock has passed opens without asking; otherwise the Player asks the player with what opens this lock:
-a password, and the moment its time lock opens. A wrong password in that dialog lets the player try again, and Cancel
-gives the default. When the time lock has passed but the Player cannot reach the drand network, the dialog offers to try
-again, and without another opener the call gives the default.
+cancelled dialog give the default, never a runtime error. The default is evaluated last, and only when it is used (owner
+decision, 2026-10-16). With `password:` a call tries only that password. Without it, a lock whose time lock has passed
+opens without asking; otherwise the Player asks the player with what opens this lock: a password, and the moment its
+time lock opens. A wrong password in that dialog lets the player try again, and Cancel gives the default. When the time
+lock has passed but the Player cannot reach the drand network, the dialog offers to try again, and without another
+opener the call gives the default.
 
 ```text
 let photo = decryptFile(locked, password: "corner", default: null)

@@ -5018,8 +5018,8 @@ export const USE_DEFAULT: unique symbol = Symbol("use the default");
 /**
  * The default that a call uses, checked as the call checks it: a `get` default that decided the element or value type
  * of an empty list or dict must fit it also in the parts the compiler could not know (ADR 0021 rule 1.7), a
- * conversion's must be of its result type, and `toRegex`'s a regex or `null`. `fromJson`, `fromBase64`, and
- * `fileFromBase64` take any default.
+ * conversion's must be of its result type, and `toRegex`'s a regex or `null`. `fromJson`, `fromBase64`,
+ * `fileFromBase64`, `decryptText`, and `decryptFile` take any default.
  */
 export function acceptedDefault(
   operation: LazyDefaultOperation,

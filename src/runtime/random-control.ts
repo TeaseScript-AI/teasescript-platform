@@ -454,7 +454,6 @@ function instructionExpressions(instruction: Instruction): readonly ExpressionPl
         instruction.value,
         ...(instruction.password === null ? [] : [instruction.password]),
         ...(instruction.timeLock === null ? [] : [instruction.timeLock]),
-        ...(instruction.default === null ? [] : [instruction.default]),
       ];
     case "storageWrite":
       return instruction.value === null ? [instruction.key] : [instruction.value, instruction.key];

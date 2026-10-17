@@ -1009,8 +1009,11 @@ export interface LockInstruction extends InstructionBase {
    * every opener or none, and none means that the player chooses each.
    */
   readonly timeLock: ExpressionPlan | null;
-  /** The `default:` of a decrypt call; `null` for an encrypt call. */
-  readonly default: ExpressionPlan | null;
+  /**
+   * For a decrypt call, whose `default:` runs as the instructions after this one, as for a `storeTemporary` with
+   * `defaultTemporary`: the temporary that receives whether the call needs it; `null` for an encrypt call.
+   */
+  readonly defaultTemporary: number | null;
   readonly destinationTemporary: number;
 }
 

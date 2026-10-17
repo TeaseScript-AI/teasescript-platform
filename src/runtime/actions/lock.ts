@@ -1,7 +1,7 @@
 import type { LockCall, LockInstruction } from "../../plan/model.js";
 import { interactionStringFits } from "../../interaction-limits.js";
 import { internalFault, RuntimeFault } from "../errors.js";
-import type { Evaluator } from "../evaluator.js";
+import { type Evaluator, USE_DEFAULT } from "../evaluator.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
 import {
   assertEventSequenceCapacity,
@@ -36,7 +36,8 @@ import type {
 // The calls that lock and open text and stored files (V30 §13). A `lock` instruction asks the Player and waits, and runs
 // again with each answer, which the completion hands off: in its `work` phase the Player locks or opens with what it has;
 // when it must ask the player, the instruction waits again in an `ask` phase, which its dialog answers, and then works
-// again with what the player typed, which never reaches the engine. Every run reads the same operands.
+// again with what the player typed, which never reaches the engine. Every run reads the same operands. A decrypt call's
+// `default:` runs only when it is used, as the instructions after it.
 
 /** The moment the lock dialog suggests for its time lock: 7 days from now (owner decisions, 2026-10-13 and 2026-10-14). */
 const SUGGESTED_TIME_LOCK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -49,7 +50,6 @@ interface LockOperands {
   readonly value: SerializableRuntimeValue;
   readonly password: SerializableRuntimeValue | undefined;
   readonly timeLock: SerializableRuntimeValue | undefined;
-  readonly fallback: SerializableRuntimeValue;
 }
 
 /**
@@ -62,9 +62,9 @@ interface EncryptOpeners {
   readonly choices: readonly RuntimeLockChoice[];
 }
 
-/** What a run asks the Player for, or the result it gives at once. */
+/** What a run asks the Player for, or the result it gives at once, which may be that the call needs its default. */
 type LockStep =
-  | { readonly result: SerializableRuntimeValue }
+  | { readonly result: SerializableRuntimeValue | typeof USE_DEFAULT }
   | {
       readonly phase: RuntimeLockActionSnapshot["phase"];
       readonly value: string;
@@ -98,7 +98,6 @@ export function executeLock(
     value: evaluator.evaluate(instruction.value),
     password: instruction.password === null ? undefined : evaluator.evaluate(instruction.password),
     timeLock: instruction.timeLock === null ? undefined : evaluator.evaluate(instruction.timeLock),
-    fallback: instruction.default === null ? null : evaluator.evaluate(instruction.default),
   };
   const handoff = snapshot.interactionResultHandoff;
   const step =
@@ -115,12 +114,14 @@ export function executeLock(
     requestLock(instruction, step, snapshot, events);
     return;
   }
-  setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, step.result);
-  evaluator.trace?.writeTemporary(
-    evaluator.callFrameId(),
-    instruction.destinationTemporary,
-    step.result,
-  );
+  const needed = step.result === USE_DEFAULT;
+  const value = step.result === USE_DEFAULT ? null : step.result;
+  setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, value);
+  evaluator.trace?.writeTemporary(evaluator.callFrameId(), instruction.destinationTemporary, value);
+  if (instruction.defaultTemporary !== null) {
+    setCapturedTemporary(snapshot.temporaries, instruction.defaultTemporary, needed);
+    evaluator.trace?.writeTemporary(evaluator.callFrameId(), instruction.defaultTemporary, needed);
+  }
   snapshot.nextInstruction += 1;
 }
 
@@ -155,7 +156,7 @@ function startLock(
   operands: LockOperands,
   snapshot: RuntimeSnapshot,
 ): LockStep {
-  const { value, password, fallback } = operands;
+  const { value, password } = operands;
   const span = instruction.span;
   const call = instruction.call;
   if (!locks(call) && password !== undefined && typeof password !== "string")
@@ -174,7 +175,7 @@ function startLock(
       );
     // Text that is not Base64 is no lock, as for `fromBase64`.
     const binary = binaryFromBase64(value);
-    if (binary === undefined) return { result: fallback };
+    if (binary === undefined) return { result: USE_DEFAULT };
     return workStep(base64FromBinary(binary), written, null);
   }
   if (call === "decryptFile")
@@ -303,7 +304,7 @@ function nextLockStep(
       return { result: detail };
     case "notOpened":
     case "cancelled":
-      return { result: operands.fallback };
+      return { result: USE_DEFAULT };
     case "unreadable":
       throw new RuntimeFault(
         "TSR085",
@@ -370,7 +371,7 @@ function malformed(call: LockCall, span: LockInstruction["span"]): RuntimeFault 
 /** Asks the Player to lock or open, or its dialog to ask the player, and waits with this instruction as continuation. */
 function requestLock(
   instruction: LockInstruction,
-  step: Exclude<LockStep, { readonly result: SerializableRuntimeValue }>,
+  step: Exclude<LockStep, { readonly result: unknown }>,
   snapshot: RuntimeSnapshot,
   events: InterpreterEvent[],
 ): void {

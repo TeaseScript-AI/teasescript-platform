@@ -2584,7 +2584,8 @@ export class InstructionCompiler {
   /**
    * `encryptText`, `encryptFile`, `decryptText`, or `decryptFile` (V30 §13). Like a file store call, its arguments are
    * evaluated in written order into temporaries, unless they are literals, so that every run of the instruction reads the
-   * same values; they are cleared once it gave its result.
+   * same values; they are cleared once it gave its result. A decrypt call's default runs only when it is used, as
+   * instructions after the call.
    */
   *#lowerLockTask(
     expression: Extract<Expression, { kind: "callExpression" }>,
@@ -2599,17 +2600,18 @@ export class InstructionCompiler {
       call !== "decryptFile"
     )
       throw new TypeError(`'${call}' is not a lock call.`);
+    const lazy = lazyDefaultArgument(expression);
+    const written = expression.arguments.filter((argument) => argument !== lazy?.argument);
     const lowered = yield* compileChild(
-      this.#lowerOrderedExpressionsTask(expression.arguments.map((argument) => argument.value)),
+      this.#lowerOrderedExpressionsTask(written.map((argument) => argument.value)),
     );
-    const operands: Record<"value" | "password" | "timeLock" | "default", ExpressionPlan | null> = {
+    const operands: Record<"value" | "password" | "timeLock", ExpressionPlan | null> = {
       value: null,
       password: null,
       timeLock: null,
-      default: null,
     };
     const temporaryIds: number[] = [];
-    expression.arguments.forEach((argument, index) => {
+    written.forEach((argument, index) => {
       const operand = lowered[index]!;
       temporaryIds.push(...operand.temporaryIds);
       let plan = operand.plan;
@@ -2626,24 +2628,38 @@ export class InstructionCompiler {
         plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
       }
       const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
-      if (name !== "value" && name !== "password" && name !== "timeLock" && name !== "default")
+      if (name !== "value" && name !== "password" && name !== "timeLock")
         throw new TypeError(`${call}(...) reached lowering with '${name}:'.`);
       operands[name] = plan;
     });
-    if (operands.value === null)
-      throw new TypeError(`${call}(...) reached lowering without its value.`);
+    const value = operands.value;
+    if (value === null) throw new TypeError(`${call}(...) reached lowering without its value.`);
+    const lock = (destinationTemporary: number, defaultTemporary: number | null): void => {
+      this.instructions.push({
+        kind: "lock",
+        call,
+        value,
+        password: operands.password,
+        timeLock: operands.timeLock,
+        defaultTemporary,
+        destinationTemporary,
+        span: copySpan(expression.span),
+      });
+      this.#emitTemporaryCleanup(temporaryIds, expression.span);
+    };
+    if (lazy !== null)
+      return yield* compileChild(
+        this.#lowerLazyDefaultTask(
+          lock,
+          lazy.argument.value,
+          { defaultOf: lazy.operation },
+          expression,
+        ),
+      );
+    if (call === "decryptText" || call === "decryptFile")
+      throw new TypeError(`${call}(...) reached lowering without its default:.`);
     const destinationTemporary = this.#allocateTemporary();
-    this.instructions.push({
-      kind: "lock",
-      call,
-      value: operands.value,
-      password: operands.password,
-      timeLock: operands.timeLock,
-      default: operands.default,
-      destinationTemporary,
-      span: copySpan(expression.span),
-    });
-    this.#emitTemporaryCleanup(temporaryIds, expression.span);
+    lock(destinationTemporary, null);
     return {
       plan: {
         kind: "temporary",

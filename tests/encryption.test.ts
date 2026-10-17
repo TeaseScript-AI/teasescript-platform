@@ -455,6 +455,35 @@ test("decryptText of text that is no Base64 gives the default at once, and a loc
   );
 });
 
+test("a decrypt call's default runs last, and only when the lock does not open", () => {
+  const played = play(
+    [
+      "function instead(name: string) {",
+      '    say "default ${name}"',
+      "    return name",
+      "}",
+      'let locked = encryptText("inside", password: "p", timeLock: false)',
+      'let opened = decryptText(locked, password: "p", default: askText "Never asked")',
+      'let wrong = decryptText(locked, password: "q", default: instead("wrong"))',
+      'let none = decryptText("not base64!", default: instead("none"))',
+      "exit",
+    ].join("\n"),
+  );
+  const { opened, wrong, none } = variables(played);
+  assert.deepEqual([opened, wrong, none], ["inside", "wrong", "none"]);
+  // The ask never ran, and each default ran after its call's lock step.
+  assert.deepEqual(
+    played.events.flatMap((event) =>
+      event.kind === "say"
+        ? [event.text]
+        : event.kind === "actionRequested" && event.action.kind === "lock"
+          ? [event.action.call]
+          : [],
+    ),
+    ["encryptText", "decryptText", "decryptText", "default wrong", "default none"],
+  );
+});
+
 test("the encrypt and decrypt calls check their arguments when they compile", () => {
   assert.deepEqual(diagnostics('let a = decryptText("x", password: "p")'), [
     [

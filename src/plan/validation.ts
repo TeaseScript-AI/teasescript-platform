@@ -1304,7 +1304,7 @@ function validateFileStoreInstruction(
 /**
  * A `lock` instruction runs again with each answer of the Player, so each operand is a temporary or a literal, which
  * reads the same every time. An encrypt call writes both `password:` and `timeLock:`, or neither; a decrypt call has no
- * `timeLock:` and its required `default:`.
+ * `timeLock:`, and its required `default:` follows it.
  */
 function validateLockInstruction(
   value: Record<string, unknown>,
@@ -1319,7 +1319,7 @@ function validateLockInstruction(
       "value",
       "password",
       "timeLock",
-      "default",
+      "defaultTemporary",
       "destinationTemporary",
       "span",
     ])
@@ -1338,13 +1338,23 @@ function validateLockInstruction(
     return;
   }
   const decrypts = call === "decryptText" || call === "decryptFile";
-  if (decrypts !== (value.default !== null))
-    errors.push(planError("TSC002", `The default of ${call}(...) is invalid.`, `${path}.default`));
+  if (decrypts !== (value.defaultTemporary !== null))
+    errors.push(
+      planError("TSC002", `The default of ${call}(...) is invalid.`, `${path}.defaultTemporary`),
+    );
+  else if (decrypts)
+    validateDefaultTemporary(
+      value.defaultTemporary,
+      value.destinationTemporary,
+      path,
+      temporaryCount,
+      errors,
+    );
   if (decrypts ? value.timeLock !== null : (value.password === null) !== (value.timeLock === null))
     errors.push(
       planError("TSC002", `The timeLock: of ${call}(...) is invalid.`, `${path}.timeLock`),
     );
-  for (const name of ["value", "password", "timeLock", "default"] as const) {
+  for (const name of ["value", "password", "timeLock"] as const) {
     const operand = value[name];
     if (operand === null && name !== "value") continue;
     if (!isRecord(operand) || (operand.kind !== "temporary" && operand.kind !== "literal"))
