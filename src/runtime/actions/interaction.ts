@@ -1,3 +1,4 @@
+import { isTimeoutLength } from "../../delay-rules.js";
 import { isSha256Hex } from "../sha256.js";
 import { cloneInteractionChoiceValue } from "../../choice-values.js";
 import {
@@ -30,7 +31,7 @@ export function buttonTimeoutMilliseconds(value: unknown): number | null {
     isPlainRecord(value) && value.kind === "duration" && typeof value.milliseconds === "number"
       ? value.milliseconds
       : Number.NaN;
-  return milliseconds > 0 && Number.isFinite(milliseconds) ? milliseconds : null;
+  return isTimeoutLength(milliseconds) ? milliseconds : null;
 }
 
 export type ResolvedInteraction =

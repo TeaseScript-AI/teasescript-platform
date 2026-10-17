@@ -431,7 +431,8 @@ labels, functions, and start values); union types, type names, and `is` type tes
 plain variables; using a possibly null value where its non-null type is required is a compile error that names the
 check and a fallback with
 `otherwise` ([§18](specifications/accepted-syntaxes-v30.md#fallback-with-otherwise)). A mismatch is `TSV041`, an
-unsupported operand or such a property read `TSV043`, returns of different types, list elements of different types, or
+unsupported operand or such a property read `TSV043` unless its rule has a code of its own, such as `TSV010` for a range
+bound, `TSV034` for a timer handle member, or `TSV036` for a play command's options, returns of different types, list elements of different types, or
 an `askChoice` of different value types outside a declared union `TSV044`, a provably constant type test or comparison,
 or a `for` or `toList()` range with a number literal on each side that contains no numbers (V30 §6), warning `TSV046`,
 and a fallback after a value that is never null warning `TSV062`. When a value the compiler cannot know, such as storage

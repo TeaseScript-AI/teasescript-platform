@@ -96,19 +96,6 @@ function staticScalar(expression: Expression): { readonly value: StaticScalar } 
   return runCompileTask(staticScalarTask(expression));
 }
 
-/**
- * A known finite number, duration, or angle, with the runtime's operations; anything else is `undefined`. A step that
- * overflows is reported by `findVisibleOverflows`, so callers check only the finite result.
- */
-export function staticQuantity(
-  expression: Expression,
-): number | AnyDuration | StoredAngle | undefined {
-  const known = staticScalar(expression)?.value;
-  return typeof known === "number" || isStaticDuration(known) || isStaticAngle(known)
-    ? known
-    : undefined;
-}
-
 /** Scalar visible text, as the runtime converts the value. */
 function scalarText(value: StaticScalar): string {
   if (typeof value === "string") return value;
@@ -265,6 +252,14 @@ export function staticChoiceValue(
     ? { value: 0 }
     : known;
 }
+
+/** The message of a visible overflow by its cause. */
+export const VISIBLE_OVERFLOW_MESSAGES = {
+  zero: "This divides by zero, so it has no result. Divide by a value other than zero.",
+  number: "This calculation gives a number too large to represent. Use smaller values.",
+  duration: "This calculation gives a duration too long to represent. Use a shorter duration.",
+  angle: "This calculation gives an angle too large to represent. Use a smaller angle.",
+} as const;
 
 /**
  * An arithmetic step the runtime always rejects: known operands with a non-finite result (`TSR036`), or a known zero

@@ -594,11 +594,12 @@ test("a bounded or grouped load compares the loaded value; a compact comparison 
   assert.equal(binding(result.finalSnapshot, "grouped"), true);
   const invalid = compileSource('let absent = load "k" == null');
   assert.equal(invalid.plan, null);
+  // The load without default: leaves the type check its basis, which reports the key and the constant comparison.
   assert.deepEqual(
     invalid.diagnostics.map(({ code }) => code),
-    ["TSV038", "TSV020"],
+    ["TSV020", "TSV046", "TSV038"],
   );
-  assert.equal(invalid.diagnostics[0]?.message, loadKeyMessage);
+  assert.equal(invalid.diagnostics[2]?.message, loadKeyMessage);
 });
 
 test("a bounded load ends at its ')', also with a space before '(' and options on several lines", () => {
@@ -1077,7 +1078,7 @@ test("compact interactions parse in every storage operand position", () => {
       const numberKey = key && value.startsWith("askNumber");
       assert.deepEqual(
         compiled.diagnostics.map((diagnostic) => diagnostic.code),
-        numberKey ? ["TSV043"] : [],
+        numberKey ? ["TSV038"] : [],
         source,
       );
     }

@@ -22,6 +22,7 @@ import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import { PlanControlFlow } from "./plan/control-flow.js";
 import { Reachability, type ConstantTest, type StatementFlow } from "./reachability.js";
 import {
+  stopsTypeCheck,
   validateProjectSemantics,
   type FileSemanticResult,
   type SemanticValidationOptions,
@@ -271,9 +272,9 @@ interface CheckedProject {
 }
 
 /**
- * Validates the names of the files without syntax errors, then, when every file is free of errors, the types of the
- * whole project. Returns what the checks found for the lowering and the checks that follow the plan, or `null` when the
- * project has an error.
+ * Validates the names of the files without syntax errors, then, when every file is free of errors that leave the type
+ * check without a basis (see `stopsTypeCheck`), the types of the whole project. Returns what the checks found for the
+ * lowering and the checks that follow the plan, or `null` when the project has an error.
  */
 function checkProject(
   files: CompiledProjectFile[],
@@ -295,7 +296,7 @@ function checkProject(
       files[index]!.picks = result.picks;
       files[index]!.captures = result.captures;
     });
-    if (files.some((file) => file.parsed === null || hasErrors(file.result.diagnostics)))
+    if (files.some((file) => file.parsed === null || file.result.diagnostics.some(stopsTypeCheck)))
       return null;
     // Types are checked once every name resolves, so a type message never repeats a name or structure error.
     const types = checkTypes(

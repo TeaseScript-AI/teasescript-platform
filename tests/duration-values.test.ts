@@ -120,7 +120,8 @@ test("mixing plain numbers with durations fails instead of guessing a unit", () 
     ],
   ] as const) {
     const source = `${declaration}\nsay "\${${expression}}"\nexit`;
-    assert.deepEqual(diagnostics(source), ["TSV043"], source);
+    // A duration with a number has a code of its own.
+    assert.deepEqual(diagnostics(source), [expression === "d * d" ? "TSV043" : "TSV035"], source);
     const dynamic = `${DYNAMIC}${declaration.replace(/= (.*)$/, "= dynamic($1)")}\nsay "\${${expression}}"\nexit`;
     const failure = runValidSource(dynamic).snapshot.failure;
     assert.deepEqual([failure?.code, failure?.message], ["TSR009", message], dynamic);

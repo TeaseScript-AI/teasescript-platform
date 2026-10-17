@@ -3,8 +3,8 @@ import { formatDuration } from "./duration.js";
 /**
  * Rules of timers, media, and camera views and of their handles that the type checker and the runtime both check, each
  * with one predicate and one message. A message takes the value as the runtime shows it (`shown`), which the compiler
- * gives for a value it knows. The compile errors are `TSV034` for timers, `TSV036` for a play command, `TSV037` for media
- * handles, and `TSV059` for camera views; message handles have no code of their own (`TSV043`).
+ * gives for a value it knows. The compile errors are `TSV034` for timers, `TSV036` for a play command or `showImage`,
+ * `TSV037` for media handles, and `TSV059` for camera views; message handles have no code of their own (`TSV043`).
  */
 export type HandleKind = "timer" | "media" | "camera" | "messageHandle";
 
@@ -76,9 +76,41 @@ export function isMediaVolume(value: unknown): value is number {
   return typeof value === "number" && value >= 0 && value <= 1;
 }
 
+export const MEDIA_VOLUME_RULE = "Media volume must be a number from 0 through 1";
+
 export function mediaVolumeMessage(shown: string): string {
-  return `Media volume must be a number from 0 through 1, but this is ${shown}.`;
+  return `${MEDIA_VOLUME_RULE}, but this is ${shown}.`;
 }
+
+/** What a play command or `showImage` (`command`) takes as its file. */
+export function fileReferenceRule(command: string): string {
+  return `${command} needs a file reference in text (string) or null`;
+}
+
+/** `repeat: true`, or `repeat` before the file, on media that blocks until it ends. */
+export function blockingRepeatMessage(command: "playAudio" | "playVideo"): string {
+  return `Blocking media cannot repeat indefinitely. Use '${command} async', a count such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.`;
+}
+
+export const FINISH_NEVER_RUNS_MESSAGE =
+  "'finish' never runs for media that repeats indefinitely. Calling stop() does not run it either. Use a count such as 'repeat: 3 times' or a duration such as 'repeat: 60 s', or remove 'finish'.";
+
+/** What `repeat:` takes, besides a count before `times`. */
+export const MEDIA_REPEAT_RULE =
+  "Media repeat must be true, false, a count such as '3 times', or a positive duration";
+
+/** Whether media can play `count` times. */
+export function isMediaRepeatCount(count: number): boolean {
+  return Number.isSafeInteger(count) && count >= 1;
+}
+
+/** Whether media can repeat for `milliseconds`. */
+export function isRepeatBudget(milliseconds: number): boolean {
+  return Number.isFinite(milliseconds) && milliseconds > 0;
+}
+
+export const MEDIA_REPEAT_COUNT_RULE =
+  "A repeat count must be a whole number of at least 1, such as '3 times'";
 
 /** Whether a media position (`startAt`, `endAt`, or a cue position) of `milliseconds` lies in the media. */
 export function isMediaPosition(milliseconds: number): boolean {
