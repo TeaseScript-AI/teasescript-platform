@@ -224,6 +224,31 @@ export function instructionKilledTemporaries(instruction: Instruction): Readonly
   }
 }
 
+/**
+ * The temporaries live before an instruction that reads `read` and sets or clears `killed`, given those live after it.
+ * Where one of the sets it is given is the answer it returns that set, so the many instructions that touch no live
+ * temporary copy nothing.
+ */
+export function temporariesLiveBefore(
+  read: ReadonlySet<number>,
+  killed: ReadonlySet<number>,
+  after: ReadonlySet<number>,
+): ReadonlySet<number> {
+  if (after.size === 0) return read;
+  let live: Set<number> | null = null;
+  for (const temporaryId of killed) {
+    if (!after.has(temporaryId)) continue;
+    live ??= new Set(after);
+    live.delete(temporaryId);
+  }
+  for (const temporaryId of read) {
+    if ((live ?? after).has(temporaryId)) continue;
+    live ??= new Set(after);
+    live.add(temporaryId);
+  }
+  return live ?? after;
+}
+
 function collectExpressionTemporaries(expression: ExpressionPlan, output: Set<number>): void {
   const pending = [expression];
   while (pending.length) {
