@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import { createFreshRuntimeSnapshot, run } from "../src/index.js";
-import { TEASESCRIPT_PROTECTED_NAMES } from "../src/protected-names.js";
+import { TEASESCRIPT_PROTECTED_NAMES } from "../src/language-facts.js";
 
 test("collects top-level functions before validating calls and mutual recursion", () => {
   const result = compileSource(

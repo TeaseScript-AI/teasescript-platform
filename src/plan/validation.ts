@@ -6,6 +6,7 @@ import { isValidInteractionPrefill } from "../interaction-answers.js";
 import { validImageRequestFields } from "../image-input.js";
 import { canonicalWebUrl } from "../web-url.js";
 import { LOCK_CALLS } from "../capture-call.js";
+import { ANGLE_UNITS, CALENDAR_DURATION_UNITS, DURATION_UNITS } from "../language-facts.js";
 import { compileRegex, isCanonicalRegexFlags } from "../regex.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -2676,14 +2677,14 @@ function validateExpressionNode(
     case "unit":
       if (
         value.calendar === true
-          ? !isOneOf(value.unit, ["d", "w", "mo", "y"])
+          ? !isOneOf(value.unit, CALENDAR_DURATION_UNITS)
           : value.calendar !== false || !isOneOf(value.unit, DURATION_UNITS)
       )
         errors.push(planError("TSC002", "Duration unit is invalid.", `${path}.unit`));
       pending.push({ value: value.operand, path: `${path}.operand`, assignmentTarget: false });
       return;
     case "angleUnit":
-      if (!isOneOf(value.unit, ["deg", "rad"]))
+      if (!isOneOf(value.unit, ANGLE_UNITS))
         errors.push(planError("TSC002", "Angle unit is invalid.", `${path}.unit`));
       pending.push({ value: value.operand, path: `${path}.operand`, assignmentTarget: false });
       return;
@@ -2921,8 +2922,6 @@ function validateCallArguments(
     validateOptionalTypeCheck(argument, argumentPath, errors);
   });
 }
-
-const DURATION_UNITS = ["ms", "s", "min", "h", "d", "w"] as const;
 
 function validateDurationUnit(value: unknown, path: string, errors: PlanValidationError[]): void {
   if (value !== null && !isOneOf(value, DURATION_UNITS)) {

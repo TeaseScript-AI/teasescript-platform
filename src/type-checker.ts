@@ -112,7 +112,7 @@ import {
   RANGE_LIST_FIX,
   type OperationProblem,
 } from "./operation-checks.js";
-import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
+import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./language-facts.js";
 import { NUMERIC_FUNCTIONS, percentageFailure, type NumericArgument } from "./numeric-functions.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,

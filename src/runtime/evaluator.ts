@@ -67,7 +67,7 @@ import {
   weightedChoices,
   weightedIndex,
 } from "./list-statistics.js";
-import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
+import { CORE_RUNTIME_BUILTINS } from "../language-facts.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { internalFault, RuntimeFault } from "./errors.js";
 import type { InstructionTraceCollector, RuntimeInstructionObserver } from "./instruction-trace.js";

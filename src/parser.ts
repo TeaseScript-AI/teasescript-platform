@@ -90,6 +90,14 @@ import type {
   WhileStatement,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
+import {
+  COMMANDS,
+  commandFacts,
+  isAsk,
+  isCommand,
+  type StatementCommand,
+  type ValueCommand,
+} from "./language-facts.js";
 import { lex } from "./lexer.js";
 import { readMisplacedHeader, readScriptHeader, type ScriptHeader } from "./script-header.js";
 import { isTagListOption, tagPredicateSteps } from "./tag-query.js";
@@ -125,27 +133,13 @@ export interface StatementRange {
   readonly end: number;
 }
 
-// Commands that #parseStatement dispatches by name. A line that starts with one starts a statement; only `showButton`
-// and `showPopup` also have an expression form, used after `=`, an operator, or an opening delimiter. `showCamera`,
-// like `timer`, is not listed, so its value form may start a line after `:`.
-const statementOnlyCommands: ReadonlySet<string> = new Set([
-  "showButton",
-  "showImage",
-  "showPopup",
-  "openUrl",
-  "exportText",
-  "hideImage",
-  "hideCamera",
-  "stopAudio",
-  "save",
-  "delete",
-  "switch",
-  "label",
-  "goto",
-  "call",
-  "fallback",
-  "end",
-]);
+/**
+ * The words that start a statement wherever a line starts with them (see `COMMANDS`), which can never be a value; of
+ * these only `showButton` and `showPopup` also have a value form, used after `=`, an operator, or an opening delimiter.
+ */
+const LINE_STATEMENTS: ReadonlySet<string> = new Set(
+  Object.keys(COMMANDS).filter((name) => commandFacts(name)?.statement === "line"),
+);
 
 const parserDiagnosticCode = {
   expectedStatement: "TSP001",
@@ -249,19 +243,6 @@ interface RangeSegment {
   readonly from: number;
   readonly to: number;
 }
-/** The compact interaction commands other than `askChoice`, and the kind of answer each asks for. */
-const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionKind"]> = new Map([
-  ["askText", "text"],
-  ["askNumber", "number"],
-  ["askInteger", "integer"],
-  ["askDate", "date"],
-  ["askTime", "time"],
-  ["askDateTime", "datetime"],
-  ["askPassword", "password"],
-  ["askBoolean", "boolean"],
-  ["askForm", "form"],
-  ["askBooleans", "booleans"],
-]);
 /** The modes of a message, `bubble` and `prose`, which a `say` or an ask's question may write. */
 const PRESENTATION_MODES: ReadonlySet<string> = new Set(["bubble", "prose"]);
 /** Tokens that may start an expression but also continue the one before them, as `(` calls and `-` subtracts. */
@@ -300,6 +281,13 @@ export const SHOW_BUTTON_OPTIONS: readonly string[] = ["background", "timeout"];
 export function askOptionNames(kind: InteractionExpression["interactionKind"]): readonly string[] {
   if (kind === "choice") return CHOICE_OPTIONS;
   return kind === "password" ? PASSWORD_OPTIONS : (NAMED_ASK_OPTIONS.get(kind) ?? ASK_OPTIONS);
+}
+
+/** The named arguments that an ask needs: `fields:` of `askForm`, and `texts:` and `prefill:` of `askBooleans`. */
+export function requiredAskOptionNames(
+  kind: InteractionExpression["interactionKind"],
+): readonly string[] {
+  return kind === "form" ? ["fields"] : kind === "booleans" ? ["texts", "prefill"] : [];
 }
 
 /** The named arguments the parser reads for an ask: its own, and for `askPassword` a `prefill:` the type check refuses. */
@@ -464,73 +452,63 @@ class Parser {
       this.#current = misplacedHeader.next;
       return null;
     }
-    if (this.#checkIdentifier("showButton")) {
-      return yield* parseChild(this.#parseShowButtonStatement());
-    }
-    if (this.#checkIdentifier("timer")) {
-      return yield* parseChild(this.#parseTimerStatement());
-    }
-    if (this.#checkIdentifier("showPermanentButton")) {
-      const parts = yield* parseChild(this.#parseShowPermanentButtonParts());
-      return parts === null
-        ? null
-        : Object.freeze({ kind: "showPermanentButtonStatement", ...parts });
-    }
-    if (this.#checkIdentifier("showImage")) {
-      return this.#parseShowImageStatement();
-    }
-    if (this.#checkIdentifier("hideImage")) {
-      return this.#parseHideImageStatement();
-    }
-    if (this.#checkIdentifier("showCamera")) {
-      const parts = this.#parseShowCameraParts();
-      return parts === null ? null : Object.freeze({ kind: "showCameraStatement", ...parts });
-    }
-    if (this.#checkIdentifier("hideCamera")) {
-      return this.#parseHideCameraStatement();
-    }
-    if (this.#checkIdentifier("showPopup")) {
-      return yield* parseChild(this.#parseShowPopupStatement());
-    }
-    if (this.#checkIdentifier("openUrl")) {
-      return yield* parseChild(this.#parseOpenUrlStatement());
-    }
-    if (this.#checkIdentifier("exportText")) {
-      return yield* parseChild(this.#parseExportTextStatement());
-    }
-    if (this.#checkIdentifier("stopAudio")) {
-      return this.#parseStopAudioStatement();
-    }
-    if (this.#checkIdentifier("save")) {
-      return this.#parseSaveStatement();
-    }
-    if (this.#checkIdentifier("delete")) {
-      return this.#parseDeleteStatement();
-    }
-    if (this.#checkIdentifier("switch")) {
-      return yield* parseChild(this.#parseSwitchStatement());
-    }
-    if (this.#checkIdentifier("label")) {
-      return this.#parseLabelStatement();
-    }
-    if (
-      this.#checkIdentifier("goto") ||
-      this.#checkIdentifier("call") ||
-      this.#checkIdentifier("fallback")
-    ) {
-      return yield* parseChild(this.#parseTransferStatement());
-    }
-    if (this.#checkIdentifier("end")) {
-      return Object.freeze({ kind: "endStatement", span: copySpan(this.#advance().span) });
-    }
-    if (this.#checkIdentifier("global")) {
-      return yield* parseChild(this.#parseGlobalStatement());
-    }
-    if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
-      const parts = yield* parseChild(this.#parseMediaParts());
-      return parts === null
-        ? null
-        : Object.freeze({ kind: "playMediaStatement", ...parts } satisfies PlayMediaStatement);
+    const command = this.#commandAt("statement");
+    switch (command) {
+      case null:
+        break;
+      case "showButton":
+        return yield* parseChild(this.#parseShowButtonStatement());
+      case "timer":
+        return yield* parseChild(this.#parseTimerStatement());
+      case "showPermanentButton": {
+        const parts = yield* parseChild(this.#parseShowPermanentButtonParts());
+        return parts === null
+          ? null
+          : Object.freeze({ kind: "showPermanentButtonStatement", ...parts });
+      }
+      case "showImage":
+        return this.#parseShowImageStatement();
+      case "hideImage":
+        return this.#parseHideImageStatement();
+      case "showCamera": {
+        const parts = this.#parseShowCameraParts();
+        return parts === null ? null : Object.freeze({ kind: "showCameraStatement", ...parts });
+      }
+      case "hideCamera":
+        return this.#parseHideCameraStatement();
+      case "showPopup":
+        return yield* parseChild(this.#parseShowPopupStatement());
+      case "openUrl":
+        return yield* parseChild(this.#parseOpenUrlStatement());
+      case "exportText":
+        return yield* parseChild(this.#parseExportTextStatement());
+      case "stopAudio":
+        return this.#parseStopAudioStatement();
+      case "save":
+        return this.#parseSaveStatement();
+      case "delete":
+        return this.#parseDeleteStatement();
+      case "switch":
+        return yield* parseChild(this.#parseSwitchStatement());
+      case "label":
+        return this.#parseLabelStatement();
+      case "goto":
+      case "call":
+      case "fallback":
+        return yield* parseChild(this.#parseTransferStatement());
+      case "end":
+        return Object.freeze({ kind: "endStatement", span: copySpan(this.#advance().span) });
+      case "global":
+        return yield* parseChild(this.#parseGlobalStatement());
+      case "playAudio":
+      case "playVideo": {
+        const parts = yield* parseChild(this.#parseMediaParts());
+        return parts === null
+          ? null
+          : Object.freeze({ kind: "playMediaStatement", ...parts } satisfies PlayMediaStatement);
+      }
+      default:
+        return command satisfies never;
     }
     if (
       this.#check(TokenKind.KeywordWait) &&
@@ -4258,20 +4236,17 @@ class Parser {
 
   *#parsePrimary(): ParseTask<Expression | null> {
     const token = this.#peek();
-    if (
-      this.#checkIdentifier("askText") ||
-      this.#checkIdentifier("askNumber") ||
-      this.#checkIdentifier("askInteger") ||
-      this.#checkIdentifier("askDate") ||
-      this.#checkIdentifier("askTime") ||
-      this.#checkIdentifier("askDateTime") ||
-      this.#checkIdentifier("askPassword") ||
-      this.#checkIdentifier("askBoolean") ||
-      this.#checkIdentifier("askForm") ||
-      this.#checkIdentifier("askBooleans") ||
-      this.#checkIdentifier("askChoice")
-    ) {
-      return yield* parseChild(this.#parseInteractionExpression());
+    const command = this.#commandAt("value");
+    if (command !== null && isAsk(command)) {
+      // An earlier name, such as `choose`, is an error that names the fix, and the ask is read as written (#830).
+      const renamed = commandFacts(command)?.renamed;
+      if (renamed !== undefined)
+        this.#reportToken(
+          parserDiagnosticCode.unsupportedInteractionForm,
+          `'${command}' is now called '${renamed}', like the other asks that wait for the player's answer. Write '${renamed}' instead.`,
+          token,
+        );
+      return yield* parseChild(this.#parseInteractionExpression(COMMANDS[command].interaction));
     }
     if (
       this.#checkIdentifier("askImage") &&
@@ -4279,43 +4254,40 @@ class Parser {
       PRESENTATION_MODES.has(this.#peek(1).lexeme)
     )
       return yield* parseChild(this.#parseAskImageWithPresentation());
-    // The earlier name of `askChoice` is an error that names the fix, and the ask is read as written (#830).
-    if (this.#checkIdentifier("choose")) {
-      this.#reportToken(
-        parserDiagnosticCode.unsupportedInteractionForm,
-        "'choose' is now called 'askChoice', like the other asks that wait for the player's answer. Write 'askChoice' instead.",
-        token,
-      );
-      return yield* parseChild(this.#parseInteractionExpression());
-    }
-    if (this.#checkIdentifier("showButton")) {
-      const parts = yield* parseChild(this.#parseShowButtonParts());
-      return parts === null ? null : Object.freeze({ kind: "showButtonExpression", ...parts });
-    }
-    if (this.#checkIdentifier("showPopup")) {
-      const parts = yield* parseChild(this.#parseShowPopupParts());
-      return parts === null ? null : Object.freeze({ kind: "showPopupExpression", ...parts });
-    }
-    if (this.#checkIdentifier("timer")) {
-      const parts = yield* parseChild(this.#parseTimerParts());
-      return parts === null ? null : Object.freeze({ kind: "timerExpression", ...parts });
-    }
-    if (this.#checkIdentifier("showCamera")) {
-      const parts = this.#parseShowCameraParts();
-      return parts === null ? null : Object.freeze({ kind: "showCameraExpression", ...parts });
-    }
-    if (this.#checkIdentifier("showPermanentButton")) {
-      const parts = yield* parseChild(this.#parseShowPermanentButtonParts());
-      return parts === null
-        ? null
-        : Object.freeze({ kind: "showPermanentButtonExpression", ...parts });
-    }
-    if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
-      const parts = yield* parseChild(this.#parseMediaParts());
-      return parts === null ? null : Object.freeze({ kind: "playMediaExpression", ...parts });
-    }
-    if (this.#checkIdentifier("load")) {
-      return yield* parseChild(this.#parseLoadExpression());
+    switch (command) {
+      case null:
+        break;
+      case "showButton": {
+        const parts = yield* parseChild(this.#parseShowButtonParts());
+        return parts === null ? null : Object.freeze({ kind: "showButtonExpression", ...parts });
+      }
+      case "showPopup": {
+        const parts = yield* parseChild(this.#parseShowPopupParts());
+        return parts === null ? null : Object.freeze({ kind: "showPopupExpression", ...parts });
+      }
+      case "timer": {
+        const parts = yield* parseChild(this.#parseTimerParts());
+        return parts === null ? null : Object.freeze({ kind: "timerExpression", ...parts });
+      }
+      case "showCamera": {
+        const parts = this.#parseShowCameraParts();
+        return parts === null ? null : Object.freeze({ kind: "showCameraExpression", ...parts });
+      }
+      case "showPermanentButton": {
+        const parts = yield* parseChild(this.#parseShowPermanentButtonParts());
+        return parts === null
+          ? null
+          : Object.freeze({ kind: "showPermanentButtonExpression", ...parts });
+      }
+      case "playAudio":
+      case "playVideo": {
+        const parts = yield* parseChild(this.#parseMediaParts());
+        return parts === null ? null : Object.freeze({ kind: "playMediaExpression", ...parts });
+      }
+      case "load":
+        return yield* parseChild(this.#parseLoadExpression());
+      default:
+        return command satisfies never;
     }
     // At the start of a line outside brackets, `say` begins a statement, so a value continued onto it ends before it.
     if (
@@ -4411,9 +4383,10 @@ class Parser {
     return null;
   }
 
-  *#parseInteractionExpression(): ParseTask<InteractionExpression | null> {
+  *#parseInteractionExpression(
+    interactionKind: InteractionExpression["interactionKind"],
+  ): ParseTask<InteractionExpression | null> {
     const command = this.#advance();
-    const interactionKind = INTERACTION_KINDS.get(command.lexeme) ?? "choice";
     if (this.#check(TokenKind.LeftParenthesis) && interactionKind !== "choice")
       return yield* parseChild(this.#parseBoundedAsk(command, interactionKind, null, null, null));
     if (this.#check(TokenKind.LeftParenthesis)) {
@@ -4820,17 +4793,13 @@ class Parser {
     const has = (name: string) => named.some((argument) => argument.name.name === name);
     if (presentation !== null && question === null && !(keepsArguments && has("message")))
       this.#reportQuestionlessPresentation(command, presentation);
-    if (interactionKind === "form" && !has("fields"))
-      this.#reportSpan(
-        parserDiagnosticCode.unsupportedInteractionForm,
-        "askForm needs its fields, as in 'fields: { enabled: false }'.",
-        command.span,
-      );
-    for (const required of interactionKind === "booleans" ? ["texts", "prefill"] : [])
+    for (const required of requiredAskOptionNames(interactionKind))
       if (!has(required))
         this.#reportSpan(
           parserDiagnosticCode.unsupportedInteractionForm,
-          `askBooleans needs ${required}:, as in 'askBooleans "Choose", texts: ["A", "B"], prefill: [true, false]'.`,
+          interactionKind === "form"
+            ? "askForm needs its fields, as in 'fields: { enabled: false }'."
+            : `askBooleans needs ${required}:, as in 'askBooleans "Choose", texts: ["A", "B"], prefill: [true, false]'.`,
           command.span,
         );
     if (question !== null && has("message"))
@@ -5582,7 +5551,7 @@ class Parser {
     const token = this.#peek();
     return (
       isStatementStart(token.kind) ||
-      (token.kind === TokenKind.Identifier && statementOnlyCommands.has(token.lexeme))
+      (token.kind === TokenKind.Identifier && LINE_STATEMENTS.has(token.lexeme))
     );
   }
 
@@ -5731,6 +5700,17 @@ class Parser {
 
   #checkIdentifier(name: string): boolean {
     return this.#check(TokenKind.Identifier) && this.#peek().lexeme === name;
+  }
+
+  /** The word of `COMMANDS` that the current identifier is, when the parser reads it here as a statement or a value. */
+  #commandAt(form: "statement"): StatementCommand | null;
+  #commandAt(form: "value"): ValueCommand | null;
+  #commandAt(form: "statement" | "value"): StatementCommand | ValueCommand | null {
+    const token = this.#peek();
+    if (token.kind !== TokenKind.Identifier || !isCommand(token.lexeme)) return null;
+    if (commandFacts(token.lexeme)?.[form] === undefined) return null;
+    // EVIDENCE: invariant: the word's facts give it the form, which is what each of the two types selects.
+    return token.lexeme as StatementCommand | ValueCommand;
   }
 
   /** The protected keyword `set` parses as a declared name so that its declaration gets the protected-name diagnostic. */

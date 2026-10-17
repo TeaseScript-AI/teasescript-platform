@@ -18,7 +18,7 @@ import type { PlanImage, PreparedFormShape, StorageTypePlan, TypeCheckPlan } fro
 import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
-import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
+import { CORE_RUNTIME_BUILTINS } from "./language-facts.js";
 import { PlanControlFlow } from "./plan/control-flow.js";
 import { Reachability, type ConstantTest, type StatementFlow } from "./reachability.js";
 import {
@@ -82,7 +82,7 @@ export interface ProjectCompilationResult {
   readonly plan: InstructionPlan | null;
 }
 
-export { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
+export { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./language-facts.js";
 
 /** Parses, validates, and compiles one source as the `main.tease` of a single-file project, without executing it. */
 export function compileSource(source: string, options: CompileOptions = {}): CompilationResult {

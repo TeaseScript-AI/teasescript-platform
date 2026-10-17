@@ -11,7 +11,7 @@ import { PlanControlFlow, type FlowEdge } from "./plan/control-flow.js";
 import { solveForward } from "./plan/dataflow.js";
 import type { InstructionPlan } from "./plan/model.js";
 import { runsOnItsOwn } from "./project-globals.js";
-import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
+import { CORE_RUNTIME_BUILTINS } from "./language-facts.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import type { DeadWays } from "./way-facts.js";
 

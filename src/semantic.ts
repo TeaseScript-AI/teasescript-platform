@@ -29,12 +29,14 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { canonicalRegexFlags, compileRegex, regexFlagProblem } from "./regex.js";
 import {
+  COMMANDS,
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   RENAMED_BUILTINS,
   RENAMED_METHODS,
+  TEASESCRIPT_GRAMMAR_KEYWORDS,
   TEASESCRIPT_PROTECTED_NAMES,
-} from "./protected-names.js";
+} from "./language-facts.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import {
   askOperands,
@@ -468,6 +470,21 @@ class SemanticScope {
   }
 }
 
+/**
+ * The names that a host may not configure, as a global or a built-in, because the language gives them a meaning of its
+ * own: the commands and asks, which the parser reads by name; `takePhoto` and `askImage`, whose calls wait for the
+ * Player; `pi`, which the parser reads as the number it names; and `debugMode`, which the engine reads from the session.
+ */
+const UNCONFIGURABLE_NAMES: ReadonlySet<string> = new Set([
+  ...Object.keys(COMMANDS).filter(
+    (name) => !TEASESCRIPT_GRAMMAR_KEYWORDS.some((keyword) => keyword === name),
+  ),
+  "takePhoto",
+  "askImage",
+  "pi",
+  "debugMode",
+]);
+
 /** How a message names the resource whose block is validated. */
 const HANDLER_NAMES = { timer: "timer", media: "media", button: "button" } as const;
 
@@ -567,34 +584,7 @@ class SemanticValidator {
     this.#root = new SemanticScope(project.scope);
     this.#invalidConfiguredNames = Object.freeze(
       [...(options.globals ?? []), ...(options.builtins ?? [])].filter((name) =>
-        [
-          "showButton",
-          "askText",
-          "askNumber",
-          "askInteger",
-          "askDate",
-          "askTime",
-          "askDateTime",
-          "askPassword",
-          "askBoolean",
-          "askForm",
-          "askBooleans",
-          "askChoice",
-          "choose",
-          "takePhoto",
-          "showCamera",
-          "hideCamera",
-          "stopAudio",
-          "showPermanentButton",
-          "askImage",
-          "showPopup",
-          "openUrl",
-          "exportText",
-          // The parser reads `pi` as the number it names, so a configured `pi` could never be read.
-          "pi",
-          // The engine reads `debugMode` from the session.
-          "debugMode",
-        ].includes(name),
+        UNCONFIGURABLE_NAMES.has(name),
       ),
     );
     this.#builtins = new Set([

@@ -37,7 +37,7 @@ import {
   TEASESCRIPT_PROTECTED_ENGINE_NAMES,
   TEASESCRIPT_PROTECTED_NAMES,
   TEASESCRIPT_PROTECTED_TYPE_NAMES,
-} from "./protected-names.js";
+} from "./language-facts.js";
 import {
   createSourcePosition,
   createSourceSpan,
