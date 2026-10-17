@@ -42,9 +42,10 @@ export type TypedAnswerKind = "text" | "number" | "integer" | TemporalAnswerKind
 /**
  * What the player is told about a wrong answer, V30 §20's default `invalidMessage`: an answer that is not of the kind a
  * typed ask or form field asks for, or typed text that matches no button of a choice (`choice`) or more than one
- * (`ambiguousChoice`); and in the Player's lock dialogs (V30 §13), a repeated password that differs from the first
- * (`passwordMismatch`), a password that does not open the lock (`wrongPassword`), and a time lock's moment that is not
- * in the future (`pastTimeLock`). A malformed host payload gets a protocol message instead.
+ * (`ambiguousChoice`); and in the Player's lock dialogs and the password fields of lock calls (V30 §13), a repeated
+ * password that differs from the first (`passwordMismatch`), a password that does not open the lock (`wrongPassword`),
+ * and a time lock's moment that is not in the future (`pastTimeLock`). A malformed host payload gets a protocol message
+ * instead.
  */
 const INVALID_ANSWER_MESSAGES: Readonly<
   Record<

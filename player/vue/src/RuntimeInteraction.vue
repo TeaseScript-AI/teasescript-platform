@@ -35,6 +35,7 @@ import {
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
+import { invalidAnswerMessage } from "../../../src/interaction-answers.js";
 import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
 import Transcript from "./Transcript.vue";
@@ -327,7 +328,7 @@ function showFeedback(message: string) {
 }
 
 watch(draft, clearFeedback);
-// Typing the repeat again clears "The passwords do not match", which empties it.
+// Typing the repeat again clears the notice that the passwords do not match, which empties it.
 watch(repeated, (text) => text !== "" && clearFeedback());
 
 // The composer edits one form field at a time: it opens with the field's text selected, so typing replaces it and
@@ -804,7 +805,7 @@ function submit(source: "input" | "button") {
     // After a mismatch both are typed again: the repeat is emptied, and the password selected, so typing replaces it.
     if (field.repeat && repeated.value !== draft.value) {
       repeated.value = "";
-      showFeedback("The passwords do not match");
+      showFeedback(invalidAnswerMessage("passwordMismatch"));
       composer.value?.selectInput();
       return;
     }
