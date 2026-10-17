@@ -1278,6 +1278,12 @@ export class TypeChecker {
    */
   readonly #bindings = new Map<Declaration, Variable>();
 
+  /** The declaration of each variable of {@link #bindings}, also of a parameter as the body accepts it. */
+  readonly #declarationOf = new Map<Variable, Declaration>();
+
+  /** The variable that each identifier read resolved to, for the facts. */
+  readonly #reads = new Map<Identifier, Variable>();
+
   // What the facts of the last check read (see `legacy-facts.ts`): the types the check gave, after it is complete.
 
   /** The type that the check kept for an expression, or `undefined` for one it did not check. */
@@ -1287,6 +1293,16 @@ export class TypeChecker {
 
   public get bindings(): ReadonlyMap<Declaration, Variable> {
     return this.#bindings;
+  }
+
+  /** The declaration of a variable a read resolved to, or `undefined` for a host global. */
+  public readDeclaration(
+    read: Identifier,
+  ): { readonly name: string; readonly declaration: Declaration | undefined } | undefined {
+    const variable = this.#reads.get(read);
+    return variable === undefined
+      ? undefined
+      : { name: variable.name, declaration: this.#declarationOf.get(variable) };
   }
 
   public get functionTypes(): ReadonlyMap<FunctionDeclaration, FunctionType> {
@@ -2360,7 +2376,10 @@ export class TypeChecker {
     const start = this.#flow.mark();
     const loopScope = new Scope(scope);
     for (const variable of variables) {
-      if (variable.declaration !== undefined) this.#bindings.set(variable.declaration, variable);
+      if (variable.declaration !== undefined) {
+        this.#bindings.set(variable.declaration, variable);
+        this.#declarationOf.set(variable, variable.declaration);
+      }
       loopScope.declare(variable.name, { kind: "variable", variable });
     }
     this.#loops.push({ start, breaks: [], continued: false });
@@ -2473,6 +2492,7 @@ export class TypeChecker {
     };
     if (statement.typeAnnotation === null) this.#declared.set(statement, variable);
     this.#bindings.set(statement, variable);
+    this.#declarationOf.set(variable, statement);
     scope.declare(name, { kind: "variable", variable });
     this.#assigned(variable, value);
   }
@@ -2594,6 +2614,8 @@ export class TypeChecker {
       if (entry?.kind === "variable") {
         variable = entry.variable;
         place = variablePlace(variable, this.#text);
+        // A compound assignment reads the variable's current value first.
+        if (statement.operator !== "=") this.#reads.set(target, variable);
       }
     } else {
       if (
@@ -3719,8 +3741,9 @@ export class TypeChecker {
       shared: this.#sharedLocal(declaration.parameters[index]!),
     }));
     fn.accepted = accepted;
-    for (const parameter of accepted) {
+    for (const [index, parameter] of accepted.entries()) {
       if (parameter.declaration !== undefined) this.#declared.set(parameter.declaration, parameter);
+      this.#declarationOf.set(parameter, fn.declaration.parameters[index]!);
       scope.declare(parameter.name, { kind: "variable", variable: parameter });
     }
     const context: FunctionContext = { fn, declared, returns: [], returnsNull: false };
@@ -3871,6 +3894,7 @@ export class TypeChecker {
       };
       if (declaration !== undefined) this.#declared.set(declaration, variable);
       this.#bindings.set(parameter, variable);
+      this.#declarationOf.set(variable, parameter);
       parameters.push(variable);
       scope.declare(name, { kind: "variable", variable });
     }
@@ -4169,6 +4193,7 @@ export class TypeChecker {
           const keeps = entry.variable.keeps;
           if (keeps !== undefined && (keeps.body === null || keeps.body === this.#body))
             this.#initializers.set(expression, keeps.initializer);
+          this.#reads.set(expression, entry.variable);
           return placeRead(this.#currentType(entry.variable));
         }
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
