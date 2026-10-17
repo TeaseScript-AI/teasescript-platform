@@ -20,6 +20,13 @@
       "category": "b",
       "reason": "The shock sequence waits each shock time; the last one takes the float residue of the sequence's sum, which can be a positive time far below a millisecond. The legacy timer slept whole milliseconds, so Groovy slept 0 ms there; TeaseScript refuses such a wait late in a scene (TSR050, found by explorer V2 at HitOrZap.tease:424). Wait the shock time in whole milliseconds.",
       "diff": "shock-milliseconds.diff"
+    },
+    {
+      "id": "extra-punishment-choice",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the extra punishment after a missed round is applied by the position of the chosen option, as if all four (more rounds, pain level, shock time, time tolerance) were offered. When one is left out, such as more rounds after the suggested number, each choice changes the setting one place further: \"Time Tolerance -0.1 seconds\" lowers the shock time instead and leaves the tolerance, so it stays on offer, and the shock time goes below 0. A missed round then waits a negative shock time, which the legacy timer refused too (explorer V2: TSR050 \"Wait duration must not be negative\" at HitOrZap.tease:426). Apply the chosen punishment by its name, as the rewards do.",
+      "diff": "extra-punishment-choice.diff"
     }
   ]
 }
