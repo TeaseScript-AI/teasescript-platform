@@ -17,15 +17,19 @@ export type DiagnosticOwner =
   | "checkpoint";
 
 /**
- * A code that more than one owner reports. It is one problem when each owner finds a part of one rule and no source
- * gets two texts for it, and two problems when the owners report different mistakes under one code, which each need a
- * code of their own (`IMPLEMENTATION-AND-REVIEW.md`, "One home for each language rule").
+ * A code that more than one owner reports: one problem found in more than one place, when the owners report the same
+ * rule, which is allowed only when they report it with the same text, or two problems, when they report different
+ * mistakes under one code, which each need a code of their own (`IMPLEMENTATION-AND-REVIEW.md`, "One home for each
+ * language rule").
  */
-export interface SharedDiagnosticCode {
-  readonly problems: "one" | "two";
-  /** What each owner reports, in the order of the owners. */
-  readonly parts: readonly string[];
-}
+export type SharedDiagnosticCode =
+  | {
+      readonly problems: "one";
+      readonly texts: "same" | "different";
+      /** What each owner reports, in the order of the owners. */
+      readonly parts: readonly string[];
+    }
+  | { readonly problems: "two"; readonly parts: readonly string[] };
 
 /** What the registry records for one code. */
 export interface DiagnosticCodeInfo {
@@ -157,6 +161,7 @@ export const DIAGNOSTIC_CODES = {
     ...entry(["name pass", "type checker"], "error", "Duplicate property or key", DOCS.values),
     shared: {
       problems: "one",
+      texts: "different",
       parts: [
         "a property name that a speaker declaration or an object literal gives twice",
         "a key that a dict literal gives twice, also through a computed key whose text is known",
@@ -189,6 +194,7 @@ export const DIAGNOSTIC_CODES = {
     ),
     shared: {
       problems: "one",
+      texts: "different",
       parts: [
         "calls of the script's functions and of built-ins by name, such as `load` without " +
           "`default:`, `askImage`, `showPopup`, `openUrl`, `exportText`, and `takePhoto`",
@@ -200,6 +206,7 @@ export const DIAGNOSTIC_CODES = {
     ...entry(["name pass", "type checker"], "error", "Unknown named argument", DOCS.values),
     shared: {
       problems: "one",
+      texts: "different",
       parts: [
         "calls of the script's functions and of built-ins by name",
         "method calls and `script(...)`",
@@ -215,6 +222,7 @@ export const DIAGNOSTIC_CODES = {
     ...entry(["name pass", "type checker"], "error", "Invalid choice", DOCS.values),
     shared: {
       problems: "one",
+      texts: "different",
       parts: [
         "a choice without options, which the parser already rejects with `TSP030`, so no " +
           "source reaches it",
@@ -225,7 +233,12 @@ export const DIAGNOSTIC_CODES = {
   },
   TSV032: entry(["name pass"], "error", "Blocking command in a parameter default", DOCS.values),
   TSV033: {
-    ...entry(["name pass", "type checker"], "error", "Invalid timer", DOCS.values),
+    ...entry(
+      ["name pass", "type checker"],
+      "error",
+      "Invalid timer or handler return",
+      DOCS.values,
+    ),
     shared: {
       problems: "two",
       parts: [
@@ -263,6 +276,7 @@ export const DIAGNOSTIC_CODES = {
     ),
     shared: {
       problems: "one",
+      texts: "different",
       parts: [
         "every operation that its operands do not support, among them a speaker property that " +
           "no declaration or assignment gives a speaker the read may reach",
@@ -290,6 +304,7 @@ export const DIAGNOSTIC_CODES = {
     ...entry(["name pass", "type checker"], "error", "Invalid start value", DOCS.values),
     shared: {
       problems: "one",
+      texts: "different",
       parts: [
         "a start value that says, asks, waits, plays media, calls a function, or uses a local " +
           "or a later global",

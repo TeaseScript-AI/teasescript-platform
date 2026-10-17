@@ -145,7 +145,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV028` | Function or built-in used as a value | error | name pass |
 | `TSV029` | Invalid choice | error | name pass, type checker |
 | `TSV032` | Blocking command in a parameter default | error | name pass |
-| `TSV033` | Invalid timer | error | name pass, type checker |
+| `TSV033` | Invalid timer or handler return | error | name pass, type checker |
 | `TSV034` | Invalid timer handle member | error | type checker |
 | `TSV035` | Duration combined with a number | error | type checker |
 | `TSV036` | Invalid media | error | name pass, type checker |
@@ -204,22 +204,23 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 
 ## Codes with more than one owner
 
-A shared code is one problem when each owner finds a part of one rule and no source gets two texts for it. It is two
-problems when the owners report different mistakes under one code, which each need a code of their own.
+A shared code is one problem found in more than one place when the owners report the same rule, which is allowed only
+when they report it with the same text. It is two problems when the owners report different mistakes under one code,
+which each need a code of their own.
 
 - `TSV004` (two problems)
   - name pass: an assignment to `debugMode`, `account`, a speaker, or a global that the host gives, and a change of the account
   - type checker: a change of a copy that no variable holds, such as a property of a call's result, which is lost
-- `TSV007` (one problem)
+- `TSV007` (one problem, different texts)
   - name pass: a property name that a speaker declaration or an object literal gives twice
   - type checker: a key that a dict literal gives twice, also through a computed key whose text is known
-- `TSV020` (one problem)
+- `TSV020` (one problem, different texts)
   - name pass: calls of the script's functions and of built-ins by name, such as `load` without `default:`, `askImage`, `showPopup`, `openUrl`, `exportText`, and `takePhoto`
   - type checker: method calls, `script(...)`, and the functions of the current date and time
-- `TSV022` (one problem)
+- `TSV022` (one problem, different texts)
   - name pass: calls of the script's functions and of built-ins by name
   - type checker: method calls and `script(...)`
-- `TSV029` (one problem)
+- `TSV029` (one problem, different texts)
   - name pass: a choice without options, which the parser already rejects with `TSP030`, so no source reaches it
   - type checker: option lists that are known to be empty, and the values, objects, number, and backgrounds of the options
 - `TSV033` (two problems)
@@ -228,10 +229,10 @@ problems when the owners report different mistakes under one code, which each ne
 - `TSV036` (two problems)
   - name pass: blocking media with a handle, and `finish` twice in a media block
   - type checker: a play command's or `showImage`'s file, `volume:`, `repeat:`, `startAt:`, `endAt:`, and cue positions, and `finish` with a repeat that never ends
-- `TSV043` (one problem)
+- `TSV043` (one problem, different texts)
   - type checker: every operation that its operands do not support, among them a speaker property that no declaration or assignment gives a speaker the read may reach
   - plan analysis: a speaker property that a way to the read misses (V30 §37)
-- `TSV055` (one problem)
+- `TSV055` (one problem, different texts)
   - name pass: a start value that says, asks, waits, plays media, calls a function, or uses a local or a later global
   - type checker: a start value that selects at random, with `.random` or a list in `${...}`, which needs the value's type
 - `TSC001` (two problems)
