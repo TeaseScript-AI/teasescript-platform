@@ -109,6 +109,27 @@ test("the facts give every declaration the type it keeps at the end of the check
   assert.ok(facts.bindings.every((fact) => fact.site.file === 0));
 });
 
+test("the facts give each read the declaration it resolved to", () => {
+  const source = ["let x = 1", "function f(a) { return a + x }", "say f(x)", "exit"].join("\n");
+  const facts = analyze({ "main.tease": source }).facts();
+  const site = (text: string): number => source.indexOf(text);
+  const declaration = (name: string): { readonly start: number } | null =>
+    binding(facts, name).site;
+  // Every read names its declaration: a let, a parameter, and a script variable read inside a function body.
+  assert.deepEqual(
+    facts.reads.map((read) => ({
+      name: read.name,
+      start: read.site.start,
+      binding: read.binding?.start ?? null,
+    })),
+    [
+      { name: "a", start: site("a + x"), binding: declaration("a")!.start },
+      { name: "x", start: site("a + x") + "a + ".length, binding: declaration("x")!.start },
+      { name: "x", start: site("f(x)") + "f(".length, binding: declaration("x")!.start },
+    ],
+  );
+});
+
 test("the facts place each site in its file and list storage keys with every load's view", () => {
   const facts = analyze({
     "main.tease": 'let a = load("level", default: 1)\ngoto "other.tease"',

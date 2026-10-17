@@ -1,5 +1,4 @@
-import type { Program } from "../ast.js";
-import { someNode } from "../project-globals.js";
+import type { Identifier, Program } from "../ast.js";
 import type { SourceSpan } from "../source.js";
 import type { Declaration } from "../static-types.js";
 import { typeKey, type StorageKeyType } from "../storage-types.js";
@@ -26,16 +25,31 @@ export function legacyFacts(
   const bindings: SolvedTypeFacts["bindings"][number][] = [];
   const values: SolvedTypeFacts["values"][number][] = [];
   const functions: SolvedTypeFacts["functions"][number][] = [];
+  const reads: {
+    readonly site: FactSite;
+    readonly name: string;
+    readonly declaration: Declaration | undefined;
+  }[] = [];
+  const declarationSites = new Map<Declaration, FactSite>();
   const spanFiles = new Map<SourceSpan, number>();
   programs.forEach((program, file) => {
-    someNode(program, (found) => {
+    eachNode(program, (found) => {
       // EVIDENCE: invariant: `someNode` visits the nodes of a parser-owned AST, each with a kind and a span.
       const node = found as FactNode;
       if (typeof node.kind !== "string" || node.span === undefined) return false;
       spanFiles.set(node.span, file);
       const site = factSite(file, node.span);
       // EVIDENCE: invariant: the maps are keyed by nodes of these programs; a node of another kind is not in them.
-      const variable = checker.bindings.get(node as Declaration);
+      const declaration = node as Declaration;
+      const variable = checker.bindings.get(declaration);
+      if (variable !== undefined) declarationSites.set(declaration, site);
+      if (node.kind === "identifier") {
+        // EVIDENCE: invariant: the reads are keyed by the identifier nodes of these programs.
+        const identifier = node as Identifier;
+        const read = checker.readDeclaration(identifier);
+        if (read !== undefined)
+          reads.push({ site, name: read.name, declaration: read.declaration });
+      }
       if (variable !== undefined)
         bindings.push({
           site,
@@ -60,7 +74,6 @@ export function legacyFacts(
           accepted: fn.accepted?.map((parameter) => typeKey(parameter.type, true, true)) ?? null,
           result: fn.result === null ? null : typeKey(fn.result, true, true),
         });
-      return false;
     });
   });
   const speakers = [...checker.speakerProperties]
@@ -90,8 +103,16 @@ export function legacyFacts(
       loads: (loadsByKey.get(key) ?? []).sort((left, right) => compareSites(left.site, right.site)),
     }))
     .sort((left, right) => compareText(left.key, right.key));
+  // A read may stand before the declaration it resolved to, in another file or in a function body checked later, so
+  // the declarations' sites are looked up once every program is walked.
+  const resolvedReads = reads.map(({ site, name, declaration }) => ({
+    site,
+    name,
+    binding: declaration === undefined ? null : (declarationSites.get(declaration) ?? null),
+  }));
   return {
     bindings: bindings.sort((left, right) => compareSites(left.site, right.site)),
+    reads: resolvedReads.sort((left, right) => compareSites(left.site, right.site)),
     values: values.sort(
       (left, right) => compareSites(left.site, right.site) || compareText(left.kind, right.kind),
     ),
@@ -112,4 +133,24 @@ function compareSites(left: FactSite, right: FactSite): number {
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
+ * Calls `visit` for every node of a parser-owned AST: every object with a kind, also inside objects without one, such
+ * as the named arguments of a form, which hold expressions of their own. Spans hold no nodes.
+ */
+function eachNode(root: Program, visit: (node: FactNode) => void): void {
+  const work: unknown[] = [root];
+  while (work.length > 0) {
+    const value = work.pop();
+    if (value === null || typeof value !== "object") continue;
+    if (Array.isArray(value)) {
+      for (const item of value) work.push(item);
+      continue;
+    }
+    // EVIDENCE: invariant: an object of a parser-owned AST is a node, a span, a position, or a holder of nodes.
+    const node = value as FactNode & Record<string, unknown>;
+    if (typeof node.kind === "string") visit(node);
+    for (const [key, nested] of Object.entries(node)) if (key !== "span") work.push(nested);
+  }
 }
