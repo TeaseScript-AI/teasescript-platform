@@ -26,7 +26,7 @@ import {
   instructionSourcePath,
   mainSourceSpan,
 } from "../plan/model.js";
-import { addTag, readTagText, type Tag } from "../tags.js";
+import { addTag, conflictingTagMessage, notATagMessage, readTagText, type Tag } from "../tags.js";
 import {
   messageMarkupVisibleText,
   parseMessageMarkup,
@@ -907,7 +907,10 @@ function executePlannedInstruction(
           instruction.span,
         );
       }
-      const value = evaluator.evaluateStartValue(instruction.value);
+      const value = evaluator.evaluateStartValue(
+        { kind: "global", name: instruction.name },
+        instruction.value,
+      );
       if (instruction.typeCheck !== undefined)
         assertValueType(value, instruction.typeCheck, instruction.value.span);
       snapshot.globals.push({
@@ -951,7 +954,10 @@ function executePlannedInstruction(
             );
           }
           const propertyValue = cloneCapturedSerializableValue(
-            stagedEvaluator.evaluateStartValue(property.value),
+            stagedEvaluator.evaluateStartValue(
+              { kind: "speaker", name: instruction.name },
+              property.value,
+            ),
           );
           if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
             throw fault("TSR050", notSkippableFlag(propertyValue), property.span);
@@ -4132,21 +4138,17 @@ function captureTags(value: SerializableRuntimeValue, span: SourceSpan): readonl
   }
   const tags = new Map<string, Tag>();
   for (const item of value.items) {
-    const tag = typeof item === "string" ? readTagText(item) : null;
-    if (tag === null) {
+    if (typeof item !== "string") {
       throw fault(
         "TSR083",
-        `takePhoto(tags:) takes tags such as "bedroom" or "punishment: 4", but it holds ${typeof item === "string" ? `'${item}'` : describeRuntimeValue(item)}.`,
+        `takePhoto(tags:) takes tags such as "bedroom" or "punishment: 4", but it holds ${describeRuntimeValue(item)}.`,
         span,
       );
     }
-    if (addTag(tags, tag) === "conflict") {
-      throw fault(
-        "TSR083",
-        `takePhoto(tags:) gives the tag '${tag.name}' two different numbers. Keep one number for each tag.`,
-        span,
-      );
-    }
+    const tag = readTagText(item);
+    if (tag === null) throw fault("TSR083", notATagMessage(item), span);
+    if (addTag(tags, tag) === "conflict")
+      throw fault("TSR083", conflictingTagMessage(tags.get(tag.name)!, tag), span);
   }
   return [...tags.values()]
     .sort((left, right) => (left.name < right.name ? -1 : 1))

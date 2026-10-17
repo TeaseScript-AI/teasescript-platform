@@ -223,7 +223,7 @@ test("a range, handle member, or media position problem has one code and one tex
         [`${CLOCK}let alias = clock\nalias.pause(1)`, "pause"],
       ],
       "TSV034",
-      "Timer pause() takes no arguments.",
+      "pause() takes no arguments, received 1.",
       // On any receiver, 'pause(1)' is TSV020.
       null,
     ],

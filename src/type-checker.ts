@@ -96,6 +96,7 @@ import {
   CONFLICTING_TAG_CODE,
   conflictingTagMessage,
   normalizeTagName,
+  notATagMessage,
   readTagText,
   type Tag,
 } from "./tags.js";
@@ -157,7 +158,6 @@ import {
   cameraPlacementMessage,
   FINISH_NEVER_RUNS_MESSAGE,
   fileReferenceRule,
-  handleArgumentsMessage,
   handleMemberMessage,
   hasArgumentlessMethods,
   isCameraPlacement,
@@ -241,10 +241,12 @@ import {
   type StaticScalar,
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
-import { startValueMessage } from "./start-value-rules.js";
+import { startValueMessage, startValueOwner } from "./start-value-rules.js";
 import {
-  argumentCountMessage,
-  missingDefaultMessage,
+  argumentShapeProblem,
+  dictArgumentsProblem,
+  NO_ARGUMENTS,
+  scriptArgumentCountMessage,
   temporalArgumentsMessage,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
@@ -2328,7 +2330,7 @@ class TypeChecker {
       )
         this.#report(
           typeCode.randomStartValue,
-          startValueMessage(owner, { kind: "random" }),
+          startValueMessage(startValueOwner(owner), { kind: "random" }),
           expression.span,
         );
       if (expression.kind === "stringLiteral")
@@ -2336,7 +2338,7 @@ class TypeChecker {
           if (part.kind === "stringInterpolation" && this.#mayBe(part.expression, isList))
             this.#report(
               typeCode.randomStartValue,
-              startValueMessage(owner, { kind: "shownList" }),
+              startValueMessage(startValueOwner(owner), { kind: "shownList" }),
               part.expression.span,
             );
       for (const child of expressionChildren(expression)) work.push(child);
@@ -5636,11 +5638,7 @@ class TypeChecker {
         .join("");
       const tag = readTagText(text);
       if (tag === null) {
-        this.#report(
-          typeCode.invalidCaptureTag,
-          `'${text}' is not a tag: use lowercase letters a–z, digits, and hyphens, with an optional number, such as "punishment: 4".`,
-          element.span,
-        );
+        this.#report(typeCode.invalidCaptureTag, notATagMessage(text), element.span);
       } else if (addTag(seen, tag) === "conflict") {
         this.#report(
           typeCode.conflictingTag,
@@ -6984,12 +6982,19 @@ class TypeChecker {
     if (passing.length === all.length) {
       const handle = resolved(all[0]!).kind;
       const handles = all.every((member) => hasArgumentlessMethods(resolved(member).kind));
-      if (handles && hasArgumentlessMethods(handle) && expression.arguments.length > 0)
-        this.#report(
-          handleMemberCode(handle),
-          handleArgumentsMessage(handle, method),
-          callee.property.span,
+      if (handles && hasArgumentlessMethods(handle)) {
+        const named = expression.arguments.flatMap((argument) =>
+          argument.kind === "namedArgument" ? [argument.name.name] : [],
         );
+        const problem = argumentShapeProblem(
+          method,
+          NO_ARGUMENTS,
+          expression.arguments.length - named.length,
+          named,
+        );
+        if (problem !== undefined)
+          this.#report(handleMemberCode(handle), problem.message, callee.property.span);
+      }
       const textual = TEXT_MEMBERS.has(method) || method === "join";
       const collection = all.some((member) => {
         const kept = resolved(member);
@@ -7641,12 +7646,7 @@ class TypeChecker {
         if (positional !== 1)
           this.#report(
             typeCode.argumentCount,
-            argumentCountMessage(
-              "script",
-              "1 argument (path)",
-              positional,
-              `Name a label with 'label:', as in 'script("rooms/hall.tease", label: "start")'.`,
-            ),
+            scriptArgumentCountMessage(positional),
             expression.span,
           );
         for (const [index, item] of expression.arguments.entries()) {
@@ -7840,40 +7840,20 @@ class TypeChecker {
    * `get(key, default: value)` a key and a `default:`. Returns whether they have that form.
    */
   #checkDictArguments(expression: CallExpression, method: string): boolean {
-    const positional = expression.arguments.filter(
-      (argument) => argument.kind === "positionalArgument",
-    );
     const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
-    const unknown = named.find((argument) => method !== "get" || argument.name.name !== "default");
-    if (unknown !== undefined) {
+    const problem = dictArgumentsProblem(
+      method,
+      expression.arguments.length - named.length,
+      named.map((argument) => argument.name.name),
+    );
+    if (problem === undefined) return true;
+    if (problem.kind === "unknownNamedArgument")
       this.#report(
         typeCode.unknownNamedArgument,
-        unknownNamedArgumentMessage(method, unknown.name.name, method === "get" ? ["default"] : []),
-        unknown.name.span,
+        problem.message,
+        named.find((argument) => argument.name.name === problem.name)!.name.span,
       );
-      return false;
-    }
-    const keys = method === "clear" ? 0 : 1;
-    if (positional.length === keys && (method !== "get" || named.length === 1)) return true;
-    this.#report(
-      typeCode.argumentCount,
-      method === "get" && named.length === 0 && positional.length === 1
-        ? missingDefaultMessage(
-            "get(key, default: value)",
-            "for a missing key",
-            "Read a key that must exist as 'dict[key]'.",
-          )
-        : argumentCountMessage(
-            method,
-            method === "get"
-              ? "1 argument (key) and a 'default:'"
-              : method === "clear"
-                ? "no arguments"
-                : "1 argument (key)",
-            positional.length,
-          ),
-      expression.span,
-    );
+    else this.#report(typeCode.argumentCount, problem.message, expression.span);
     return false;
   }
 

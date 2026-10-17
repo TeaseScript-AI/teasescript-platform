@@ -2,15 +2,24 @@ import type { GlobalStatement, SpeakerDeclaration } from "./ast.js";
 
 /**
  * What a start value uses that it may not, with one message whichever pass finds it (TSV055): the name pass finds
- * effects, calls, and names without a value yet, the type checker random selection, which needs the value's type. A
- * start value is set up at the start of the session, before the story runs (ADR 0022 §6).
+ * effects, calls, and names without a value yet, the type checker random selection, which needs the value's type. The
+ * runtime gives the same message where a start value of a type that the compiler does not know selects at random
+ * (TSR067). A start value is set up at the start of the session, before the story runs (ADR 0022 §6).
  */
 export type StartValueUse =
   /** A command that says, asks, waits, or plays media. */
   | { readonly kind: "effect" }
   | { readonly kind: "call" }
-  /** A local variable `name`; `assigned` is how the global's value is written, for the fix. */
-  | { readonly kind: "local"; readonly name: string; readonly assigned: string }
+  /**
+   * A local variable `name`; `assigned` is how the global's value is written, for the fix, and `defaulted` whether the
+   * start value is the global's `default:`, as in `global g = value, default: 0`.
+   */
+  | {
+      readonly kind: "local";
+      readonly name: string;
+      readonly assigned: string;
+      readonly defaulted: boolean;
+    }
   /** A global or speaker `name` that is set up after this one. */
   | { readonly kind: "later"; readonly name: string }
   /** The global itself. */
@@ -20,13 +29,23 @@ export type StartValueUse =
   /** A list shown in `${...}`, which shows a random element. */
   | { readonly kind: "shownList" };
 
-/** The message for a start value of `owner`, a global or the properties of a speaker, that uses `use` (TSV055). */
-export function startValueMessage(
-  owner: GlobalStatement | SpeakerDeclaration,
-  use: StartValueUse,
-): string {
-  const name = owner.name.name;
-  const speaker = owner.kind === "speakerDeclaration";
+/** The global or the speaker whose start value a message names. */
+export interface StartValueOwner {
+  readonly kind: "global" | "speaker";
+  readonly name: string;
+}
+
+export function startValueOwner(owner: GlobalStatement | SpeakerDeclaration): StartValueOwner {
+  return {
+    kind: owner.kind === "speakerDeclaration" ? "speaker" : "global",
+    name: owner.name.name,
+  };
+}
+
+/** The message for a start value of `owner`, a global or the properties of a speaker, that uses `use`. */
+export function startValueMessage(owner: StartValueOwner, use: StartValueUse): string {
+  const name = owner.name;
+  const speaker = owner.kind === "speaker";
   const subject = speaker
     ? `The properties of speaker '${name}'`
     : `The start value of global '${name}'`;
@@ -48,7 +67,7 @@ export function startValueMessage(
     case "local":
       if (speaker)
         return `${subject} cannot use '${use.name}': a speaker is set up at the start of the session, before '${use.name}' has a value. ${plain}`;
-      if (owner.assignment !== null)
+      if (use.defaulted)
         return `The default of global '${name}' cannot use '${use.name}': it is the value '${name}' has from the start of the session, before '${use.name}' has one. Use a literal or a global declared before it.`;
       return `Global '${name}' needs a value from the start of the session, before the story runs, so it cannot start with '${use.name}'. Add a start value, as in 'global ${name} = ${use.assigned}, default: 0', or write 'global ${name} = 0' and later '${name} = ${use.assigned}'.`;
   }

@@ -368,6 +368,17 @@ test("an object literal reports a code with the severity that the registry gives
       );
 });
 
+test("a shared code is one problem with one text", () => {
+  // The registry has no form for two problems under one code, or for one problem with different texts.
+  const forms: SharedDiagnosticCode[] = [
+    // @ts-expect-error -- two problems need a code each
+    { problems: "two", parts: [] },
+    // @ts-expect-error -- the owners of a code report it with one text
+    { texts: "different", parts: [] },
+  ];
+  assert.equal(forms.length, 2);
+});
+
 test("a code with several owners says how they share it", () => {
   for (const [code, info] of Object.entries(registry)) {
     assert.equal(new Set(info.owners).size, info.owners.length, `${code} names an owner twice.`);
@@ -436,11 +447,6 @@ test("each code's document section exists and explains the code", () => {
   }
 });
 
-function sharedLabel(shared: SharedDiagnosticCode): string {
-  if (shared.problems === "two") return "two problems";
-  return shared.texts === "same" ? "one problem, same text" : "one problem, different texts";
-}
-
 test("DIAGNOSTICS.md lists its codes as the registry does", () => {
   const document = "docs/DIAGNOSTICS.md";
   const text = readFileSync(resolve(root, document), "utf8");
@@ -466,7 +472,7 @@ test("DIAGNOSTICS.md lists its codes as the registry does", () => {
     info.shared === undefined
       ? []
       : [
-          `- \`${code}\` (${sharedLabel(info.shared)})`,
+          `- \`${code}\``,
           ...info.owners.map((owner, index) => `  - ${owner}: ${info.shared!.parts[index]!}`),
         ],
   );

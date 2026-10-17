@@ -113,8 +113,6 @@ export interface AngleFunction {
   /** What every argument is: an angle, or a number for the functions that give an angle. */
   readonly takes: "angle" | "number";
   readonly returns: "angle" | "number";
-  /** A call that shows how to use the function. */
-  readonly example: string;
   /** The result of arguments of the kinds the function takes, or why there is none. */
   readonly apply: (
     values: readonly (number | StoredAngle)[],
@@ -133,18 +131,16 @@ function degreesOf(value: number | StoredAngle): number {
   return typeof value === "number" ? value : value.degrees;
 }
 
-function trigonometric(name: string, compute: (degrees: number) => number): AngleFunction {
+function trigonometric(compute: (degrees: number) => number): AngleFunction {
   return {
     parameters: ["angle"],
     takes: "angle",
     returns: "number",
-    example: `${name}(30 deg)`,
     apply: ([angle]) => number(compute(degreesOf(angle!))),
   };
 }
 
 function inverse(
-  name: string,
   parameters: readonly string[],
   compute: (...values: number[]) => number | undefined,
   failure: (values: readonly number[]) => string,
@@ -153,7 +149,6 @@ function inverse(
     parameters,
     takes: "number",
     returns: "angle",
-    example: `${name}(${parameters.length === 1 ? "0.5" : "1, 1"})`,
     apply: (values) => {
       const numbers = values.map(degreesOf);
       const degrees = compute(...numbers);
@@ -164,15 +159,14 @@ function inverse(
 
 /** The angle functions by name. */
 export const ANGLE_FUNCTIONS: ReadonlyMap<string, AngleFunction> = new Map([
-  ["sin", trigonometric("sin", sinDegrees)],
-  ["cos", trigonometric("cos", cosDegrees)],
+  ["sin", trigonometric(sinDegrees)],
+  ["cos", trigonometric(cosDegrees)],
   [
     "tan",
     {
       parameters: ["angle"],
       takes: "angle",
       returns: "number",
-      example: "tan(45 deg)",
       apply: ([value]) => {
         const angle = angleValue(degreesOf(value!));
         const result = tanDegrees(angle.degrees);
@@ -187,7 +181,6 @@ export const ANGLE_FUNCTIONS: ReadonlyMap<string, AngleFunction> = new Map([
   [
     "asin",
     inverse(
-      "asin",
       ["value"],
       asinDegrees,
       ([value]) => `asin(${value}) has no result: only a number from -1 through 1 has an arcsine.`,
@@ -196,22 +189,20 @@ export const ANGLE_FUNCTIONS: ReadonlyMap<string, AngleFunction> = new Map([
   [
     "acos",
     inverse(
-      "acos",
       ["value"],
       acosDegrees,
       ([value]) =>
         `acos(${value}) has no result: only a number from -1 through 1 has an arccosine.`,
     ),
   ],
-  ["atan", inverse("atan", ["value"], atanDegrees, () => "")],
-  ["atan2", inverse("atan2", ["y", "x"], atan2Degrees, () => "")],
+  ["atan", inverse(["value"], atanDegrees, () => "")],
+  ["atan2", inverse(["y", "x"], atan2Degrees, () => "")],
   [
     "toDeg",
     {
       parameters: ["angle"],
       takes: "angle",
       returns: "number",
-      example: "toDeg(pi rad)",
       apply: ([angle]) => number(degreesOf(angle!)),
     },
   ],
@@ -221,7 +212,6 @@ export const ANGLE_FUNCTIONS: ReadonlyMap<string, AngleFunction> = new Map([
       parameters: ["angle"],
       takes: "angle",
       returns: "number",
-      example: "toRad(180 deg)",
       apply: ([angle]) => number(degreesToRadians(degreesOf(angle!))),
     },
   ],

@@ -15,8 +15,6 @@ export interface NumericFunction {
   readonly parameters: readonly string[];
   /** The named parameters the function may also take, each a number. */
   readonly named?: readonly string[];
-  /** A call that shows how to use the function. */
-  readonly example: string;
   /** The result type, from what the compiler knows about the arguments. */
   readonly result: (
     inputs: readonly NumericArgument[],
@@ -63,7 +61,6 @@ export function percentageFailure(name: string, value: number): string | undefin
 function rounding(name: string): NumericFunction {
   return {
     parameters: ["value"],
-    example: `${name}(2.5)`,
     result: () => "integer",
     apply: ([value]) => rounded(name, value!),
   };
@@ -75,13 +72,11 @@ function rounding(name: string): NumericFunction {
  */
 function real(
   parameters: readonly string[],
-  example: string,
   compute: (...values: number[]) => number | undefined,
   failure: (values: readonly number[]) => string,
 ): NumericFunction {
   return {
     parameters,
-    example,
     result: () => "number",
     apply: (values) => {
       const result = compute(...values);
@@ -106,7 +101,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     {
       parameters: ["value"],
       named: ["decimals"],
-      example: "round(2.5)",
       result: (_, { decimals }) => (decimals === undefined ? "integer" : "number"),
       apply: ([value], { decimals }) =>
         decimals === undefined ? rounded("round", value!) : roundedToDecimals(value!, decimals),
@@ -118,7 +112,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "abs",
     {
       parameters: ["value"],
-      example: "abs(-2)",
       result: ([value]) => value!.type,
       apply: ([value]) => Math.abs(value!),
     },
@@ -127,7 +120,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "sign",
     {
       parameters: ["value"],
-      example: "sign(-2)",
       result: () => "integer",
       apply: ([value]) => withoutNegativeZero(Math.sign(value!)),
     },
@@ -136,7 +128,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "sqrt",
     {
       parameters: ["value"],
-      example: "sqrt(2)",
       result: () => "number",
       // IEEE 754 rounds a square root correctly, so every JavaScript engine gives the same result.
       apply: ([value]) =>
@@ -149,7 +140,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "pow",
     {
       parameters: ["base", "exponent"],
-      example: "pow(2, 3)",
       // A whole number to a whole power of at least 0 is whole.
       result: ([base, exponent]) =>
         exponent!.known !== undefined && Number.isInteger(exponent!.known) && exponent!.known >= 0
@@ -162,7 +152,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "mod",
     {
       parameters: ["value", "divisor"],
-      example: "mod(-1, 3)",
       result: together,
       apply: ([value, divisor]) => modulo(value!, divisor!),
     },
@@ -171,7 +160,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "clamp",
     {
       parameters: ["value", "min", "max"],
-      example: "clamp(level, 1, 10)",
       result: together,
       apply: ([value, min, max]) =>
         min! > max!
@@ -186,18 +174,16 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "exp",
     real(
       ["value"],
-      "exp(1)",
       exp,
       ([value]) => `exp(${value}) gives a number too large to represent. Use smaller values.`,
     ),
   ],
-  ["ln", real(["value"], "ln(10)", ln, LOGARITHM("ln"))],
-  ["log10", real(["value"], "log10(1000)", log10, LOGARITHM("log10"))],
+  ["ln", real(["value"], ln, LOGARITHM("ln"))],
+  ["log10", real(["value"], log10, LOGARITHM("log10"))],
   [
     "randomNormal",
     {
       parameters: ["mean", "spread"],
-      example: "randomNormal(20, 5)",
       result: () => "number",
       random: ([, spread]) =>
         spread! < 0
@@ -214,7 +200,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "randomBeta",
     {
       parameters: ["alpha", "beta"],
-      example: "randomBeta(2, 5)",
       result: () => "number",
       random: ([alpha, beta]) =>
         alpha! > 0 && beta! > 0
@@ -231,7 +216,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "randomPert",
     {
       parameters: ["min", "mostLikely", "max"],
-      example: "randomPert(5, 10, 20)",
       result: () => "number",
       random: ([min, mostLikely, max]) =>
         min! <= mostLikely! && mostLikely! <= max!
