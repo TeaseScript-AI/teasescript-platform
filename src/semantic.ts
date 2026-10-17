@@ -146,7 +146,6 @@ const semanticCode = {
   laterParameterDefault: "TSV025",
   functionAssignment: "TSV026",
   functionValue: "TSV028",
-  invalidInteractionChoice: "TSV029",
   unsupportedBlockingContext: "TSV032",
   invalidTimer: "TSV033",
   invalidLabel: "TSV051",
@@ -1906,15 +1905,8 @@ class SemanticValidator {
     scope: SemanticScope,
     contextualSpeaker: string | null,
   ): CompileTask<void> {
-    if (expression.options.length === 0) {
-      this.#report(
-        semanticCode.invalidInteractionChoice,
-        "A choice requires at least one option.",
-        expression.span,
-      );
-      return;
-    }
-    // The type checker checks the options: what each button shows and returns, and how many buttons a choice has.
+    // The parser rejects a choice without options (TSP030). The type checker checks the options: what each button
+    // shows and returns, and how many buttons a choice has.
     for (const option of expression.options)
       yield* compileChild(
         this.#validateExpressionTask(option.expression, scope, contextualSpeaker),

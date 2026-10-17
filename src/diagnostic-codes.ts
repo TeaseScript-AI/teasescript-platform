@@ -226,19 +226,7 @@ export const DIAGNOSTIC_CODES = {
   TSV025: entry(["name pass"], "error", "Default that uses a later parameter", DOCS.values),
   TSV026: entry(["name pass"], "error", "Assignment to a function", DOCS.values),
   TSV028: entry(["name pass"], "error", "Function or built-in used as a value", DOCS.values),
-  TSV029: {
-    ...entry(["name pass", "type checker"], "error", "Invalid choice", DOCS.values),
-    shared: {
-      problems: "one",
-      texts: "different",
-      parts: [
-        "a choice without options, which the parser already rejects with `TSP030`, so no " +
-          "source reaches it",
-        "option lists that are known to be empty, and the values, objects, number, and " +
-          "backgrounds of the options",
-      ],
-    },
-  },
+  TSV029: entry(["type checker"], "error", "Invalid choice", DOCS.values),
   TSV032: entry(["name pass"], "error", "Blocking command in a parameter default", DOCS.values),
   TSV033: entry(["name pass"], "error", "Invalid timer or handler return", DOCS.values),
   TSV034: entry(["type checker"], "error", "Invalid timer handle member", DOCS.values),

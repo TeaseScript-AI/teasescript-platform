@@ -143,7 +143,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV025` | Default that uses a later parameter | error | name pass |
 | `TSV026` | Assignment to a function | error | name pass |
 | `TSV028` | Function or built-in used as a value | error | name pass |
-| `TSV029` | Invalid choice | error | name pass, type checker |
+| `TSV029` | Invalid choice | error | type checker |
 | `TSV032` | Blocking command in a parameter default | error | name pass |
 | `TSV033` | Invalid timer or handler return | error | name pass |
 | `TSV034` | Invalid timer handle member | error | type checker |
@@ -224,9 +224,6 @@ which each need a code of their own.
 - `TSV022` (one problem, different texts)
   - name pass: calls of the script's functions and of built-ins by name
   - type checker: method calls and `script(...)`
-- `TSV029` (one problem, different texts)
-  - name pass: a choice without options, which the parser already rejects with `TSP030`, so no source reaches it
-  - type checker: option lists that are known to be empty, and the values, objects, number, and backgrounds of the options
 - `TSV043` (one problem, different texts)
   - type checker: every operation that its operands do not support, among them a speaker property that no declaration or assignment gives a speaker the read may reach
   - plan analysis: a speaker property that a way to the read misses (V30 §37)
