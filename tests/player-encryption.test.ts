@@ -17,6 +17,7 @@ import {
   openWithTime,
   PASSWORD_ITERATIONS,
   readLock,
+  loadAge,
   loadTlock,
   type LockServices,
 } from "../player/encryption/lock.js";
@@ -82,7 +83,7 @@ function relays(beacons: readonly (typeof ROUND_1)[], options: { down?: boolean 
 }
 
 function services(fetcher: typeof fetch, nowMs: number): LockServices {
-  return { tlock: loadTlock, fetch: fetcher, nowMs: () => nowMs };
+  return { tlock: loadTlock, age: loadAge, fetch: fetcher, nowMs: () => nowMs };
 }
 
 test("the time lock's pairing code opens upstream tlock-js's ciphertext, verifies real beacons, and refuses others", () => {

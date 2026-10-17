@@ -2626,11 +2626,10 @@ export class InstructionCompiler {
       throw new TypeError(`'${call}' is not a lock call.`);
     const lazy = lazyDefaultArgument(expression);
     const written = expression.arguments.filter((argument) => argument !== lazy?.argument);
-    const operands: Record<"value" | "password" | "timeLock", ExpressionPlan | null> = {
-      value: null,
-      password: null,
-      timeLock: null,
-    };
+    const operands: Record<
+      "value" | "password" | "publicKey" | "key" | "timeLock",
+      ExpressionPlan | null
+    > = { value: null, password: null, publicKey: null, key: null, timeLock: null };
     const temporaryIds: number[] = [];
     let passwordField: LockInstruction["passwordField"] = null;
     // A password field written directly says its question where `password:` stands; the arguments before it are kept
@@ -2683,7 +2682,13 @@ export class InstructionCompiler {
           plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
         }
         const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
-        if (name !== "value" && name !== "password" && name !== "timeLock")
+        if (
+          name !== "value" &&
+          name !== "password" &&
+          name !== "publicKey" &&
+          name !== "key" &&
+          name !== "timeLock"
+        )
           throw new TypeError(`${call}(...) reached lowering with '${name}:'.`);
         operands[name] = plan;
       });
@@ -2697,6 +2702,8 @@ export class InstructionCompiler {
         value,
         password: operands.password,
         passwordField,
+        publicKey: operands.publicKey,
+        key: operands.key,
         timeLock: operands.timeLock,
         defaultTemporary,
         destinationTemporary,

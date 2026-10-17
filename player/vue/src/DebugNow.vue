@@ -69,20 +69,28 @@ function lockDetail(
   lock: {
     dialog: boolean;
     password: boolean;
+    publicKeys: number;
+    key: boolean;
     timeLockMs: number | null;
     choices: readonly string[];
   },
 ): string {
   const moment = lock.timeLockMs === null ? null : new Date(lock.timeLockMs).toISOString();
   const chosen = lock.choices.map((choice) =>
-    choice !== "timeLock"
-      ? choice
-      : lock.dialog && moment !== null
-        ? `time lock (suggests ${moment})`
-        : "time lock",
+    choice === "publicKey"
+      ? "public key"
+      : choice !== "timeLock"
+        ? choice
+        : lock.dialog && moment !== null
+          ? `time lock (suggests ${moment})`
+          : "time lock",
   );
   const given = [
     ...(lock.password ? ["password"] : []),
+    ...(lock.publicKeys === 0
+      ? []
+      : [lock.publicKeys === 1 ? "public key" : `${lock.publicKeys} public keys`]),
+    ...(lock.key ? ["key"] : []),
     ...(moment === null || lock.choices.includes("timeLock") ? [] : [`time lock ${moment}`]),
   ];
   if (kind === "unlock")

@@ -64,6 +64,8 @@ export function instructionExpressions(instruction: Instruction): readonly Expre
         instruction.value,
         instruction.password,
         instruction.passwordField?.hint ?? null,
+        instruction.publicKey,
+        instruction.key,
         instruction.timeLock,
       ].filter((operand): operand is ExpressionPlan => operand !== null);
     case "storageWrite":

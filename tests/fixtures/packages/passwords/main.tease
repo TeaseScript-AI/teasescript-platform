@@ -1,9 +1,9 @@
 let code = askPassword "Your code?", hint: "The code"
 say "Same: ${code == hashText("corner")}", instant
-let note = encryptText("Field note", password: askPassword("Choose a code"), timeLock: false)
+let note = encryptText("Field note", password: askPassword("Choose a code"), publicKey: false, timeLock: false)
 say "Locked.", instant
 let opened = decryptText(note, password: askPassword("Type it again"), default: "closed")
 say "Opened: ${opened}", instant
-let timed = encryptText("Field and time", password: askPassword("Choose another code"), timeLock: true)
+let timed = encryptText("Field and time", password: askPassword("Choose another code"), publicKey: false, timeLock: true)
 say "Locked with a time.", instant
 exit

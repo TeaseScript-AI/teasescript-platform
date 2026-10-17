@@ -2,12 +2,12 @@ let note = encryptText("A secret note")
 say "Locked.", instant
 let opened = decryptText(note, default: "closed")
 say "Opened: ${opened}", instant
-let chosen = encryptText("Only a password", password: true, timeLock: false)
+let chosen = encryptText("Only a password", password: true, publicKey: false, timeLock: false)
 say "Locked with a password.", instant
 let openedChosen = decryptText(chosen, default: "closed")
 say "Password: ${openedChosen}", instant
 let past = toAbsoluteDateTime("2023-08-23T15:09:27Z")
-let timed = encryptText("From the past", password: false, timeLock: past)
+let timed = encryptText("From the past", password: false, publicKey: false, timeLock: past)
 let byTime = decryptText(timed, default: "closed")
 say "Time lock: ${byTime}", instant
 exit

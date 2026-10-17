@@ -7,6 +7,7 @@ import { crc32, deflateSync, gunzipSync, inflateSync } from "node:zlib";
 import Color from "colorjs.io";
 import { createPlaygroundServer } from "../dist/playground/server.js";
 import { findChromium } from "./find-chromium.mjs";
+import { fromBase64, openAge, x25519Identity } from "../dist/tests/helpers/age-keyholder.js";
 
 // An image request's preview on the Stage, once it shows.
 const decodedPreview = `(() => { const image = document.querySelector('[data-stage-preview]'); return !!image && image.complete && image.naturalWidth > 0; })()`;
@@ -150,6 +151,7 @@ async function main() {
         ["password", () => passwordScenario(cdp, origin)],
         ["passwordInterruption", () => passwordInterruptionScenario(cdp, origin)],
         ["lockKept", () => lockKeptScenario(cdp, origin)],
+        ["publicKey", () => publicKeyScenario(cdp, origin, profile)],
       ];
       const named = (process.env.PLAYER_SMOKE_ONLY ?? "")
         .split(",")
@@ -172,7 +174,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, and a lock dialog kept across a reload",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
       );
     } finally {
       cdp.close();
@@ -2145,6 +2147,75 @@ async function lockKeptScenario(cdp, origin) {
     await physicalClick(cdp, start);
     await waitFor(cdp, `!!${dialog}`, 8_000, "Continue did not return to the lock dialog");
     assertEqual(await value(cdp, resume), false, "Continue returned to the block's button");
+  } finally {
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
+}
+
+/**
+ * The `public-keys` package's dialogs, coarsely: `publicKey: true` alone shows the public key option, which locks with a
+ * pasted key; the unlock dialog offers the unlock request to copy and download, and the unlock key that the matching
+ * private key gives opens it.
+ */
+async function publicKeyScenario(cdp, origin, profile) {
+  const identifier = await standInRelays(cdp);
+  const downloads = join(profile, "public-key-downloads");
+  await mkdir(downloads, { recursive: true });
+  await cdp.call("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
+  try {
+    await setViewport(cdp, 1280, 800);
+    await navigate(cdp, `${origin}/player/?package=public-keys`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+    const said = (text) =>
+      `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim().endsWith(${JSON.stringify(text)}))`;
+    const openers = `['time', 'password', 'keys'].filter((name) => !!document.querySelector('[data-lock-' + name + ']')).join()`;
+    await waitFor(cdp, `!!document.querySelector('[data-lock-dialog="lock"]')`, 8_000, "No dialog");
+    assertEqual(await value(cdp, openers), "keys", "The lock dialog's openers");
+    const owner = x25519Identity();
+    await typeInto(cdp, "[data-lock-public-keys]", owner.recipient);
+    await physicalClick(cdp, "[data-lock-submit]");
+    await waitFor(cdp, said("Locked."), 15_000, "The lock dialog did not lock with a public key");
+
+    // The unlock request, copied or downloaded, opens with the private key into the unlock key, which opens the lock.
+    const ageText = `document.querySelector('[data-unlock-age-text]')?.value ?? ''`;
+    await waitFor(
+      cdp,
+      `(${ageText}).startsWith('-----BEGIN AGE ENCRYPTED FILE-----')`,
+      8_000,
+      "No unlock request",
+    );
+    await physicalClick(cdp, "[data-unlock-age-copy]");
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-unlock-age-status]').textContent.trim() !== ''`,
+      2_000,
+      "Copy said nothing",
+    );
+    await physicalClick(cdp, "[data-unlock-age-download]");
+    const armor = await value(cdp, ageText);
+    let downloaded = null;
+    for (const deadline = Date.now() + 5_000; downloaded === null && Date.now() < deadline;) {
+      if ((await readdir(downloads)).includes("unlock-request.age"))
+        downloaded = await readFile(join(downloads, "unlock-request.age"), "utf8");
+      else await delay(100);
+    }
+    assertEqual(downloaded, armor, "Download saved another file");
+    const request = fromBase64(
+      armor
+        .split("\n")
+        .filter((line) => line !== "" && !line.startsWith("-----"))
+        .join(""),
+    );
+    const unlockKey = new TextDecoder().decode(openAge(request, owner)).trim();
+    await typeInto(cdp, "[data-unlock-key]", unlockKey);
+    await physicalClick(cdp, "[data-unlock-submit]");
+    await waitFor(
+      cdp,
+      said("Opened: For the owner of the key"),
+      15_000,
+      "The unlock key did not open it",
+    );
   } finally {
     await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
   }

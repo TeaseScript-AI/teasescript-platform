@@ -111,7 +111,7 @@ test("askPassword takes no prefill:, as a password is never suggested", () => {
 
 test("plans and states keep a password field's shape: no prefill, and no written password beside the field", () => {
   const plan = compileValidPlan(
-    'let typed = askPassword("Code?", hint: "The code")\nlet locked = encryptText("x", password: askPassword("New code"), timeLock: false)\nexit',
+    'let typed = askPassword("Code?", hint: "The code")\nlet locked = encryptText("x", password: askPassword("New code"), publicKey: false, timeLock: false)\nexit',
   );
   assert.equal(validateInstructionPlan(plan).valid, true);
   const changed = (

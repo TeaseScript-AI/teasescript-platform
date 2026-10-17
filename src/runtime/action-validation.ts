@@ -71,7 +71,8 @@ import {
 } from "./stored-files.js";
 import { validPermanentButtonAction } from "./permanent-button-validation.js";
 import { isSha256Hex } from "./sha256.js";
-import { isLockOutcome } from "./actions/lock.js";
+import { isLockNotice, isLockOutcome } from "./actions/lock.js";
+import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey } from "../public-keys.js";
 import { validTimerAction } from "./timer-validation.js";
 import { validateScriptStorageEntries } from "./script-storage.js";
 import {
@@ -293,9 +294,10 @@ function validForegroundActionKind(
  * A pending step of a lock, for its instruction's call. An encrypt call's lock dialog asks for the openers the player
  * chooses, suggesting a moment for a chosen time lock, after its password field, of `password: askPassword(...)`, asked
  * for the password; the step after them locks with the openers the call gives and what the player gave, and a step
- * without them has an opener. A decrypt call has no time lock and chooses nothing; its dialog or password field, and the
- * step after it, have no written password, its password field always asks first, and its notice belongs to the dialog.
- * The text is any text, the Base64 lock standard Base64, and a file one this session knows.
+ * without them has an opener. Only an encrypt call has public keys, each read as one, and only a decrypt call a key. A
+ * decrypt call has no time lock and chooses nothing; its dialog, and the step after it, have no written password or
+ * key, its password field always asks first, and its notice belongs to the dialog. The text is any text, the Base64
+ * lock standard Base64, and a file one this session knows.
  */
 function validLockAction(
   action: Record<string, unknown>,
@@ -323,6 +325,8 @@ function validLockAction(
       "dialogActionId",
       "notice",
       "passwordField",
+      "publicKeys",
+      "key",
       "resumes",
     ]) ||
     !nonNegativeSafeInteger(action.resumes) ||
@@ -342,17 +346,26 @@ function validLockAction(
         positiveSafeInteger(action.dialogActionId) &&
         action.dialogActionId < Number(action.actionId)
       )) ||
-    (action.notice !== null && !isOneOf(action.notice, ["wrongPassword", "unreachable"])) ||
+    (action.notice !== null && !isLockNotice(action.notice)) ||
     (action.passwordField !== null &&
       !(
         isPlainRecord(action.passwordField) &&
         hasExactKeys(action.passwordField, ["hint"]) &&
         (action.passwordField.hint === null || typeof action.passwordField.hint === "string")
       )) ||
+    !Array.isArray(action.publicKeys) ||
+    action.publicKeys.length > MAX_LOCK_PUBLIC_KEYS ||
+    !action.publicKeys.every(
+      (key: unknown) =>
+        typeof key === "string" && key === key.trim() && parsePublicKey(key) !== null,
+    ) ||
+    (action.key !== null && typeof action.key !== "string") ||
     !Array.isArray(snapshot.storedFiles)
   )
     return false;
   const encrypts = action.call === "encryptText" || action.call === "encryptFile";
+  // Only an encrypt call has public keys, and only a decrypt call a key.
+  if (encrypts ? action.key !== null : action.publicKeys.length > 0) return false;
   const asks = action.phase === "ask";
   const choices: readonly unknown[] = action.choices;
   const field = action.passwordField !== null;
@@ -373,13 +386,25 @@ function validLockAction(
     const dialog = asks || action.dialogActionId !== null;
     if (dialog !== (choices.length > 0 || field)) return false;
     if (choices.includes("password") && (action.password !== null || field)) return false;
+    if (choices.includes("publicKey") && action.publicKeys.length > 0) return false;
     if (choices.includes("timeLock") && (action.timeLockMs !== null) !== asks) return false;
-    if (!dialog && action.password === null && action.timeLockMs === null) return false;
+    if (
+      !dialog &&
+      action.password === null &&
+      action.timeLockMs === null &&
+      action.publicKeys.length === 0
+    )
+      return false;
   } else {
     if (action.timeLockMs !== null || choices.length > 0) return false;
     if (!asks && action.notice !== null) return false;
-    // The unlock dialog, and the step after it, ask for nothing written: the dialog's call wrote no password.
-    if ((asks || action.dialogActionId !== null) && action.password !== null) return false;
+    // The unlock dialog, and the step after it, ask for nothing written: the dialog's call wrote no password or key.
+    if (
+      !field &&
+      (asks || action.dialogActionId !== null) &&
+      (action.password !== null || action.key !== null)
+    )
+      return false;
     if (field && asks !== (action.dialogActionId === null)) return false;
   }
   if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
@@ -387,18 +412,24 @@ function validLockAction(
   if (owner?.kind !== "lock" || owner.call !== action.call) return false;
   if ((owner.passwordField !== null) !== field) return false;
   if (owner.password === null && action.password !== null) return false;
+  if ((owner.key !== null) !== (action.key !== null)) return false;
+  if (owner.publicKey === null && action.publicKeys.length > 0) return false;
   if (encrypts) {
     if (owner.timeLock === null && action.timeLockMs !== null && !choices.includes("timeLock"))
       return false;
     // An encrypt call that writes no opener lets the player choose each.
     return owner.password !== null || field || choices.length === LOCK_CHOICES.length;
   }
-  // Only a decrypt call without a written password asks.
-  return owner.password === null || (!asks && action.dialogActionId === null);
+  // Only a decrypt call without a written password or key asks in the dialog; its password field asks too.
+  return (
+    field ||
+    (owner.password === null && owner.key === null) ||
+    (!asks && action.dialogActionId === null)
+  );
 }
 
 /** The openers an encrypt call's lock dialog lets the player choose, in the order the dialog shows them. */
-const LOCK_CHOICES = ["timeLock", "password"] as const;
+const LOCK_CHOICES = ["timeLock", "password", "publicKey"] as const;
 
 /** Each choice once, in the order the dialog shows them. */
 function validLockChoices(value: unknown): value is readonly string[] {
@@ -1241,7 +1272,7 @@ function validateLockHandoff(
     !isLockOutcome(outcome) ||
     // A lock or an opening carries its result, a dialog that asks again may carry its notice, nothing else carries more.
     ((outcome === "locked" || outcome === "opened") !== (detail !== null) &&
-      !(outcome === "ask" && isOneOf(detail, ["wrongPassword", "unreachable"]))) ||
+      !(outcome === "ask" && isLockNotice(detail))) ||
     snapshot.foregroundAction !== null ||
     !isOneOf(snapshot.status, ["running", "failed"]) ||
     !isPlainRecord(settlement) ||

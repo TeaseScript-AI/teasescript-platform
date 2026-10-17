@@ -15,6 +15,7 @@ import {
   type TemporalContext,
   type TimeFields,
 } from "./temporal.js";
+import { MAX_LOCK_PUBLIC_KEYS } from "./public-keys.js";
 
 /** Whether text is blank, which `askText` rejects as an answer. */
 export function isBlankTextAnswer(text: string): boolean {
@@ -43,9 +44,10 @@ export type TypedAnswerKind = "text" | "number" | "integer" | TemporalAnswerKind
  * What the player is told about a wrong answer, V30 §20's default `invalidMessage`: an answer that is not of the kind a
  * typed ask or form field asks for, or typed text that matches no button of a choice (`choice`) or more than one
  * (`ambiguousChoice`); and in the Player's lock dialogs and the password fields of lock calls (V30 §13), a repeated
- * password that differs from the first (`passwordMismatch`), a password that does not open the lock (`wrongPassword`),
- * and a time lock's moment that is not in the future (`pastTimeLock`). A malformed host payload gets a protocol message
- * instead.
+ * password that differs from the first (`passwordMismatch`), a password or unlock key that does not open the lock
+ * (`wrongPassword`, `wrongKey`), a time lock's moment that is not in the future (`pastTimeLock`), and pasted public keys
+ * of which one is none (`notPublicKey`) or that are more than a lock holds (`tooManyPublicKeys`). A malformed host
+ * payload gets a protocol message instead.
  */
 const INVALID_ANSWER_MESSAGES: Readonly<
   Record<
@@ -54,7 +56,10 @@ const INVALID_ANSWER_MESSAGES: Readonly<
     | "ambiguousChoice"
     | "passwordMismatch"
     | "wrongPassword"
-    | "pastTimeLock",
+    | "wrongKey"
+    | "pastTimeLock"
+    | "notPublicKey"
+    | "tooManyPublicKeys",
     string
   >
 > = {
@@ -68,7 +73,10 @@ const INVALID_ANSWER_MESSAGES: Readonly<
   ambiguousChoice: "More than one button has this text. Use the buttons above.",
   passwordMismatch: "The passwords do not match",
   wrongPassword: "That password does not open it.",
+  wrongKey: "That key does not open it.",
   pastTimeLock: "Choose a moment in the future.",
+  notPublicKey: "That is not a public key.",
+  tooManyPublicKeys: `A lock holds at most ${MAX_LOCK_PUBLIC_KEYS} public keys.`,
 };
 
 /** The message for a wrong answer to a typed ask, a typed form field, a choice, or a lock dialog. */

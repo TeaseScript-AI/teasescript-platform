@@ -4,7 +4,7 @@ import type { LazyDefaultOperation } from "../lazy-defaults.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 99;
+export const INSTRUCTION_PLAN_VERSION = 100;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -1027,6 +1027,10 @@ export interface LockInstruction extends InstructionBase {
    * or none, after the question was said in the evaluation order of the arguments. `null` otherwise.
    */
   readonly passwordField: { readonly hint: ExpressionPlan | null } | null;
+  /** The written `publicKey:` of an encrypt call, a public key, a list of them, `true`, or `false`; `null` without one. */
+  readonly publicKey: ExpressionPlan | null;
+  /** The written `key:` of a decrypt call, the unlock key sent back for a public key opener, or `null`. */
+  readonly key: ExpressionPlan | null;
   /**
    * The written `timeLock:` of an encrypt call, a moment, `true`, or `false`; `null` without one. An encrypt call writes
    * every opener or none, and none means that the player chooses each.

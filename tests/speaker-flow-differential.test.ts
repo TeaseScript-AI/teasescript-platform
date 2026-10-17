@@ -69,14 +69,14 @@ const KNOB = (index: number): string => `let k${index} = load "k${index}", defau
 const LOCK = "bG9jaw==";
 
 /**
- * A Player that locks into {@link LOCK} and opens it with a password, written or typed in a password field, or else
- * asks in its dialog, which is cancelled.
+ * A Player that locks into {@link LOCK} and opens it with a password or key, written or typed in a password field, or
+ * else asks in its dialog, which is cancelled.
  */
 const LOCKS: FlowLockAnswer = (action) => {
   if (action.phase === "ask")
     return action.passwordField === null ? { kind: "cancelled" } : { kind: "submitted" };
   if (action.call === "encryptText") return { kind: "locked", text: LOCK };
-  return action.password !== null || action.dialogActionId !== null
+  return action.password !== null || action.key !== null || action.dialogActionId !== null
     ? { kind: "opened", text: "inside" }
     : { kind: "ask" };
 };
@@ -413,7 +413,7 @@ const TEMPLATES: readonly Template[] = [
     lock: LOCKS,
     main: (k) => [
       k.set,
-      'let locked = encryptText("x", password: "p", timeLock: false)',
+      'let locked = encryptText("x", password: "p", publicKey: false, timeLock: false)',
       `say ${k.expr} // READ`,
     ],
   },

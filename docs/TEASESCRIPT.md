@@ -150,8 +150,8 @@ All basic interactions are mandatory and blocking, with no cancellation result. 
 `boolean`; `askDate`, `askTime`, and
 `askDateTime` return `date`, `time`, and `datetime` from the Player's date and time controls; `askPassword` returns the
 SHA-256 of the password typed in a masked field, as `hashText` gives it, and asks for the password itself when written
-directly as the `password:` of an encrypt or decrypt call. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
-optional `timeout:` ends the wait without a chat message; see
+directly as the `password:` of an encrypt or decrypt call. `showButton` used as a value returns the elapsed waiting
+time as a `duration`, and an optional `timeout:` ends the wait without a chat message; see
 [blocking button](specifications/accepted-syntaxes-v30.md#21-blocking-button).
 Timer interrupts may suspend an interaction, whose timeout stands still meanwhile; handler `exit` discards its
 instruction without producing a result or binding. See [timer semantics](specifications/accepted-syntaxes-v30.md#27-timers).
@@ -217,15 +217,16 @@ other value goes through `toJson` first. A hash hides only a secret with many po
 ([§13](specifications/accepted-syntaxes-v30.md#hashes)).
 
 ```tease
-let locked = encryptFile(photo, password: "corner", timeLock: false)
+let locked = encryptFile(photo, password: "corner", publicKey: false, timeLock: false)
 let photo = decryptFile(locked, default: null)
 ```
 
-`encryptText` and `encryptFile` lock text, as Base64, or a stored file, with a `password:` and a `timeLock:`, a moment
-from which it opens by itself. Each takes a value, `true` for the player to set it in the Player's lock dialog, or
-`false` to leave it out; a call gives each or none, and without any the player sets each. `decryptText` and
-`decryptFile` need a `default:`, which a wrong password, a changed lock, or a
-time lock not yet open gives; without `password:` a passed time lock opens, otherwise the Player asks
+`encryptText` and `encryptFile` lock text, as Base64, or a stored file, with a `password:`, public keys (`publicKey:`,
+`age1…` or `ssh-ed25519 …`), and a `timeLock:`, a moment from which it opens by itself. Each takes a value, `true` for
+the player to set it in the Player's lock dialog, or `false` to leave it out; a call gives each or none, and without any
+the player sets each. `decryptText` and `decryptFile` need a `default:`, which a wrong password or key, a changed lock,
+or a time lock not yet open gives; for a public key, the owner of the private key gets the `key:` with `age`; without
+`password:` or `key:` a passed time lock opens, otherwise the Player asks
 ([§13](specifications/accepted-syntaxes-v30.md#encryption), [locks](RUNTIME.md#locks),
 [`ENCRYPTION.md`](ENCRYPTION.md)).
 

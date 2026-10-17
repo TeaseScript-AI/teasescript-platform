@@ -1,5 +1,6 @@
 import type { LockCall, LockInstruction } from "../../plan/model.js";
 import { interactionStringFits } from "../../interaction-limits.js";
+import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey } from "../../public-keys.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import { type Evaluator, USE_DEFAULT } from "../evaluator.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
@@ -45,7 +46,7 @@ import type {
 const SUGGESTED_TIME_LOCK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** The openers of an encrypt call, in the order the lock dialog shows them. */
-const LOCK_CHOICES: readonly RuntimeLockChoice[] = ["timeLock", "password"];
+const LOCK_CHOICES: readonly RuntimeLockChoice[] = ["timeLock", "password", "publicKey"];
 
 /** The operands of a run: the text, Base64 lock, or stored file, and the written options. */
 interface LockOperands {
@@ -53,7 +54,15 @@ interface LockOperands {
   readonly password: SerializableRuntimeValue | undefined;
   /** The password field of `password: askPassword(...)`, with its hint as text, or `null`. */
   readonly passwordField: RuntimeLockActionSnapshot["passwordField"];
+  readonly publicKey: SerializableRuntimeValue | undefined;
+  readonly key: SerializableRuntimeValue | undefined;
   readonly timeLock: SerializableRuntimeValue | undefined;
+}
+
+/** An encrypt call's written public keys, each as written but trimmed, and a decrypt call's written key. */
+interface WrittenKeys {
+  readonly publicKeys: readonly string[];
+  readonly key: string | null;
 }
 
 /**
@@ -63,6 +72,7 @@ interface LockOperands {
 interface EncryptOpeners {
   readonly password: string | null;
   readonly timeLockMs: number | null;
+  readonly publicKeys: readonly string[];
   readonly choices: readonly RuntimeLockChoice[];
 }
 
@@ -78,6 +88,8 @@ type LockStep =
       readonly dialogActionId: number | null;
       readonly notice: RuntimeLockNotice | null;
       readonly passwordField: RuntimeLockActionSnapshot["passwordField"];
+      readonly publicKeys: readonly string[];
+      readonly key: string | null;
     };
 
 /** Whether a call locks; the others open. */
@@ -112,6 +124,9 @@ export function executeLock(
                 ? null
                 : fieldText(evaluator.evaluate(field.hint), span, currentTemporalContext(snapshot)),
           },
+    publicKey:
+      instruction.publicKey === null ? undefined : evaluator.evaluate(instruction.publicKey),
+    key: instruction.key === null ? undefined : evaluator.evaluate(instruction.key),
     timeLock: instruction.timeLock === null ? undefined : evaluator.evaluate(instruction.timeLock),
   };
   const handoff = snapshot.interactionResultHandoff;
@@ -181,6 +196,7 @@ function startLock(
       copySpan(span),
     );
   const written = typeof password === "string" ? password : null;
+  const keys = writtenKeys(call, operands, span);
   if (call === "decryptText") {
     if (typeof value !== "string")
       throw new RuntimeFault(
@@ -192,13 +208,17 @@ function startLock(
     const binary = binaryFromBase64(value);
     if (binary === undefined) return { result: USE_DEFAULT };
     const lock = base64FromBinary(binary);
-    return passwordField === null ? workStep(lock, written, null) : fieldStep(lock, passwordField);
+    return passwordField === null
+      ? workStep(lock, written, null, keys)
+      : fieldStep(lock, passwordField, keys);
   }
   if (call === "decryptFile") {
     const file = storedFile(call, value, snapshot, span);
-    return passwordField === null ? workStep(file, written, null) : fieldStep(file, passwordField);
+    return passwordField === null
+      ? workStep(file, written, null, keys)
+      : fieldStep(file, passwordField, keys);
   }
-  const openers = encryptOpeners(call, operands, span);
+  const openers = encryptOpeners(call, operands, keys, span);
   const text = call === "encryptText" ? value : storedFile(call, value, snapshot, span);
   if (typeof text !== "string")
     throw new RuntimeFault(
@@ -210,27 +230,34 @@ function startLock(
     openers.choices.length === 0 &&
     openers.password === null &&
     passwordField === null &&
-    openers.timeLockMs === null
+    openers.timeLockMs === null &&
+    openers.publicKeys.length === 0
   )
     throw new RuntimeFault(
       "TSR059",
-      `${call}(...) has no way to open, because 'password:' and 'timeLock:' are both false, so nothing could ever open it. Give one of them a value, or true to let the player choose.`,
+      `${call}(...) has no way to open, because ${
+        operands.publicKey === false
+          ? "'password:', 'publicKey:', and 'timeLock:' are all false"
+          : "'publicKey:' holds no key and 'password:' and 'timeLock:' are false"
+      }, so nothing could ever open it. Give one of them a value, or true to let the player choose.`,
       copySpan(span),
     );
   // An opener written `true`, or each without any written, is chosen by the player in the Player's lock dialog, after
   // the password field of `password: askPassword(...)` asked for its password.
   if (openers.choices.length > 0 || passwordField !== null)
     return dialogStep(call, text, openers, passwordField, snapshot, span);
-  return workStep(text, openers.password, openers.timeLockMs);
+  return workStep(text, openers.password, openers.timeLockMs, keys);
 }
 
 /**
- * The checked openers of an encrypt call: `password:` takes text, `timeLock:` a moment, and each also `true`, which lets
- * the player choose it, or `false`, which leaves it out. A call writes each opener or none (plan validation).
+ * The checked openers of an encrypt call: `password:` takes text, `timeLock:` a moment, `publicKey:` public keys, and
+ * each also `true`, which lets the player choose it, or `false`, which leaves it out. A call writes each opener or none
+ * (plan validation).
  */
 function encryptOpeners(
   call: LockCall,
-  { password, passwordField, timeLock }: LockOperands,
+  { password, passwordField, publicKey, timeLock }: LockOperands,
+  { publicKeys }: WrittenKeys,
   span: LockInstruction["span"],
 ): EncryptOpeners {
   if (password !== undefined && typeof password !== "string" && typeof password !== "boolean")
@@ -245,16 +272,26 @@ function encryptOpeners(
       `'timeLock:' of ${call}(...) takes a moment (absoluteDateTime), true, or false, not ${describeRuntimeValue(timeLock)}.`,
       copySpan(span),
     );
-  const written = password !== undefined || passwordField !== null || timeLock !== undefined;
-  const chosen = { password, timeLock };
+  const written =
+    password !== undefined ||
+    passwordField !== null ||
+    publicKey !== undefined ||
+    timeLock !== undefined;
+  const chosen = { password, publicKey, timeLock };
   return {
     password: typeof password === "string" ? password : null,
     timeLockMs: typeof timeLock === "object" ? timeLock.epochMilliseconds : null,
+    publicKeys,
     choices: LOCK_CHOICES.filter((choice) => !written || chosen[choice] === true),
   };
 }
 
-function workStep(value: string, password: string | null, timeLockMs: number | null): LockStep {
+function workStep(
+  value: string,
+  password: string | null,
+  timeLockMs: number | null,
+  { publicKeys, key }: WrittenKeys,
+): LockStep {
   return {
     phase: "work",
     value,
@@ -264,13 +301,66 @@ function workStep(value: string, password: string | null, timeLockMs: number | n
     dialogActionId: null,
     notice: null,
     passwordField: null,
+    publicKeys,
+    key,
   };
+}
+
+/**
+ * The checked `publicKey:` of an encrypt call, a public key, a list of them, `true`, or `false`, and `key:` of a decrypt
+ * call, text. A public key is an age recipient, `age1…`, or an OpenSSH Ed25519 key, `ssh-ed25519 AAAA…`.
+ */
+function writtenKeys(
+  call: LockCall,
+  { publicKey, key }: LockOperands,
+  span: LockInstruction["span"],
+): WrittenKeys {
+  if (key !== undefined && typeof key !== "string")
+    throw new RuntimeFault(
+      "TSR059",
+      `'key:' of ${call}(...) takes an unlock key as text (string), not ${describeRuntimeValue(key)}.`,
+      copySpan(span),
+    );
+  const written =
+    publicKey === undefined || typeof publicKey === "boolean"
+      ? []
+      : publicKey !== null && typeof publicKey === "object" && publicKey.kind === "list"
+        ? publicKey.items
+        : [publicKey];
+  const publicKeys: string[] = [];
+  for (const item of written) {
+    if (typeof item !== "string")
+      throw new RuntimeFault(
+        "TSR059",
+        `'publicKey:' of ${call}(...) takes a public key (string), a list of them, true, or false, ${
+          item === publicKey
+            ? `not ${describeRuntimeValue(item)}`
+            : `but its list holds ${describeRuntimeValue(item)}`
+        }.`,
+        copySpan(span),
+      );
+    if (parsePublicKey(item) === null)
+      throw new RuntimeFault(
+        "TSR059",
+        `'publicKey:' of ${call}(...) takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but ${JSON.stringify(messageText(item))} is neither.`,
+        copySpan(span),
+      );
+    publicKeys.push(item.trim());
+  }
+  if (publicKeys.length > MAX_LOCK_PUBLIC_KEYS)
+    throw new RuntimeFault(
+      "TSR059",
+      `'publicKey:' of ${call}(...) has ${publicKeys.length} public keys, but a lock holds at most ${MAX_LOCK_PUBLIC_KEYS}.`,
+      copySpan(span),
+    );
+  return { publicKeys, key: key ?? null };
 }
 
 /** The password field of a decrypt call's `password: askPassword(...)`, which asks before the call opens. */
 function fieldStep(
   value: string,
   passwordField: NonNullable<RuntimeLockActionSnapshot["passwordField"]>,
+  { key }: WrittenKeys,
 ): LockStep {
   return {
     phase: "ask",
@@ -281,6 +371,8 @@ function fieldStep(
     dialogActionId: null,
     notice: null,
     passwordField,
+    publicKeys: [],
+    key,
   };
 }
 
@@ -292,7 +384,7 @@ function fieldStep(
 function dialogStep(
   call: LockCall,
   value: string,
-  { password, timeLockMs, choices }: EncryptOpeners,
+  { password, timeLockMs, publicKeys, choices }: EncryptOpeners,
   passwordField: RuntimeLockActionSnapshot["passwordField"],
   snapshot: RuntimeSnapshot,
   span: LockInstruction["span"],
@@ -308,6 +400,8 @@ function dialogStep(
     dialogActionId: null,
     notice: null,
     passwordField,
+    publicKeys,
+    key: null,
   };
 }
 
@@ -368,11 +462,16 @@ function nextLockStep(
       // The operands were checked when the first run asked.
       const value = startValue(call, operands.value);
       const field = operands.passwordField;
+      const keys = writtenKeys(call, operands, span);
       if (!locks(call)) {
         if (outcome === "submitted")
-          return { ...workStep(value, null, null), dialogActionId: actionId, passwordField: field };
+          return {
+            ...workStep(value, null, null, keys),
+            dialogActionId: actionId,
+            passwordField: field,
+          };
         // The password field asks again for a password that this Player no longer has.
-        if (field !== null) return fieldStep(value, field);
+        if (field !== null) return fieldStep(value, field, keys);
         return {
           phase: "ask",
           value,
@@ -380,11 +479,13 @@ function nextLockStep(
           timeLockMs: null,
           choices: [],
           dialogActionId: null,
-          notice: detail === "wrongPassword" || detail === "unreachable" ? detail : null,
+          notice: isLockNotice(detail) ? detail : null,
           passwordField: null,
+          publicKeys: [],
+          key: null,
         };
       }
-      const openers = encryptOpeners(call, operands, span);
+      const openers = encryptOpeners(call, operands, keys, span);
       // The step after the dialog locks with what the player gave there, instead of the moment it suggested.
       if (outcome === "submitted")
         return {
@@ -396,6 +497,8 @@ function nextLockStep(
           dialogActionId: actionId,
           notice: null,
           passwordField: field,
+          publicKeys: openers.publicKeys,
+          key: null,
         };
       // The password field and the lock dialog ask again, a chosen time lock suggested from now.
       return dialogStep(call, value, openers, field, snapshot, span);
@@ -460,6 +563,8 @@ function requestLock(
     dialogActionId: step.dialogActionId,
     notice: step.notice,
     passwordField: step.passwordField,
+    publicKeys: step.publicKeys,
+    key: step.key,
     resumes: 0,
   });
   snapshot.nextActionId += 1;
@@ -498,6 +603,12 @@ function isAbsoluteDateTime(
   value: SerializableRuntimeValue,
 ): value is { readonly kind: "absoluteDateTime"; readonly epochMilliseconds: number } {
   return value !== null && typeof value === "object" && value.kind === "absoluteDateTime";
+}
+
+const LOCK_NOTICES: readonly RuntimeLockNotice[] = ["wrongPassword", "wrongKey", "unreachable"];
+
+export function isLockNotice(value: unknown): value is RuntimeLockNotice {
+  return LOCK_NOTICES.some((notice) => notice === value);
 }
 
 const LOCK_OUTCOMES: readonly RuntimeLockOutcome[] = [
@@ -606,16 +717,21 @@ export function resolveLockCompletion(
         break;
       return ok(payload.reason === "unreadable" ? "unreadable" : "failed");
     case "ask": {
-      // Only the dialog's own call asks: a decrypt call without `password:`, or one whose typed answer was lost. The
-      // password field asks again only for a password this Player no longer has.
-      if (encrypts ? action.dialogActionId === null : action.password !== null) break;
+      // Only the dialog's own call asks: a decrypt call without `password:` or `key:`, or one whose typed answer was
+      // lost. The password field asks again only for a password this Player no longer has, also with a written key. A
+      // wrong password or key was typed in the dialog.
+      const asksAgain =
+        encrypts || action.passwordField !== null
+          ? action.dialogActionId !== null
+          : action.password === null && action.key === null;
+      if (!asksAgain) break;
       if (keys === "kind") return ok("ask");
       if (
         encrypts ||
         action.passwordField !== null ||
         keys !== "kind,notice" ||
-        (payload.notice !== "unreachable" &&
-          (payload.notice !== "wrongPassword" || action.dialogActionId === null))
+        !isLockNotice(payload.notice) ||
+        (payload.notice !== "unreachable" && action.dialogActionId === null)
       )
         break;
       return ok("ask", payload.notice);

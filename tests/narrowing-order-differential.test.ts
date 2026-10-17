@@ -46,6 +46,8 @@ const TEXT: Part = { clear: '"${clearText()}"', read: '"${x + 1}"' };
 const SECONDS: Part = { clear: "clearInteger() s", read: "x s" };
 const INTEGER: Part = { clear: "clearInteger()", read: "x + 1" };
 const DISPLAY: Part = { clear: "clearDisplay()", read: '["visible"][x - 5]' };
+/** `false` both ways, so that a lock call writes no time lock, which would need the session's clock. */
+const BOOLEAN: Part = { clear: "clearInteger() > 5", read: "x > 9" };
 
 const CONSTRUCTS: readonly Construct[] = [
   {
@@ -147,11 +149,8 @@ const CONSTRUCTS: readonly Construct[] = [
   {
     // No time lock, so the run stops where the Player locks.
     name: "encryptText's password and timeLock",
-    parts: [
-      named("password", TEXT),
-      named("timeLock", { clear: "clearInteger() > 5", read: "x > 9" }),
-    ],
-    line: ([a, b]) => `let r = encryptText("t", ${a}, ${b})`,
+    parts: [named("password", TEXT), named("timeLock", BOOLEAN)],
+    line: ([a, b]) => `let r = encryptText("t", ${a}, ${b}, publicKey: false)`,
   },
   {
     // The question of a password field is said where `password:` stands; the field then waits for the player.
@@ -161,9 +160,21 @@ const CONSTRUCTS: readonly Construct[] = [
         clear: 'askPassword("${clearText()}")',
         read: 'askPassword("${x + 1}")',
       }),
-      named("timeLock", { clear: "clearInteger() > 5", read: "x > 9" }),
+      named("timeLock", BOOLEAN),
     ],
-    line: ([a, b]) => `let r = encryptText("t", ${a}, ${b})`,
+    line: ([a, b]) => `let r = encryptText("t", ${a}, ${b}, publicKey: false)`,
+  },
+  {
+    name: "encryptText's publicKey and timeLock",
+    parts: [named("publicKey", BOOLEAN), named("timeLock", BOOLEAN)],
+    line: ([a, b]) => `let r = encryptText("t", password: "p", ${a}, ${b})`,
+  },
+  {
+    // The text is no lock, so the default runs, after `key:`, which is written after it.
+    name: "decryptText's key and default",
+    parts: [TEXT, TEXT],
+    line: ([a, b]) => `let r = decryptText("x", default: ${b}, key: ${a})`,
+    fixed: true,
   },
   {
     // The text is no lock, so the default runs, after `password:`, which is written after it.

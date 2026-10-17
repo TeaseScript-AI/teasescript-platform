@@ -580,7 +580,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     ...(options.lockServices === undefined ? {} : { crypto: options.lockServices }),
   });
   watch(servicedSession, () => locks.request());
-  // A script that locks or opens loads the lock code while the Player is online, so locking works offline later.
+  // A script that locks or opens loads the lock code while the Player is online, so locking works offline later; one
+  // that locks also loads the public keys' code.
   watch(
     () => servicedSession.value?.plan,
     (plan) => {
@@ -589,6 +590,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       void (options.lockServices?.tlock ?? (() => import("../../encryption/tlock.js")))().catch(
         () => {},
       );
+      const encrypts = plan.instructions.some(
+        (instruction) =>
+          instruction.kind === "lock" &&
+          (instruction.call === "encryptText" || instruction.call === "encryptFile"),
+      );
+      if (encrypts)
+        void (options.lockServices?.age ?? (() => import("../../encryption/age.js")))().catch(
+          () => {},
+        );
     },
   );
   // A session that ended releases its camera.

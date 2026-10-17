@@ -924,8 +924,9 @@ decrypt call is the same masked field; an encrypt call's adds a "Repeat password
 with its own eye button, "Show repeated password" or "Hide repeated password". Enter in the first moves to it, and Send
 or Enter there locks only when both match, else the composer notice says "The passwords do not match", the repeat
 empties, and the password is selected. A call with openers written `true` shows its lock dialog once the passwords
-match, and locks with both answers. While the Player locks or opens, the fields are read-only. The field starts empty each time it shows, also after a block interrupted it, and takes the
-focus back when the player was typing in the composer before it; nothing typed in it is kept. A prefill starts as the
+match, and locks with both answers. While the Player locks or opens, the fields are read-only. The field starts empty
+each time it shows, also after a block interrupted it, and takes the focus back when the player was typing in the
+composer before it; nothing typed in it is kept. A prefill starts as the
 composer text, which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint
 restore the composer shows the prefill again, and unsent edits are not kept.
 
@@ -1011,18 +1012,33 @@ A lock ([V30 §13](../specifications/accepted-syntaxes-v30.md#encryption)) that 
 popup's, with nothing in the transcript. **Lock**, for an encrypt call with openers that the player sets, shows only
 those openers, under "Choose one or more ways this can be opened again." where it shows more than one, each with a line
 that says what it does: the checked box **Time lock**, "Opens by itself after the time you
-set.", with a date-and-time field prefilled 7 days ahead; and **Password (optional)**, "Opens with a password you
-choose.", which takes focus, or else the date-and-time field does, and, once a password is typed, **Repeat password**,
-which says "The passwords do not match" under it as soon as it differs from the password. Where the password is the only
-opener there can be, its label has no "(optional)". Unchecking the box hides the field, which keeps its moment for when
-the box is checked again. A line above **Lock** says "Without a time, this only opens with the password. If the password
-is forgotten, it never opens." while no time lock would open the lock, or what can be set, such as "Set a time or a
-password.", while nothing would. Its **Lock** button, the only way out, works once the two passwords match and the lock
-has an opener, also one the call gives, and refuses a moment that is not in the future with "Choose a moment in the
-future." under the field. **Unlock**, for a decrypt call, shows "Opens by itself at …" for each time
-lock in the player's locale, a **Password** field where a password opens it, which takes focus, **Unlock**, which tries
-the password as typed, also an empty one, and **Cancel**, which takes focus without a password field; Cancel, or Escape,
-gives the call's default. A wrong password keeps it open with "That password does not open it." under the field; a
+set.", with a date-and-time field prefilled 7 days ahead; **Password (optional)**, "Opens with a password you choose.",
+which takes focus, or else the date-and-time field does, and, once a password is typed, **Repeat password**, which says
+"The passwords do not match" under it as soon as it differs from the password; and **Public key (optional)**, "Only the
+person with the matching private key can open it.", which takes `age1…` or `ssh-ed25519 …` keys, one per line, and once
+left, or when Lock is pressed, says "That is not a public key." under it for a line that is none, and for more than
+594 lines "A lock holds at most 594 public keys.", and has a collapsed **What is a public key?**: "A public key is a
+code you get from someone else, for example the person who decides when this opens. Paste it here. Only that person
+can open it again, with their own private key.", and where the dialog offers other openers, "No public key? Use a time
+or a password instead.", naming only those it offers. No dialog shows a command or a key tool's name; those are in
+[ENCRYPTION.md](../ENCRYPTION.md#for-the-owner-of-the-private-key) for the owner of the private key.
+Where an opener is the only one there can be, its label has no "(optional)". Unchecking the box hides the field, which
+keeps its moment for when the box is checked again. A line above **Lock** says what still opens the lock while no time
+lock would, such as "Without a time, this only opens with the password or the private key. If both are lost, it never
+opens.", or what can be set, such as "Set a time, a password, or a public key.", while nothing would. Its **Lock**
+button, the only way out, works once the two passwords match, each line is a public key, and the lock has an opener,
+also one the call gives, and refuses a moment that is not in the future with "Choose a moment in the future." under the
+field. **Unlock**, for a decrypt call, shows "Opens by itself at …" for each time lock in the player's locale, a
+**Password** field where a password opens it, which takes focus, **Unlock**, which tries the password as typed, also an
+empty one, and **Cancel**, which takes focus without a password field; Cancel, or Escape, gives the call's default.
+Where a public key opens it, it shows **Send this to the person who gave you the public key.**, "They send back an
+unlock key: paste it below.", the unlock request's armor in a read-only field, **Copy**, which says "Copied." or, where
+the browser refuses, selects the text and says "Could not copy. The text is selected, so copy it by hand or use
+Download.", and **Download**, which saves it as `unlock-request.age`; and **Unlock key**, which takes focus where no
+password opens it. Unlock tries the
+key when one is given, otherwise the password, and without a password opener it waits for a key; a wrong key keeps it
+open with "That key does not open it." under the field, which takes focus. A wrong password keeps it open with "That
+password does not open it." under the field; a
 passed time lock whose relays the Player cannot reach shows "Its time has passed, but the time service could not be
 reached." and **Try again** instead of its moment; and a time lock whose moment comes while it shows opens it without
 the player. A password field masks its text, has an eye button, **Show password** or **Hide password**, says "Caps Lock
