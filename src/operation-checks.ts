@@ -60,7 +60,7 @@ import {
   POSITIONAL_METHODS,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
-import { MIN_MAX_TAKES } from "./list-function-rules.js";
+import { minMaxValuesProblem } from "./list-function-rules.js";
 import {
   argumentFix,
   argumentTypeMessage,
@@ -815,21 +815,18 @@ function minMaxProblems(
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
-  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
-  if (named !== undefined)
+  const named = call.arguments.filter((argument) => argument.kind === "namedArgument");
+  const problem = minMaxValuesProblem(
+    name,
+    call.arguments.length - named.length,
+    named.map((argument) => argument.name.name),
+  );
+  if (problem !== undefined)
     return [
       {
-        kind: "unknownNamedArgument",
-        message: unknownNamedArgumentMessage(name, named.name.name, []),
-        span: named.name.span,
-      },
-    ];
-  if (call.arguments.length < 2)
-    return [
-      {
-        kind: "argumentCount",
-        message: argumentCountMessage(name, MIN_MAX_TAKES, call.arguments.length),
-        span: call.span,
+        kind: problem.kind,
+        message: problem.message,
+        span: problem.kind === "unknownNamedArgument" ? named[0]!.name.span : call.span,
       },
     ];
   let family: StaticType | undefined;

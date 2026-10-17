@@ -1,4 +1,9 @@
-import type { ArgumentShape } from "./argument-rules.js";
+import {
+  argumentCountMessage,
+  unknownNamedArgumentMessage,
+  type ArgumentProblem,
+  type ArgumentShape,
+} from "./argument-rules.js";
 
 /**
  * Rules of the list functions (V30 §16) that the type checker and the runtime both check, each with one message: their
@@ -26,4 +31,25 @@ export const LIST_FUNCTION_SHAPES: ReadonlyMap<string, ArgumentShape> = new Map(
 ]);
 
 /** What `min` and `max` take besides one list. */
-export const MIN_MAX_TAKES = "2 or more arguments, or one list";
+const MIN_MAX_TAKES = "2 or more arguments, or one list";
+
+/**
+ * The first problem with the names and the number of the arguments of `min` or `max` of values, which is every call but
+ * one of one list: a name, which only one list takes, then fewer than 2 values. The compiler checks it where the
+ * argument cannot be a list, and the runtime where it is not one. `undefined` when the arguments fit.
+ */
+export function minMaxValuesProblem(
+  name: string,
+  received: number,
+  named: readonly string[],
+): ArgumentProblem | undefined {
+  const unknown = named[0];
+  if (unknown !== undefined)
+    return {
+      kind: "unknownNamedArgument",
+      name: unknown,
+      message: unknownNamedArgumentMessage(name, unknown, []),
+    };
+  if (received >= 2) return undefined;
+  return { kind: "argumentCount", message: argumentCountMessage(name, MIN_MAX_TAKES, received) };
+}

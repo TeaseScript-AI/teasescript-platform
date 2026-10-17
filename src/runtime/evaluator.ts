@@ -1,5 +1,4 @@
 import {
-  argumentCountMessage,
   argumentShapeProblem,
   callShapeProblem,
   dictArgumentsProblem,
@@ -12,7 +11,7 @@ import {
   scriptArgumentCountMessage,
   unknownNamedArgumentMessage,
 } from "../argument-rules.js";
-import { LIST_FUNCTION_SHAPES, MIN_MAX_TAKES } from "../list-function-rules.js";
+import { LIST_FUNCTION_SHAPES, minMaxValuesProblem } from "../list-function-rules.js";
 import { startValueMessage, type StartValueOwner } from "../start-value-rules.js";
 import type { DeveloperWarningCode, RuntimeErrorCode } from "../diagnostic-codes.js";
 import { temporalCaptureAt } from "./temporal-captures.js";
@@ -3620,20 +3619,15 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): SerializableRuntimeValue {
-    // One list, optionally with by:, chooses among its values (V30 §16). As the compiler, which knows the type, names are
-    // checked as one list takes them, else as the values take none; one other value with no other name than 'by:' fails
-    // below as not a list.
+    // One list, optionally with by:, chooses among its values (V30 §16). As the compiler, which knows the type, the
+    // arguments are checked as one list takes them, else as the values do, also one value that is not a list.
     const one = positional.length === 1;
     const names = Object.keys(named);
     const problem =
       one && isList(positional[0]!)
-        ? argumentShapeProblem(name, LIST_FUNCTION_SHAPES.get(name)!, 1, names)?.message
-        : names.some((key) => !one || key !== "by")
-          ? unknownNamedArgumentMessage(name, names[0]!, [])
-          : positional.length === 0
-            ? argumentCountMessage(name, MIN_MAX_TAKES, 0)
-            : undefined;
-    if (problem !== undefined) throw fault("TSR028", problem, span);
+        ? argumentShapeProblem(name, LIST_FUNCTION_SHAPES.get(name)!, 1, names)
+        : minMaxValuesProblem(name, positional.length, names);
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     if (one) {
       const values = listValues(name, positional[0]!, named.by, span);
       if (values.length === 0)

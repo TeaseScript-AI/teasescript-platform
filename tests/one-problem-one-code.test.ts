@@ -365,6 +365,30 @@ test("a value of a type the compiler does not know fails with the compiler's tex
   }
 });
 
+test("min or max of one value that is not a list fails at run time with the compiler's rule and text", () => {
+  // The compiler takes a value of a type it does not know as maybe a list; one that is not a list breaks the rule of the
+  // arguments' names and number (TSV020, TSV022), which the runtime checks under TSR028.
+  const D = "function dynamic(value) {\n    return value\n}\n";
+  for (const [unknown, known, code] of [
+    [`${D}say min(dynamic(5))`, "say min(5)", "TSV020"],
+    [`${D}say max(dynamic(1..3))`, "say max(1..3)", "TSV020"],
+    [`${D}say min(dynamic(5), by: "w")`, 'say min(5, by: "w")', "TSV022"],
+    [`${D}say max(dynamic("a"), by: "w")`, 'say max("a", by: "w")', "TSV022"],
+  ] as const) {
+    const compiled = diagnostics(known);
+    assert.deepEqual(
+      compiled.map(([found]) => found),
+      [code],
+      known,
+    );
+    assert.deepEqual(
+      runtimeFailure(compileValidPlan(`${unknown}\nexit`)),
+      ["TSR028", compiled[0]![1]],
+      unknown,
+    );
+  }
+});
+
 test("a speaker property that a read may miss has one text, from the type checker or the speaker flow", () => {
   const fix =
     "Give it a start value, as in 'speaker anna { mood: ... }', or assign it before this line.";
