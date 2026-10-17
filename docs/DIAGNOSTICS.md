@@ -108,7 +108,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSH009` | Invalid tag name | error | parser |
 | `TSH010` | Invalid tag value | error | parser |
 | `TSH011` | Repeated tag | warning | parser |
-| `TSH012` | Tag with two different numbers | error | parser |
+| `TSH012` | Tag with two different numbers, now `TST004` | error | parser |
 | `TSH013` | Empty keyword | error | parser |
 | `TSH014` | Repeated keyword | warning | parser |
 | `TSH015` | Expected the end of the line | error | parser |
@@ -189,7 +189,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TST001` | Invalid tag query | error | parser |
 | `TST002` | Tag query that matches nothing | error | type checker |
 | `TST003` | Image keywords that are not tags | warning | compiler |
-| `TST004` | Image tag with two different numbers | error | compiler |
+| `TST004` | Tag with two different numbers | error | parser, compiler, type checker |
 | `TST005` | Invalid tag | error | type checker |
 | `TST006` | Invalid `from:` of a tag query | error | type checker |
 
@@ -233,3 +233,7 @@ which each need a code of their own.
 - `TSV055` (one problem, different texts)
   - name pass: a start value that says, asks, waits, plays media, calls a function, or uses a local or a later global
   - type checker: a start value that selects at random, with `.random` or a list in `${...}`, which needs the value's type
+- `TST004` (one problem, same text)
+  - parser: a tag that a file header gives two different numbers (`conflictingTagMessage`)
+  - compiler: the same rule with the same text, naming the image, for the keywords of an image
+  - type checker: the same rule with the same text for the written tags of `takePhoto(tags: [...])`

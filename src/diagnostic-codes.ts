@@ -135,7 +135,10 @@ export const DIAGNOSTIC_CODES = {
   TSH009: entry(["parser"], "error", "Invalid tag name", DOCS.header),
   TSH010: entry(["parser"], "error", "Invalid tag value", DOCS.header),
   TSH011: entry(["parser"], "warning", "Repeated tag", DOCS.header),
-  TSH012: entry(["parser"], "error", "Tag with two different numbers", DOCS.header),
+  TSH012: {
+    ...entry(["parser"], "error", "Tag with two different numbers, now `TST004`", DOCS.header),
+    retired: true,
+  },
   TSH013: entry(["parser"], "error", "Empty keyword", DOCS.header),
   TSH014: entry(["parser"], "warning", "Repeated keyword", DOCS.header),
   TSH015: entry(["parser"], "error", "Expected the end of the line", DOCS.header),
@@ -310,7 +313,23 @@ export const DIAGNOSTIC_CODES = {
   TST001: entry(["parser"], "error", "Invalid tag query", DOCS.tags),
   TST002: entry(["type checker"], "error", "Tag query that matches nothing", DOCS.tags),
   TST003: entry(["compiler"], "warning", "Image keywords that are not tags", DOCS.tags),
-  TST004: entry(["compiler"], "error", "Image tag with two different numbers", DOCS.tags),
+  TST004: {
+    ...entry(
+      ["parser", "compiler", "type checker"],
+      "error",
+      "Tag with two different numbers",
+      DOCS.tags,
+    ),
+    shared: {
+      problems: "one",
+      texts: "same",
+      parts: [
+        "a tag that a file header gives two different numbers (`conflictingTagMessage`)",
+        "the same rule with the same text, naming the image, for the keywords of an image",
+        "the same rule with the same text for the written tags of `takePhoto(tags: [...])`",
+      ],
+    },
+  },
   TST005: entry(["type checker"], "error", "Invalid tag", DOCS.tags),
   TST006: entry(["type checker"], "error", "Invalid `from:` of a tag query", DOCS.tags),
 

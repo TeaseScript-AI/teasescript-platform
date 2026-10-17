@@ -91,7 +91,14 @@ import {
   imageFilterTextProblem,
 } from "./image-input.js";
 import { evaluateTagSteps, passesTagList } from "./tag-query.js";
-import { addTag, normalizeTagName, readTagText, type Tag } from "./tags.js";
+import {
+  addTag,
+  CONFLICTING_TAG_CODE,
+  conflictingTagMessage,
+  normalizeTagName,
+  readTagText,
+  type Tag,
+} from "./tags.js";
 import { CONVERSION_RESULTS, isTemporalConversionResult, numberFromText } from "./conversions.js";
 import {
   builtinCallProblems,
@@ -433,6 +440,7 @@ const typeCode = {
   visibleOverflow: "TSV050",
   emptyTagQuery: "TST002",
   invalidCaptureTag: "TST005",
+  conflictingTag: CONFLICTING_TAG_CODE,
   invalidTagQueryFrom: "TST006",
   randomStartValue: "TSV055",
   invalidCameraHandleMember: "TSV059",
@@ -5621,8 +5629,8 @@ class TypeChecker {
         );
       } else if (addTag(seen, tag) === "conflict") {
         this.#report(
-          typeCode.invalidCaptureTag,
-          `The tag '${tag.name}' has two different numbers.`,
+          typeCode.conflictingTag,
+          conflictingTagMessage(seen.get(tag.name)!, tag),
           element.span,
         );
       }

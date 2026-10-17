@@ -161,7 +161,7 @@ test("written tags and the tags argument are checked at compile time", () => {
     ],
   ]);
   assert.deepEqual(errors('let photo = takePhoto(tags: ["level: 1", "level: 2"])'), [
-    ["TST005", "The tag 'level' has two different numbers."],
+    ["TST004", "The tag 'level' has two different numbers, 1 and 2. Keep one, such as 'level: 1'."],
   ]);
   assert.deepEqual(
     errors('let photo = takePhoto(tags: "bedroom")').map(([code]) => code),
