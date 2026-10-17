@@ -450,29 +450,61 @@ export function graphText(graph: ConstraintGraph): string {
   return lines.join("\n");
 }
 
+/** The text of a term, written with an explicit stack: a term nests as deep as its annotation or literal. */
 function typeTermText(term: TypeTerm, graph?: ConstraintGraph): string {
-  switch (term.kind) {
-    case "atom":
-      return term.name;
-    case "never":
-      return "never";
-    case "dynamic":
-      return `dynamic(${term.why})`;
-    case "list":
-    case "set":
-    case "dict":
-      return `${term.kind}<${typeTermText(term.element, graph)}>`;
-    case "object":
-      return term.properties === null
-        ? "object"
-        : `{${term.properties.map((property) => `${property.name}: ${typeTermText(property.type, graph)}`).join(", ")}}`;
-    case "union":
-      return `(${term.members.map((member) => typeTermText(member, graph)).join(" | ")})`;
-    case "restricted":
-      return `${term.name}{${term.values.map((value) => JSON.stringify(value)).join("|")}}`;
-    case "ref":
-      return graph === undefined ? `ref#${term.place}` : `ref ${placeName(graph, term.place)}`;
+  const out: string[] = [];
+  // Pending terms and the text between them, in reverse order of appearance.
+  const work: (TypeTerm | string)[] = [term];
+  while (work.length > 0) {
+    const item = work.pop()!;
+    if (typeof item === "string") {
+      out.push(item);
+      continue;
+    }
+    switch (item.kind) {
+      case "atom":
+        out.push(item.name);
+        break;
+      case "never":
+        out.push("never");
+        break;
+      case "dynamic":
+        out.push(`dynamic(${item.why})`);
+        break;
+      case "list":
+      case "set":
+      case "dict":
+        work.push(">", item.element, `${item.kind}<`);
+        break;
+      case "object":
+        if (item.properties === null) {
+          out.push("object");
+          break;
+        }
+        work.push("}");
+        for (let index = item.properties.length - 1; index >= 0; index -= 1) {
+          const property = item.properties[index]!;
+          work.push(property.type, `${index === 0 ? "" : ", "}${property.name}: `);
+        }
+        work.push("{");
+        break;
+      case "union":
+        work.push(")");
+        for (let index = item.members.length - 1; index >= 0; index -= 1) {
+          work.push(item.members[index]!);
+          if (index > 0) work.push(" | ");
+        }
+        work.push("(");
+        break;
+      case "restricted":
+        out.push(`${item.name}{${item.values.map((value) => JSON.stringify(value)).join("|")}}`);
+        break;
+      case "ref":
+        out.push(graph === undefined ? `ref#${item.place}` : `ref ${placeName(graph, item.place)}`);
+        break;
+    }
   }
+  return out.join("");
 }
 
 /** How a dump names a place: its label and its id. */

@@ -1620,8 +1620,15 @@ function interactionEvidence(
   }
 }
 
-/** The type a written annotation means, as a term. */
+/**
+ * The term a written annotation names. A compile task, as the production conversion is (`annotationTask` in
+ * `static-types.ts`): an annotation nests as deep as it is written.
+ */
 function typeTerm(annotation: TypeAnnotation): TypeTerm {
+  return runCompileTask(typeTermTask(annotation));
+}
+
+function* typeTermTask(annotation: TypeAnnotation): CompileTask<TypeTerm> {
   switch (annotation.kind) {
     case "namedType":
       switch (annotation.name) {
@@ -1640,14 +1647,21 @@ function typeTerm(annotation: TypeAnnotation): TypeTerm {
       return {
         kind:
           annotation.kind === "listType" ? "list" : annotation.kind === "setType" ? "set" : "dict",
-        element: typeTerm(annotation.element),
+        element: yield* compileChild(typeTermTask(annotation.element)),
       };
     case "optionalType":
       return {
         kind: "union",
-        members: [typeTerm(annotation.value), { kind: "atom", name: "null" }],
+        members: [
+          yield* compileChild(typeTermTask(annotation.value)),
+          { kind: "atom", name: "null" },
+        ],
       };
-    case "unionType":
-      return { kind: "union", members: annotation.members.map(typeTerm) };
+    case "unionType": {
+      const members: TypeTerm[] = [];
+      for (const member of annotation.members)
+        members.push(yield* compileChild(typeTermTask(member)));
+      return { kind: "union", members };
+    }
   }
 }
