@@ -63,7 +63,7 @@ test("misuse the compiler can see is a compile error", () => {
     [
       "say min(1)\nexit",
       "TSV020",
-      "min(...) takes 2 or more arguments, or one list, received 1.",
+      "min() takes 2 or more arguments, or one list, received 1.",
       "min(1)",
     ],
     [
@@ -87,7 +87,7 @@ test("misuse the compiler can see is a compile error", () => {
     [
       "say min(1, 2, to: 3)\nexit",
       "TSV022",
-      "min(...) takes no named arguments. Remove 'to:'.",
+      "min() takes its arguments without names. Remove 'to:'.",
       "to",
     ],
     [

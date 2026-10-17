@@ -710,7 +710,7 @@ test("public keys and keys are checked when they compile and when they run", () 
     ],
     ["'key:' takes an unlock key as text (string), not a whole number (integer)."],
     [
-      "decryptText(...) has no parameter 'publicKey'. Its named arguments are 'password:', 'key:', and 'default:'.",
+      "decryptText() has no parameter 'publicKey'. Its named arguments are 'password:', 'key:', and 'default:'.",
     ],
     [
       "encryptText(...) has no way to open, because 'password:', 'publicKey:', and 'timeLock:' are all false, so nothing could ever open it. Give one of them a value, or true to let the player choose.",
@@ -871,10 +871,10 @@ test("the encrypt and decrypt calls check their arguments when they compile", ()
   ].map((source) => diagnostics(source).map(([, message]) => message));
   assert.deepEqual(problems, [
     [
-      "encryptText(...) has no parameter 'key'. Its named arguments are 'password:', 'publicKey:', and 'timeLock:'.",
+      "encryptText() has no parameter 'key'. Its named arguments are 'password:', 'publicKey:', and 'timeLock:'.",
     ],
     [
-      "decryptText(...) has no parameter 'timeLock'. Its named arguments are 'password:', 'key:', and 'default:'.",
+      "decryptText() has no parameter 'timeLock'. Its named arguments are 'password:', 'key:', and 'default:'.",
     ],
     ["'password:' takes text (string), true, or false, not a whole number (integer)."],
     ["'timeLock:' takes a moment (absoluteDateTime), true, or false, not a date and time."],
@@ -891,7 +891,7 @@ test("the encrypt and decrypt calls check their arguments when they compile", ()
     ],
     problems[9]!,
     problems[10]!,
-    ["encryptText(...) takes 1 argument (text), received 2."],
+    ["encryptText() takes 1 argument (text), received 2."],
     [
       "encryptText(...) is not supported in function parameter defaults, because it may ask the player. Call it in the function's body.",
     ],

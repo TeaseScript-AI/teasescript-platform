@@ -77,6 +77,14 @@ import {
 } from "./project-globals.js";
 import { PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 import { duplicateEntryMessage } from "./object-properties.js";
+import {
+  argumentCountMessage,
+  argumentsTaken,
+  leadingArgumentMessage,
+  leadingArgumentTwiceMessage,
+  missingDefaultMessage,
+  unknownNamedArgumentMessage,
+} from "./argument-rules.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -1624,7 +1632,11 @@ class SemanticValidator {
           const key = literalText(expression.key);
           this.#report(
             semanticCode.argumentCount,
-            `A load needs default:, the value to use while the key has not been saved, as in load(${key === undefined ? "key" : JSON.stringify(key)}, default: 0). Write default: null to check for a missing value with != null.`,
+            missingDefaultMessage(
+              `load(${key === undefined ? "key" : JSON.stringify(key)}, default: value)`,
+              "for a key that has not been saved",
+              "Add one, such as 'default: 0', or 'default: null' to check for a missing value with '!= null'.",
+            ),
             expression.span,
             true,
           );
@@ -1670,18 +1682,27 @@ class SemanticValidator {
           const name = expression.callee.name;
           const binding = scope.resolve(name);
           if (isTakePhotoCall(expression)) {
-            const [first, ...rest] = expression.arguments;
-            if (
-              rest.length > 0 ||
-              (first !== undefined &&
-                (first.kind !== "namedArgument" || first.name.name !== "tags"))
-            ) {
+            const positional = expression.arguments.filter(
+              (argument) => argument.kind === "positionalArgument",
+            ).length;
+            if (positional > 0)
               this.#report(
                 semanticCode.argumentCount,
-                'takePhoto() takes only tags:, such as takePhoto(tags: ["bedroom"]).',
+                argumentCountMessage(
+                  "takePhoto",
+                  "no arguments without a name",
+                  positional,
+                  `Name its tags, as in 'takePhoto(tags: ["bedroom"])'.`,
+                ),
                 expression.span,
               );
-            }
+            for (const argument of expression.arguments)
+              if (argument.kind === "namedArgument" && argument.name.name !== "tags")
+                this.#report(
+                  semanticCode.unknownNamedArgument,
+                  unknownNamedArgumentMessage("takePhoto", argument.name.name, ["tags"]),
+                  argument.name.span,
+                );
           } else if (isAskImageCall(expression)) {
             this.#validateAskImageArguments(expression);
             // `askImage` has no `as`, so the default speaker asks: `speaker` in its mode and in every argument is that
@@ -1961,7 +1982,11 @@ class SemanticValidator {
     if (positional.length > parameterNames.length) {
       this.#report(
         semanticCode.argumentCount,
-        `Function '${functionName}' takes ${argumentRange(required, parameterNames)}, received ${positional.length} positional argument${positional.length === 1 ? "" : "s"}. Remove the extra positional arguments.`,
+        argumentCountMessage(
+          functionName,
+          argumentsTaken(parameterNames, required),
+          positional.length,
+        ),
         expression.span,
       );
       return;
@@ -1970,7 +1995,11 @@ class SemanticValidator {
       if (positional.length < required)
         this.#report(
           semanticCode.argumentCount,
-          `Function '${functionName}' takes ${argumentRange(required, parameterNames)}, received ${positional.length}. Add the missing arguments.`,
+          argumentCountMessage(
+            functionName,
+            argumentsTaken(parameterNames, required),
+            positional.length,
+          ),
           expression.span,
         );
       return;
@@ -1983,7 +2012,7 @@ class SemanticValidator {
       if (index === undefined) {
         this.#report(
           semanticCode.unknownNamedArgument,
-          `Function '${functionName}' has no parameter '${name}'. ${parameterNames.length === 0 ? "It takes no arguments." : `Its parameters are ${parameterNames.join(", ")}.`}`,
+          unknownNamedArgumentMessage(functionName, name, parameterNames, false),
           argument.name.span,
         );
       } else if (index < positional.length) {
@@ -2024,7 +2053,11 @@ class SemanticValidator {
         if (index > 0 || message)
           this.#report(
             semanticCode.argumentCount,
-            'askImage() takes only its message without a name, first, such as askImage("Add an image").',
+            leadingArgumentMessage(
+              "askImage",
+              "its message",
+              'askImage("Add an image", allowCamera: false)',
+            ),
             argument.span,
           );
         message = true;
@@ -2035,7 +2068,7 @@ class SemanticValidator {
         if (message)
           this.#report(
             semanticCode.argumentCount,
-            "askImage() takes one message: give it without a name or as message:, not both.",
+            leadingArgumentTwiceMessage("askImage", "message"),
             argument.name.span,
           );
         message = true;
@@ -2048,7 +2081,7 @@ class SemanticValidator {
       } else if (!IMAGE_REQUEST_OPTIONS.has(name)) {
         this.#report(
           semanticCode.unknownNamedArgument,
-          `askImage() has no argument '${name}'. It takes a message, hint:, allowCamera:, allowFile:, allowSkip:, types:, and mime:.`,
+          unknownNamedArgumentMessage("askImage", name, ["message", ...IMAGE_REQUEST_OPTIONS]),
           argument.name.span,
         );
       }
@@ -2067,7 +2100,11 @@ class SemanticValidator {
         if (index > 0 || message)
           this.#report(
             semanticCode.argumentCount,
-            'showPopup takes only its message without a name, first. Name the button text, as in \'showPopup(message: "Task completed", buttonText: "Continue")\'.',
+            leadingArgumentMessage(
+              "showPopup",
+              "its message",
+              'showPopup("Task completed", buttonText: "Continue")',
+            ),
             argument.span,
           );
         message = true;
@@ -2078,14 +2115,14 @@ class SemanticValidator {
         if (message)
           this.#report(
             semanticCode.argumentCount,
-            "showPopup takes one message: give it without a name or as message:, not both.",
+            leadingArgumentTwiceMessage("showPopup", "message"),
             argument.name.span,
           );
         message = true;
       } else if (name !== "buttonText") {
         this.#report(
           semanticCode.unknownNamedArgument,
-          `showPopup has no argument '${name}'. It takes a message and buttonText:.`,
+          unknownNamedArgumentMessage("showPopup", name, ["message", "buttonText"]),
           argument.name.span,
         );
       }
@@ -2112,7 +2149,11 @@ class SemanticValidator {
     if (!addressed)
       this.#report(
         semanticCode.argumentCount,
-        "openUrl takes one web address without a name, first, as in 'openUrl(\"https://example.com\")'.",
+        leadingArgumentMessage(
+          "openUrl",
+          "one web address",
+          'openUrl("https://example.com", buttonText: "Open the page")',
+        ),
         statement.span,
       );
     for (const argument of statement.arguments)
@@ -2125,7 +2166,10 @@ class SemanticValidator {
       )
         this.#report(
           semanticCode.unknownNamedArgument,
-          `openUrl has no argument '${argument.name.name}'. It takes a web address, buttonText:, and alwaysButton:.`,
+          unknownNamedArgumentMessage("openUrl", argument.name.name, [
+            "buttonText",
+            "alwaysButton",
+          ]),
           argument.name.span,
         );
   }
@@ -2141,7 +2185,11 @@ class SemanticValidator {
     if (!given)
       this.#report(
         semanticCode.argumentCount,
-        "exportText takes one text without a name, first, as in 'exportText(report, title: \"Your report\")'.",
+        leadingArgumentMessage(
+          "exportText",
+          "one text",
+          'exportText(report, title: "Your report")',
+        ),
         statement.span,
       );
     for (const argument of statement.arguments)
@@ -2154,7 +2202,7 @@ class SemanticValidator {
       )
         this.#report(
           semanticCode.unknownNamedArgument,
-          `exportText has no argument '${argument.name.name}'. It takes a text, title:, and fileName:.`,
+          unknownNamedArgumentMessage("exportText", argument.name.name, ["title", "fileName"]),
           argument.name.span,
         );
   }
@@ -2561,16 +2609,6 @@ function literalText(expression: Expression): string | undefined {
     text += part.value;
   }
   return text;
-}
-
-/** "2 arguments (a, b)" or "1 to 3 arguments (a, b, c)", naming the parameters so the author sees what is expected. */
-function argumentRange(required: number, parameterNames: readonly string[]): string {
-  const total = parameterNames.length;
-  const count =
-    required === total
-      ? `${total} argument${total === 1 ? "" : "s"}`
-      : `${required} to ${total} arguments`;
-  return total === 0 ? "no arguments" : `${count} (${parameterNames.join(", ")})`;
 }
 
 /**

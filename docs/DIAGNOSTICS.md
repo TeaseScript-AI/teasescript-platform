@@ -218,12 +218,12 @@ which each need a code of their own.
 - `TSV007` (one problem, same text)
   - name pass: a property name that a speaker declaration or an object literal gives twice (`duplicateEntryMessage`)
   - type checker: the same rule with the same text for a key that a dict literal gives twice, also through a computed key whose text is known
-- `TSV020` (one problem, different texts)
-  - name pass: calls of the script's functions and of built-ins by name, such as `load` without `default:`, `askImage`, `showPopup`, `openUrl`, `exportText`, and `takePhoto`
-  - type checker: method calls, `script(...)`, and the functions of the current date and time
-- `TSV022` (one problem, different texts)
-  - name pass: calls of the script's functions and of built-ins by name
-  - type checker: method calls and `script(...)`
+- `TSV020` (one problem, same text)
+  - name pass: calls of the script's functions and of the commands it knows by name, such as `load` without `default:`, `askImage`, `showPopup`, `openUrl`, `exportText`, and `takePhoto`, with the messages of `argument-rules.ts`
+  - type checker: the same rules with the same texts for method calls, `script(...)`, the functions of the current date and time, and the other built-ins
+- `TSV022` (one problem, same text)
+  - name pass: calls of the script's functions and of the commands it knows by name (`unknownNamedArgumentMessage`)
+  - type checker: the same rule with the same text for method calls, `script(...)`, and the other built-ins
 - `TSV043` (one problem, different texts)
   - type checker: every operation that its operands do not support, among them a speaker property that no declaration or assignment gives a speaker the read may reach
   - plan analysis: a speaker property that a way to the read misses (V30 §37)

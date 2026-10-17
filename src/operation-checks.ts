@@ -49,12 +49,18 @@ import {
 } from "./static-types.js";
 import {
   argumentCountMessage,
+  argumentsTaken,
+  missingDefaultMessage,
+  unknownNamedArgumentMessage,
+} from "./argument-rules.js";
+import {
   argumentFix,
   argumentTypeMessage,
   beyondLengthMessage,
   emptyTextMessage,
   endBeforeStartMessage,
   LIST_JOIN,
+  methodArgumentCountMessage,
   needsNonEmptyText,
   negativeMessage,
   regexMemberMessage,
@@ -179,7 +185,7 @@ function shapeProblems(member: MethodParameters, call: CallExpression): Operatio
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${member.name}() takes its arguments without names. Remove '${named.name.name}:'.`,
+        message: unknownNamedArgumentMessage(member.name, named.name.name, []),
         span: named.name.span,
       },
     ];
@@ -188,7 +194,7 @@ function shapeProblems(member: MethodParameters, call: CallExpression): Operatio
     return [
       {
         kind: "argumentCount",
-        message: argumentCountMessage(member, call.arguments.length),
+        message: methodArgumentCountMessage(member, call.arguments.length),
         span: call.span,
       },
     ];
@@ -332,7 +338,7 @@ export function builtinShapeProblems(name: string, call: CallExpression): Operat
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}(...) takes no named arguments. Remove '${named.name.name}:'.`,
+        message: unknownNamedArgumentMessage(name, named.name.name, [], parameters.length > 0),
         span: named.name.span,
       },
     ];
@@ -340,10 +346,7 @@ export function builtinShapeProblems(name: string, call: CallExpression): Operat
   return [
     {
       kind: "argumentCount",
-      message:
-        parameters.length === 0
-          ? `${name}() takes no arguments, received ${call.arguments.length}.`
-          : `${name}(...) takes ${parameters.length} argument (${parameters.join(", ")}), received ${call.arguments.length}.`,
+      message: argumentCountMessage(name, argumentsTaken(parameters), call.arguments.length),
       span: call.span,
     },
   ];
@@ -383,7 +386,7 @@ export function builtinCallProblems(
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is 'default:'.`,
+        message: unknownNamedArgumentMessage(name, argument.name.name, ["default"]),
         span: argument.name.span,
       });
   }
@@ -392,7 +395,11 @@ export function builtinCallProblems(
   if (positional.length !== 1 && !parts)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes 1 argument (value)${result === "datetime" ? " or 2 (date, time)" : ""}, received ${positional.length}.`,
+      message: argumentCountMessage(
+        name,
+        `1 argument (value)${result === "datetime" ? " or 2 (date, time)" : ""}`,
+        positional.length,
+      ),
       span: call.span,
     });
   if (problems.length > 0) return problems;
@@ -444,20 +451,27 @@ function lockProblems(
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: `${name}(...) has no parameter '${argument.name.name}'. Its named arguments are ${quoted(parameters, "and")}.`,
+        message: unknownNamedArgumentMessage(name, argument.name.name, parameters),
         span: argument.name.span,
       });
   }
   if (positional !== 1)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes 1 argument (${name.endsWith("File") ? "file" : "text"})${decrypts ? " and a 'default:'" : ""}, received ${positional}.`,
+      message: argumentCountMessage(
+        name,
+        `1 argument (${name.endsWith("File") ? "file" : "text"})${decrypts ? " and a 'default:'" : ""}`,
+        positional,
+      ),
       span: call.span,
     });
   else if (decrypts && !named.has("default"))
     problems.push({
       kind: "argumentCount",
-      message: `'${name}(${name === "decryptText" ? "text" : "file"}, default: value)' needs a 'default:' for when it does not open, such as with a wrong password. Add one, such as 'default: null'.`,
+      message: missingDefaultMessage(
+        `${name}(${name === "decryptText" ? "text" : "file"}, default: value)`,
+        "for when it does not open, such as with a wrong password",
+      ),
       span: call.span,
     });
   // An encrypt call's option also takes `true`, which lets the player choose it, or `false`, which leaves it out.
@@ -575,11 +589,10 @@ function dataTextProblems(
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: reads
-          ? `${name}(...) has no parameter '${argument.name.name}'. ${takesFiles ? "Its named arguments are 'default:' and 'files:'." : "Its only named argument is 'default:'."}`
-          : takesFiles
-            ? `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is 'files:'.`
-            : `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`,
+        message: unknownNamedArgumentMessage(name, argument.name.name, [
+          ...(reads ? ["default"] : []),
+          ...(takesFiles ? ["files"] : []),
+        ]),
         span: argument.name.span,
       });
   }
@@ -599,13 +612,20 @@ function dataTextProblems(
   if (positional.length !== 1)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes 1 argument (${name === "toJson" ? "value" : name === "fileToBase64" || name === "hashFile" ? "file" : "text"})${reads ? " and a 'default:'" : ""}, received ${positional.length}.`,
+      message: argumentCountMessage(
+        name,
+        `1 argument (${name === "toJson" ? "value" : name === "fileToBase64" || name === "hashFile" ? "file" : "text"})${reads ? " and a 'default:'" : ""}`,
+        positional.length,
+      ),
       span: call.span,
     });
   else if (reads && !fallback)
     problems.push({
       kind: "argumentCount",
-      message: `'${name}(text, default: value)' needs a 'default:' for text that is not valid ${name === "fromJson" ? "JSON" : "Base64"}. Add one, such as 'default: null'.`,
+      message: missingDefaultMessage(
+        `${name}(text, default: value)`,
+        `for text that is not valid ${name === "fromJson" ? "JSON" : "Base64"}`,
+      ),
       span: call.span,
     });
   if (
@@ -675,21 +695,27 @@ function regexConversionProblems(
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: `toRegex(...) has no parameter '${argument.name.name}'. Its only named argument is 'default:'.`,
+        message: unknownNamedArgumentMessage("toRegex", argument.name.name, ["default"]),
         span: argument.name.span,
       });
   }
   if (positional.length !== 1)
     problems.push({
       kind: "argumentCount",
-      message: `toRegex(...) takes 1 argument (text) and a 'default:', received ${positional.length}.`,
+      message: argumentCountMessage(
+        "toRegex",
+        "1 argument (text) and a 'default:'",
+        positional.length,
+      ),
       span: call.span,
     });
   else if (fallback === undefined)
     problems.push({
       kind: "argumentCount",
-      message:
-        "'toRegex(text, default: value)' needs a 'default:' for text that is not a valid regex. Add one, such as 'default: null'.",
+      message: missingDefaultMessage(
+        "toRegex(text, default: value)",
+        "for text that is not a valid regex",
+      ),
       span: call.span,
     });
   if (problems.length > 0) return problems;
@@ -745,17 +771,14 @@ function numericFunctionProblems(
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message:
-          named.length === 0
-            ? `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`
-            : `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is '${named[0]}:'.`,
+        message: unknownNamedArgumentMessage(name, argument.name.name, named),
         span: argument.name.span,
       });
   }
   if (positional !== parameters.length)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes ${parameters.length} argument${parameters.length === 1 ? "" : "s"} (${parameters.join(", ")}), received ${positional}.`,
+      message: argumentCountMessage(name, argumentsTaken(parameters), positional),
       span: call.span,
     });
   if (problems.length > 0) return problems;
@@ -794,14 +817,14 @@ function angleFunctionProblems(
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`,
+        message: unknownNamedArgumentMessage(name, argument.name.name, []),
         span: argument.name.span,
       });
   }
   if (values.length !== parameters.length)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes ${parameters.length} argument${parameters.length === 1 ? "" : "s"} (${parameters.join(", ")}), received ${values.length}.`,
+      message: argumentCountMessage(name, argumentsTaken(parameters), values.length),
       span: call.span,
     });
   if (problems.length > 0) return problems;
@@ -837,7 +860,7 @@ function minMaxProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}(...) takes no named arguments. Remove '${named.name.name}:'.`,
+        message: unknownNamedArgumentMessage(name, named.name.name, []),
         span: named.name.span,
       },
     ];
@@ -845,7 +868,11 @@ function minMaxProblems(
     return [
       {
         kind: "argumentCount",
-        message: `${name}(...) takes 2 or more arguments, or one list, received ${call.arguments.length}.`,
+        message: argumentCountMessage(
+          name,
+          "2 or more arguments, or one list",
+          call.arguments.length,
+        ),
         span: call.span,
       },
     ];
@@ -1164,7 +1191,11 @@ export function positionalMethodProblems(
   return [
     {
       kind: "argumentCount",
-      message: `remove() takes 1 argument, or none on a message or permanent button, received ${call.arguments.length}.`,
+      message: argumentCountMessage(
+        "remove",
+        "1 argument, or none on a message or permanent button",
+        call.arguments.length,
+      ),
       span: call.span,
     },
   ];
@@ -1241,7 +1272,7 @@ function takeProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}() takes its count without a name. Remove '${named.name.name}:'.`,
+        message: unknownNamedArgumentMessage(name, named.name.name, []),
         span: named.name.span,
       },
     ];
@@ -1249,7 +1280,7 @@ function takeProblems(
     return [
       {
         kind: "argumentCount",
-        message: `${name}() takes 1 argument (count), received ${call.arguments.length}.`,
+        message: argumentCountMessage(name, "1 argument (count)", call.arguments.length),
         span: call.span,
       },
     ];
@@ -1292,7 +1323,7 @@ function searchProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}() takes its value without a name. Remove '${named.name.name}:'.`,
+        message: unknownNamedArgumentMessage(name, named.name.name, []),
         span: named.name.span,
       },
     ];
@@ -1300,7 +1331,7 @@ function searchProblems(
     return [
       {
         kind: "argumentCount",
-        message: `${name}() takes 1 argument (value), received ${call.arguments.length}.`,
+        message: argumentCountMessage(name, "1 argument (value)", call.arguments.length),
         span: call.span,
       },
     ];
@@ -1331,7 +1362,7 @@ function getProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `get(...) has no parameter '${unknown.name.name}'. Its only named argument is 'default:'.`,
+        message: unknownNamedArgumentMessage("get", unknown.name.name, ["default"]),
         span: unknown.name.span,
       },
     ];
@@ -1344,11 +1375,21 @@ function getProblems(
       message:
         positional === 1 && named.length === 0
           ? list
-            ? "'get(index, default: value)' needs a 'default:' for an index the list does not have. Read an element that must exist as 'list[index]'."
-            : "'get(index or key, default: value)' needs a 'default:' for an index or key the value does not have. Read one that must exist as 'value[index]'."
-          : list
-            ? "'get(index, default: value)' takes one index and a 'default:'."
-            : "'get(index or key, default: value)' takes one index or key and a 'default:'.",
+            ? missingDefaultMessage(
+                "get(index, default: value)",
+                "for an index the list does not have",
+                "Read an element that must exist as 'list[index]'.",
+              )
+            : missingDefaultMessage(
+                "get(index or key, default: value)",
+                "for an index or key the value does not have",
+                "Read one that must exist as 'value[index]'.",
+              )
+          : argumentCountMessage(
+              "get",
+              `1 argument (${list ? "index" : "index or key"}) and a 'default:'`,
+              positional,
+            ),
       span: call.span,
     },
   ];

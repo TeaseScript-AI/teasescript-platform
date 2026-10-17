@@ -3,6 +3,8 @@
  * and positions count Unicode code points.
  */
 
+import { argumentCountMessage, argumentsTaken } from "./argument-rules.js";
+
 /**
  * What an argument must be: `text`, `nonEmptyText`, a `regex`, `textOrRegex`, `nonEmptyTextOrRegex`, a `position` from
  * 0 through the text length, or a `count` (a repetition count or target length) of 0 or more.
@@ -113,15 +115,17 @@ export interface MethodParameters {
   readonly parameters: readonly Pick<TextParameter, "name" | "optional">[] | null;
 }
 
-export function argumentCountMessage(member: MethodParameters, received: number): string {
+/** A call of a method with a number of arguments it does not take, at compile time (TSV020) and at runtime (TSR028). */
+export function methodArgumentCountMessage(member: MethodParameters, received: number): string {
   const parameters = member.parameters ?? [];
-  const names = parameters.map((parameter) => parameter.name);
-  const required = parameters.filter((parameter) => parameter.optional !== true).length;
-  const expected =
-    names.length === 0
-      ? "no arguments"
-      : `${required === names.length ? `${required} argument${required === 1 ? "" : "s"}` : `${required} to ${names.length} arguments`} (${names.join(", ")})`;
-  return `${member.name}() takes ${expected}, received ${received}.`;
+  return argumentCountMessage(
+    member.name,
+    argumentsTaken(
+      parameters.map((parameter) => parameter.name),
+      parameters.filter((parameter) => parameter.optional !== true).length,
+    ),
+    received,
+  );
 }
 
 /** An argument of the wrong kind; `argumentFix` names the conversion that fixes it. */

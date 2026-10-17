@@ -65,7 +65,7 @@ test("a positional argument after a named one and a parameter given twice are re
   ]);
   assert.deepEqual(diagnostics(SHOW + "say show(1, d: 2)")[0]?.slice(0, 2), [
     "TSV022",
-    "Function 'show' has no parameter 'd'. Its parameters are a, b, c.",
+    "show() has no parameter 'd'. Its named arguments are 'a:', 'b:', and 'c:'.",
   ]);
   assert.deepEqual(diagnostics(SHOW + "say show(b: 2)")[0]?.slice(0, 2), [
     "TSV024",
@@ -118,11 +118,11 @@ test("a name given twice to a built-in or method is rejected at compile time", (
 test("argument count errors name the parameters and the fix", () => {
   assert.deepEqual(diagnostics(SHOW + "say show(1, 2, 3, 4)")[0]?.slice(0, 2), [
     "TSV020",
-    "Function 'show' takes 1 to 3 arguments (a, b, c), received 4 positional arguments. Remove the extra positional arguments.",
+    "show() takes 1 to 3 arguments (a, b, c), received 4.",
   ]);
   assert.deepEqual(diagnostics(SHOW + "say show()")[0]?.slice(0, 2), [
     "TSV020",
-    "Function 'show' takes 1 to 3 arguments (a, b, c), received 0. Add the missing arguments.",
+    "show() takes 1 to 3 arguments (a, b, c), received 0.",
   ]);
 });
 

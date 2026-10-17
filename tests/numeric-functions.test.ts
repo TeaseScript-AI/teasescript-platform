@@ -71,7 +71,7 @@ test("round to decimals rounds the number as written, half away from zero, and g
     ],
   ]);
   assert.deepEqual(diagnostics("say floor(2.5, decimals: 1)\nexit"), [
-    ["TSV022", "floor(...) takes no named arguments. Remove 'decimals:'.", "decimals"],
+    ["TSV022", "floor() takes its arguments without names. Remove 'decimals:'.", "decimals"],
   ]);
   assert.deepEqual(failure(`${DYNAMIC}say round(2.5, decimals: dynamic(-1))\nexit`), [
     "TSR039",
@@ -217,9 +217,9 @@ test("numeric functions check their arguments", () => {
         "pow(...) needs a number, not text (string). Convert text with toNumber(...) first.",
         '"3"',
       ],
-      ["TSV020", "sqrt(...) takes 1 argument (value), received 0.", "sqrt()"],
-      ["TSV020", "pow(...) takes 2 arguments (base, exponent), received 1.", "pow(2)"],
-      ["TSV022", "abs(...) takes no named arguments. Remove 'by:'.", "by"],
+      ["TSV020", "sqrt() takes 1 argument (value), received 0.", "sqrt()"],
+      ["TSV020", "pow() takes 2 arguments (base, exponent), received 1.", "pow(2)"],
+      ["TSV022", "abs() takes its arguments without names. Remove 'by:'.", "by"],
       [
         "TSV043",
         "'maybe' may be null. Check it first: if maybe != null { ... }, or give a fallback: maybe otherwise 0",

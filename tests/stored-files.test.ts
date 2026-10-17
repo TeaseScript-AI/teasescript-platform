@@ -809,7 +809,7 @@ test("the file functions are checked where the types show their arguments", () =
     ["TSV043", "fileFromBase64(...) reads text (string), not a whole number (integer)."],
   ]);
   assert.deepEqual(diagnostics('let f = fileToBase64("x", default: "")'), [
-    ["TSV022", "fileToBase64(...) takes no named arguments. Remove 'default:'."],
+    ["TSV022", "fileToBase64() takes its arguments without names. Remove 'default:'."],
   ]);
   assert.deepEqual(diagnostics("let h = hashFile(3)"), [
     [
@@ -818,10 +818,10 @@ test("the file functions are checked where the types show their arguments", () =
     ],
   ]);
   assert.deepEqual(diagnostics('let h = hashFile("x", type: "sha1")'), [
-    ["TSV022", "hashFile(...) takes no named arguments. Remove 'type:'."],
+    ["TSV022", "hashFile() takes its arguments without names. Remove 'type:'."],
   ]);
   assert.deepEqual(diagnostics("let h = hashFile()"), [
-    ["TSV020", "hashFile(...) takes 1 argument (file), received 0."],
+    ["TSV020", "hashFile() takes 1 argument (file), received 0."],
   ]);
   assert.deepEqual(
     diagnostics("let hashFile = 1").map(([code]) => code),
@@ -831,7 +831,7 @@ test("the file functions are checked where the types show their arguments", () =
     ["TSV043", "'files:' takes true or false (boolean), not text (string)."],
   ]);
   assert.deepEqual(diagnostics("let j = toJson(1, keep: true)"), [
-    ["TSV022", "toJson(...) has no parameter 'keep'. Its only named argument is 'files:'."],
+    ["TSV022", "toJson() has no parameter 'keep'. Its only named argument is 'files:'."],
   ]);
 });
 

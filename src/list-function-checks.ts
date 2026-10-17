@@ -1,3 +1,4 @@
+import { argumentCountMessage, unknownNamedArgumentMessage } from "./argument-rules.js";
 import { angleStatisticMessage } from "./angle.js";
 import type { CallExpression, Expression } from "./ast.js";
 import { percentageFailure } from "./numeric-functions.js";
@@ -197,17 +198,14 @@ function shape(
     if (argument.kind === "namedArgument" && !names.includes(argument.name.name))
       context.problems.push({
         kind: "unknownNamedArgument",
-        message:
-          names.length === 0
-            ? `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`
-            : `${name}(...) has no parameter '${argument.name.name}'. ${names.length === 1 ? "Its only named argument is" : "Its named arguments are"} ${names.map((one) => `'${one}:'`).join(" and ")}.`,
+        message: unknownNamedArgumentMessage(name, argument.name.name, names),
         span: argument.name.span,
       });
   const count = call.arguments.filter((argument) => argument.kind === "positionalArgument").length;
   if (count !== positional)
     context.problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes ${usage}, received ${count}.`,
+      message: argumentCountMessage(name, usage, count),
       span: call.span,
     });
   return context.problems.length === before;

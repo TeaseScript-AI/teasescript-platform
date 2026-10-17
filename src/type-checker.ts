@@ -231,6 +231,11 @@ import {
   type StaticScalar,
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
+import {
+  argumentCountMessage,
+  missingDefaultMessage,
+  unknownNamedArgumentMessage,
+} from "./argument-rules.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
@@ -7020,9 +7025,14 @@ class TypeChecker {
       if (all.every(isTemporal) && expression.arguments.length > 0)
         this.#report(
           typeCode.argumentCount,
-          method.startsWith("format")
-            ? `${method}() takes no arguments: it shows the value in the player's own date and time format.`
-            : `${method}() takes no arguments.`,
+          argumentCountMessage(
+            method,
+            "no arguments",
+            expression.arguments.length,
+            method.startsWith("format")
+              ? "It shows the value in the player's own date and time format."
+              : undefined,
+          ),
           callee.property.span,
         );
       return all.length === 1 ? results[0]! : union(results.map((result) => result!));
@@ -7603,7 +7613,7 @@ class TypeChecker {
         if (expression.arguments.length > 0)
           this.#report(
             typeCode.argumentCount,
-            `${name}() takes no arguments.`,
+            argumentCountMessage(name, "no arguments", expression.arguments.length),
             expression.arguments[0]!.value.span,
           );
         return name === "getDate"
@@ -7621,14 +7631,19 @@ class TypeChecker {
         if (positional !== 1)
           this.#report(
             typeCode.argumentCount,
-            `script(...) takes 1 argument (path), received ${positional}. Name a label with label:, as in script("rooms/hall.tease", label: "start").`,
+            argumentCountMessage(
+              "script",
+              "1 argument (path)",
+              positional,
+              `Name a label with 'label:', as in 'script("rooms/hall.tease", label: "start")'.`,
+            ),
             expression.span,
           );
         for (const [index, item] of expression.arguments.entries()) {
           if (item.kind === "namedArgument" && item.name.name !== "label")
             this.#report(
               typeCode.unknownNamedArgument,
-              `script(...) has no parameter '${item.name.name}'. Its only named argument is 'label:'.`,
+              unknownNamedArgumentMessage("script", item.name.name, ["label"]),
               item.name.span,
             );
           else if (item.kind === "namedArgument" || positional === 1)
@@ -7823,9 +7838,7 @@ class TypeChecker {
     if (unknown !== undefined) {
       this.#report(
         typeCode.unknownNamedArgument,
-        method === "get"
-          ? `get(...) has no parameter '${unknown.name.name}'. Its only named argument is 'default:'.`
-          : `${method}(...) takes no named arguments.`,
+        unknownNamedArgumentMessage(method, unknown.name.name, method === "get" ? ["default"] : []),
         unknown.name.span,
       );
       return false;
@@ -7834,13 +7847,21 @@ class TypeChecker {
     if (positional.length === keys && (method !== "get" || named.length === 1)) return true;
     this.#report(
       typeCode.argumentCount,
-      method === "get"
-        ? named.length === 0 && positional.length === 1
-          ? "get(key, default: value) needs a 'default:' for a missing key. Read a key that must exist as dict[key]."
-          : "get(key, default: value) takes one key and a 'default:'."
-        : method === "clear"
-          ? "clear() takes no arguments."
-          : `${method}(key) takes one key.`,
+      method === "get" && named.length === 0 && positional.length === 1
+        ? missingDefaultMessage(
+            "get(key, default: value)",
+            "for a missing key",
+            "Read a key that must exist as 'dict[key]'.",
+          )
+        : argumentCountMessage(
+            method,
+            method === "get"
+              ? "1 argument (key) and a 'default:'"
+              : method === "clear"
+                ? "no arguments"
+                : "1 argument (key)",
+            positional.length,
+          ),
       expression.span,
     );
     return false;

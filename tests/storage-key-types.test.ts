@@ -54,13 +54,13 @@ test("every load needs a default, and null says the value may be missing", () =>
   assert.deepEqual(errors('let visits = load("visits")\nexit'), [
     [
       "TSV020",
-      'A load needs default:, the value to use while the key has not been saved, as in load("visits", default: 0). Write default: null to check for a missing value with != null.',
+      `'load("visits", default: value)' needs a 'default:' for a key that has not been saved. Add one, such as 'default: 0', or 'default: null' to check for a missing value with '!= null'.`,
       'load("visits")',
     ],
   ]);
   assert.equal(
     errors('let prefix = "a"\nlet value = load prefix + "b"\nexit')[0]?.[1],
-    "A load needs default:, the value to use while the key has not been saved, as in load(key, default: 0). Write default: null to check for a missing value with != null.",
+    "'load(key, default: value)' needs a 'default:' for a key that has not been saved. Add one, such as 'default: 0', or 'default: null' to check for a missing value with '!= null'.",
   );
   // With a declared type, a default of null makes the value optional, and a use needs a check.
   assert.deepEqual(

@@ -204,11 +204,13 @@ export const DIAGNOSTIC_CODES = {
     ),
     shared: {
       problems: "one",
-      texts: "different",
+      texts: "same",
       parts: [
-        "calls of the script's functions and of built-ins by name, such as `load` without " +
-          "`default:`, `askImage`, `showPopup`, `openUrl`, `exportText`, and `takePhoto`",
-        "method calls, `script(...)`, and the functions of the current date and time",
+        "calls of the script's functions and of the commands it knows by name, such as `load` " +
+          "without `default:`, `askImage`, `showPopup`, `openUrl`, `exportText`, and " +
+          "`takePhoto`, with the messages of `argument-rules.ts`",
+        "the same rules with the same texts for method calls, `script(...)`, the functions of " +
+          "the current date and time, and the other built-ins",
       ],
     },
   },
@@ -216,10 +218,12 @@ export const DIAGNOSTIC_CODES = {
     ...entry(["name pass", "type checker"], "error", "Unknown named argument", DOCS.values),
     shared: {
       problems: "one",
-      texts: "different",
+      texts: "same",
       parts: [
-        "calls of the script's functions and of built-ins by name",
-        "method calls and `script(...)`",
+        "calls of the script's functions and of the commands it knows by name " +
+          "(`unknownNamedArgumentMessage`)",
+        "the same rule with the same text for method calls, `script(...)`, and the other " +
+          "built-ins",
       ],
     },
   },
