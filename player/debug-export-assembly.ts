@@ -416,11 +416,32 @@ function replayData(
 const LEFT_OUT = "[left out: not chosen]";
 
 /**
+ * Stands in for a lock step's text, file, password, or key, which a readable section never shows (docs/ENCRYPTION.md).
+ */
+const LOCK_LEFT_OUT = "[left out: lock content]";
+
+/**
  * An event as session text. What the player saw stays: messages, their own transcript text, and button labels. Any other
  * event can hold a saved value, an answer, or a storage key (a request's options and default, a settlement's result, a
- * warning about a key), so it keeps its structure only, unless saved values and answers are chosen too.
+ * warning about a key), so it keeps its structure only, unless saved values and answers are chosen too. A lock step's
+ * request never shows its text, file, password, or key, only its call, phase, public keys, and time lock.
  */
 function sessionTextEvent(event: InterpreterEvent, choices: DebugExportChoices) {
+  if (
+    event.kind === "actionRequested" &&
+    event.action.kind === "lock" &&
+    choices.savedValues &&
+    choices.answers
+  )
+    return {
+      ...event,
+      action: {
+        ...event.action,
+        value: LOCK_LEFT_OUT,
+        password: event.action.password === null ? null : LOCK_LEFT_OUT,
+        key: event.action.key === null ? null : LOCK_LEFT_OUT,
+      },
+    };
   if (choices.savedValues && choices.answers) return event;
   const { kind, sequence } = event;
   switch (event.kind) {
@@ -455,6 +476,8 @@ function sessionTextEvent(event: InterpreterEvent, choices: DebugExportChoices) 
     case "scriptStorageEdited":
       return { kind, sequence, operation: event.operation, key: LEFT_OUT };
   }
+  // A new event kind must say what of it session text keeps.
+  event satisfies never;
 }
 
 /** The fields of a settlement that say how an action ended without what it carried. */

@@ -43,9 +43,10 @@ const FAMILIES: Readonly<
 
 /**
  * The background swatches in order, the chosen family's first, then the ones that stand in when the photo has no such
- * colour. "Vibrant when large enough" takes a swatch of either family only when it covers the share, so a tiny detail
- * does not colour the Player, and otherwise the largest. A Vibrant swatch that stands in for a missing Muted one is the
- * larger one. Only the hue and the colourfulness are used, so the other mode's swatches can stand in last.
+ * colour. "Vibrant if large enough, else Muted" takes a swatch of either family only when it covers the share, so a
+ * tiny detail does not colour the Player, and otherwise the largest. A Vibrant swatch that stands in for a missing
+ * Muted one is the larger one. Only the hue and the colourfulness are used, so the other mode's swatches can stand in
+ * last.
  */
 function surfaceSwatches(swatches: PhotoSwatches, mode: Mode, choice: PhotoColourChoice) {
   const { vibrant, muted } = FAMILIES[mode];

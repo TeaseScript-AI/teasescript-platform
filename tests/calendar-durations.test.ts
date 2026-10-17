@@ -522,7 +522,7 @@ test("an absolute date and time moves only by exact time, and elapsed-time consu
     runtimeFailure(`${DYNAMIC}showButton "Go", timeout: dynamic(1 calendar day)\nexit`),
     "TSR065",
   );
-  assert.ok(compileErrors('playAudio(file: "a", repeat: 1 calendar day)\nexit').includes("TSV043"));
+  assert.ok(compileErrors('playAudio(file: "a", repeat: 1 calendar day)\nexit').includes("TSV036"));
   assert.equal(
     runtimeFailure(`${DYNAMIC}playAudio(file: "a", repeat: dynamic(1 calendar day))\nexit`),
     "TSR065",

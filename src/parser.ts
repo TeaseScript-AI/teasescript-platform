@@ -257,6 +257,7 @@ const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionK
   ["askDate", "date"],
   ["askTime", "time"],
   ["askDateTime", "datetime"],
+  ["askPassword", "password"],
   ["askBoolean", "boolean"],
   ["askForm", "form"],
   ["askBooleans", "booleans"],
@@ -290,20 +291,30 @@ const NAMED_ASK_OPTIONS: ReadonlyMap<InteractionExpression["interactionKind"], r
   ]);
 /** The one named argument of `askChoice`, written once after its options. */
 const CHOICE_OPTIONS: readonly string[] = ["prefill"];
+/** The one named argument of `askPassword`: a password is never suggested, so it has no `prefill:`. */
+const PASSWORD_OPTIONS: readonly string[] = ["hint"];
 /** The named options of `showButton` after its label. */
 export const SHOW_BUTTON_OPTIONS: readonly string[] = ["background", "timeout"];
 
 /** The named arguments of an ask, such as `prefill:` and `hint:` of `askText`, as the parser accepts them. */
 export function askOptionNames(kind: InteractionExpression["interactionKind"]): readonly string[] {
-  return kind === "choice" ? CHOICE_OPTIONS : (NAMED_ASK_OPTIONS.get(kind) ?? ASK_OPTIONS);
+  if (kind === "choice") return CHOICE_OPTIONS;
+  return kind === "password" ? PASSWORD_OPTIONS : (NAMED_ASK_OPTIONS.get(kind) ?? ASK_OPTIONS);
 }
+
+/** The named arguments the parser reads for an ask: its own, and for `askPassword` a `prefill:` the type check refuses. */
+function readAskOptionNames(kind: InteractionExpression["interactionKind"]): readonly string[] {
+  return kind === "password" ? READ_PASSWORD_OPTIONS : askOptionNames(kind);
+}
+const READ_PASSWORD_OPTIONS: readonly string[] = [...PASSWORD_OPTIONS, "prefill"];
 /**
  * The earlier name of an ask's `prefill:`, which is a compile error that names the fix (owner decision on #512,
  * 2026-10-08): `default:`, or `defaults:` for `askBooleans`.
  */
 function removedPrefillName(kind: InteractionExpression["interactionKind"]): string | null {
   if (kind === "booleans") return "defaults";
-  return kind === "choice" || kind === "form" ? null : "default";
+  // askPassword came after the rename and never had one.
+  return kind === "choice" || kind === "form" || kind === "password" ? null : "default";
 }
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
 const OPENING_TOKENS: ReadonlySet<TokenKind> = new Set([
@@ -933,18 +944,21 @@ class Parser {
       this.#check(TokenKind.Identifier) &&
       ["bubble", "prose"].includes(this.#peek().lexeme) &&
       (this.#atSayModeBeforeBoundedText() ||
-        !(yield* parseChild(this.#canParseCompleteSayValue(statement))))
+        !(yield* parseChild(
+          this.#canParseCompleteSayValue(statement, this.#peekAfterSayMode()?.kind),
+        )))
         ? yield* parseChild(this.#parseSayPresentation())
         : null;
 
     let skipPolicy: SayParts["skipPolicy"] = null;
+    let skipPolicySpan: SourceSpan | null = null;
     if (
       (this.#checkIdentifier("skippable") || this.#checkIdentifier("unskippable")) &&
       ((!statement && this.#peek(1).kind === TokenKind.LeftParenthesis) ||
-        !(yield* parseChild(this.#canParseCompleteSayValue(statement))))
+        !(yield* parseChild(this.#canParseCompleteSayValue(statement, this.#peek(1).kind))))
     ) {
       skipPolicy = this.#peek().lexeme === "skippable" ? "skippable" : "unskippable";
-      this.#advance();
+      skipPolicySpan = copySpan(this.#advance().span);
     }
 
     if (
@@ -960,8 +974,10 @@ class Parser {
         presentation,
         speaker,
         skipPolicy,
+        skipPolicySpan,
         value: bounded.value,
         pacing: bounded.pacing,
+        instantSpan: bounded.instantSpan,
         span: spanFrom(keyword.span, bounded.end),
       });
     }
@@ -978,11 +994,13 @@ class Parser {
       return null;
     }
     let pacing: SayParts["pacing"] = null;
+    let instantSpan: SourceSpan | null = null;
     let endSpan = value.span;
     if (this.#match(TokenKind.Comma)) {
       if (this.#canParseInstantPacingAlias(statement)) {
         endSpan = this.#advance().span;
         pacing = "instant";
+        instantSpan = copySpan(endSpan);
       } else {
         const parsedPacing = yield* parseChild(this.#parseOr());
         if (parsedPacing === null) {
@@ -1001,8 +1019,10 @@ class Parser {
       presentation,
       speaker,
       skipPolicy,
+      skipPolicySpan,
       value,
       pacing,
+      instantSpan,
       span: spanFrom(keyword.span, endSpan),
     });
   }
@@ -1053,6 +1073,7 @@ class Parser {
   *#parseBoundedSayText(): ParseTask<{
     readonly value: Expression;
     readonly pacing: SayParts["pacing"];
+    readonly instantSpan: SourceSpan | null;
     readonly end: SourceSpan;
   } | null> {
     this.#advance();
@@ -1061,6 +1082,7 @@ class Parser {
     if (value === null) return null;
     this.#skipNewlines();
     let pacing: SayParts["pacing"] = null;
+    let instantSpan: SourceSpan | null = null;
     if (this.#match(TokenKind.Comma)) {
       this.#skipNewlines();
       let after = 1;
@@ -1069,7 +1091,7 @@ class Parser {
         this.#checkIdentifier("instant") &&
         this.#peek(after).kind === TokenKind.RightParenthesis
       ) {
-        this.#advance();
+        instantSpan = copySpan(this.#advance().span);
         pacing = "instant";
       } else {
         pacing = yield* parseChild(this.#parseRequiredExpressionTask());
@@ -1084,7 +1106,7 @@ class Parser {
       );
       return null;
     }
-    return { value, pacing, end: copySpan(this.#previous().span) };
+    return { value, pacing, instantSpan, end: copySpan(this.#previous().span) };
   }
 
   /**
@@ -1092,20 +1114,28 @@ class Parser {
    * a bounded `say`: `bubble() ("Plain", instant)` is no chained call.
    */
   #atSayModeBeforeBoundedText(): boolean {
-    if (this.#peek(1).kind !== TokenKind.LeftParenthesis) return false;
+    return (
+      this.#peek(1).kind === TokenKind.LeftParenthesis &&
+      this.#peekAfterSayMode()?.kind === TokenKind.LeftParenthesis
+    );
+  }
+
+  /**
+   * The token after the `bubble` or `prose` here and its options, or `null` when the parentheses after it cannot hold
+   * them: they hold none or named ones only.
+   */
+  #peekAfterSayMode(): Token | null {
+    if (this.#peek(1).kind !== TokenKind.LeftParenthesis) return this.#peek(1);
     let first = 2;
     while (this.#peek(first).kind === TokenKind.Newline) first += 1;
     if (
       this.#peek(first).kind !== TokenKind.RightParenthesis &&
       !(isPropertyName(this.#peek(first)) && this.#peek(first + 1).kind === TokenKind.Colon)
     )
-      return false;
+      return null;
     this.#shared.closers ??= delimiterClosers(this.tokens);
     const closer = this.#shared.closers.get(this.#current + 1);
-    return (
-      closer !== undefined &&
-      this.#peek(closer + 1 - this.#current).kind === TokenKind.LeftParenthesis
-    );
+    return closer === undefined ? null : this.#peek(closer + 1 - this.#current);
   }
 
   /**
@@ -1184,9 +1214,14 @@ class Parser {
    * identifiers. Keep that interpretation whenever the existing say grammar
    * can consume a complete value (and optional pacing) from this position,
    * also one that recovered from an error, such as a string with a failed
-   * interpolation.
+   * interpolation. When a `/` follows the modifier (`afterModifier`), only a
+   * value without errors counts: a regex may start there (V30 §8), and the
+   * tokens after the `/` do not show its pattern, as in `say prose /[/*]/`.
    */
-  *#canParseCompleteSayValue(statement: boolean): ParseTask<boolean> {
+  *#canParseCompleteSayValue(
+    statement: boolean,
+    afterModifier: TokenKind | undefined,
+  ): ParseTask<boolean> {
     const speculative = new Parser(this.tokens, this.#shared);
     speculative.#current = this.#current;
 
@@ -1205,7 +1240,10 @@ class Parser {
       }
     }
 
-    return speculative.#isSayBoundary(statement);
+    return (
+      speculative.#isSayBoundary(statement) &&
+      (afterModifier !== TokenKind.Slash || speculative.#diagnostics.length === 0)
+    );
   }
 
   /**
@@ -4227,6 +4265,7 @@ class Parser {
       this.#checkIdentifier("askDate") ||
       this.#checkIdentifier("askTime") ||
       this.#checkIdentifier("askDateTime") ||
+      this.#checkIdentifier("askPassword") ||
       this.#checkIdentifier("askBoolean") ||
       this.#checkIdentifier("askForm") ||
       this.#checkIdentifier("askBooleans") ||
@@ -4432,7 +4471,7 @@ class Parser {
     }
 
     if (interactionKind !== "choice") {
-      const names = askOptionNames(interactionKind);
+      const names = readAskOptionNames(interactionKind);
       // The earlier name of the prefill is read as an option too, so its error names the fix wherever it is written.
       const removed = removedPrefillName(interactionKind);
       const recognized = removed === null ? names : [...names, removed];
@@ -4694,7 +4733,7 @@ class Parser {
     const parts = this.#boundedArguments(
       command,
       call,
-      askOptionNames(interactionKind),
+      readAskOptionNames(interactionKind),
       parserDiagnosticCode.unsupportedInteractionForm,
     );
     if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
@@ -4841,22 +4880,9 @@ class Parser {
     if (!this.#check(TokenKind.Identifier) || !PRESENTATION_MODES.has(this.#peek().lexeme))
       return false;
     if (this.#atSayModeBeforeBoundedText()) return true;
-    let after = 1;
-    if (this.#peek(1).kind === TokenKind.LeftParenthesis) {
-      let first = 2;
-      while (this.#peek(first).kind === TokenKind.Newline) first += 1;
-      if (
-        this.#peek(first).kind !== TokenKind.RightParenthesis &&
-        !(isPropertyName(this.#peek(first)) && this.#peek(first + 1).kind === TokenKind.Colon)
-      )
-        return false;
-      this.#shared.closers ??= delimiterClosers(this.tokens);
-      const closer = this.#shared.closers.get(this.#current + 1);
-      if (closer === undefined) return false;
-      after = closer + 1 - this.#current;
-    }
-    const next = this.#peek(after);
+    const next = this.#peekAfterSayMode();
     return (
+      next !== null &&
       isExpressionStart(next) &&
       !EXPRESSION_CONTINUATIONS.has(next.kind) &&
       !(this.#blockEndsCompactInteraction && next.kind === TokenKind.LeftBrace)

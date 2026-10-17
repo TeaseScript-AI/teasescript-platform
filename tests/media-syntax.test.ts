@@ -164,9 +164,10 @@ test("invalid media forms are rejected with focused diagnostics", () => {
     ['let m = playAudio async "a.mp3"\nsay "${m.played}"', "TSV037", "played"],
     ['let m = playAudio async "a.mp3"\nm.rewind()', "TSV037", "rewind"],
     ['let m = playAudio async "a.mp3"\nm.stop(1)', "TSV037", "stop"],
-    ['let m = playAudio async "a.mp3"\nm.volume = 1.5', "TSV037", "volume"],
-    ['let m = playAudio async "a.mp3"\nm.position = "start"', "TSV037", "position"],
-    ['let m = playAudio async "a.mp3"\nm.remaining = 10', "TSV037", "remaining"],
+    ['let m = playAudio async "a.mp3"\nm.volume = 1.5', "TSV037", "1.5"],
+    // A value of another type is a type error of the store.
+    ['let m = playAudio async "a.mp3"\nm.position = "start"', "TSV041", '"start"'],
+    ['let m = playAudio async "a.mp3"\nm.remaining = 10', "TSV041", "10"],
     ['playAudio async "a.mp3" {\n  return 1\n}', "TSV033", "1"],
   ];
   for (const [source, code, offending] of cases) {
@@ -328,10 +329,10 @@ test("statically evident invalid media values are compile errors", () => {
     ["playAudio 3", "TSV036", "3"],
     ["showImage -1", "TSV036", "-1"],
     ['playAudio(file: "a", endAt: 0 s)', "TSV036", "0 s"],
-    ['let m = playAudio async "a"\nm.position += "x"', "TSV037", "position"],
-    ['let m = playAudio async "a"\nm.remaining -= true', "TSV037", "remaining"],
-    ['let m = playAudio async "a"\nm.position += 3', "TSV037", "position"],
-    ['let m = playAudio async "a"\nm.volume += 1 s', "TSV037", "volume"],
+    ['let m = playAudio async "a"\nm.position += "x"', "TSV041", '"x"'],
+    ['let m = playAudio async "a"\nm.remaining -= true', "TSV041", "true"],
+    ['let m = playAudio async "a"\nm.position += 3', "TSV041", "3"],
+    ['let m = playAudio async "a"\nm.volume += 1 s', "TSV041", "1 s"],
     ['playAudio(file: "a", repeat: 9007199254740992 times)', "TSV036", "9007199254740992"],
   ];
   for (const [source, code, offending] of cases) {

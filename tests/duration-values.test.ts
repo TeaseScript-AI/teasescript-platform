@@ -120,7 +120,8 @@ test("mixing plain numbers with durations fails instead of guessing a unit", () 
     ],
   ] as const) {
     const source = `${declaration}\nsay "\${${expression}}"\nexit`;
-    assert.deepEqual(diagnostics(source), ["TSV043"], source);
+    // A duration with a number has a code of its own.
+    assert.deepEqual(diagnostics(source), [expression === "d * d" ? "TSV043" : "TSV035"], source);
     const dynamic = `${DYNAMIC}${declaration.replace(/= (.*)$/, "= dynamic($1)")}\nsay "\${${expression}}"\nexit`;
     const failure = runValidSource(dynamic).snapshot.failure;
     assert.deepEqual([failure?.code, failure?.message], ["TSR009", message], dynamic);
@@ -207,7 +208,7 @@ test("wait accepts duration values and keeps its trailing unit form", () => {
   assert.deepEqual(diagnostics("wait -(1 s)\nexit"), ["TSV011"]);
   assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(-1 s)\nwait d\nexit`), "TSR050");
   assert.deepEqual(diagnostics("let d = 1 s\nwait d ms\nexit"), ["TSV043"]);
-  assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(1 s)\nwait d ms\nexit`), "TSR050");
+  assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(1 s)\nwait d ms\nexit`), "TSR027");
 });
 
 test("duration values persist through checkpoint JSON and reject malformed data", () => {

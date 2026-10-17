@@ -1,24 +1,15 @@
-import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
+import { isAskImageCall, isLockCall, isTakePhotoCall } from "./capture-call.js";
 import { IMAGE_REQUEST_OPTIONS } from "./image-input.js";
-import { normalizeOpaqueColor } from "./color.js";
-import {
-  presentationPropertyDiagnostics,
-  messageColorDiagnostics,
-} from "./authored-presentation.js";
 import type {
   AssignmentTarget,
   Block,
-  CallArgument,
-  DurationUnit,
   Identifier,
-  InteractionChoiceOption,
   SayParts,
   ShowButtonParts,
   ShowPermanentButtonParts,
   TimerParts,
   Expression,
   MediaParts,
-  ObjectLiteral,
   FunctionDeclaration,
   GlobalStatement,
   Program,
@@ -44,14 +35,6 @@ import {
   RENAMED_METHODS,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
-import {
-  findVisibleOverflows,
-  isStaticDuration,
-  staticChoiceValue,
-  staticNumber,
-  staticQuantity,
-  staticVisibleText,
-} from "./static-evaluation.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import {
   askOperands,
@@ -63,7 +46,6 @@ import {
   showButtonOptions,
   tagQueryOperands,
 } from "./expression-children.js";
-import { DURATION_UNIT_MILLISECONDS, isCalendar } from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
 import {
   COLLECTION_CHANGES,
@@ -78,7 +60,7 @@ import {
   packageGlobProblem,
   packagePathProblem,
 } from "./project-paths.js";
-import type { StatementFlow } from "./type-checker.js";
+import type { StatementFlow } from "./reachability.js";
 import { MAIN_FILE_PATH } from "./project-paths.js";
 import {
   PLAYER_DECLARATION,
@@ -112,8 +94,6 @@ type BindingKind = "variable" | "speaker" | "global" | "function";
 
 interface Binding {
   readonly kind: BindingKind;
-  /** Set while a variable statically holds an async timer or media handle. */
-  handle?: "timer" | "media" | "camera" | null;
   /** The declaration of a function. */
   readonly declaration?: FunctionDeclaration;
   /** Where the project declares a global, a speaker, or a global function, which every file sees. */
@@ -136,32 +116,6 @@ interface ProjectDeclaration {
   readonly order: number | null;
 }
 
-const TIMER_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
-  "remaining",
-  "elapsed",
-  "display",
-  "label",
-  "state",
-  "repeatDuration",
-]);
-const TIMER_HANDLE_ASSIGNABLE: ReadonlySet<string> = new Set([
-  "remaining",
-  "display",
-  "repeatDuration",
-]);
-const TIMER_HANDLE_METHODS: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);
-const TIMER_DISPLAYS: ReadonlySet<string> = new Set(["visible", "mystery", "hidden"]);
-const CAMERA_PLACEMENTS: ReadonlySet<string> = new Set(["window", "stage"]);
-const MEDIA_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
-  "position",
-  "elapsed",
-  "remaining",
-  "duration",
-  "volume",
-  "state",
-]);
-const MEDIA_HANDLE_ASSIGNABLE: ReadonlySet<string> = new Set(["position", "remaining", "volume"]);
-
 const semanticCode = {
   duplicateDeclaration: "TSV001",
   unknownVariable: "TSV002",
@@ -171,9 +125,6 @@ const semanticCode = {
   duplicateProperty: "TSV007",
   invalidLoopControl: "TSV008",
   chainedRange: "TSV009",
-  invalidRangeOperand: "TSV010",
-  invalidRepeatCount: "TSV011",
-  invalidLoopSource: "TSV012",
   duplicateFunction: "TSV013",
   duplicateParameter: "TSV014",
   requiredAfterDefault: "TSV015",
@@ -191,19 +142,12 @@ const semanticCode = {
   invalidInteractionChoice: "TSV029",
   unsupportedBlockingContext: "TSV032",
   invalidTimer: "TSV033",
-  invalidTimerHandleMember: "TSV034",
-  mixedDurationOperands: "TSV035",
   invalidMedia: "TSV036",
-  invalidMediaHandleMember: "TSV037",
-  invalidStorageKey: "TSV038",
-  invalidListIndex: "TSV045",
-  visibleOverflow: "TSV050",
   invalidLabel: "TSV051",
   skippedInitialization: "TSV054",
   invalidStartValue: "TSV055",
   fileName: "TSV056",
   invalidFileTarget: "TSV057",
-  invalidCameraHandleMember: "TSV059",
   noSpeaker: "TSV063",
   invalidRegex: "TSV064",
 } as const;
@@ -215,12 +159,19 @@ type FlowContext =
   /** A block runs where its timer or media started: in `origin`, when `created` runs. */
   | { readonly kind: "handler"; readonly origin: FlowContext; readonly created: Statement };
 
-const OVERFLOW_MESSAGES = {
-  zero: "This divides by zero, so it has no result. Divide by a value other than zero.",
-  number: "This calculation gives a number too large to represent. Use smaller values.",
-  duration: "This calculation gives a duration too long to represent. Use a shorter duration.",
-  angle: "This calculation gives an angle too large to represent. Use a smaller angle.",
-} as const;
+/**
+ * The name-pass errors that leave the type check its basis: every name resolves, and every construct it walks is whole.
+ * They are a start value's placement (TSV055) and a `load` without `default:`, so the type check still reports the
+ * problems of the values in them, such as a load's key that is a comparison.
+ */
+const LEAVES_TYPES_CHECKABLE = new WeakSet<Diagnostic>();
+
+/** Whether a name-pass error leaves the type check without a basis (see `LEAVES_TYPES_CHECKABLE`). */
+export function stopsTypeCheck(diagnostic: Diagnostic): boolean {
+  return (
+    diagnostic.severity === DiagnosticSeverity.Error && !LEAVES_TYPES_CHECKABLE.has(diagnostic)
+  );
+}
 
 /** Validates one source as the `main.tease` of a single-file project. */
 export function validateSemantics(
@@ -451,8 +402,17 @@ class ProjectNames {
     );
   }
 
-  public report(file: number, code: string, message: string, span: SourceSpan): void {
-    this.diagnostics[file]!.push(createDiagnostic(DiagnosticSeverity.Error, code, message, span));
+  /** `checkable` marks an error that leaves the type check its basis (see `LEAVES_TYPES_CHECKABLE`). */
+  public report(
+    file: number,
+    code: string,
+    message: string,
+    span: SourceSpan,
+    checkable = false,
+  ): void {
+    const diagnostic = createDiagnostic(DiagnosticSeverity.Error, code, message, span);
+    if (checkable) LEAVES_TYPES_CHECKABLE.add(diagnostic);
+    this.diagnostics[file]!.push(diagnostic);
   }
 }
 
@@ -615,6 +575,7 @@ class SemanticValidator {
           "askDate",
           "askTime",
           "askDateTime",
+          "askPassword",
           "askBoolean",
           "askForm",
           "askBooleans",
@@ -733,8 +694,6 @@ class SemanticValidator {
     }
     this.#handler = null;
     this.#collectCaptures();
-    for (const overflow of findVisibleOverflows(program))
-      this.#report(semanticCode.visibleOverflow, OVERFLOW_MESSAGES[overflow.cause], overflow.span);
   }
 
   /**
@@ -749,7 +708,7 @@ class SemanticValidator {
     try {
       const scope = new SemanticScope(handler.scope);
       if (handler.selfHandle !== null) {
-        scope.bindings.set(handler.selfHandle, { kind: "variable", handle: "media" });
+        scope.bindings.set(handler.selfHandle, { kind: "variable" });
       }
       runCompileTask(this.#validateStatements(handler.block.statements, scope, 0));
     } finally {
@@ -845,20 +804,8 @@ class SemanticValidator {
   #handlerOwner: "timer" | "media" | "button" = "timer";
 
   #validateTimer(timer: TimerParts, scope: SemanticScope, valuePosition: boolean): void {
-    if (typeof timer.display === "object" && timer.display !== null) {
+    if (typeof timer.display === "object" && timer.display !== null)
       this.#validateExpression(timer.display, scope, null);
-      const display = staticVisibleText(timer.display);
-      if (
-        (display !== undefined && !TIMER_DISPLAYS.has(display)) ||
-        isDefinitelyNonText(timer.display)
-      ) {
-        this.#report(
-          semanticCode.invalidTimer,
-          'Timer display must be "visible", "mystery", or "hidden".',
-          timer.display.span,
-        );
-      }
-    }
     this.#validateExpression(timer.duration, scope, null);
     if (timer.label !== null) this.#validateExpression(timer.label, scope, null);
     if (!timer.async) {
@@ -878,85 +825,7 @@ class SemanticValidator {
         );
       }
     }
-    this.#validateDelayDuration("timer", timer.duration, timer.unit, timer.repeat);
     if (timer.handler !== null) this.#pendHandler(timer.handler, "timer", null, scope);
-  }
-
-  /**
-   * The checks of a `wait` or timer duration that the compiler can see: a second unit, a range of whole units, and a
-   * length below zero, zero for a repeating round, or beyond scene time. A range without a unit is a type error.
-   */
-  #validateDelayDuration(
-    command: "wait" | "timer",
-    written: Expression,
-    unit: DurationUnit | null,
-    repeat: boolean,
-  ): void {
-    const duration = unwrapParentheses(written);
-    if (unit !== null && duration.kind === "durationLiteral") {
-      this.#report(
-        semanticCode.invalidTimer,
-        `This duration already has a unit. Remove the '${unit}' after it.`,
-        written.span,
-      );
-    }
-    if (duration.kind === "rangeExpression") {
-      if (unit === null) return;
-      const start = staticNumber(duration.start);
-      const end = staticNumber(duration.end);
-      if (!isKnownInteger(duration.start) || !isKnownInteger(duration.end)) {
-        this.#report(
-          semanticCode.invalidRangeOperand,
-          `A ${command} range counts whole units, so its bounds must be whole numbers.`,
-          duration.span,
-        );
-      } else if (start !== undefined && start < (repeat ? 1 : 0)) {
-        this.#report(
-          semanticCode.invalidRangeOperand,
-          repeat
-            ? "A repeating timer range must start at 1 or more."
-            : `A ${command} range must not start below 0.`,
-          duration.span,
-        );
-      } else if (
-        start !== undefined &&
-        end !== undefined &&
-        (duration.inclusive ? end < start : end <= start)
-      ) {
-        this.#report(
-          semanticCode.invalidRangeOperand,
-          `A ${command} range must contain at least one whole number.`,
-          duration.span,
-        );
-      } else if (
-        start !== undefined &&
-        !(start * DURATION_UNIT_MILLISECONDS[unit] <= Number.MAX_SAFE_INTEGER)
-      ) {
-        // Every draw is at least the lower bound.
-        this.#report(
-          semanticCode.invalidRepeatCount,
-          `This ${command} is too long for scene time to reach. Use a shorter duration.`,
-          duration.span,
-        );
-      }
-    } else {
-      const known = knownMilliseconds(written, unit);
-      if (known !== undefined && (known < 0 || (repeat && known === 0))) {
-        this.#report(
-          semanticCode.invalidRepeatCount,
-          repeat
-            ? "A repeating timer duration must be greater than zero."
-            : `${command === "wait" ? "Wait" : "Timer"} duration must not be negative.`,
-          written.span,
-        );
-      } else if (beyondSceneTime(written, unit)) {
-        this.#report(
-          semanticCode.invalidRepeatCount,
-          `This ${command} is too long for scene time to reach. Use a shorter duration.`,
-          written.span,
-        );
-      }
-    }
   }
 
   /** The button text is checked like any shown text; the click action runs later, like a timer expiry block. */
@@ -968,7 +837,7 @@ class SemanticValidator {
     this.#pendHandler(button.handler, "button", null, scope);
   }
 
-  /** Static checks of a play command; runtime validates the values the compiler cannot know. */
+  /** The names and form of a play command; the type check checks its values. */
   *#validateMediaTask(
     media: MediaParts,
     scope: SemanticScope,
@@ -979,91 +848,12 @@ class SemanticValidator {
     for (const operand of mediaOperands(media)) {
       yield* compileChild(this.#validateExpressionTask(operand, scope, null));
     }
-    if (isDefinitelyNonFileReference(media.file)) {
-      this.#report(
-        semanticCode.invalidMedia,
-        `${command} needs a media file reference or null.`,
-        media.file.span,
-      );
-    }
     if (!media.async && valuePosition) {
       this.#report(
         semanticCode.invalidMedia,
         `Blocking media returns no handle. Use '${command} async ...' to keep one.`,
         media.span,
       );
-    }
-    const repeat = media.repeat;
-    if (
-      repeat?.kind === "indefinite" ||
-      (repeat?.kind === "value" && isTrueLiteral(repeat.value))
-    ) {
-      if (!media.async) {
-        this.#report(
-          semanticCode.invalidMedia,
-          `Blocking media cannot repeat indefinitely. Use '${command} async', a count such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.`,
-          repeat.span,
-        );
-      }
-    } else if (repeat?.kind === "value") {
-      const kind = literalKind(repeat.value);
-      // A calendar duration has no fixed length; the type check reports it as such (V30 §35).
-      const milliseconds = knownMilliseconds(repeat.value, null);
-      if (kind === "numberLiteral") {
-        this.#report(
-          semanticCode.invalidMedia,
-          "Write a repeat count with 'times', such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.",
-          repeat.value.span,
-        );
-      } else if (milliseconds !== undefined && !(milliseconds > 0)) {
-        this.#report(
-          semanticCode.invalidMedia,
-          "A repeat duration must be greater than zero.",
-          repeat.value.span,
-        );
-      } else if (kind !== "booleanLiteral" && isDefinitelyNonDuration(repeat.value)) {
-        this.#report(
-          semanticCode.invalidMedia,
-          "Repeat must be true, false, a count such as '3 times', or a duration such as '60 s'.",
-          repeat.value.span,
-        );
-      }
-    } else if (repeat?.kind === "times") {
-      const count = staticNumber(repeat.count);
-      if (
-        (count !== undefined && (!Number.isSafeInteger(count) || count < 1)) ||
-        isDefinitelyNonNumeric(repeat.count)
-      ) {
-        this.#report(
-          semanticCode.invalidMedia,
-          "A repeat count must be a whole number of at least 1, such as '3 times'.",
-          repeat.count.span,
-        );
-      }
-    }
-    const startMs = this.#validateMediaPosition(media.startAt, "startAt");
-    const endMs = this.#validateMediaPosition(media.endAt, "endAt");
-    // An omitted startAt is the start of the file.
-    const effectiveStartMs = media.startAt === null ? 0 : startMs;
-    if (effectiveStartMs !== undefined && endMs !== undefined && endMs <= effectiveStartMs) {
-      this.#report(
-        semanticCode.invalidMedia,
-        "endAt must be later than startAt.",
-        media.endAt!.span,
-      );
-    }
-    if (media.volume !== null) {
-      const volume = staticNumber(media.volume);
-      if (
-        (volume !== undefined && !(volume >= 0 && volume <= 1)) ||
-        isDefinitelyNonNumeric(media.volume)
-      ) {
-        this.#report(
-          semanticCode.invalidMedia,
-          "Volume must be a number from 0 through 1.",
-          media.volume.span,
-        );
-      }
     }
     if (media.handlers?.kind === "cues") {
       let finishes = 0;
@@ -1077,180 +867,13 @@ class SemanticValidator {
               cue.keywordSpan,
             );
           }
-          if (media.repeat?.kind === "indefinite" || isIndefiniteRepeatValue(media.repeat)) {
-            this.#report(
-              semanticCode.invalidMedia,
-              "'finish' never runs for media that repeats indefinitely. Calling stop() does not run it either. Use a count such as 'repeat: 3 times' or a duration such as 'repeat: 60 s', or remove 'finish'.",
-              cue.keywordSpan,
-            );
-          }
-          continue;
         }
-        this.#validateMediaPosition(cue.offset, cue.kind);
       }
     }
     // The blocks of one media share its variables.
     const captures = this.#captureScope(scope);
     for (const block of mediaHandlerBlocks(media))
       this.#pendHandler(block, "media", media.async ? selfHandle : null, captures);
-  }
-
-  /** A media position is a duration that is not negative. Returns its value in milliseconds when known. */
-  #validateMediaPosition(expression: Expression | null, name: string): number | undefined {
-    if (expression === null) return undefined;
-    const known = knownMilliseconds(expression, null);
-    if (known !== undefined && known < 0) {
-      this.#report(semanticCode.invalidMedia, `${name} must not be negative.`, expression.span);
-    } else if (
-      known === undefined &&
-      literalKind(expression) !== "durationLiteral" &&
-      isDefinitelyNonNumeric(expression)
-    ) {
-      this.#report(
-        semanticCode.invalidMedia,
-        `${name} must be a duration such as '30 s'.`,
-        expression.span,
-      );
-    }
-    return known;
-  }
-
-  /** Rejects unknown members of a variable that statically holds an async timer handle. */
-  #validateTimerHandleMember(
-    object: Expression,
-    name: Identifier,
-    scope: SemanticScope,
-    use: "read" | "assign" | "call",
-    value?: Expression,
-    callArguments?: readonly CallArgument[],
-    compound = false,
-  ): void {
-    object = unwrapParentheses(object);
-    if (object.kind !== "identifier") return;
-    const handle = scope.resolve(object.name)?.handle;
-    if (handle === "media") {
-      this.#validateMediaHandleMember(name, use, value, callArguments, compound);
-      return;
-    }
-    if (handle === "camera") {
-      this.#validateCameraHandleMember(name, use, value, compound);
-      return;
-    }
-    if (handle !== "timer") return;
-    // Timer compound assignments keep their runtime operand check.
-    if (compound) value = undefined;
-    const known =
-      use === "call"
-        ? TIMER_HANDLE_METHODS
-        : use === "assign"
-          ? TIMER_HANDLE_ASSIGNABLE
-          : TIMER_HANDLE_PROPERTIES;
-    if (known.has(name.name)) {
-      const invalidOperand =
-        use === "call"
-          ? callArguments !== undefined && callArguments.length > 0
-            ? `Timer ${name.name}() takes no arguments.`
-            : null
-          : use === "assign" && value !== undefined
-            ? invalidTimerAssignment(name.name, value)
-            : null;
-      if (invalidOperand !== null) {
-        this.#report(semanticCode.invalidTimerHandleMember, invalidOperand, name.span);
-      }
-      return;
-    }
-    this.#report(
-      semanticCode.invalidTimerHandleMember,
-      use === "call"
-        ? `Timer handles have no method '${name.name}'. Use pause(), resume(), or stop().`
-        : use === "assign"
-          ? `Timer handle property '${name.name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`
-          : `Timer handles have no property '${name.name}'.`,
-      name.span,
-    );
-  }
-
-  /** A camera view handle has one property, `placement`, which is readable and assignable, and no methods. */
-  #validateCameraHandleMember(
-    name: Identifier,
-    use: "read" | "assign" | "call",
-    value: Expression | undefined,
-    compound: boolean,
-  ): void {
-    if (use === "call" || name.name !== "placement") {
-      this.#report(
-        semanticCode.invalidCameraHandleMember,
-        use === "call"
-          ? `Camera views have no method '${name.name}'. Hide them with hideCamera.`
-          : `Camera views have no property '${name.name}'. Use the placement property.`,
-        name.span,
-      );
-      return;
-    }
-    if (use !== "assign" || value === undefined) return;
-    const text = staticVisibleText(value);
-    if (
-      compound ||
-      isDefinitelyNonText(value) ||
-      (text !== undefined && !CAMERA_PLACEMENTS.has(text))
-    )
-      this.#report(
-        semanticCode.invalidCameraHandleMember,
-        'Camera placement must be "window" or "stage".',
-        value.span,
-      );
-  }
-
-  #validateMediaHandleMember(
-    name: Identifier,
-    use: "read" | "assign" | "call",
-    value?: Expression,
-    callArguments?: readonly CallArgument[],
-    compound = false,
-  ): void {
-    const known =
-      use === "call"
-        ? TIMER_HANDLE_METHODS
-        : use === "assign"
-          ? MEDIA_HANDLE_ASSIGNABLE
-          : MEDIA_HANDLE_PROPERTIES;
-    if (!known.has(name.name)) {
-      this.#report(
-        semanticCode.invalidMediaHandleMember,
-        use === "call"
-          ? `Media handles have no method '${name.name}'. Use pause(), resume(), or stop().`
-          : use === "assign"
-            ? `Media handle property '${name.name}' cannot be assigned. You can assign position, remaining, or volume.`
-            : `Media handles have no property '${name.name}'.`,
-        name.span,
-      );
-      return;
-    }
-    if (use === "call" && callArguments !== undefined && callArguments.length > 0) {
-      this.#report(
-        semanticCode.invalidMediaHandleMember,
-        `Media ${name.name}() takes no arguments.`,
-        name.span,
-      );
-    } else if (use === "assign" && value !== undefined) {
-      // A compound volume operand is a change, so only its type is known statically.
-      const invalid =
-        name.name === "volume"
-          ? isDefinitelyNonNumeric(value) ||
-            (!compound &&
-              staticNumber(value) !== undefined &&
-              !(staticNumber(value)! >= 0 && staticNumber(value)! <= 1))
-          : literalKind(value) !== "durationLiteral" && isDefinitelyNonDuration(value);
-      if (invalid) {
-        this.#report(
-          semanticCode.invalidMediaHandleMember,
-          name.name === "volume"
-            ? "Media volume must be a number from 0 through 1."
-            : `Media ${name.name} must be assigned a duration such as 10 s.`,
-          name.span,
-        );
-      }
-    }
   }
 
   *#validateStatements(
@@ -1293,9 +916,7 @@ class SemanticValidator {
           this.#validateExpression(statement.initializer, scope, null);
         }
         if (this.#declare(statement.name.name, "variable", statement.name.span, scope)) {
-          const binding = scope.bindings.get(statement.name.name)!;
-          binding.handle = handleKind(statement.initializer);
-          binding.site = statement;
+          scope.bindings.get(statement.name.name)!.site = statement;
         }
         return;
       }
@@ -1323,10 +944,6 @@ class SemanticValidator {
             );
           }
           names.add(property.name.name);
-          if (["presentation", "color", "bubble", "prose"].includes(property.name.name))
-            this.#diagnostics.push(
-              ...presentationPropertyDiagnostics(property.name.name, property.value),
-            );
           this.#validateStartValue(
             property.value,
             scope,
@@ -1353,11 +970,9 @@ class SemanticValidator {
       case "showButtonStatement":
         yield* compileChild(this.#validateShowButtonTask(statement, scope));
         return;
-      case "waitStatement": {
+      case "waitStatement":
         this.#validateExpression(statement.duration, scope, null);
-        this.#validateDelayDuration("wait", statement.duration, statement.unit, false);
         return;
-      }
       case "timerStatement":
         this.#validateTimer(statement, scope, false);
         return;
@@ -1367,17 +982,9 @@ class SemanticValidator {
       case "playMediaStatement":
         yield* compileChild(this.#validateMediaTask(statement, scope, false, null));
         return;
-      case "showImageStatement": {
+      case "showImageStatement":
         this.#validateExpression(statement.image, scope, null);
-        if (isDefinitelyNonFileReference(statement.image)) {
-          this.#report(
-            semanticCode.invalidMedia,
-            "showImage needs an image file reference or null.",
-            statement.image.span,
-          );
-        }
         return;
-      }
       case "hideImageStatement":
       case "showCameraStatement":
       case "hideCameraStatement":
@@ -1400,29 +1007,14 @@ class SemanticValidator {
         return;
       case "saveStatement":
         this.#validateExpression(statement.value, scope, null);
-        this.#validateStorageKey(statement.key, scope, "Storage key must be a string.");
+        this.#validateExpression(statement.key, scope, null);
         return;
       case "deleteStatement":
-        this.#validateStorageKey(statement.key, scope, "Storage key must be a string.");
+        this.#validateExpression(statement.key, scope, null);
         return;
       case "assignmentStatement":
         this.#validateAssignmentTarget(statement.target, scope);
         this.#validateExpression(statement.value, scope, null);
-        if (statement.target.kind === "identifier") {
-          const binding = scope.resolve(statement.target.name);
-          // Reassignment may happen on any path, so the variable is no longer known to hold a handle.
-          if (binding?.kind === "variable") binding.handle = null;
-        } else if (statement.target.kind === "propertyAccessExpression") {
-          this.#validateTimerHandleMember(
-            statement.target.object,
-            statement.target.property,
-            scope,
-            "assign",
-            statement.value,
-            undefined,
-            statement.operator !== "=",
-          );
-        }
         return;
       case "expressionStatement":
         this.#validateExpression(statement.expression, scope, null);
@@ -1454,43 +1046,10 @@ class SemanticValidator {
         return;
       case "repeatStatement":
         this.#validateExpression(statement.count, scope, null);
-        const knownCount = staticNumber(statement.count);
-        if (knownCount !== undefined && (!Number.isInteger(knownCount) || knownCount < 0)) {
-          this.#report(
-            semanticCode.invalidRepeatCount,
-            "A statically known repeat count must be a non-negative integer.",
-            statement.count.span,
-          );
-        } else if (isDefinitelyNonNumeric(statement.count)) {
-          this.#report(
-            semanticCode.invalidRepeatCount,
-            "A repeat count must be an integer value.",
-            statement.count.span,
-          );
-        }
         yield* compileChild(this.#validateBlock(statement.body, scope, loopDepth + 1));
         return;
       case "forStatement": {
         this.#validateExpression(statement.iterable, scope, null);
-        if (isDefinitelyNonIterable(statement.iterable)) {
-          this.#report(
-            semanticCode.invalidLoopSource,
-            statement.valueVariable === null
-              ? "A for-loop source must be a list, set, dict, or integer range."
-              : "A for-loop with a key and a value goes through a dict.",
-            statement.iterable.span,
-          );
-        }
-        if (
-          statement.iterable.kind === "rangeExpression" &&
-          (!isKnownInteger(statement.iterable.start) || !isKnownInteger(statement.iterable.end))
-        ) {
-          this.#report(
-            semanticCode.invalidRangeOperand,
-            "A statically known iterated range must have integer bounds.",
-            statement.iterable.span,
-          );
-        }
         const loopScope = new SemanticScope(scope);
         if (this.#declare(statement.variable.name, "variable", statement.variable.span, loopScope))
           loopScope.bindings.get(statement.variable.name)!.site = statement;
@@ -1819,7 +1378,11 @@ class SemanticValidator {
                   ? "A say is not supported in function parameter defaults."
                   : isTakePhotoCall(blockingInteraction)
                     ? "Camera capture is not supported in function parameter defaults."
-                    : "Blocking interactions are not supported in function parameter defaults.",
+                    : isLockCall(blockingInteraction) &&
+                        blockingInteraction.kind === "callExpression" &&
+                        blockingInteraction.callee.kind === "identifier"
+                      ? `${blockingInteraction.callee.name}(...) is not supported in function parameter defaults, because it may ask the player. Call it in the function's body.`
+                      : "Blocking interactions are not supported in function parameter defaults.",
             blockingInteraction.span,
           );
         }
@@ -1891,7 +1454,6 @@ class SemanticValidator {
     this.#validateExpression(target.object, scope, null);
     if (target.kind === "indexExpression") {
       this.#validateExpression(target.index, scope, null);
-      this.#validateListIndex(target.index);
     }
   }
 
@@ -1916,17 +1478,6 @@ class SemanticValidator {
       `Cannot ${assigned ? "assign to" : "change"} '${label}': the account is read-only. Copy it into the player with 'player.copyFrom(account)' and ${assigned ? "assign" : "change"} ${instead} instead.`,
       place.span,
     );
-  }
-
-  /** Reports a list index the compiler can see is negative; the type check reports one that is not a whole number. */
-  #validateListIndex(index: Expression): void {
-    const known = staticNumber(index);
-    if (known !== undefined && known < 0)
-      this.#report(
-        semanticCode.invalidListIndex,
-        "A list index cannot be negative. The first element is at index 0, and the last at length - 1.",
-        index.span,
-      );
   }
 
   #validateExpression(
@@ -1974,7 +1525,6 @@ class SemanticValidator {
         if (expression.interactionKind === "choice") {
           yield* compileChild(this.#validateChoiceTask(expression, scope, contextualSpeaker));
         } else {
-          this.#validatePresentationProperties(expression.presentation);
           if (expression.question !== null) this.#askQuestions.add(expression.question);
           for (const operand of askOperands(expression))
             yield* compileChild(this.#validateExpressionTask(operand, scope, contextualSpeaker));
@@ -2045,32 +1595,18 @@ class SemanticValidator {
           this.#validateCollectionExpressionTask(expression, scope, contextualSpeaker),
         );
         return;
-      case "dictLiteral": {
-        // Keys the source shows must differ; keys known only at runtime replace earlier entries instead.
-        const keys = new Set<string>();
+      case "dictLiteral":
         for (const entry of expression.entries) {
           yield* compileChild(this.#validateExpressionTask(entry.key, scope, contextualSpeaker));
-          const key = staticChoiceValue(entry.key)?.value;
-          if (typeof key === "string") {
-            if (keys.has(key))
-              this.#report(
-                semanticCode.duplicateProperty,
-                `Duplicate dict key ${JSON.stringify(key)}. Each key may appear only once. Remove one of the entries.`,
-                entry.key.span,
-              );
-            keys.add(key);
-          }
           yield* compileChild(this.#validateExpressionTask(entry.value, scope, contextualSpeaker));
         }
         return;
-      }
       case "propertyAccessExpression":
         // The account is read by its fields, which the type check knows.
         if (isAccount(expression.object)) return;
         yield* compileChild(
           this.#validateExpressionTask(expression.object, scope, contextualSpeaker),
         );
-        this.#validateTimerHandleMember(expression.object, expression.property, scope, "read");
         return;
       case "showButtonExpression":
         yield* compileChild(this.#validateShowButtonTask(expression, scope));
@@ -2093,15 +1629,13 @@ class SemanticValidator {
         return;
       case "loadExpression":
         yield* compileChild(this.#validateExpressionTask(expression.key, scope, contextualSpeaker));
-        if (isDefinitelyNonString(expression.key)) {
-          this.#report(semanticCode.invalidStorageKey, LOAD_KEY_MESSAGE, expression.key.span);
-        }
         if (expression.defaultValue === null) {
           const key = literalText(expression.key);
           this.#report(
             semanticCode.argumentCount,
             `A load needs default:, the value to use while the key has not been saved, as in load(${key === undefined ? "key" : JSON.stringify(key)}, default: 0). Write default: null to check for a missing value with != null.`,
             expression.span,
+            true,
           );
         } else {
           yield* compileChild(
@@ -2116,7 +1650,6 @@ class SemanticValidator {
         yield* compileChild(
           this.#validateExpressionTask(expression.index, scope, contextualSpeaker),
         );
-        this.#validateListIndex(expression.index);
         return;
       case "callExpression": {
         const authorFunction =
@@ -2160,7 +1693,6 @@ class SemanticValidator {
             }
           } else if (isAskImageCall(expression)) {
             this.#validateAskImageArguments(expression);
-            this.#validatePresentationProperties(expression.presentation ?? null);
             // `askImage` has no `as`, so the default speaker asks: `speaker` in its mode and in every argument is that
             // speaker, as in a basic ask.
             if (expression.presentation !== undefined)
@@ -2246,14 +1778,6 @@ class SemanticValidator {
               `Unknown method '${method.property.name}'. Use '${renamed}()'.`,
               method.property.span,
             );
-          this.#validateTimerHandleMember(
-            method.object,
-            method.property,
-            scope,
-            "call",
-            undefined,
-            expression.arguments,
-          );
         } else {
           yield* compileChild(
             this.#validateExpressionTask(expression.callee, scope, contextualSpeaker),
@@ -2291,47 +1815,6 @@ class SemanticValidator {
             continue;
           yield* compileChild(this.#validateExpressionTask(argument.value, scope, argumentSpeaker));
         }
-        if (
-          method.kind === "propertyAccessExpression" &&
-          method.property.name === "removeAt" &&
-          expression.arguments.length === 1 &&
-          expression.arguments[0]!.kind === "positionalArgument"
-        )
-          this.#validateListIndex(expression.arguments[0]!.value);
-        if (
-          expression.callee.kind === "identifier" &&
-          expression.callee.name === "randomInteger" &&
-          expression.arguments.length === 1
-        ) {
-          const written = expression.arguments[0]!.value;
-          const argument = unwrapParentheses(written);
-          if (argument.kind === "rangeExpression") {
-            const start = staticNumber(argument.start);
-            const end = staticNumber(argument.end);
-            if (!isKnownInteger(argument.start) || !isKnownInteger(argument.end)) {
-              // The type check names the rounding fix for a range in parentheses.
-              if (written === argument)
-                this.#report(
-                  semanticCode.invalidRangeOperand,
-                  "A statically known randomInteger range must have integer bounds.",
-                  argument.span,
-                );
-            } else if (
-              // A named argument is the error the call check reports.
-              expression.arguments[0]!.kind === "positionalArgument" &&
-              start !== undefined &&
-              end !== undefined &&
-              (argument.inclusive ? end < start : end <= start)
-            ) {
-              // As for a wait or timer range (`#validateDelayDuration`); bounds it cannot see fail at runtime (TSR041).
-              this.#report(
-                semanticCode.invalidRangeOperand,
-                "A randomInteger range must contain at least one whole number.",
-                argument.span,
-              );
-            }
-          }
-        }
         return;
       }
       case "binaryExpression": {
@@ -2341,24 +1824,6 @@ class SemanticValidator {
         yield* compileChild(
           this.#validateExpressionTask(expression.right, scope, contextualSpeaker),
         );
-        const left = literalKind(expression.left);
-        const right = literalKind(expression.right);
-        const mixed =
-          (left === "numberLiteral" && right === "durationLiteral") ||
-          (left === "durationLiteral" && right === "numberLiteral");
-        // Durations scale by numbers (`d * n`, `n * d`, `d / n`); every other mixed operator has no meaning. A fallback
-        // may be of another type than the value (V30 §18).
-        const scaling =
-          expression.operator === "*" ||
-          (expression.operator === "/" && left === "durationLiteral") ||
-          ["==", "!=", "and", "or", "otherwise"].includes(expression.operator);
-        if (mixed && !scaling) {
-          this.#report(
-            semanticCode.mixedDurationOperands,
-            "A number and a duration cannot be combined with this operator. Give both a unit, or group a number before its unit as in '(1 + 2) s'.",
-            expression.span,
-          );
-        }
         return;
       }
       case "rangeExpression":
@@ -2371,13 +1836,6 @@ class SemanticValidator {
           expression.end.kind === "rangeExpression"
         ) {
           this.#report(semanticCode.chainedRange, "Ranges may not be chained.", expression.span);
-        }
-        if (isDefinitelyNonNumeric(expression.start) || isDefinitelyNonNumeric(expression.end)) {
-          this.#report(
-            semanticCode.invalidRangeOperand,
-            "Range bounds must be numeric values.",
-            expression.span,
-          );
         }
         return;
       case "typeTestExpression":
@@ -2415,15 +1873,6 @@ class SemanticValidator {
     if (!compiled.ok) this.#report(semanticCode.invalidRegex, compiled.problem, literal.span);
   }
 
-  /** The options of a message mode written for a `say` or an ask's question, such as `prose(align: "center")`. */
-  #validatePresentationProperties(presentation: ObjectLiteral | null): void {
-    if (presentation === null) return;
-    for (const property of presentation.properties)
-      this.#diagnostics.push(
-        ...presentationPropertyDiagnostics(property.name.name, property.value),
-      );
-  }
-
   /** A `say`, as a statement or a value: its operands under the speaker it chooses, and its presentation and pacing. */
   *#validateSayTask(parts: SayParts, scope: SemanticScope, statement: boolean): CompileTask<void> {
     const contextualSpeaker =
@@ -2432,31 +1881,14 @@ class SemanticValidator {
         : this.#validateSpeakerReference(parts.speaker.name, parts.speaker.span, scope)
           ? parts.speaker.name
           : null;
-    if (parts.presentation !== null) {
+    if (parts.presentation !== null)
       yield* compileChild(
         this.#validateExpressionTask(parts.presentation, scope, contextualSpeaker),
       );
-      this.#validatePresentationProperties(parts.presentation);
-    }
-    this.#diagnostics.push(...messageColorDiagnostics(parts.value));
     if (statement) this.#sayStatementValues.add(parts.value);
     yield* compileChild(this.#validateExpressionTask(parts.value, scope, contextualSpeaker));
-    if (parts.pacing !== null && parts.pacing !== "instant") {
+    if (parts.pacing !== null && parts.pacing !== "instant")
       yield* compileChild(this.#validateExpressionTask(parts.pacing, scope, contextualSpeaker));
-      const known = knownMilliseconds(parts.pacing, null);
-      if (known !== undefined && known < 0) {
-        this.#report(
-          semanticCode.invalidRepeatCount,
-          "Say pacing must not be negative.",
-          parts.pacing.span,
-        );
-      }
-    }
-  }
-
-  #validateStorageKey(key: Expression, scope: SemanticScope, message: string): void {
-    this.#validateExpression(key, scope, null);
-    if (isDefinitelyNonString(key)) this.#report(semanticCode.invalidStorageKey, message, key.span);
   }
 
   #interactionSpeaker(
@@ -2474,43 +1906,8 @@ class SemanticValidator {
   *#validateShowButtonTask(parts: ShowButtonParts, scope: SemanticScope): CompileTask<void> {
     const contextualSpeaker = this.#interactionSpeaker(parts.speaker, scope);
     yield* compileChild(this.#validateExpressionTask(parts.label, scope, contextualSpeaker));
-    for (const option of showButtonOptions(parts)) {
+    for (const option of showButtonOptions(parts))
       yield* compileChild(this.#validateExpressionTask(option.value, scope, contextualSpeaker));
-      if (option.name === "background") this.#validateButtonBackground(option.value);
-      else this.#validateButtonTimeout(option.value);
-    }
-  }
-
-  /**
-   * When the compiler can fully evaluate a timeout, it reports every failure the runtime would hit: a value of zero or
-   * less, or one scene time cannot reach; an overflowing step is a visible-overflow error like anywhere else. The type
-   * checker requires a number or a duration, and the runtime checks the values the compiler cannot know.
-   */
-  #validateButtonTimeout(expression: Expression): void {
-    const milliseconds = knownMilliseconds(expression, null);
-    if (milliseconds !== undefined && milliseconds <= 0)
-      this.#report(
-        semanticCode.invalidRepeatCount,
-        "The showButton timeout must be greater than zero. Remove 'timeout:' to wait for the click without a time limit.",
-        expression.span,
-      );
-    else if (beyondSceneTime(expression, null))
-      this.#report(
-        semanticCode.invalidRepeatCount,
-        "The showButton timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
-        expression.span,
-      );
-  }
-
-  #validateButtonBackground(expression: Expression): void {
-    // The type checker checks that the colour is text; a known text must name an opaque colour.
-    const text = staticVisibleText(expression);
-    if (text !== undefined && normalizeOpaqueColor(text) === null)
-      this.#report(
-        semanticCode.invalidInteractionChoice,
-        'A button background must be an opaque CSS colour, such as "#336699".',
-        expression.span,
-      );
   }
 
   *#validateChoiceTask(
@@ -2526,64 +1923,15 @@ class SemanticValidator {
       );
       return;
     }
-    // The type checker checks what each button shows and returns, and how many buttons a choice has. Values of
-    // different types, such as an identifier and a number before ':', make a union (#511 C2).
-    let empty = true;
-    for (const option of expression.options) {
+    // The type checker checks the options: what each button shows and returns, and how many buttons a choice has.
+    for (const option of expression.options)
       yield* compileChild(
         this.#validateExpressionTask(option.expression, scope, contextualSpeaker),
       );
-      const content = unwrapParentheses(option.expression);
-      if (content.kind !== "listLiteral" && content.kind !== "setLiteral") {
-        empty = false;
-        this.#validateChoiceObject(content, option.value);
-        continue;
-      }
-      if (content.elements.length > 0) empty = false;
-      for (const element of content.elements)
-        this.#validateChoiceObject(unwrapParentheses(element), option.value);
-    }
     if (expression.prefill !== null)
       yield* compileChild(
         this.#validateExpressionTask(expression.prefill, scope, contextualSpeaker),
       );
-    if (empty)
-      this.#report(
-        semanticCode.invalidInteractionChoice,
-        "A choice needs at least one button, but its option lists are empty.",
-        expression.span,
-      );
-  }
-
-  /**
-   * Checks the properties of a choice object that gives one button. `value` is the value written before the option's
-   * `:`, which every button of a list or set option returns.
-   */
-  #validateChoiceObject(entry: Expression, value: InteractionChoiceOption["value"]): void {
-    if (entry.kind !== "objectLiteral") return;
-    if (!entry.properties.some((property) => property.name.name === "text"))
-      this.#report(
-        semanticCode.invalidInteractionChoice,
-        "A choice object needs a 'text' property to label its button.",
-        entry.span,
-      );
-    for (const property of entry.properties) {
-      const name = property.name.name;
-      if (name === "background") this.#validateButtonBackground(property.value);
-      else if (name === "text") continue;
-      else if (name === "value" && value !== null)
-        this.#report(
-          semanticCode.invalidInteractionChoice,
-          "This choice option has two values, one before ':' and one in its value property. Keep one.",
-          property.name.span,
-        );
-      else if (name !== "value")
-        this.#report(
-          semanticCode.invalidInteractionChoice,
-          `A choice object can only have 'value', 'text', and 'background', but this one has '${name}'. Remove it.`,
-          property.name.span,
-        );
-    }
   }
 
   *#validateCollectionExpressionTask(
@@ -3146,6 +2494,7 @@ class SemanticValidator {
             semanticCode.invalidStartValue,
             `${subject} cannot say, ask the player, wait, or play media: ${speaker ? "a speaker is set up" : "it is set"} at the start of the session, before the story runs.${speaker ? "" : ` Give it a plain start value, and assign the answer later, as in '${owner.name.name} = ...'.`}`,
             expression.span,
+            true,
           );
           continue;
         case "callExpression":
@@ -3163,6 +2512,7 @@ class SemanticValidator {
             semanticCode.invalidStartValue,
             `${subject} cannot call a function: ${speaker ? "a speaker is set up" : "it is set"} at the start of the session, before the story runs. Use literals, globals declared before it, operators, and 'load ..., default:'.`,
             expression.span,
+            true,
           );
           continue;
         case "identifier": {
@@ -3176,6 +2526,7 @@ class SemanticValidator {
               semanticCode.invalidStartValue,
               this.#localStartValueMessage(owner, expression.name),
               expression.span,
+              true,
             );
           } else if (
             used.order !== null &&
@@ -3187,6 +2538,7 @@ class SemanticValidator {
                 ? `The start value of global '${owner.name.name}' cannot use '${owner.name.name}' itself, which has no value yet.`
                 : `${subject} cannot use '${expression.name}', which gets its value later: globals and speakers are set up in order, main.tease first, then the other files by path, each from top to bottom. Declare '${expression.name}' before '${owner.name.name}'.`,
               expression.span,
+              true,
             );
           }
           continue;
@@ -3214,12 +2566,8 @@ class SemanticValidator {
     return false;
   }
 
-  get #diagnostics(): Diagnostic[] {
-    return this.project.diagnostics[this.file]!;
-  }
-
-  #report(code: string, message: string, span: SourceSpan): void {
-    this.project.report(this.file, code, message, span);
+  #report(code: string, message: string, span: SourceSpan, checkable = false): void {
+    this.project.report(this.file, code, message, span, checkable);
   }
 }
 
@@ -3235,15 +2583,6 @@ function literalText(expression: Expression): string | undefined {
   return text;
 }
 
-/** The literal kind of an operand, looking through parentheses and unary signs. */
-function literalKind(expression: Expression): Expression["kind"] {
-  let current = unwrapParentheses(expression);
-  while (current.kind === "unaryExpression" && current.operator !== "not") {
-    current = unwrapParentheses(current.operand);
-  }
-  return current.kind;
-}
-
 /** "2 arguments (a, b)" or "1 to 3 arguments (a, b, c)", naming the parameters so the author sees what is expected. */
 function argumentRange(required: number, parameterNames: readonly string[]): string {
   const total = parameterNames.length;
@@ -3252,116 +2591,6 @@ function argumentRange(required: number, parameterNames: readonly string[]): str
       ? `${total} argument${total === 1 ? "" : "s"}`
       : `${required} to ${total} arguments`;
   return total === 0 ? "no arguments" : `${count} (${parameterNames.join(", ")})`;
-}
-
-/** The handle kind statically held by a variable initialized from `expression`. */
-function handleKind(expression: Expression): "timer" | "media" | "camera" | null {
-  expression = unwrapParentheses(expression);
-  if (expression.kind === "timerExpression" && expression.async) return "timer";
-  if (expression.kind === "playMediaExpression" && expression.async) return "media";
-  if (expression.kind === "showCameraExpression") return "camera";
-  return null;
-}
-
-function isTrueLiteral(expression: Expression): boolean {
-  expression = unwrapParentheses(expression);
-  return expression.kind === "booleanLiteral" && expression.value;
-}
-
-function isIndefiniteRepeatValue(repeat: MediaParts["repeat"]): boolean {
-  return repeat?.kind === "value" && isTrueLiteral(repeat.value);
-}
-
-/** A statically evident wrong value for an assignable timer handle property. */
-function invalidTimerAssignment(name: string, value: Expression): string | null {
-  if (name === "display") {
-    const text = staticVisibleText(value);
-    return isDefinitelyNonText(value) || (text !== undefined && !TIMER_DISPLAYS.has(text))
-      ? 'Timer display must be "visible", "mystery", or "hidden".'
-      : null;
-  }
-  return literalKind(value) !== "durationLiteral" && isDefinitelyNonDuration(value)
-    ? `Timer ${name} must be assigned a duration such as 10 s.`
-    : null;
-}
-
-function isDefinitelyNonDuration(expression: Expression): boolean {
-  const kind = literalKind(expression);
-  return (
-    kind === "numberLiteral" ||
-    kind === "stringLiteral" ||
-    kind === "booleanLiteral" ||
-    kind === "nullLiteral" ||
-    kind === "listLiteral" ||
-    kind === "setLiteral" ||
-    kind === "objectLiteral" ||
-    kind === "dictLiteral" ||
-    kind === "rangeExpression"
-  );
-}
-
-/** A literal that can never be a file reference string or `null`. */
-function isDefinitelyNonFileReference(expression: Expression): boolean {
-  const kind = literalKind(expression);
-  return (
-    kind === "numberLiteral" ||
-    kind === "durationLiteral" ||
-    kind === "booleanLiteral" ||
-    kind === "listLiteral" ||
-    kind === "setLiteral" ||
-    kind === "objectLiteral" ||
-    kind === "dictLiteral" ||
-    kind === "rangeExpression" ||
-    kind === "showButtonExpression" ||
-    kind === "showPopupExpression" ||
-    kind === "timerExpression" ||
-    kind === "playMediaExpression" ||
-    kind === "showCameraExpression" ||
-    kind === "showPermanentButtonExpression" ||
-    kind === "unaryExpression"
-  );
-}
-
-function isDefinitelyNonText(expression: Expression): boolean {
-  expression = unwrapParentheses(expression);
-  return (
-    expression.kind === "numberLiteral" ||
-    expression.kind === "durationLiteral" ||
-    expression.kind === "booleanLiteral" ||
-    expression.kind === "nullLiteral" ||
-    expression.kind === "listLiteral" ||
-    expression.kind === "setLiteral" ||
-    expression.kind === "objectLiteral" ||
-    expression.kind === "dictLiteral" ||
-    expression.kind === "rangeExpression"
-  );
-}
-
-/**
- * The milliseconds of a known wait, timer, timeout, pacing, media position, or media repeat duration: a number of a
- * timer's `unit`, or a duration without one. `undefined` when the value is not known or not a finite quantity, and for
- * a number without a unit, which the type check reports.
- */
-function knownMilliseconds(expression: Expression, unit: DurationUnit | null): number | undefined {
-  const known = staticQuantity(expression);
-  if (known === undefined) return undefined;
-  if (typeof known === "number")
-    return unit === null ? undefined : known * DURATION_UNIT_MILLISECONDS[unit];
-  // A duration with a unit after it is a type error of its own, and a calendar duration has no fixed length.
-  return unit === null && isStaticDuration(known) && !isCalendar(known)
-    ? known.milliseconds
-    : undefined;
-}
-
-/** Scene time is at most `Number.MAX_SAFE_INTEGER` milliseconds, so a known longer duration can never be reached. */
-function beyondSceneTime(expression: Expression, unit: DurationUnit | null): boolean {
-  const milliseconds = knownMilliseconds(expression, unit);
-  return milliseconds !== undefined && !(milliseconds <= Number.MAX_SAFE_INTEGER);
-}
-
-function isKnownInteger(expression: Expression): boolean {
-  const value = staticNumber(expression);
-  return value === undefined || Number.isInteger(value);
 }
 
 /**
@@ -3393,7 +2622,8 @@ function findFirstInteraction(
       current.kind === "playMediaExpression" ||
       current.kind === "showCameraExpression" ||
       current.kind === "sayExpression" ||
-      (current.kind === "callExpression" && (isTakePhotoCall(current) || isAskImageCall(current)))
+      (current.kind === "callExpression" &&
+        (isTakePhotoCall(current) || isAskImageCall(current) || isLockCall(current)))
     )
       return current;
     const children = expressionChildren(current);
@@ -3427,90 +2657,6 @@ function unwrapParentheses(expression: Expression): Expression {
 function unboundValue(name: string, contextualSpeaker: string | null): string | null {
   if (name === "speaker" && contextualSpeaker !== null) return "the current speaker";
   return name === "debugMode" ? "a read-only value" : null;
-}
-
-function isDefinitelyNonNumeric(expression: Expression): boolean {
-  expression = unwrapParentheses(expression);
-  if (expression.kind === "interactionExpression") {
-    if (expression.interactionKind === "number" || expression.interactionKind === "integer")
-      return false;
-    if (expression.interactionKind !== "choice") return true;
-    // A choice returns the type its values share, which the type checker knows.
-    return false;
-  }
-  return (
-    expression.kind === "stringLiteral" ||
-    expression.kind === "booleanLiteral" ||
-    expression.kind === "nullLiteral" ||
-    expression.kind === "listLiteral" ||
-    expression.kind === "setLiteral" ||
-    expression.kind === "objectLiteral" ||
-    expression.kind === "dictLiteral" ||
-    expression.kind === "rangeExpression" ||
-    expression.kind === "durationLiteral" ||
-    expression.kind === "showButtonExpression" ||
-    expression.kind === "showPopupExpression" ||
-    expression.kind === "timerExpression" ||
-    expression.kind === "playMediaExpression" ||
-    expression.kind === "showCameraExpression" ||
-    expression.kind === "showPermanentButtonExpression" ||
-    expression.kind === "sayExpression"
-  );
-}
-
-const LOAD_KEY_MESSAGE =
-  "Storage key must be a string. To compare the loaded value, write 'load(\"k\", default: null) == null'.";
-
-const NON_STRING_OPERATORS: ReadonlySet<string> = new Set([
-  "==",
-  "!=",
-  "<",
-  "<=",
-  ">",
-  ">=",
-  "and",
-  "or",
-]);
-
-/** A storage key that can never evaluate to a string, such as the comparison in `load "k" == null`. */
-function isDefinitelyNonString(expression: Expression): boolean {
-  expression = unwrapParentheses(expression);
-  if (expression.kind === "binaryExpression") return NON_STRING_OPERATORS.has(expression.operator);
-  return (
-    expression.kind === "numberLiteral" ||
-    expression.kind === "durationLiteral" ||
-    expression.kind === "booleanLiteral" ||
-    expression.kind === "nullLiteral" ||
-    expression.kind === "listLiteral" ||
-    expression.kind === "setLiteral" ||
-    expression.kind === "objectLiteral" ||
-    expression.kind === "dictLiteral" ||
-    expression.kind === "rangeExpression" ||
-    expression.kind === "unaryExpression" ||
-    expression.kind === "showButtonExpression" ||
-    expression.kind === "showPopupExpression" ||
-    expression.kind === "timerExpression" ||
-    expression.kind === "playMediaExpression" ||
-    expression.kind === "showCameraExpression" ||
-    expression.kind === "showPermanentButtonExpression"
-  );
-}
-
-function isDefinitelyNonIterable(expression: Expression): boolean {
-  expression = unwrapParentheses(expression);
-  return (
-    expression.kind === "stringLiteral" ||
-    expression.kind === "booleanLiteral" ||
-    expression.kind === "nullLiteral" ||
-    expression.kind === "numberLiteral" ||
-    expression.kind === "objectLiteral" ||
-    // `askBooleans` returns a list of booleans, and `askForm` a dict when its fields are a dict; its type tells.
-    (expression.kind === "interactionExpression" &&
-      expression.interactionKind !== "booleans" &&
-      expression.interactionKind !== "form") ||
-    expression.kind === "showButtonExpression" ||
-    expression.kind === "showPopupExpression"
-  );
 }
 
 function visitExpression(

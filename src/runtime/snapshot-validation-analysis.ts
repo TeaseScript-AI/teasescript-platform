@@ -1,3 +1,4 @@
+import { PlanControlFlow } from "../plan/control-flow.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import type {
   CompiledFunctionDefinition,
@@ -32,6 +33,7 @@ export interface PreparedSayTemporaryOwnership {
 /** What snapshot validation derives from an instruction plan alone; every snapshot is still validated against it. */
 export interface SnapshotValidationAnalysis {
   readonly plan: InstructionPlan;
+  readonly controlFlow: PlanControlFlow;
   readonly functionsById: ReadonlyMap<number, CompiledFunctionDefinition>;
   readonly regionEnds: readonly number[];
   readonly functionIdsByInstruction: readonly (number | null)[];
@@ -158,6 +160,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
   );
   return {
     plan,
+    controlFlow: new PlanControlFlow(plan),
     functionsById,
     regionEnds,
     functionIdsByInstruction,

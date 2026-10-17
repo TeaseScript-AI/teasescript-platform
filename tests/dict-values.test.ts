@@ -19,8 +19,8 @@ import { runValidSource } from "./helpers/run-valid-source.js";
 /** Hides a value's type from the compiler, so a check reaches the runtime. */
 const DYNAMIC = "function dynamic(value) {\n    return value\n}\n";
 
-function says(source: string): string[] {
-  const result = runValidSource(source);
+function says(source: string, warnings: readonly string[] = []): string[] {
+  const result = runValidSource(source, undefined, warnings);
   assert.equal(result.snapshot.failure, null, JSON.stringify(result.snapshot.failure));
   return result.events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
 }
@@ -226,6 +226,7 @@ test("for key, value goes through the entries as they were when it started, with
         "}",
         "exit",
       ].join("\n"),
+      ["TSV065"],
     ),
     ["rope 11", "cuffs 12", "1", 'dict{ "rope": { uses: 101 }, "added": { uses: 0 } }'],
   );
@@ -263,9 +264,13 @@ test("for key, value takes a dict, a text key, and the dict's value type, which 
   assert.deepEqual(codes('for key, value in dict{ a: "x" } {\n    value = 1\n}\nexit'), [
     ["TSV041", "1"],
   ]);
-  assert.deepEqual(codes("for key, value in [1, 2] {\n}\nexit"), [["TSV043", "[1, 2]"]]);
+  assert.deepEqual(codes("for key, value in [1, 2] {\n}\nexit"), [["TSV012", "[1, 2]"]]);
   assert.deepEqual(diagnostics("for key, value in 3 {\n}\nexit"), [
-    ["TSV012", "A for-loop with a key and a value goes through a dict.", "3"],
+    [
+      "TSV012",
+      "'for key, value' goes through the keys and values of a dict, but this is a whole number (integer).",
+      "3",
+    ],
   ]);
   // A line may break after the comma, also with a blank line.
   assert.deepEqual(says("for key,\n    value in dict{ a: 1 } {\n    say value\n}\nexit"), ["1"]);

@@ -21,12 +21,13 @@ test("the compiler reports visible overflow in every expression position", () =>
     ['say "${1e308 * 10}"', "1:8"],
     ["wait 1e308 * 10 s", "1:6"],
     ["timer async 1e300 s * 1e10", "1:13"],
-    ['showButton "Go", timeout: 1e308 * 10', "1:27"],
+    ['showButton "Go", timeout: 1e300 s * 1e10', "1:27"],
     ["function f(x = 1e308 * 10) { return x }", "1:16"],
-    ["say [1, 2][1e308 * 10]", "1:12"],
   ] as const) {
     assert.deepEqual(diagnostics(source), [`TSV050 ${at}`], source);
   }
+  // A number written with an exponent has the type number, so it is no list index either.
+  assert.deepEqual(diagnostics("say [1, 2][1e308 * 10]"), ["TSV050 1:12", "TSV043 1:12"]);
   const [overflow] = compileSource("let x = 1e308 * 10").diagnostics;
   assert.equal(
     overflow?.message,
@@ -64,10 +65,11 @@ test("a division by a zero the compiler can see fails at compile time whatever t
 
 test("only the overflowing step is reported, once", () => {
   assert.deepEqual(diagnostics("say (1e308 * 10) * 2 + 1"), ["TSV050 1:6"]);
-  // Checks of a known wait, timer, or repeat value leave an overflow to the overflow error.
-  assert.deepEqual(diagnostics("wait -1e308 * 10"), ["TSV050 1:6"]);
-  assert.deepEqual(diagnostics("timer -1e308 * 10"), ["TSV050 1:7"]);
-  assert.deepEqual(diagnostics("repeat 1e308 * 10 { }"), ["TSV050 1:8"]);
+  // Checks of a known wait, timer, or repeat value leave an overflow to the overflow error. A number written with an
+  // exponent has the type number, so it is no repeat count either.
+  assert.deepEqual(diagnostics("wait -1e300 s * 1e10"), ["TSV050 1:6"]);
+  assert.deepEqual(diagnostics("timer -1e300 s * 1e10"), ["TSV050 1:7"]);
+  assert.deepEqual(diagnostics("repeat 1e308 * 10 { }"), ["TSV050 1:8", "TSV011 1:8"]);
   assert.deepEqual(diagnostics("say 1e308 + 1e308 - 1e308"), ["TSV050 1:5"]);
   assert.deepEqual(diagnostics("say 1e308 * 10\nsay 1 / 0"), ["TSV050 1:5", "TSV050 2:5"]);
 });

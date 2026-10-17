@@ -27,6 +27,7 @@ import {
   type InteractionTemporalKind,
   type InteractionUiPayload,
   type InstructionPlan,
+  type LockCall,
   type PlanSourceLocation,
   DEFAULT_EXPORT_FILE_NAME,
   DEFAULT_EXPORT_TITLE,
@@ -70,6 +71,8 @@ import {
 } from "./stored-files.js";
 import { validPermanentButtonAction } from "./permanent-button-validation.js";
 import { isSha256Hex } from "./sha256.js";
+import { isLockNotice, isLockOutcome } from "./actions/lock.js";
+import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey } from "../public-keys.js";
 import { validTimerAction } from "./timer-validation.js";
 import { validateScriptStorageEntries } from "./script-storage.js";
 import {
@@ -278,7 +281,170 @@ function validForegroundActionKind(
       hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
     );
   }
+  if (action.kind === "lock") {
+    return (
+      validLockAction(action, snapshot, plan) &&
+      hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
+    );
+  }
   return false;
+}
+
+/**
+ * A pending step of a lock, for its instruction's call. An encrypt call's lock dialog asks for the openers the player
+ * chooses, suggesting a moment for a chosen time lock, after its password field, of `password: askPassword(...)`, asked
+ * for the password; the step after them locks with the openers the call gives and what the player gave, and a step
+ * without them has an opener. Only an encrypt call has public keys, each read as one, and only a decrypt call a key. A
+ * decrypt call has no time lock and chooses nothing; its dialog, and the step after it, have no written password or
+ * key, its password field always asks first, and its notice belongs to the dialog. The text is any text, the Base64
+ * lock standard Base64, and a file one this session knows.
+ */
+function validLockAction(
+  action: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
+  if (
+    !hasExactKeys(action, [
+      "kind",
+      "actionId",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "scopeDepth",
+      "loopDepth",
+      "destinationTemporary",
+      "createdAtMs",
+      "requestEventSequence",
+      "call",
+      "phase",
+      "value",
+      "password",
+      "timeLockMs",
+      "choices",
+      "dialogActionId",
+      "notice",
+      "passwordField",
+      "publicKeys",
+      "key",
+      "resumes",
+    ]) ||
+    !nonNegativeSafeInteger(action.resumes) ||
+    (action.phase !== "ask" && action.resumes !== 0) ||
+    !positiveSafeInteger(action.destinationTemporary) ||
+    !validSessionTime(action.createdAtMs) ||
+    !validSessionTime(snapshot.currentSessionTimeMs) ||
+    action.createdAtMs > snapshot.currentSessionTimeMs ||
+    !isOneOf(action.call, ["encryptText", "encryptFile", "decryptText", "decryptFile"]) ||
+    !isOneOf(action.phase, ["work", "ask"]) ||
+    typeof action.value !== "string" ||
+    (action.password !== null && typeof action.password !== "string") ||
+    (action.timeLockMs !== null && !isEpochMilliseconds(action.timeLockMs)) ||
+    !validLockChoices(action.choices) ||
+    (action.dialogActionId !== null &&
+      !(
+        positiveSafeInteger(action.dialogActionId) &&
+        action.dialogActionId < Number(action.actionId)
+      )) ||
+    (action.notice !== null && !isLockNotice(action.notice)) ||
+    (action.passwordField !== null &&
+      !(
+        isPlainRecord(action.passwordField) &&
+        hasExactKeys(action.passwordField, ["hint"]) &&
+        (action.passwordField.hint === null || typeof action.passwordField.hint === "string")
+      )) ||
+    !Array.isArray(action.publicKeys) ||
+    action.publicKeys.length > MAX_LOCK_PUBLIC_KEYS ||
+    !action.publicKeys.every(
+      (key: unknown) =>
+        typeof key === "string" && key === key.trim() && parsePublicKey(key) !== null,
+    ) ||
+    (action.key !== null && typeof action.key !== "string") ||
+    !Array.isArray(snapshot.storedFiles)
+  )
+    return false;
+  const encrypts = action.call === "encryptText" || action.call === "encryptFile";
+  // Only an encrypt call has public keys, and only a decrypt call a key.
+  if (encrypts ? action.key !== null : action.publicKeys.length > 0) return false;
+  const asks = action.phase === "ask";
+  const choices: readonly unknown[] = action.choices;
+  const field = action.passwordField !== null;
+  const value = action.value;
+  if (
+    (action.call === "decryptText" && !isStandardBase64(value)) ||
+    ((action.call === "encryptFile" || action.call === "decryptFile") &&
+      !holdsStoredFile(snapshot.storedFiles, value))
+  )
+    return false;
+  if (asks && action.dialogActionId !== null) return false;
+  // The password field asks for the call's password, which the call therefore does not write.
+  if (field && (action.password !== null || action.notice !== null)) return false;
+  if (encrypts) {
+    if (action.notice !== null) return false;
+    // The dialog or password field and the step after them; a chosen opener is not written, and a chosen time lock is
+    // suggested while the dialog asks and comes from the player's answer after it.
+    const dialog = asks || action.dialogActionId !== null;
+    if (dialog !== (choices.length > 0 || field)) return false;
+    if (choices.includes("password") && (action.password !== null || field)) return false;
+    if (choices.includes("publicKey") && action.publicKeys.length > 0) return false;
+    if (choices.includes("timeLock") && (action.timeLockMs !== null) !== asks) return false;
+    if (
+      !dialog &&
+      action.password === null &&
+      action.timeLockMs === null &&
+      action.publicKeys.length === 0
+    )
+      return false;
+  } else {
+    if (action.timeLockMs !== null || choices.length > 0) return false;
+    if (!asks && action.notice !== null) return false;
+    // The unlock dialog, and the step after it, ask for nothing written: the dialog's call wrote no password or key.
+    if (
+      !field &&
+      (asks || action.dialogActionId !== null) &&
+      (action.password !== null || action.key !== null)
+    )
+      return false;
+    if (field && asks !== (action.dialogActionId === null)) return false;
+  }
+  if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
+  const owner = plan.instructions[action.owningInstruction];
+  if (owner?.kind !== "lock" || owner.call !== action.call) return false;
+  if ((owner.passwordField !== null) !== field) return false;
+  if (owner.password === null && action.password !== null) return false;
+  if ((owner.key !== null) !== (action.key !== null)) return false;
+  if (owner.publicKey === null && action.publicKeys.length > 0) return false;
+  if (encrypts) {
+    if (owner.timeLock === null && action.timeLockMs !== null && !choices.includes("timeLock"))
+      return false;
+    // An encrypt call that writes no opener lets the player choose each.
+    return owner.password !== null || field || choices.length === LOCK_CHOICES.length;
+  }
+  // Only a decrypt call without a written password or key asks in the dialog; its password field asks too.
+  return (
+    field ||
+    (owner.password === null && owner.key === null) ||
+    (!asks && action.dialogActionId === null)
+  );
+}
+
+/** The openers an encrypt call's lock dialog lets the player choose, in the order the dialog shows them. */
+const LOCK_CHOICES = ["timeLock", "password", "publicKey"] as const;
+
+/** Each choice once, in the order the dialog shows them. */
+function validLockChoices(value: unknown): value is readonly string[] {
+  if (!Array.isArray(value)) return false;
+  let next = 0;
+  for (const choice of value) {
+    const index = LOCK_CHOICES.findIndex((known, at) => at >= next && known === choice);
+    if (index === -1) return false;
+    next = index + 1;
+  }
+  return true;
+}
+
+function isEpochMilliseconds(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
 }
 
 /**
@@ -442,6 +608,7 @@ function validSettlementShapeAndKind(
       "storageWrite",
       "capture",
       "fileStore",
+      "lock",
     ]) &&
     (settlement.actionKind === "chatPacingGate" ||
       settlement.settlementKind === "completed" ||
@@ -479,8 +646,9 @@ function validSettlementIdentityAndEventSequences(
     );
   }
   if (settlement.actionKind !== "interaction") return true;
-  // A button that timed out, a closed popup or exportText, and an opened `openUrl` publish no player transcript.
-  if (settlement.settlementKind === "timedOut" || silentInteraction(settlement.interactionKind))
+  // A button that timed out, a closed popup or exportText, an opened `openUrl`, and a password publish no player
+  // transcript.
+  if (settlement.settlementKind === "timedOut" || transcriptless(settlement.interactionKind))
     return settlement.transcriptEventSequence === null;
   return (
     positiveSafeInteger(settlement.transcriptEventSequence) &&
@@ -604,7 +772,9 @@ export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
       (foreground.kind === "delay" ||
         foreground.kind === "interaction" ||
         foreground.kind === "chatPacingGate" ||
-        foreground.kind === "mediaPlayback"))
+        foreground.kind === "mediaPlayback" ||
+        // A lock's dialog, as `timerHandlerDispatchable` lets a block interrupt it.
+        (foreground.kind === "lock" && foreground.phase === "ask")))
   );
 }
 
@@ -867,6 +1037,10 @@ export function validateInteractionResultHandoffState(
     validateFileStoreHandoff(handoff, snapshot, plan, errors);
     return;
   }
+  if (isPlainRecord(handoff) && handoff.actionKind === "lock") {
+    validateLockHandoff(handoff, snapshot, plan, errors);
+    return;
+  }
   if (
     !isPlainRecord(handoff) ||
     !hasExactKeys(handoff, [
@@ -1051,6 +1225,101 @@ function validateFileStoreHandoff(
     errors.push("Runtime file store answer handoff does not match its plan instruction.");
 }
 
+/**
+ * The answer of a lock step, which its instruction runs again with: its outcome, then the result text or file of a lock
+ * or an opening, or the notice of a dialog that asks again.
+ */
+function validateLockHandoff(
+  handoff: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  const result = handoff.result;
+  const settlement = snapshot.lastSettlement;
+  let items: string[] | null = null;
+  if (
+    isPlainRecord(result) &&
+    hasExactKeys(result, ["kind", "items"]) &&
+    result.kind === "list" &&
+    Array.isArray(result.items)
+  ) {
+    const texts: string[] = [];
+    for (const item of result.items) if (typeof item === "string") texts.push(item);
+    if (texts.length === result.items.length) items = texts;
+  }
+  const outcome = items?.[0];
+  const detail = items !== null && items.length === 2 ? items[1]! : null;
+  if (
+    !hasExactKeys(handoff, [
+      "actionKind",
+      "actionId",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "destinationTemporary",
+      "result",
+    ]) ||
+    !positiveSafeInteger(handoff.actionId) ||
+    !nonNegativeSafeInteger(handoff.owningInstruction) ||
+    handoff.continuationInstruction !== handoff.owningInstruction ||
+    snapshot.nextInstruction !== handoff.owningInstruction ||
+    !positiveSafeInteger(handoff.destinationTemporary) ||
+    (handoff.ownerCallFrameId !== null && !positiveSafeInteger(handoff.ownerCallFrameId)) ||
+    items === null ||
+    items.length < 1 ||
+    items.length > 2 ||
+    !isLockOutcome(outcome) ||
+    // A lock or an opening carries its result, a dialog that asks again may carry its notice, nothing else carries more.
+    ((outcome === "locked" || outcome === "opened") !== (detail !== null) &&
+      !(outcome === "ask" && isLockNotice(detail))) ||
+    snapshot.foregroundAction !== null ||
+    !isOneOf(snapshot.status, ["running", "failed"]) ||
+    !isPlainRecord(settlement) ||
+    settlement.actionKind !== "lock" ||
+    settlement.actionId !== handoff.actionId ||
+    settlement.owningInstruction !== handoff.owningInstruction ||
+    settlement.ownerCallFrameId !== handoff.ownerCallFrameId ||
+    settlement.destinationTemporary !== handoff.destinationTemporary ||
+    settlement.outcome !== outcome ||
+    // A kept file is the result.
+    (settlement.file !== null && settlement.file !== detail) ||
+    !validInteractionResultHandoffOwner(handoff, snapshot, plan) ||
+    !Array.isArray(snapshot.temporaries) ||
+    snapshot.temporaries.some(
+      (temporary) => isPlainRecord(temporary) && temporary.id === handoff.destinationTemporary,
+    )
+  ) {
+    errors.push("Runtime lock answer handoff is malformed.");
+    return;
+  }
+  if (plan === undefined) return;
+  const instruction = plan.instructions[handoff.owningInstruction];
+  if (
+    instruction?.kind !== "lock" ||
+    instruction.destinationTemporary !== handoff.destinationTemporary ||
+    !lockOutcomeFits(instruction.call, outcome, settlement.file) ||
+    // A locked text is standard Base64.
+    (outcome === "locked" && instruction.call === "encryptText" && !isStandardBase64(detail!))
+  )
+    errors.push("Runtime lock answer handoff does not match its plan instruction.");
+}
+
+/**
+ * Whether a lock step's outcome fits its call: an encrypt call locks, a decrypt call opens, and a file call keeps
+ * exactly the stored file it gives; only a decrypt call is not opened, cancelled, or reads its file, and the file calls
+ * alone find a file unreadable.
+ */
+function lockOutcomeFits(call: LockCall, outcome: string, file: unknown): boolean {
+  const encrypts = call === "encryptText" || call === "encryptFile";
+  const files = call === "encryptFile" || call === "decryptFile";
+  const result = outcome === "locked" || outcome === "opened";
+  if ((outcome === "locked" && !encrypts) || (outcome === "opened" && encrypts)) return false;
+  if ((outcome === "notOpened" || outcome === "cancelled") && encrypts) return false;
+  if (outcome === "unreadable" && !files) return false;
+  return (file !== null) === (result && files);
+}
+
 /** Whether `list` is a list value whose items are exactly `items`, in order. */
 function sameItems(list: unknown, items: unknown): boolean {
   if (!isPlainRecord(list) || !Array.isArray(list.items) || !Array.isArray(items)) return false;
@@ -1141,6 +1410,9 @@ function validInteractionResultForInstruction(
       (isImageReference(result) ||
         (result === null && imageRequestAllowsSkip(instruction, snapshot.temporaries)))
     );
+  // A password's answer is the SHA-256 of what was typed.
+  if (instruction.interactionKind === "password")
+    return instruction.expectedResult === "string" && isSha256Hex(result);
   // The form's fields were cleared with its request; its settlement checks the answers against them.
   if (instruction.interactionKind === "form")
     return (
@@ -1259,7 +1531,14 @@ function validInteractionAction(
       "requestEventSequence",
       ...(action.interactionKind === "form" ? ["form"] : []),
       ...(Object.hasOwn(action, "pausedMs") ? ["pausedMs"] : []),
+      ...(Object.hasOwn(action, "resumes") ? ["resumes"] : []),
     ])
+  )
+    return false;
+  // Only a password field counts its returns after blocks.
+  if (
+    Object.hasOwn(action, "resumes") &&
+    (action.interactionKind !== "password" || !positiveSafeInteger(action.resumes))
   )
     return false;
   if (
@@ -1498,6 +1777,12 @@ function preparedInteractionUiMatchesAction(
       actual.integer === (prepared.kind === "number" ? prepared.integer : undefined)
     );
   }
+  if (prepared.kind === "password")
+    return (
+      (prepared.hintTemporary === null
+        ? null
+        : runtimeTemporaryValue(temporaries, prepared.hintTemporary)) === actual.hint
+    );
   if (prepared.kind === "temporal") {
     const hint =
       prepared.hintTemporary === null
@@ -1586,12 +1871,13 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
   const expectedUiKeys =
     kind === "button"
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in value ? ["background"] : [])]
-      : kind === "text" || kind === "number" || kind === "temporal"
+      : kind === "text" || kind === "number" || kind === "temporal" || kind === "password"
         ? [
             "kind",
             "hint",
             "accessibleName",
-            ...("prefill" in value ? ["prefill"] : []),
+            // A password is never suggested.
+            ...("prefill" in value && kind !== "password" ? ["prefill"] : []),
             ...(kind === "number" && "integer" in value ? ["integer"] : []),
             ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
@@ -1653,7 +1939,9 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
         ? "number"
         : kind === "choice"
           ? "chooseOption"
-          : "answer";
+          : kind === "password"
+            ? "password"
+            : "answer";
   if (value.accessibleName.kind === "text") {
     if (
       !hasExactKeys(value.accessibleName, ["kind", "text"]) ||
@@ -1677,6 +1965,8 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
   }
   if (kind === "popup")
     return count(value.message) && count(value.buttonText) && !measurementExhausted;
+  if (kind === "password")
+    return (value.hint === null || count(value.hint)) && !measurementExhausted;
   // The address is canonical.
   if (kind === "url")
     return (
@@ -1783,6 +2073,7 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
       actual.hint === expected.hint &&
       actual.prefill === expected.prefill
     );
+  if (expected.kind === "password") return actual.hint === expected.hint;
   if (expected.kind === "image")
     return (
       actual.question === expected.question &&
@@ -1973,6 +2264,50 @@ function validFileStoreSettlement(
   );
 }
 
+/** A settled lock step: how it ended, and the stored file it kept, which the session knows from then on. */
+function validLockSettlement(
+  settlement: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
+  if (
+    !hasExactKeys(settlement, [
+      "actionId",
+      "actionKind",
+      "settlementKind",
+      "outcome",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "destinationTemporary",
+      "requestEventSequence",
+      "completionEventSequence",
+      "completedAtMs",
+      "file",
+    ]) ||
+    !isLockOutcome(settlement.outcome) ||
+    (settlement.ownerCallFrameId !== null && !positiveSafeInteger(settlement.ownerCallFrameId)) ||
+    !positiveSafeInteger(settlement.destinationTemporary) ||
+    (settlement.file !== null &&
+      !(
+        typeof settlement.file === "string" &&
+        Array.isArray(snapshot.storedFiles) &&
+        holdsStoredFile(snapshot.storedFiles, settlement.file)
+      )) ||
+    !validSessionTime(settlement.completedAtMs) ||
+    !validSessionTime(snapshot.currentSessionTimeMs) ||
+    settlement.completedAtMs > snapshot.currentSessionTimeMs
+  )
+    return false;
+  if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  const owner = plan.instructions[settlement.owningInstruction];
+  return (
+    owner?.kind === "lock" &&
+    owner.destinationTemporary === settlement.destinationTemporary &&
+    lockOutcomeFits(owner.call, settlement.outcome, settlement.file)
+  );
+}
+
 function validSettlementKindData(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
@@ -2026,6 +2361,7 @@ function validSettlementKindData(
     return validCaptureSettlement(settlement, snapshot, plan);
   if (settlement.actionKind === "fileStore")
     return validFileStoreSettlement(settlement, snapshot, plan);
+  if (settlement.actionKind === "lock") return validLockSettlement(settlement, snapshot, plan);
   if (settlement.actionKind === "mediaPlayback") {
     return (
       hasExactKeys(settlement, [
@@ -2077,7 +2413,7 @@ function validSettlementKindData(
     !positiveSafeInteger(settlement.requestEventSequence) ||
     !positiveSafeInteger(settlement.completionEventSequence) ||
     // A timed-out button or form, a closed popup or exportText, and an opened `openUrl` add nothing to the transcript.
-    (timedOut || silentInteraction(settlement.interactionKind)
+    (timedOut || transcriptless(settlement.interactionKind)
       ? settlement.transcriptText !== null ||
         settlement.transcriptEventSequence !== null ||
         settlement.requestEventSequence >= settlement.completionEventSequence
@@ -2104,6 +2440,9 @@ function validSettlementKindData(
         ? settlement.result === null
         : validElapsedResult(settlement.result) &&
           !(timedOut && settlement.result.milliseconds === 0);
+  } else if (settlement.interactionKind === "password") {
+    // The SHA-256 of what was typed, never the text.
+    resultValid = isSha256Hex(settlement.result);
   } else if (settlement.interactionKind === "text") {
     resultValid =
       typeof settlement.result === "string" && settlement.result === settlement.transcriptText;
@@ -2213,6 +2552,11 @@ function validSettlementKindData(
 }
 
 /** A popup, an `openUrl`, or an `exportText`: an interaction that adds nothing to the transcript. */
+/** An interaction that adds no player line to the transcript: a silent one, or a password, which is never shown. */
+function transcriptless(kind: unknown): boolean {
+  return silentInteraction(kind) || kind === "password";
+}
+
 function silentInteraction(kind: unknown): boolean {
   return kind === "popup" || kind === "url" || kind === "export";
 }
@@ -2234,6 +2578,7 @@ function isInteractionKind(value: unknown): value is InteractionKind {
     "number",
     "choice",
     "temporal",
+    "password",
     "image",
     "form",
     "popup",
@@ -2358,6 +2703,7 @@ function preparedUiFitsPresentedUi(
       (ui.hint === null) === (prepared.hintTemporary === null) &&
       (!("prefill" in ui) || prepared.prefillTemporary !== undefined)
     );
+  if (prepared.kind === "password") return (ui.hint === null) === (prepared.hintTemporary === null);
   // The request temporary is cleared after completion; the recorded request was checked by its shape.
   if (prepared.kind === "image") return true;
   if (prepared.kind === "form") return formShapeFits(prepared.shape, ui.shape);
@@ -2482,11 +2828,13 @@ function validSettlementProvenance(
 ): boolean {
   const owningInstruction = settlement.owningInstruction;
   const continuationInstruction = settlement.continuationInstruction;
-  // A file store's instruction runs again with the answer.
+  // A file store's or lock's instruction runs again with the answer.
   if (
     !nonNegativeSafeInteger(owningInstruction) ||
     !nonNegativeSafeInteger(continuationInstruction) ||
-    continuationInstruction !== owningInstruction + (settlement.actionKind === "fileStore" ? 0 : 1)
+    continuationInstruction !==
+      owningInstruction +
+        (settlement.actionKind === "fileStore" || settlement.actionKind === "lock" ? 0 : 1)
   )
     return false;
   if (plan === undefined) return true;
@@ -2504,7 +2852,9 @@ function validSettlementProvenance(
               ? "capture"
               : settlement.actionKind === "fileStore"
                 ? "fileStore"
-                : "say";
+                : settlement.actionKind === "lock"
+                  ? "lock"
+                  : "say";
   if (plan.instructions[owningInstruction]?.kind !== expectedKind) return false;
   const definition = functionHoldingInstruction(plan, owningInstruction);
   return definition === undefined
@@ -2525,17 +2875,30 @@ function validForegroundActionOwnership(
     !nonNegativeSafeInteger(continuationInstruction) ||
     snapshot.nextInstruction !== owningInstruction ||
     owningInstruction >= plan.instructions.length ||
-    // A file store's instruction runs again with the answer.
-    continuationInstruction !== owningInstruction + (action.kind === "fileStore" ? 0 : 1) ||
-    !["wait", "interaction", "say", "playMedia", "storageWrite", "capture", "fileStore"].includes(
-      plan.instructions[owningInstruction]?.kind ?? "",
-    )
+    // A file store's or lock's instruction runs again with the answer.
+    continuationInstruction !==
+      owningInstruction + (action.kind === "fileStore" || action.kind === "lock" ? 0 : 1) ||
+    ![
+      "wait",
+      "interaction",
+      "say",
+      "playMedia",
+      "storageWrite",
+      "capture",
+      "fileStore",
+      "lock",
+    ].includes(plan.instructions[owningInstruction]?.kind ?? "")
   )
     return false;
   const owner = plan.instructions[owningInstruction];
   if (
     (action.kind === "fileStore") !== (owner?.kind === "fileStore") ||
     (owner?.kind === "fileStore" && action.destinationTemporary !== owner.destinationTemporary)
+  )
+    return false;
+  if (
+    (action.kind === "lock") !== (owner?.kind === "lock") ||
+    (owner?.kind === "lock" && action.destinationTemporary !== owner.destinationTemporary)
   )
     return false;
   if (

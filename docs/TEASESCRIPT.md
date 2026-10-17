@@ -111,6 +111,8 @@ let day = askDate "Which day?"
 let start = askTime as mistress "What time?", prefill: toTime("20:00")
 let moment = askDateTime "When are you free?"
 
+let code = askPassword "Your code?"
+
 let name = askText("Your name?", prefill: "Ada")
 let more = askInteger as mistress ("How many?", prefill: 3) + 1
 
@@ -146,8 +148,10 @@ same way, then shows two buttons: `yesText:` (default "Yes") returns `true` and 
 All basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
 `askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers; `askBoolean` returns
 `boolean`; `askDate`, `askTime`, and
-`askDateTime` return `date`, `time`, and `datetime` from the Player's date and time controls. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
-optional `timeout:` ends the wait without a chat message; see
+`askDateTime` return `date`, `time`, and `datetime` from the Player's date and time controls; `askPassword` returns the
+SHA-256 of the password typed in a masked field, as `hashText` gives it, and asks for the password itself when written
+directly as the `password:` of an encrypt or decrypt call. `showButton` used as a value returns the elapsed waiting
+time as a `duration`, and an optional `timeout:` ends the wait without a chat message; see
 [blocking button](specifications/accepted-syntaxes-v30.md#21-blocking-button).
 Timer interrupts may suspend an interaction, whose timeout stands still meanwhile; handler `exit` discards its
 instruction without producing a result or binding. See [timer semantics](specifications/accepted-syntaxes-v30.md#27-timers).
@@ -211,6 +215,20 @@ let same = hashFile(image) == load("imageHash", default: "")
 after a short wait, both as the 64 lowercase hexadecimal digits that other programs, such as `sha256sum`, give. Any
 other value goes through `toJson` first. A hash hides only a secret with many possible values
 ([§13](specifications/accepted-syntaxes-v30.md#hashes)).
+
+```tease
+let locked = encryptFile(photo, password: "corner", publicKey: false, timeLock: false)
+let photo = decryptFile(locked, default: null)
+```
+
+`encryptText` and `encryptFile` lock text, as Base64, or a stored file, with a `password:`, public keys (`publicKey:`,
+`age1…` or `ssh-ed25519 …`), and a `timeLock:`, a moment from which it opens by itself. Each takes a value, `true` for
+the player to set it in the Player's lock dialog, or `false` to leave it out; a call gives each or none, and without any
+the player sets each. `decryptText` and `decryptFile` need a `default:`, which a wrong password or key, a changed lock,
+or a time lock not yet open gives; for a public key, the owner of the private key gets the `key:` with `age`; without
+`password:` or `key:` a passed time lock opens, otherwise the Player asks
+([§13](specifications/accepted-syntaxes-v30.md#encryption), [locks](RUNTIME.md#locks),
+[`ENCRYPTION.md`](ENCRYPTION.md)).
 
 ### Compact choices
 
@@ -278,14 +296,9 @@ Pacing meanings:
 
 With no explicit skip modifier, `say` uses the effective speaker's `defaultSaySkippable` setting and otherwise the platform default `true`.
 
-A paced `say` lasts its reading time, and the next statement runs after it, unless the player skips it (owner decision
-on #829, 2026-10-11). Nothing after the `say` runs during its reading time: no other message, question, button, form,
-media or camera change, message or permanent-button change, `wait`, timer, or code the player cannot see. A question
-appears together with its controls, and a timeout counts from when it is visible. Permanent buttons already shown stay
-usable. A timer, media, or permanent-button block interrupts a reading time as it interrupts a `wait`, and the reading
-time continues with the time it had left once the block returns. For exact timing, write `instant`:
-`say "Hold the position.", instant` followed by `wait 30 s` takes exactly 30 seconds, and without `instant` the reading
-time comes first. `wait` remains separate and does not become a `say` option.
+A paced `say` lasts its reading time, and the next statement runs after it unless the player skips it, as
+[V30](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides) defines. `wait` remains
+separate and does not become a `say` option.
 
 Used as a value, `say` gives a `messageHandle` whose `text` changes the message in place, without a new message or
 pacing, and whose `remove()` takes the message out of the chat
@@ -391,7 +404,8 @@ Implemented value operations include the V30 §8 text operations and regexes, jo
 §13 conversions `toString`,
 `toNumber`, `toInteger`, and `toBoolean` with `default:`, the §13 JSON and Base64 functions `toJson`, `fromJson`,
 `toBase64`, and `fromBase64`, with stored files as data URLs unless `files: false`, the §13 hashes `hashText` and
-`hashFile`, the §33 file functions `fileFromBase64` and `fileToBase64` ([stored files](RUNTIME.md#stored-files)), the
+`hashFile`, the §13 locks `encryptText`, `encryptFile`, `decryptText`, and `decryptFile` ([locks](RUNTIME.md#locks)),
+the §33 file functions `fileFromBase64` and `fileToBase64` ([stored files](RUNTIME.md#stored-files)), the
 numeric functions `round` (also with
 `decimals:`), `floor`, `ceil`, `abs`, `sign`, `sqrt`, `pow`, `mod`, and `clamp`, the constant `pi`, the exponentials
 and logarithms `exp`, `ln`, and `log10`, angles with a unit such as `90 deg` or `pi rad` and the angle functions `sin`,
@@ -417,7 +431,8 @@ labels, functions, and start values); union types, type names, and `is` type tes
 plain variables; using a possibly null value where its non-null type is required is a compile error that names the
 check and a fallback with
 `otherwise` ([§18](specifications/accepted-syntaxes-v30.md#fallback-with-otherwise)). A mismatch is `TSV041`, an
-unsupported operand or such a property read `TSV043`, returns of different types, list elements of different types, or
+unsupported operand or such a property read `TSV043` unless its rule has a code of its own, such as `TSV010` for a range
+bound, `TSV034` for a timer handle member, or `TSV036` for a play command's options, returns of different types, list elements of different types, or
 an `askChoice` of different value types outside a declared union `TSV044`, a provably constant type test or comparison,
 or a `for` or `toList()` range with a number literal on each side that contains no numbers (V30 §6), warning `TSV046`,
 and a fallback after a value that is never null warning `TSV062`. When a value the compiler cannot know, such as storage

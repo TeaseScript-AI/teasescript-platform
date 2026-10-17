@@ -42,6 +42,7 @@ import type {
   StoreTemporaryInstruction,
   MediaCuePlan,
   JumpInstruction,
+  LockInstruction,
   LoopControlInstruction,
   LoopStartInstruction,
   PrepareParameterDefaultInstruction,
@@ -66,7 +67,13 @@ import { canonicalWebUrl } from "../../web-url.js";
 import { canonicalRegexFlags } from "../../regex.js";
 import { copiesAccount } from "../../project-globals.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
-import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "../../capture-call.js";
+import {
+  isAskImageCall,
+  isFileStoreCall,
+  directPasswordField,
+  isLockCall,
+  isTakePhotoCall,
+} from "../../capture-call.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
@@ -86,11 +93,20 @@ import {
   timerOperands,
 } from "../../expression-children.js";
 
-/** A transfer or fallback at `instruction` whose destination is a file, from its entry or at a label. */
+/**
+ * What the lowering tells an analysis that reads the plan back as source; not part of the plan. `origins` holds the
+ * source construct of each `jumpIfFalse` and `loopStart`, by instruction, and `statements` the instructions of each
+ * statement: from `start` up to `end` in the region where it stands, none for a declaration that runs nothing there.
+ */
+export interface LoweringTrace {
+  readonly origins: Map<number, ControlOrigin>;
+  readonly statements: Map<Statement, { readonly start: number; readonly end: number }>;
+}
+
 /**
  * The source construct that a `jumpIfFalse` or `loopStart` decides, for an analysis that reads the plan's ways back
  * as source: an `if`, one `case` of a `switch`, a loop, the right side of `and`, `or`, or `otherwise` that runs as
- * instructions, or a `default:` of a `load` or a call that runs as instructions. Not part of the plan.
+ * instructions, or a `default:` of a `load` or a call that runs as instructions.
  */
 export type ControlOrigin =
   | { readonly kind: "if"; readonly statement: IfStatement }
@@ -110,6 +126,7 @@ export type LoopStatement = Extract<
   { kind: "repeatStatement" | "forStatement" | "whileStatement" }
 >;
 
+/** A transfer or fallback at `instruction` whose destination is a file, from its entry or at a label. */
 export interface PendingDestination {
   readonly instruction: number;
   /** The file, or for a glob the files to pick from. */
@@ -239,8 +256,8 @@ export class InstructionCompiler {
     private readonly captures: ReadonlyMap<Block, readonly string[]> = new Map(),
     /** The result shape of each `askForm`, from the type check. */
     private readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape> = new Map(),
-    /** Receives the source construct of each `jumpIfFalse` and `loopStart`, when an analysis asks for it. */
-    private readonly origins: Map<number, ControlOrigin> | null = null,
+    /** Receives the trace of the lowering, when an analysis asks for it. */
+    private readonly trace: LoweringTrace | null = null,
   ) {
     this.#functionIdBase = functions.length;
     const functionByName = new Map<
@@ -257,7 +274,7 @@ export class InstructionCompiler {
   }
 
   #originate(instruction: number, origin: ControlOrigin): void {
-    this.origins?.set(instruction, origin);
+    this.trace?.origins.set(instruction, origin);
   }
 
   /** The ID of one of this file's functions. */
@@ -335,6 +352,12 @@ export class InstructionCompiler {
   }
 
   *#compileStatement(statement: Statement): CompileTask<void> {
+    const start = this.instructions.length;
+    yield* compileChild(this.#compileStatementKind(statement));
+    this.trace?.statements.set(statement, { start, end: this.instructions.length });
+  }
+
+  *#compileStatementKind(statement: Statement): CompileTask<void> {
     switch (statement.kind) {
       case "speakerDeclaration":
         // A speaker is set up before the story runs, by the start of main.tease.
@@ -516,7 +539,7 @@ export class InstructionCompiler {
         }
         // A compound assignment reads the current value before any instruction-emitting operand runs.
         const current =
-          statement.operator === "=" || !this.#containsUserCall(statement.value)
+          statement.operator === "=" || !this.#emitsInstructions(statement.value)
             ? null
             : this.#materializeExpression(
                 { plan: target.plan, temporaryIds: [] },
@@ -671,7 +694,7 @@ export class InstructionCompiler {
     this.instructions[conditional] = { ...conditionalInstruction, target: falseCleanup };
     this.#emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
     if (statement.elseBlock.kind === "ifStatement") {
-      yield* compileChild(this.#compileIf(statement.elseBlock));
+      yield* compileChild(this.#compileStatement(statement.elseBlock));
     } else {
       yield* compileChild(this.#compileBlock(statement.elseBlock));
     }
@@ -853,9 +876,9 @@ export class InstructionCompiler {
    * the instruction sets once the message is shown.
    */
   *#lowerSayTask(say: SayParts, value: boolean): CompileTask<LoweredExpression | null> {
-    const textCanSuspend = say.presentation !== null || this.#containsUserCall(say.value);
+    const textCanSuspend = say.presentation !== null || this.#emitsInstructions(say.value);
     const pacingCanSuspend =
-      say.pacing !== null && say.pacing !== "instant" && this.#containsUserCall(say.pacing);
+      say.pacing !== null && say.pacing !== "instant" && this.#emitsInstructions(say.pacing);
     const pacingOf = (lowered: LoweredExpression | null): SayInstruction["pacing"] =>
       say.pacing === null ? "smart" : lowered === null ? "instant" : lowered.plan;
     let destinationTemporary: number | undefined;
@@ -1335,7 +1358,7 @@ export class InstructionCompiler {
 
   *#lowerExpressionTask(expression: Expression): CompileTask<LoweredExpression> {
     expression = unwrapParentheses(expression);
-    if (this.#contextualSpeakerTemporary === null && !this.#containsUserCall(expression))
+    if (this.#contextualSpeakerTemporary === null && !this.#emitsInstructions(expression))
       return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
     if (expression.kind === "interactionExpression") {
       return yield* compileChild(this.#lowerInteractionTask(expression));
@@ -1402,6 +1425,9 @@ export class InstructionCompiler {
     if (isFileStoreCall(expression) && expression.kind === "callExpression") {
       return yield* compileChild(this.#lowerFileStoreTask(expression));
     }
+    if (isLockCall(expression) && expression.kind === "callExpression") {
+      return yield* compileChild(this.#lowerLockTask(expression));
+    }
     if (
       expression.kind === "callExpression" &&
       expression.callee.kind === "identifier" &&
@@ -1428,14 +1454,14 @@ export class InstructionCompiler {
     if (
       expression.kind === "binaryExpression" &&
       (expression.operator === "and" || expression.operator === "or") &&
-      this.#containsUserCall(expression)
+      this.#emitsInstructions(expression)
     ) {
       return yield* compileChild(this.#lowerLogicalExpressionTask(expression));
     }
     if (
       expression.kind === "binaryExpression" &&
       expression.operator === "otherwise" &&
-      this.#containsUserCall(expression.right)
+      this.#emitsInstructions(expression.right)
     ) {
       return yield* compileChild(this.#lowerFallbackTask(expression));
     }
@@ -1535,7 +1561,7 @@ export class InstructionCompiler {
       }
       case "indexExpression": {
         let object = yield* compileChild(this.#lowerExpressionTask(expression.object));
-        if (this.#containsUserCall(expression.index)) {
+        if (this.#emitsInstructions(expression.index)) {
           object = this.#prepareReferenceExpression(object, expression.object.span);
         }
         const index = yield* compileChild(this.#lowerExpressionTask(expression.index));
@@ -1552,7 +1578,7 @@ export class InstructionCompiler {
       case "callExpression": {
         const lazy = lazyDefaultArgument(expression);
         // A `default:` that runs as instructions runs after the call, and only when the call needs it.
-        if (lazy === null || !this.#containsUserCall(lazy.argument.value))
+        if (lazy === null || !this.#emitsInstructions(lazy.argument.value))
           return yield* compileChild(this.#lowerCallTask(expression, null));
         const call = yield* compileChild(this.#lowerCallTask(expression, lazy.argument));
         const span = copySpan(expression.span);
@@ -1621,8 +1647,8 @@ export class InstructionCompiler {
         const rightExpression = expression.right;
         if (
           this.#contextualSpeakerTemporary === null &&
-          !this.#containsUserCall(leftExpression) &&
-          !this.#containsUserCall(rightExpression)
+          !this.#emitsInstructions(leftExpression) &&
+          !this.#emitsInstructions(rightExpression)
         ) {
           return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
         }
@@ -1954,7 +1980,7 @@ export class InstructionCompiler {
         ? ("choice" as const)
         : expression.interactionKind === "number" || expression.interactionKind === "integer"
           ? ("number" as const)
-          : expression.interactionKind === "text"
+          : expression.interactionKind === "text" || expression.interactionKind === "password"
             ? ("string" as const)
             : ("temporal" as const);
 
@@ -2004,89 +2030,41 @@ export class InstructionCompiler {
     let preparedUi: PreparedInteractionUiPayload;
     const preparedTemporaryIds: number[] = [speakerTemporary];
 
-    let question: Extract<Instruction, { kind: "say" }> | null = null;
     if (expression.interactionKind !== "choice") {
-      let questionTemporaryIds: number[] = [];
-      if (expression.question !== null) {
-        const sayTemporaries = this.#prepareQuestionSpeaker(
-          expression.speaker?.name ?? null,
-          expression.asSpan ?? expression.commandSpan,
-        );
-        const presentation = yield* compileChild(
-          this.#lowerQuestionPresentationTask(
-            expression.presentation ?? undefined,
-            speakerTemporary,
-          ),
-        );
-        const lowered = yield* compileChild(
-          this.#lowerInteractionPayloadTask(expression.question, speakerTemporary),
-        );
-        const textTemporary = this.#allocateTemporary();
-        this.instructions.push({
-          kind: "prepareSayText",
-          value: lowered.plan,
-          destinationTemporary: textTemporary,
-          field: true,
-          span: copySpan(expression.question.span),
-        });
-        this.#emitTemporaryCleanup(lowered.temporaryIds, expression.question.span);
-        question = {
-          kind: "say",
-          presentation: presentation?.plan ?? null,
-          speaker: expression.speaker?.name ?? null,
-          value: lowered.plan,
-          ...sayTemporaries,
-          textTemporary,
-          skipPolicy: null,
-          pacing: "instant",
-          span: copySpan(expression.span),
-        };
-        questionTemporaryIds = [
-          sayTemporaries.speakerTemporary,
-          sayTemporaries.contextualSpeakerTemporary,
-          ...(presentation?.temporaryIds ?? []),
-          textTemporary,
-        ];
-      }
-      let hint: { readonly temporaryId: number } | null = null;
-      let prefill: { readonly temporaryId: number } | null = null;
-      for (const operand of askOperands(expression)) {
-        if (operand === expression.question || operand === expression.presentation) continue;
-        const materialized = this.#materializeDedicatedInteractionValue(
-          yield* compileChild(this.#lowerInteractionPayloadTask(operand, speakerTemporary)),
-          operand.span,
-        );
-        preparedTemporaryIds.push(materialized.temporaryId);
-        if (operand === expression.hint) hint = materialized;
-        else prefill = materialized;
-      }
-      if (question !== null) {
-        this.instructions.push(question);
-        this.#emitTemporaryCleanup(questionTemporaryIds, expression.span);
-      }
+      const { hint, prefill } = yield* compileChild(
+        this.#lowerAskQuestionTask(expression, speakerTemporary),
+      );
+      if (hint !== null) preparedTemporaryIds.push(hint.temporaryId);
+      if (prefill !== null) preparedTemporaryIds.push(prefill.temporaryId);
       preparedUi =
-        expression.interactionKind === "text"
+        expression.interactionKind === "password"
           ? {
-              kind: "text",
+              kind: "password",
               hintTemporary: hint?.temporaryId ?? null,
-              ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
-              accessibleName: { kind: "localizedDefault", key: "answer" },
+              accessibleName: { kind: "localizedDefault", key: "password" },
             }
-          : expression.interactionKind === "number" || expression.interactionKind === "integer"
+          : expression.interactionKind === "text"
             ? {
-                kind: "number",
-                hintTemporary: hint?.temporaryId ?? null,
-                ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
-                ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
-                accessibleName: { kind: "localizedDefault", key: "number" },
-              }
-            : {
-                kind: "temporal",
-                temporalKind: expression.interactionKind,
+                kind: "text",
                 hintTemporary: hint?.temporaryId ?? null,
                 ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
                 accessibleName: { kind: "localizedDefault", key: "answer" },
-              };
+              }
+            : expression.interactionKind === "number" || expression.interactionKind === "integer"
+              ? {
+                  kind: "number",
+                  hintTemporary: hint?.temporaryId ?? null,
+                  ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
+                  ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
+                  accessibleName: { kind: "localizedDefault", key: "number" },
+                }
+              : {
+                  kind: "temporal",
+                  temporalKind: expression.interactionKind,
+                  hintTemporary: hint?.temporaryId ?? null,
+                  ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
+                  accessibleName: { kind: "localizedDefault", key: "answer" },
+                };
     } else {
       // The `prefill:` after the options is evaluated after them.
       const loweredValues = yield* compileChild(
@@ -2144,6 +2122,76 @@ export class InstructionCompiler {
     );
     this.#emitTemporaryCleanup(preparedTemporaryIds, expression.span);
     return lowered;
+  }
+
+  /**
+   * A basic ask's question and its `hint:` and `prefill:`: the question's speaker, mode, and text are prepared, the named
+   * arguments are evaluated in written order into temporaries, and then the question is said. The caller clears the
+   * temporaries it is given.
+   */
+  *#lowerAskQuestionTask(
+    expression: InteractionExpression,
+    speakerTemporary: number,
+  ): CompileTask<{
+    readonly hint: { readonly temporaryId: number } | null;
+    readonly prefill: { readonly temporaryId: number } | null;
+  }> {
+    let question: Extract<Instruction, { kind: "say" }> | null = null;
+    let questionTemporaryIds: number[] = [];
+    if (expression.question !== null) {
+      const sayTemporaries = this.#prepareQuestionSpeaker(
+        expression.speaker?.name ?? null,
+        expression.asSpan ?? expression.commandSpan,
+      );
+      const presentation = yield* compileChild(
+        this.#lowerQuestionPresentationTask(expression.presentation ?? undefined, speakerTemporary),
+      );
+      const lowered = yield* compileChild(
+        this.#lowerInteractionPayloadTask(expression.question, speakerTemporary),
+      );
+      const textTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "prepareSayText",
+        value: lowered.plan,
+        destinationTemporary: textTemporary,
+        field: true,
+        span: copySpan(expression.question.span),
+      });
+      this.#emitTemporaryCleanup(lowered.temporaryIds, expression.question.span);
+      question = {
+        kind: "say",
+        presentation: presentation?.plan ?? null,
+        speaker: expression.speaker?.name ?? null,
+        value: lowered.plan,
+        ...sayTemporaries,
+        textTemporary,
+        skipPolicy: null,
+        pacing: "instant",
+        span: copySpan(expression.span),
+      };
+      questionTemporaryIds = [
+        sayTemporaries.speakerTemporary,
+        sayTemporaries.contextualSpeakerTemporary,
+        ...(presentation?.temporaryIds ?? []),
+        textTemporary,
+      ];
+    }
+    let hint: { readonly temporaryId: number } | null = null;
+    let prefill: { readonly temporaryId: number } | null = null;
+    for (const operand of askOperands(expression)) {
+      if (operand === expression.question || operand === expression.presentation) continue;
+      const materialized = this.#materializeDedicatedInteractionValue(
+        yield* compileChild(this.#lowerInteractionPayloadTask(operand, speakerTemporary)),
+        operand.span,
+      );
+      if (operand === expression.hint) hint = materialized;
+      else prefill = materialized;
+    }
+    if (question !== null) {
+      this.instructions.push(question);
+      this.#emitTemporaryCleanup(questionTemporaryIds, expression.span);
+    }
+    return { hint, prefill };
   }
 
   /**
@@ -2573,6 +2621,135 @@ export class InstructionCompiler {
     };
   }
 
+  /**
+   * `encryptText`, `encryptFile`, `decryptText`, or `decryptFile` (V30 §13). Like a file store call, its arguments are
+   * evaluated in written order into temporaries, unless they are literals, so that every run of the instruction reads the
+   * same values; they are cleared once it gave its result. A decrypt call's default runs only when it is used, as
+   * instructions after the call.
+   */
+  *#lowerLockTask(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): CompileTask<LoweredExpression> {
+    if (expression.callee.kind !== "identifier")
+      throw new TypeError("A lock call reached lowering without its name.");
+    const call = expression.callee.name;
+    if (
+      call !== "encryptText" &&
+      call !== "encryptFile" &&
+      call !== "decryptText" &&
+      call !== "decryptFile"
+    )
+      throw new TypeError(`'${call}' is not a lock call.`);
+    const lazy = lazyDefaultArgument(expression);
+    const written = expression.arguments.filter((argument) => argument !== lazy?.argument);
+    const operands: Record<
+      "value" | "password" | "publicKey" | "key" | "timeLock",
+      ExpressionPlan | null
+    > = { value: null, password: null, publicKey: null, key: null, timeLock: null };
+    const temporaryIds: number[] = [];
+    let passwordField: LockInstruction["passwordField"] = null;
+    // A password field written directly says its question where `password:` stands; the arguments before it are kept
+    // in temporaries first, and those after it are evaluated after the question.
+    const fieldIndex = written.findIndex(
+      (argument) =>
+        argument.kind === "namedArgument" &&
+        argument.name.name === "password" &&
+        directPasswordField(argument.value) !== null,
+    );
+    const groups =
+      fieldIndex === -1 ? [written] : [written.slice(0, fieldIndex), written.slice(fieldIndex + 1)];
+    for (const [group, part] of groups.entries()) {
+      if (group === 1) {
+        const field = directPasswordField(written[fieldIndex]!.value)!;
+        const speakerTemporary = this.#prepareInteractionSpeaker(
+          field.speaker?.name ?? null,
+          field.asSpan ?? field.commandSpan,
+        );
+        const { hint } = yield* compileChild(this.#lowerAskQuestionTask(field, speakerTemporary));
+        temporaryIds.push(speakerTemporary, ...(hint === null ? [] : [hint.temporaryId]));
+        passwordField = {
+          hint:
+            hint === null
+              ? null
+              : {
+                  kind: "temporary",
+                  temporaryId: hint.temporaryId,
+                  span: copySpan(field.hint!.span),
+                },
+        };
+      }
+      const lowered = yield* compileChild(
+        this.#lowerOrderedExpressionsTask(part.map((argument) => argument.value)),
+      );
+      part.forEach((argument, index) => {
+        const operand = lowered[index]!;
+        temporaryIds.push(...operand.temporaryIds);
+        let plan = operand.plan;
+        if (plan.kind !== "temporary" && plan.kind !== "literal") {
+          const temporaryId = this.#allocateTemporary();
+          this.instructions.push({
+            kind: "storeTemporary",
+            temporaryId,
+            value: plan,
+            expectBoolean: false,
+            span: copySpan(argument.value.span),
+          });
+          temporaryIds.push(temporaryId);
+          plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
+        }
+        const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
+        if (
+          name !== "value" &&
+          name !== "password" &&
+          name !== "publicKey" &&
+          name !== "key" &&
+          name !== "timeLock"
+        )
+          throw new TypeError(`${call}(...) reached lowering with '${name}:'.`);
+        operands[name] = plan;
+      });
+    }
+    const value = operands.value;
+    if (value === null) throw new TypeError(`${call}(...) reached lowering without its value.`);
+    const lock = (destinationTemporary: number, defaultTemporary: number | null): void => {
+      this.instructions.push({
+        kind: "lock",
+        call,
+        value,
+        password: operands.password,
+        passwordField,
+        publicKey: operands.publicKey,
+        key: operands.key,
+        timeLock: operands.timeLock,
+        defaultTemporary,
+        destinationTemporary,
+        span: copySpan(expression.span),
+      });
+      this.#emitTemporaryCleanup(temporaryIds, expression.span);
+    };
+    if (lazy !== null)
+      return yield* compileChild(
+        this.#lowerLazyDefaultTask(
+          lock,
+          lazy.argument.value,
+          { defaultOf: lazy.operation },
+          expression,
+        ),
+      );
+    if (call === "decryptText" || call === "decryptFile")
+      throw new TypeError(`${call}(...) reached lowering without its default:.`);
+    const destinationTemporary = this.#allocateTemporary();
+    lock(destinationTemporary, null);
+    return {
+      plan: {
+        kind: "temporary",
+        temporaryId: destinationTemporary,
+        span: copySpan(expression.span),
+      },
+      temporaryIds: [destinationTemporary],
+    };
+  }
+
   #consumeInteractionResult(transientTemporary: number, span: SourceSpan): LoweredExpression {
     const ordinaryTemporary = this.#allocateTemporary();
     this.instructions.push({
@@ -2766,7 +2943,7 @@ export class InstructionCompiler {
     expressions: readonly Expression[],
     materializeInstructionEmitting = false,
   ): CompileTask<LoweredExpression[]> {
-    const emitsInstructions = expressions.map((expression) => this.#containsUserCall(expression));
+    const emitsInstructions = expressions.map((expression) => this.#emitsInstructions(expression));
     const laterEmitsInstructions = new Array<boolean>(expressions.length);
     let suffixEmitsInstructions = false;
     for (let index = expressions.length - 1; index >= 0; index -= 1) {
@@ -2901,7 +3078,7 @@ export class InstructionCompiler {
     const method = unwrapParentheses(expression.callee);
     if (method.kind === "propertyAccessExpression") {
       let receiver = yield* compileChild(this.#lowerExpressionTask(method.object));
-      if (written.some((argument) => this.#containsUserCall(argument.value))) {
+      if (written.some((argument) => this.#emitsInstructions(argument.value))) {
         receiver = this.#prepareReferenceExpression(receiver, method.object.span);
         this.instructions.push({
           kind: "validateCallReceiver",
@@ -3008,7 +3185,7 @@ export class InstructionCompiler {
     const key = yield* compileChild(this.#lowerExpressionTask(expression.key));
     const defaultValue = expression.defaultValue;
     const type = this.typeChecks.get(expression)?.type ?? null;
-    if (defaultValue === null || !this.#containsUserCall(defaultValue)) {
+    if (defaultValue === null || !this.#emitsInstructions(defaultValue)) {
       const lowered =
         defaultValue === null ? null : yield* compileChild(this.#lowerExpressionTask(defaultValue));
       return {
@@ -3190,7 +3367,12 @@ export class InstructionCompiler {
     };
   }
 
-  #containsUserCall(expression: Expression): boolean {
+  /**
+   * Whether `expression` runs instructions, so it cannot be one expression plan: it holds an interaction, a `say`, a
+   * button, popup, timer, media, or camera command, a photo or image ask, a file store or lock call, or a call of a user
+   * function. Its lowering keeps the operands before it in temporaries and evaluates them in order.
+   */
+  #emitsInstructions(expression: Expression): boolean {
     const cached = this.#instructionEmissionByExpression.get(expression);
     if (cached !== undefined) return cached;
 
@@ -3229,6 +3411,7 @@ export class InstructionCompiler {
         isTakePhotoCall(current.expression) ||
         isAskImageCall(current.expression) ||
         isFileStoreCall(current.expression) ||
+        isLockCall(current.expression) ||
         (current.expression.kind === "callExpression" &&
           current.expression.callee.kind === "identifier" &&
           this.#functionByName.has(current.expression.callee.name))
@@ -3437,6 +3620,12 @@ function staticInteractionUi(expression: InteractionExpression): InteractionUiPa
     const hint = expression.hint === null ? null : staticVisibleText(expression.hint);
     const prefill = expression.prefill === null ? null : staticInteractionPrefill(expression);
     if (hint === undefined || prefill === undefined) return undefined;
+    if (expression.interactionKind === "password")
+      return {
+        kind: "password",
+        hint,
+        accessibleName: { kind: "localizedDefault", key: "password" },
+      };
     return expression.interactionKind === "text"
       ? {
           kind: "text",
@@ -3603,6 +3792,8 @@ function assembleExpression(
         throw new TypeError("askImage() reached pure expression assembly.");
       if (isFileStoreCall(expression))
         throw new TypeError("A file store call reached pure expression assembly.");
+      if (isLockCall(expression))
+        throw new TypeError("A lock call reached pure expression assembly.");
       return {
         kind: "call",
         callee: child(expression.callee),

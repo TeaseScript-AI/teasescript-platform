@@ -432,7 +432,7 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'let x = askChoice [{ text: "A", background: ["red"] }]\nexit',
       "TSV029",
-      'A button background must be an opaque CSS colour, such as "#336699".',
+      'A button background must be an opaque CSS colour, such as "#336699", but this is a list (string[]).',
     ],
     [
       "let x = askChoice [1..2]\nexit",
@@ -472,12 +472,12 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'let x = askChoice { text: "A", background: 1 second }',
       "TSV029",
-      'A button background must be an opaque CSS colour, such as "#336699".',
+      'A button background must be an opaque CSS colour, such as "#336699", but this is a duration.',
     ],
     [
       'let shade: duration? = 1 s\nshowButton "Go", background: shade\nexit',
       "TSV029",
-      'A button background must be an opaque CSS colour, such as "#336699".',
+      'A button background must be an opaque CSS colour, such as "#336699", but this is a duration.',
     ],
     [
       'speaker vera {}\nlet x = askChoice as vera speaker, "B"\nexit',
@@ -513,9 +513,10 @@ test("a choice of durations is a duration where the compiler checks numbers and 
   ]) {
     const result = compileSource(source);
     assert.equal(result.plan, null, source);
+    // A duration is no range bound.
     assert.deepEqual(
       result.diagnostics.map((diagnostic) => diagnostic.code),
-      ["TSV043"],
+      ["TSV010"],
       source,
     );
   }

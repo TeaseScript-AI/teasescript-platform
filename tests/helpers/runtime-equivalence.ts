@@ -9,11 +9,11 @@ import {
   deserializeCheckpoint,
   deserializeRuntimeSession,
   executeInstruction,
-  interactionDeadlineMs,
   observeTime,
   pressPermanentButton,
   reportMediaLoad,
   run,
+  runtimeTimedWork,
   serializeCheckpoint,
   validateRuntimeSnapshot,
   validateInstructionPlan,
@@ -39,6 +39,8 @@ const DEFAULT_INSTRUCTION_GUARD = 2_000;
 
 export interface RuntimeResumeEquivalenceOptions {
   readonly scenarioName?: string;
+  /** The codes of the warnings that the source gives, in compiler order; it gives no other diagnostic. */
+  readonly warnings?: readonly string[];
   readonly seed?: number;
   readonly instructionGuard?: number;
   /**
@@ -114,9 +116,9 @@ export function assertRuntimeResumeEquivalent(
       ? compileSource(source, compileOptions)
       : compileProject(source, compileOptions);
   assert.deepEqual(
-    compiled.diagnostics,
-    [],
-    `${scenario}: source must compile without diagnostics`,
+    compiled.diagnostics.map((diagnostic) => `${diagnostic.severity} ${diagnostic.code}`),
+    (options.warnings ?? []).map((code) => `warning ${code}`),
+    `${scenario}: source must compile without diagnostics but its warnings`,
   );
   assert.notEqual(compiled.plan, null, `${scenario}: compilation must produce a plan`);
   const plan = options.transformPlan?.(compiled.plan!) ?? compiled.plan!;
@@ -507,17 +509,10 @@ function dueDelayStep(
   if (playing.length > 0) {
     deadlines.push(view.observedSessionTimeMs + MEDIA_OBSERVATION_STEP_MS);
   }
-  for (const action of [view.foregroundAction, ...view.backgroundActions]) {
-    if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
-      deadlines.push(action.deadlineMs);
-    }
-    if (action?.kind === "timer" && action.timer.deadlineMs !== null) {
-      deadlines.push(action.timer.deadlineMs);
-    }
+  // Media events come due through the progress reported at those samples.
+  for (const work of runtimeTimedWork(view)) {
+    if (work.kind !== "media") deadlines.push(work.deadlineMs);
   }
-  const button = view.foregroundAction;
-  const buttonDeadlineMs = button?.kind === "interaction" ? interactionDeadlineMs(button) : null;
-  if (buttonDeadlineMs !== null) deadlines.push(buttonDeadlineMs);
   assert.ok(
     deadlines.length > 0,
     `${context}: only delays, pacing, timers, media, and button timeouts can be serviced`,

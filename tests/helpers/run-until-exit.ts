@@ -31,8 +31,11 @@ export function runUntilExit(
 }
 
 /** Like `runValidSource`, but stops before the script's exit, which it must reach without waiting or failing. */
-export function runValidSourceUntilExit(source: string): RuntimeOperationResult {
-  const plan = compileValidPlan(source);
+export function runValidSourceUntilExit(
+  source: string,
+  warnings: readonly string[] = [],
+): RuntimeOperationResult {
+  const plan = compileValidPlan(source, {}, warnings);
   const result = runUntilExit(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.equal(result.snapshot.status, "running", source);
   assert.equal(plan.instructions[result.snapshot.nextInstruction]?.kind, "exit", source);

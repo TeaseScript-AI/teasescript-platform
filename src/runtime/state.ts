@@ -24,6 +24,7 @@ import type {
   RuntimeMediaPlaybackActionSnapshot,
   RuntimeForegroundActionSnapshot,
   RuntimeInteractionActionSnapshot,
+  RuntimeLockActionSnapshot,
   RuntimePendingActionSnapshot,
   InteractionResultValue,
 } from "./actions/model.js";
@@ -118,7 +119,10 @@ import { validatePermanentButtonState } from "./permanent-button-validation.js";
 import {
   instructionKilledTemporaries,
   requiredInstructionTemporaries,
+  temporariesLiveBefore,
 } from "../plan/temporary-uses.js";
+import type { FlowEdge } from "../plan/control-flow.js";
+import { sameSet, setUnion, solveBackward } from "../plan/dataflow.js";
 import {
   snapshotValidationAnalysis,
   type PreparedSayTemporaryOwnership,
@@ -132,7 +136,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 84;
+export const RUNTIME_SNAPSHOT_VERSION = 87;
 export const DEFAULT_MAX_CALL_DEPTH = 1024;
 export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -339,12 +343,13 @@ export type RuntimeTimerInterruptionSnapshot =
       readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
     };
 
-/** Foreground actions that an interrupt block can suspend. */
+/** Foreground actions that an interrupt block can suspend; of a lock, only a step whose dialog asks the player. */
 export type RuntimeInterruptibleActionSnapshot =
   | RuntimeDelayActionSnapshot
   | RuntimeInteractionActionSnapshot
   | RuntimeChatPacingGateActionSnapshot
-  | RuntimeMediaPlaybackActionSnapshot;
+  | RuntimeMediaPlaybackActionSnapshot
+  | RuntimeLockActionSnapshot;
 
 export interface RuntimeCallFrameSnapshot {
   readonly kind: "function";
@@ -388,7 +393,7 @@ export type RuntimeFrameSnapshot = RuntimeCallFrameSnapshot | RuntimeFileCallFra
 
 export interface RuntimeInteractionResultHandoffSnapshot {
   /** Which foreground action produced the result: an interaction, a capture, or a file store. */
-  readonly actionKind: "interaction" | "capture" | "fileStore";
+  readonly actionKind: "interaction" | "capture" | "fileStore" | "lock";
   readonly actionId: number;
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
@@ -934,6 +939,12 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
       files: action.files.map((file) => ({ ...file })),
       references: [...action.references],
     };
+  if (action.kind === "lock")
+    return {
+      ...action,
+      passwordField: action.passwordField === null ? null : { ...action.passwordField },
+      publicKeys: [...action.publicKeys],
+    };
   if (action.kind === "delay")
     return {
       kind: "delay",
@@ -980,6 +991,7 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
     ui: cloneInteractionUi(action.ui),
     createdAtMs: action.createdAtMs,
     ...(action.pausedMs === undefined ? {} : { pausedMs: action.pausedMs }),
+    ...(action.resumes === undefined ? {} : { resumes: action.resumes }),
     timeoutMs: action.timeoutMs,
     requestEventSequence: action.requestEventSequence,
     ...(action.form === undefined ? {} : { form: cloneFormState(action.form) }),
@@ -1037,6 +1049,7 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
     };
   if (ui.kind === "image") return cloneImageUi(ui, accessibleName);
   if (ui.kind === "form") return cloneFormUi(ui, accessibleName);
+  if (ui.kind === "password") return { kind: "password", hint: ui.hint, accessibleName };
   return {
     kind: ui.kind,
     hint: ui.hint,
@@ -1070,6 +1083,7 @@ function cloneSettlement(
     return { ...settlement };
   if (settlement.actionKind === "fileStore")
     return { ...settlement, references: [...settlement.references] };
+  if (settlement.actionKind === "lock") return { ...settlement };
   return {
     actionId: settlement.actionId,
     actionKind: "interaction",
@@ -2498,7 +2512,8 @@ function validateTimerHandlerFrame(
     (action.kind !== "delay" &&
       action.kind !== "interaction" &&
       action.kind !== "chatPacingGate" &&
-      action.kind !== "mediaPlayback") ||
+      action.kind !== "mediaPlayback" &&
+      (action.kind !== "lock" || action.phase !== "ask")) ||
     !validForegroundActionState(action, view, plan, true)
   ) {
     errors.push("Runtime suspended foreground action is malformed.");
@@ -2803,28 +2818,18 @@ function validateSuspendedContinuationTemporaries(
  * One snapshot validation's continuation liveness. Its continuations with the same loops share one graph, which each
  * query extends with the nodes it reaches; `required` holds what each continuation it asked about needs.
  */
-interface ContinuationRequests {
+export interface ContinuationRequests {
   readonly graphs: Map<string, ContinuationGraph>;
   readonly required: Map<string, ReadonlySet<number>>;
 }
 
-/** Analysed nodes and what each needs; closed under successors, so every result is final. */
-interface ContinuationGraph {
-  readonly nodes: Map<number, ContinuationNode>;
-  readonly liveIn: Map<number, ReadonlySet<number>>;
-}
-
-/** A node's successors and the temporaries its instruction sets or reads. */
-interface ContinuationNode {
-  readonly successors: readonly number[];
-  readonly killed: ReadonlySet<number>;
-  readonly read: ReadonlySet<number>;
-}
+/** Analysed nodes, each with what it needs; closed under successors, so every result is final. */
+type ContinuationGraph = Map<number, ReadonlySet<number>>;
 
 /** Shared by every node that needs no temporary. */
 const NOTHING_LIVE: ReadonlySet<number> = new Set<number>();
 
-function requiredContinuationTemporaries(
+export function requiredContinuationTemporaries(
   analysis: SnapshotValidationAnalysis,
   startInstruction: number,
   callerPosition: number,
@@ -2844,7 +2849,7 @@ function requiredContinuationTemporaries(
   if (known !== undefined) return known;
   let graph = continuationRequests.graphs.get(loopsKey);
   if (graph === undefined) {
-    graph = { nodes: new Map(), liveIn: new Map() };
+    graph = new Map();
     continuationRequests.graphs.set(loopsKey, graph);
   }
   const required = continuationRequirement(analysis, startInstruction, activeLoops, graph);
@@ -2922,121 +2927,119 @@ function continuationRequirement(
   const { plan } = analysis;
   // A position outside the runnable plan has nothing live.
   if (plan.instructions[startInstruction] === undefined) return NOTHING_LIVE;
-  const { nodes, liveIn } = graph;
   const depths = activeLoops.length + 1;
   const startNode = startInstruction * depths + activeLoops.length;
-  // The nodes that this continuation reaches and earlier ones of the validation did not.
-  const added: number[] = [];
+  // The nodes that this continuation reaches and earlier ones of the validation did not, with their ways on.
+  const ways = new Map<number, readonly (number | null)[]>();
   const pending = [startNode];
   while (pending.length > 0) {
     const node = pending.pop()!;
-    if (nodes.has(node)) continue;
-    const index = Math.floor(node / depths);
-    const active = node % depths;
-    const instruction = plan.instructions[index];
-    const innermost = activeLoops[active - 1] ?? null;
-    const successors: number[] = [];
+    if (graph.has(node) || ways.has(node)) continue;
     // An instruction outside the runnable plan has nothing live.
-    if (instruction === undefined) {
-      nodes.set(node, { successors, killed: NOTHING_LIVE, read: NOTHING_LIVE });
+    if (plan.instructions[Math.floor(node / depths)] === undefined) {
+      graph.set(node, NOTHING_LIVE);
       continue;
     }
-    for (const successor of instructionSuccessors(analysis, index)) {
-      const leaves = innermost !== null && leavesLoop(instruction, innermost, successor);
-      if (leaves) successors.push(successor * depths + active - 1);
-      // An empty loop body would make a loop's exit and its body the same instruction.
-      if (!leaves || (instruction.kind === "loopStart" && successor === index + 1)) {
-        successors.push(successor * depths + active);
-      }
-    }
-    nodes.set(node, {
-      successors,
-      killed: instructionKilledTemporaries(instruction),
-      read: requiredInstructionTemporaries(instruction, innermost),
-    });
-    added.push(node);
-    for (const successor of successors) pending.push(successor);
+    const successors = continuationSuccessors(analysis, node, activeLoops);
+    ways.set(node, successors);
+    for (const successor of successors) if (successor !== null) pending.push(successor);
   }
-  if (added.length === 0) return liveIn.get(startNode) ?? NOTHING_LIVE;
+  if (ways.size === 0) return graph.get(startNode) ?? NOTHING_LIVE;
   recordValidationTestWork("continuationLivenessAnalyses");
-  recordValidationTestWork("continuationLivenessNodes", added.length);
+  recordValidationTestWork("continuationLivenessNodes", ways.size);
 
-  // Earlier nodes are final, so only the added ones take part in the fixed point, latest instructions first.
-  added.sort((left, right) => right - left);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const node of added) {
-      const { successors, killed, read } = nodes.get(node)!;
-      // Most instructions have nothing live, which needs no set of their own.
-      let liveOut: Set<number> | undefined;
-      for (const successor of successors) {
-        for (const temporaryId of liveIn.get(successor) ?? NOTHING_LIVE) {
-          (liveOut ??= new Set()).add(temporaryId);
-        }
+  // The added nodes in plan order, then the earlier ones they lead to, whose needs are final.
+  const added = Array.from(ways.keys()).sort((left, right) => left - right);
+  const local = new Map<number, number>();
+  added.forEach((node, index) => local.set(node, index));
+  const known: [number, ReadonlySet<number>][] = [];
+  const addedWays = added.map((node) =>
+    ways.get(node)!.map((successor) => {
+      if (successor === null) return { node: null, edge: null };
+      let index = local.get(successor);
+      if (index === undefined) {
+        index = local.size;
+        local.set(successor, index);
+        known.push([index, graph.get(successor)!]);
       }
-      for (const temporaryId of killed) liveOut?.delete(temporaryId);
-      for (const temporaryId of read) (liveOut ??= new Set()).add(temporaryId);
-      if (liveOut !== undefined && !sameNumberSet(liveIn.get(node) ?? NOTHING_LIVE, liveOut)) {
-        liveIn.set(node, liveOut);
-        changed = true;
-      }
-    }
-  }
-  return liveIn.get(startNode) ?? NOTHING_LIVE;
-}
-
-/** Whether going from an instruction to this successor leaves the loop: at the loop's exit or by its `break`. */
-function leavesLoop(instruction: Instruction, loopId: number, successor: number): boolean {
-  if (instruction.kind === "loopStart") {
-    return instruction.loopId === loopId && successor === instruction.target;
-  }
-  return (
-    instruction.kind === "loopControl" &&
-    instruction.action === "break" &&
-    instruction.loopId === loopId
+      return { node: index, edge: null };
+    }),
   );
+  const read = added.map((node) => {
+    const instruction = plan.instructions[Math.floor(node / depths)]!;
+    return requiredInstructionTemporaries(instruction, activeLoops[(node % depths) - 1] ?? null);
+  });
+  const killed = added.map((node) =>
+    instructionKilledTemporaries(plan.instructions[Math.floor(node / depths)]!),
+  );
+  const needs = solveBackward<ReadonlySet<number>, null>(
+    {
+      nodeCount: local.size,
+      successors: (index) => addedWays[index]!,
+      join: setUnion,
+      equals: sameSet,
+      transfer: (index, _edge, after) => {
+        const live = temporariesLiveBefore(read[index]!, killed[index]!, after ?? NOTHING_LIVE);
+        return live.size === 0 ? null : live;
+      },
+    },
+    known,
+  );
+  added.forEach((node, index) => graph.set(node, needs[index] ?? NOTHING_LIVE));
+  return graph.get(startNode)!;
 }
 
-function instructionSuccessors(
+/**
+ * The ways on from a node of a continuation's graph: for each way of its instruction that stays in the instruction's
+ * region and on this path, the node with how many of the context's loops are still active after it, and `null` for
+ * each other way, which leaves the graph.
+ */
+function continuationSuccessors(
   analysis: SnapshotValidationAnalysis,
-  index: number,
-): readonly number[] {
+  node: number,
+  activeLoops: readonly number[],
+): (number | null)[] {
   const { plan } = analysis;
-  const instruction = plan.instructions[index];
-  if (instruction === undefined) return [];
+  const depths = activeLoops.length + 1;
+  const index = Math.floor(node / depths);
+  const active = node % depths;
+  const innermost = activeLoops[active - 1] ?? null;
+  const instruction = plan.instructions[index]!;
   const regionEnd = analysis.regionEnds[index] ?? plan.instructions.length;
-  const next = index + 1 < regionEnd ? index + 1 : null;
-  switch (instruction.kind) {
-    case "jump":
-    case "loopControl":
-      return instruction.target < regionEnd ? [instruction.target] : [];
-    case "jumpIfFalse":
-    case "loopStart": {
-      const successors = [instruction.target];
-      if (next !== null) successors.push(next);
-      return successors.filter((candidate) => candidate >= 0 && candidate < regionEnd);
+  const successors: (number | null)[] = [];
+  for (const { edge, target } of analysis.controlFlow.successors(index)) {
+    if (target === null || target >= regionEnd || !CONTINUATION_WAYS.has(edge.kind)) {
+      successors.push(null);
+      continue;
     }
-    case "returnValue":
-    case "returnVoid":
-    case "exit":
-    // A goto or end leaves this path with no temporaries, so nothing it holds stays live.
-    case "goto":
-    case "end":
-      return [];
-    // A file call returns after it with the caller's temporaries; a file goto leaves like a goto.
-    case "transfer":
-      return instruction.mode === "call" && next !== null ? [next] : [];
-    case "callFunction":
-      return instruction.returnInstruction < regionEnd ? [instruction.returnInstruction] : [];
-    default:
-      return next === null ? [] : [next];
+    const leaves =
+      (edge.kind === "exhausted" || edge.kind === "break") &&
+      (instruction.kind === "loopStart" || instruction.kind === "loopControl") &&
+      instruction.loopId === innermost;
+    successors.push(target * depths + (leaves ? active - 1 : active));
   }
+  return successors;
 }
 
-function sameNumberSet(left: ReadonlySet<number>, right: ReadonlySet<number>): boolean {
-  return left.size === right.size && [...left].every((value) => right.has(value));
-}
+/**
+ * The ways that a continuation follows. A goto, a transfer to a file, an end, an exit, or a return leaves this path with
+ * no temporaries, so nothing it holds stays live; a call runs in a frame of its own and comes back at its `resume`. The
+ * way past a parameter default for a supplied argument is not followed: a frame either supplies the argument or runs
+ * the default, and following that way too would ask a frame that runs the default for a temporary that the default
+ * sets itself. In a compiled plan both ways need the same.
+ */
+const CONTINUATION_WAYS: ReadonlySet<FlowEdge["kind"]> = new Set<FlowEdge["kind"]>([
+  "next",
+  "true",
+  "false",
+  "jump",
+  "iterate",
+  "exhausted",
+  "continue",
+  "break",
+  "resume",
+  "omitted",
+]);
 
 function validateStatusConsistency(
   value: Record<string, unknown>,
@@ -3064,6 +3067,7 @@ function validateStatusConsistency(
         "storageWrite",
         "capture",
         "fileStore",
+        "lock",
       ]);
     if (!hasAllowedActionKind) {
       errors.push("Waiting runtime state requires one foreground action.");
@@ -3250,6 +3254,9 @@ function validateCurrentTemporaryRequirements(
   }
   if (instruction.kind === "fileStore" && present.has(instruction.destinationTemporary)) {
     errors.push("Runtime file store result destination is already occupied.");
+  }
+  if (instruction.kind === "lock" && present.has(instruction.destinationTemporary)) {
+    errors.push("Runtime lock result destination is already occupied.");
   }
   if (
     instruction.kind === "say" &&
@@ -4009,7 +4016,8 @@ function collectSpeakerReferenceIds(
   }
 }
 
-function validSpan(value: unknown): value is SourceSpan {
+/** Whether `value` is a source span: a start and an end position, the end not before the start. */
+export function validSpan(value: unknown): value is SourceSpan {
   return (
     isPlainRecord(value) &&
     validPosition(value.start) &&

@@ -27,8 +27,8 @@ function errors(source: string): [string, string][] {
     .map(([, code, , text]) => [code, text]);
 }
 
-function sayTexts(source: string): string[] {
-  const result = runValidSource(source);
+function sayTexts(source: string, warnings: readonly string[] = []): string[] {
+  const result = runValidSource(source, undefined, warnings);
   assert.equal(result.snapshot.failure, null, JSON.stringify(result.snapshot.failure));
   return result.events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
 }
@@ -279,7 +279,7 @@ test("a loop keeps a narrowing that only code a literal rules out would end", ()
       "exit",
     ].join("\n");
   // A literal rules out the call or the assignment in these forms, in a loop body or condition: the script compiles,
-  // and at runtime `reset` never runs.
+  // and at runtime `reset` never runs. A branch or loop body that never runs is reported (TSV065), an operand is not.
   for (const [condition, body, warnings] of [
     ["i < 2", ["let a = false and reset() == 0"], []],
     ["i < 2", ["let a = not true and reset() == 0"], []],
@@ -288,22 +288,22 @@ test("a loop keeps a narrowing that only code a literal rules out would end", ()
     ["i < 2", ["let a = 1 otherwise reset()"], ["TSV062"]],
     ["i < 2", ["let a = m otherwise 0 otherwise reset()"], ["TSV062"]],
     ["i < 2", ["let a = (not true) otherwise reset()"], ["TSV062"]],
-    ["i < 2", ["if false {", "    reset()", "}"], []],
-    ["i < 2", ["if false {", "    x = null", "}"], []],
-    ["i < 2", ["if true {", "    let a = 1", "} else {", "    reset()", "}"], []],
-    ["i < 2", ["if false and reset() == 0 {", '    say "never"', "}"], []],
-    ["i < 2", ["if i > 5 and false {", "    reset()", "}"], []],
-    ["i < 2", ["if (false and i > 5) and i > 0 {", "    reset()", "}"], []],
-    ["i < 2", ["if i > 5 or true {", "    let a = 1", "} else {", "    reset()", "}"], []],
+    ["i < 2", ["if false {", "    reset()", "}"], ["TSV065"]],
+    ["i < 2", ["if false {", "    x = null", "}"], ["TSV065"]],
+    ["i < 2", ["if true {", "    let a = 1", "} else {", "    reset()", "}"], ["TSV065"]],
+    ["i < 2", ["if false and reset() == 0 {", '    say "never"', "}"], ["TSV065"]],
+    ["i < 2", ["if i > 5 and false {", "    reset()", "}"], ["TSV065"]],
+    ["i < 2", ["if (false and i > 5) and i > 0 {", "    reset()", "}"], ["TSV065"]],
+    ["i < 2", ["if i > 5 or true {", "    let a = 1", "} else {", "    reset()", "}"], ["TSV065"]],
     [
       "i < 2",
       ["if i > 5 {", "    let a = 1", "} else if i > 6 and false {", "    reset()", "}"],
-      [],
+      ["TSV065"],
     ],
-    ["i < 2", ["while i > 5 and false {", "    reset()", "}"], []],
-    ["i < 2", ["while false {", "    reset()", "}"], []],
-    ["i < 2", ["repeat 0 {", "    reset()", "}"], []],
-    ["i < 2", ["for e in [] {", "    reset()", "}"], []],
+    ["i < 2", ["while i > 5 and false {", "    reset()", "}"], ["TSV065"]],
+    ["i < 2", ["while false {", "    reset()", "}"], ["TSV065"]],
+    ["i < 2", ["repeat 0 {", "    reset()", "}"], ["TSV065"]],
+    ["i < 2", ["for e in [] {", "    reset()", "}"], ["TSV065"]],
     ["i < 2 and (true or reset() == 0)", [], []],
     ["i < (2 otherwise reset())", [], ["TSV062"]],
   ] as const) {
@@ -337,6 +337,7 @@ test("a loop keeps a narrowing that only code a literal rules out would end", ()
         'say "${i}"',
         "exit",
       ].join("\n"),
+      ["TSV065"],
     ),
     ["3"],
   );

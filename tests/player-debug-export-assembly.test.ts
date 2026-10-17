@@ -14,6 +14,8 @@ import {
 import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/debug-export.js";
 import { DebugRecorder } from "../player/debug-recorder.js";
 import {
+  activePlayerRuntimeLock,
+  answerPlayerRuntimeLock,
   activatePlayerRuntimeButton,
   advancePlayerRuntimeTime,
   answeredByPlayerInput,
@@ -481,6 +483,39 @@ test("session text shows what the player saw; values that were never said need t
   ] as const)
     assert.ok(!(await exported(categories)).events.includes(hidden), categories.join(", "));
   assert.ok((await exported(["sessionText", "savedValues", "answers"])).events.includes(hidden));
+});
+
+test("a lock's text and password never show in readable sections, and its steps replay without the network or a password", async () => {
+  const text = "private-note-only-in-the-lock";
+  const password = "corner-password-only-in-the-script";
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    [
+      `let locked = encryptText("${text}", password: "${password}", publicKey: false, timeLock: false)`,
+      'let opened = decryptText(locked, default: "closed")',
+      'say "Done"',
+      "exit",
+    ].join("\n"),
+    { recorder, wallClockMs: Date.UTC(2026, 9, 14) },
+  );
+  // The lock, the unlock dialog that the player answers, and the opening, as the Player answers them.
+  for (const answer of [
+    { kind: "locked", text: "VFNMSwEBAgAA" },
+    { kind: "ask" },
+    { kind: "submitted" },
+    { kind: "opened", text },
+  ] as const) {
+    const action = activePlayerRuntimeLock(session.state);
+    assert.ok(action, answer.kind);
+    session = answerPlayerRuntimeLock(session, action.actionId, answer).session;
+  }
+  session = advancePlayerRuntimeTime(session, 60_000);
+  assert.equal(session.state.status, "halted");
+  const frozen = candidate(session, recorder);
+  const read = await exportedWith(frozen, []);
+  const readable = JSON.stringify(read.sections);
+  assert.ok(readable.includes("encryptText") && readable.includes("decryptText"));
+  assert.ok(!readable.includes(text) && !readable.includes(password));
 });
 
 test("credentials and rooted paths are removed from every readable section, and replay data with one is left out", async () => {

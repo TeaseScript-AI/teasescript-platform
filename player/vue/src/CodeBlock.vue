@@ -40,13 +40,20 @@ const maxRows = computed(() => Math.max(MIN_ROWS, Math.min(props.lines.length, 4
 const wrap = ref(false);
 const expanded = ref(false);
 
+// The theme's few code colours: a command looks like the keyword `say`, a type like a name, a regex like text, and
+// punctuation like an operator.
 const tokenClasses: Record<CodeTokenClass, string> = {
   keyword: "code-block-keyword",
+  command: "code-block-keyword",
+  type: "code-block-name",
+  name: "code-block-name",
   string: "code-block-string",
+  interpolation: "code-block-operator",
+  regex: "code-block-string",
   number: "code-block-number",
   comment: "code-block-comment",
-  name: "code-block-name",
   operator: "code-block-operator",
+  punctuation: "code-block-operator",
 };
 // The gutter holds the longest number with its padding, so it also covers code scrolled sideways under it.
 const gutter = computed(() => `calc(${String(props.lines.at(-1)?.number ?? 1).length}ch + 20px)`);

@@ -87,7 +87,11 @@ function planObjects(root: unknown): Array<{ path: string; value: Record<string,
 
 test("current-version plans reject an added field on each object shape of a compiled plan", () => {
   const compiled = compileSource(REPRESENTATIVE_SOURCE, { builtins: ["capture"] });
-  assert.deepEqual(compiled.diagnostics, []);
+  // Only the body of `while false` never runs.
+  assert.deepEqual(
+    compiled.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV065"],
+  );
   const external: unknown = JSON.parse(JSON.stringify(compiled.plan));
   assert.deepEqual(validateInstructionPlan(external), { valid: true, errors: [] });
 

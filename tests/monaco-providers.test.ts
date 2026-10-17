@@ -17,9 +17,22 @@ const providers = createTeaseScriptProviders(
     endColumn,
   }),
   { Keyword: 1, Function: 2, Variable: 3, Value: 4 },
+  {
+    keyword: "theme-keyword",
+    type: "theme-type",
+    command: "theme-command",
+    name: "theme-name",
+    number: "theme-number",
+    string: "theme-string",
+    interpolation: "theme-interpolation",
+    regex: "theme-regex",
+    comment: "theme-comment",
+    operator: "theme-operator",
+    punctuation: "theme-punctuation",
+  },
 );
 
-test("Monaco registers usable completion, hover, signature, and formatting providers", () => {
+test("Monaco registers usable completion, hover, signature, formatting, and token providers", () => {
   const registered: Partial<TeaseScriptProviders> = {};
   registerTeaseScriptProviders(
     {
@@ -27,6 +40,7 @@ test("Monaco registers usable completion, hover, signature, and formatting provi
       hover: (provider) => (registered.hover = provider),
       signature: (provider) => (registered.signature = provider),
       formatting: (provider) => (registered.formatting = provider),
+      semanticTokens: (provider) => (registered.semanticTokens = provider),
     },
     providers,
   );
@@ -34,6 +48,7 @@ test("Monaco registers usable completion, hover, signature, and formatting provi
     "completion",
     "formatting",
     "hover",
+    "semanticTokens",
     "signature",
   ]);
   assert.equal(registered.completion, providers.completion);
@@ -67,6 +82,37 @@ test("Monaco registers usable completion, hover, signature, and formatting provi
   assert.notEqual(compiled.plan, null);
   assert.deepEqual(compiled.diagnostics, []);
   assert.deepEqual(formatting.provideDocumentFormattingEdits(model(formatted)), []);
+});
+
+test("Monaco colours each token by the compiler's class, once for each line the token is on", () => {
+  const source = 'let r = /a+/\r\n/* two\r\nlines */ say "${r}"';
+  const lines = source.split("\r\n");
+  const { tokenTypes } = providers.semanticTokens.getLegend();
+  const { data } = providers.semanticTokens.provideDocumentSemanticTokens(model(source));
+  const shown: string[] = [];
+  let [line, column] = [0, 0];
+  for (let index = 0; index < data.length; index += 5) {
+    const [lineDelta, columnDelta, length, kind] = data.slice(index, index + 4);
+    column = lineDelta === 0 ? column + columnDelta! : columnDelta!;
+    line += lineDelta!;
+    const text = lines[line]!.slice(column, column + length!);
+    shown.push(`${line}:${column} ${text} ${tokenTypes[kind!]}`);
+  }
+  assert.deepEqual(shown, [
+    "0:0 let theme-keyword",
+    "0:4 r theme-name",
+    "0:6 = theme-operator",
+    // After `=`, `/a+/` is a regex, not a division.
+    "0:8 /a+/ theme-regex",
+    "1:0 /* two theme-comment",
+    "2:0 lines */ theme-comment",
+    "2:9 say theme-keyword",
+    '2:13 " theme-string',
+    "2:14 ${ theme-interpolation",
+    "2:16 r theme-name",
+    "2:17 } theme-interpolation",
+    '2:18 " theme-string',
+  ]);
 });
 
 /** Applies Monaco edits through the model offset mapping, last edit first. */

@@ -4,7 +4,7 @@ import type { LazyDefaultOperation } from "../lazy-defaults.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 97;
+export const INSTRUCTION_PLAN_VERSION = 100;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -167,6 +167,7 @@ export type Instruction =
   | InteractionInstruction
   | CaptureInstruction
   | FileStoreInstruction
+  | LockInstruction
   | GotoInstruction
   | TransferInstruction
   | SetFallbackInstruction
@@ -587,6 +588,7 @@ export type InteractionKind =
   | "number"
   | "choice"
   | "temporal"
+  | "password"
   | "image"
   | "form"
   | "popup"
@@ -605,7 +607,7 @@ export type InteractionAccessibleName =
   | { readonly kind: "text"; readonly text: string }
   | {
       readonly kind: "localizedDefault";
-      readonly key: "answer" | "number" | "chooseOption" | "continue";
+      readonly key: "answer" | "number" | "chooseOption" | "continue" | "password";
     };
 /** A value a choice option can show and return: a scalar, a duration, an angle, or a date or time value. */
 export type InteractionChoiceValue =
@@ -655,6 +657,15 @@ export type InteractionUiPayload =
       readonly hint: string | null;
       /** The prefill as ISO text; submitting it unchanged answers with the prefill. */
       readonly prefill?: string;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      /**
+       * `askPassword` (V30 §20): a masked field. The Player answers with the SHA-256 of the typed text, as `hashText`
+       * gives it, never the text, and adds nothing to the transcript.
+       */
+      readonly kind: "password";
+      readonly hint: string | null;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
@@ -830,6 +841,11 @@ export type PreparedInteractionUiPayload =
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
+      readonly kind: "password";
+      readonly hintTemporary: number | null;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
       readonly kind: "choice";
       /** A list holding the value of each authored option, in source order. */
       readonly optionsTemporary: number;
@@ -983,6 +999,48 @@ export interface FileStoreInstruction extends InstructionBase {
   readonly defaultTemporary: number | null;
   /** The written `files:` of `toJson` and `fromJson`; `null` without one, which means `true`. */
   readonly files: ExpressionPlan | null;
+  readonly destinationTemporary: number;
+}
+
+/** The calls that lock and open text and stored files, which `lock` instructions run (V30 §13). */
+export type LockCall = "encryptText" | "encryptFile" | "decryptText" | "decryptFile";
+
+/**
+ * `encryptText(text, ...)`, `encryptFile(file, ...)`, `decryptText(text, ..., default:)`, or
+ * `decryptFile(file, ..., default:)` (V30 §13). It asks the Player to lock or open and waits, with the instruction itself
+ * as the continuation; each answer is handed off and the instruction runs again with it, either to give the result or
+ * to wait again, as while the Player's dialog asks the player. Its operands are temporaries or literals, so every run
+ * reads the same values.
+ */
+export interface LockInstruction extends InstructionBase {
+  readonly kind: "lock";
+  readonly call: LockCall;
+  /** The text, Base64 lock, or stored file. */
+  readonly value: ExpressionPlan;
+  /**
+   * The written `password:`: text, or for an encrypt call also `true` or `false`; `null` without one, also when it is a
+   * password field.
+   */
+  readonly password: ExpressionPlan | null;
+  /**
+   * `password: askPassword(...)` written directly: the Player's password field asks for the password, with this `hint:`
+   * or none, after the question was said in the evaluation order of the arguments. `null` otherwise.
+   */
+  readonly passwordField: { readonly hint: ExpressionPlan | null } | null;
+  /** The written `publicKey:` of an encrypt call, a public key, a list of them, `true`, or `false`; `null` without one. */
+  readonly publicKey: ExpressionPlan | null;
+  /** The written `key:` of a decrypt call, the unlock key sent back for a public key opener, or `null`. */
+  readonly key: ExpressionPlan | null;
+  /**
+   * The written `timeLock:` of an encrypt call, a moment, `true`, or `false`; `null` without one. An encrypt call writes
+   * every opener or none, and none means that the player chooses each.
+   */
+  readonly timeLock: ExpressionPlan | null;
+  /**
+   * For a decrypt call, whose `default:` runs as the instructions after this one, as for a `storeTemporary` with
+   * `defaultTemporary`: the temporary that receives whether the call needs it; `null` for an encrypt call.
+   */
+  readonly defaultTemporary: number | null;
   readonly destinationTemporary: number;
 }
 

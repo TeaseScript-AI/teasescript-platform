@@ -5,6 +5,7 @@ import { isInteractionChoiceValue } from "../choice-values.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
 import { validImageRequestFields } from "../image-input.js";
 import { canonicalWebUrl } from "../web-url.js";
+import { LOCK_CALLS } from "../capture-call.js";
 import { compileRegex, isCanonicalRegexFlags } from "../regex.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -27,7 +28,7 @@ import { lazyDefaultArgumentIndex, lazyDefaultCallOperation } from "./expression
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
-  type Instruction,
+  type InstructionPlan,
   type PreparedFormShape,
 } from "./model.js";
 import {
@@ -119,8 +120,9 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
     );
     analyzeInstructionStream(value.instructions, value.functions, files, errors);
     if (errors.length === 0 && files !== null) {
-      // EVIDENCE: validation: every instruction passed its shape check above, with no error.
-      validateLabelPositions(value.instructions as readonly Instruction[], files, errors);
+      const plan: unknown = value;
+      // EVIDENCE: validation: every part of the plan passed its check above, with no error.
+      validateLabelPositions(plan as InstructionPlan, files, errors);
     }
   }
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
@@ -1220,6 +1222,9 @@ function validateInstruction(
     case "fileStore":
       validateFileStoreInstruction(value, path, temporaryCount, errors);
       return;
+    case "lock":
+      validateLockInstruction(value, path, temporaryCount, errors);
+      return;
     default:
       errors.push(planError("TSC002", `Unknown instruction kind '${value.kind}'.`, `${path}.kind`));
   }
@@ -1286,6 +1291,100 @@ function validateFileStoreInstruction(
           "A file store operand must be a temporary or a literal.",
           `${path}.${name}`,
         ),
+      );
+    else validateExpression(operand, `${path}.${name}`, errors, false, temporaryCount);
+  }
+  validateTemporaryId(
+    value.destinationTemporary,
+    `${path}.destinationTemporary`,
+    temporaryCount,
+    errors,
+  );
+}
+
+/**
+ * A `lock` instruction runs again with each answer of the Player, so each operand is a temporary or a literal, which
+ * reads the same every time. An encrypt call writes each of `password:`, also as a password field, `publicKey:`, and
+ * `timeLock:`, or none; a decrypt call has its required `default:`, which follows it, and may have `key:`, which an
+ * encrypt call has not.
+ */
+function validateLockInstruction(
+  value: Record<string, unknown>,
+  path: string,
+  temporaryCount: number,
+  errors: PlanValidationError[],
+): void {
+  if (
+    !hasExactKeys(value, [
+      "kind",
+      "call",
+      "value",
+      "password",
+      "passwordField",
+      "publicKey",
+      "key",
+      "timeLock",
+      "defaultTemporary",
+      "destinationTemporary",
+      "span",
+    ])
+  ) {
+    errors.push(planError("TSC002", "Lock instruction has an invalid shape.", path));
+    return;
+  }
+  const call = value.call;
+  if (
+    call !== "encryptText" &&
+    call !== "encryptFile" &&
+    call !== "decryptText" &&
+    call !== "decryptFile"
+  ) {
+    errors.push(planError("TSC002", "Lock call is invalid.", `${path}.call`));
+    return;
+  }
+  const decrypts = call === "decryptText" || call === "decryptFile";
+  if (decrypts !== (value.defaultTemporary !== null))
+    errors.push(
+      planError("TSC002", `The default of ${call}(...) is invalid.`, `${path}.defaultTemporary`),
+    );
+  else if (decrypts)
+    validateDefaultTemporary(
+      value.defaultTemporary,
+      value.destinationTemporary,
+      path,
+      temporaryCount,
+      errors,
+    );
+  if (!decrypts && value.key !== null)
+    errors.push(planError("TSC002", `${call}(...) takes no key:.`, `${path}.key`));
+  // A password field asks for the password, so the call has no written password besides it.
+  const field = value.passwordField;
+  if (
+    field !== null &&
+    (!isRecord(field) || !hasExactKeys(field, ["hint"]) || value.password !== null)
+  )
+    errors.push(
+      planError("TSC002", "The password field of a lock is invalid.", `${path}.passwordField`),
+    );
+  const passwordWritten = value.password !== null || field !== null;
+  for (const name of ["publicKey", "timeLock"] as const)
+    if (decrypts ? value[name] !== null : passwordWritten !== (value[name] !== null))
+      errors.push(
+        planError("TSC002", `The ${name}: of ${call}(...) is invalid.`, `${path}.${name}`),
+      );
+  const hint = isRecord(field) && field.hint !== null ? field.hint : null;
+  for (const [name, operand] of [
+    ["value", value.value],
+    ["password", value.password],
+    ["passwordField.hint", hint],
+    ["publicKey", value.publicKey],
+    ["key", value.key],
+    ["timeLock", value.timeLock],
+  ] as const) {
+    if (operand === null && name !== "value") continue;
+    if (!isRecord(operand) || (operand.kind !== "temporary" && operand.kind !== "literal"))
+      errors.push(
+        planError("TSC002", "A lock operand must be a temporary or a literal.", `${path}.${name}`),
       );
     else validateExpression(operand, `${path}.${name}`, errors, false, temporaryCount);
   }
@@ -1441,6 +1540,7 @@ function validateInteractionInstruction(
       "number",
       "choice",
       "temporal",
+      "password",
       "image",
       "form",
       "popup",
@@ -1539,12 +1639,13 @@ function validateStaticInteractionUi(
   const uiKeys =
     kind === "button"
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in ui ? ["background"] : [])]
-      : kind === "text" || kind === "number" || kind === "temporal"
+      : kind === "text" || kind === "number" || kind === "temporal" || kind === "password"
         ? [
             "kind",
             "hint",
             "accessibleName",
-            ...("prefill" in ui ? ["prefill"] : []),
+            // A password is never suggested.
+            ...("prefill" in ui && kind !== "password" ? ["prefill"] : []),
             ...(kind === "number" && "integer" in ui ? ["integer"] : []),
             ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
@@ -1643,6 +1744,7 @@ function validateStaticInteractionUi(
     if ("background" in ui && !isNormalizedOpaqueColor(ui.background))
       errors.push(planError("TSC002", "Invalid opaque button background.", `${path}.background`));
   }
+  if (kind === "password" && ui.hint !== null) countString(ui.hint, `${path}.hint`);
   if (kind === "text" || kind === "number" || kind === "temporal") {
     if (ui.hint !== null) countString(ui.hint, `${path}.hint`);
     const temporalKind = ui.temporalKind;
@@ -1754,12 +1856,12 @@ function validatePreparedInteractionUi(
           ...("backgroundTemporary" in ui ? ["backgroundTemporary"] : []),
           ...("timeoutTemporary" in ui ? ["timeoutTemporary"] : []),
         ]
-      : kind === "text" || kind === "number" || kind === "temporal"
+      : kind === "text" || kind === "number" || kind === "temporal" || kind === "password"
         ? [
             "kind",
             "hintTemporary",
             "accessibleName",
-            ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
+            ...("prefillTemporary" in ui && kind !== "password" ? ["prefillTemporary"] : []),
             ...(kind === "number" && "integer" in ui ? ["integer"] : []),
             ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
@@ -1898,7 +2000,7 @@ function validatePreparedInteractionUi(
     if ("fileNameTemporary" in ui) addTemporary(ui.fileNameTemporary, `${path}.fileNameTemporary`);
     return;
   }
-  if (kind === "text" || kind === "number" || kind === "temporal") {
+  if (kind === "text" || kind === "number" || kind === "temporal" || kind === "password") {
     if (ui.hintTemporary !== null) addTemporary(ui.hintTemporary, `${path}.hintTemporary`);
     if ("prefillTemporary" in ui) addTemporary(ui.prefillTemporary, `${path}.prefillTemporary`);
     return;
@@ -2054,7 +2156,9 @@ function validateInteractionAccessibleName(
         ? "number"
         : kind === "choice"
           ? "chooseOption"
-          : "answer";
+          : kind === "password"
+            ? "password"
+            : "answer";
   if (accessible.key !== expectedKey) {
     errors.push(
       planError(
@@ -2496,6 +2600,21 @@ function validateExpressionNode(
           planError(
             "TSC002",
             `${value.callee.name}() must be lowered to a file store instruction.`,
+            path,
+          ),
+        );
+      }
+      // The encrypt and decrypt calls wait for the Player; they lower to a lock instruction.
+      if (
+        isRecord(value.callee) &&
+        value.callee.kind === "identifier" &&
+        typeof value.callee.name === "string" &&
+        LOCK_CALLS.has(value.callee.name)
+      ) {
+        errors.push(
+          planError(
+            "TSC002",
+            `${value.callee.name}() must be lowered to a lock instruction.`,
             path,
           ),
         );

@@ -84,13 +84,14 @@ which appears when the host persists script storage.
   value set, or a message shown, inside an `if`, `switch`, `while`, or similar branch lists the **Branch condition**
   that took that branch after its other causes, with the condition's value and statement; it opens to the condition's
   own causes.
-- **Storage** lists what the script saved in this browser: every key in UTF-16 order, its value's type and a
-  short preview, and, once expanded, a list, set, object, or dict's members, 20 at a time, as one flat outline. Text
-  stays text: when it has the exact shape of a photo reference, a thumbnail beside it shows the photo this browser
-  saved under it, read only once it is in view, or says No saved photo. Each such reference also appears once under
-  Photo references with the keys whose values contain it. The tab reads the saved values freshly when it opens, after
-  this Player saved, cleared, or imported them, after another tab of this browser changed this script's values, and on
-  Refresh. The running session keeps the copy it loaded at Start, apart from its own edits:
+- **Storage** lists what the script saved in this browser: every key in UTF-16 order, its value's type, and the
+  value in the notation Variables shows, which keys and dict keys use too, and, once expanded, a list, set, object, or
+  dict's members, 20 at a time, as one flat outline. Text stays text: when it has the exact shape of a photo
+  reference, a thumbnail beside it shows the photo this browser saved under it, read only once it is in view, or says
+  No saved photo. Each such reference also appears once under Photo references with the keys whose values contain it.
+  The tab reads the saved values freshly when it opens, after this Player saved, cleared, or imported them, after
+  another tab of this browser changed this script's values, and on Refresh. The running session keeps the copy it
+  loaded at Start, apart from its own edits:
   - **Edit**, **Delete**, and **Add a value** open an editor with the value's type (Text, Number, Integer, Yes/no, or
     Advanced: the stored JSON form), checked before it is stored. An Advanced value whose stored form would be longer
     than a text can be opens with an empty field and says so; it can still be replaced or deleted. A draft that long
@@ -153,7 +154,8 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
   - a button for each outcome of a `chance`, of a whole-number range of at most 17 values, of a pick from a list or
     set, and of a weighted pick whose weight is above 0, each with a muted `×N` when the site took it before;
   - an **Outcome** field for any other number, with its range ("From 0 through 1.", "Any finite number. Suggested: 15
-    to 45." for a normal draw's ±3 spreads), and **Use this value**;
+    to 45." for a normal draw's ±3 spreads), and **Use this value**; a value the draw does not take shows the engine's
+    reason instead of the range and cannot be used;
   - for a shuffle, the items in their order before it, to drag or move with **Move up** and **Move down**, and **Use
     this order**;
   - **Least tried**, the outcome Prefer untried would take, and **Random**, the natural outcome, which has the focus.
@@ -166,10 +168,10 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
 - **Earlier outcomes** lists the outcomes the site took while Debug chose them, oldest first and numbered from the
   site's first draw, opening at the newest at the bottom; it keeps the last 1,000 per site, diagnostic tuning rather
   than a script limit, while the `×N` counts count all.
-- **Code** shows the draw's whole file, coloured by the compiler's own lexer with the theme's `syntax-*` roles: 7 lines
-  by default, with the draw's line highlighted in the middle and the draw itself underlined. A file the lexer rejects
-  shows plain. **Show whole function**, **Show whole block** for the smallest statement or block around the draw that
-  those lines do not show whole, or **Show whole file** fits that range together with the lines already shown, and
+- **Code** shows the draw's whole file, coloured by the compiler's token classes with the theme's `syntax-*` roles: 7
+  lines by default, with the draw's line highlighted in the middle and the draw itself underlined. **Show whole
+  function**, **Show whole block** for the smallest statement or block around the draw that those lines do not show
+  whole, or **Show whole file** fits that range together with the lines already shown, and
   **Show less** returns. Both blocks have **Copy visible lines**, **Wrap long lines**, and **Expand** in their top-right
   corner, shown while the pointer is over the block or one of them has keyboard focus, and always where the pointer
   cannot hover. A corner grip, also by arrow keys, resizes a block by whole lines, keeping the draw's line in the
@@ -278,7 +280,8 @@ text adds the last 50 transcript messages the chat shows, so not a removed one, 
 sources, notice messages, and the Debug log while the Debug menu is on, and the events with their content: messages and
 their changes and removals, the player's own
 transcript text, and button labels always, but the details of requests, settlements, warnings, failures, and storage edits, which can hold
-saved values, answers, or storage keys, only when saved values and answers are chosen too; replay data adds the
+saved values, answers, or storage keys, only when saved values and answers are chosen too, and never a lock step's text,
+file, or password ([`ENCRYPTION.md`](ENCRYPTION.md#what-is-stored-and-recorded)); replay data adds the
 checkpoint of the state a complete record reaches (of the actual state when the record is incomplete), or of its anchor
 as the last good state when that state cannot be checkpointed; photos add the chosen originals of the photos the export
 refers to and their uses (a recorded image answer or capture, or a saved value; none for one it holds only otherwise,

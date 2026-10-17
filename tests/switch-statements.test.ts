@@ -16,8 +16,8 @@ import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js"
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 
-function says(source: string): string[] {
-  return sayTexts(runValidSource(source));
+function says(source: string, warnings: readonly string[] = []): string[] {
+  return sayTexts(runValidSource(source, undefined, warnings));
 }
 
 function diagnostics(source: string): string[] {
@@ -407,7 +407,8 @@ test("a speaker case is a speaker even in a function called before the speaker i
     "exit",
   ].join("\n");
 
-  assert.deepEqual(says(source), ["vera"]);
+  // The call in `if false` is checked before the speaker is declared, though it never runs.
+  assert.deepEqual(says(source, ["TSV065"]), ["vera"]);
   assert.deepEqual(diagnostics("speaker vera {}\nswitch 1 { case vera {} }\nexit"), [
     "TSV049 2:17",
   ]);

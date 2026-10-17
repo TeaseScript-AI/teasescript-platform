@@ -11,6 +11,7 @@ import {
   MAIN_FILE_PATH,
   restoreRuntimeSession,
   RuntimeSessionError,
+  runtimeTimedWork,
   serializeCheckpoint,
   type ActionCompletionOutcome,
   type ContinueCaptureOutcome,
@@ -35,6 +36,9 @@ import {
   type CaptureUnavailableReason,
   type RuntimeCaptureActionSnapshot,
   type RuntimeFileStoreActionSnapshot,
+  type RuntimeLockActionSnapshot,
+  type RuntimeLockChoice,
+  type RuntimeLockNotice,
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSession,
   type RuntimeSessionCall,
@@ -43,6 +47,7 @@ import {
   type RuntimeSessionView,
   type RuntimeSnapshot,
   type RuntimeStorageWriteActionSnapshot,
+  type RuntimeTimedWork,
   type SerializableRuntimeValue,
   type TemporalContext,
   type TimeObservationOutcome,
@@ -50,6 +55,7 @@ import {
   type RandomControlOptions,
   type RandomDrawRequest,
   type RandomDrawResolutionOutcome,
+  textSha256,
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import { formValueText } from "../src/interaction-answers.js";
@@ -66,7 +72,6 @@ import {
   repeatsSilently,
   type RuntimeMediaSnapshot,
 } from "../src/runtime/media.js";
-import type { RuntimeTimerSnapshot } from "../src/runtime/timers.js";
 import type { DebugAnswerInput } from "./debug-export.js";
 import type { DebugRecorder } from "./debug-recorder.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
@@ -790,6 +795,12 @@ export function playerRuntimeForeground(
         // A native date control has no year 0000, so such a default is shown and edited as ISO text.
         ...(action.ui.prefill?.startsWith("0000") === true ? { isoText: true as const } : {}),
       });
+    case "password":
+      return Object.freeze({
+        kind: "ask-password",
+        accessibleName,
+        hint: action.ui.hint ?? "Type your response…",
+      });
     case "image":
       return Object.freeze({
         kind: "ask-image",
@@ -871,33 +882,22 @@ export function playerRuntimeTimers(
   );
 }
 
-/** Session-time deadlines at which the Player must observe time again. A failed session settles nothing further. */
+/** Session-time deadlines at which the Player must observe time again: those of the session's timed work. */
 export function playerRuntimeDeadlines(state: PlayerRuntimeState): readonly number[] {
   return timedDeadlines(state, () => true);
 }
 
+/**
+ * The deadlines of the session's timed work that `counts`. Media events are not among them: they come due only through
+ * reported progress, which the Player's media device measures and asks an observation for.
+ */
 function timedDeadlines(
   state: RuntimeSessionView,
-  timerCounts: (timer: RuntimeTimerSnapshot) => boolean,
+  counts: (work: RuntimeTimedWork) => boolean,
 ): number[] {
   const deadlines: number[] = [];
-  if (state.status === "failed") return deadlines;
-  // An action a block suspended stands still, so it needs no observation until the block returns.
-  for (const action of [state.foregroundAction, ...state.backgroundActions]) {
-    if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
-      deadlines.push(action.deadlineMs);
-    } else if (
-      action?.kind === "timer" &&
-      action.timer.deadlineMs !== null &&
-      timerCounts(action.timer)
-    ) {
-      deadlines.push(action.timer.deadlineMs);
-    }
-  }
-  // A button with a timeout times out only while it is presented.
-  const button = activePlayerRuntimeInteraction(state);
-  const buttonDeadlineMs = button === null ? null : interactionDeadlineMs(button);
-  if (buttonDeadlineMs !== null) deadlines.push(buttonDeadlineMs);
+  for (const work of runtimeTimedWork(state))
+    if (work.kind !== "media" && counts(work)) deadlines.push(work.deadlineMs);
   return deadlines;
 }
 
@@ -975,7 +975,9 @@ export type PlayerDebugWaitKind =
   | "media"
   | "save"
   | "photo"
-  | "file";
+  | "file"
+  | "lock"
+  | "unlock";
 
 /** One active call, innermost first: a function, a called file, or a timer, media cue or permanent-button block. */
 export interface PlayerDebugCall {
@@ -1020,6 +1022,20 @@ export interface PlayerRuntimeDebugNow {
   readonly waitingAt: {
     readonly kind: PlayerDebugWaitKind;
     readonly at: PlayerDebugSourceLocation;
+    /**
+     * A lock step's openers, never its text, password, or key: whether its dialog asks the player, whether a password
+     * was written or its password field asks for one, how many public keys an encrypt call has, whether a decrypt call
+     * has a key, its time lock's moment in epoch milliseconds, or `null`, which the lock dialog suggests for a chosen
+     * time lock, and the openers the player chooses in the lock dialog.
+     */
+    readonly lock?: {
+      readonly dialog: boolean;
+      readonly password: boolean;
+      readonly publicKeys: number;
+      readonly key: boolean;
+      readonly timeLockMs: number | null;
+      readonly choices: readonly RuntimeLockChoice[];
+    };
   } | null;
   readonly calls: readonly PlayerDebugCall[];
   readonly timers: readonly PlayerDebugTimer[];
@@ -1062,6 +1078,8 @@ function debugWaitKind(
       return "photo";
     case "fileStore":
       return "file";
+    case "lock":
+      return action.call === "encryptText" || action.call === "encryptFile" ? "lock" : "unlock";
   }
 }
 
@@ -1168,6 +1186,21 @@ export function playerRuntimeDebugNow(
         ? Object.freeze({
             kind: debugWaitKind(plan, foreground),
             at: debugLocation(plan, foreground.owningInstruction),
+            ...(foreground.kind === "lock"
+              ? {
+                  // The password field of `password: askPassword(...)` is a password opener, not the dialog.
+                  lock: Object.freeze({
+                    dialog:
+                      foreground.phase === "ask" &&
+                      (foreground.passwordField === null || foreground.choices.length > 0),
+                    password: foreground.password !== null || foreground.passwordField !== null,
+                    publicKeys: foreground.publicKeys.length,
+                    key: foreground.key !== null,
+                    timeLockMs: foreground.timeLockMs,
+                    choices: foreground.choices,
+                  }),
+                }
+              : {}),
           })
         : null,
     calls: active ? playerRuntimeCalls(session) : Object.freeze([]),
@@ -1273,6 +1306,58 @@ export function answerPlayerRuntimeFileStore(
   });
 }
 
+/** The lock step the session waits for, or `null`; while an expiry block runs, its dialog is not one. */
+export function activePlayerRuntimeLock(
+  state: PlayerRuntimeState,
+): RuntimeLockActionSnapshot | null {
+  const action = state.status === "waiting" ? state.foregroundAction : null;
+  return action?.kind === "lock" ? action : null;
+}
+
+/**
+ * The Player's answer to a lock step (V30 §13): a lock as Base64 or a locked stored file, an opened text or file of its
+ * type, that it did not open, that it failed, or that it must ask the player; or the dialog's submission or cancel.
+ */
+export type PlayerLockAnswer =
+  | { readonly kind: "locked"; readonly text: string }
+  | { readonly kind: "locked"; readonly file: string }
+  | { readonly kind: "opened"; readonly text: string }
+  | { readonly kind: "opened"; readonly file: string; readonly type: string }
+  | { readonly kind: "notOpened" }
+  | { readonly kind: "failed"; readonly reason: "unreadable" | "unavailable" }
+  | { readonly kind: "ask"; readonly notice?: RuntimeLockNotice }
+  | { readonly kind: "submitted" }
+  | { readonly kind: "cancelled" };
+
+/**
+ * Answers a pending lock step and continues on success. A stored file is accepted only when `capturedMedia` vouches for
+ * it. On `executionPending` the host runs the session and offers the same answer again.
+ */
+export function answerPlayerRuntimeLock(
+  session: PlayerRuntimeSession,
+  actionId: number,
+  answer: PlayerLockAnswer,
+  capturedMedia?: CapturedMediaAdmission,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> {
+  const request = { actionId, actionKind: "lock", payload: answer };
+  const operation = session.engine.call(
+    session,
+    "completeAction",
+    [request],
+    (runtime, admission) =>
+      runtime.completeAction(
+        request,
+        capturedMedia === undefined
+          ? traceOptions(session.debugTrace)
+          : { ...traceOptions(session.debugTrace), capturedMedia: admission(capturedMedia) },
+      ),
+  );
+  return Object.freeze({
+    session: applyOperation(session, operation, "completed"),
+    outcome: operation.outcome,
+  });
+}
+
 export function completePlayerRuntimeAction(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
@@ -1318,6 +1403,15 @@ export function submitPlayerRuntimeComposer(
         ? cancelPlayerRuntimeForm(session)
         : stepPlayerRuntimeFormField(session, fields[0]!.id);
   }
+  // A password is answered with the SHA-256 of what was typed, as hashText gives it; the text itself goes nowhere. As
+  // askText needs text, it needs a password: an empty field answers nothing.
+  if (action?.ui.kind === "password")
+    return submittedText === ""
+      ? null
+      : completePlayerAction(session, action, {
+          kind: "submittedPassword",
+          hash: textSha256(submittedText),
+        });
   // The exact text of a skippable image request's skip control skips it; other text never answers an image request.
   if (action?.ui.kind === "image")
     return submittedText === IMAGE_SKIP_TEXT ? skipPlayerRuntimeImage(session) : null;
@@ -1783,7 +1877,7 @@ export function observePlayerRuntimeTime(
  * nothing is scheduled, for example while only player input, loading media, or paused timers remain.
  */
 export function nextPlayerRuntimeEventMs(state: PlayerRuntimeState): number | null {
-  const times = timedDeadlines(state, timerEvent);
+  const times = timedDeadlines(state, (work) => !work.silent);
   if (state.status !== "failed") {
     for (const action of state.backgroundActions) {
       const atMs = action.kind === "media" ? nextMediaEventMs(action.media) : null;
@@ -1794,11 +1888,6 @@ export function nextPlayerRuntimeEventMs(state: PlayerRuntimeState): number | nu
   const nextMs = Math.min(...times);
   const observedMs = state.observedSessionTimeMs;
   return nextMs > observedMs ? nextMs : Math.floor(observedMs) + 1;
-}
-
-/** Whether a timer's deadline is an event: a round of a repeating timer without an expiry block runs nothing. */
-function timerEvent(timer: RuntimeTimerSnapshot): boolean {
-  return !timer.repeat || timer.handlerFunctionId !== null;
 }
 
 /** When the next event of media playing at 1× is due; a departure needs progress after the sample it leaves. */
@@ -1813,16 +1902,18 @@ function nextMediaEventMs(media: RuntimeMediaSnapshot): number | null {
 
 /**
  * Whether time cannot advance before the host answers: catch-up holds for a queued block behind a pending write, a
- * `save`, `delete`, `takePhoto()`, or file store waits for the host, or the session is paused at a random draw.
+ * `save`, `delete`, `takePhoto()`, file store, or lock step waits for the host, or the session is paused at a random
+ * draw. A lock's dialog waits for the player, as an interaction does.
  */
 export function playerRuntimeAwaitsHost(state: RuntimeSessionView): boolean {
-  const pending = state.foregroundAction?.kind;
+  const pending = state.foregroundAction;
   return (
     state.randomDraw !== null ||
     state.currentSessionTimeMs < state.observedSessionTimeMs ||
-    pending === "storageWrite" ||
-    pending === "capture" ||
-    pending === "fileStore"
+    pending?.kind === "storageWrite" ||
+    pending?.kind === "capture" ||
+    pending?.kind === "fileStore" ||
+    (pending?.kind === "lock" && pending.phase === "work")
   );
 }
 
@@ -1882,7 +1973,7 @@ export interface PlayerRuntimeCatchUp {
 export function nextPlayerRuntimeCatchUpStepMs(state: RuntimeSessionView): number | null {
   if (playerRuntimeAwaitsHost(state)) return null;
   let nextMs: number | null = null;
-  for (const atMs of timedDeadlines(state, (timer) => timerEvent(timer) || timer.range !== null)) {
+  for (const atMs of timedDeadlines(state, (work) => !work.silent || work.drawsNextRound)) {
     if (atMs > state.observedSessionTimeMs && (nextMs === null || atMs < nextMs)) nextMs = atMs;
   }
   return nextMs;
@@ -2306,16 +2397,20 @@ export function playerRuntimeTranscriptEventSequence(entryId: string): number | 
 }
 
 /**
- * The transcript that `events` present, from the start of a session: its entries and the speakers they name. Debug's
- * rewind shows with it the messages of a state the shown one has not reached yet.
+ * The transcript that `events` present, from the start of a session: its entries and the speakers they name, with a
+ * form's answers in `presentation`, as a session restored with these events shows them in the presentation of its
+ * state. Debug's rewind shows with it the messages of a state the shown one has not reached yet.
  */
-export function playerRuntimeTranscript(events: readonly InterpreterEvent[]): {
+export function playerRuntimeTranscript(
+  events: readonly InterpreterEvent[],
+  presentation: PresentationSettings,
+): {
   readonly entries: readonly PlayerTranscriptEntryPresentation[];
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
 } {
   const entries: PlayerTranscriptEntryPresentation[] = [];
   const speakers: Record<string, PlayerSpeakerPresentation> = { ...DEFAULT_SPEAKERS };
-  appendTranscript(entries, new Map(), [], speakers, events, DEFAULT_TEMPORAL_CONTEXT.presentation);
+  appendTranscript(entries, new Map(), [], speakers, events, presentation);
   return { entries, speakers };
 }
 
@@ -2509,6 +2604,7 @@ function interactionAccessibleName(value: InteractionAccessibleName): string {
     number: "Number",
     chooseOption: "Choose an option",
     continue: "Continue",
+    password: "Password",
   }[value.key];
 }
 

@@ -1,10 +1,17 @@
 import { parseChild, runParse, type ParseTask } from "./parse-continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
-import { createSourcePosition, createSourceSpan, type SourcePosition } from "./source.js";
+import {
+  createSourcePosition,
+  createSourceSpan,
+  type SourcePosition,
+  type SourceSpan,
+} from "./source.js";
 import { createToken, TokenKind, type Token } from "./token.js";
 
 export interface LexResult {
   readonly tokens: readonly Token[];
+  /** The line and block comments, in source order; inside a block comment only its line breaks are tokens. */
+  readonly comments: readonly SourceSpan[];
   readonly diagnostics: readonly Diagnostic[];
 }
 
@@ -62,6 +69,7 @@ export function lex(source: string, regexStarts: ReadonlySet<number> = new Set()
 
 class Lexer {
   readonly #tokens: Token[] = [];
+  readonly #comments: SourceSpan[] = [];
   readonly #diagnostics: Diagnostic[] = [];
   #offset = 0;
   #line = 0;
@@ -89,6 +97,7 @@ class Lexer {
 
     return Object.freeze({
       tokens: Object.freeze([...this.#tokens]),
+      comments: Object.freeze([...this.#comments]),
       diagnostics: Object.freeze([...this.#diagnostics]),
     });
   }
@@ -230,7 +239,9 @@ class Lexer {
   }
 
   #scanLineComment(): void {
+    const start = this.#position();
     while (!this.#isAtEnd() && !this.#isNewline()) this.#advanceCodeUnit();
+    this.#comments.push(createSourceSpan(start, this.#position()));
   }
 
   #scanBlockComment(): void {
@@ -241,11 +252,13 @@ class Lexer {
       if (this.#peek() === "*" && this.#peek(1) === "/") {
         this.#advanceCodeUnit();
         this.#advanceCodeUnit();
+        this.#comments.push(createSourceSpan(start, this.#position()));
         return;
       }
       if (this.#isNewline()) this.#scanNewline();
       else this.#advanceCodePoint();
     }
+    this.#comments.push(createSourceSpan(start, this.#position()));
     this.#report(
       diagnosticCodes.unterminatedComment,
       "Unterminated block comment.",
@@ -857,6 +870,7 @@ function isInteractionCommand(value: string | undefined): boolean {
     value === "askDate" ||
     value === "askTime" ||
     value === "askDateTime" ||
+    value === "askPassword" ||
     value === "askBoolean" ||
     value === "askForm" ||
     value === "askBooleans" ||

@@ -56,7 +56,8 @@ test("a range that contains no numbers runs its loop no time, with a warning whe
       "after",
     ]);
   }
-  // A computed bound, a variable, or a global stays silent, even where the compiler knows its value.
+  // A computed bound, a variable, or a global gets no range warning, even where the compiler knows its value. A loop
+  // over a constant expression such as `(2 + 2)..=1` still never runs its body, which is reported as code that never runs.
   assert.deepEqual(
     sayTexts(
       runSource(
@@ -73,6 +74,8 @@ test("a range that contains no numbers runs its loop no time, with a warning whe
           "for value in 2..=2 { say value }",
           "exit",
         ].join("\n"),
+        1,
+        ["TSV065"],
       ),
     ),
     ["2"],
@@ -87,6 +90,8 @@ test("iterates lists and sets in order and performs zero iterations", () => {
       'repeat 0 { say "never" }',
       "exit",
     ].join("\n"),
+    1,
+    ["TSV065"],
   );
 
   assert.deepEqual(sayTexts(result), ["a", "b", "b", "a"]);
@@ -222,11 +227,23 @@ test("invalid random built-in arguments fail with source-associated errors", () 
     );
   }
 
-  for (const [staticRange, message] of [
-    ["1.5..=3", "A statically known randomInteger range must have integer bounds."],
-    // As for a wait or timer range, also when the compiler computes a bound.
-    ["3..3", "A randomInteger range must contain at least one whole number."],
-    ["(2 + 1)..=1", "A randomInteger range must contain at least one whole number."],
+  for (const [staticRange, message, subject] of [
+    [
+      "1.5..=3",
+      "randomInteger(range) needs a range of whole numbers, but its start is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
+      "1.5",
+    ],
+    // As for a wait or timer range, also when the compiler computes a bound, with the runtime's message.
+    [
+      "3..3",
+      "randomInteger(range) needs a range that holds at least one whole number, but 3..3 holds none. Check that the range is not empty first.",
+      "3..3",
+    ],
+    [
+      "(2 + 1)..=1",
+      "randomInteger(range) needs a range that holds at least one whole number, but 3..=1 holds none. Check that the range is not empty first.",
+      "(2 + 1)..=1",
+    ],
   ]) {
     const staticSource = `say randomInteger(${staticRange})`;
     const rejected = compileSource(staticSource);
@@ -237,7 +254,7 @@ test("invalid random built-in arguments fail with source-associated errors", () 
         message,
         staticSource.slice(span.start.offset, span.end.offset),
       ]),
-      [["TSV010", message, staticRange]],
+      [["TSV010", message, subject]],
     );
   }
   // A named argument is the error then, not the empty range.
@@ -557,8 +574,8 @@ test("loop variables deep-copy composite list elements", () => {
   assert.deepEqual(sayTexts(result), ["1"]);
 });
 
-function runSource(source: string, seed = 1) {
-  const result = runValidSource(source, seed);
+function runSource(source: string, seed = 1, warnings: readonly string[] = []) {
+  const result = runValidSource(source, seed, warnings);
   // An empty or partial say list is only evidence when the run completed instead of failing early.
   assert.equal(result.snapshot.status, "halted", source);
   return result;

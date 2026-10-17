@@ -1,21 +1,14 @@
-import { formatAngle } from "../src/angle.js";
-import { formatDuration } from "../src/duration.js";
-import type { SerializableRuntimeValue } from "../src/index.js";
-import {
-  formatIsoDate,
-  formatIsoDateTime,
-  formatIsoTime,
-  formatIsoTimestamp,
-} from "../src/temporal.js";
+import { runtimeDebugPreview, type SerializableRuntimeValue } from "../src/index.js";
 import { isWellFormedCapturedMediaReference } from "./captured-media.js";
 
 /**
- * One saved value as Player Debug's Storage tab previews it: its type, a one-line text, and how many members a
- * composite has. Text shaped like a captured-media reference stays text; it is only a candidate for a saved photo, which
- * the Player's media store confirms or not.
+ * One saved value as Player Debug's Storage tab previews it: its type, its notation as Variables shows a value, and how
+ * many members a composite has. Text shaped like a captured-media reference stays text; it is only a candidate for a
+ * saved photo, which the Player's media store confirms or not.
  */
 export interface StoragePreview {
   readonly type: string;
+  /** The engine's notation of the value (`runtimeDebugPreview`), ending in `…` where its preview limit cut it off. */
   readonly text: string;
   /** The captured-media reference this text has the shape of, which may name a saved photo; otherwise `null`. */
   readonly photo: string | null;
@@ -29,76 +22,65 @@ export interface StorageMember {
   readonly value: SerializableRuntimeValue;
 }
 
-const PREVIEW_TEXT_LENGTH = 80;
-
-function shortText(text: string): string {
-  return text.length <= PREVIEW_TEXT_LENGTH ? text : `${text.slice(0, PREVIEW_TEXT_LENGTH - 1)}…`;
+/**
+ * The engine's notation of a saved value or key, as Variables shows a value: written only up to the preview limit, then
+ * `…`.
+ */
+export function storageNotation(value: SerializableRuntimeValue): string {
+  const { text, truncated } = runtimeDebugPreview(value);
+  return truncated ? `${text}…` : text;
 }
 
-const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+const TYPES: Readonly<
+  Partial<Record<Extract<SerializableRuntimeValue, { readonly kind: string }>["kind"], string>>
+> = {
+  list: "List",
+  set: "Set",
+  object: "Object",
+  dict: "Dict",
+  range: "Range",
+  duration: "Duration",
+  calendarDuration: "Calendar duration",
+  angle: "Angle",
+  date: "Date",
+  time: "Time",
+  datetime: "Date and time",
+  absoluteDateTime: "Absolute date and time",
+  script: "Script",
+  regex: "Regex",
+};
 
-export function storagePreview(value: SerializableRuntimeValue): StoragePreview {
-  const preview = (type: string, text: string, size: number | null = null): StoragePreview =>
-    Object.freeze({ type, text, photo: null, size });
-  if (value === null) return preview("Nothing", "null");
-  if (typeof value === "string")
-    return Object.freeze({
-      type: "Text",
-      // Only the head that the preview can show is written as JSON: a saved text may be too long to write whole.
-      text: shortText(JSON.stringify(value.slice(0, PREVIEW_TEXT_LENGTH))),
-      photo: isWellFormedCapturedMediaReference(value) ? value : null,
-      size: null,
-    });
-  if (typeof value === "number")
-    return preview(Number.isInteger(value) ? "Integer" : "Number", String(value));
-  if (typeof value === "boolean") return preview("Yes/no", value ? "true" : "false");
+function typeOf(value: SerializableRuntimeValue): string {
+  if (value === null) return "Nothing";
+  if (typeof value === "string") return "Text";
+  if (typeof value === "number") return Number.isInteger(value) ? "Integer" : "Number";
+  if (typeof value === "boolean") return "Yes/no";
+  // Handles to runtime objects never reach storage; one would show its kind.
+  return TYPES[value.kind] ?? value.kind;
+}
+
+function sizeOf(value: SerializableRuntimeValue): number | null {
+  if (value === null || typeof value !== "object") return null;
   switch (value.kind) {
     case "list":
-      return preview("List", plural(value.items.length, "item", "items"), value.items.length);
     case "set":
-      return preview("Set", plural(value.items.length, "item", "items"), value.items.length);
+      return value.items.length;
     case "object":
-      return preview(
-        "Object",
-        plural(value.properties.length, "property", "properties"),
-        value.properties.length,
-      );
+      return value.properties.length;
     case "dict":
-      return preview(
-        "Dict",
-        plural(value.entries.length, "entry", "entries"),
-        value.entries.length,
-      );
-    case "range":
-      return preview(
-        "Range",
-        `${value.start} to ${value.end}${value.inclusive ? "" : ", end excluded"}`,
-      );
-    case "duration":
-      return preview("Duration", formatDuration(value));
-    case "calendarDuration":
-      return preview("Calendar duration", formatDuration(value));
-    case "angle":
-      return preview("Angle", formatAngle(value));
-    case "date":
-      return preview("Date", formatIsoDate(value));
-    case "time":
-      return preview("Time", formatIsoTime(value));
-    case "datetime":
-      return preview("Date and time", formatIsoDateTime(value));
-    case "absoluteDateTime":
-      return preview("Absolute date and time", formatIsoTimestamp(value.epochMilliseconds));
-    case "script":
-      return preview(
-        "Script",
-        value.label === null ? value.path : `${value.path}, label ${value.label}`,
-      );
-    case "regex":
-      return preview("Regex", shortText(`/${value.source}/${value.flags}`));
+      return value.entries.length;
     default:
-      // Handles to runtime objects never reach storage; a forged one is shown as what it claims to be.
-      return preview(value.kind, "");
+      return null;
   }
+}
+
+export function storagePreview(value: SerializableRuntimeValue): StoragePreview {
+  return Object.freeze({
+    type: typeOf(value),
+    text: storageNotation(value),
+    photo: typeof value === "string" && isWellFormedCapturedMediaReference(value) ? value : null,
+    size: sizeOf(value),
+  });
 }
 
 /**
@@ -123,7 +105,7 @@ export function storageMembers(
     case "dict":
       return value.entries
         .slice(0, limit)
-        .map((entry) => ({ label: JSON.stringify(entry.key), value: entry.value }));
+        .map((entry) => ({ label: storageNotation(entry.key), value: entry.value }));
     default:
       return [];
   }

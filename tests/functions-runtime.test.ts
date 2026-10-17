@@ -174,6 +174,8 @@ test("early return unwinds if and every loop kind", () => {
       "say fromWhile()",
       "exit",
     ].join("\n"),
+    // Each `return 9` never runs.
+    ["TSV065", "TSV065", "TSV065", "TSV065"],
   );
 
   assert.deepEqual(sayTexts(result), ["1", "2", "3", "4"]);

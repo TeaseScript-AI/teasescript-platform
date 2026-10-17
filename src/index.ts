@@ -58,6 +58,7 @@ export {
   type InteractionInstruction,
   type PrepareInteractionSpeakerInstruction,
   type InteractionKind,
+  type LockCall,
   type InteractionResultDomain,
   type InteractionUiPayload,
   type InteractionChoiceOption,
@@ -90,6 +91,7 @@ export type { RuntimeErrorInfo } from "./runtime/errors.js";
 export type { RuntimeWarningInfo } from "./runtime/warnings.js";
 export {
   applyLanguageTextEdits,
+  classifyTokens,
   createLanguageDocument,
   formatLanguageDocument,
   languageCompletions,
@@ -111,6 +113,8 @@ export {
   type LanguageRange,
   type LanguageSignatureHelp,
   type LanguageTextEdit,
+  type LanguageToken,
+  type LanguageTokenClass,
 } from "./language-tooling.js";
 export {
   inspectRuntimeState,
@@ -134,6 +138,7 @@ export type {
   SayEvent,
   ScriptStorageEditedEvent,
 } from "./runtime/events.js";
+export { interpreterEventProblem } from "./runtime/event-validation.js";
 export {
   validateScriptStorageEntries,
   type RuntimeScriptStorageEntrySnapshot,
@@ -159,6 +164,7 @@ export {
   type RandomDrawAlternatives,
 } from "./runtime/random-alternatives.js";
 export {
+  checkedOutcome,
   listRandomSites,
   pendingRandomDraw,
   RANDOM_DRAW_KINDS,
@@ -204,6 +210,7 @@ export {
   type ActionCompletionOptions,
 } from "./runtime/operations/complete-action.js";
 export type { CapturedMediaAdmission } from "./runtime/actions/capture.js";
+export { textSha256 } from "./runtime/sha256.js";
 export {
   fileType,
   OCTET_STREAM,
@@ -214,7 +221,12 @@ export {
   updateInteraction,
   type InteractionUpdateOutcome,
 } from "./runtime/operations/update-interaction.js";
-export { observeTime, type MediaProgressReport } from "./runtime/operations/observe-time.js";
+export {
+  observeTime,
+  runtimeTimedWork,
+  type MediaProgressReport,
+  type RuntimeTimedWork,
+} from "./runtime/operations/observe-time.js";
 export {
   RUNTIME_DEBUG_TRACE_LIMITS,
   RuntimeDebugContext,
@@ -316,6 +328,10 @@ export type {
   RuntimeFileStoreActionSnapshot,
   RuntimeFileToStore,
   RuntimeInteractionActionSnapshot,
+  RuntimeLockActionSettlementSnapshot,
+  RuntimeLockActionSnapshot,
+  RuntimeLockChoice,
+  RuntimeLockNotice,
   RuntimeMediaActionSnapshot,
   RuntimeMediaPlaybackActionSnapshot,
   RuntimeMediaPlaybackSettlementSnapshot,

@@ -60,7 +60,45 @@ const waitLabels: Record<PlayerDebugWaitKind, string> = {
   save: "Save",
   photo: "Photo",
   file: "Stored file",
+  lock: "Lock",
+  unlock: "Unlock",
 };
+/** A lock step's openers as Debug shows them; never its text, password, or key. */
+function lockDetail(
+  kind: PlayerDebugWaitKind,
+  lock: {
+    dialog: boolean;
+    password: boolean;
+    publicKeys: number;
+    key: boolean;
+    timeLockMs: number | null;
+    choices: readonly string[];
+  },
+): string {
+  const moment = lock.timeLockMs === null ? null : new Date(lock.timeLockMs).toISOString();
+  const chosen = lock.choices.map((choice) =>
+    choice === "publicKey"
+      ? "public key"
+      : choice !== "timeLock"
+        ? choice
+        : lock.dialog && moment !== null
+          ? `time lock (suggests ${moment})`
+          : "time lock",
+  );
+  const given = [
+    ...(lock.password ? ["password"] : []),
+    ...(lock.publicKeys === 0
+      ? []
+      : [lock.publicKeys === 1 ? "public key" : `${lock.publicKeys} public keys`]),
+    ...(lock.key ? ["key"] : []),
+    ...(moment === null || lock.choices.includes("timeLock") ? [] : [`time lock ${moment}`]),
+  ];
+  if (kind === "unlock")
+    return lock.dialog ? "dialog" : given.length > 0 ? given.join(", ") : "time lock";
+  if (chosen.length === 0) return given.join(", ");
+  const choosing = `${lock.dialog ? "dialog" : "as the player chose"}: ${chosen.join(", ")}`;
+  return given.length === 0 ? choosing : `${choosing}; given: ${given.join(", ")}`;
+}
 const callLabels = {
   function: (name: string) => `${name}()`,
   file: (name: string) => `call ${name}`,
@@ -129,6 +167,9 @@ const imageOrigin = computed(() => {
             <template v-if="now.waitingAt">
               {{ waitLabels[now.waitingAt.kind] }} ·
               <span class="break-all font-mono">{{ at(now.waitingAt.at) }}</span>
+              <span v-if="now.waitingAt.lock" class="block" data-debug-now-lock>
+                {{ lockDetail(now.waitingAt.kind, now.waitingAt.lock) }}
+              </span>
             </template>
             <template v-else>Nothing</template>
           </dd>

@@ -313,6 +313,33 @@ test("lexing tells a regex from division and comments by whether an operand is e
   assert.equal(literal !== undefined && "value" in literal ? literal.value : null, '${name}\\n"');
 });
 
+test("after a message mode or skip word, a regex may hold what reads as a comment or an operator elsewhere", () => {
+  // The tokens after a `/` do not show a regex's pattern, so a word before it divides only where its value parses
+  // without errors.
+  assert.deepEqual(
+    said(
+      "say prose /[/*]/",
+      "say prose() /[//]/",
+      'say prose(align: "center") /[*/]/',
+      "say skippable /[/]/",
+      "say bubble unskippable /[/*]/, instant",
+      'say "${(say prose /[/*]/).text}"',
+    ),
+    ["/[/*]/", "/[//]/", "/[*/]/", "/[/]/", "/[/*]/", "/[/*]/", "/[/*]/"],
+  );
+  // A word whose value parses divides, also over a comment that a regex there would hold, and a comment stays one
+  // right after an operator and before a division.
+  assert.deepEqual(
+    said(
+      "let prose = 8",
+      "say prose / [4 /* four */][0]",
+      "let x = /* a comment */ 6",
+      "say x /* a comment */ / 2",
+    ),
+    ["2", "3"],
+  );
+});
+
 test("an unterminated regex literal is reported at its opening slash", () => {
   assert.deepEqual(diagnostics("let r = /abc\nexit")[0], [
     "TSL009",

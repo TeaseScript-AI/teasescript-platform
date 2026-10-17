@@ -4,8 +4,8 @@ import { dayWaitWarnings } from "./day-waits.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
   compileStableProject,
-  type ControlOrigin,
   type InstructionPlan,
+  type LoweringTrace,
 } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
 import type { ScriptHeader } from "./script-header.js";
@@ -19,10 +19,18 @@ import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
-import { validateProjectSemantics, type SemanticValidationOptions } from "./semantic.js";
+import { PlanControlFlow } from "./plan/control-flow.js";
+import { Reachability, type ConstantTest, type StatementFlow } from "./reachability.js";
+import {
+  stopsTypeCheck,
+  validateProjectSemantics,
+  type FileSemanticResult,
+  type SemanticValidationOptions,
+} from "./semantic.js";
 import { speakerFlowDiagnostics, type SpeakerFlowInput } from "./speaker-flow.js";
 import { checkTypes, type RuntimeCheckSite } from "./type-checker.js";
 import { createSourcePosition, createSourceSpan } from "./source.js";
+import { DeadWays, type WayFacts } from "./way-facts.js";
 
 export interface CompileOptions extends SemanticValidationOptions {
   /** The package images and their XMP keywords, which tag queries search; none by default. */
@@ -127,32 +135,18 @@ function compileProjectFiles(
     scriptCatalog: files.map((file) => ({ path: file.result.path, tags: scriptTags(file.result) })),
   });
   if (inventory.diagnostics.length === 0 && !hasErrors(catalog.diagnostics) && checked !== null) {
-    if (checked.reachesExit) {
-      const origins = new Map<number, ControlOrigin>();
-      plan = lowerProject(
-        files,
-        checked.typeChecks,
-        catalog.images,
-        checked.formShapes,
-        checked.storageTypes,
-        origins,
-      );
-      // The flow of speaker properties follows the plan, which runs exactly as the session will (V30 §37).
-      if (plan !== null) plan = checkSpeakerFlow(files, plan, origins, checked.speakerFlow);
-    } else {
-      const main = files[0]!.result;
-      const noExit = createDiagnostic(
-        DiagnosticSeverity.Error,
-        "TSV053",
-        "The script never reaches exit, so the session has no end. Add exit where the session should finish.",
-        main.program.statements.at(-1)?.span ?? main.program.span,
-      );
-      files[0]!.result = Object.freeze({
-        ...main,
-        semanticDiagnostics: Object.freeze([...main.semanticDiagnostics, noExit]),
-        diagnostics: Object.freeze([...main.diagnostics, noExit]),
-      });
-    }
+    const trace: LoweringTrace = { origins: new Map(), statements: new Map() };
+    plan = lowerProject(
+      files,
+      checked.typeChecks,
+      catalog.images,
+      checked.formShapes,
+      checked.storageTypes,
+      trace,
+    );
+    // Which code can run, the endings, and the flow of speaker properties follow the plan, which runs exactly as the
+    // session will (V30 §30, §37).
+    if (plan !== null) plan = checkFlow(files, plan, trace, checked);
   }
   const results = files.map((file) => file.result);
   const result = Object.freeze({
@@ -267,21 +261,25 @@ function parseFile(path: string, source: string): CompiledProjectFile {
   };
 }
 
+/** What the checks of a project give the lowering and the checks that follow the plan. */
+interface CheckedProject {
+  readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
+  readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
+  readonly storageTypes: readonly StorageTypePlan[];
+  readonly speakerFlow: SpeakerFlowInput;
+  readonly ways: WayFacts;
+  readonly names: readonly FileSemanticResult[];
+}
+
 /**
- * Validates the names of the files without syntax errors, then, when every file is free of errors, the types of the
- * whole project and, by the flow of that check, the initialization of variables at labels. Returns the runtime checks
- * the type check recorded and whether the project reaches an exit, or `null` when the project has an error.
+ * Validates the names of the files without syntax errors, then, when every file is free of errors that leave the type
+ * check without a basis (see `stopsTypeCheck`), the types of the whole project. Returns what the checks found for the
+ * lowering and the checks that follow the plan, or `null` when the project has an error.
  */
 function checkProject(
   files: CompiledProjectFile[],
   options: ProjectCheckOptions,
-): {
-  readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
-  readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
-  readonly reachesExit: boolean;
-  readonly storageTypes: readonly StorageTypePlan[];
-  readonly speakerFlow: SpeakerFlowInput;
-} | null {
+): CheckedProject | null {
   let current = 0;
   const track = (file: number): void => {
     current = file;
@@ -298,7 +296,7 @@ function checkProject(
       files[index]!.picks = result.picks;
       files[index]!.captures = result.captures;
     });
-    if (files.some((file) => file.parsed === null || hasErrors(file.result.diagnostics)))
+    if (files.some((file) => file.parsed === null || file.result.diagnostics.some(stopsTypeCheck)))
       return null;
     // Types are checked once every name resolves, so a type message never repeats a name or structure error.
     const types = checkTypes(
@@ -310,36 +308,9 @@ function checkProject(
       },
       track,
     );
-    // A transfer or script reference that can run enters its label afresh, which has then run nothing of its file. As
-    // the source shows it, a computed path stands for every file and a computed label for every label.
-    const labels = new Map(
-      files.map((file) => [file.result.path, fileLabels(file.result.program)]),
-    );
-    const freshLabels = new Map<string, Set<string>>();
-    const marked = new Set<string>();
-    for (const result of names) {
-      for (const { path, label } of result.reachableEntries(types.flow)) {
-        // Many references mark the same labels; each mark is followed once.
-        const mark = JSON.stringify([path, label]);
-        if (label === null || marked.has(mark)) continue;
-        marked.add(mark);
-        for (const entered of path === null ? labels.keys() : [path]) {
-          const known = labels.get(entered) ?? new Set<string>();
-          const fresh = freshLabels.get(entered) ?? new Set<string>();
-          if (label === true) for (const name of known) fresh.add(name);
-          else if (known.has(label)) fresh.add(label);
-          freshLabels.set(entered, fresh);
-        }
-      }
-    }
-    // The initialization check at labels follows the flow of the type check.
     types.diagnostics.forEach((diagnostics, index) =>
       addSemanticDiagnostics(files[index]!, [
         ...diagnostics,
-        ...names[index]!.checkInitialization(
-          freshLabels.get(files[index]!.result.path) ?? new Set(),
-          types.flow,
-        ),
         ...dayWaitWarnings(files[index]!.result.program, files[index]!.source),
       ]),
     );
@@ -348,9 +319,10 @@ function checkProject(
       : {
           typeChecks: types.runtimeChecks,
           formShapes: types.formShapes,
-          reachesExit: types.reachesExit,
           storageTypes: types.storageTypes,
           speakerFlow: types.speakerFlow,
+          ways: types.ways,
+          names,
         };
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
@@ -379,16 +351,72 @@ function addSemanticDiagnostics(
   });
 }
 
-/** The plan when the flow check of speaker properties accepts it, else `null` with its diagnostics in the files. */
-function checkSpeakerFlow(
+/**
+ * The checks that follow the plan, with which ways the type check found possible: which code can run, with the
+ * initialization of variables at labels and the endings of files and of the session, then the flow of speaker
+ * properties. Returns the plan when they find no error, else `null` with their diagnostics in the files.
+ */
+function checkFlow(
   files: CompiledProjectFile[],
   plan: InstructionPlan,
-  origins: ReadonlyMap<number, ControlOrigin>,
-  input: SpeakerFlowInput,
+  trace: LoweringTrace,
+  checked: CheckedProject,
 ): InstructionPlan | null {
-  let flow: readonly (readonly Diagnostic[])[];
   try {
-    flow = speakerFlowDiagnostics(plan, origins, input);
+    const ways = new DeadWays(new PlanControlFlow(plan), trace.origins, checked.ways);
+    const reachability = new Reachability(
+      files.map((file) => file.result.program),
+      plan,
+      trace,
+      ways,
+    );
+    const statementFlow = reachability.statementFlow();
+    const freshLabels = enteredLabels(files, checked.names, statementFlow);
+    const endings = reachability.endingDiagnostics();
+    const errors = files.map((file, index) => [
+      // The initialization check at labels decides itself which functions and blocks run, by the calls and creations
+      // in statements that can run (ADR 0022 §3.4).
+      ...checked.names[index]!.checkInitialization(
+        freshLabels.get(file.result.path) ?? new Set(),
+        statementFlow,
+      ),
+      ...endings[index]!,
+    ]);
+    if (!errors.some((diagnostics) => diagnostics.length > 0) && !reachability.reachesExit()) {
+      const main = files[0]!.result.program;
+      errors[0]!.push(
+        createDiagnostic(
+          DiagnosticSeverity.Error,
+          "TSV053",
+          "The script never reaches exit, so the session has no end. Add exit where the session should finish.",
+          main.statements.at(-1)?.span ?? main.span,
+        ),
+      );
+    }
+    const warnings = reachability.warnings(
+      files.map((file) =>
+        file.result.diagnostics.flatMap((diagnostic): ConstantTest[] =>
+          diagnostic.code === "TSV046"
+            ? [{ span: diagnostic.span, value: constantTestValue(diagnostic.message) }]
+            : [],
+        ),
+      ),
+    );
+    // In source order, a warning before an error at the same place, as the loop that never ends comes before the
+    // missing exit that it causes.
+    files.forEach((file, index) =>
+      addSemanticDiagnostics(
+        file,
+        [...warnings[index]!, ...errors[index]!].sort(
+          (left, right) => left.span.start.offset - right.span.start.offset,
+        ),
+      ),
+    );
+    if (errors.some((diagnostics) => diagnostics.length > 0)) return null;
+    const flow = speakerFlowDiagnostics(plan, trace.origins, ways, checked.speakerFlow);
+    if (!flow.some((diagnostics) => diagnostics.length > 0)) return plan;
+    flow.forEach((diagnostics, index) => addSemanticDiagnostics(files[index]!, diagnostics));
+    return null;
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
     const main = files[0]!;
@@ -401,14 +429,46 @@ function checkSpeakerFlow(
     );
     return null;
   }
-  if (!flow.some((diagnostics) => diagnostics.length > 0)) return plan;
-  flow.forEach((diagnostics, index) => addSemanticDiagnostics(files[index]!, diagnostics));
-  return null;
+}
+
+/** What a TSV046 warning says its test always gives, by its words: `null` for a case that never matches or an empty range. */
+function constantTestValue(message: string): boolean | null {
+  return message.endsWith("always true.") ? true : message.endsWith("always false.") ? false : null;
+}
+
+/**
+ * The labels of each file that a transfer or script reference that can run enters afresh, which has then run nothing
+ * of its file. As the source shows it, a computed path stands for every file and a computed label for every label.
+ */
+function enteredLabels(
+  files: readonly CompiledProjectFile[],
+  names: readonly FileSemanticResult[],
+  flow: StatementFlow,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const labels = new Map(files.map((file) => [file.result.path, fileLabels(file.result.program)]));
+  const freshLabels = new Map<string, Set<string>>();
+  const marked = new Set<string>();
+  for (const result of names) {
+    for (const { path, label } of result.reachableEntries(flow)) {
+      // Many references mark the same labels; each mark is followed once.
+      const mark = JSON.stringify([path, label]);
+      if (label === null || marked.has(mark)) continue;
+      marked.add(mark);
+      for (const entered of path === null ? labels.keys() : [path]) {
+        const known = labels.get(entered) ?? new Set<string>();
+        const fresh = freshLabels.get(entered) ?? new Set<string>();
+        if (label === true) for (const name of known) fresh.add(name);
+        else if (known.has(label)) fresh.add(label);
+        freshLabels.set(entered, fresh);
+      }
+    }
+  }
+  return freshLabels;
 }
 
 /**
  * Lowers the error-free files into one plan; a lowering diagnostic belongs to the file it arose in, and a failure of the
- * finished plan to `main.tease`. `origins` receives the source construct of each of the plan's branches.
+ * finished plan to `main.tease`. `trace` receives what the checks that follow the plan read it back as source with.
  */
 function lowerProject(
   files: CompiledProjectFile[],
@@ -416,7 +476,7 @@ function lowerProject(
   images: readonly PlanImage[],
   formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>,
   storageTypes: readonly StorageTypePlan[],
-  origins: Map<number, ControlOrigin>,
+  trace: LoweringTrace,
 ): InstructionPlan | null {
   let current = files[0]!;
   let failure: ReturnType<typeof compiledPlanValidationDiagnostic>;
@@ -436,7 +496,7 @@ function lowerProject(
       images,
       formShapes,
       storageTypes,
-      origins,
+      trace,
     );
     current = files[0]!;
     failure = compiledPlanValidationDiagnostic(compiled);

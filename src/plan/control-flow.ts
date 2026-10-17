@@ -170,6 +170,7 @@ export class PlanControlFlow {
       case "interaction":
       case "capture":
       case "fileStore":
+      case "lock":
       case "setFallback":
         return [{ edge: NEXT, target: index + 1 }];
     }

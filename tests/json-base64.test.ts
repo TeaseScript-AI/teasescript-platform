@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { createSourcePosition, createSourceSpan } from "../src/source.js";
 import { valueFromJson } from "../src/runtime/json-base64.js";
 import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
 import {
@@ -258,7 +259,10 @@ test("fromJson accepts exactly the texts that native JSON accepts, and reads the
     }
     // A number too large to represent is valid JSON that no runtime value holds.
     if (typeof native === "number" && !Number.isFinite(native)) nativeAccepts = false;
-    const read = valueFromJson(text);
+    const read = valueFromJson(
+      text,
+      createSourceSpan(createSourcePosition(0, 0, 0), createSourcePosition(0, 0, 0)),
+    );
     assert.equal(read !== undefined, nativeAccepts, JSON.stringify(text));
     // Native JSON moves keys that look like whole numbers to the front; written alike, the values are the same.
     if (read !== undefined)

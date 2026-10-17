@@ -1,5 +1,5 @@
 /** Names reserved by the accepted V30 TeaseScript specification. */
-const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
+export const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "let",
   "function",
   "return",
@@ -39,7 +39,7 @@ const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "otherwise",
 ] as const);
 
-const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
+export const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "string",
   "boolean",
   "integer",
@@ -63,7 +63,7 @@ const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "regex",
 ] as const);
 
-const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
+export const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "player",
   "random",
   "randomInteger",
@@ -120,6 +120,10 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "fileToBase64",
   "hashText",
   "hashFile",
+  "encryptText",
+  "encryptFile",
+  "decryptText",
+  "decryptFile",
   "toRegex",
   "getDate",
   "getTime",
@@ -148,6 +152,7 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "askDate",
   "askTime",
   "askDateTime",
+  "askPassword",
   "wait",
   "timer",
   "showPermanentButton",
@@ -240,6 +245,10 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "fileToBase64",
   "hashText",
   "hashFile",
+  "encryptText",
+  "encryptFile",
+  "decryptText",
+  "decryptFile",
   "toRegex",
   "getDate",
   "getTime",

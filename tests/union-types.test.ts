@@ -178,7 +178,7 @@ test("a union receiver checks element stores, property writes, compound assignme
     ["TSV043", "h"],
   ]);
   assert.deepEqual(codes("function f(h: timer | media) {\n    h.elapsed = 1 s\n}\nexit"), [
-    ["TSV043", "elapsed"],
+    ["TSV034", "elapsed"],
   ]);
   assert.deepEqual(codes("function f(h: object | timer) {\n    h.display = 1\n}\nexit"), [
     ["TSV041", "1"],
@@ -187,10 +187,10 @@ test("a union receiver checks element stores, property writes, compound assignme
   assert.deepEqual(codes("function f(xs: integer[] | string[]) {\n    xs[0] += 1\n}\nexit"), [
     ["TSV043", "xs[0]"],
   ]);
-  // Results of different types stay known, so their later use is checked.
+  // Results of different types stay known, so their later use is checked; a duration beside a number has its own code.
   assert.deepEqual(
     codes("function f(n: number | duration) {\n    let x = n * 2\n    let y = x + 1\n}\nexit"),
-    [["TSV043", "x"]],
+    [["TSV035", "x"]],
   );
   assert.deepEqual(
     codes("function f(xs: integer[] | string[]) {\n    let n = xs.first + 1\n}\nexit"),

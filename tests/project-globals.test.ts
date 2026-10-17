@@ -21,12 +21,17 @@ import {
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
+/** The plan of a project with no diagnostics but the warnings `warnings` names, by code in compiler order. */
 function compiledPlan(
   files: readonly ProjectSourceFile[],
   options: { readonly globals?: readonly string[] } = {},
+  warnings: readonly string[] = [],
 ): InstructionPlan {
   const result = compileProject(files, options);
-  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => `${diagnostic.severity} ${diagnostic.code}`),
+    warnings.map((code) => `warning ${code}`),
+  );
   return result.plan!;
 }
 
@@ -495,13 +500,17 @@ test("a global that is still null at the top of main.tease may be tested before 
     assert.deepEqual(
       said(
         runToEnd(
-          compiledPlan([
-            {
-              path: "main.tease",
-              source: `${declaration}\nlet p = 0\nif plain != null {\n  p = plain\n}\ncall "set.tease"\nif plain != null {\n  p = plain\n}\nsay "\${p}"\nexit`,
-            },
-            { path: "set.tease", source: "plain = 5\nend" },
-          ]),
+          compiledPlan(
+            [
+              {
+                path: "main.tease",
+                source: `${declaration}\nlet p = 0\nif plain != null {\n  p = plain\n}\ncall "set.tease"\nif plain != null {\n  p = plain\n}\nsay "\${p}"\nexit`,
+              },
+              { path: "set.tease", source: "plain = 5\nend" },
+            ],
+            {},
+            ["TSV065"],
+          ),
         ).events,
       ),
       ["5"],
@@ -639,13 +648,16 @@ test("speakers are global: declared anywhere in any file and known in every file
         source: 'goto later\nlet n = 1\nglobal g = 1\nlabel later\nsay "${g}"\nexit',
       },
     ]),
-    [],
+    [["main.tease", "TSV065", 2]],
   );
   assert.deepEqual(
     diagnostics([
       { path: "main.tease", source: 'goto later\nlet n = 1\nlabel later\nsay "${n}"\nexit' },
     ]),
-    [["main.tease", "TSV054", 4]],
+    [
+      ["main.tease", "TSV065", 2],
+      ["main.tease", "TSV054", 4],
+    ],
   );
 
   // A file of declarations only runs nothing, so it needs no ending; a global with default: assigns where it stands.
@@ -684,25 +696,36 @@ test("speakers are global: declared anywhere in any file and known in every file
 test("the label check follows where a global's assignment runs, and a global function's goto enters afresh", () => {
   // A `global ... default:` assigns only when its declaration runs, so an unreachable one adds no way to a label and
   // reads nothing.
-  const said1 = (source: string) =>
-    said(runToEnd(compiledPlan([{ path: "main.tease", source }])).events);
+  const said1 = (source: string, warnings: readonly string[] = []) =>
+    said(runToEnd(compiledPlan([{ path: "main.tease", source }], {}, warnings)).events);
   assert.deepEqual(
     said1(
       "if false { global ignored = skip(), default: null }\nlet x = 1\nlabel later\nsay x\nexit\nfunction skip { goto later }",
+      ["TSV065"],
     ),
     ["1"],
   );
   assert.deepEqual(
     said1(
       "goto later\nlet x = 1\nlabel later\nif false { global ignored = x, default: 0 }\nsay ignored\nexit",
+      ["TSV065", "TSV065"],
     ),
     ["0"],
   );
-  for (const source of [
-    "if true { global ignored = skip(), default: null }\nlet x = 1\nlabel later\nsay x\nexit\nfunction skip { goto later }",
-    "goto later\nlet x = 1\nlabel later\nif true { global ignored = x, default: 0 }\nsay ignored\nexit",
-  ])
-    assert.deepEqual(diagnostics([{ path: "main.tease", source }]), [["main.tease", "TSV054", 4]]);
+  for (const [source, warnings] of [
+    [
+      "if true { global ignored = skip(), default: null }\nlet x = 1\nlabel later\nsay x\nexit\nfunction skip { goto later }",
+      [],
+    ],
+    [
+      "goto later\nlet x = 1\nlabel later\nif true { global ignored = x, default: 0 }\nsay ignored\nexit",
+      [["main.tease", "TSV065", 2]],
+    ],
+  ] as const)
+    assert.deepEqual(diagnostics([{ path: "main.tease", source }]), [
+      ...warnings,
+      ["main.tease", "TSV054", 4],
+    ]);
 
   // A global function may run from any file, and its bare label means that label of its own file, entered afresh, so
   // nothing of the file has run there: here main.tease calls lib.tease, which calls back into main.tease's goto.
@@ -956,9 +979,11 @@ test("a plan sets up its globals once, with start values of the accepted kinds",
   assert.deepEqual(validateInstructionPlan(self).errors, []);
 
   // A label and a goto of main.tease stand after the startup.
-  const labelled = compiledPlan([
-    { path: "main.tease", source: "global g = 1\nlabel again\nif false { goto again }\nexit" },
-  ]);
+  const labelled = compiledPlan(
+    [{ path: "main.tease", source: "global g = 1\nlabel again\nif false { goto again }\nexit" }],
+    {},
+    ["TSV065"],
+  );
   const goto = labelled.instructions.findIndex((instruction) => instruction.kind === "goto");
   const back = externalPlan(labelled);
   back.instructions[goto] = { ...back.instructions[goto]!, target: 0 };

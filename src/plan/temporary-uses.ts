@@ -109,6 +109,14 @@ export function requiredInstructionTemporaries(
       collect(instruction.value);
       if (instruction.files !== null) collect(instruction.files);
       break;
+    case "lock":
+      collect(instruction.value);
+      if (instruction.password !== null) collect(instruction.password);
+      if (instruction.passwordField?.hint) collect(instruction.passwordField.hint);
+      if (instruction.publicKey !== null) collect(instruction.publicKey);
+      if (instruction.key !== null) collect(instruction.key);
+      if (instruction.timeLock !== null) collect(instruction.timeLock);
+      break;
     case "storageWrite":
       if (instruction.value !== null) collect(instruction.value);
       collect(instruction.key);
@@ -152,6 +160,9 @@ export function requiredInstructionTemporaries(
           instruction.preparedUi.kind === "form"
         ) {
           output.add(instruction.preparedUi.requestTemporary);
+        } else if (instruction.preparedUi.kind === "password") {
+          if (instruction.preparedUi.hintTemporary !== null)
+            output.add(instruction.preparedUi.hintTemporary);
         } else if (instruction.preparedUi.kind !== "choice") {
           if (instruction.preparedUi.hintTemporary !== null)
             output.add(instruction.preparedUi.hintTemporary);
@@ -192,6 +203,7 @@ export function instructionKilledTemporaries(instruction: Instruction): Readonly
     case "capture":
       return new Set([instruction.destinationTemporary]);
     case "fileStore":
+    case "lock":
       return instruction.defaultTemporary === null
         ? new Set([instruction.destinationTemporary])
         : new Set([instruction.destinationTemporary, instruction.defaultTemporary]);
@@ -210,6 +222,31 @@ export function instructionKilledTemporaries(instruction: Instruction): Readonly
     default:
       return new Set<number>();
   }
+}
+
+/**
+ * The temporaries live before an instruction that reads `read` and sets or clears `killed`, given those live after it.
+ * Where one of the sets it is given is the answer it returns that set, so the many instructions that touch no live
+ * temporary copy nothing.
+ */
+export function temporariesLiveBefore(
+  read: ReadonlySet<number>,
+  killed: ReadonlySet<number>,
+  after: ReadonlySet<number>,
+): ReadonlySet<number> {
+  if (after.size === 0) return read;
+  let live: Set<number> | null = null;
+  for (const temporaryId of killed) {
+    if (!after.has(temporaryId)) continue;
+    live ??= new Set(after);
+    live.delete(temporaryId);
+  }
+  for (const temporaryId of read) {
+    if ((live ?? after).has(temporaryId)) continue;
+    live ??= new Set(after);
+    live.add(temporaryId);
+  }
+  return live ?? after;
 }
 
 function collectExpressionTemporaries(expression: ExpressionPlan, output: Set<number>): void {

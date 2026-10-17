@@ -93,6 +93,7 @@ export function cloneSettlement(
     return { ...settlement };
   if (settlement.actionKind === "fileStore")
     return { ...settlement, references: [...settlement.references] };
+  if (settlement.actionKind === "lock") return { ...settlement };
   return {
     actionId: settlement.actionId,
     actionKind: "interaction",

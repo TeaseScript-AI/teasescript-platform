@@ -747,22 +747,40 @@ test("dynamic media options are validated when supplied, including null and inde
 });
 
 test("a media position or repeat duration the compiler can compute is checked like the literal it equals", () => {
-  const negative = (name: string) => `${name} must not be negative.`;
-  const later = "endAt must be later than startAt.";
-  const zero = "A repeat duration must be greater than zero.";
+  const negative = (name: string, shown: string) =>
+    `Media ${name} must be a duration of at least 0 seconds, but this is ${shown}.`;
+  const later = (end: string, start: string) =>
+    `Media endAt must be later than startAt, but endAt is ${end} and startAt is ${start}.`;
+  const zero = (shown: string) =>
+    `Media repeat must be true, false, a count such as '3 times', or a positive duration, but this is ${shown}.`;
   const hidden = "function dynamic(value) {\n    return value\n}\n";
-  // [the source with $ for the value, the value, the compile error]
-  for (const [template, value, expected] of [
-    ['playAudio(file: "a", startAt: $)', "-1 s", negative("startAt")],
-    ['playAudio(file: "a", startAt: $)', "(1 - 2) s", negative("startAt")],
-    ['playVideo(file: "a", startAt: $)', "500 ms - 1 s", negative("startAt")],
-    ['playAudio(file: "a", startAt: 2 s, endAt: $)', "1 s", later],
-    ['playAudio(file: "a", startAt: (1 + 1) s, endAt: $)', "1 s", later],
-    ['playAudio(file: "a", endAt: $)', "1 s - 1 s", later],
-    ['playAudio(file: "a", repeat: $)', "0 s", zero],
-    ['playAudio(file: "a", repeat: $)', "(1 - 1) s", zero],
-    ['playAudio "a" {\n  at $ {\n  }\n}', "1 s - 2 s", negative("at")],
-    ['playAudio "a" {\n  beforeEnd $ {\n  }\n}', "(1 - 2) s", negative("beforeEnd")],
+  // [the source with $ for the value, the value, the compile error, which the runtime gives too]
+  for (const [template, value, expected, runtime] of [
+    ['playAudio(file: "a", startAt: $)', "-1 s", negative("startAt", "-1 second"), true],
+    ['playAudio(file: "a", startAt: $)', "(1 - 2) s", negative("startAt", "-1 second"), true],
+    [
+      'playVideo(file: "a", startAt: $)',
+      "500 ms - 1 s",
+      negative("startAt", "-500 milliseconds"),
+      true,
+    ],
+    ['playAudio(file: "a", startAt: 2 s, endAt: $)', "1 s", later("1 second", "2 seconds"), true],
+    [
+      'playAudio(file: "a", startAt: (1 + 1) s, endAt: $)',
+      "1 s",
+      later("1 second", "2 seconds"),
+      true,
+    ],
+    ['playAudio(file: "a", endAt: $)', "1 s - 1 s", later("0 seconds", "0 seconds"), true],
+    ['playAudio(file: "a", repeat: $)', "0 s", zero("0 seconds"), true],
+    ['playAudio(file: "a", repeat: $)', "(1 - 1) s", zero("0 seconds"), true],
+    ['playAudio "a" {\n  at $ {\n  }\n}', "1 s - 2 s", negative("at position", "-1 second"), true],
+    [
+      'playAudio "a" {\n  beforeEnd $ {\n  }\n}',
+      "(1 - 2) s",
+      negative("beforeEnd position", "-1 second"),
+      true,
+    ],
   ] as const) {
     const at = template.indexOf("$");
     const source = `${template.replace("$", value)}\nexit`;
@@ -791,6 +809,7 @@ test("a media position or repeat duration the compiler can compute is checked li
       ["TSR050", start, start + operand.length],
       unknown,
     );
+    if (runtime) assert.equal(snapshot.failure?.message, expected, unknown);
   }
 
   // Valid values from constant arithmetic play as the literals they equal.

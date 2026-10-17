@@ -14,6 +14,7 @@ import type {
   RuntimeChatPacingGateActionSnapshot,
   RuntimeFileStoreActionSnapshot,
   RuntimeInteractionActionSettlementSnapshot,
+  RuntimeLockActionSnapshot,
   RuntimeInteractionActionSnapshot,
   RuntimeStorageWriteActionSnapshot,
 } from "../actions/model.js";
@@ -31,6 +32,7 @@ import {
   type CapturedMediaAdmission,
 } from "../actions/capture.js";
 import { resolveFileStoreCompletion } from "../actions/file-store.js";
+import { resolveLockCompletion } from "../actions/lock.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
 import { addStoredFile, addStoredFiles } from "../stored-files.js";
 import { createCapturedSerializableList } from "../serializable-values.js";
@@ -193,6 +195,9 @@ function completeCapturedAction(
   if (active.kind === "fileStore") {
     return completeFileStore(captured.plan, current, active, value, options.capturedMedia);
   }
+  if (active.kind === "lock") {
+    return completeLock(captured.plan, current, active, value, options.capturedMedia);
+  }
   return completePacingGate(captured.plan, current, active, value);
 }
 
@@ -244,13 +249,14 @@ function completePacingGate(
 
 function validRequestedActionKind(
   value: unknown,
-): value is "interaction" | "chatPacingGate" | "storageWrite" | "capture" | "fileStore" {
+): value is "interaction" | "chatPacingGate" | "storageWrite" | "capture" | "fileStore" | "lock" {
   return (
     value === "interaction" ||
     value === "chatPacingGate" ||
     value === "storageWrite" ||
     value === "capture" ||
-    value === "fileStore"
+    value === "fileStore" ||
+    value === "lock"
   );
 }
 
@@ -483,6 +489,66 @@ function completeFileStore(
     ownerCallFrameId: action.ownerCallFrameId,
     destinationTemporary: action.destinationTemporary,
     result: resolved.answer === null ? null : createCapturedSerializableList([...resolved.answer]),
+  });
+  current.status = "running";
+  current.nextInstruction = action.continuationInstruction;
+  const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
+  const events: InterpreterEvent[] = [
+    Object.freeze({
+      kind: "actionCompleted",
+      sequence: completionSequence,
+      settlement,
+      span: copySpan(span),
+    } satisfies ActionCompletedEvent),
+  ];
+  return pendingResult(current, events, { kind: "completed", settlement });
+}
+
+/**
+ * Settles a step of a lock with the Player's answer, which is handed off to its instruction; that runs again and gives
+ * the result or waits in the next step. A stored file the Player kept becomes a file this session knows.
+ */
+function completeLock(
+  plan: InstructionPlan,
+  current: RuntimeSnapshot,
+  action: RuntimeLockActionSnapshot,
+  request: Record<string, unknown>,
+  admission: CapturedMediaAdmission | undefined,
+): PendingActionOperationResult<ActionCompletionOutcome> {
+  const resolved = resolveLockCompletion(request.payload, action, admission);
+  if (!resolved.ok) {
+    return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
+  }
+  assertEventSequenceCapacity(current, 1);
+  if (resolved.stored !== null) addStoredFile(current.storedFiles, resolved.stored);
+  const completionSequence = takeSequence(current, 1);
+  const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
+    actionId: action.actionId,
+    actionKind: "lock",
+    settlementKind: "completed",
+    outcome: resolved.outcome,
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
+    destinationTemporary: action.destinationTemporary,
+    requestEventSequence: action.requestEventSequence,
+    completionEventSequence: completionSequence,
+    completedAtMs: current.currentSessionTimeMs,
+    file: resolved.stored,
+  });
+  current.foregroundAction = null;
+  current.lastSettlement = settlement;
+  // The instruction runs again with the answer before anything else, as a result is consumed.
+  current.interactionResultHandoff = Object.freeze({
+    actionKind: "lock",
+    actionId: action.actionId,
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
+    destinationTemporary: action.destinationTemporary,
+    result: createCapturedSerializableList(
+      resolved.detail === null ? [resolved.outcome] : [resolved.outcome, resolved.detail],
+    ),
   });
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;

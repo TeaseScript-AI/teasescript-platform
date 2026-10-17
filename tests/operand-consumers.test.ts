@@ -31,8 +31,8 @@ function says(source: string): string[] {
 }
 
 /** A source that opens one choice, run to its end after its first button is selected, with what it says then. */
-function saysAfterChoice(source: string): string[] {
-  const plan = compileValidPlan(source);
+function saysAfterChoice(source: string, warnings: readonly string[] = []): string[] {
+  const plan = compileValidPlan(source, {}, warnings);
   const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   const action = pending.snapshot.foregroundAction;
   assert.ok(action?.kind === "interaction", source);
@@ -105,12 +105,18 @@ test("a computed choice object's text that cannot be shown is an error", () => {
     errors('let options = [{ text: "A", value: 1 }]\nlet answer = askChoice options\nexit'),
     [],
   );
-  // A text that may still be null may give a button.
-  for (const source of [
-    'let options = [{ text: null }, { text: [1] }]\noptions.removeAt(1)\nlet answer = askChoice options\nsay "done"\nexit',
-    'let option = { text: null }\nif false {\n    option.text = [1]\n}\nlet answer = askChoice option\nsay "done"\nexit',
-  ])
-    assert.deepEqual(saysAfterChoice(source), ["done"], source);
+  // A text that may still be null may give a button, also where the only other value never runs.
+  for (const [source, warnings] of [
+    [
+      'let options = [{ text: null }, { text: [1] }]\noptions.removeAt(1)\nlet answer = askChoice options\nsay "done"\nexit',
+      [],
+    ],
+    [
+      'let option = { text: null }\nif false {\n    option.text = [1]\n}\nlet answer = askChoice option\nsay "done"\nexit',
+      ["TSV065"],
+    ],
+  ] as const)
+    assert.deepEqual(saysAfterChoice(source, warnings), ["done"], source);
 });
 
 test("join checks the element type of a computed list", () => {

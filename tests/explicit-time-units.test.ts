@@ -75,7 +75,8 @@ test("a time without a unit is a compile error at every consumer, and the error 
   ] as const) {
     const result = compileSource(`${source}\nexit`);
     const [diagnostic, ...rest] = result.diagnostics;
-    assert.equal(diagnostic?.code, "TSV043", source);
+    // A media position is a rule of the play command, with its code.
+    assert.equal(diagnostic?.code, source.startsWith("playAudio") ? "TSV036" : "TSV043", source);
     assert.ok(diagnostic.message.includes(fix), `${source}: ${diagnostic.message}`);
     assert.ok(!diagnostic.message.includes(";"), diagnostic.message);
     const start = source.lastIndexOf(subject);
@@ -137,7 +138,7 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     grouped.map(({ code, message }) => [code, message]),
     [
       [
-        "TSV043",
+        "TSV035",
         "A duration and a number cannot be combined with '+'. Put the expression in parentheses with the unit after them, such as 'wait (15 + randomInteger(0..35)) s'.",
       ],
     ],
@@ -161,12 +162,33 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     assert.deepEqual([diagnostic?.code, diagnostic?.message], [code, message], source);
     assert.deepEqual(rest, [], source);
   }
-  for (const operand of ['"5"', "5 s"]) {
-    const result = runValidSource(`${DYNAMIC}let d = dynamic(${operand})\nlet x = d s\nexit`);
-    assert.equal(result.snapshot.failure?.code, "TSR027", operand);
-    // A wait or timer checks the value before its unit itself.
-    const waited = runValidSource(`${DYNAMIC}let d = dynamic(${operand})\nwait d s\nexit`);
-    assert.equal(waited.snapshot.failure?.code, "TSR050", operand);
+  // A wait or timer keeps its unit apart, as it also takes a range there, but the amount before the unit is one rule with
+  // one code and text wherever a unit stands, at compile time and at runtime.
+  const consumers = [
+    "let x = d s",
+    "wait d s",
+    "timer d s",
+    "timer(duration: d s)",
+    'showButton "Go", timeout: d s',
+  ];
+  for (const [operand, type, value, fix] of [
+    ['"5"', "text (string)", 'text (string) "5"', "Use a number before the 's'."],
+    ["5 s", "a duration", "5 seconds", "Remove the 's' after it."],
+  ] as const) {
+    for (const consumer of consumers) {
+      const compiled = compileSource(`let d = ${operand}\n${consumer}\nexit`).diagnostics;
+      assert.deepEqual(
+        compiled.map(({ code, message }) => [code, message]),
+        [["TSV043", `A unit follows a number, but this is ${type}. ${fix}`]],
+        consumer,
+      );
+      const result = runValidSource(`${DYNAMIC}let d = dynamic(${operand})\n${consumer}\nexit`);
+      assert.deepEqual(
+        [result.snapshot.failure?.code, result.snapshot.failure?.message],
+        ["TSR027", `A unit follows a number, but this is ${value}. ${fix}`],
+        consumer,
+      );
+    }
   }
   assertRuntimeResumeEquivalent(
     'let n = 1\nwait (n + randomInteger(1..=2)) s\ntimer (n * 2) s\nsay "done"\nexit',
@@ -370,7 +392,7 @@ test("a wait takes a range with a unit like a hidden timer, drawn once in whole 
     [
       "wait (1.5..3) s",
       "TSV010",
-      "A wait range counts whole units, so its bounds must be whole numbers.",
+      "A wait needs a range of whole numbers, but its start is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
     ],
   ] as const) {
     const [diagnostic, ...rest] = compileSource(`${source}\nexit`).diagnostics;

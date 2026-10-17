@@ -283,8 +283,8 @@ available in every build to every user. It currently offers:
   wraps around without opening the dropdown:
   - **Title bar on short screens:** A or B above (default A);
   - **Photo accent:** A, the accent follows the photo, or B, the theme's accent (default);
-  - **Photo colour family:** A, Vibrant; B, Muted; or C, Vibrant when large enough (default), with the share of the
-    photo from which a swatch counts as large enough (default 3 %);
+  - **Photo colour family:** A, Vibrant; B, Muted; or C, Vibrant if large enough, else Muted (default), with the
+    share of the photo from which a swatch counts as large enough (default 3 %);
   - **Photo colour fade time:** A, 0.6 s, or B, 0.3 s (default), for the photo colour fade
     ([Stage and media presentation](#stage-and-media-presentation));
   - **Photo colour blending:** A, Oklab (default), or B, sRGB, for the same fade.
@@ -452,14 +452,15 @@ hidden until a session is shown. A script that does not compile cannot start: in
 diagnostics, each with its file, line, and message. The player's activation of Start is the user activation that later
 audible media playback relies on, so scripts may play audio from their first statement without a separate unlock step.
 
-The Player keeps the session in this browser: at each interaction it newly presents, when it ends, and when the page
+The Player keeps the session in this browser: at each interaction it newly presents, a lock's dialog or password field
+too, also one that asks again after a block, when it ends, and when the page
 is hidden, it stores the session's state, the events that led to it, and the photos only the session uses, which no
 save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/kept-sessions.ts`). Opening the script
 again, after a reload or with the browser closed in between, shows **Continue** on the start page instead of Start; it
 goes on from the last kept point, with those photos as session media again; a stored photo the kept session uses
 stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
-a kept session whose events lack what the Player reads from them, such as a message's markup or an answer's form, is
-not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
+a kept session whose events the engine's `interpreterEventProblem` refuses, such as a message without its markup or an
+answer without its form, is not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
 moment after an answer, can be lost. A saved-data import of the script discards its kept session
 ([transfer](../DATA-AND-API.md#saved-data-transfer)). A script a host prepares without its plan, such as a development
 scenario, keeps none. The debug room has a start page of its own, with its restarts
@@ -915,9 +916,19 @@ keyboard. `askDate`, `askTime`, and `askDateTime` replace the composer's text fi
 date-and-time control, which submits ISO text, and show the hint beside it. These native controls cover the years 0001
 through 9999; a prefill in year 0000, which they cannot show, is offered as editable ISO text in the text field. When
 Send moves to an interaction whose field is of the other kind, the editing focus and the keyboard's state move to the
-new field. A prefill starts as the composer text,
-which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint restore the
-composer shows the prefill again, and unsent edits are not kept.
+new field. `askPassword` masks the composer's field, which keeps its one line, with an eye button at its end, "Show
+password" or "Hide password", that shows the text while the person typing chooses to, and "Caps Lock is on" under it
+while a key event reports Caps Lock; an empty field answers nothing, and the answer adds no line to the chat; after a
+block interrupted it, the field is empty again. The password field of `password: askPassword(...)` in an encrypt or
+decrypt call is the same masked field; an encrypt call's adds a "Repeat password" field below it, past a dividing line,
+with its own eye button, "Show repeated password" or "Hide repeated password". Enter in the first moves to it, and Send
+or Enter there locks only when both match, else the composer notice says "The passwords do not match", the repeat
+empties, and the password is selected. A call with openers written `true` shows its lock dialog once the passwords
+match, and locks with both answers. While the Player locks or opens, the fields are read-only. The field starts empty
+each time it shows, also after a block interrupted it, and takes the focus back when the player was typing in the
+composer before it; nothing typed in it is kept. A prefill starts as the
+composer text, which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint
+restore the composer shows the prefill again, and unsent edits are not kept.
 
 `askImage(...)` that allows files shows a paperclip before the composer's input, named "Attach an image", with the
 request's `hint:` as the input's hint, or "Add an image…" without one. The paperclip opens the browser's native file
@@ -986,7 +997,7 @@ adds nothing to the transcript. Meanwhile the composer takes no answer. A block 
 until the block returns, and a restored session opens it again. While Debug runs, the dialog is not modal, so the Debug
 panel and its rewind stay usable beside it: it stands in the middle of the session's area instead of the window, below
 the tools drawer of a narrow layout, and Escape closes it only while focus is inside it. While a popup, an
-`exportText` dialog, or an `openUrl` button waits, the composer shows no hint.
+`exportText` dialog, an `openUrl` button, or a lock waits, the composer shows no hint.
 
 `exportText` opens a dialog like a popup's, named by its title, with the text in a read-only monospace field that wraps
 long lines and scrolls, and the buttons **Copy**, which takes focus, **Download**, and **Close**. Copy writes the whole
@@ -996,6 +1007,46 @@ copy it by hand or use Download. Download saves the text as a UTF-8 file with th
 Neither closes the dialog, and the Player never copies or downloads by itself. Close, or Escape, closes it and lets the
 script go on; a click beside it does not, and nothing enters the transcript. Its keys, modality, and placement while
 Debug runs, and its return after a block or a reload, are a popup's.
+
+A lock ([V30 §13](../specifications/accepted-syntaxes-v30.md#encryption)) that must ask the player opens a dialog like a
+popup's, with nothing in the transcript. **Lock**, for an encrypt call with openers that the player sets, shows only
+those openers, under "Choose one or more ways this can be opened again." where it shows more than one, each with a line
+that says what it does: the checked box **Time lock**, "Opens by itself after the time you
+set.", with a date-and-time field prefilled 7 days ahead; **Password (optional)**, "Opens with a password you choose.",
+which takes focus, or else the date-and-time field does, and, once a password is typed, **Repeat password**, which says
+"The passwords do not match" under it as soon as it differs from the password; and **Public key (optional)**, "Only the
+person with the matching private key can open it.", which takes `age1…` or `ssh-ed25519 …` keys, one per line, and once
+left, or when Lock is pressed, says "That is not a public key." under it for a line that is none, and for more than
+594 lines "A lock holds at most 594 public keys.", and has a collapsed **What is a public key?**: "A public key is a
+code you get from someone else, for example the person who decides when this opens. Paste it here. Only that person
+can open it again, with their own private key.", and where the dialog offers other openers, "No public key? Use a time
+or a password instead.", naming only those it offers. No dialog shows a command or a key tool's name; those are in
+[ENCRYPTION.md](../ENCRYPTION.md#for-the-owner-of-the-private-key) for the owner of the private key.
+Where an opener is the only one there can be, its label has no "(optional)". Unchecking the box hides the field, which
+keeps its moment for when the box is checked again. A line above **Lock** says what still opens the lock while no time
+lock would, such as "Without a time, this only opens with the password or the private key. If both are lost, it never
+opens.", or what can be set, such as "Set a time, a password, or a public key.", while nothing would. Its **Lock**
+button, the only way out, works once the two passwords match, each line is a public key, and the lock has an opener,
+also one the call gives, and refuses a moment that is not in the future with "Choose a moment in the future." under the
+field. **Unlock**, for a decrypt call, shows "Opens by itself at …" for each time lock in the player's locale, a
+**Password** field where a password opens it, which takes focus, **Unlock**, which tries the password as typed, also an
+empty one, and **Cancel**, which takes focus without a password field; Cancel, or Escape, gives the call's default.
+Where a public key opens it, it shows **Send this to the person who gave you the public key.**, "They send back an
+unlock key: paste it below.", the unlock request's armor in a read-only field, **Copy**, which says "Copied." or, where
+the browser refuses, selects the text and says "Could not copy. The text is selected, so copy it by hand or use
+Download.", and **Download**, which saves it as `unlock-request.age`; and **Unlock key**, which takes focus where no
+password opens it. Unlock tries the
+key when one is given, otherwise the password, and without a password opener it waits for a key; a wrong key keeps it
+open with "That key does not open it." under the field, which takes focus. A wrong password keeps it open with "That
+password does not open it." under the field; a
+passed time lock whose relays the Player cannot reach shows "Its time has passed, but the time service could not be
+reached." and **Try again** instead of its moment; and a time lock whose moment comes while it shows opens it without
+the player. A password field masks its text, has an eye button, **Show password** or **Hide password**, says "Caps Lock
+is on" under it while it is, and offers no saved or suggested password. While the Player locks or opens with what the
+player gave, the dialog stays and takes no input but keeps focus, and the button that started it reads **Locking…** or
+**Opening…**, as does a line when a time lock opens it by itself. As for a popup, a key held down since before it opened
+does nothing. A block that interrupts the dialog closes it, and it asks again afterwards with empty fields; its modality
+and placement while Debug runs are a popup's.
 
 `openUrl` opens its web address in a new tab. Right after the player's click, such as on a `showButton`, a choice, or a
 form, while the browser still counts it as the player's activation, the Player opens the tab at once and the script goes

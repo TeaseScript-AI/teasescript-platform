@@ -58,7 +58,11 @@ test("accepts nested lexical access and sibling-local reuse", () => {
     ].join("\n"),
   );
 
-  assert.deepEqual(result.diagnostics, []);
+  // Only the warning that the branch of `if false` never runs.
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV065"],
+  );
   assert.notEqual(result.plan, null);
 });
 

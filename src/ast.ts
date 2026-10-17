@@ -79,8 +79,12 @@ export interface SayParts {
   readonly presentation: ObjectLiteral | null;
   readonly speaker: Identifier | null;
   readonly skipPolicy: "skippable" | "unskippable" | null;
+  /** The skip word, when there is one. */
+  readonly skipPolicySpan: SourceSpan | null;
   readonly value: Expression;
   readonly pacing: Expression | "instant" | null;
+  /** The word `instant`, when it is the pacing. */
+  readonly instantSpan: SourceSpan | null;
   readonly span: SourceSpan;
 }
 
@@ -696,6 +700,7 @@ export interface InteractionExpression {
     | "date"
     | "time"
     | "datetime"
+    | "password"
     | "boolean"
     | "choice"
     | "form"

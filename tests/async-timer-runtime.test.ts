@@ -321,7 +321,11 @@ test("static handle hints do not leak from untaken paths, and a variable keeps i
   const untaken = compileSource(
     'let o = load "" + "o", default: null\nif false {\n  o = timer async 1 s\n}\nsay "${o.x}"\nexit',
   );
-  assert.deepEqual(untaken.diagnostics, []);
+  // Only the warning that the branch never runs.
+  assert.deepEqual(
+    untaken.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV065"],
+  );
   // `t` keeps its timer type, so a loaded value must be a timer too, which a default of null is not, and timers have
   // no property `x`.
   const reassigned =
@@ -333,7 +337,7 @@ test("static handle hints do not leak from untaken paths, and a variable keeps i
     ]),
     [
       ["TSV041", "null"],
-      ["TSV043", "x"],
+      ["TSV034", "x"],
     ],
   );
 });

@@ -4,6 +4,7 @@ import type {
   Block,
   CallArgument,
   CallExpression,
+  DurationUnit,
   Expression,
   FunctionDeclaration,
   ForStatement,
@@ -32,7 +33,11 @@ import type {
   TransferTarget,
   TypeAnnotation,
 } from "./ast.js";
-import { messageColorDiagnostics } from "./authored-presentation.js";
+import {
+  messageColorDiagnostics,
+  presentationPropertyDiagnostics,
+  SPEAKER_PRESENTATION_PROPERTIES,
+} from "./authored-presentation.js";
 import {
   globMatches,
   isPathGlob,
@@ -44,13 +49,15 @@ import { compileChild, runCompileTask, type CompileTask } from "./compiler/conti
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
   askOperands,
-  askParts,
   expressionChildren,
+  expressionParts,
+  handlerBlocks,
   namedAskArguments,
-  sayOperands,
   mediaHandlerBlocks,
   mediaOperands,
+  nestedStatements,
   showButtonOptions,
+  statementExpressions,
   timerOperands,
 } from "./expression-children.js";
 import {
@@ -74,7 +81,7 @@ import {
   unknownFormTypeMessage,
 } from "./form-fields.js";
 import type { VariableSite } from "./semantic.js";
-import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "./capture-call.js";
+import { isAskImageCall, isFileStoreCall, isLockCall, isTakePhotoCall } from "./capture-call.js";
 import { lazyDefaultArgument } from "./lazy-defaults.js";
 import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "./web-url.js";
 import {
@@ -84,7 +91,7 @@ import {
 } from "./image-input.js";
 import { evaluateTagSteps, passesTagList } from "./tag-query.js";
 import { addTag, normalizeTagName, readTagText, type Tag } from "./tags.js";
-import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
+import { CONVERSION_RESULTS, isTemporalConversionResult, numberFromText } from "./conversions.js";
 import {
   builtinCallProblems,
   builtinShapeProblems,
@@ -117,6 +124,76 @@ import {
 } from "./angle.js";
 import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
 import { rangeListLengthProblem } from "./runtime/collection-operations.js";
+import { describeShownValue, shownChoice } from "./runtime/value-types.js";
+import {
+  buttonBackgroundMessage,
+  CHOICE_TEXT_MESSAGE,
+  CHOICE_VALUES_MESSAGE,
+  choicePropertyMessage,
+  EMPTY_CHOICE_MESSAGE,
+  isButtonBackground,
+  isChoiceObjectProperty,
+} from "./choice-rules.js";
+import {
+  blockingRepeatMessage,
+  cameraPlacementMessage,
+  FINISH_NEVER_RUNS_MESSAGE,
+  fileReferenceRule,
+  handleArgumentsMessage,
+  handleMemberMessage,
+  hasArgumentlessMethods,
+  isCameraPlacement,
+  isMediaPosition,
+  isMediaRange,
+  isMediaRepeatCount,
+  isRepeatBudget,
+  isMediaVolume,
+  isTimerDisplay,
+  MEDIA_REPEAT_COUNT_RULE,
+  MEDIA_REPEAT_RULE,
+  MEDIA_VOLUME_RULE,
+  mediaPositionMessage,
+  mediaRangeMessage,
+  mediaVolumeMessage,
+  timerDisplayMessage,
+  type HandleKind,
+} from "./handle-rules.js";
+import {
+  emptyRangeProblem,
+  rangeBoundRule,
+  rangeStartProblem,
+  rangeText,
+  wholeRangeMessage,
+  type RangeBounds,
+} from "./range-checks.js";
+import {
+  logicalOperandRule,
+  notNumberFix,
+  UNIT_AMOUNT_RULE,
+  unitAmountFix,
+} from "./operand-rules.js";
+import { withoutNegativeZero } from "./conversions.js";
+import {
+  buttonTimeoutMessage,
+  isDelayLength,
+  isRoundLength,
+  isTimeoutLength,
+  negativeDelayMessage,
+  pacingMessage,
+  reachesSceneTime,
+  sceneTimeMessage,
+  timeoutSceneTimeMessage,
+  zeroRoundMessage,
+} from "./delay-rules.js";
+import {
+  FOR_SOURCE_RULE,
+  isRepeatCount,
+  pairLoopRule,
+  REPEAT_COUNT_RULE,
+  ROUND_COUNT_FIX,
+  repeatCountFix,
+  repeatCountMessage,
+} from "./loop-rules.js";
 import {
   compareDurations,
   divideDuration,
@@ -125,16 +202,20 @@ import {
   durationParts,
   durationPropertyMessage,
   durationQuotient,
+  DURATION_UNIT_MILLISECONDS,
   formatDuration,
   isCalendar,
   scaleDuration,
   unitValue,
   UNIT_OPERANDS,
+  ZERO_DIVISOR,
   type AnyDuration,
 } from "./duration.js";
 import {
+  findVisibleOverflows,
   isStaticDuration,
   knownOperands,
+  VISIBLE_OVERFLOW_MESSAGES,
   knownStep,
   staticChoiceValue,
   staticNumber,
@@ -152,12 +233,8 @@ import {
   misspelledPropertyHint,
 } from "./object-properties.js";
 import { GENDER_TERMS, PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
-import {
-  placeKey,
-  type SpeakerFlowInput,
-  type SpeakerFlowRead,
-  type SpeakerFlowStore,
-} from "./speaker-flow.js";
+import type { SpeakerFlowInput, SpeakerFlowRead, SpeakerFlowStore } from "./speaker-flow.js";
+import { placeKey, type WayFacts } from "./way-facts.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -249,7 +326,6 @@ import {
   accountCopy,
   copiesAccount,
   PLAYER_DECLARATION,
-  runsOnItsOwn,
   sessionDeclarations,
   someNode,
 } from "./project-globals.js";
@@ -300,10 +376,13 @@ export interface TypeCheckResult {
   readonly runtimeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
   /** The result shape the runtime needs for each `askForm`. */
   readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
-  /** Whether a file of the project has an `exit` that execution can reach; a project needs one (ADR 0022). */
-  readonly reachesExit: boolean;
-  /** Which statements run, for the checks that follow this flow. */
-  readonly flow: StatementFlow;
+  /** Which ways through the source can run, which the checks that follow the compiled plan take from the check. */
+  readonly ways: WayFacts;
+  /**
+   * The statements that the check found never run once their function, block, or file runs, which its narrowing and its
+   * loop effects follow: the plan's reachability finds the same ones (tests/reachability-differential.test.ts).
+   */
+  readonly unreachable: ReadonlySet<Statement>;
   /** What the flow check of speaker properties needs from the check, once the project is lowered (V30 §37). */
   readonly speakerFlow: SpeakerFlowInput;
   /**
@@ -311,12 +390,6 @@ export interface TypeCheckResult {
    * which a saved value has to fit when the script runs (ADR 0021 §6), sorted by key.
    */
   readonly storageTypes: readonly { readonly key: string; readonly type: TypePlan }[];
-}
-
-/** The statements that never run, and the top-level statements that run and after which execution continues. */
-export interface StatementFlow {
-  readonly unreachable: ReadonlySet<Statement>;
-  readonly continuing: ReadonlySet<Statement>;
 }
 
 /**
@@ -336,9 +409,19 @@ export type RuntimeCheckSite =
 
 const typeCode = {
   invalidAssignment: "TSV004",
+  duplicateProperty: "TSV007",
+  invalidRangeOperand: "TSV010",
+  invalidRepeatCount: "TSV011",
+  invalidLoopSource: "TSV012",
   argumentCount: "TSV020",
   unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
+  invalidTimer: "TSV033",
+  invalidTimerHandleMember: "TSV034",
+  mixedDurationOperands: "TSV035",
+  invalidMedia: "TSV036",
+  invalidMediaHandleMember: "TSV037",
+  invalidStorageKey: "TSV038",
   invalidInteractionPrefill: "TSV039",
   listInText: "TSV040",
   unshowableValue: "TSV042",
@@ -346,13 +429,14 @@ const typeCode = {
   typeMismatch: "TSV041",
   invalidOperand: "TSV043",
   mixedTypes: "TSV044",
+  invalidListIndex: "TSV045",
   impossibleCase: "TSV049",
+  visibleOverflow: "TSV050",
   emptyTagQuery: "TST002",
   invalidCaptureTag: "TST005",
   invalidTagQueryFrom: "TST006",
   randomStartValue: "TSV055",
-  closedLoop: "TSV058",
-  invalidCameraPlacement: "TSV059",
+  invalidCameraHandleMember: "TSV059",
   unusedFallback: "TSV062",
 } as const;
 
@@ -370,6 +454,78 @@ export function checkTypes(
 ): TypeCheckResult {
   const programs = files.map((file) => file.program);
   const lines = lineNamer(files);
+  // Code that never runs changes nothing (rule 5.5). What a loop, function, or block may change leaves out the code that
+  // the previous check found never runs, and each such choice is checked from nothing, since all that a check finds,
+  // such as the types it decides, rests on the effects it followed. The last check must find that code never runs too:
+  // should it not, the next check leaves out only what both found, and the one after that nothing, which always holds.
+  // Otherwise, when what the last check found never running would leave out more, the next check leaves out that, a
+  // bounded number of times.
+  let dead: DeadCode = { statements: new Set(), operands: new Set() };
+  let effects = projectEffects(programs, dead);
+  let growth = 0;
+  let shrinks = 0;
+  for (;;) {
+    const checked = checkWithEffects(programs, options, onFile, lines, effects);
+    const found = checked.dead;
+    if (!coversDeadCode(found, dead)) {
+      dead =
+        shrinks === 0
+          ? {
+              statements: new Set(
+                [...dead.statements].filter((each) => found.statements.has(each)),
+              ),
+              operands: new Set([...dead.operands].filter((place) => found.operands.has(place))),
+            }
+          : { statements: new Set(), operands: new Set() };
+      shrinks += 1;
+      effects = projectEffects(programs, dead);
+      continue;
+    }
+    if (shrinks === 0 && growth < MAX_DEAD_CODE_ROUNDS) {
+      const fewer = projectEffects(programs, found);
+      if (!sameProjectEffects(fewer, effects)) {
+        dead = found;
+        effects = fewer;
+        growth += 1;
+        continue;
+      }
+    }
+    return withVisibleOverflows(checked.result, programs);
+  }
+}
+
+/**
+ * Adds to each file's diagnostics the steps of known values without a finite result (TSV050), which the folds of every
+ * round of the check share, so they are found once.
+ */
+function withVisibleOverflows(
+  result: TypeCheckResult,
+  programs: readonly Program[],
+): TypeCheckResult {
+  return {
+    ...result,
+    diagnostics: result.diagnostics.map((diagnostics, file) => [
+      ...findVisibleOverflows(programs[file]!).map((overflow) =>
+        createDiagnostic(
+          DiagnosticSeverity.Error,
+          typeCode.visibleOverflow,
+          VISIBLE_OVERFLOW_MESSAGES[overflow.cause],
+          overflow.span,
+        ),
+      ),
+      ...diagnostics,
+    ]),
+  };
+}
+
+/** The type check of the project with the effects `effects`, and the code it found never runs (see `checkTypes`). */
+function checkWithEffects(
+  programs: readonly Program[],
+  options: TypeCheckOptions,
+  onFile: (file: number) => void,
+  lines: LineNamer,
+  effects: ProjectEffects,
+): { readonly result: TypeCheckResult; readonly dead: DeadCode } {
   // An integer variable is a number when one of its assignments can store a non-whole number, also an assignment
   // after its uses (rule 1.2). A check that finds a new one starts again with that variable declared as a number, so
   // the last check, which finds none, sees every variable with its final type and alone reports. Likewise, a place
@@ -408,7 +564,7 @@ export function checkTypes(
       onFile,
       lines,
     );
-    checker.check(programs);
+    checker.check(programs, effects);
     // A key whose type the runtime cannot check has none.
     const found: Map<string, StorageKeyType> = new Map(
       [...storageKeyTypes(checker.storageLoads)].filter(([, kept]) => typePlan(kept.type) !== null),
@@ -475,20 +631,21 @@ export function checkTypes(
       last = !checker.widenedMore;
     }
     if (last) {
-      const closedLoops = closedLoopWarnings(programs, checker.unreachable);
-      return Object.freeze({
-        diagnostics: Object.freeze(
-          checker.fileDiagnostics.map((diagnostics, file) =>
-            Object.freeze([...diagnostics, ...closedLoops[file]!]),
+      const dead = checker.deadCode();
+      return {
+        result: Object.freeze({
+          diagnostics: Object.freeze(
+            checker.fileDiagnostics.map((diagnostics) => Object.freeze(diagnostics)),
           ),
-        ),
-        speakerFlow: checker.speakerFlowInput(),
-        runtimeChecks: checker.runtimeChecks(),
-        formShapes: checker.formShapes(),
-        reachesExit: checker.reachesExit,
-        flow: Object.freeze({ unreachable: checker.unreachable, continuing: checker.continuing }),
-        storageTypes: storageTypePlans(storage),
-      });
+          speakerFlow: checker.speakerFlowInput(),
+          runtimeChecks: checker.runtimeChecks(),
+          formShapes: checker.formShapes(),
+          ways: checker.ways(),
+          unreachable: dead.statements,
+          storageTypes: storageTypePlans(storage),
+        }),
+        dead,
+      };
     }
     if (!followed) checker.widenFollowers();
   }
@@ -496,6 +653,9 @@ export function checkTypes(
 
 /** How many checks may still change the storage key types (see {@link checkTypes}). */
 const MAX_STORAGE_ROUNDS = 8;
+
+/** How many checks may leave out more code that never runs (see {@link checkTypes}). */
+const MAX_DEAD_CODE_ROUNDS = 4;
 
 /** The runtime checks of the storage keys, sorted by key; a type the runtime cannot check has none. */
 function storageTypePlans(
@@ -1336,16 +1496,8 @@ class TypeChecker {
   /** Whether the statement being checked can run; a `break` after a `return` does not end its loop. */
   #reachable = true;
 
-  /** Whether a reachable `exit` was checked. */
-  reachesExit = false;
-
   /** The statements that never run, by the flow this check follows. */
-  readonly unreachable = new Set<Statement>();
-
-  /** The top-level statements that run and after which execution continues. */
-  readonly continuing = new Set<Statement>();
-
-  #rootStatements: readonly Statement[] | null = null;
+  readonly #unreachable = new Set<Statement>();
 
   /**
    * List and set literals whose elements mix types, with those types. A literal stored in a place of a declared element
@@ -1434,8 +1586,8 @@ class TypeChecker {
   readonly #copyStatements = new WeakSet<Expression>();
 
   // What the flow check of speaker properties needs (see `speakerFlowInput`): the reads of a property through a
-  // speaker's name or `speaker` under `as`, the stores through a speaker's name, and which ways through each branch,
-  // loop, and lazy operand are possible (see `SpeakerFlowInput`).
+  // speaker's name or `speaker` under `as`, and the stores through a speaker's name; and which ways through each branch,
+  // loop, and lazy operand are possible (see `WayFacts`).
   readonly #flowReads = new Map<
     PropertyAccessExpression,
     Omit<SpeakerFlowRead, "sources"> & { readonly file: number }
@@ -1720,20 +1872,12 @@ class TypeChecker {
 
   /**
    * Checks the project: the start values of globals and speakers in the order a session sets them up, then each file,
-   * `main.tease` first, as a single script (rule 6).
+   * `main.tease` first, as a single script (rule 6). `effects` is what its code may change (see `projectEffects`).
    */
-  public check(programs: readonly Program[]): void {
+  public check(programs: readonly Program[], effects: ProjectEffects): void {
     startPropertyLineage();
-    const effects = programs.map(programEffects);
-    const loops = new Map(effects.flatMap((fileEffects) => [...fileEffects.loops]));
-    const sharedGlobals = new Map<string, Sharing>();
-    for (const fileEffects of effects)
-      for (const [name, how] of fileEffects.shared) noteSharing(sharedGlobals, name, how);
-    // While a `call` runs, any file's top level may run and assign globals (ADR 0022 §5, §6).
-    if (effects.some((fileEffects) => fileEffects.callsFiles))
-      for (const fileEffects of effects)
-        for (const [name, how] of fileEffects.rootAssigned) noteSharing(sharedGlobals, name, how);
-    this.#sharedGlobals = sharedGlobals;
+    const loops = effects.loops;
+    this.#sharedGlobals = effects.sharedGlobals;
     const functionsByFile = programs.map(() => new Map<FunctionDeclaration, FunctionType>());
     for (const [file, program] of programs.entries())
       for (const statement of program.statements)
@@ -1753,12 +1897,12 @@ class TypeChecker {
     }
     // main.tease runs right after the start values, so it starts with what they stored, unless a transfer enters it
     // again later; other files start afresh.
-    const startupFlow = effects.some((fileEffects) => fileEffects.entersMain)
+    const startupFlow = effects.files.some((fileEffects) => fileEffects.entersMain)
       ? new Flow()
       : this.#flow;
     for (const [file, program] of programs.entries()) {
       this.#enterFile(file);
-      this.#effects = { shared: effects[file]!.shared, loops };
+      this.#effects = { shared: effects.files[file]!.shared, loops };
       this.#root = new Scope(this.#project);
       this.#outer = this.#root;
       this.#scriptVariables = new Set(
@@ -1775,21 +1919,7 @@ class TypeChecker {
       const rootStatements = program.statements.filter(
         (statement) => statement.kind !== "functionDeclaration",
       );
-      this.#rootStatements = rootStatements;
-      const continues = runCompileTask(this.#statementsTask(rootStatements, this.#root));
-      // A file of declarations only runs nothing on its own, so it has no way to its end.
-      if (continues && rootStatements.some(runsOnItsOwn)) {
-        const last = rootStatements.at(-1)!;
-        const call = last.kind === "expressionStatement" ? unwrapGrouping(last.expression) : null;
-        // A call counts as returning, also of a function that always exits.
-        this.#report(
-          "TSV052",
-          call?.kind === "callExpression" && call.callee.kind === "identifier"
-            ? `This path reaches the end of the file after ${call.callee.name}(). Even if ${call.callee.name} ends the session, add exit (or end) here so the ending is explicit.`
-            : "The script can run past the end of this file. Add exit where the session should finish, or end to return to the file that called this one.",
-          last.span,
-        );
-      }
+      runCompileTask(this.#statementsTask(rootStatements, this.#root));
       // Every script variable has its type now, so every function body is checked, also one that waited for one.
       this.#scriptChecked = true;
       for (const statement of program.statements)
@@ -1879,6 +2009,8 @@ class TypeChecker {
     for (const property of declaration.properties) {
       const name = property.name.name;
       gets.add(name);
+      if (SPEAKER_PRESENTATION_PROPERTIES.has(name))
+        this.diagnostics.push(...presentationPropertyDiagnostics(name, property.value));
       const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
       this.#checkSpeakerProperty(name, property.value, type);
       this.#rejectRandomSelection(property.value);
@@ -2072,7 +2204,19 @@ class TypeChecker {
     const stores = new Map<string, SpeakerFlowStore>();
     for (const [statement, { file, ...store }] of this.#flowStores)
       stores.set(placeKey(file, statement.target.span), store);
-    return { reads, stores, paths: this.#pathFacts, operands: this.#operandFacts };
+    return { reads, stores };
+  }
+
+  /** Which ways through each branch, loop, and lazy operand this check found possible. */
+  public ways(): WayFacts {
+    return { paths: this.#pathFacts, operands: this.#operandFacts };
+  }
+
+  /** The code that this check found never runs, which the loop effects of the next check leave out. */
+  public deadCode(): DeadCode {
+    const operands = new Set<string>();
+    for (const [place, ways] of this.#operandFacts) if (!ways[0]) operands.add(place);
+    return { statements: new Set(this.#unreachable), operands };
   }
 
   /** A declared speaker for a message to name in its example, other than the built-in `player`. */
@@ -2246,10 +2390,8 @@ class TypeChecker {
       // A goto can reach a label even when the statements before it never continue.
       if (statement.kind === "labelStatement") continues = true;
       this.#reachable = reachable && continues;
-      if (!this.#reachable) this.unreachable.add(statement);
+      if (!this.#reachable) this.#unreachable.add(statement);
       if (!(yield* compileChild(this.#statementTask(statement, scope)))) continues = false;
-      else if (this.#reachable && statements === this.#rootStatements)
-        this.continuing.add(statement);
     }
     this.#reachable = reachable;
     return continues;
@@ -2298,9 +2440,7 @@ class TypeChecker {
         this.#suspend();
         return true;
       case "waitStatement":
-        yield* compileChild(
-          this.#timeTask(statement.duration, "wait", statement.unit !== null, scope),
-        );
+        yield* compileChild(this.#timeTask(statement.duration, "wait", statement.unit, scope));
         this.#suspend();
         return true;
       case "timerStatement":
@@ -2483,14 +2623,11 @@ class TypeChecker {
           if ((yield* compileChild(this.#pathTask(switchCase.body, scope, reached))) && reached)
             ends.push(this.#flow.mark());
         }
-        // `default`, or the path without one, runs when no case matched. A path that no value reaches does not continue.
+        // `default`, or the path without one, runs when no case matched: not when no value is left, also because the
+        // cases list every value it can be. A path that no value reaches does not continue.
         this.#flow.restore(start);
-        const restReached = remaining.kind !== "never";
-        // The flow of speaker properties also knows that no value is left when the cases list every value it can be.
-        this.#notePaths(statement, [
-          ...casePaths,
-          restReached && !takesEveryValue(remaining, literals),
-        ]);
+        const restReached = remaining.kind !== "never" && !takesEveryValue(remaining, literals);
+        this.#notePaths(statement, [...casePaths, restReached]);
         if (variable !== null && restReached && remaining !== subject)
           this.#flow.apply(this.#flow.since(start, new Map([[variable, remaining]])));
         if (statement.defaultBlock === null) {
@@ -2524,10 +2661,21 @@ class TypeChecker {
       case "repeatStatement": {
         const counted = yield* compileChild(this.#expressionTask(statement.count, scope));
         const count = nonNullTypeForUse(counted);
+        const known = this.#known(statement.count);
         if (isScalar(count, "number"))
           this.#report(
-            typeCode.invalidOperand,
-            `A repeat count must be a whole number (integer), but this is ${describeValue(count)}.${this.#widenedNote(statement.count)}${ROUND_FIX}.`,
+            typeCode.invalidRepeatCount,
+            repeatCountMessage(
+              "this",
+              describeValue(count),
+              `${this.#widenedNote(statement.count)}${ROUND_COUNT_FIX}`,
+            ),
+            statement.count.span,
+          );
+        else if (typeof known === "number" && !isRepeatCount(known))
+          this.#report(
+            typeCode.invalidRepeatCount,
+            repeatCountMessage("this", describeShownValue(known), repeatCountFix(known)),
             statement.count.span,
           );
         else
@@ -2535,7 +2683,9 @@ class TypeChecker {
             counted,
             (member) => isScalar(member, "integer"),
             statement.count,
-            "A repeat count is a whole number (integer)",
+            REPEAT_COUNT_RULE,
+            undefined,
+            typeCode.invalidRepeatCount,
           );
         const times = staticNumber(statement.count);
         this.#notePaths(statement, [
@@ -2554,7 +2704,7 @@ class TypeChecker {
           return yield* compileChild(
             this.#pairLoopTask(statement, statement.valueVariable, iterable, scope),
           );
-        this.#checkWholeRangeBounds(statement.iterable, "A for-loop range bound");
+        this.#checkWholeRangeBounds(statement.iterable, "A 'for' loop");
         this.#warnEmptyRange(statement.iterable, "the loop never runs");
         // A loop over a dict goes through its keys.
         const element = elementType(iterable, true);
@@ -2562,7 +2712,9 @@ class TypeChecker {
           iterable,
           (member) => elementType(member, true) !== undefined,
           statement.iterable,
-          "A for-loop goes through a list, a set, a dict, or a range",
+          FOR_SOURCE_RULE,
+          undefined,
+          typeCode.invalidLoopSource,
         );
         const loopType = element === undefined ? UNKNOWN_TYPE : loopValueType(element);
         this.#follow({ root: statement, path: [] }, loopType, statement.iterable.span);
@@ -2598,7 +2750,6 @@ class TypeChecker {
         return false;
       }
       case "exitStatement":
-        if (this.#reachable) this.reachesExit = true;
         return false;
       case "endStatement":
         return false;
@@ -2654,7 +2805,7 @@ class TypeChecker {
     const reachable = this.#reachable;
     if (!reached) this.#reachable = false;
     // An `else if` is a statement outside any statement list; the flow records it like one.
-    if (block.kind !== "block" && !this.#reachable) this.unreachable.add(block);
+    if (block.kind !== "block" && !this.#reachable) this.#unreachable.add(block);
     const continues =
       block.kind === "block"
         ? yield* compileChild(this.#blockTask(block, scope))
@@ -2677,7 +2828,9 @@ class TypeChecker {
       iterable,
       (member) => dictValueType(member) !== undefined,
       statement.iterable,
-      "A for-loop with a key and a value goes through a dict",
+      pairLoopRule(statement.variable.name, valueName.name),
+      undefined,
+      typeCode.invalidLoopSource,
     );
     const key: Variable = {
       name: statement.variable.name,
@@ -2735,8 +2888,11 @@ class TypeChecker {
   }
 
   *#sayTask(statement: SayParts, scope: Scope): CompileTask<void> {
-    if (statement.presentation !== null)
+    if (statement.presentation !== null) {
       yield* compileChild(this.#expressionTask(statement.presentation, scope));
+      this.#checkPresentation(statement.presentation);
+    }
+    this.diagnostics.push(...messageColorDiagnostics(statement.value));
     yield* compileChild(this.#expressionTask(statement.value, scope));
     if (statement.pacing !== null && statement.pacing !== "instant") {
       const pacing = statement.pacing;
@@ -2744,7 +2900,24 @@ class TypeChecker {
       this.#reportNonDuration(pacing, type, "Say pacing is a duration or instant", "3 s", () =>
         unitFix(pacing),
       );
+      const known = this.#knownLength(pacing);
+      if (known !== undefined && !isDelayLength(known.milliseconds))
+        this.#report(
+          typeCode.invalidRepeatCount,
+          pacingMessage(formatDuration(known)),
+          pacing.span,
+        );
     }
+  }
+
+  /**
+   * The options of a message mode written for a `say` or an ask's question, such as `prose(align: "center")`, whose
+   * known values must name a colour, an alignment, or a mode; a value the compiler cannot know falls back when shown.
+   */
+  #checkPresentation(presentation: ObjectLiteral | null): void {
+    if (presentation === null) return;
+    for (const property of presentation.properties)
+      this.diagnostics.push(...presentationPropertyDiagnostics(property.name.name, property.value));
   }
 
   /** A `let`, or the start value of a `global`, which declares the global in the project's names. */
@@ -2852,20 +3025,41 @@ class TypeChecker {
   }
 
   /**
-   * A placement the compiler knows to be wrong, written to what can only be a camera view, also through an alias, a
-   * function result, or a collection element; a value it cannot know is checked at runtime (`TSR050`).
+   * A camera view's placement, a timer's display, or a media volume that the compiler knows to be wrong, written to what
+   * can only be such a handle, also through an alias, a parameter, a function result, or a collection element. A value
+   * of another type is a type error of the store, and a value the compiler cannot know is checked at runtime (`TSR050`).
    */
-  #checkCameraPlacement(object: StaticType, statement: AssignmentStatement): void {
-    const receivers = members(nonNullType(object));
-    if (receivers.length === 0 || !receivers.every((member) => resolved(member).kind === "camera"))
-      return;
-    const text = staticVisibleText(statement.value);
-    if (statement.operator !== "=" || (text !== undefined && text !== "window" && text !== "stage"))
-      this.#report(
-        typeCode.invalidCameraPlacement,
-        'Camera placement must be "window" or "stage".',
-        statement.value.span,
-      );
+  #checkHandleValue(
+    object: StaticType,
+    name: string,
+    statement: AssignmentStatement,
+    value: StaticType,
+  ): void {
+    const receivers = members(nonNullType(object)).map((member) => resolved(member).kind);
+    const kind = receivers[0];
+    if (kind === undefined || receivers.some((other) => other !== kind)) return;
+    const report = (message: string) =>
+      this.#report(handleMemberCode(kind), message, statement.value.span);
+    const text = isScalar(value, "string") ? staticVisibleText(statement.value) : undefined;
+    if (kind === "camera" && name === "placement") {
+      // Adding text to the placement never gives another placement; any other change is the operation's error.
+      if (statement.operator !== "=") {
+        if (
+          statement.operator === "+=" &&
+          (isScalar(value, "string") || !isKnown(nonNullTypeForUse(value)))
+        )
+          report(cameraPlacementMessage(null));
+      } else if (text !== undefined && !isCameraPlacement(text))
+        report(cameraPlacementMessage(shownChoice(text)));
+    } else if (statement.operator !== "=") return;
+    else if (kind === "timer" && name === "display") {
+      if (text !== undefined && !isTimerDisplay(text))
+        report(timerDisplayMessage(shownChoice(text)));
+    } else if (kind === "media" && name === "volume") {
+      const known = this.#known(statement.value);
+      if (typeof known === "number" && !isMediaVolume(known))
+        report(mediaVolumeMessage(describeShownValue(known)));
+    }
   }
 
   /**
@@ -2886,6 +3080,8 @@ class TypeChecker {
     let place: Place | undefined;
     let variable: Variable | undefined;
     let handle = false;
+    /** The check of the value written to a handle property, once the value's type is known. */
+    let checkValue: ((value: StaticType) => void) | undefined;
     /** For an element, the type it may hold now, which can be wider than what may be stored. */
     let read: StaticType | undefined;
     /** The name of a speaker property the store may write, which the runtime checks. */
@@ -3020,10 +3216,9 @@ class TypeChecker {
         // A media position, remaining time, or volume write, and a camera view's placement, first wait for the
         // previous message's pacing.
         if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(receiver, "media")) this.#suspend();
-        if (name === "placement" && mayBe(receiver, "camera")) {
-          this.#suspend();
-          this.#checkCameraPlacement(receiver, statement);
-        }
+        if (name === "placement" && mayBe(receiver, "camera")) this.#suspend();
+        if (handle)
+          checkValue = (value) => this.#checkHandleValue(receiver, name, statement, value);
         if (name === "text" && statement.operator === "=")
           this.#checkMessageText(receiver, statement);
       }
@@ -3038,6 +3233,7 @@ class TypeChecker {
     // What the variable holds where it is read, before a call in the value may end what is known about it.
     const before = variable === undefined ? undefined : this.#currentType(variable);
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
+    checkValue?.(value);
     // A mixed `askChoice` that C2 rejects for the other receivers needs no second message here.
     if (speakerProperty !== null && !(untyped && this.#mixedChoices.has(unwrap(statement.value)))) {
       if (statement.operator === "=" || speakerProperty !== "defaultSaySkippable")
@@ -3873,7 +4069,7 @@ class TypeChecker {
         if (passing.length > 0) this.#reportMayBe(objectExpression, all[index]!, passing);
         else
           this.#report(
-            typeCode.invalidOperand,
+            handleMemberCode(all[index]!.kind),
             target.problem,
             target.receiver === true ? objectExpression.span : property.span,
           );
@@ -4290,26 +4486,79 @@ class TypeChecker {
   }
 
   /**
-   * A range that `for` goes through, `randomInteger` draws from, `toList` gives, or a wait or timer counts in units has
-   * whole-number bounds (V30 §6): a bound of type `number` is an error rather than a truncation. A bound the compiler
-   * cannot know is checked at runtime.
+   * A range that `for` goes through, `randomInteger` draws from, `toList` gives, or a wait or timer counts in units
+   * (`subject`) has whole-number bounds (V30 §6): a bound of type `number` is an error rather than a truncation. Returns
+   * whether the bounds may be whole; a bound the compiler cannot know is checked at runtime.
    */
-  #checkWholeRangeBounds(expression: Expression, bound: string): void {
+  #checkWholeRangeBounds(expression: Expression, subject: string): boolean {
     const range = unwrap(expression);
-    if (range.kind !== "rangeExpression") return;
-    for (const part of [range.start, range.end]) {
+    if (range.kind !== "rangeExpression") return true;
+    let whole = true;
+    for (const [part, side] of [
+      [range.start, "start"],
+      [range.end, "end"],
+    ] as const) {
       const type = this.#typeOf(part);
-      if (isScalar(type, "number"))
-        this.#report(
-          typeCode.invalidOperand,
-          `${bound} must be a whole number (integer), but this is ${describeValue(type)}.${this.#widenedNote(part)}${ROUND_FIX}.`,
-          part.span,
-        );
+      if (!isScalar(type, "number")) continue;
+      whole = false;
+      this.#report(
+        typeCode.invalidRangeOperand,
+        wholeRangeMessage(
+          subject,
+          `its ${side} is ${describeValue(type)}`,
+          this.#widenedNote(part),
+        ),
+        part.span,
+      );
     }
+    return whole;
   }
 
   /**
-   * A range written in a `toList()` call whose bounds the compiler knows gives at most `MAX_RANGE_LIST_LENGTH` numbers
+   * A range written where `randomInteger` draws a number from it, or a wait or timer a number of units (`delay`), in
+   * the runtime's order: a start that gives a wait or timer no length, whole-number bounds, and at least one number to
+   * draw. A bound the compiler cannot know is checked at runtime. Returns whether it reported a problem.
+   */
+  #checkDrawnRange(
+    expression: Expression,
+    subject: string,
+    delay?: {
+      readonly command: "wait" | "timer";
+      readonly repeat: boolean;
+      readonly unit: DurationUnit;
+    },
+  ): boolean {
+    const range = unwrap(expression);
+    if (range.kind !== "rangeExpression") return false;
+    const start = this.#known(range.start);
+    const end = this.#known(range.end);
+    const known: RangeBounds | undefined =
+      typeof start === "number" && typeof end === "number"
+        ? { start, end, inclusive: range.inclusive }
+        : undefined;
+    if (delay !== undefined && typeof start === "number") {
+      const problem = rangeStartProblem(
+        delay.command,
+        delay.repeat,
+        start,
+        delay.unit,
+        known === undefined
+          ? `this range starts at ${withoutNegativeZero(start)}`
+          : `this range is ${rangeText(known)}`,
+      );
+      if (problem !== null) {
+        this.#report(typeCode.invalidRangeOperand, problem, range.span);
+        return true;
+      }
+    }
+    if (!this.#checkWholeRangeBounds(range, subject)) return true;
+    const empty = known === undefined ? null : emptyRangeProblem(subject, known);
+    if (empty !== null) this.#report(typeCode.invalidRangeOperand, empty, range.span);
+    return empty !== null;
+  }
+
+  /**
+   * A range written in a `toList()` call whose bounds the compiler knows gives at most `MAX_COLLECTION_LENGTH` numbers
    * (V30 §6). Bounds that a number cannot hold exactly are left to the runtime, which names them.
    */
   #checkRangeListLength(expression: Expression): void {
@@ -4438,11 +4687,21 @@ class TypeChecker {
         return { kind: expression.kind === "listLiteral" ? "list" : "set", element };
       }
       case "dictLiteral": {
-        // Each key is text; the values share one type like the elements of a list (rule 1.3).
+        // Each key is text; the values share one type like the elements of a list (rule 1.3). Keys the compiler knows
+        // must differ; keys known only at runtime replace earlier entries instead.
         const types: StaticType[] = [];
+        const keys = new Set<string>();
         for (const entry of expression.entries) {
           const key = yield* compileChild(this.#expressionTask(entry.key, scope));
           this.#checkDictKey(key, entry.key);
+          const text = staticChoiceValue(entry.key)?.value;
+          if (typeof text === "string" && keys.has(text))
+            this.#report(
+              typeCode.duplicateProperty,
+              `Duplicate dict key ${JSON.stringify(text)}. Each key may appear only once. Remove one of the entries.`,
+              entry.key.span,
+            );
+          if (typeof text === "string") keys.add(text);
           yield* compileChild(this.#expressionTask(entry.value, scope));
           types.push(this.#capture(entry.value));
         }
@@ -4515,32 +4774,23 @@ class TypeChecker {
             expression.span,
           );
         const unit = expression.calendar ? `calendar ${expression.unit}` : expression.unit;
-        this.#reportUnless(
-          operand,
-          isNumeric,
-          expression.operand,
-          "A unit follows a number",
-          () => {
-            if (isScalar(value, "duration", "calendarDuration"))
-              return ` Remove the '${unit}' after it.`;
-            if (resolved(value).kind !== "range") return ` Use a number before the '${unit}'.`;
-            // A wait refuses a calendar range, so the example takes the exact unit of the same name, if any.
-            const range = expressionText(expression.operand);
-            const exact =
-              expression.unit === "mo" || expression.unit === "y" ? null : expression.unit;
-            return range === null || exact === null
-              ? " Only a wait or timer takes a range with a unit."
-              : ` Only a wait or timer takes a range with a unit, as in 'wait ${range} ${exact}'.`;
-          },
-        );
+        this.#reportUnless(operand, isNumeric, expression.operand, UNIT_AMOUNT_RULE, () => {
+          if (isScalar(value, "duration", "calendarDuration")) return unitAmountFix(unit, true);
+          if (resolved(value).kind !== "range") return unitAmountFix(unit, false);
+          // A wait refuses a calendar range, so the example takes the exact unit of the same name, if any.
+          const range = expressionText(expression.operand);
+          const exact =
+            expression.unit === "mo" || expression.unit === "y" ? null : expression.unit;
+          return range === null || exact === null
+            ? " Only a wait or timer takes a range with a unit."
+            : ` Only a wait or timer takes a range with a unit, as in 'wait ${range} ${exact}'.`;
+        });
         return type;
       }
       case "angleExpression": {
         const operand = yield* compileChild(this.#expressionTask(expression.operand, scope));
-        this.#reportUnless(operand, isNumeric, expression.operand, "A unit follows a number", () =>
-          isScalar(nonNullTypeForUse(operand), "angle")
-            ? ` Remove the '${expression.unit}' after it.`
-            : ` Use a number before the '${expression.unit}'.`,
+        this.#reportUnless(operand, isNumeric, expression.operand, UNIT_AMOUNT_RULE, () =>
+          unitAmountFix(expression.unit, isScalar(nonNullTypeForUse(operand), "angle")),
         );
         return ANGLE_TYPE;
       }
@@ -4557,9 +4807,35 @@ class TypeChecker {
       case "binaryExpression":
         return yield* compileChild(this.#binaryTask(expression, scope));
       case "rangeExpression": {
-        for (const bound of [expression.start, expression.end]) {
+        // The bounds as the runtime spells them: a variable, a property path, or a number.
+        const spelled = (bound: Expression): string | null => {
+          const literal = unwrap(bound);
+          return (
+            expressionLabel(bound) ??
+            (literal.kind === "numberLiteral" ? String(literal.value) : null)
+          );
+        };
+        const labels = { start: spelled(expression.start), end: spelled(expression.end) };
+        for (const place of ["start", "end"] as const) {
+          const bound = expression[place];
           const type = yield* compileChild(this.#expressionTask(bound, scope));
-          this.#reportUnless(type, isNumeric, bound, "A range bound is a number");
+          this.#reportUnless(
+            type,
+            isNumeric,
+            bound,
+            rangeBoundRule(labels.start, labels.end, expression.inclusive, place),
+            () => {
+              const text = isScalar(type, "string") ? staticVisibleText(bound) : undefined;
+              const value =
+                nonNullType(type).kind === "never"
+                  ? "null"
+                  : text !== undefined && numberFromText(text) !== undefined
+                    ? "numeric text"
+                    : "other";
+              return ` ${notNumberFix(labels[place], value)}`;
+            },
+            typeCode.invalidRangeOperand,
+          );
         }
         return { kind: "range" };
       }
@@ -4593,7 +4869,7 @@ class TypeChecker {
         yield* compileChild(this.#permanentButtonTask(expression, scope));
         return { kind: "permanentButton" };
       case "loadExpression": {
-        yield* compileChild(this.#storageKeyTask(expression.key, scope));
+        yield* compileChild(this.#storageKeyTask(expression.key, scope, true));
         let fallback: StaticType = UNKNOWN_TYPE;
         if (expression.defaultValue !== null) {
           // The default runs only for a missing key.
@@ -5185,8 +5461,10 @@ class TypeChecker {
    * answer. The answer is an image reference, or also `null` unless `allowSkip:` is left out or written `false`.
    */
   *#askImageTask(expression: CallExpression, scope: Scope): CompileTask<StaticType> {
-    if (expression.presentation !== undefined)
+    if (expression.presentation !== undefined) {
       yield* compileChild(this.#expressionTask(expression.presentation, scope));
+      this.#checkPresentation(expression.presentation);
+    }
     const sources: boolean[] = [];
     let skippable = false;
     for (const argument of expression.arguments) {
@@ -5466,7 +5744,7 @@ class TypeChecker {
       }
       case "binaryExpression": {
         if (node.operator === "and" || node.operator === "or") {
-          const rule = `'${node.operator}' needs true or false (boolean) values`;
+          const rule = logicalOperandRule(node.operator);
           const left = yield* compileChild(this.#branchTask(node.left, scope));
           this.#requireBoolean(left.type, node.left, rule);
           // The right operand runs only when the left one did not decide the result. When no value lets it run, it is
@@ -5922,7 +6200,8 @@ class TypeChecker {
       if (value !== undefined && factor !== undefined)
         problem = operator === "*" ? scaleDuration(value, factor) : divideDuration(value, factor);
     }
-    if (typeof problem === "string")
+    // A zero divisor the compiler can see is a visible overflow (TSV050), reported once for the step.
+    if (typeof problem === "string" && problem !== ZERO_DIVISOR)
       this.#report(typeCode.invalidOperand, `'${operator}': ${problem}.`, expression.span);
   }
 
@@ -6013,6 +6292,7 @@ class TypeChecker {
         ? [expression.left, expression.right]
         : [expression.operand],
       result,
+      operator,
     );
     let failed: readonly StaticType[];
     if ("type" in outcome) {
@@ -6033,7 +6313,9 @@ class TypeChecker {
     } else failed = outcome.failed;
     const command = this.#timeOperands.get(expression);
     this.#report(
-      typeCode.invalidOperand,
+      mixesDurationAndNumber(operator, failed)
+        ? typeCode.mixedDurationOperands
+        : typeCode.invalidOperand,
       (command === undefined ? null : groupedUnitMessage(command, expression, failed)) ??
         operatorMessage(operator, expression, failed, (item) => this.#typeOf(item)),
       expression.span,
@@ -6316,6 +6598,7 @@ class TypeChecker {
     operands: readonly StaticType[],
     expressions: readonly Expression[],
     result: (...values: StaticType[]) => StaticType | undefined,
+    operator?: string,
   ): { readonly type: StaticType } | { readonly failed: readonly StaticType[] } {
     const values = operands.map((operand) => resolved(operand));
     const lefts = members(values[0]!);
@@ -6406,7 +6689,14 @@ class TypeChecker {
       const all = index === 0 ? lefts : rights;
       const failing = all.find((member) => !passing.includes(member));
       if (passing.length > 0 && failing !== undefined) {
-        this.#reportMayBe(expressions[index]!, failing, passing);
+        this.#reportMayBe(
+          expressions[index]!,
+          failing,
+          passing,
+          operator !== undefined && mixesDurationAndNumber(operator, failed)
+            ? typeCode.mixedDurationOperands
+            : typeCode.invalidOperand,
+        );
         return { type: UNKNOWN_TYPE };
       }
     }
@@ -6478,9 +6768,13 @@ class TypeChecker {
       const entry = scope.resolve(callee.name);
       if (entry?.kind === "function")
         return yield* compileChild(this.#functionCallTask(expression, entry.fn, scope));
-      // A file store call may wait for the Player.
+      // A file store or lock call may wait for the Player.
       const values = yield* compileChild(
-        this.#callArgumentsTask(expression, scope, isFileStoreCall(expression)),
+        this.#callArgumentsTask(
+          expression,
+          scope,
+          isFileStoreCall(expression) || isLockCall(expression),
+        ),
       );
       if (entry === undefined && this.#builtins.has(callee.name))
         return this.#builtinType(callee.name, expression, values);
@@ -6550,6 +6844,16 @@ class TypeChecker {
       }
     }
     const values = yield* compileChild(this.#callArgumentsTask(expression, scope));
+    // Only a list has removeAt, so its position is a list index on any receiver; a list checks it with its other index
+    // rules below.
+    const listReceiver = values.length === 1 && isKnown(value) && members(value).every(isList);
+    if (
+      method === "removeAt" &&
+      !listReceiver &&
+      expression.arguments.length === 1 &&
+      expression.arguments[0]!.kind === "positionalArgument"
+    )
+      this.#checkNegativeIndex(expression.arguments[0]!.value);
     if (!isKnown(value)) {
       // Only text and lists have these methods, so their arguments are checked on any receiver.
       memberChecks();
@@ -6559,7 +6863,7 @@ class TypeChecker {
           this.#reportMixedChoice(argument.value, () => ONE_TYPE_FIX);
       return UNKNOWN_TYPE;
     }
-    if (method === "removeAt" && values.length === 1 && members(value).every(isList))
+    if (method === "removeAt" && listReceiver)
       this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
     // As for a dict, the default may decide the element type of a list that no value decided yet (V30 §16), before
     // anything reads the element.
@@ -6591,7 +6895,7 @@ class TypeChecker {
       members(value).some(isList) &&
       members(value).every((member) => memberMethodType(member, method) !== undefined)
     )
-      this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0].value);
+      this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0].value, true);
     // A dict method takes a text key; `get` also takes the value it gives for a missing key.
     let fallback: StaticType | undefined;
     if (isDictReceiver(value) && DICT_METHODS.has(method)) {
@@ -6629,7 +6933,7 @@ class TypeChecker {
       this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
     // A range written in the call gives its whole numbers, as `for` does, but at most 1,000,000 of them (V30 §6).
     if (method === "toList") {
-      this.#checkWholeRangeBounds(callee.object, "A toList range bound");
+      this.#checkWholeRangeBounds(callee.object, "toList()");
       this.#checkRangeListLength(callee.object);
       // A call with arguments is an error, which says enough.
       if (expression.arguments.length === 0)
@@ -6649,12 +6953,12 @@ class TypeChecker {
         );
     const passing = all.filter((_, index) => results[index] !== undefined);
     if (passing.length === all.length) {
-      const handle = HANDLE_LABELS.get(resolved(all[0]!).kind);
-      const handles = all.every((member) => HANDLE_LABELS.has(resolved(member).kind));
-      if (handles && expression.arguments.length > 0)
+      const handle = resolved(all[0]!).kind;
+      const handles = all.every((member) => hasArgumentlessMethods(resolved(member).kind));
+      if (handles && hasArgumentlessMethods(handle) && expression.arguments.length > 0)
         this.#report(
-          typeCode.invalidOperand,
-          `${handle} ${method}() takes no arguments.`,
+          handleMemberCode(handle),
+          handleArgumentsMessage(handle, method),
           callee.property.span,
         );
       const textual = TEXT_MEMBERS.has(method) || method === "join";
@@ -6729,7 +7033,7 @@ class TypeChecker {
       );
     else
       this.#report(
-        typeCode.invalidOperand,
+        handleMemberCode(failing.kind),
         failing.kind === "list" || failing.kind === "set"
           ? `${failing.kind === "list" ? "Lists" : "Sets"} have no method '${method}'.`
           : failing.kind === "dict"
@@ -7106,7 +7410,8 @@ class TypeChecker {
             argument.value,
             "randomInteger(...) takes a range such as 1..=6",
           );
-          this.#checkWholeRangeBounds(argument.value, "A randomInteger range bound");
+          if (argument.kind === "positionalArgument")
+            this.#checkDrawnRange(argument.value, "randomInteger(range)");
         }
         return INTEGER_TYPE;
       case "min":
@@ -7230,6 +7535,30 @@ class TypeChecker {
         return (name === "fromBase64" || name === "fileFromBase64") && fallback !== -1
           ? union([STRING_TYPE, values[fallback]!])
           : STRING_TYPE;
+      }
+      case "encryptText":
+      case "encryptFile":
+      case "decryptText":
+      case "decryptFile": {
+        // Locked text as Base64 or a locked stored file, and what a lock opens to, or the default (V30 §13).
+        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        this.#reportProblems(problems);
+        const index = expression.arguments.findIndex((item) => item.kind === "positionalArgument");
+        if (index !== -1 && problems.every((problem) => problem.kind !== "argumentCount"))
+          this.#reportUnless(
+            values[index]!,
+            (member) => isScalar(member, "string"),
+            expression.arguments[index]!.value,
+            name === "encryptText"
+              ? "encryptText(...) locks text (string)"
+              : name === "decryptText"
+                ? "decryptText(...) opens locked text (string)"
+                : `${name}(...) ${name === "encryptFile" ? "locks" : "opens"} a stored file, which is text (string)`,
+          );
+        const fallback = expression.arguments.findIndex(
+          (item) => item.kind === "namedArgument" && item.name.name === "default",
+        );
+        return fallback !== -1 ? union([STRING_TYPE, values[fallback]!]) : STRING_TYPE;
       }
       case "toRegex": {
         // A regex from pattern text, or the default, a regex or null (V30 §8).
@@ -7373,7 +7702,7 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     this.#report(
-      typeCode.invalidOperand,
+      handleMemberCode(value.kind),
       value.kind === "list" || value.kind === "set"
         ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'. Use length, first, last, or random.`
         : value.kind === "dict"
@@ -7391,15 +7720,27 @@ class TypeChecker {
 
   /**
    * Checks `object[index]`: only lists, indexed by a whole number, and dicts, by a text key, are indexed, and every
-   * member of a union must be the same one. An object has fixed properties, so it points to a dict.
+   * member of a union must be the same one. An object has fixed properties, so it points to a dict. A list index below
+   * 0 is an error, but not for a list's `get` (`belowZero`), which gives its default for it; one that is not whole has
+   * the error of that.
    */
   #checkIndex(
     object: StaticType,
     objectExpression: Expression,
     index: StaticType,
     expression: Expression,
+    belowZero = false,
   ): void {
     const known = members(nonNullType(object)).filter(isKnown).map(resolved);
+    // Also on a receiver that may be null or is not known: no list has an element below 0.
+    if (
+      !belowZero &&
+      !isScalar(nonNullTypeForUse(index), "number") &&
+      members(nonNullType(object)).some(
+        (member) => !isKnown(member) || resolved(member).kind === "list",
+      )
+    )
+      this.#checkNegativeIndex(expression);
     if (known.length > 0 && known.every((member) => member.kind === "object")) {
       const key = staticChoiceValue(expression)?.value;
       const name = expressionLabel(objectExpression);
@@ -7447,6 +7788,13 @@ class TypeChecker {
           ? "An index is a whole number (integer) for a list, or text (string) for a dict"
           : "A list index is a whole number (integer)",
       );
+  }
+
+  /** A list index the compiler knows is below 0, which no element has. */
+  #checkNegativeIndex(expression: Expression): void {
+    const known = this.#known(expression);
+    if (typeof known === "number" && known < 0)
+      this.#report(typeCode.invalidListIndex, NEGATIVE_INDEX_MESSAGE, expression.span);
   }
 
   /**
@@ -7539,6 +7887,7 @@ class TypeChecker {
       return BOOLEAN_TYPE;
     }
     if (expression.interactionKind !== "choice") {
+      this.#checkPresentation(expression.presentation);
       for (const operand of askOperands(expression)) {
         if (operand === expression.presentation) continue;
         const type = yield* compileChild(this.#expressionTask(operand, scope));
@@ -7563,8 +7912,15 @@ class TypeChecker {
       else literals?.push(literal);
     };
     let buttons = 0;
+    // Whether every option is a list or set written without elements.
+    let empty = true;
     for (const option of expression.options) {
       const content = unwrap(option.expression);
+      if (
+        (content.kind !== "listLiteral" && content.kind !== "setLiteral") ||
+        content.elements.length > 0
+      )
+        empty = false;
       const written: StaticType | null =
         option.value === null
           ? null
@@ -7655,6 +8011,8 @@ class TypeChecker {
         `A choice can show at most ${MAX_INTERACTION_OPTION_ENTRIES} buttons.`,
         expression.span,
       );
+    if (empty && expression.options.length > 0)
+      this.#report(typeCode.invalidInteractionChoice, EMPTY_CHOICE_MESSAGE, expression.span);
     // The button whose value `prefill:` gives is preselected; a value no button has preselects none (V30 §19).
     if (expression.prefill !== null)
       yield* compileChild(this.#expressionTask(expression.prefill, scope));
@@ -7724,6 +8082,20 @@ class TypeChecker {
         if (member.kind === "object" && member.properties !== null)
           this.#checkChoiceText(entry, member.properties);
       return value.kind === "object" ? UNKNOWN_TYPE : type;
+    }
+    // What a choice object written as a literal may hold; the runtime checks a computed one, whose properties may change.
+    if (!literal.properties.some((property) => property.name.name === "text"))
+      this.#report(typeCode.invalidInteractionChoice, CHOICE_TEXT_MESSAGE, literal.span);
+    for (const property of literal.properties) {
+      const name = property.name.name;
+      if (!isChoiceObjectProperty(name))
+        this.#report(
+          typeCode.invalidInteractionChoice,
+          choicePropertyMessage(name),
+          property.name.span,
+        );
+      else if (name === "value" && !returns)
+        this.#report(typeCode.invalidInteractionChoice, CHOICE_VALUES_MESSAGE, property.name.span);
     }
     let returned: StaticType = UNKNOWN_TYPE;
     for (const property of literal.properties) {
@@ -7838,16 +8210,43 @@ class TypeChecker {
           "30 s",
           () => unitFix(option.value),
         );
+        const known = this.#knownLength(option.value);
+        const problem =
+          known === undefined
+            ? undefined
+            : !isTimeoutLength(known.milliseconds)
+              ? buttonTimeoutMessage(formatDuration(known))
+              : !reachesSceneTime(known.milliseconds)
+                ? timeoutSceneTimeMessage("showButton")
+                : undefined;
+        if (problem !== undefined)
+          this.#report(typeCode.invalidRepeatCount, problem, option.value.span);
       }
     }
   }
 
   #checkBackground(expression: Expression, type: StaticType): void {
-    if (this.#reportedMayBe(expression, type, (member) => isScalar(member, "string"))) return;
-    if (isKnown(nonNullType(type)) && !isScalar(nonNullType(type), "string"))
+    if (
+      this.#reportedMayBe(
+        expression,
+        type,
+        (member) => isScalar(member, "string"),
+        typeCode.invalidInteractionChoice,
+      )
+    )
+      return;
+    const value = nonNullType(type);
+    const text = isScalar(type, "string") ? staticVisibleText(expression) : undefined;
+    if (isKnown(value) && !isScalar(value, "string"))
       this.#report(
         typeCode.invalidInteractionChoice,
-        'A button background must be an opaque CSS colour, such as "#336699".',
+        buttonBackgroundMessage(describeValue(value)),
+        expression.span,
+      );
+    else if (text !== undefined && !isButtonBackground(text))
+      this.#report(
+        typeCode.invalidInteractionChoice,
+        buttonBackgroundMessage(describeShownValue(text)),
         expression.span,
       );
   }
@@ -7907,6 +8306,7 @@ class TypeChecker {
     expression: Expression,
     type: StaticType,
     accepts: (member: StaticType) => boolean,
+    code: string = typeCode.invalidOperand,
   ): boolean {
     const all = members(nonNullType(type)).filter(isKnown);
     const passing = all.filter(accepts);
@@ -7915,6 +8315,7 @@ class TypeChecker {
       expression,
       all.find((member) => !accepts(member))!,
       passing,
+      code,
     );
     return true;
   }
@@ -7963,6 +8364,15 @@ class TypeChecker {
     expression: Expression,
     type: StaticType,
   ): void {
+    // A password is typed by the person who knows it, never suggested (V30 §20).
+    if (kind === "password") {
+      this.#report(
+        typeCode.invalidOperand,
+        "askPassword takes no 'prefill:', since a password is never suggested. Remove 'prefill:'.",
+        expression.span,
+      );
+      return;
+    }
     const name = expression.kind === "identifier" ? expression.name : null;
     const value = nonNullTypeForUse(type);
     const holds = !isKnown(type)
@@ -8062,12 +8472,12 @@ class TypeChecker {
   *#timeTask(
     expression: Expression,
     command: "wait" | "media",
-    unit: boolean,
+    unit: DurationUnit | null,
     scope: Scope,
   ): CompileTask<StaticType> {
     if (command === "wait") this.#timeOperands.set(expression, "wait");
     const type = yield* compileChild(this.#expressionTask(expression, scope));
-    this.#reportTime(expression, type, command, unit);
+    this.#reportTime(expression, type, command, unit, false);
     return type;
   }
 
@@ -8079,22 +8489,42 @@ class TypeChecker {
     expression: Expression,
     type: StaticType,
     command: "wait" | "timer" | "named timer" | "media",
-    unit: boolean,
+    unit: DurationUnit | null,
+    repeat: boolean,
   ): void {
     const isRange = (member: StaticType): boolean =>
       command !== "media" && resolved(member).kind === "range";
-    if (unit) {
+    const delay = command === "wait" ? "wait" : "timer";
+    if (unit !== null) {
       this.#reportUnless(
         type,
         (member) => isNumeric(member) || isRange(member),
         expression,
-        "A time before a unit is a number",
+        UNIT_AMOUNT_RULE,
+        () =>
+          unitAmountFix(unit, isScalar(nonNullTypeForUse(type), "duration", "calendarDuration")),
       );
-      // A range counts whole units, as `for` counts whole numbers.
-      if (command !== "media")
-        this.#checkWholeRangeBounds(
+      if (command === "media") return;
+      // A range counts whole units, as `for` counts whole numbers. Every draw is at least its start.
+      const range = unwrap(expression);
+      if (range.kind === "rangeExpression") {
+        const start = this.#known(range.start);
+        if (
+          !this.#checkDrawnRange(expression, `A ${delay}`, { command: delay, repeat, unit }) &&
+          typeof start === "number" &&
+          !reachesSceneTime(start * DURATION_UNIT_MILLISECONDS[unit])
+        )
+          this.#report(typeCode.invalidRepeatCount, sceneTimeMessage(delay), range.span);
+        return;
+      }
+      const known = this.#known(expression);
+      if (typeof known === "number")
+        this.#checkDelayLength(
           expression,
-          command === "wait" ? "A wait range bound" : "A timer range bound",
+          delay,
+          repeat,
+          known * DURATION_UNIT_MILLISECONDS[unit],
+          describeShownValue(known),
         );
       return;
     }
@@ -8107,7 +8537,38 @@ class TypeChecker {
         : `A ${command === "wait" ? "wait" : "timer"} takes a duration`,
       "30 s",
       () => timeUnitFix(expression, command, range),
+      command === "media" ? typeCode.invalidMedia : typeCode.invalidOperand,
     );
+    const known = this.#knownLength(expression);
+    if (command !== "media" && known !== undefined)
+      this.#checkDelayLength(expression, delay, repeat, known.milliseconds, formatDuration(known));
+  }
+
+  /**
+   * A known wait or timer length, as the runtime checks it before it waits: not below zero, not zero for a round of a
+   * repeating timer, and short enough for scene time to reach.
+   */
+  #checkDelayLength(
+    expression: Expression,
+    command: "wait" | "timer",
+    repeat: boolean,
+    milliseconds: number,
+    shown: string,
+  ): void {
+    const problem = !isDelayLength(milliseconds)
+      ? negativeDelayMessage(command, shown)
+      : repeat && !isRoundLength(milliseconds)
+        ? zeroRoundMessage(shown)
+        : !reachesSceneTime(milliseconds)
+          ? sceneTimeMessage(command)
+          : undefined;
+    if (problem !== undefined) this.#report(typeCode.invalidRepeatCount, problem, expression.span);
+  }
+
+  /** The exact duration `expression` is known to have; a calendar duration has no fixed length. */
+  #knownLength(expression: Expression): AnyDuration | undefined {
+    const known = this.#known(expression);
+    return isStaticDuration(known) && !isCalendar(known) ? known : undefined;
   }
 
   /**
@@ -8120,6 +8581,7 @@ class TypeChecker {
     rule: string,
     example: string,
     fix: () => string,
+    code: string = typeCode.invalidOperand,
   ): void {
     const value = nonNullTypeForUse(type);
     const unitless = isNumeric(value) || resolved(value).kind === "range";
@@ -8133,6 +8595,7 @@ class TypeChecker {
         isScalar(value, "calendarDuration")
           ? ""
           : ` ${unitless ? fix() : `Use a duration such as '${example}'.`}`,
+      code,
     );
   }
 
@@ -8146,7 +8609,8 @@ class TypeChecker {
           operand,
           duration,
           timer.form === "short" ? "timer" : "named timer",
-          timer.unit !== null,
+          timer.unit,
+          timer.repeat,
         );
       } else if (operand === timer.label)
         this.#checkShownText(
@@ -8154,15 +8618,20 @@ class TypeChecker {
           yield* compileChild(this.#expressionTask(operand, scope)),
           "a timer label",
         );
-      else
-        yield* compileChild(
-          this.#requireTask(
-            operand,
-            scope,
-            (type) => isScalar(type, "string"),
-            "A timer display is text (string)",
-          ),
+      else {
+        const type = yield* compileChild(this.#expressionTask(operand, scope));
+        this.#reportUnless(
+          type,
+          (member) => isScalar(member, "string"),
+          operand,
+          "A timer display is text (string)",
+          undefined,
+          typeCode.invalidTimer,
         );
+        const text = isScalar(type, "string") ? staticVisibleText(operand) : undefined;
+        if (text !== undefined && !isTimerDisplay(text))
+          this.#report(typeCode.invalidTimer, timerDisplayMessage(shownChoice(text)), operand.span);
+      }
     }
     if (timer.handler !== null) this.#pendHandler(timer.handler, null, scope);
   }
@@ -8189,41 +8658,110 @@ class TypeChecker {
   }
 
   *#mediaTask(media: MediaParts, scope: Scope, selfHandle: string | null): CompileTask<StaticType> {
+    const command = media.media === "audio" ? "playAudio" : "playVideo";
     // Media first waits for the previous message's pacing, and later for loading; handlers may run at both.
     this.#suspend();
     for (const operand of mediaOperands(media)) {
-      if (operand === media.file)
-        yield* compileChild(
-          this.#fileTask(operand, scope, media.media === "audio" ? "playAudio" : "playVideo"),
+      if (operand === media.file) yield* compileChild(this.#fileTask(operand, scope, command));
+      else if (operand === media.volume) {
+        const type = yield* compileChild(
+          this.#requireTask(operand, scope, isNumeric, MEDIA_VOLUME_RULE, typeCode.invalidMedia),
         );
-      else if (operand === media.volume)
-        yield* compileChild(
-          this.#requireTask(operand, scope, isNumeric, "Volume is a number from 0 through 1"),
-        );
-      else if (media.repeat?.kind === "times" && operand === media.repeat.count)
-        yield* compileChild(
+        const known = isNumeric(type) ? this.#known(operand) : undefined;
+        if (typeof known === "number" && !isMediaVolume(known))
+          this.#report(
+            typeCode.invalidMedia,
+            mediaVolumeMessage(describeShownValue(known)),
+            operand.span,
+          );
+      } else if (media.repeat?.kind === "times" && operand === media.repeat.count) {
+        const type = yield* compileChild(
           this.#requireTask(
             operand,
             scope,
-            (type) => isScalar(type, "integer"),
-            "A repeat count is a whole number (integer)",
+            (member) => isScalar(member, "integer"),
+            MEDIA_REPEAT_COUNT_RULE,
+            typeCode.invalidMedia,
           ),
         );
-      else if (media.repeat?.kind === "value" && operand === media.repeat.value) {
-        yield* compileChild(
-          this.#requireTask(
-            operand,
-            scope,
-            (type) => isScalar(type, "boolean", "duration"),
-            "Repeat is true, false, or a duration",
-          ),
+        const known = isScalar(type, "integer") ? this.#known(operand) : undefined;
+        if (typeof known === "number" && !isMediaRepeatCount(known))
+          this.#report(
+            typeCode.invalidMedia,
+            `${MEDIA_REPEAT_COUNT_RULE}, but this is ${describeShownValue(known)}.`,
+            operand.span,
+          );
+      } else if (media.repeat?.kind === "value" && operand === media.repeat.value) {
+        const type = yield* compileChild(this.#expressionTask(operand, scope));
+        this.#reportUnless(
+          type,
+          (member) => isScalar(member, "boolean", "duration"),
+          operand,
+          MEDIA_REPEAT_RULE,
+          () =>
+            isNumeric(nonNullTypeForUse(type))
+              ? ` Write a count with 'times', such as 'repeat: ${expressionLabel(operand) ?? "3"} times'.`
+              : "",
+          typeCode.invalidMedia,
         );
-      } else yield* compileChild(this.#timeTask(operand, "media", false, scope));
+        const known = this.#knownLength(operand);
+        if (known !== undefined && !isRepeatBudget(known.milliseconds))
+          this.#report(
+            typeCode.invalidMedia,
+            `${MEDIA_REPEAT_RULE}, but this is ${formatDuration(known)}.`,
+            operand.span,
+          );
+      } else yield* compileChild(this.#timeTask(operand, "media", null, scope));
     }
+    // `repeat` before the file, or `repeat: true`.
+    const indefinite =
+      media.repeat?.kind === "indefinite" ||
+      (media.repeat?.kind === "value" && isTrueLiteral(media.repeat.value));
+    if (indefinite && !media.async)
+      this.#report(typeCode.invalidMedia, blockingRepeatMessage(command), media.repeat!.span);
+    if (indefinite && media.handlers?.kind === "cues")
+      for (const cue of media.handlers.cues)
+        if (cue.kind === "finish")
+          this.#report(typeCode.invalidMedia, FINISH_NEVER_RUNS_MESSAGE, cue.keywordSpan);
+    this.#checkMediaPositions(media);
     for (const block of mediaHandlerBlocks(media))
       this.#pendHandler(block, media.async ? selfHandle : null, scope);
     this.#suspend();
     return media.async ? { kind: "media" } : UNKNOWN_TYPE;
+  }
+
+  /**
+   * The media positions of a play command that the compiler knows: `startAt`, `endAt`, and each cue position are at
+   * least zero, and `endAt` is later than `startAt`, which is the start of the file when left out (V30 §35). A
+   * position it cannot know is checked at runtime (`TSR050`).
+   */
+  #checkMediaPositions(media: MediaParts): void {
+    const position = (expression: Expression, subject: string): AnyDuration | undefined => {
+      // A calendar duration is a type error of its own.
+      const known = this.#knownLength(expression);
+      if (known === undefined || isMediaPosition(known.milliseconds)) return known;
+      this.#report(
+        typeCode.invalidMedia,
+        mediaPositionMessage(subject, formatDuration(known)),
+        expression.span,
+      );
+      return undefined;
+    };
+    const start = media.startAt === null ? 0 : position(media.startAt, "startAt");
+    const end = media.endAt === null ? undefined : position(media.endAt, "endAt");
+    if (
+      start !== undefined &&
+      end !== undefined &&
+      !isMediaRange(typeof start === "number" ? start : start.milliseconds, end.milliseconds)
+    )
+      this.#report(
+        typeCode.invalidMedia,
+        mediaRangeMessage(formatDuration(end), formatDuration(start)),
+        media.endAt!.span,
+      );
+    if (media.handlers?.kind === "cues")
+      for (const cue of media.handlers.cues)
+        if (cue.offset !== null) position(cue.offset, `${cue.kind} position`);
   }
 
   *#fileTask(expression: Expression, scope: Scope, command: string): CompileTask<void> {
@@ -8235,7 +8773,8 @@ class TypeChecker {
           members(type).every(
             (member) => isScalar(member, "string") || resolved(member).kind === "null",
           ),
-        `${command} needs a file reference in text (string) or null`,
+        fileReferenceRule(command),
+        typeCode.invalidMedia,
       ),
     );
   }
@@ -8267,15 +8806,35 @@ class TypeChecker {
     );
   }
 
-  *#storageKeyTask(expression: Expression, scope: Scope): CompileTask<void> {
-    yield* compileChild(
-      this.#requireTask(
+  /**
+   * A storage key is text (V30 §25). `load "k" == null` loads the key `"k" == null`, so a load names the grouping that
+   * compares the loaded value instead.
+   */
+  *#storageKeyTask(expression: Expression, scope: Scope, load = false): CompileTask<void> {
+    const type = yield* compileChild(this.#expressionTask(expression, scope));
+    const text = (member: StaticType): boolean => isScalar(member, "string");
+    const all = members(type);
+    const failing = all.filter((member) => !text(member));
+    // A sign gives a number, a duration, or an angle, never text, also of an operand the compiler cannot know.
+    const key = unwrap(expression);
+    const signed =
+      key.kind === "unaryExpression" &&
+      key.operator !== "not" &&
+      !isKnown(nonNullTypeForUse(this.#typeOf(key.operand)));
+    if (!signed && (!isKnown(nonNullTypeForUse(type)) || failing.length === 0)) return;
+    if (!signed && failing.length < all.length)
+      this.#reportMayBe(
         expression,
-        scope,
-        (type) => isScalar(type, "string"),
-        "A storage key is text (string)",
-      ),
-    );
+        failing.find((member) => member.kind !== "null") ?? failing[0]!,
+        all.filter(text),
+        typeCode.invalidStorageKey,
+      );
+    else
+      this.#report(
+        typeCode.invalidStorageKey,
+        load ? LOAD_KEY_MESSAGE : STORAGE_KEY_MESSAGE,
+        expression.span,
+      );
   }
 
   /**
@@ -8314,9 +8873,11 @@ class TypeChecker {
     scope: Scope,
     accepts: (type: StaticType) => boolean,
     rule: string,
-  ): CompileTask<void> {
+    code: string = typeCode.invalidOperand,
+  ): CompileTask<StaticType> {
     const type = yield* compileChild(this.#expressionTask(expression, scope));
-    this.#reportUnless(type, accepts, expression, rule);
+    this.#reportUnless(type, accepts, expression, rule, undefined, code);
+    return type;
   }
 
   /**
@@ -8425,6 +8986,7 @@ class TypeChecker {
     expression: Expression,
     rule: string,
     fix: () => string = () => "",
+    code: string = typeCode.invalidOperand,
   ): void {
     const value = nonNullTypeForUse(type);
     if (!isKnown(value)) return;
@@ -8438,16 +9000,17 @@ class TypeChecker {
         expression,
         failing.find((member) => member.kind !== "null") ?? failing[0]!,
         passing,
+        code,
       );
       return;
     }
     // Where a duration is wanted, a calendar duration needs the reason it does not fit (ADR 0026).
     const reason =
-      isScalar(value, "calendarDuration") && rule.includes("duration")
+      isScalar(value, "calendarDuration") && accepts(DURATION_TYPE)
         ? " A calendar day or month has no fixed length. Use a fixed length such as '1 day' or '24 h'."
         : "";
     this.#report(
-      typeCode.invalidOperand,
+      code,
       `${rule}, but this is ${describeValue(value)}.${reason}${fix()}`,
       expression.span,
     );
@@ -8542,9 +9105,14 @@ class TypeChecker {
   }
 
   /** A value that may be of a member type the operation does not support: name the test that makes it safe. */
-  #reportMayBe(expression: Expression, failing: StaticType, passing: readonly StaticType[]): void {
+  #reportMayBe(
+    expression: Expression,
+    failing: StaticType,
+    passing: readonly StaticType[],
+    code: string = typeCode.invalidOperand,
+  ): void {
     this.#report(
-      typeCode.invalidOperand,
+      code,
       mayBeMessage(expression, failing, passing, !this.#changed.has(expression)),
       expression.span,
     );
@@ -8856,6 +9424,71 @@ interface ProgramEffects {
   readonly loops: ReadonlyMap<Block, LoopEffects>;
 }
 
+/**
+ * The code that a check found never runs: the statements of a branch or loop body that no value takes or after a
+ * statement that never continues, and by place the `and`, `or`, and `otherwise` whose right side never runs.
+ */
+interface DeadCode {
+  readonly statements: ReadonlySet<Statement>;
+  readonly operands: ReadonlySet<string>;
+}
+
+/** Whether `found` holds all of `dead`. */
+function coversDeadCode(found: DeadCode, dead: DeadCode): boolean {
+  for (const statement of dead.statements) if (!found.statements.has(statement)) return false;
+  for (const place of dead.operands) if (!found.operands.has(place)) return false;
+  return true;
+}
+
+/** What the code of a project may change, as the check uses it. */
+interface ProjectEffects {
+  readonly files: readonly ProgramEffects[];
+  readonly loops: ReadonlyMap<Block, LoopEffects>;
+  /** The globals that a function or a timer or media block of any file assigns or changes in place, with how. */
+  readonly sharedGlobals: ReadonlyMap<string, Sharing>;
+}
+
+/** What the code of each file may change, leaving out the code that never runs. */
+function projectEffects(programs: readonly Program[], dead: DeadCode): ProjectEffects {
+  const files = programs.map((program, file) => programEffects(program, file, dead));
+  const sharedGlobals = new Map<string, Sharing>();
+  for (const fileEffects of files)
+    for (const [name, how] of fileEffects.shared) noteSharing(sharedGlobals, name, how);
+  // While a `call` runs, any file's top level may run and assign globals (ADR 0022 §5, §6).
+  if (files.some((fileEffects) => fileEffects.callsFiles))
+    for (const fileEffects of files)
+      for (const [name, how] of fileEffects.rootAssigned) noteSharing(sharedGlobals, name, how);
+  return {
+    files,
+    loops: new Map(files.flatMap((fileEffects) => [...fileEffects.loops])),
+    sharedGlobals,
+  };
+}
+
+/** Whether two sets of effects give a check the same facts. */
+function sameProjectEffects(left: ProjectEffects, right: ProjectEffects): boolean {
+  const sameSharing = (
+    one: ReadonlyMap<string, Sharing>,
+    other: ReadonlyMap<string, Sharing>,
+  ): boolean => one.size === other.size && [...one].every(([name, how]) => other.get(name) === how);
+  return (
+    sameSharing(left.sharedGlobals, right.sharedGlobals) &&
+    left.files.every(
+      (fileEffects, file) =>
+        fileEffects.entersMain === right.files[file]!.entersMain &&
+        sameSharing(fileEffects.shared, right.files[file]!.shared),
+    ) &&
+    [...left.loops].every(([body, loop]) => {
+      const other = right.loops.get(body);
+      return (
+        other !== undefined &&
+        loop.suspends === other.suspends &&
+        sameSharing(loop.writes, other.writes)
+      );
+    })
+  );
+}
+
 interface LoopNode {
   readonly body: Block;
   readonly parent: LoopNode | null;
@@ -8863,48 +9496,53 @@ interface LoopNode {
   suspends: boolean;
 }
 
-type EffectWork =
-  | { readonly statement: Statement; readonly loop: LoopNode | null; readonly inside: boolean }
-  | { readonly expression: Expression; readonly loop: LoopNode | null; readonly inside: boolean };
+/** A node to walk, with the innermost loop around it, whether it stands in a function or block, and whether it runs. */
+type EffectWork = {
+  readonly loop: LoopNode | null;
+  readonly inside: boolean;
+  readonly runs: boolean;
+} & ({ readonly statement: Statement } | { readonly expression: Expression });
 
 /**
  * Collects in one pass the names that functions and blocks assign, and the effects of every loop. A loop's effects
- * include those of the loops inside it, but not those of timer or media blocks it starts, which run later, nor those of
- * code that a literal rules out, which never runs.
+ * include those of the loops inside it, but not those of timer or media blocks it starts, which run later. Code that
+ * `dead` holds never runs, so it changes nothing; a loop in it has effects of its own, for the check of its body.
  */
-function programEffects(program: Program): ProgramEffects {
+function programEffects(program: Program, file: number, dead: DeadCode): ProgramEffects {
   const shared = new Map<string, Sharing>();
   const rootAssigned = new Map<string, Sharing>();
-  const write = (name: string, how: Sharing, loop: LoopNode | null, inside: boolean): void => {
-    noteSharing(inside ? shared : rootAssigned, name, how);
-    if (loop !== null) noteSharing(loop.writes, name, how);
-  };
   let callsFiles = false;
   let entersMain = false;
-  // The value that literals give each condition the walk asks about.
-  const conditions = new Map<Expression, boolean | undefined>();
   const nodes: LoopNode[] = [];
   const work: EffectWork[] = [];
   const enter = (
     statements: readonly Statement[],
     loop: LoopNode | null,
     inside: boolean,
+    runs: boolean,
   ): void => {
     for (let index = statements.length - 1; index >= 0; index -= 1)
-      work.push({ statement: statements[index]!, loop, inside });
+      work.push({ statement: statements[index]!, loop, inside, runs });
   };
   const loopNode = (body: Block, parent: LoopNode | null): LoopNode => {
     const node: LoopNode = { body, parent, writes: new Map(), suspends: false };
     nodes.push(node);
     return node;
   };
-  const handlers = (node: Statement | Expression): void => {
-    for (const block of handlerBlocks(node)) enter(block.statements, null, true);
-  };
-  enter(program.statements, null, false);
+  enter(program.statements, null, false, true);
   while (work.length > 0) {
     const item = work.pop()!;
-    const { loop, inside } = item;
+    // Code that never runs is part of no loop around it.
+    const runs = item.runs && !("statement" in item && dead.statements.has(item.statement));
+    const loop = runs === item.runs ? item.loop : null;
+    const { inside } = item;
+    const write = (name: string, how: Sharing): void => {
+      if (runs) noteSharing(inside ? shared : rootAssigned, name, how);
+      if (loop !== null) noteSharing(loop.writes, name, how);
+    };
+    const handlers = (node: Statement | Expression): void => {
+      for (const block of handlerBlocks(node)) enter(block.statements, null, true, runs);
+    };
     if ("expression" in item) {
       const expression = item.expression;
       if (
@@ -8926,36 +9564,31 @@ function programEffects(program: Program): ProgramEffects {
         COLLECTION_CHANGES.has(callee.property.name)
       ) {
         const root = rootName(callee.object);
-        if (root !== null) write(root, "changes", loop, inside);
+        if (root !== null) write(root, "changes");
       }
       handlers(expression);
-      if (
+      // The right side of an `and`, `or`, or `otherwise` that never runs changes nothing.
+      const skipped =
         expression.kind === "binaryExpression" &&
         (expression.operator === "and" ||
           expression.operator === "or" ||
-          expression.operator === "otherwise")
-      ) {
-        // The operands of an `and`, `or`, or `otherwise` chain after a literal that decides its result never run, so
-        // they are part of no loop.
-        let runs = true;
-        for (const operand of chainOperands(expression)) {
-          work.push({ expression: operand, loop: runs ? loop : null, inside });
-          // A condition that literals decide is never null either.
-          const decides =
-            expression.operator === "otherwise"
-              ? isNonNullLiteral(operand) || literalCondition(operand, conditions) !== undefined
-              : literalCondition(operand, conditions) === (expression.operator === "or");
-          runs &&= !decides;
-        }
-        continue;
-      }
-      for (const part of expressionParts(expression)) work.push({ expression: part, loop, inside });
+          expression.operator === "otherwise") &&
+        dead.operands.has(placeKey(file, expression.span))
+          ? expression.right
+          : null;
+      for (const part of expressionParts(expression))
+        work.push(
+          part === skipped
+            ? { expression: part, loop: null, inside, runs: false }
+            : { expression: part, loop, inside, runs },
+        );
       continue;
     }
     const statement = item.statement;
     if (loop !== null && SUSPENDING_STATEMENTS.has(statement.kind)) loop.suspends = true;
-    if (statement.kind === "callFileStatement") callsFiles = true;
+    if (runs && statement.kind === "callFileStatement") callsFiles = true;
     if (
+      runs &&
       (statement.kind === "gotoStatement" ||
         statement.kind === "callFileStatement" ||
         statement.kind === "fallbackStatement") &&
@@ -8964,58 +9597,40 @@ function programEffects(program: Program): ProgramEffects {
     )
       entersMain = true;
     // The `default:` form of a global assigns it where the declaration runs.
-    if (statement.kind === "globalStatement" && statement.assignment !== null)
+    if (runs && statement.kind === "globalStatement" && statement.assignment !== null)
       noteSharing(inside ? shared : rootAssigned, statement.name.name, "assigns");
     if (statement.kind === "assignmentStatement") {
       // A store into an element or property changes the variable that holds it in place, too.
       const root = rootName(statement.target);
       if (root !== null)
-        write(root, statement.target.kind === "identifier" ? "assigns" : "changes", loop, inside);
+        write(root, statement.target.kind === "identifier" ? "assigns" : "changes");
       // A timer or media property write may run a block at once.
       if (statement.target.kind !== "identifier" && loop !== null) loop.suspends = true;
     }
     handlers(statement);
     switch (statement.kind) {
       case "functionDeclaration":
-        enter(statement.body.statements, null, true);
+        enter(statement.body.statements, null, true, runs);
         // A parameter default runs in the function too, and the blocks it shows run later.
         for (const parameter of statement.parameters)
           if (parameter.defaultValue !== null)
-            work.push({ expression: parameter.defaultValue, loop: null, inside: true });
+            work.push({ expression: parameter.defaultValue, loop: null, inside: true, runs });
         continue;
-      case "ifStatement": {
-        // A branch that a literal condition rules out never runs, so it is part of no loop.
-        const condition = literalCondition(statement.condition, conditions);
-        enter(statement.thenBlock.statements, condition === false ? null : loop, inside);
-        if (statement.elseBlock !== null)
-          enter(
-            statement.elseBlock.kind === "ifStatement"
-              ? [statement.elseBlock]
-              : statement.elseBlock.statements,
-            condition === true ? null : loop,
-            inside,
-          );
-        break;
-      }
       case "whileStatement": {
         const node = loopNode(statement.body, loop);
-        // A body that a literal rules out never runs, so it is part of no loop, and its own loop changes nothing.
-        const runs = literalCondition(statement.condition, conditions) !== false;
-        enter(statement.body.statements, runs ? node : null, inside);
-        work.push({ expression: statement.condition, loop: node, inside });
+        enter(statement.body.statements, node, inside, runs);
+        work.push({ expression: statement.condition, loop: node, inside, runs });
         continue;
       }
       case "repeatStatement":
-      case "forStatement": {
-        const node = loopNode(statement.body, loop);
-        enter(statement.body.statements, runsNoTime(statement) ? null : node, inside);
+      case "forStatement":
+        enter(statement.body.statements, loopNode(statement.body, loop), inside, runs);
         break;
-      }
       default:
-        enter(nestedStatements(statement), loop, inside);
+        enter(nestedStatements(statement), loop, inside, runs);
     }
     for (const expression of statementExpressions(statement))
-      work.push({ expression, loop, inside });
+      work.push({ expression, loop, inside, runs });
   }
   // Inner loops come after the loops around them, so walking backwards adds each loop's effects to its parent.
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
@@ -9033,236 +9648,6 @@ function programEffects(program: Program): ProgramEffects {
       nodes.map((node) => [node.body, { writes: node.writes, suspends: node.suspends }]),
     ),
   };
-}
-
-/** The operands of a chain of one operator, from the left; a part in parentheses is an operand of its own. */
-function chainOperands(root: Extract<Expression, { kind: "binaryExpression" }>): Expression[] {
-  const operands: Expression[] = [];
-  let left: Expression = root;
-  while (left.kind === "binaryExpression" && left.operator === root.operator) {
-    operands.push(left.right);
-    left = left.left;
-  }
-  operands.push(left);
-  return operands.reverse();
-}
-
-/**
- * The value that literals give a condition, as the type check decides it: `true` or `false`, also in parentheses or
- * after `not`, and an `and` chain with an operand that is `false` this way, or whose operands are all `true`, and an
- * `or` chain the other way round. `known` keeps the value of each part, so each part is evaluated once, without native
- * recursion.
- */
-function literalCondition(
-  condition: Expression,
-  known: Map<Expression, boolean | undefined>,
-): boolean | undefined {
-  const pending = [condition];
-  while (pending.length > 0) {
-    const node = pending.at(-1)!;
-    if (known.has(node)) {
-      pending.pop();
-      continue;
-    }
-    const parts = conditionParts(node);
-    const unknown = parts.filter((part) => !known.has(part));
-    if (unknown.length > 0) {
-      for (const part of unknown) pending.push(part);
-      continue;
-    }
-    pending.pop();
-    const values = parts.map((part) => known.get(part));
-    known.set(node, conditionValue(node, values));
-  }
-  return known.get(condition);
-}
-
-/** The parts whose values decide a condition: what stands in parentheses or after `not`, or a chain's operands. */
-function conditionParts(node: Expression): readonly Expression[] {
-  if (node.kind === "parenthesizedExpression") return [node.expression];
-  if (node.kind === "unaryExpression" && node.operator === "not") return [node.operand];
-  if (node.kind === "binaryExpression" && (node.operator === "and" || node.operator === "or"))
-    return chainOperands(node);
-  return [];
-}
-
-/** A condition's value from the values of its {@link conditionParts}, or `undefined` when literals do not decide it. */
-function conditionValue(
-  node: Expression,
-  values: readonly (boolean | undefined)[],
-): boolean | undefined {
-  if (node.kind === "booleanLiteral") return node.value;
-  if (node.kind === "parenthesizedExpression") return values[0];
-  if (node.kind === "unaryExpression" && node.operator === "not")
-    return values[0] === undefined ? undefined : !values[0];
-  if (node.kind !== "binaryExpression" || (node.operator !== "and" && node.operator !== "or"))
-    return undefined;
-  const decides = node.operator === "or";
-  if (values.includes(decides)) return decides;
-  return values.every((value) => value === !decides) ? !decides : undefined;
-}
-
-/** A literal other than `null`, also in parentheses, so a fallback after it never runs. */
-function isNonNullLiteral(expression: Expression): boolean {
-  return [
-    "numberLiteral",
-    "durationLiteral",
-    "stringLiteral",
-    "booleanLiteral",
-    "listLiteral",
-    "setLiteral",
-    "dictLiteral",
-    "objectLiteral",
-  ].includes(unwrap(expression).kind);
-}
-
-/** Whether the body of a `repeat` or `for` loop certainly runs no time, as the type check decides it. */
-function runsNoTime(
-  statement: Extract<Statement, { kind: "repeatStatement" | "forStatement" }>,
-): boolean {
-  if (statement.kind === "forStatement") return isEmptyLiteral(statement.iterable);
-  const times = staticNumber(statement.count);
-  return times !== undefined && times < 1;
-}
-
-/** The statements that leave a loop or the session, or may: one of them is a way out of the loop it stands in. */
-const LOOP_EXITS: ReadonlySet<Statement["kind"]> = new Set([
-  "breakStatement",
-  "returnStatement",
-  "endStatement",
-  "exitStatement",
-  "gotoStatement",
-  "callFileStatement",
-]);
-
-/** The engine functions, which only compute a value; a call of any other function may leave a loop. */
-const ENGINE_FUNCTIONS: ReadonlySet<string> = new Set(CORE_RUNTIME_BUILTINS);
-
-/** A `while true` loop, and whether its body has a way out. */
-interface EndlessLoop {
-  readonly statement: Extract<Statement, { kind: "whileStatement" }>;
-  readonly parent: EndlessLoop | null;
-  exits: boolean;
-}
-
-/** A node to walk, with the innermost `while true` around it and whether it stands in a timer or media block. */
-type ExitWork = { readonly loop: EndlessLoop | null; readonly handler: boolean } & (
-  { readonly statement: Statement } | { readonly expression: Expression }
-);
-
-/**
- * Warns about each loop with no way out once it starts (#578): a `while true`, and a top-level `goto` back to an earlier
- * label of its file, whose loop is the statements between them. A `break`, `return`, `end`, `exit`, any other `goto`, a
- * `call` of a file, or a call of a function other than an engine function is a way out wherever it stands in the loop,
- * also in a branch that no value takes. A timer or media block may run during any loop, so when a block of the project
- * has a way out, no loop is reported. Neither is a loop that never runs by the flow of the type check.
- */
-function closedLoopWarnings(
-  programs: readonly Program[],
-  unreachable: ReadonlySet<Statement>,
-): readonly (readonly Diagnostic[])[] {
-  let blockExits = false;
-  const loops: { readonly file: number; readonly loop: EndlessLoop }[] = [];
-  const closed = programs.map((): SourceSpan[] => []);
-  /** Walks a top-level statement and returns whether it has a way out. */
-  const walk = (file: number, root: Statement): boolean => {
-    let found = false;
-    const work: ExitWork[] = [{ statement: root, loop: null, handler: false }];
-    const enter = (
-      statements: readonly Statement[],
-      loop: EndlessLoop | null,
-      handler: boolean,
-    ): void => {
-      for (let index = statements.length - 1; index >= 0; index -= 1)
-        work.push({ statement: statements[index]!, loop, handler });
-    };
-    const wayOut = (loop: EndlessLoop | null, handler: boolean): void => {
-      found = true;
-      blockExits ||= handler;
-      // A way out of an inner loop is one of the loops around it too.
-      for (let node = loop; node !== null && !node.exits; node = node.parent) node.exits = true;
-    };
-    while (work.length > 0) {
-      const item = work.pop()!;
-      const { loop, handler } = item;
-      // A timer or media block runs later, outside the loop that starts it.
-      for (const block of handlerBlocks("expression" in item ? item.expression : item.statement))
-        enter(block.statements, null, true);
-      if ("expression" in item) {
-        const expression = item.expression;
-        if (
-          expression.kind === "callExpression" &&
-          !(expression.callee.kind === "identifier" && ENGINE_FUNCTIONS.has(expression.callee.name))
-        )
-          wayOut(loop, handler);
-        for (const part of expressionParts(expression))
-          work.push({ expression: part, loop, handler });
-        continue;
-      }
-      const statement = item.statement;
-      if (LOOP_EXITS.has(statement.kind)) wayOut(loop, handler);
-      if (statement.kind === "functionDeclaration") {
-        enter(statement.body.statements, null, false);
-        for (const parameter of statement.parameters)
-          if (parameter.defaultValue !== null)
-            work.push({ expression: parameter.defaultValue, loop: null, handler: false });
-        continue;
-      }
-      let inner = loop;
-      if (isWhileTrue(statement)) {
-        inner = { statement, parent: loop, exits: false };
-        loops.push({ file, loop: inner });
-      }
-      enter(nestedStatements(statement), inner, handler);
-      for (const expression of statementExpressions(statement))
-        work.push({ expression, loop, handler });
-    }
-    return found;
-  };
-  for (const [file, program] of programs.entries()) {
-    // The number of top-level statements with a way out before each label.
-    const labels = new Map<string, number>();
-    let count = 0;
-    for (const statement of program.statements) {
-      if (statement.kind === "labelStatement") labels.set(statement.name.name, count);
-      else if (
-        statement.kind === "gotoStatement" &&
-        statement.target.kind === "labelTarget" &&
-        labels.get(statement.target.label.name) === count &&
-        !unreachable.has(statement)
-      )
-        closed[file]!.push(statement.span);
-      // A function runs where it is called, and a call is a way out.
-      if (walk(file, statement) && statement.kind !== "functionDeclaration") count += 1;
-    }
-  }
-  if (blockExits) return programs.map(() => []);
-  for (const { file, loop } of loops)
-    if (!loop.exits && !unreachable.has(loop.statement))
-      closed[file]!.push(
-        createSourceSpan(loop.statement.span.start, loop.statement.condition.span.end),
-      );
-  return closed.map((spans) =>
-    spans
-      .sort((left, right) => left.start.offset - right.start.offset)
-      .map((span) =>
-        createDiagnostic(
-          DiagnosticSeverity.Warning,
-          typeCode.closedLoop,
-          "If this loop starts, it has no way to stop. Add a condition with `break` to leave the loop, or use `exit` to finish the session.",
-          span,
-        ),
-      ),
-  );
-}
-
-/** Whether a statement is `while true`, with or without parentheses. */
-function isWhileTrue(
-  statement: Statement,
-): statement is Extract<Statement, { kind: "whileStatement" }> {
-  if (statement.kind !== "whileStatement") return false;
-  const condition = unwrap(statement.condition);
-  return condition.kind === "booleanLiteral" && condition.value;
 }
 
 /** Methods that change the list or set they are called on. */
@@ -9345,115 +9730,6 @@ function loopValueType(element: StaticType): StaticType {
 }
 
 /**
- * The statements of the blocks that run as part of a statement: branches and loop bodies, not handler blocks. A
- * `global` with `default:` assigns where it stands.
- */
-function nestedStatements(statement: Statement): readonly Statement[] {
-  switch (statement.kind) {
-    case "globalStatement":
-      return statement.assignment === null ? [] : [statement.assignment];
-    case "ifStatement":
-      return [
-        ...statement.thenBlock.statements,
-        ...(statement.elseBlock === null
-          ? []
-          : statement.elseBlock.kind === "ifStatement"
-            ? [statement.elseBlock]
-            : statement.elseBlock.statements),
-      ];
-    case "whileStatement":
-    case "repeatStatement":
-    case "forStatement":
-      return statement.body.statements;
-    case "switchStatement":
-      return [
-        ...statement.cases.flatMap((switchCase) => switchCase.body.statements),
-        ...(statement.defaultBlock?.statements ?? []),
-      ];
-    default:
-      return [];
-  }
-}
-
-/** The timer, media, or permanent button blocks that a statement or expression registers. */
-function handlerBlocks(node: Statement | Expression): readonly Block[] {
-  if (node.kind === "timerStatement" || node.kind === "timerExpression")
-    return node.handler === null ? [] : [node.handler];
-  if (node.kind === "showPermanentButtonStatement" || node.kind === "showPermanentButtonExpression")
-    return [node.handler];
-  if (node.kind === "playMediaStatement" || node.kind === "playMediaExpression")
-    return mediaHandlerBlocks(node);
-  return [];
-}
-
-/** The expressions a statement evaluates itself, outside its nested blocks. */
-function statementExpressions(statement: Statement): readonly Expression[] {
-  switch (statement.kind) {
-    case "letStatement":
-      return [statement.initializer];
-    case "assignmentStatement":
-      return statement.target.kind === "identifier"
-        ? [statement.value]
-        : [...expressionChildren(statement.target), statement.value];
-    case "expressionStatement":
-      return [statement.expression];
-    case "switchStatement":
-      return [statement.subject, ...statement.cases.flatMap((switchCase) => switchCase.values)];
-    case "speakerDeclaration":
-      return statement.properties.map((property) => property.value);
-    case "sayStatement":
-      return sayOperands(statement);
-    case "showButtonStatement":
-      return showButtonOperands(statement);
-    case "waitStatement":
-      return [statement.duration];
-    case "timerStatement":
-      return timerOperands(statement);
-    case "showPermanentButtonStatement":
-      return [statement.text];
-    case "playMediaStatement":
-      return mediaOperands(statement);
-    case "showImageStatement":
-      return [statement.image];
-    case "showPopupStatement":
-    case "openUrlStatement":
-    case "exportTextStatement":
-      return statement.arguments.map((argument) => argument.value);
-    case "saveStatement":
-      return [statement.value, statement.key];
-    case "deleteStatement":
-      return [statement.key];
-    case "ifStatement":
-    case "whileStatement":
-      return [statement.condition];
-    case "repeatStatement":
-      return [statement.count];
-    case "forStatement":
-      return [statement.iterable];
-    case "returnStatement":
-      return statement.value === null ? [] : [statement.value];
-    case "gotoStatement":
-    case "callFileStatement":
-    case "fallbackStatement":
-      return statement.target?.kind === "scriptTarget" ? [statement.target.expression] : [];
-    default:
-      return [];
-  }
-}
-
-/** The direct subexpressions of an expression, including interaction operands. */
-function expressionParts(expression: Expression): readonly Expression[] {
-  if (expression.kind === "interactionExpression") return askParts(expression);
-  if (expression.kind === "showButtonExpression") return showButtonOperands(expression);
-  if (expression.kind === "sayExpression") return sayOperands(expression);
-  return expressionChildren(expression);
-}
-
-function showButtonOperands(parts: ShowButtonParts): readonly Expression[] {
-  return [parts.label, ...showButtonOptions(parts).map((option) => option.value)];
-}
-
-/**
  * Whether a target may enter main.tease at its top: a file target naming it or a glob that may pick it, and any computed
  * target but a `script(...)` whose literal path names another file.
  */
@@ -9486,7 +9762,10 @@ const PURE_BUILTINS: ReadonlySet<string> = new Set([
 function isPureBuiltinCall(expression: CallExpression): boolean {
   const callee = expression.callee;
   return (
-    callee.kind === "identifier" && PURE_BUILTINS.has(callee.name) && !isFileStoreCall(expression)
+    callee.kind === "identifier" &&
+    PURE_BUILTINS.has(callee.name) &&
+    !isFileStoreCall(expression) &&
+    !isLockCall(expression)
   );
 }
 
@@ -10084,6 +10363,10 @@ function capitalize(text: string): string {
 
 const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
 
+const STORAGE_KEY_MESSAGE = "Storage key must be a string.";
+
+const LOAD_KEY_MESSAGE = `${STORAGE_KEY_MESSAGE} To compare the loaded value, write 'load("k", default: null) == null'.`;
+
 /** The name of the variable a declaration declares. */
 function declarationName(declaration: Declaration): string {
   if (declaration.kind === "identifier") return declaration.name;
@@ -10459,6 +10742,15 @@ function numberPrefillFix(expression: Expression): string {
     : " Use a number, such as 'prefill: 10'.";
 }
 
+const NEGATIVE_INDEX_MESSAGE =
+  "A list index cannot be negative. The first element is at index 0, and the last at length - 1.";
+
+/** Whether `expression` is `true` as written, also in parentheses. */
+function isTrueLiteral(expression: Expression): boolean {
+  const value = unwrap(expression);
+  return value.kind === "booleanLiteral" && value.value;
+}
+
 function unwrap(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;
@@ -10556,16 +10848,16 @@ function mixDescription(first: StaticType, other: StaticType): string {
   return `${describeValue(first)} and ${describeValue(other)}`;
 }
 
-/** The kinds of handle whose properties scripts read or assign. */
-type HandleKind = "timer" | "media" | "camera" | "messageHandle";
-
-/** The handles whose methods take no arguments, as their messages name them. */
-const HANDLE_LABELS: ReadonlyMap<string, string> = new Map([
-  ["timer", "Timer"],
-  ["media", "Media"],
-  ["messageHandle", "Message"],
-  ["permanentButton", "Permanent button"],
-]);
+/** The code of a problem with a member of a handle or permanent button (see `handle-rules.ts`). */
+function handleMemberCode(kind: StaticType["kind"]): string {
+  return kind === "timer"
+    ? typeCode.invalidTimerHandleMember
+    : kind === "media"
+      ? typeCode.invalidMediaHandleMember
+      : kind === "camera"
+        ? typeCode.invalidCameraHandleMember
+        : typeCode.invalidOperand;
+}
 
 /**
  * The message for a method call on a receiver that is a speaker, which has properties but no methods (V30 §37). In a
@@ -10573,29 +10865,6 @@ const HANDLE_LABELS: ReadonlyMap<string, string> = new Map([
  */
 function speakerMethodMessage(method: string, label: string | null): string {
   return `A speaker has no methods, so it has no '${method}'. Use one of its properties instead, such as '${label === null ? "" : `${label}.`}title'.`;
-}
-
-/** The message for a timer, media, message, or camera view handle member that does not exist or cannot be assigned. */
-function handleMemberMessage(
-  handle: HandleKind,
-  name: string,
-  use: "read" | "assign" | "call",
-): string {
-  if (handle === "messageHandle")
-    return use === "call"
-      ? `Message handles have no method '${name}'. Use remove(), or change the message with its text property.`
-      : `Message handles have no property '${name}'. Use the text property.`;
-  if (handle === "camera")
-    return use === "call"
-      ? `Camera views have no method '${name}'. Hide them with hideCamera.`
-      : `Camera views have no property '${name}'. Use the placement property.`;
-  const kind = handle === "timer" ? "Timer" : "Media";
-  if (use === "call")
-    return `${kind} handles have no method '${name}'. Use pause(), resume(), or stop().`;
-  if (use === "read") return `${kind} handles have no property '${name}'.`;
-  return handle === "timer"
-    ? `Timer handle property '${name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`
-    : `Media handle property '${name}' cannot be assigned. You can assign position, remaining, or volume.`;
 }
 
 /**
@@ -10615,6 +10884,17 @@ function groupedUnitMessage(
   const amount = expressionText(right.kind === "durationLiteral" ? right.amount : right.operand);
   if (left === null || amount === null) return null;
   return `A duration and a number cannot be combined with '${expression.operator}'. Put the expression in parentheses with the unit after them, such as '${command} (${left} ${expression.operator} ${amount}) ${right.unit}'.`;
+}
+
+/**
+ * Whether an operation failed on a duration and a number, which have their own code (TSV035). `%` takes no duration
+ * whatever the other operand is.
+ */
+function mixesDurationAndNumber(operator: string, operands: readonly StaticType[]): boolean {
+  if (operands.length !== 2 || operator === "%") return false;
+  const duration = (type: StaticType): boolean => isScalar(type, "duration", "calendarDuration");
+  const [left, right] = [operands[0]!, operands[1]!];
+  return (duration(left) && isNumeric(right)) || (isNumeric(left) && duration(right));
 }
 
 function operatorMessage(
@@ -11380,6 +11660,8 @@ function interactionResultType(
       return TIME_TYPE;
     case "datetime":
       return DATETIME_TYPE;
+    case "password":
+      return STRING_TYPE;
   }
 }
 
