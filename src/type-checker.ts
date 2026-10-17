@@ -231,6 +231,7 @@ import {
   type StaticScalar,
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
+import { startValueMessage } from "./start-value-rules.js";
 import {
   argumentCountMessage,
   missingDefaultMessage,
@@ -1987,7 +1988,7 @@ class TypeChecker {
     this.#reachable = true;
     if (declaration.kind === "globalStatement") {
       yield* compileChild(this.#letTask(declaration, this.#project));
-      this.#rejectRandomSelection(declaration.initial);
+      this.#rejectRandomSelection(declaration.initial, declaration);
       return;
     }
     // A custom property keeps the type of its first value, as a property of an object (V30 §37), in an object that the
@@ -2030,7 +2031,7 @@ class TypeChecker {
         this.diagnostics.push(...presentationPropertyDiagnostics(name, property.value));
       const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
       this.#checkSpeakerProperty(name, property.value, type);
-      this.#rejectRandomSelection(property.value);
+      this.#rejectRandomSelection(property.value, declaration);
       if (!this.#keepsType(name)) continue;
       properties.set(
         name,
@@ -2309,7 +2310,7 @@ class TypeChecker {
    * Reports a start value that would select a random element: a list shown in `${...}`, or `.random`. A start value is
    * set up before the story runs and uses no random numbers (ADR 0022 §6); the runtime rejects a value of unknown type.
    */
-  #rejectRandomSelection(value: Expression): void {
+  #rejectRandomSelection(value: Expression, owner: GlobalStatement | SpeakerDeclaration): void {
     const work = [value];
     while (work.length > 0) {
       const expression = work.pop()!;
@@ -2320,7 +2321,7 @@ class TypeChecker {
       )
         this.#report(
           typeCode.randomStartValue,
-          "A start value cannot select a random element with '.random': it is set up at the start of the session, before the story runs. Pick the element in the story instead.",
+          startValueMessage(owner, { kind: "random" }),
           expression.span,
         );
       if (expression.kind === "stringLiteral")
@@ -2328,7 +2329,7 @@ class TypeChecker {
           if (part.kind === "stringInterpolation" && this.#mayBe(part.expression, isList))
             this.#report(
               typeCode.randomStartValue,
-              "A start value cannot show a list in '${...}', which selects a random element: it is set up at the start of the session, before the story runs. Show one element, as in '${items[0]}'.",
+              startValueMessage(owner, { kind: "shownList" }),
               part.expression.span,
             );
       for (const child of expressionChildren(expression)) work.push(child);

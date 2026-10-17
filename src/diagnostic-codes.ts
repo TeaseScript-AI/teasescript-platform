@@ -281,12 +281,12 @@ export const DIAGNOSTIC_CODES = {
     ...entry(["name pass", "type checker"], "error", "Invalid start value", DOCS.values),
     shared: {
       problems: "one",
-      texts: "different",
+      texts: "same",
       parts: [
         "a start value that says, asks, waits, plays media, calls a function, or uses a local " +
-          "or a later global",
-        "a start value that selects at random, with `.random` or a list in `${...}`, which " +
-          "needs the value's type",
+          "or a later global (`startValueMessage`)",
+        "the same rule with the same text for a start value that selects at random, with " +
+          "`.random` or a list in `${...}`, which needs the value's type",
       ],
     },
   },

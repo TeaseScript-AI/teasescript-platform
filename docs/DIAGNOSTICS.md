@@ -227,9 +227,9 @@ which each need a code of their own.
 - `TSV043` (one problem, different texts)
   - type checker: every operation that its operands do not support, among them a speaker property that no declaration or assignment gives a speaker the read may reach
   - plan analysis: a speaker property that a way to the read misses (V30 §37)
-- `TSV055` (one problem, different texts)
-  - name pass: a start value that says, asks, waits, plays media, calls a function, or uses a local or a later global
-  - type checker: a start value that selects at random, with `.random` or a list in `${...}`, which needs the value's type
+- `TSV055` (one problem, same text)
+  - name pass: a start value that says, asks, waits, plays media, calls a function, or uses a local or a later global (`startValueMessage`)
+  - type checker: the same rule with the same text for a start value that selects at random, with `.random` or a list in `${...}`, which needs the value's type
 - `TST004` (one problem, same text)
   - parser: a tag that a file header gives two different numbers (`conflictingTagMessage`)
   - compiler: the same rule with the same text, naming the image, for the keywords of an image

@@ -77,6 +77,7 @@ import {
 } from "./project-globals.js";
 import { PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 import { duplicateEntryMessage } from "./object-properties.js";
+import { startValueMessage } from "./start-value-rules.js";
 import {
   argumentCountMessage,
   argumentsTaken,
@@ -2502,9 +2503,6 @@ class SemanticValidator {
     this.#validateExpression(value, scope, contextualSpeaker);
     this.#startValue = false;
     const speaker = owner.kind === "speakerDeclaration";
-    const subject = speaker
-      ? `The properties of speaker '${owner.name.name}'`
-      : `The start value of global '${owner.name.name}'`;
     const order = this.project.order(owner);
     const work = [value];
     while (work.length > 0) {
@@ -2520,7 +2518,7 @@ class SemanticValidator {
         case "showPermanentButtonExpression":
           this.#report(
             semanticCode.invalidStartValue,
-            `${subject} cannot say, ask the player, wait, or play media: ${speaker ? "a speaker is set up" : "it is set"} at the start of the session, before the story runs.${speaker ? "" : ` Give it a plain start value, and assign the answer later, as in '${owner.name.name} = ...'.`}`,
+            startValueMessage(owner, { kind: "effect" }),
             expression.span,
             true,
           );
@@ -2538,7 +2536,7 @@ class SemanticValidator {
           }
           this.#report(
             semanticCode.invalidStartValue,
-            `${subject} cannot call a function: ${speaker ? "a speaker is set up" : "it is set"} at the start of the session, before the story runs. Use literals, globals declared before it, operators, and 'load ..., default:'.`,
+            startValueMessage(owner, { kind: "call" }),
             expression.span,
             true,
           );
@@ -2550,9 +2548,15 @@ class SemanticValidator {
             continue;
           const used = binding.project;
           if (used === undefined) {
+            const value =
+              owner.kind === "globalStatement" ? unwrapParentheses(owner.initial) : null;
             this.#report(
               semanticCode.invalidStartValue,
-              this.#localStartValueMessage(owner, expression.name),
+              startValueMessage(owner, {
+                kind: "local",
+                name: expression.name,
+                assigned: value?.kind === "identifier" ? value.name : "...",
+              }),
               expression.span,
               true,
             );
@@ -2562,9 +2566,12 @@ class SemanticValidator {
           ) {
             this.#report(
               semanticCode.invalidStartValue,
-              used.order === order
-                ? `The start value of global '${owner.name.name}' cannot use '${owner.name.name}' itself, which has no value yet.`
-                : `${subject} cannot use '${expression.name}', which gets its value later: globals and speakers are set up in order, main.tease first, then the other files by path, each from top to bottom. Declare '${expression.name}' before '${owner.name.name}'.`,
+              startValueMessage(
+                owner,
+                used.order === order
+                  ? { kind: "itself" }
+                  : { kind: "later", name: expression.name },
+              ),
               expression.span,
               true,
             );
@@ -2575,17 +2582,6 @@ class SemanticValidator {
           for (const child of expressionChildren(expression)) work.push(child);
       }
     }
-  }
-
-  #localStartValueMessage(owner: GlobalStatement | SpeakerDeclaration, local: string): string {
-    const name = owner.name.name;
-    if (owner.kind === "speakerDeclaration")
-      return `The properties of speaker '${name}' cannot use '${local}': a speaker is set up at the start of the session, before '${local}' has a value. Use literals, globals declared before it, operators, and 'load ..., default:'.`;
-    if (owner.assignment !== null)
-      return `The default of global '${name}' cannot use '${local}': it is the value '${name}' has from the start of the session, before '${local}' has one. Use a literal or a global declared before it.`;
-    const value = unwrapParentheses(owner.initial);
-    const assigned = value.kind === "identifier" ? value.name : "...";
-    return `Global '${name}' needs a value from the start of the session, before the story runs, so it cannot start with '${local}'. Add a start value, as in 'global ${name} = ${assigned}, default: 0', or write 'global ${name} = 0' and later '${name} = ${assigned}'.`;
   }
 
   #validateSpeakerReference(name: string, span: SourceSpan, scope: SemanticScope): boolean {
