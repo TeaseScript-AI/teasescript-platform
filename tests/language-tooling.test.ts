@@ -563,6 +563,36 @@ test("token classes take a message mode, a skip word, and instant from the parse
   );
 });
 
+test("token classes make a key or a label in name: a name, also a protected word", () => {
+  const source = [
+    'let o = { min: 1, set: 2, string: "s" }',
+    "let d = dict{ max: 3 }",
+    'let m = max(o.min, d.get("cap", default: 0))',
+    'let n = load("count", default: 0)',
+    'let c = load "count", default: 0',
+    "switch m {",
+    '  case 1 { say "one" }',
+    '  default { say "other" }',
+    "}",
+  ].join("\n");
+  assert.deepEqual(compileSource(`${source}\nexit`).diagnostics, []);
+  assert.deepEqual(
+    tokenClasses(source).filter((token) => /^(min|set|string|max|default):/u.test(token)),
+    [
+      "min:name",
+      "set:name",
+      "string:name",
+      "max:name",
+      "max:command",
+      "min:name",
+      "default:name",
+      "default:name",
+      "default:name",
+      "default:keyword",
+    ],
+  );
+});
+
 test("token classes keep a string's text, its interpolations, and their code apart", () => {
   assert.deepEqual(tokenClasses('say "Hi ${name}!"'), [
     "say:keyword",

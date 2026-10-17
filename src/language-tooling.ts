@@ -445,8 +445,9 @@ export function applyLanguageTextEdits(
  * read as a regex starts one (V30 §8). A word's class comes from the protected names (V30 §38): a grammar keyword is a
  * `keyword`, a protected type name a `type`, and a protected engine name, a command, built-in function, or engine
  * reference such as `player`, a `command`; a word in a written type is a `type`, a message mode, skip word, or `instant`
- * where the parse read it so a `keyword`, and a unit and a word after `.` are `name`s. A source with errors still has a
- * class for every token the lexer reads. Whitespace and line breaks have none.
+ * where the parse read it so a `keyword`, and a unit, a word after `.`, and a word before `:`, a key, a named
+ * argument's label, or a declared name, are `name`s. A source with errors still has a class for every token the lexer
+ * reads. Whitespace and line breaks have none.
  */
 export function classifyTokens(
   text: string,
@@ -469,7 +470,7 @@ export function classifyTokens(
       typeEnd = Math.max(typeEnd, types[type++]!.end.offset);
     const kind = modifiers.has(start)
       ? "keyword"
-      : tokenClass(token, tokens[index - 1], start < typeEnd, unitEnds);
+      : tokenClass(token, tokens[index - 1], tokens[index + 1], start < typeEnd, unitEnds);
     if (kind !== null) classified.push(Object.freeze({ kind, span: token.span }));
   }
   return Object.freeze(classified);
@@ -497,16 +498,19 @@ const PUNCTUATION: ReadonlySet<TokenKind> = new Set([
 function tokenClass(
   token: Token,
   previous: Token | undefined,
+  next: Token | undefined,
   inType: boolean,
   unitEnds: ReadonlySet<number>,
 ): LanguageTokenClass | null {
+  // A property, a method, a key, or a label in `name:` is no protected name.
+  const named = previous?.kind === TokenKind.Dot || next?.kind === TokenKind.Colon;
   switch (token.kind) {
     case TokenKind.Newline:
     case TokenKind.EndOfFile:
       return null;
     case TokenKind.Identifier: {
-      // A property, a method, or a unit is no protected name.
-      if (previous?.kind === TokenKind.Dot || unitEnds.has(token.span.end.offset)) return "name";
+      // A unit is none either.
+      if (named || unitEnds.has(token.span.end.offset)) return "name";
       if (inType || TYPE_NAMES.has(token.lexeme)) return "type";
       if (GRAMMAR_KEYWORDS.has(token.lexeme)) return "keyword";
       return ENGINE_NAMES.has(token.lexeme) ? "command" : "name";
@@ -525,8 +529,8 @@ function tokenClass(
   }
   if (!token.kind.startsWith("keyword"))
     return PUNCTUATION.has(token.kind) ? "punctuation" : "operator";
-  // After `.` a keyword names a property, and in a written type `set`, `speaker`, and `null` name types.
-  if (previous?.kind === TokenKind.Dot) return "name";
+  if (named) return "name";
+  // In a written type `set`, `speaker`, and `null` name types.
   return inType ? "type" : "keyword";
 }
 
