@@ -9,6 +9,7 @@ import {
   WEIGHTED_SOURCE_MESSAGE,
 } from "../list-function-rules.js";
 import { percentageFailure } from "../numeric-functions.js";
+import { RANDOM_CONTRACTS } from "../random-functions.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { dateTimeMilliseconds, daysBetween } from "../temporal.js";
@@ -209,12 +210,8 @@ export function listStatistic(
   return amounts.kind === "numbers" ? (result === 0 ? 0 : result) : exactDuration(result);
 }
 
-/** A percentage from 0 through 100, as `percentile` and `chance` take it. */
-export function percentage(
-  name: string,
-  value: SerializableRuntimeValue,
-  span: SourceSpan,
-): number {
+/** A percentage from 0 through 100, as `percentile` takes it. */
+function percentage(name: string, value: SerializableRuntimeValue, span: SourceSpan): number {
   if (typeof value !== "number")
     throw fault(
       "TSR059",
@@ -512,7 +509,7 @@ export function predict(
 
 /**
  * The choices and weights of `randomWeighted` (V30 §4): the keys of a dict and its values, or the elements of a list
- * and the property `weight` of each. Weights are numbers of at least 0, and at least one is above 0.
+ * and the property `weight` of each. Weights are numbers, valid as its contract says (see `RANDOM_CONTRACTS`).
  */
 export function weightedChoices(
   positional: readonly SerializableRuntimeValue[],
@@ -542,6 +539,7 @@ export function weightedChoices(
       `${name}(...) of an empty ${dict ? "dict" : "list"} has nothing to choose.`,
       span,
     );
+  const contract = RANDOM_CONTRACTS[name];
   const numbers = weights.map((weight) => {
     if (typeof weight !== "number")
       throw fault(
@@ -549,12 +547,12 @@ export function weightedChoices(
         `${name}(...) needs numbers as weights, not ${describeRuntimeValue(weight)}.`,
         span,
       );
-    if (weight < 0)
-      throw fault("TSR039", `${name}(...) needs weights of at least 0, not ${weight}.`, span);
+    const problem = contract.weightProblem(weight);
+    if (problem !== undefined) throw fault("TSR039", problem, span);
     return weight;
   });
-  if (!numbers.some((weight) => weight > 0))
-    throw fault("TSR039", `${name}(...) needs at least one weight above 0.`, span);
+  const problem = contract.weightsProblem(numbers);
+  if (problem !== undefined) throw fault("TSR039", problem, span);
   return { choices, weights: numbers };
 }
 

@@ -66,17 +66,18 @@ const START_SOURCES: readonly ((value: string, use: string) => string)[] = [
 ];
 
 test("built-ins with fixed arguments check their number and names", () => {
-  for (const [source, code] of [
-    ["say chance()\nexit", "TSV020"],
-    ["say chance(1, 2)\nexit", "TSV020"],
-    ["say chance(percent: 5)\nexit", "TSV022"],
-    ["say randomInteger()\nexit", "TSV020"],
-    ['say escapeMarkup("a", "b")\nexit', "TSV020"],
-    ["say random(1)\nexit", "TSV020"],
+  for (const [source, codes] of [
+    ["say chance()\nexit", ["TSV020"]],
+    ["say chance(1, 2)\nexit", ["TSV020"]],
+    // `chance` takes numbers as a numeric function does: a name, and then the number of arguments without one.
+    ["say chance(percent: 5)\nexit", ["TSV022", "TSV020"]],
+    ["say randomInteger()\nexit", ["TSV020"]],
+    ['say escapeMarkup("a", "b")\nexit', ["TSV020"]],
+    ["say random(1)\nexit", ["TSV020"]],
   ] as const)
     assert.deepEqual(
       errors(source).map(([found]) => found),
-      [code],
+      codes,
       source,
     );
   assert.equal(

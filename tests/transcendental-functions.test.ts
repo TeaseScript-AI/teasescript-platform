@@ -4,6 +4,7 @@ import test from "node:test";
 import { ANGLE_FUNCTIONS, angleValue } from "../src/angle.js";
 import { compileSource } from "../src/compiler.js";
 import { NUMERIC_FUNCTIONS } from "../src/numeric-functions.js";
+import { RANDOM_CONTRACTS } from "../src/random-functions.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -42,9 +43,7 @@ function apply(name: string, ...values: number[]): number | undefined {
     );
     return typeof result === "number" ? result : "degrees" in result ? result.degrees : undefined;
   }
-  const result = NUMERIC_FUNCTIONS.get(name)!.apply(values, {}, () => {
-    throw new Error("no draws");
-  });
+  const result = NUMERIC_FUNCTIONS.get(name)!.apply(values, {});
   return typeof result === "number" ? result : undefined;
 }
 
@@ -128,15 +127,15 @@ test("random distributions draw from the session generator", () => {
     assert.equal(point, 4);
   }
   assert.deepEqual(diagnostics("say randomNormal(1, -1)\nexit"), [
-    ["TSV043", "randomNormal(...) needs a spread of at least 0, not -1.", "randomNormal(1, -1)"],
+    ["TSV043", "randomNormal(...) needs a spread of at least 0, not -1.", "-1"],
   ]);
   assert.deepEqual(failure(`${DYNAMIC}say randomBeta(dynamic(0), 1)\nexit`), [
     "TSR039",
-    "randomBeta(...) needs an alpha and a beta above 0, not 0 and 1.",
+    "randomBeta(...) needs an alpha above 0, not 0.",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}say randomPert(dynamic(5), 1, 2)\nexit`), [
     "TSR039",
-    "randomPert(...) needs min <= mostLikely <= max, not 5, 1, and 2.",
+    "randomPert(...) needs min <= mostLikely <= max, but min 5 is above max 2.",
   ]);
 });
 
@@ -151,11 +150,15 @@ test("random distributions follow their means", () => {
     state >>>= 0;
     return state / 4294967296;
   };
-  const mean = (name: string, values: number[], expected: number, tolerance: number): void => {
-    const sampler = NUMERIC_FUNCTIONS.get(name)!;
+  const mean = (
+    name: "randomNormal" | "randomBeta" | "randomPert",
+    values: number[],
+    expected: number,
+    tolerance: number,
+  ): void => {
     let total = 0;
     for (let index = 0; index < count; index += 1) {
-      const sample = sampler.apply(values, {}, draw);
+      const sample = RANDOM_CONTRACTS[name].sample(values, draw);
       if (typeof sample !== "number") throw new Error(`${name} failed: ${sample.failure}`);
       total += sample;
     }

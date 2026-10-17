@@ -1,20 +1,14 @@
 import { isConversion } from "../conversions.js";
+import { isRandomFunction } from "../random-functions.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import type { ExpressionPlan, SayInstruction } from "../plan/model.js";
 
 /**
- * Engine functions that, apart from drawing from the session generator, only read copies of their arguments and the
- * scene clock, and return a new value; so do the conversions (see `Conversion`). A host built-in runs code the engine
- * has not checked, so it is not listed.
+ * Engine functions that only read copies of their arguments and the scene clock, and return a new value; so do the
+ * conversions and the random functions, apart from drawing from the session generator (see `Conversion` and
+ * `RandomFunction`). A host built-in runs code the engine has not checked, so it is not listed.
  */
 const READING_FUNCTIONS: ReadonlySet<string> = new Set([
-  "random",
-  "chance",
-  "randomInteger",
-  "randomWeighted",
-  "randomNormal",
-  "randomBeta",
-  "randomPert",
   "hashText",
   "round",
   "floor",
@@ -136,7 +130,9 @@ function changesOnlyGenerator(root: ExpressionPlan): boolean {
       case "call":
         if (
           node.callee.kind === "identifier"
-            ? !READING_FUNCTIONS.has(node.callee.name) && !isConversion(node.callee.name)
+            ? !READING_FUNCTIONS.has(node.callee.name) &&
+              !isConversion(node.callee.name) &&
+              !isRandomFunction(node.callee.name)
             : node.callee.kind !== "property" || !READING_METHODS.has(node.callee.name)
         )
           return false;

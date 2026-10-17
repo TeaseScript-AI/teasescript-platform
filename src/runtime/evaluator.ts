@@ -52,7 +52,13 @@ import {
   lazyDefaultCallOperation,
 } from "../plan/expression-children.js";
 import type { LazyDefaultOperation } from "../lazy-defaults.js";
-import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
+import { NUMERIC_FUNCTIONS, type NumberSignature } from "../numeric-functions.js";
+import {
+  isRandomFunction,
+  numbersProblem,
+  RANDOM_CONTRACTS,
+  type RandomFunction,
+} from "../random-functions.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
   ANGLE_FUNCTIONS,
@@ -78,12 +84,15 @@ import {
   linearRegression,
   listStatistic,
   listValues,
-  percentage,
   predict,
   weightedChoices,
   weightedIndex,
 } from "./list-statistics.js";
-import { CORE_RUNTIME_BUILTINS, type ConversionName } from "../language-facts.js";
+import {
+  CORE_RUNTIME_BUILTINS,
+  type ConversionName,
+  type RandomFunctionName,
+} from "../language-facts.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { internalFault, RuntimeFault } from "./errors.js";
 import type { InstructionTraceCollector, RuntimeInstructionObserver } from "./instruction-trace.js";
@@ -111,13 +120,13 @@ import {
 } from "./prepared-references.js";
 import { nextXorShift32, type RandomSource } from "./random.js";
 import {
-  sampleChance,
   sampleIndex,
   sampleOrder,
   sampleRangeInteger,
   type PrimitiveDraw,
 } from "./random-draws.js";
 import {
+  naturalOf,
   RandomControlSignal,
   type RandomControl,
   type RandomNatural,
@@ -2367,16 +2376,16 @@ export class Evaluator {
           expression.span,
         );
       if (name === "hashText") return hashedText(positional, named, expression.span);
+      if (isRandomFunction(name))
+        return this.#randomFunction(name, positional, named, expression.span);
       if (NUMERIC_FUNCTIONS.has(name))
-        return this.#numericFunction(name, positional, named, expression.span);
+        return numericFunction(name, positional, named, expression.span);
       if (ANGLE_FUNCTIONS.has(name)) return angleFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))
         return this.#minMaxBuiltin(name, positional, named, expression.span);
       if (LIST_STATISTICS.has(name)) return listStatistic(name, positional, named, expression.span);
       if (name === "linearRegression") return linearRegression(positional, named, expression.span);
       if (name === "predict") return predict(positional, named, expression.span);
-      if (name === "randomWeighted")
-        return this.#randomWeighted(positional, named, expression.span);
       if (name === "script") return scriptReference(positional, named, expression.span);
       const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
@@ -2408,15 +2417,6 @@ export class Evaluator {
       let returned: SerializableRuntimeValue;
       try {
         switch (name) {
-          case "random":
-            returned = this.#randomBuiltin(call);
-            break;
-          case "chance":
-            returned = this.#chanceBuiltin(call);
-            break;
-          case "randomInteger":
-            returned = this.#randomIntegerBuiltin(call);
-            break;
           case "escapeMarkup":
             returned = this.#escapeMarkupBuiltin(call);
             break;
@@ -3482,45 +3482,48 @@ export class Evaluator {
     return random;
   }
 
-  #randomBuiltin(call: RuntimeCapabilityCall): number {
-    this.#expectBuiltinArguments("random", call);
-    let random = this.#draw(call.span, "random", null, null, (draw) => draw());
-    if (this.control !== null)
-      random = outcomeNumber(
-        this.#resolve(call.span, "random", { kind: "number", value: random }, () => ({
-          kind: "unit",
-        })),
+  /**
+   * A call of a random function (see `RANDOM_CONTRACTS`), whose arguments are checked before it draws. A debug trace
+   * records its draws as one record under its name, and under random control a host may choose the outcome.
+   */
+  #randomFunction(
+    name: RandomFunctionName,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    const random: RandomFunction = RANDOM_CONTRACTS[name];
+    if (random.takes === "choices") return this.#randomWeighted(positional, named, span);
+    if (random.takes === "range") {
+      const problem = argumentShapeProblem(
+        name,
+        positionalShape(random.parameters),
+        positional.length,
+        Object.keys(named),
       );
-    this.trace?.randomResult(random);
-    return random;
-  }
-
-  #chanceBuiltin(call: RuntimeCapabilityCall): boolean {
-    this.#expectBuiltinArguments("chance", call);
-    const percent = percentage("chance", call.positional[0]!, call.span);
-    let chosen = this.#draw(call.span, "chance", null, null, (draw) => sampleChance(draw, percent));
-    if (this.control !== null)
-      chosen = outcomeBoolean(
-        this.#resolve(call.span, "chance", { kind: "boolean", value: chosen }, () => ({
-          kind: "chance",
-          percent,
-        })),
-      );
-    this.trace?.randomResult(chosen);
-    return chosen;
-  }
-
-  #randomIntegerBuiltin(call: RuntimeCapabilityCall): number {
-    this.#expectBuiltinArguments("randomInteger", call);
-    const range = call.positional[0]!;
-    if (!isRange(range)) {
-      throw fault(
-        "TSR040",
-        `randomInteger(range) needs a range such as '1..=6', but this is ${describeShownValue(range)}.`,
-        call.span,
-      );
+      if (problem !== undefined) throw fault("TSR028", problem.message, span);
+      const range = positional[0]!;
+      if (!isRange(range))
+        throw fault(
+          "TSR040",
+          `${name}(range) needs a range such as '1..=6', but this is ${describeShownValue(range)}.`,
+          span,
+        );
+      return this.randomIntegerInRange(range, span, `${name}(range)`, name);
     }
-    return this.randomIntegerInRange(range, call.span, "randomInteger(range)", "randomInteger");
+    const { numbers } = callNumbers(name, random, positional, named, span);
+    const invalid = numbersProblem(random, numbers);
+    if (invalid !== undefined) throw fault("TSR039", invalid, span);
+    let result = this.#draw(span, name, null, null, (draw) => random.sample(numbers, draw));
+    if (this.control !== null) {
+      const resolved = this.#resolve(span, name, naturalOf(result), () => random.support(numbers));
+      // A natural failure stays the draw's failure; a chosen outcome replaces it.
+      if (resolved.kind !== "failure")
+        result = random.result === "boolean" ? outcomeBoolean(resolved) : outcomeNumber(resolved);
+    }
+    if (typeof result === "object") throw fault(result.code, result.failure, span);
+    this.trace?.randomResult(result);
+    return result;
   }
 
   /** Draws one whole number from a non-empty integer range with the session RNG. */
@@ -3729,59 +3732,6 @@ export class Evaluator {
     const chosen = cloneSerializableValue(choices[index]!);
     this.trace?.randomResult(chosen);
     return chosen;
-  }
-
-  /** A numeric function of numbers (V30 §13); a call without a result fails. */
-  #numericFunction(
-    name: string,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    span: SourceSpan,
-  ): number {
-    const { parameters, named: names = [], apply, random } = NUMERIC_FUNCTIONS.get(name)!;
-    const problem = argumentShapeProblem(
-      name,
-      { ...positionalShape(parameters), names },
-      positional.length,
-      Object.keys(named),
-    );
-    if (problem !== undefined) throw fault("TSR028", problem.message, span);
-    const number = (value: SerializableRuntimeValue, place: string): number => {
-      if (typeof value === "number") return value;
-      throw fault(
-        "TSR059",
-        `${name}(...) needs a number${place}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : isAngle(value) ? " Convert it to a number of degrees with toDeg(...) first." : ""}`,
-        span,
-      );
-    };
-    const numbers = positional.map((value) => number(value, ""));
-    const options = Object.fromEntries(
-      Object.entries(named).map(([key, value]) => [key, number(value, ` as its ${key}:`)]),
-    );
-    const invalid = random?.(numbers);
-    if (invalid !== undefined) throw fault(invalid.code, invalid.failure, span);
-    // A trace records a random function's draws as one record, like a shuffle.
-    // EVIDENCE: invariant: each random numeric function is named like its trace operation, such as randomNormal.
-    const operation = name as RuntimeDebugRandomOperation;
-    let result =
-      random === undefined
-        ? apply(numbers, options, NO_DRAWS)
-        : this.#draw(span, operation, null, null, (draw) => apply(numbers, options, draw));
-    if (random !== undefined && this.control !== null) {
-      const resolved = this.#resolve(
-        span,
-        operation,
-        typeof result === "number"
-          ? { kind: "number", value: result }
-          : { kind: "failure", code: result.code, message: result.failure },
-        () => distributionSupport(name, numbers),
-      );
-      // A natural failure stays the draw's failure; a chosen outcome replaces it.
-      if (resolved.kind !== "failure") result = outcomeNumber(resolved);
-    }
-    if (typeof result !== "number") throw fault(result.code, result.failure, span);
-    if (random !== undefined) this.trace?.randomResult(result);
-    return result;
   }
 
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
@@ -4138,11 +4088,53 @@ export class Evaluator {
 
 const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
 
-/** The support of a random distribution function's draw, from its checked arguments. */
-function distributionSupport(name: string, numbers: readonly number[]): RandomSupport {
-  if (name === "randomNormal") return { kind: "normal", mean: numbers[0]!, spread: numbers[1]! };
-  if (name === "randomBeta") return { kind: "beta", alpha: numbers[0]!, beta: numbers[1]! };
-  return { kind: "pert", min: numbers[0]!, mostLikely: numbers[1]!, max: numbers[2]! };
+/** A numeric function of numbers (V30 §13); a call without a result fails. */
+function numericFunction(
+  name: string,
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  span: SourceSpan,
+): number {
+  const numeric = NUMERIC_FUNCTIONS.get(name)!;
+  const { numbers, options } = callNumbers(name, numeric, positional, named, span);
+  const result = numeric.apply(numbers, options);
+  if (typeof result !== "number") throw fault(result.code, result.failure, span);
+  return result;
+}
+
+/**
+ * The numbers of a call of a function whose every argument is a number, such as a numeric function or `chance`, by
+ * position and by name; a call of another shape, or with a value that is not a number, fails.
+ */
+function callNumbers(
+  name: string,
+  { parameters, named: names = [] }: NumberSignature,
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  span: SourceSpan,
+): { readonly numbers: readonly number[]; readonly options: Readonly<Record<string, number>> } {
+  const problem = argumentShapeProblem(
+    name,
+    { ...positionalShape(parameters), names },
+    positional.length,
+    Object.keys(named),
+    parameters.length > 0,
+  );
+  if (problem !== undefined) throw fault("TSR028", problem.message, span);
+  const number = (value: SerializableRuntimeValue, place: string): number => {
+    if (typeof value === "number") return value;
+    throw fault(
+      "TSR059",
+      `${name}(...) needs a number${place}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : isAngle(value) ? " Convert it to a number of degrees with toDeg(...) first." : ""}`,
+      span,
+    );
+  };
+  return {
+    numbers: positional.map((value) => number(value, "")),
+    options: Object.fromEntries(
+      Object.entries(named).map(([key, value]) => [key, number(value, ` as its ${key}:`)]),
+    ),
+  };
 }
 
 /*
@@ -4172,11 +4164,6 @@ function outcomeOrder(outcome: RandomNatural): readonly number[] {
     throw new Error("A random draw resolved to another kind of outcome.");
   return outcome.order;
 }
-
-/** The draws of a numeric function that is not random: it never takes one. */
-const NO_DRAWS: PrimitiveDraw = () => {
-  throw new Error("A numeric function that is not random drew a random number.");
-};
 
 /** List, set, and dict methods that change their receiver in place. */
 const MUTATING_METHODS: ReadonlySet<string> = new Set([
@@ -5011,8 +4998,9 @@ interface EvaluationFrame {
 const callingExpressions = new WeakMap<ExpressionPlan, boolean>();
 
 /**
- * Whether evaluating an expression can run a call that may change a value: any call but a conversion, which only reads
- * (see `Conversion`). Results are cached per plan node, so nested checks stay linear.
+ * Whether evaluating an expression can run a call that may change a value: any call but a conversion's or a random
+ * function's, which only read (see `Conversion` and `RandomFunction`). Results are cached per plan node, so nested
+ * checks stay linear.
  */
 function mayRunCall(expression: ExpressionPlan): boolean {
   // A node is decided after its children, which are pushed above it.
@@ -5025,7 +5013,8 @@ function mayRunCall(expression: ExpressionPlan): boolean {
     if (
       current.expression.kind === "call" &&
       (current.expression.callee.kind !== "identifier" ||
-        !isConversion(current.expression.callee.name))
+        (!isConversion(current.expression.callee.name) &&
+          !isRandomFunction(current.expression.callee.name)))
     ) {
       callingExpressions.set(current.expression, true);
     } else if (current.children !== null) {

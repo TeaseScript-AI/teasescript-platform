@@ -9,7 +9,8 @@ import {
 } from "./list-function-rules.js";
 import { percentageFailure } from "./numeric-functions.js";
 import { RANGE_LIST_FIX, type OperationProblem } from "./operation-checks.js";
-import { staticVisibleText } from "./static-evaluation.js";
+import { RANDOM_CONTRACTS } from "./random-functions.js";
+import { staticChoiceValue, staticVisibleText } from "./static-evaluation.js";
 import {
   copyType,
   describeValue,
@@ -38,7 +39,6 @@ export const LIST_FUNCTIONS: ReadonlySet<string> = new Set([
   "stddev",
   "linearRegression",
   "predict",
-  "randomWeighted",
 ]);
 
 /** The problems with a call of a list function, the properties it reads by name, and its result type. */
@@ -84,25 +84,36 @@ interface Context {
   readonly reads: ListPropertyRead[];
 }
 
-/**
- * Checks a call of a list function, or of `min` or `max` with one list, and gives its result type. `known` gives a
- * number the compiler can see, such as a constant percentage.
- */
+/** A number the compiler can see, such as a constant percentage or weight, or `undefined`. */
+type Known = (expression: Expression) => number | undefined;
+
+/** Checks a call of a list function, or of `min` or `max` with one list, and gives its result type. */
 export function listFunctionCheck(
   name: string,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
-  known: (expression: Expression) => number | undefined,
+  known: Known,
 ): ListFunctionCheck {
   const context: Context = { name, call, typeOf, problems: [], reads: [] };
   const type = listFunctionType(context, known);
   return { problems: context.problems, reads: context.reads, type };
 }
 
-function listFunctionType(
-  context: Context,
-  known: (expression: Expression) => number | undefined,
-): StaticType {
+/**
+ * Checks a call of `randomWeighted` (see `RANDOM_CONTRACTS`), which reads its weights as a list function reads values,
+ * and gives its result type.
+ */
+export function weightedChoiceCheck(
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+  known: Known,
+): ListFunctionCheck {
+  const context: Context = { name: "randomWeighted", call, typeOf, problems: [], reads: [] };
+  const type = weightedType(context, known);
+  return { problems: context.problems, reads: context.reads, type };
+}
+
+function listFunctionType(context: Context, known: Known): StaticType {
   const { name, call } = context;
   switch (name) {
     case "linearRegression": {
@@ -143,8 +154,6 @@ function listFunctionType(
     }
     case "predict":
       return predictType(context);
-    case "randomWeighted":
-      return weightedType(context);
     default: {
       // `sum`, `average`, `median`, `percentile`, `stddev`, and `min` or `max` of one list.
       const percentile = name === "percentile";
@@ -436,10 +445,13 @@ function knownKind(type: StaticType): ValueKind | undefined {
 }
 
 /** `randomWeighted`: a key of a dict of weights, or a copy of an element of a list of objects with `weight:`. */
-function weightedType(context: Context): StaticType {
+function weightedType(context: Context, known: Known): StaticType {
   const { call, typeOf } = context;
   if (!shape(context)) return UNKNOWN_TYPE;
   const source = call.arguments.find((argument) => argument.kind === "positionalArgument")!.value;
+  // A dict or list written in the call, whose weights the compiler may see.
+  let written = source;
+  while (written.kind === "parenthesizedExpression") written = written.expression;
   const weight = named(call, "weight");
   const type = forUse(typeOf(source));
   if (!isKnown(type)) {
@@ -450,16 +462,82 @@ function weightedType(context: Context): StaticType {
   const value = resolved(type);
   if (value.kind === "dict") {
     if (weight !== undefined) problem(context, DICT_WEIGHTS_MESSAGE, weight);
-    else valueKind(context, value.element, ["number"], source);
+    else {
+      valueKind(context, value.element, ["number"], source);
+      if (written.kind === "dictLiteral") {
+        // Keys the compiler knows differ, but a later key known only at runtime may replace an entry, and a later known
+        // key an entry whose key is known only at runtime.
+        const weights: Weight[] = [];
+        let laterKeysKnown = true;
+        for (let index = written.entries.length - 1; index >= 0; index -= 1) {
+          const entry = written.entries[index]!;
+          const keyKnown = typeof staticChoiceValue(entry.key)?.value === "string";
+          weights[index] = {
+            at: entry.value,
+            value: known(entry.value),
+            kept: index === written.entries.length - 1 || (keyKnown && laterKeysKnown),
+          };
+          laterKeysKnown &&= keyKnown;
+        }
+        weightProblems(context, source, weights);
+      }
+    }
     return STRING_TYPE;
   }
   if (value.kind === "list") {
     if (weight === undefined) problem(context, LIST_WEIGHT_MESSAGE, source);
-    else valueKind(context, valuesType(context, source, weight, "weight"), ["number"], weight);
+    else {
+      valueKind(context, valuesType(context, source, weight, "weight"), ["number"], weight);
+      const key = staticVisibleText(weight);
+      if (written.kind === "listLiteral" && key !== undefined)
+        weightProblems(
+          context,
+          source,
+          written.elements.map((element) => {
+            const property =
+              element.kind === "objectLiteral"
+                ? element.properties.find((one) => one.name.name === key)
+                : undefined;
+            return {
+              at: property?.value ?? element,
+              value: property === undefined ? undefined : known(property.value),
+              kept: true,
+            };
+          }),
+        );
+    }
     return copyType(value.element);
   }
   problem(context, WEIGHTED_SOURCE_MESSAGE, source);
   return UNKNOWN_TYPE;
+}
+
+/** A weight written in a call of `randomWeighted`, and whether the dict that holds it keeps it. */
+interface Weight {
+  readonly at: Expression;
+  readonly value: number | undefined;
+  readonly kept: boolean;
+}
+
+/**
+ * The weights of a dict or list written in the call, as the runtime checks them (see `RANDOM_CONTRACTS`): the first
+ * weight the compiler can see that is invalid, unless a later entry may replace it (`kept`), and otherwise, when it can
+ * see every weight, all of them together.
+ */
+function weightProblems(context: Context, source: Expression, weights: readonly Weight[]): void {
+  const contract = RANDOM_CONTRACTS.randomWeighted;
+  for (const weight of weights) {
+    const message =
+      weight.kept && weight.value !== undefined ? contract.weightProblem(weight.value) : undefined;
+    if (message !== undefined) return problem(context, message, weight.at);
+  }
+  const values = weights.flatMap((weight) => weight.value ?? []);
+  // The weights the runtime reads are some of these, so they fail together when all of these do.
+  const message =
+    values.length > 0 && values.length === weights.length
+      ? contract.weightsProblem(values)
+      : undefined;
+  if (message !== undefined) problem(context, message, source);
 }
 
 /**
