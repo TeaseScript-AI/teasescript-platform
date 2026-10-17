@@ -127,33 +127,30 @@ test("a key the dict does not have fails, gives false, gives the default, or is 
   ]);
 });
 
-test("a key that is not text has one text when compiled and when run", () => {
+test("a key that is not text has one text when compiled and when run, which names the key", () => {
+  const notText =
+    'A dict key is text (string), but this is a whole number (integer). Write a number key as text, as in "${count}".';
   for (const use of [
-    "toys[id]",
-    "toys.contains(id)",
-    "toys.get(id, default: 0)",
-    "dict{ [id]: 1 }",
+    "toys[count]",
+    "toys.contains(count)",
+    "toys.get(count, default: 0)",
+    "dict{ [count]: 1 }",
   ]) {
-    const compiled = errors(`${TOYS}let id = 5\nsay ${use}\nexit`);
+    assert.deepEqual(errors(`${TOYS}let count = 5\nsay ${use}\nexit`), [["TSV043", notText]], use);
     assert.deepEqual(
-      compiled,
-      [
-        [
-          "TSV043",
-          'A dict key is text (string), but this is a whole number (integer). Write a number key as text, as in "${id}".',
-        ],
-      ],
-      use,
-    );
-    assert.deepEqual(
-      failure(`${DYNAMIC}${TOYS}let id = dynamic(5)\nsay ${use}\nexit`),
-      ["TSR062", compiled[0]![1]],
+      failure(`${DYNAMIC}${TOYS}let count = dynamic(5)\nsay ${use}\nexit`),
+      ["TSR062", notText],
       use,
     );
   }
-  assert.deepEqual(failure(`${DYNAMIC}${TOYS}let id = dynamic(5)\ntoys[id] = 3\nexit`), [
+  assert.deepEqual(failure(`${DYNAMIC}${TOYS}let count = dynamic(5)\ntoys[count] = 3\nexit`), [
     "TSR062",
-    'A dict key is text (string), but this is a whole number (integer). Write a number key as text, as in "${id}".',
+    notText,
+  ]);
+  // A key the source does not name by a variable or path, such as a call, is named `id`.
+  assert.deepEqual(failure(`${DYNAMIC}${TOYS}say toys[dynamic(5)]\nexit`), [
+    "TSR062",
+    notText.replace("${count}", "${id}"),
   ]);
 });
 
@@ -179,6 +176,13 @@ test("each method takes the arguments of its contract, as many as the list metho
   assert.deepEqual(errors(`${TOYS}say toys.get("a", fallback: 0)\nexit`), [
     ["TSV022", "get() has no parameter 'fallback'. Its only named argument is 'default:'."],
   ]);
+  // A dict in a union takes the arguments as a dict does (ADR 0021 rule 3.5); the first member's problem is reported.
+  assert.deepEqual(
+    errors(
+      `${DYNAMIC}let d: (integer dict | string[]) = dynamic(dict{ a: 1 })\nsay d.contains(1, 2)\nexit`,
+    ),
+    [["TSV020", "contains() takes 1 argument (key), received 2."]],
+  );
 });
 
 test("a property gives its contract's value, and a name without one has one text when compiled and when run", () => {
