@@ -4,7 +4,7 @@
  */
 
 import { argumentCountMessage, argumentsTaken, POSITIONAL_METHODS } from "./argument-rules.js";
-import { isListMethod } from "./list-methods.js";
+import { isListMethod, LIST_METHODS } from "./list-methods.js";
 import { compileRegex, replacementParts } from "./regex.js";
 import type { SerializableRegex } from "./runtime/serializable-values.js";
 
@@ -376,9 +376,10 @@ export function stringLength(text: string): number {
   return length;
 }
 
+/** List `join` (see `LIST_METHODS`), whose separator is checked as text. */
 export const LIST_JOIN: TextSignature = {
-  name: "join",
-  parameters: [{ name: "separator", kind: "text", optional: true }],
+  name: LIST_METHODS.join.name,
+  parameters: LIST_METHODS.join.parameters,
   domains: [],
 };
 
