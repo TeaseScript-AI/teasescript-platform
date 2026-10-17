@@ -553,6 +553,30 @@ test("a loop keeps a narrowing that only code which never runs would end, and no
     taken.runs.map((run) => [run.status, run.failure]),
     [["halted", null]],
   );
+  // The same for what a store may reach: only a dead store could make `target` a speaker, so a store through it does not
+  // erase the type of `vera.mood`, and storing a number there stays an error, as on main.
+  assert.deepEqual(
+    compileAndRunVariants(
+      [
+        {
+          path: "main.tease",
+          source: [
+            'speaker vera { mood: "calm" }',
+            'let target: object | speaker = { mood: "a" }',
+            "repeat 1 {",
+            '  target.mood = "s"',
+            "  if false { target = vera }",
+            "}",
+            "vera.mood = 1",
+            "say vera.mood.length",
+            "exit",
+          ].join("\n"),
+        },
+      ],
+      [],
+    ).diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.span.start.line + 1}`),
+    ["TSV041 7"],
+  );
   // Where such code can run, the loop forgets the narrowing, and the read is an error.
   for (const body of [
     ["if k {", "  y = null", "}"],

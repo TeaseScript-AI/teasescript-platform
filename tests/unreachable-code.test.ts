@@ -107,11 +107,22 @@ test("a run of code that never runs is reported once, on its first statement", (
 });
 
 test("code that another warning already reports as never running gets no second warning", () => {
-  // The condition that TSV046 reports as always false, or the case it reports as never matching.
+  // The condition that TSV046 reports as always false, also through an operand that decides it, or the case it reports
+  // as never matching. A TSV046 in the condition that does not decide it so says nothing about the branch.
   assert.deepEqual(
     codes('let name: string? = "Ann"\nif name == null {\n    say "never"\n}\nexit'),
     ["2 TSV046"],
   );
+  assert.deepEqual(
+    codes(
+      `${KNOB}let name: string? = "Ann"\nif (name == null and k) or not (name != null) {\n    say "never"\n}\nexit`,
+    ),
+    ["3 TSV046", "3 TSV046"],
+  );
+  assert.deepEqual(codes('let x = 1\nif x != null and false {\n    say "never"\n}\nexit'), [
+    "2 TSV046",
+    "3 TSV065",
+  ]);
   assert.deepEqual(
     codes(
       'let count = 1\nswitch count {\n    case is string { say "never" }\n    default { say "one" }\n}\nexit',

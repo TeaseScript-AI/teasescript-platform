@@ -20,7 +20,7 @@ import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import { PlanControlFlow } from "./plan/control-flow.js";
-import { Reachability, type StatementFlow } from "./reachability.js";
+import { Reachability, type ConstantTest, type StatementFlow } from "./reachability.js";
 import {
   validateProjectSemantics,
   type FileSemanticResult,
@@ -28,7 +28,7 @@ import {
 } from "./semantic.js";
 import { speakerFlowDiagnostics, type SpeakerFlowInput } from "./speaker-flow.js";
 import { checkTypes, type RuntimeCheckSite } from "./type-checker.js";
-import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
+import { createSourcePosition, createSourceSpan } from "./source.js";
 import { DeadWays, type WayFacts } from "./way-facts.js";
 
 export interface CompileOptions extends SemanticValidationOptions {
@@ -394,8 +394,10 @@ function checkFlow(
     }
     const warnings = reachability.warnings(
       files.map((file) =>
-        file.result.diagnostics.flatMap((diagnostic): SourceSpan[] =>
-          diagnostic.code === "TSV046" ? [diagnostic.span] : [],
+        file.result.diagnostics.flatMap((diagnostic): ConstantTest[] =>
+          diagnostic.code === "TSV046"
+            ? [{ span: diagnostic.span, value: constantTestValue(diagnostic.message) }]
+            : [],
         ),
       ),
     );
@@ -426,6 +428,11 @@ function checkFlow(
     );
     return null;
   }
+}
+
+/** What a TSV046 warning says its test always gives, by its words: `null` for a case that never matches or an empty range. */
+function constantTestValue(message: string): boolean | null {
+  return message.endsWith("always true.") ? true : message.endsWith("always false.") ? false : null;
 }
 
 /**

@@ -25,6 +25,15 @@ import type { DeadWays } from "./way-facts.js";
  * check of variables at labels follows (TSV054).
  */
 
+/**
+ * A TSV046 warning: where it stands, and what it says the test there always gives, or `null` for a case that never
+ * matches or a range that contains no numbers.
+ */
+export interface ConstantTest {
+  readonly span: SourceSpan;
+  readonly value: boolean | null;
+}
+
 /** The statements that never run, and the top-level statements that run and after which execution continues. */
 export interface StatementFlow {
   readonly unreachable: ReadonlySet<Statement>;
@@ -198,10 +207,10 @@ export class Reachability {
 
   /**
    * The warnings of each file, in source order: the loops with no way out (TSV058), and each run of statements that
-   * never run, on its first statement (TSV065, or TSV066 for an `exit`). `constantTests` holds the spans of the TSV046
-   * warnings of each file, which already report a branch that never runs.
+   * never run, on its first statement (TSV065, or TSV066 for an `exit`). `constantTests` holds the TSV046 warnings of
+   * each file, which may already report why a branch never runs.
    */
-  public warnings(constantTests: readonly (readonly SourceSpan[])[]): Diagnostic[][] {
+  public warnings(constantTests: readonly (readonly ConstantTest[])[]): Diagnostic[][] {
     const { diagnostics, closed } = this.#closedLoops();
     this.programs.forEach((program, file) =>
       new UnreachableCode(
@@ -209,7 +218,7 @@ export class Reachability {
         (statements) => this.#regionRuns(statements),
         closed,
         [...(constantTests[file] ?? [])].sort(
-          (left, right) => left.start.offset - right.start.offset,
+          (left, right) => left.span.start.offset - right.span.start.offset,
         ),
         diagnostics[file]!,
       ).report(program),
@@ -421,17 +430,17 @@ interface Reason {
 /**
  * Finds each run of statements that never run in a file, and reports it once, on its first statement (V30 §30): with
  * TSV066 when that is an `exit`, else with TSV065. One problem gets one code, so a run is not reported where another
- * warning already says why it never runs: in a branch whose condition has a TSV046 warning, and after a loop that TSV058
- * reports. Nor is the code of a function that no call which can run reaches, or of a block that no code which can run
- * creates.
+ * warning already says why it never runs: in a branch whose condition TSV046 reports as never taking it, or whose case
+ * value or range it reports, and after a loop that TSV058 reports. Nor is the code of a function that no call which can
+ * run reaches, or of a block that no code which can run creates.
  */
 class UnreachableCode {
   public constructor(
     private readonly runs: (statement: Statement) => boolean | null,
     private readonly regionRuns: (statements: readonly Statement[]) => boolean | null,
     private readonly closed: ReadonlySet<Statement>,
-    /** The spans of the file's TSV046 warnings, by start. */
-    private readonly constantTests: readonly SourceSpan[],
+    /** The file's TSV046 warnings, by start. */
+    private readonly constantTests: readonly ConstantTest[],
     private readonly diagnostics: Diagnostic[],
   ) {}
 
@@ -533,7 +542,7 @@ class UnreachableCode {
       case "then":
       case "else": {
         const condition = owner.statement.condition;
-        if (this.#hasConstantTest(condition.span)) return null;
+        if (this.#reportsAlways(condition, owner.kind === "else")) return null;
         return {
           because: `the condition on line ${condition.span.start.line + 1} is ${owner.kind === "then" ? "never true" : "always true"}`,
           fix: "Remove it, or change the condition.",
@@ -560,13 +569,14 @@ class UnreachableCode {
         };
       case "body": {
         const loop = owner.statement;
-        const decides =
+        if (
           loop.kind === "whileStatement"
-            ? loop.condition
-            : loop.kind === "repeatStatement"
-              ? loop.count
-              : loop.iterable;
-        if (this.#hasConstantTest(decides.span)) return null;
+            ? this.#reportsAlways(loop.condition, false)
+            : this.#hasConstantTest(
+                (loop.kind === "repeatStatement" ? loop.count : loop.iterable).span,
+              )
+        )
+          return null;
         const line = loop.span.start.line + 1;
         if (loop.kind === "whileStatement")
           return {
@@ -586,18 +596,76 @@ class UnreachableCode {
     }
   }
 
+  /**
+   * Whether TSV046 warnings say that `condition` is always `value`: one on the condition itself, or on parts that decide
+   * it so, such as an operand of `and` that is always false, or every operand of `or`.
+   */
+  #reportsAlways(condition: Expression, value: boolean): boolean {
+    // For each part of the condition, whether the warnings say it is always true, and always false; a part comes before
+    // the parts in it, so the reverse order has each one after its parts, without native recursion.
+    const parts: Expression[] = [];
+    for (const work = [condition]; work.length > 0;) {
+      const node = unwrap(work.pop()!);
+      parts.push(node);
+      if (node.kind === "unaryExpression" && node.operator === "not") work.push(node.operand);
+      else if (
+        node.kind === "binaryExpression" &&
+        (node.operator === "and" || node.operator === "or")
+      )
+        work.push(node.left, node.right);
+    }
+    const always = new Map<Expression, readonly [boolean, boolean]>();
+    const of = (part: Expression): readonly [boolean, boolean] =>
+      always.get(unwrap(part)) ?? [false, false];
+    for (let index = parts.length - 1; index >= 0; index -= 1) {
+      const node = parts[index]!;
+      const reported = this.#constantTestAt(node.span);
+      let [isTrue, isFalse] = [reported === true, reported === false];
+      if (node.kind === "unaryExpression" && node.operator === "not") {
+        const [operandTrue, operandFalse] = of(node.operand);
+        isTrue ||= operandFalse;
+        isFalse ||= operandTrue;
+      } else if (
+        node.kind === "binaryExpression" &&
+        (node.operator === "and" || node.operator === "or")
+      ) {
+        const [leftTrue, leftFalse] = of(node.left);
+        const [rightTrue, rightFalse] = of(node.right);
+        isTrue ||= node.operator === "or" ? leftTrue || rightTrue : leftTrue && rightTrue;
+        isFalse ||= node.operator === "and" ? leftFalse || rightFalse : leftFalse && rightFalse;
+      }
+      always.set(node, [isTrue, isFalse]);
+    }
+    return of(condition)[value ? 0 : 1];
+  }
+
+  /** What the TSV046 warning on exactly `span` says its test always gives, or `undefined` without one. */
+  #constantTestAt(span: SourceSpan): boolean | null | undefined {
+    for (let index = this.#firstTestFrom(span); index < this.constantTests.length; index += 1) {
+      const test = this.constantTests[index]!;
+      if (test.span.start.offset !== span.start.offset) break;
+      if (test.span.end.offset === span.end.offset) return test.value;
+    }
+    return undefined;
+  }
+
   /** Whether a TSV046 warning stands inside `span`: expressions nest, so the first one that starts in it lies in it. */
   #hasConstantTest(span: SourceSpan): boolean {
+    const test = this.constantTests[this.#firstTestFrom(span)];
+    return test !== undefined && test.span.start.offset < span.end.offset;
+  }
+
+  /** The index of the first TSV046 warning that starts at `span` or after it. */
+  #firstTestFrom(span: SourceSpan): number {
     const tests = this.constantTests;
     let low = 0;
     let high = tests.length;
     while (low < high) {
       const middle = (low + high) >>> 1;
-      if (tests[middle]!.start.offset < span.start.offset) low = middle + 1;
+      if (tests[middle]!.span.start.offset < span.start.offset) low = middle + 1;
       else high = middle;
     }
-    const test = tests[low];
-    return test !== undefined && test.start.offset < span.end.offset;
+    return low;
   }
 }
 

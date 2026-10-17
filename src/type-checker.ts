@@ -363,6 +363,54 @@ export function checkTypes(
 ): TypeCheckResult {
   const programs = files.map((file) => file.program);
   const lines = lineNamer(files);
+  // Code that never runs changes nothing (rule 5.5). What a loop, function, or block may change leaves out the code that
+  // the previous check found never runs, and each such choice is checked from nothing, since all that a check finds,
+  // such as the types it decides, rests on the effects it followed. The last check must find that code never runs too:
+  // should it not, the next check leaves out only what both found, and the one after that nothing, which always holds.
+  // Otherwise, when what the last check found never running would leave out more, the next check leaves out that, a
+  // bounded number of times.
+  let dead: DeadCode = { statements: new Set(), operands: new Set() };
+  let effects = projectEffects(programs, dead);
+  let growth = 0;
+  let shrinks = 0;
+  for (;;) {
+    const checked = checkWithEffects(programs, options, onFile, lines, effects);
+    const found = checked.dead;
+    if (!coversDeadCode(found, dead)) {
+      dead =
+        shrinks === 0
+          ? {
+              statements: new Set(
+                [...dead.statements].filter((each) => found.statements.has(each)),
+              ),
+              operands: new Set([...dead.operands].filter((place) => found.operands.has(place))),
+            }
+          : { statements: new Set(), operands: new Set() };
+      shrinks += 1;
+      effects = projectEffects(programs, dead);
+      continue;
+    }
+    if (shrinks === 0 && growth < MAX_DEAD_CODE_ROUNDS) {
+      const fewer = projectEffects(programs, found);
+      if (!sameProjectEffects(fewer, effects)) {
+        dead = found;
+        effects = fewer;
+        growth += 1;
+        continue;
+      }
+    }
+    return checked.result;
+  }
+}
+
+/** The type check of the project with the effects `effects`, and the code it found never runs (see `checkTypes`). */
+function checkWithEffects(
+  programs: readonly Program[],
+  options: TypeCheckOptions,
+  onFile: (file: number) => void,
+  lines: LineNamer,
+  effects: ProjectEffects,
+): { readonly result: TypeCheckResult; readonly dead: DeadCode } {
   // An integer variable is a number when one of its assignments can store a non-whole number, also an assignment
   // after its uses (rule 1.2). A check that finds a new one starts again with that variable declared as a number, so
   // the last check, which finds none, sees every variable with its final type and alone reports. Likewise, a place
@@ -385,24 +433,6 @@ export function checkTypes(
   let guessedAgain = false;
   let storage: ReadonlyMap<string, StorageKeyType> = guess;
   let storageRounds = 0;
-  // Code that never runs changes nothing (rule 5.5). What a loop, function, or block may change leaves out the code that
-  // the previous check found never runs, so the last check must find it never runs too: should it not, the next check
-  // leaves out only what both found, and keeps that. Otherwise, when the code that the last check found never running
-  // would leave out more, the next check leaves out that, a bounded number of times.
-  let dead: DeadCode = { statements: new Set(), operands: new Set() };
-  let effects = projectEffects(programs, dead);
-  let deadRounds = 0;
-  let deadKept = false;
-  // What a check found, such as a type it decided or widened, rests on the effects it followed and on the unchecked
-  // properties it knew, so a check with other effects or more of them starts again from nothing.
-  const startAgain = (): void => {
-    widened.clear();
-    decided.clear();
-    copies.clear();
-    kept.clear();
-    storage = guess ?? new Map();
-    storageRounds = 0;
-  };
   for (;;) {
     const guessed: boolean = storage === guess;
     const uncheckedBefore = guessed ? [...unchecked] : [];
@@ -443,7 +473,12 @@ export function checkTypes(
     // A check that found more of them read those properties with the types they no longer keep, so what it found rests
     // on those types: the next check starts again from nothing but the larger set, which only grows.
     if (checker.uncheckedMore) {
-      startAgain();
+      widened.clear();
+      decided.clear();
+      copies.clear();
+      kept.clear();
+      storage = guess ?? new Map();
+      storageRounds = 0;
       continue;
     }
     let storageChanged = false;
@@ -481,40 +516,21 @@ export function checkTypes(
       last = !checker.widenedMore;
     }
     if (last) {
-      const deadFound = checker.deadCode();
-      if (!coversDeadCode(deadFound, dead)) {
-        dead = {
-          statements: new Set(
-            [...dead.statements].filter((statement) => deadFound.statements.has(statement)),
+      const dead = checker.deadCode();
+      return {
+        result: Object.freeze({
+          diagnostics: Object.freeze(
+            checker.fileDiagnostics.map((diagnostics) => Object.freeze(diagnostics)),
           ),
-          operands: new Set([...dead.operands].filter((place) => deadFound.operands.has(place))),
-        };
-        effects = projectEffects(programs, dead);
-        deadKept = true;
-        startAgain();
-        continue;
-      }
-      if (!deadKept && deadRounds < MAX_DEAD_CODE_ROUNDS) {
-        const fewer = projectEffects(programs, deadFound);
-        if (!sameProjectEffects(fewer, effects)) {
-          dead = deadFound;
-          effects = fewer;
-          deadRounds += 1;
-          startAgain();
-          continue;
-        }
-      }
-      return Object.freeze({
-        diagnostics: Object.freeze(
-          checker.fileDiagnostics.map((diagnostics) => Object.freeze(diagnostics)),
-        ),
-        speakerFlow: checker.speakerFlowInput(),
-        runtimeChecks: checker.runtimeChecks(),
-        formShapes: checker.formShapes(),
-        ways: checker.ways(),
-        unreachable: deadFound.statements,
-        storageTypes: storageTypePlans(storage),
-      });
+          speakerFlow: checker.speakerFlowInput(),
+          runtimeChecks: checker.runtimeChecks(),
+          formShapes: checker.formShapes(),
+          ways: checker.ways(),
+          unreachable: dead.statements,
+          storageTypes: storageTypePlans(storage),
+        }),
+        dead,
+      };
     }
     if (!followed) checker.widenFollowers();
   }
