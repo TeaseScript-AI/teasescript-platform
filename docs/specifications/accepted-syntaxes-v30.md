@@ -1925,6 +1925,9 @@ let chosenName = account.petNames.random
 let stranger = speakers.random
 ```
 
+A list holds at most 1,000,000 elements, a set 1,000,000 members, and a dict 1,000,000 keys; an operation that would
+make one longer is runtime error `TSR088` (owner decision, 2026-10-17).
+
 ### Lists in text
 
 Interpolation is the only place where a list turns into one random element. Each `${...}` evaluation selects one

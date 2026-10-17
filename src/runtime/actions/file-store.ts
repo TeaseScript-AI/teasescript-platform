@@ -173,7 +173,7 @@ function startFileStore(
       return references.length === 0 ? { result: text } : { read: references };
     }
     case "fromJson": {
-      const read = typeof value === "string" ? valueFromJson(value) : undefined;
+      const read = typeof value === "string" ? valueFromJson(value, span) : undefined;
       if (read === undefined) return { result: USE_DEFAULT };
       if (!files) return { result: read };
       const store: RuntimeFileToStore[] = [];
@@ -252,7 +252,7 @@ function finishFileStore(
       return text;
     }
     case "fromJson": {
-      const read = typeof value === "string" ? valueFromJson(value) : undefined;
+      const read = typeof value === "string" ? valueFromJson(value, span) : undefined;
       if (read === undefined) throw malformed();
       const references = new Map<string, string>();
       const result = replaceFileDataUrls(read, (file) => {

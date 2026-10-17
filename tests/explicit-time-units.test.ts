@@ -75,7 +75,8 @@ test("a time without a unit is a compile error at every consumer, and the error 
   ] as const) {
     const result = compileSource(`${source}\nexit`);
     const [diagnostic, ...rest] = result.diagnostics;
-    assert.equal(diagnostic?.code, "TSV043", source);
+    // A media position is a rule of the play command, with its code.
+    assert.equal(diagnostic?.code, source.startsWith("playAudio") ? "TSV036" : "TSV043", source);
     assert.ok(diagnostic.message.includes(fix), `${source}: ${diagnostic.message}`);
     assert.ok(!diagnostic.message.includes(";"), diagnostic.message);
     const start = source.lastIndexOf(subject);
@@ -370,7 +371,7 @@ test("a wait takes a range with a unit like a hidden timer, drawn once in whole 
     [
       "wait (1.5..3) s",
       "TSV010",
-      "A wait range counts whole units, so its bounds must be whole numbers.",
+      "A wait needs a range of whole numbers, but its start is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
     ],
   ] as const) {
     const [diagnostic, ...rest] = compileSource(`${source}\nexit`).diagnostics;

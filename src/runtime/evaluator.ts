@@ -115,8 +115,24 @@ import {
   visibleText,
 } from "./value-text.js";
 import { checkTextLength, MAX_TEXT_LENGTH, messageText, textTooLong } from "./text-length.js";
+import {
+  checkCollectionLength,
+  collectionTooLong,
+  MAX_COLLECTION_LENGTH,
+} from "./collection-size.js";
 import { base64Text, jsonText, textFromBase64, valueFromJson } from "./json-base64.js";
 import { textSha256 } from "./sha256.js";
+import { emptyRangeProblem, rangeLength, rangeText, wholeRangeMessage } from "../range-checks.js";
+import {
+  cameraPlacementMessage,
+  handleArgumentsMessage,
+  handleMemberMessage,
+  isCameraPlacement,
+  isMediaVolume,
+  isTimerDisplay,
+  mediaVolumeMessage,
+  timerDisplayMessage,
+} from "../handle-rules.js";
 import {
   RANGE_LIST_FIX,
   rangeListLengthProblem,
@@ -1517,6 +1533,16 @@ export class Evaluator {
     if (isDict(object)) {
       // A new key is added at the end; an existing key keeps its position.
       const key = this.#dictKey(this.evaluate(target.index), target.index.span);
+      if (
+        object.entries.length >= MAX_COLLECTION_LENGTH &&
+        getSerializableDictEntry(object, key) === undefined
+      )
+        throw collectionTooLong(
+          "dict",
+          "assigning to a new key",
+          target.span,
+          object.entries.length + 1,
+        );
       if (receiverDescriptor !== null && !receiverDescriptor.detached) {
         const mutationStep: PreparedReferenceStep = { kind: "key", key };
         detachPreparedReferencesForMutation(this.snapshot, {
@@ -1597,6 +1623,13 @@ export class Evaluator {
       this.assign(target, joined);
       return true;
     }
+    checkCollectionLength(
+      "list",
+      list.items.length + right.items.length,
+      Math.max(list.items.length, right.items.length),
+      "joining with +",
+      value.span,
+    );
     detachPreparedReferencesForMutation(this.snapshot, {
       rootFrameId: location.frame.id,
       rootName: target.name,
@@ -1700,16 +1733,12 @@ export class Evaluator {
     span: SourceSpan,
   ): void {
     if (isCameraView(receiver))
-      throw fault(
-        "TSR016",
-        `Camera views have no method '${method}'. Hide them with hideCamera.`,
-        span,
-      );
+      throw fault("TSR016", handleMemberMessage("camera", method, "call"), span);
     if (isTimerHandle(receiver) || isMediaHandle(receiver)) {
       if (!["pause", "resume", "stop"].includes(method)) {
         throw fault(
           "TSR016",
-          `${isTimerHandle(receiver) ? "Timer" : "Media"} handles have no method '${method}'. Use pause(), resume(), or stop().`,
+          handleMemberMessage(isTimerHandle(receiver) ? "timer" : "media", method, "call"),
           span,
         );
       }
@@ -2182,8 +2211,16 @@ export class Evaluator {
       checkTextLength(left.length + right.length, "joining with +", expression.span);
       return left + right;
     }
-    if (isList(left) && isList(right))
+    if (isList(left) && isList(right)) {
+      checkCollectionLength(
+        "list",
+        left.items.length + right.items.length,
+        Math.max(left.items.length, right.items.length),
+        "joining with +",
+        expression.span,
+      );
       return createCapturedSerializableList(left.items.concat(right.items));
+    }
     throw fault(
       "TSR009",
       `'+' joins two texts or two lists and adds numbers or durations, but these are ${describeRuntimeValue(left)} and ${describeRuntimeValue(right)}.${joinFix(left, right)}`,
@@ -2542,6 +2579,11 @@ export class Evaluator {
           case "add":
             expect(1);
             if (added !== null) assertValueType(positional[0]!, added.check, added.span);
+            if (
+              receiver.items.length >= MAX_COLLECTION_LENGTH &&
+              !serializableSetContains(receiver, positional[0]!)
+            )
+              throw collectionTooLong("set", "add(...)", span, receiver.items.length + 1);
             addSerializableSetValue(receiver, positional[0]!);
             return null;
           case "remove":
@@ -2560,15 +2602,19 @@ export class Evaluator {
             return createCapturedSerializableList(receiver.items);
           case "intersection":
           case "union":
-          case "difference":
+          case "difference": {
             expect(1);
-            return createCapturedSerializableSet(
-              setOperationItems(
-                name,
-                receiver.items,
-                this.#setOperationArgument(name, positional[0]!, span),
-              ),
+            const argument = this.#setOperationArgument(name, positional[0]!, span);
+            const items = setOperationItems(name, receiver.items, argument);
+            checkCollectionLength(
+              "set",
+              items.length,
+              Math.max(receiver.items.length, argument.length),
+              `${name}(...)`,
+              span,
             );
+            return createCapturedSerializableSet(items);
+          }
           case "sort":
           case "shuffle":
           case "reverse":
@@ -2585,6 +2631,13 @@ export class Evaluator {
         case "add":
           expect(1);
           if (added !== null) assertValueType(positional[0]!, added.check, added.span);
+          checkCollectionLength(
+            "list",
+            receiver.items.length + 1,
+            receiver.items.length,
+            "add(...)",
+            span,
+          );
           receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
           return null;
         case "addAll": {
@@ -2599,6 +2652,13 @@ export class Evaluator {
           // Every element is checked before any is added, and copies are taken first, so a list can add itself.
           if (added !== null)
             for (const item of other.items) assertValueType(item, added.check, added.span);
+          checkCollectionLength(
+            "list",
+            receiver.items.length + other.items.length,
+            Math.max(receiver.items.length, other.items.length),
+            "addAll(...)",
+            span,
+          );
           const items = other.items.map((item) => cloneCapturedSerializableValue(item));
           for (const item of items) receiver.items.push(item);
           return null;
@@ -2720,15 +2780,19 @@ export class Evaluator {
           return null;
         case "intersection":
         case "union":
-        case "difference":
+        case "difference": {
           expect(1);
-          return createCapturedSerializableList(
-            setOperationItems(
-              name,
-              receiver.items,
-              this.#setOperationArgument(name, positional[0]!, span),
-            ),
+          const argument = this.#setOperationArgument(name, positional[0]!, span);
+          const items = setOperationItems(name, receiver.items, argument);
+          checkCollectionLength(
+            "list",
+            items.length,
+            Math.max(receiver.items.length, argument.length),
+            `${name}(...)`,
+            span,
           );
+          return createCapturedSerializableList(items);
+        }
         case "join": {
           checkTextArguments(LIST_JOIN, positional, span);
           // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
@@ -2810,7 +2874,7 @@ export class Evaluator {
   ): null {
     if (name !== "remove") throw fault("TSR016", removableHandleMethodMessage(button, name), span);
     if (positional.length !== 0 || Object.keys(named).length !== 0)
-      throw fault("TSR028", "Permanent button remove() takes no arguments.", span);
+      throw fault("TSR028", handleArgumentsMessage("permanentButton", name), span);
     removePermanentButtons(
       this.snapshot,
       (shown) => shown.button.buttonId === button.buttonId,
@@ -2840,14 +2904,10 @@ export class Evaluator {
     span: SourceSpan,
   ): null {
     if (!["pause", "resume", "stop"].includes(name)) {
-      throw fault(
-        "TSR016",
-        `Timer handles have no method '${name}'. Use pause(), resume(), or stop().`,
-        span,
-      );
+      throw fault("TSR016", handleMemberMessage("timer", name, "call"), span);
     }
     if (positional.length !== 0 || Object.keys(named).length !== 0) {
-      throw fault("TSR028", `Timer ${name}() takes no arguments.`, span);
+      throw fault("TSR028", handleArgumentsMessage("timer", name), span);
     }
     const timer = this.#timer(handle, span);
     const action = activeTimerAction(this.snapshot, handle.timerId);
@@ -2909,11 +2969,7 @@ export class Evaluator {
         warning = setTimerRepeatDuration(timer, value.milliseconds, now);
       }
     } else {
-      throw fault(
-        "TSR003",
-        `Timer handle property '${name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`,
-        span,
-      );
+      throw fault("TSR003", handleMemberMessage("timer", name, "assign"), span);
     }
     if (warning === "expired") {
       expireTimerAction(
@@ -2950,14 +3006,10 @@ export class Evaluator {
     span: SourceSpan,
   ): null {
     if (!["pause", "resume", "stop"].includes(name)) {
-      throw fault(
-        "TSR016",
-        `Media handles have no method '${name}'. Use pause(), resume(), or stop().`,
-        span,
-      );
+      throw fault("TSR016", handleMemberMessage("media", name, "call"), span);
     }
     if (positional.length !== 0 || Object.keys(named).length !== 0) {
-      throw fault("TSR028", `Media ${name}() takes no arguments.`, span);
+      throw fault("TSR028", handleArgumentsMessage("media", name), span);
     }
     const media = this.#media(handle, span);
     const action = activeMediaAction(this.snapshot, handle.mediaId);
@@ -2981,22 +3033,13 @@ export class Evaluator {
   ): void {
     const media = this.#media(handle, span);
     if (name === "volume") {
-      if (typeof value !== "number" || !(value >= 0 && value <= 1)) {
-        throw fault(
-          "TSR050",
-          `Media volume must be a number from 0 through 1, but this is ${describeShownValue(value)}.`,
-          span,
-        );
-      }
+      if (!isMediaVolume(value))
+        throw fault("TSR050", mediaVolumeMessage(describeShownValue(value)), span);
       this.#mediaWarning(setMediaVolume(media, value), span);
       return;
     }
     if (name !== "position" && name !== "remaining") {
-      throw fault(
-        "TSR003",
-        `Media handle property '${name}' cannot be assigned. You can assign position, remaining, or volume.`,
-        span,
-      );
+      throw fault("TSR003", handleMemberMessage("media", name, "assign"), span);
     }
     if (!isAnyDuration(value) || !Number.isFinite(value.milliseconds)) {
       throw fault(
@@ -3029,17 +3072,9 @@ export class Evaluator {
   /** `view.placement = "window" | "stage"` moves a shown camera view; a hidden one stays hidden and only warns. */
   #assignCameraProperty(name: string, value: SerializableRuntimeValue, span: SourceSpan): void {
     if (name !== "placement")
-      throw fault(
-        "TSR003",
-        `Camera view property '${name}' cannot be assigned. You can assign placement.`,
-        span,
-      );
-    if (value !== "window" && value !== "stage")
-      throw fault(
-        "TSR050",
-        `Camera placement must be "window" or "stage", but this is ${shownChoice(value)}.`,
-        span,
-      );
+      throw fault("TSR003", handleMemberMessage("camera", name, "assign"), span);
+    if (!isCameraPlacement(value))
+      throw fault("TSR050", cameraPlacementMessage(shownChoice(value)), span);
     const view = this.#cameraView();
     if (!view.shown) {
       this.#warn(
@@ -3084,7 +3119,7 @@ export class Evaluator {
   ): null {
     if (name !== "remove") throw fault("TSR016", removableHandleMethodMessage(handle, name), span);
     if (positional.length !== 0 || Object.keys(named).length !== 0)
-      throw fault("TSR028", "Message remove() takes no arguments.", span);
+      throw fault("TSR028", handleArgumentsMessage("messageHandle", name), span);
     const index = this.#liveMessage(handle, span);
     const record = this.snapshot.liveMessages[index]!;
     if (record.removed === true) return null;
@@ -3122,11 +3157,7 @@ export class Evaluator {
     receiver: ExpressionPlan,
   ): void {
     if (name !== "text")
-      throw fault(
-        "TSR003",
-        `Message handle property '${name}' cannot be assigned. You can assign text.`,
-        span,
-      );
+      throw fault("TSR003", handleMemberMessage("messageHandle", name, "assign"), span);
     if (typeof value !== "string")
       throw fault(
         "TSR050",
@@ -3474,14 +3505,9 @@ export class Evaluator {
     operation: RuntimeDebugRandomOperation,
   ): number {
     assertIntegerRange(range, subject, span);
+    const empty = emptyRangeProblem(subject, range);
+    if (empty !== null) throw fault("TSR041", empty, span);
     const length = rangeLength(range);
-    if (length < 1) {
-      throw fault(
-        "TSR041",
-        `${subject} needs a range that holds at least one whole number, but ${rangeText(range)} holds none. Check that the range is not empty first.`,
-        span,
-      );
-    }
     let drawn = this.#draw(span, operation, length, range, (draw) =>
       sampleRangeInteger(draw, range, length),
     );
@@ -3609,7 +3635,7 @@ export class Evaluator {
       typeof value !== "string"
         ? undefined
         : name === "fromJson"
-          ? valueFromJson(value)
+          ? valueFromJson(value, span)
           : textFromBase64(value);
     // JSON's null is a value; only text that does not read gives the default.
     return read === undefined ? USE_DEFAULT : read;
@@ -3931,11 +3957,7 @@ export class Evaluator {
     }
     if (isCameraView(value)) {
       if (name !== "placement")
-        throw fault(
-          "TSR017",
-          `Camera views have no property '${name}'. Use the placement property.`,
-          span,
-        );
+        throw fault("TSR017", handleMemberMessage("camera", name, "read"), span);
       return this.#cameraView().placement;
     }
     if (isMediaHandle(value)) {
@@ -3945,7 +3967,7 @@ export class Evaluator {
         this.snapshot.currentSessionTimeMs,
       );
       if (property === undefined)
-        throw fault("TSR017", `Media handles have no property '${name}'.`, span);
+        throw fault("TSR017", handleMemberMessage("media", name, "read"), span);
       return property;
     }
     if (isCalendarDuration(value)) {
@@ -3979,16 +4001,12 @@ export class Evaluator {
         this.snapshot.currentSessionTimeMs,
       );
       if (property === undefined)
-        throw fault("TSR017", `Timer handles have no property '${name}'.`, span);
+        throw fault("TSR017", handleMemberMessage("timer", name, "read"), span);
       return property;
     }
     if (isMessageHandle(value)) {
       if (name !== "text")
-        throw fault(
-          "TSR017",
-          `Message handles have no property '${name}'. Use the text property.`,
-          span,
-        );
+        throw fault("TSR017", handleMemberMessage("messageHandle", name, "read"), span);
       return this.snapshot.liveMessages[this.#liveMessage(value, span)]!.sourceText;
     }
     throw fault("TSR017", missingMemberMessage(value, name, "property"), span);
@@ -4407,7 +4425,7 @@ function removableHandleMethodMessage(
   method: string,
 ): string {
   return isMessageHandle(handle)
-    ? `Message handles have no method '${method}'. Use remove(), or change the message with its text property.`
+    ? handleMemberMessage("messageHandle", method, "call")
     : `Permanent buttons have no method '${method}'. Use remove().`;
 }
 
@@ -4579,12 +4597,8 @@ function timerDisplayValue(
   value: SerializableRuntimeValue,
   span: SourceSpan,
 ): "visible" | "mystery" | "hidden" {
-  if (value === "visible" || value === "mystery" || value === "hidden") return value;
-  throw fault(
-    "TSR050",
-    `Timer display must be "visible", "mystery", or "hidden", but this is ${shownChoice(value)}.`,
-    span,
-  );
+  if (isTimerDisplay(value)) return value;
+  throw fault("TSR050", timerDisplayMessage(shownChoice(value)), span);
 }
 
 function optionalSpeakerString(
@@ -4777,10 +4791,6 @@ function readTemporary(
   return temporary.value;
 }
 
-function rangeLength(range: SerializableRuntimeRange): number {
-  return Math.max(0, range.end - range.start + (range.inclusive ? 1 : 0));
-}
-
 /** `TSR045` unless `range` has whole-number bounds and a length that a number counts exactly. */
 export function assertIntegerRange(
   range: SerializableRuntimeRange,
@@ -4796,7 +4806,7 @@ export function assertIntegerRange(
     throw fault(
       "TSR045",
       !Number.isInteger(range.start) || !Number.isInteger(range.end)
-        ? `${subject} needs a range of whole numbers, but this range is ${rangeText(range)}. Round its bounds with floor(...), round(...), or ceil(...) first.`
+        ? wholeRangeMessage(subject, `this range is ${rangeText(range)}`)
         : Number.isSafeInteger(range.start) && Number.isSafeInteger(range.end)
           ? `${subject} needs a range it can count, but ${rangeText(range)} holds too many numbers. Use a smaller range.`
           : `${subject} needs a range of whole numbers, but the bounds of ${rangeText(range)} are too large. Use bounds closer to 0.`,
@@ -4807,7 +4817,7 @@ export function assertIntegerRange(
 
 /**
  * `range.toList()` (V30 §6): the whole numbers of the range as a new list, in order, as `for` goes through them, and at
- * most `MAX_RANGE_LIST_LENGTH` of them, checked before any is added. The list is new and nothing else holds its
+ * most `MAX_COLLECTION_LENGTH` of them, checked before any is added. The list is new and nothing else holds its
  * numbers, so it takes them without a copy.
  */
 function rangeList(range: SerializableRuntimeRange, span: SourceSpan): SerializableRuntimeList {
@@ -4818,11 +4828,6 @@ function rangeList(range: SerializableRuntimeRange, span: SourceSpan): Serializa
   for (let position = 0, length = rangeLength(range); position < length; position += 1)
     items.push(range.start + position);
   return { kind: "list", items };
-}
-
-/** A range as the source writes it, such as `1..=6`. */
-function rangeText(range: SerializableRuntimeRange): string {
-  return `${withoutNegativeZero(range.start)}${range.inclusive ? "..=" : ".."}${withoutNegativeZero(range.end)}`;
 }
 
 /**

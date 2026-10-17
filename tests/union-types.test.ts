@@ -178,7 +178,7 @@ test("a union receiver checks element stores, property writes, compound assignme
     ["TSV043", "h"],
   ]);
   assert.deepEqual(codes("function f(h: timer | media) {\n    h.elapsed = 1 s\n}\nexit"), [
-    ["TSV043", "elapsed"],
+    ["TSV034", "elapsed"],
   ]);
   assert.deepEqual(codes("function f(h: object | timer) {\n    h.display = 1\n}\nexit"), [
     ["TSV041", "1"],

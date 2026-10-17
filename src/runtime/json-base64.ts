@@ -7,6 +7,7 @@ import {
   formatIsoTime,
   formatIsoTimestamp,
 } from "../temporal.js";
+import { collectionTooLong, MAX_COLLECTION_LENGTH } from "./collection-size.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import type {
@@ -172,14 +173,21 @@ function jsonString(text: string, span: SourceSpan): string {
   }
 }
 
-/** An array or object that `valueFromJson` is reading, with the key of the value it reads next in an object. */
+/**
+ * An array or object that `valueFromJson` is reading, with the key of the value it reads next in an object, and the
+ * number of its elements or keys so far; those past `MAX_COLLECTION_LENGTH` are counted but not kept.
+ */
 type OpenJson =
-  | { readonly list: SerializableRuntimeList }
+  | { readonly list: SerializableRuntimeList; length: number }
   | {
       readonly dict: SerializableRuntimeDict;
-      /** The position of each key, so a repeated key replaces the value at its first position. */
+      /**
+       * The position of each key, so a repeated key replaces the value at its first position; a key past the limit has a
+       * position past the last entry.
+       */
       readonly positions: Map<string, number>;
       key: string;
+      length: number;
     };
 
 const QUOTE = 0x22;
@@ -194,10 +202,15 @@ const CLOSE_BRACE = 0x7d;
 /**
  * The runtime value of JSON `text` (RFC 8259), or `undefined` when it is not JSON or holds a number too large to
  * represent. An object becomes a dict in source order; a repeated key keeps its first position with its last value. An
- * array becomes a list, and a whole number an integer.
+ * array becomes a list, and a whole number an integer. JSON with an array or object of more elements or keys than a
+ * list or dict can hold fails with `TSR088`, naming how many the first one to end has.
  */
-export function valueFromJson(text: string): SerializableRuntimeValue | undefined {
+export function valueFromJson(
+  text: string,
+  span: SourceSpan,
+): SerializableRuntimeValue | undefined {
   const open: OpenJson[] = [];
+  let tooLong: OpenJson | undefined;
   let at = 0;
   const skipWhitespace = () => {
     for (; at < text.length; at += 1) {
@@ -278,7 +291,7 @@ export function valueFromJson(text: string): SerializableRuntimeValue | undefine
       skipWhitespace();
       const list: SerializableRuntimeList = { kind: "list", items: [] };
       if (text.charCodeAt(at) !== CLOSE_BRACKET) {
-        open.push({ list });
+        open.push({ list, length: 0 });
         continue;
       }
       at += 1;
@@ -290,7 +303,7 @@ export function valueFromJson(text: string): SerializableRuntimeValue | undefine
       if (text.charCodeAt(at) !== CLOSE_BRACE) {
         const key = readKey();
         if (key === undefined) return undefined;
-        open.push({ dict, positions: new Map(), key });
+        open.push({ dict, positions: new Map(), key, length: 0 });
         continue;
       }
       at += 1;
@@ -307,15 +320,28 @@ export function valueFromJson(text: string): SerializableRuntimeValue | undefine
       const container = open.at(-1);
       if (container === undefined) {
         skipWhitespace();
-        return at === text.length ? value : undefined;
+        if (at !== text.length) return undefined;
+        if (tooLong !== undefined)
+          throw collectionTooLong(
+            "list" in tooLong ? "list" : "dict",
+            "fromJson(...)",
+            span,
+            tooLong.length,
+          );
+        return value;
       }
-      if ("list" in container) container.list.items.push(value);
-      else {
+      if ("list" in container) {
+        container.length += 1;
+        if (container.length <= MAX_COLLECTION_LENGTH) container.list.items.push(value);
+      } else {
         const position = container.positions.get(container.key);
         if (position === undefined) {
-          container.positions.set(container.key, container.dict.entries.length);
-          container.dict.entries.push({ key: container.key, value });
-        } else container.dict.entries[position]!.value = value;
+          container.positions.set(container.key, container.length);
+          container.length += 1;
+          if (container.length <= MAX_COLLECTION_LENGTH)
+            container.dict.entries.push({ key: container.key, value });
+        } else if (position < MAX_COLLECTION_LENGTH)
+          container.dict.entries[position]!.value = value;
       }
       skipWhitespace();
       const next = text.charCodeAt(at);
@@ -330,6 +356,7 @@ export function valueFromJson(text: string): SerializableRuntimeValue | undefine
       }
       if (next !== ("list" in container ? CLOSE_BRACKET : CLOSE_BRACE)) return undefined;
       open.pop();
+      if (container.length > MAX_COLLECTION_LENGTH) tooLong ??= container;
       value = "list" in container ? container.list : container.dict;
     }
   }

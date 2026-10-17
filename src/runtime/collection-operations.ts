@@ -3,6 +3,7 @@ import { compareAngles } from "../angle.js";
 import { compareDurations, durationFamily, durationParts } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
+import { MAX_COLLECTION_LENGTH } from "./collection-size.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import { valueKey, type SerializableRuntimeValue } from "./serializable-values.js";
@@ -164,12 +165,10 @@ class ValueIndex {
 /** The fix for a range where a list is needed, as for a set (V30 §6). */
 export const RANGE_LIST_FIX = " Make a list of its numbers with toList() first.";
 
-/** The most numbers `range.toList()` makes (V30 §6, docs/RESOURCE-LIMITS.md). */
-const MAX_RANGE_LIST_LENGTH = 1_000_000;
-
 /**
- * Whether `toList()` on the range of whole numbers from `start` to `end` gives more than `MAX_RANGE_LIST_LENGTH`
- * numbers, and so fails before it builds the list: the message, or `null`. The compiler and the runtime share it.
+ * Whether `toList()` on the range of whole numbers from `start` to `end` gives more numbers than a list can hold
+ * (`MAX_COLLECTION_LENGTH`, V30 §6), and so fails before it builds the list: the message, or `null`. The compiler and
+ * the runtime share it.
  */
 export function rangeListLengthProblem(
   start: number,
@@ -177,9 +176,9 @@ export function rangeListLengthProblem(
   inclusive: boolean,
 ): string | null {
   const length = end - start + (inclusive ? 1 : 0);
-  if (length <= MAX_RANGE_LIST_LENGTH) return null;
+  if (length <= MAX_COLLECTION_LENGTH) return null;
   const range = `${withoutNegativeZero(start)}${inclusive ? "..=" : ".."}${withoutNegativeZero(end)}`;
-  return `toList() can make a list of at most ${groupedDigits(MAX_RANGE_LIST_LENGTH)} numbers, but ${range} holds ${groupedDigits(length)}. Use a smaller range.`;
+  return `toList() can make a list of at most ${groupedDigits(MAX_COLLECTION_LENGTH)} numbers, but ${range} holds ${groupedDigits(length)}. Use a smaller range.`;
 }
 
 /** A text for a set operation's argument that is neither a list nor a set. */
