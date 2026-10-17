@@ -29,8 +29,7 @@ import { misspelledPropertyHint } from "./object-properties.js";
 import { parsePublicKey } from "./public-keys.js";
 import { cannotConvert } from "./runtime/value-types.js";
 import type { SourceSpan } from "./source.js";
-import { canonicalRegexFlags, regexFlagProblem } from "./regex.js";
-import { staticNumber, staticVisibleText } from "./static-evaluation.js";
+import { staticVisibleText, type KnownValue } from "./static-evaluation.js";
 import {
   ANGLE_TYPE,
   CALENDAR_DURATION_TYPE,
@@ -99,7 +98,10 @@ import {
   type TextParameter,
   type TextSignature,
 } from "./text-operations.js";
-import type { SerializableRegex } from "./runtime/serializable-values.js";
+import { isRegex } from "./runtime/value-predicates.js";
+
+/** The value that every run gives an expression, when the compiler knows it (see `KnownValues`). */
+type Known = (expression: Expression) => KnownValue | undefined;
 
 /**
  * A compile-time problem with a built-in operation: a wrong number of arguments, an argument name it does not take, or
@@ -130,6 +132,7 @@ export function memberProblems(
   property: Identifier,
   call: CallExpression | null,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
 ): OperationProblem[] {
   const type = forUse(receiverType);
   const name = property.name;
@@ -145,11 +148,18 @@ export function memberProblems(
       return problem(
         `'${name}' is a method. Write ${name}(${method.parameters.length === 0 ? "" : "..."}) with parentheses.`,
       );
-    return argumentProblems(method, call, typeOf, staticVisibleText(receiver));
+    const text = known(receiver);
+    return argumentProblems(
+      method,
+      call,
+      typeOf,
+      known,
+      typeof text === "string" ? text : undefined,
+    );
   }
   if (type.kind === "list" && name === "join") {
     if (call === null) return problem("'join' is a method. Write .join() with parentheses.");
-    const problems = argumentProblems(LIST_JOIN, call, typeOf, undefined);
+    const problems = argumentProblems(LIST_JOIN, call, typeOf, known, undefined);
     const element = unshowableElement(receiver, type.element, typeOf);
     if (element !== undefined)
       problems.push({
@@ -175,9 +185,9 @@ export function memberProblems(
     // a count, a list, or a collection, so those arguments are checked on any receiver too.
     const list = listMethod(name);
     if (list !== undefined && name !== "join")
-      return listArgumentProblems(list, undefined, property, call, typeOf, true);
+      return listArgumentProblems(list, undefined, property, call, typeOf, known, true);
     const member = name === "join" ? LIST_JOIN : isTextMethod(name) ? TEXT_METHODS[name] : null;
-    if (member !== null) return argumentProblems(member, call, typeOf, undefined);
+    if (member !== null) return argumentProblems(member, call, typeOf, known, undefined);
     // Only date and time values have their methods, which take no arguments.
     if (isTemporalMethod(name))
       return call.arguments.length === 0
@@ -270,6 +280,7 @@ function argumentProblems(
   member: TextSignature,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
   receiverText: string | undefined,
 ): OperationProblem[] {
   const shape = shapeProblems(member, call);
@@ -326,7 +337,7 @@ function argumentProblems(
       );
       continue;
     }
-    values[index] = knownArgument(parameter, value);
+    values[index] = knownArgument(parameter, known(value));
     for (const domain of member.domains) if (lastArgument(domain) === index) check(domain);
   }
   return problems;
@@ -337,18 +348,17 @@ function lastArgument(domain: TextDomain): number {
   return Math.max(...domain.reads.map((read) => (read === "length" ? -1 : read)));
 }
 
-/** The value of an argument of `parameter` that the compiler knows: text, a whole number, or a regex literal. */
-function knownArgument(parameter: TextParameter, value: Expression): DomainValue | undefined {
-  if (!takesText(parameter) && !takesRegex(parameter)) return staticNumber(value);
-  return (takesText(parameter) ? staticVisibleText(value) : undefined) ?? knownRegex(value);
-}
-
-/** The regex of a literal, also in parentheses, with valid flags; one RE2 rejects is reported where it is written. */
-function knownRegex(expression: Expression): SerializableRegex | undefined {
-  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
-  if (expression.kind !== "regexLiteral" || regexFlagProblem(expression.flags) !== null)
-    return undefined;
-  return { kind: "regex", source: expression.source, flags: canonicalRegexFlags(expression.flags) };
+/** The known `value` of an argument of `parameter` as its domains read it: text, a whole number, or a regex. */
+function knownArgument(
+  parameter: TextParameter,
+  value: KnownValue | undefined,
+): DomainValue | undefined {
+  if (!takesText(parameter) && !takesRegex(parameter))
+    return typeof value === "number" ? value : undefined;
+  return (takesText(parameter) && typeof value === "string") ||
+    (takesRegex(parameter) && value !== undefined && isRegex(value))
+    ? value
+    : undefined;
 }
 
 /**
@@ -426,6 +436,7 @@ export function builtinCallProblems(
   name: string,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
 ): OperationProblem[] {
   if (isListFunction(name) && takesValues(name)) return minMaxProblems(name, call, typeOf);
   if (isNumericFunction(name))
@@ -435,7 +446,7 @@ export function builtinCallProblems(
     if (random.takes === "numbers") return numberArgumentProblems(name, random, call, typeOf);
     return random.takes === "range" ? fixedShapeProblems(name, random.parameters, call) : [];
   }
-  if (isConversion(name)) return conversionProblems(name, CONVERSIONS[name], call, typeOf);
+  if (isConversion(name)) return conversionProblems(name, CONVERSIONS[name], call, typeOf, known);
   const shape = FILE_TEXT_FUNCTIONS.get(name);
   if (shape !== undefined) return fileTextProblems(name, shape, call, typeOf);
   if (LOCK_CALLS.has(name)) return lockProblems(name, call, typeOf);
@@ -649,6 +660,7 @@ function conversionProblems(
   conversion: Conversion,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
 ): OperationProblem[] {
   const { problems, positional, fallback } = shapedCall(name, conversion, call, typeOf);
   if (problems.length > 0) return problems;
@@ -658,7 +670,16 @@ function conversionProblems(
     if (conversion.pair !== undefined && positional.length === 2)
       problems.push(...pairProblems(name, conversion.pair, positional, typeOf));
     else {
-      const message = conversionProblem(name, conversion, value, type);
+      // Without a default, a run fails at any known text that does not convert. With one, the run gives the default,
+      // and only text written as a constant is an error (V30 §13).
+      const computed = known(value);
+      const text =
+        fallback !== undefined
+          ? staticVisibleText(value)
+          : typeof computed === "string"
+            ? computed
+            : undefined;
+      const message = conversionProblem(name, conversion, value, type, text);
       if (message !== undefined)
         problems.push({ kind: "invalidOperand", message, span: value.span });
     }
@@ -886,12 +907,13 @@ function conversionProblem(
   conversion: ValueConversion,
   value: Expression,
   type: StaticType,
+  text: string | undefined,
 ): string | undefined {
   const candidates = members(forUse(type)).map(resolved);
   if (candidates.length === 0 || candidates.some((candidate) => !isKnown(candidate)))
     return undefined;
   const problems = candidates.map((candidate) =>
-    candidateConversionProblem(name, conversion, value, candidate),
+    candidateConversionProblem(name, conversion, value, candidate, text),
   );
   return problems.every((problem) => problem !== undefined) ? problems[0] : undefined;
 }
@@ -901,13 +923,13 @@ function candidateConversionProblem(
   conversion: ValueConversion,
   value: Expression,
   type: StaticType,
+  text: string | undefined,
 ): string | undefined {
   const { kinds, result } = conversion;
   if (kinds === "shown" ? type.kind === "scalar" || type.kind === "null" : isScalar(type, ...kinds))
     return undefined;
   if (isScalar(type, "string")) {
     // Text it can see converts as the runtime converts it, and does not convert with the runtime's text.
-    const text = staticVisibleText(value);
     return text === undefined || conversion.textProblem(text) === undefined
       ? undefined
       : cannotConvert(name, conversion, text);
@@ -1121,6 +1143,7 @@ export function collectionMethodProblems(
   property: Identifier,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
   removable = false,
 ): OperationProblem[] {
   const method = listMethod(name);
@@ -1132,7 +1155,7 @@ export function collectionMethodProblems(
         span: property.span,
       },
     ];
-  return listArgumentProblems(method, receiverType, property, call, typeOf, removable);
+  return listArgumentProblems(method, receiverType, property, call, typeOf, known, removable);
 }
 
 /**
@@ -1148,6 +1171,7 @@ function listArgumentProblems(
   property: Identifier,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
   removable: boolean,
 ): OperationProblem[] {
   if (method.named !== undefined) return getProblems(receiverType, call);
@@ -1155,7 +1179,7 @@ function listArgumentProblems(
   if (shape.length > 0) return shape;
   // The shape fits, so each argument has its parameter.
   const problems = call.arguments.flatMap((argument, position) =>
-    argumentKindProblems(method, method.parameters[position]!.kind, argument.value, typeOf),
+    argumentKindProblems(method, method.parameters[position]!.kind, argument.value, typeOf, known),
   );
   if (method.name !== "sort" || receiverType === undefined) return problems;
   const message = sortProblem(receiverType.element);
@@ -1170,6 +1194,7 @@ function argumentKindProblems(
   kind: ListParameterKind,
   argument: Expression,
   typeOf: (expression: Expression) => StaticType,
+  known: Known,
 ): OperationProblem[] {
   const problem = (message: string): OperationProblem[] => [
     { kind: "invalidOperand", message, span: argument.span },
@@ -1182,8 +1207,8 @@ function argumentKindProblems(
     const other = members(type).find((member) => !isAssignable(INTEGER_TYPE, member));
     if (other !== undefined)
       return problem(listArgumentMessage(method.name, "count", describeValue(other), "other"));
-    const known = staticNumber(argument);
-    const message = known === undefined ? undefined : countProblem(method.name, known);
+    const count = known(argument);
+    const message = typeof count === "number" ? countProblem(method.name, count) : undefined;
     return message === undefined ? [] : problem(message);
   }
   if (kind !== "list" && kind !== "collection") return [];

@@ -315,6 +315,10 @@ function checkProject(
       {
         ...options,
         sharedWrites: new Map(names.flatMap((result) => [...result.sharedWrites])),
+        written: {
+          lets: new Set(names.flatMap((result) => [...result.writtenLets])),
+          globals: new Set(names.flatMap((result) => [...result.writtenGlobals])),
+        },
         speakers: new Map(names.flatMap((result) => [...result.speakers])),
       },
       track,

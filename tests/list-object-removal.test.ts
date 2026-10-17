@@ -115,7 +115,7 @@ test("removal fails at runtime for an invalid index or an empty list", () => {
       "Cannot remove index 1: 'items' has 1 element, so its only index is 0. Check the index against 'items.length' first.",
     ],
     [
-      'let items = ["a"]\nlet index = 0 - 1\nitems.removeAt(index)\nexit',
+      'function dynamic(value) {\n    return value\n}\nlet items = ["a"]\nlet index = dynamic(0 - 1)\nitems.removeAt(index)\nexit',
       "TSR025",
       "Cannot remove index -1: 'items' has 1 element, so its only index is 0. Check the index against 'items.length' first.",
     ],

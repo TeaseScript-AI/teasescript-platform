@@ -7,6 +7,7 @@ import { angleStatisticMessage } from "./angle.js";
 import type { CallExpression, Expression } from "./ast.js";
 import type { ListFunctionName } from "./language-facts.js";
 import {
+  fewestValuesProblem,
   LIST_FUNCTION_CONTRACTS,
   listFunctionShape,
   listValueMessage,
@@ -17,7 +18,8 @@ import {
 import { RANGE_LIST_FIX } from "./list-methods.js";
 import type { OperationProblem } from "./operation-checks.js";
 import { RANDOM_CONTRACTS } from "./random-functions.js";
-import { staticChoiceValue, staticVisibleText } from "./static-evaluation.js";
+import { isList } from "./runtime/value-predicates.js";
+import { staticChoiceValue, staticVisibleText, type KnownValue } from "./static-evaluation.js";
 import {
   copyType,
   describeValue,
@@ -73,8 +75,30 @@ interface Context {
   readonly reads: ListPropertyRead[];
 }
 
-/** A number the compiler can see, such as a constant percentage or weight, or `undefined`. */
-type Known = (expression: Expression) => number | undefined;
+/** The value that every run gives an expression, when the compiler knows it (see `KnownValues`). */
+type Known = (expression: Expression) => KnownValue | undefined;
+
+/** The number `expression` is known to have, such as a constant percentage or weight, or `undefined`. */
+function knownNumber(known: Known, expression: Expression): number | undefined {
+  const value = known(expression);
+  return typeof value === "number" ? value : undefined;
+}
+
+/**
+ * Reports a list the compiler knows, with fewer values than the list function needs (see `fewestValuesProblem`), at the
+ * list.
+ */
+function checkFewest(
+  context: Context,
+  name: ListFunctionName,
+  list: Expression,
+  known: Known,
+): void {
+  const value = known(list);
+  if (value === undefined || !isList(value)) return;
+  const message = fewestValuesProblem(name, value.items.length);
+  if (message !== undefined) problem(context, message, list);
+}
 
 /**
  * Checks a call of a list function (see `LIST_FUNCTION_CONTRACTS`), `min` and `max` with one list, and gives its result
@@ -94,7 +118,7 @@ export function listFunctionCheck(
     problems: [],
     reads: [],
   };
-  const type = listFunctionType(context, LIST_FUNCTION_CONTRACTS[name], known);
+  const type = listFunctionType(context, name, known);
   return { problems: context.problems, reads: context.reads, type };
 }
 
@@ -113,8 +137,9 @@ export function weightedChoiceCheck(
   return { problems: context.problems, reads: context.reads, type };
 }
 
-function listFunctionType(context: Context, contract: ListFunction, known: Known): StaticType {
-  const { name, call } = context;
+function listFunctionType(context: Context, name: ListFunctionName, known: Known): StaticType {
+  const { call } = context;
+  const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
   switch (contract.takes) {
     case "points": {
       if (!shape(context)) return UNKNOWN_TYPE;
@@ -125,7 +150,11 @@ function listFunctionType(context: Context, contract: ListFunction, known: Known
         problem(context, `${name}(...) needs y: with x:, the property that holds the values.`, x);
         return UNKNOWN_TYPE;
       }
+      const before = context.problems.length;
       const ys = valueKind(context, valuesType(context, list, y, "y"), contract.values, list);
+      // Without names, its points are the list's values.
+      if (y === undefined && context.problems.length === before)
+        checkFewest(context, name, list, known);
       const xs =
         x === undefined
           ? "integer"
@@ -154,7 +183,7 @@ function listFunctionType(context: Context, contract: ListFunction, known: Known
         const argument = positional[index]!;
         if (index === 0) return undefined;
         const type = forUse(context.typeOf(argument));
-        if (isAssignable(NUMBER_TYPE, type)) return known(argument);
+        if (isAssignable(NUMBER_TYPE, type)) return knownNumber(known, argument);
         problem(
           context,
           `${name}(...) needs a number as its ${parameter}, not ${describeValue(type)}.`,
@@ -171,12 +200,12 @@ function listFunctionType(context: Context, contract: ListFunction, known: Known
           problem(context, failure, reads.length === 1 ? positional[reads[0]!]! : call);
       }
       const list = positional[0]!;
-      const kind = valueKind(
-        context,
-        valuesType(context, list, named(call, "by"), "by"),
-        contract.values,
-        list,
-      );
+      const by = named(call, "by");
+      const before = context.problems.length;
+      const kind = valueKind(context, valuesType(context, list, by, "by"), contract.values, list);
+      // Without `by:`, its values are the list's.
+      if (by === undefined && context.problems.length === before)
+        checkFewest(context, name, list, known);
       if (kind === "integer" && contract.integers === "number") return NUMBER_TYPE;
       return typeOfKind(kind);
     }
@@ -449,7 +478,7 @@ function weightedType(context: Context, known: Known): StaticType {
           const keyKnown = typeof staticChoiceValue(entry.key)?.value === "string";
           weights[index] = {
             at: entry.value,
-            value: known(entry.value),
+            value: knownNumber(known, entry.value),
             kept: index === written.entries.length - 1 || (keyKnown && laterKeysKnown),
           };
           laterKeysKnown &&= keyKnown;
@@ -477,7 +506,7 @@ function weightedType(context: Context, known: Known): StaticType {
                 : undefined;
             return {
               at: property?.value ?? element,
-              value: property === undefined ? undefined : known(property.value),
+              value: property === undefined ? undefined : knownNumber(known, property.value),
               kept: true,
             };
           }),
