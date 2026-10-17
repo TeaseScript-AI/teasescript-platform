@@ -12,6 +12,7 @@ import {
   unknownNamedArgumentMessage,
 } from "../argument-rules.js";
 import { LIST_FUNCTION_SHAPES, MIN_MAX_TAKES } from "../list-function-rules.js";
+import { startValueMessage, type StartValueOwner } from "../start-value-rules.js";
 import type { DeveloperWarningCode, RuntimeErrorCode } from "../diagnostic-codes.js";
 import { temporalCaptureAt } from "./temporal-captures.js";
 import {
@@ -413,8 +414,8 @@ export class Evaluator {
   /** Whether the reference being prepared keeps a copy of its root (`preparedReferenceTemporaries`). */
   #keepPreparedRoot = false;
 
-  /** Whether a start value is being evaluated, which may not select anything at random (ADR 0022 §6). */
-  #startValue = false;
+  /** The global or speaker whose start value is being evaluated, which may not select at random (ADR 0022 §6). */
+  #startValue: StartValueOwner | null = null;
 
   /** With controlled randomness, the generator state before the last draw: its ID. */
   #drawId = 0;
@@ -469,12 +470,15 @@ export class Evaluator {
   }
 
   /** Evaluates the start value of a global or a speaker property. */
-  public evaluateStartValue(expression: ExpressionPlan): SerializableRuntimeValue {
-    this.#startValue = true;
+  public evaluateStartValue(
+    owner: StartValueOwner,
+    expression: ExpressionPlan,
+  ): SerializableRuntimeValue {
+    this.#startValue = owner;
     try {
       return this.evaluate(expression);
     } finally {
-      this.#startValue = false;
+      this.#startValue = null;
     }
   }
 
@@ -3397,7 +3401,7 @@ export class Evaluator {
     let draws = 0;
     const outcome = sample(() => {
       draws += 1;
-      return this.#drawRandom(span);
+      return this.#drawRandom(span, operation);
     });
     if (trace !== null && draws > 0)
       trace.random(operation, span, choices, range, before, this.#randomState(), draws);
@@ -3446,11 +3450,20 @@ export class Evaluator {
     return this.capabilities.random === undefined ? this.snapshot.rng.state : null;
   }
 
-  #drawRandom(span: SourceSpan): number {
-    if (this.#startValue)
+  #drawRandom(span: SourceSpan, operation: RuntimeDebugRandomOperation): number {
+    // The compiler reports '.random' and a list in '${...}' where it knows the value's type, and every other random
+    // operation of a start value as a call.
+    if (this.#startValue !== null)
       throw fault(
         "TSR067",
-        "A start value cannot select anything at random: it is set up at the start of the session, before the story runs.",
+        startValueMessage(this.#startValue, {
+          kind:
+            operation === "collectionRandom"
+              ? "random"
+              : operation === "interpolation"
+                ? "shownList"
+                : "call",
+        }),
         span,
       );
     const random =

@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource, type CompileOptions } from "../src/compiler.js";
+import type { ArgumentPlan, ExpressionPlan, InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
+import { run } from "../src/runtime/engine.js";
 import { RuntimeFault } from "../src/runtime/errors.js";
 import { temporalMethod, temporalNow } from "../src/runtime/temporal-operations.js";
 import { createSourcePosition, createSourceSpan } from "../src/source.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 // One problem gets one code and one text, whichever pass, path, or form of the source finds it, and two problems get a
 // code each (IMPLEMENTATION-AND-REVIEW.md, "One home for each language rule").
@@ -175,6 +179,148 @@ test("a date or time call with arguments has the compiler's text where the runti
     assert.equal(compiled.length, 1, source);
     assert.equal(compiled[0]![0], "TSV020", source);
     assert.deepEqual(fault(run), [code, compiled[0]![1]], source);
+  }
+});
+
+/** The code and message that the runtime fails `plan` with. */
+function runtimeFailure(plan: InstructionPlan): readonly [string, string] {
+  const failure = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot.failure;
+  assert.notEqual(failure, null, "The plan did not fail.");
+  return [failure!.code, failure!.message];
+}
+
+type Written = number | string | boolean;
+
+/**
+ * The plan of `valid` whose first call of `callee` has the arguments `written` instead: a value, or `[name, value]`
+ * for a named argument. It is a plan that the compiler did not check.
+ */
+function forgedCall(
+  valid: string,
+  callee: string,
+  written: readonly (Written | readonly [string, Written])[],
+): InstructionPlan {
+  const plan = structuredClone(compileValidPlan(`${valid}\nexit`));
+  const find = (node: unknown): { arguments: unknown } | undefined => {
+    if (typeof node !== "object" || node === null) return undefined;
+    if (
+      "kind" in node &&
+      node.kind === "call" &&
+      "callee" in node &&
+      typeof node.callee === "object" &&
+      node.callee !== null &&
+      "name" in node.callee &&
+      node.callee.name === callee &&
+      "arguments" in node
+    )
+      return node;
+    for (const child of Object.values(node)) {
+      const found = find(child);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+  const span = { so: 0, sl: 0, sc: 0, eo: 1, el: 0, ec: 1 };
+  const literal = (value: Written): ExpressionPlan => ({ kind: "literal", value, span });
+  find(plan.instructions)!.arguments = written.map((argument): ArgumentPlan =>
+    typeof argument === "object"
+      ? { kind: "named", name: argument[0], value: literal(argument[1]), span }
+      : { kind: "positional", value: literal(argument), span },
+  );
+  return plan;
+}
+
+test("a call's arguments have the compiler's text where the runtime checks them", () => {
+  // The runtime checks the arguments of a plan that this compiler did not check (TSR028), and gives the text of the
+  // compiler's first problem.
+  const TREND = "let trend = linearRegression([1, 2])\n";
+  const DICT = "let d = dict{ a: 1 }\n";
+  const TIMER = "let t = timer(duration: 10 s, async: true)\n";
+  const LINE = 'let line = say "Hi", instant\n';
+  const BUTTON = 'let b = showPermanentButton "Press" {\n}\n';
+  for (const [bad, valid, callee, written] of [
+    // A numeric, angle, or random function, and `escapeMarkup`.
+    ["say round(1.5, x: 1)", "say round(1.5)", "round", [1.5, ["x", 1]]],
+    ["say pow(2)", "say pow(2, 3)", "pow", [2]],
+    ["say sin()", "say sin(1 deg)", "sin", []],
+    ["say random(1)", "say random()", "random", [1]],
+    ["say chance(50, x: 1)", "say chance(50)", "chance", [50, ["x", 1]]],
+    ["say escapeMarkup()", 'say escapeMarkup("a")', "escapeMarkup", []],
+    // `min` and `max` of values or of one list.
+    ["say min()", "say min(1, 2)", "min", []],
+    ["say max(1, 2, by: 3)", "say max(1, 2)", "max", [1, 2, ["by", 3]]],
+    ["say min([1, 2], x: 1)", "say min([1, 2])", "min", [1, ["x", 1]]],
+    // The list functions.
+    ["say sum([1], x: 1)", "say sum([1])", "sum", [1, ["x", 1]]],
+    ["say percentile([1])", "say percentile([1], 50)", "percentile", [1]],
+    ["say linearRegression()", "say linearRegression([1, 2])", "linearRegression", []],
+    [`${TREND}say predict(trend)`, `${TREND}say predict(trend, 1)`, "predict", [1]],
+    ["say randomWeighted()", 'say randomWeighted(dict{ "a": 1 })', "randomWeighted", []],
+    // `script(...)` reports the number of arguments first.
+    ["let s = script()", 'let s = script("main.tease")', "script", []],
+    [
+      'let s = script("main.tease", x: 1)',
+      'let s = script("main.tease")',
+      "script",
+      ["a", ["x", 1]],
+    ],
+    // The methods of dicts, lists, sets, and ranges.
+    [`${DICT}d.clear(1)`, `${DICT}d.clear()`, "clear", [1]],
+    [`${DICT}say d.contains("a", x: 1)`, `${DICT}say d.contains("a")`, "contains", ["a", ["x", 1]]],
+    [`${DICT}say d.get("a")`, `${DICT}say d.get("a", default: 0)`, "get", ["a"]],
+    ["let l = [1]\nl.add(1, 2)", "let l = [1]\nl.add(1)", "add", [1, 2]],
+    ["let l = [1]\nsay l.take()", "let l = [1]\nsay l.take(1)", "take", []],
+    ["let l = [1]\nsay l.get(0)", "let l = [1]\nsay l.get(0, default: 0)", "get", [0]],
+    ["let s = set[1]\ns.add()", "let s = set[1]\ns.add(1)", "add", []],
+    ["say (1..=3).toList(1)", "say (1..=3).toList()", "toList", [1]],
+    // The methods of handles, which take no arguments.
+    [`${TIMER}t.pause(1)`, `${TIMER}t.pause()`, "pause", [1]],
+    [`${TIMER}t.stop(now: true)`, `${TIMER}t.stop()`, "stop", [["now", true]]],
+    [`${LINE}line.remove(1)`, `${LINE}line.remove()`, "remove", [1]],
+    [`${BUTTON}b.remove(1)`, `${BUTTON}b.remove()`, "remove", [1]],
+  ] as const) {
+    const compiled = diagnostics(bad);
+    assert.ok(compiled.length > 0, bad);
+    assert.deepEqual(
+      runtimeFailure(forgedCall(valid, callee, written)),
+      ["TSR028", compiled[0]![1]],
+      bad,
+    );
+  }
+});
+
+test("a value of a type the compiler does not know fails with the compiler's text for its type", () => {
+  const D = "function dynamic(value) {\n    return value\n}\n";
+  const LINE = 'let line = say "Hi", instant\n';
+  for (const [unknown, known] of [
+    // A message takes 'remove()', a list 'remove(value)', so the compiler accepts either for an unknown receiver.
+    [`${D}dynamic([1]).remove()`, "let l = [1]\nl.remove()"],
+    [`${D}${LINE}dynamic(line).remove(1)`, `${LINE}line.remove(1)`],
+    [
+      `${D}say randomWeighted(dynamic(dict{ "a": 1 }), weight: "w")`,
+      'say randomWeighted(dict{ "a": 1 }, weight: "w")',
+    ],
+    [`${D}say randomWeighted(dynamic([{ w: 1 }]))`, "say randomWeighted([{ w: 1 }])"],
+    // A start value, which may not select at random, of a key that the compiler cannot read.
+    ['global pick = (load "pi" + "cks", default: [1, 2]).random', "global pick = [1, 2].random"],
+    ['global shown = "${load "pi" + "cks", default: [1, 2]}"', 'global shown = "${[1, 2]}"'],
+    [
+      'speaker anna { mood: (load "pi" + "cks", default: [1, 2]).random }',
+      "speaker anna { mood: [1, 2].random }",
+    ],
+    // Tags from a value that the compiler does not know.
+    [
+      'let names = load "names", default: ["level: 1", "level: 2"]\nlet photo = takePhoto(tags: names)',
+      'let photo = takePhoto(tags: ["level: 1", "level: 2"])',
+    ],
+    [
+      'let names = load "names", default: ["Bed Room"]\nlet photo = takePhoto(tags: names)',
+      'let photo = takePhoto(tags: ["Bed Room"])',
+    ],
+  ]) {
+    const compiled = diagnostics(known!);
+    assert.equal(compiled.length, 1, known);
+    assert.equal(runtimeFailure(compileValidPlan(`${unknown}\nexit`))[1], compiled[0]![1], unknown);
   }
 });
 

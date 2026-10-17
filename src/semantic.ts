@@ -77,7 +77,7 @@ import {
 } from "./project-globals.js";
 import { PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
 import { duplicateEntryMessage } from "./object-properties.js";
-import { startValueMessage } from "./start-value-rules.js";
+import { startValueMessage, startValueOwner } from "./start-value-rules.js";
 import {
   argumentCountMessage,
   argumentsTaken,
@@ -2512,6 +2512,7 @@ class SemanticValidator {
     this.#validateExpression(value, scope, contextualSpeaker);
     this.#startValue = false;
     const speaker = owner.kind === "speakerDeclaration";
+    const subject = startValueOwner(owner);
     const order = this.project.order(owner);
     const work = [value];
     while (work.length > 0) {
@@ -2527,7 +2528,7 @@ class SemanticValidator {
         case "showPermanentButtonExpression":
           this.#report(
             semanticCode.invalidStartValue,
-            startValueMessage(owner, { kind: "effect" }),
+            startValueMessage(subject, { kind: "effect" }),
             expression.span,
             true,
           );
@@ -2545,7 +2546,7 @@ class SemanticValidator {
           }
           this.#report(
             semanticCode.invalidStartValue,
-            startValueMessage(owner, { kind: "call" }),
+            startValueMessage(subject, { kind: "call" }),
             expression.span,
             true,
           );
@@ -2561,10 +2562,11 @@ class SemanticValidator {
               owner.kind === "globalStatement" ? unwrapParentheses(owner.initial) : null;
             this.#report(
               semanticCode.invalidStartValue,
-              startValueMessage(owner, {
+              startValueMessage(subject, {
                 kind: "local",
                 name: expression.name,
                 assigned: value?.kind === "identifier" ? value.name : "...",
+                defaulted: owner.kind === "globalStatement" && owner.assignment !== null,
               }),
               expression.span,
               true,
@@ -2576,7 +2578,7 @@ class SemanticValidator {
             this.#report(
               semanticCode.invalidStartValue,
               startValueMessage(
-                owner,
+                subject,
                 used.order === order
                   ? { kind: "itself" }
                   : { kind: "later", name: expression.name },

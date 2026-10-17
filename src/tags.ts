@@ -69,6 +69,11 @@ export function conflictingTagMessage(kept: Tag, tag: Tag, image?: string): stri
   return `The tag '${tag.name}'${of} has two different numbers, ${kept.value} and ${tag.value}. Keep one, such as '${tag.name}: ${kept.value}'.`;
 }
 
+/** The message for a text of `takePhoto(tags: [...])` that is not a tag (`TST005`, and `TSR083` at runtime). */
+export function notATagMessage(text: string): string {
+  return `'${text}' is not a tag: use lowercase letters a–z, digits, and hyphens, with an optional number, such as "punishment: 4".`;
+}
+
 /**
  * Adds `tag` to `tags`, keyed by name. A repeated name is merged: a number wins over its absence. Two different numbers
  * for one name conflict and leave the first.

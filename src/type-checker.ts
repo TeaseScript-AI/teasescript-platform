@@ -96,6 +96,7 @@ import {
   CONFLICTING_TAG_CODE,
   conflictingTagMessage,
   normalizeTagName,
+  notATagMessage,
   readTagText,
   type Tag,
 } from "./tags.js";
@@ -240,7 +241,7 @@ import {
   type StaticScalar,
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
-import { startValueMessage } from "./start-value-rules.js";
+import { startValueMessage, startValueOwner } from "./start-value-rules.js";
 import {
   argumentShapeProblem,
   dictArgumentsProblem,
@@ -2329,7 +2330,7 @@ class TypeChecker {
       )
         this.#report(
           typeCode.randomStartValue,
-          startValueMessage(owner, { kind: "random" }),
+          startValueMessage(startValueOwner(owner), { kind: "random" }),
           expression.span,
         );
       if (expression.kind === "stringLiteral")
@@ -2337,7 +2338,7 @@ class TypeChecker {
           if (part.kind === "stringInterpolation" && this.#mayBe(part.expression, isList))
             this.#report(
               typeCode.randomStartValue,
-              startValueMessage(owner, { kind: "shownList" }),
+              startValueMessage(startValueOwner(owner), { kind: "shownList" }),
               part.expression.span,
             );
       for (const child of expressionChildren(expression)) work.push(child);
@@ -5637,11 +5638,7 @@ class TypeChecker {
         .join("");
       const tag = readTagText(text);
       if (tag === null) {
-        this.#report(
-          typeCode.invalidCaptureTag,
-          `'${text}' is not a tag: use lowercase letters a–z, digits, and hyphens, with an optional number, such as "punishment: 4".`,
-          element.span,
-        );
+        this.#report(typeCode.invalidCaptureTag, notATagMessage(text), element.span);
       } else if (addTag(seen, tag) === "conflict") {
         this.#report(
           typeCode.conflictingTag,
