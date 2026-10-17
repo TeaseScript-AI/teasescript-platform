@@ -22,6 +22,7 @@ import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import { PlanControlFlow } from "./plan/control-flow.js";
 import { Reachability, type ConstantTest, type StatementFlow } from "./reachability.js";
 import {
+  stopsTypeCheck,
   validateProjectSemantics,
   type FileSemanticResult,
   type SemanticValidationOptions,
@@ -295,7 +296,9 @@ function checkProject(
       files[index]!.picks = result.picks;
       files[index]!.captures = result.captures;
     });
-    if (files.some((file) => file.parsed === null || hasErrors(file.result.diagnostics)))
+    if (
+      files.some((file) => file.parsed === null || file.result.diagnostics.some(stopsTypeCheck))
+    )
       return null;
     // Types are checked once every name resolves, so a type message never repeats a name or structure error.
     const types = checkTypes(

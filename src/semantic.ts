@@ -190,6 +190,17 @@ const OVERFLOW_MESSAGES = {
   angle: "This calculation gives an angle too large to represent. Use a smaller angle.",
 } as const;
 
+/**
+ * Whether a name-pass error leaves the type check without a basis. Every error does, except a start value's placement
+ * (TSV055): it leaves every name resolved, so the type check still reports the problems of the values inside it.
+ */
+export function stopsTypeCheck(diagnostic: Diagnostic): boolean {
+  return (
+    diagnostic.severity === DiagnosticSeverity.Error &&
+    diagnostic.code !== semanticCode.invalidStartValue
+  );
+}
+
 /** Validates one source as the `main.tease` of a single-file project. */
 export function validateSemantics(
   program: Program,
