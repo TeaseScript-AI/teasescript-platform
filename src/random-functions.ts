@@ -1,3 +1,4 @@
+import type { ArgumentShape } from "./argument-rules.js";
 import { withoutNegativeZero } from "./conversions.js";
 import { randomBeta, randomNormal, randomPert } from "./deterministic-math.js";
 import type { RandomFunctionName } from "./language-facts.js";
@@ -59,6 +60,14 @@ export type RandomFunction = {
        */
       readonly takes: "choices";
       readonly result: "choice";
+      /** Its arguments: the dict or the list, and `weight:`, which only a list takes. */
+      readonly shape: ArgumentShape;
+      /**
+       * Why it cannot choose from what it is given: a dict with `weight:`, a list without it, or another value. The last
+       * names neither the type nor the value: the compiler and the runtime would describe them in different words, such
+       * as an element type that only the compiler knows.
+       */
+      readonly sources: { readonly dict: string; readonly list: string; readonly other: string };
       /** Why a weight is invalid, or `undefined`. */
       readonly weightProblem: (weight: number) => string | undefined;
       /** Why valid weights are invalid together, or `undefined`. */
@@ -135,6 +144,12 @@ export const RANDOM_CONTRACTS = {
   randomWeighted: {
     takes: "choices",
     result: "choice",
+    shape: { count: 1, takes: "1 argument (a dict, or a list with weight:)", names: ["weight"] },
+    sources: {
+      dict: "randomWeighted(...) of a dict takes its weights from the dict. Remove 'weight:'.",
+      list: `randomWeighted(...) of a list needs weight:, the property that holds each element's weight, as in randomWeighted(tasks, weight: "chance").`,
+      other: "randomWeighted(...) needs a dict of weights or a list of objects.",
+    },
     weightProblem: (weight) =>
       weight < 0 ? `randomWeighted(...) needs weights of at least 0, not ${weight}.` : undefined,
     weightsProblem: (weights) =>

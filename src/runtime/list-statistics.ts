@@ -1,13 +1,8 @@
 import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import { angleStatisticMessage, angleValue } from "../angle.js";
-import { argumentShapeProblem } from "../argument-rules.js";
+import { argumentShapeProblem, type ArgumentShape } from "../argument-rules.js";
 import { exactDuration } from "../duration.js";
-import {
-  DICT_WEIGHTS_MESSAGE,
-  LIST_FUNCTION_SHAPES,
-  LIST_WEIGHT_MESSAGE,
-  WEIGHTED_SOURCE_MESSAGE,
-} from "../list-function-rules.js";
+import { LIST_FUNCTION_SHAPES } from "../list-function-rules.js";
 import { percentageFailure } from "../numeric-functions.js";
 import { RANDOM_CONTRACTS } from "../random-functions.js";
 import type { PlanSourceLocation } from "../plan/model.js";
@@ -517,14 +512,15 @@ export function weightedChoices(
   span: SourceSpan,
 ): { readonly choices: readonly SerializableRuntimeValue[]; readonly weights: readonly number[] } {
   const name = "randomWeighted";
-  checkArguments(name, positional, named, span);
+  const contract = RANDOM_CONTRACTS[name];
+  checkArguments(name, positional, named, span, contract.shape);
   const source = positional[0]!;
   const dict = isDict(source);
   // A dict has its weights, and anything else needs weight:, as the compiler checks them.
   if (dict ? named.weight !== undefined : named.weight === undefined)
     throw fault(
       "TSR028",
-      dict ? DICT_WEIGHTS_MESSAGE : isList(source) ? LIST_WEIGHT_MESSAGE : WEIGHTED_SOURCE_MESSAGE,
+      contract.sources[dict ? "dict" : isList(source) ? "list" : "other"],
       span,
     );
   const choices = dict
@@ -539,7 +535,6 @@ export function weightedChoices(
       `${name}(...) of an empty ${dict ? "dict" : "list"} has nothing to choose.`,
       span,
     );
-  const contract = RANDOM_CONTRACTS[name];
   const numbers = weights.map((weight) => {
     if (typeof weight !== "number")
       throw fault(
@@ -574,19 +569,18 @@ export function weightedIndex(weights: readonly number[], draw: number): number 
   return last;
 }
 
-/** Fails as the compiler reports the first problem with the names and the number of a list function's arguments. */
+/**
+ * Fails as the compiler reports the first problem with the names and the number of a list function's arguments, or of
+ * `randomWeighted`'s, which `shape` gives.
+ */
 function checkArguments(
   name: string,
   positional: readonly SerializableRuntimeValue[],
   named: Named,
   span: SourceSpan,
+  shape: ArgumentShape = LIST_FUNCTION_SHAPES.get(name)!,
 ): void {
-  const problem = argumentShapeProblem(
-    name,
-    LIST_FUNCTION_SHAPES.get(name)!,
-    positional.length,
-    Object.keys(named),
-  );
+  const problem = argumentShapeProblem(name, shape, positional.length, Object.keys(named));
   if (problem !== undefined) throw fault("TSR028", problem.message, span);
 }
 

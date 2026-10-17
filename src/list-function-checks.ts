@@ -1,12 +1,11 @@
-import { argumentCountMessage, unknownNamedArgumentMessage } from "./argument-rules.js";
+import {
+  argumentCountMessage,
+  unknownNamedArgumentMessage,
+  type ArgumentShape,
+} from "./argument-rules.js";
 import { angleStatisticMessage } from "./angle.js";
 import type { CallExpression, Expression } from "./ast.js";
-import {
-  DICT_WEIGHTS_MESSAGE,
-  LIST_FUNCTION_SHAPES,
-  LIST_WEIGHT_MESSAGE,
-  WEIGHTED_SOURCE_MESSAGE,
-} from "./list-function-rules.js";
+import { LIST_FUNCTION_SHAPES } from "./list-function-rules.js";
 import { percentageFailure } from "./numeric-functions.js";
 import { RANGE_LIST_FIX, type OperationProblem } from "./operation-checks.js";
 import { RANDOM_CONTRACTS } from "./random-functions.js";
@@ -78,6 +77,8 @@ const TEMPORAL_KINDS: readonly ValueKind[] = ["date", "time", "datetime", "absol
 
 interface Context {
   readonly name: string;
+  /** What the function takes. */
+  readonly shape: ArgumentShape;
   readonly call: CallExpression;
   readonly typeOf: (expression: Expression) => StaticType;
   readonly problems: OperationProblem[];
@@ -94,7 +95,14 @@ export function listFunctionCheck(
   typeOf: (expression: Expression) => StaticType,
   known: Known,
 ): ListFunctionCheck {
-  const context: Context = { name, call, typeOf, problems: [], reads: [] };
+  const context: Context = {
+    name,
+    shape: LIST_FUNCTION_SHAPES.get(name)!,
+    call,
+    typeOf,
+    problems: [],
+    reads: [],
+  };
   const type = listFunctionType(context, known);
   return { problems: context.problems, reads: context.reads, type };
 }
@@ -108,7 +116,8 @@ export function weightedChoiceCheck(
   typeOf: (expression: Expression) => StaticType,
   known: Known,
 ): ListFunctionCheck {
-  const context: Context = { name: "randomWeighted", call, typeOf, problems: [], reads: [] };
+  const { shape } = RANDOM_CONTRACTS.randomWeighted;
+  const context: Context = { name: "randomWeighted", shape, call, typeOf, problems: [], reads: [] };
   const type = weightedType(context, known);
   return { problems: context.problems, reads: context.reads, type };
 }
@@ -194,7 +203,7 @@ function listFunctionType(context: Context, known: Known): StaticType {
 /** Reports names and a number of positional arguments the function does not take; `true` when there are none. */
 function shape(context: Context): boolean {
   const { name, call } = context;
-  const { count: positional, names, takes } = LIST_FUNCTION_SHAPES.get(name)!;
+  const { count: positional, names, takes } = context.shape;
   const before = context.problems.length;
   for (const argument of call.arguments)
     if (argument.kind === "namedArgument" && !names.includes(argument.name.name))
@@ -460,7 +469,8 @@ function weightedType(context: Context, known: Known): StaticType {
   }
   const value = resolved(type);
   if (value.kind === "dict") {
-    if (weight !== undefined) problem(context, DICT_WEIGHTS_MESSAGE, weight);
+    if (weight !== undefined)
+      problem(context, RANDOM_CONTRACTS.randomWeighted.sources.dict, weight);
     else {
       valueKind(context, value.element, ["number"], source);
       if (written.kind === "dictLiteral") {
@@ -484,7 +494,8 @@ function weightedType(context: Context, known: Known): StaticType {
     return STRING_TYPE;
   }
   if (value.kind === "list") {
-    if (weight === undefined) problem(context, LIST_WEIGHT_MESSAGE, source);
+    if (weight === undefined)
+      problem(context, RANDOM_CONTRACTS.randomWeighted.sources.list, source);
     else {
       valueKind(context, valuesType(context, source, weight, "weight"), ["number"], weight);
       const key = staticVisibleText(weight);
@@ -508,7 +519,7 @@ function weightedType(context: Context, known: Known): StaticType {
     }
     return copyType(value.element);
   }
-  problem(context, WEIGHTED_SOURCE_MESSAGE, source);
+  problem(context, RANDOM_CONTRACTS.randomWeighted.sources.other, source);
   return UNKNOWN_TYPE;
 }
 
