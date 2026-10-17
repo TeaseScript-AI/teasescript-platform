@@ -6831,6 +6831,13 @@ class TypeChecker {
       }
     }
     const values = yield* compileChild(this.#callArgumentsTask(expression, scope));
+    // Only a list has removeAt, so its position is a list index on any receiver.
+    if (
+      method === "removeAt" &&
+      expression.arguments.length === 1 &&
+      expression.arguments[0]!.kind === "positionalArgument"
+    )
+      this.#checkNegativeIndex(expression.arguments[0]!.value);
     if (!isKnown(value)) {
       // Only text and lists have these methods, so their arguments are checked on any receiver.
       memberChecks();
@@ -6841,14 +6848,7 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     if (method === "removeAt" && values.length === 1 && members(value).every(isList))
-      this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
-    // Only a list has removeAt, so its position is a list index on any receiver.
-    else if (
-      method === "removeAt" &&
-      expression.arguments.length === 1 &&
-      expression.arguments[0]!.kind === "positionalArgument"
-    )
-      this.#checkNegativeIndex(expression.arguments[0]!.value);
+      this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value, true);
     // As for a dict, the default may decide the element type of a list that no value decided yet (V30 §16), before
     // anything reads the element.
     const listDefault = expression.arguments[1];
@@ -7704,17 +7704,26 @@ class TypeChecker {
 
   /**
    * Checks `object[index]`: only lists, indexed by a whole number, and dicts, by a text key, are indexed, and every
-   * member of a union must be the same one. An object has fixed properties, so it points to a dict. A list's `get`
-   * gives its default for any index the list does not have, also one below 0 (`negative`).
+   * member of a union must be the same one. An object has fixed properties, so it points to a dict. A list index below
+   * 0 is checked here unless the caller handles it (`belowZero`): a list's `get` gives its default for it, and
+   * `removeAt` checks it on any receiver.
    */
   #checkIndex(
     object: StaticType,
     objectExpression: Expression,
     index: StaticType,
     expression: Expression,
-    negative = false,
+    belowZero = false,
   ): void {
     const known = members(nonNullType(object)).filter(isKnown).map(resolved);
+    // Also on a receiver that may be null or is not known: no list has an element below 0.
+    if (
+      !belowZero &&
+      members(nonNullType(object)).some(
+        (member) => !isKnown(member) || resolved(member).kind === "list",
+      )
+    )
+      this.#checkNegativeIndex(expression);
     if (known.length > 0 && known.every((member) => member.kind === "object")) {
       const key = staticChoiceValue(expression)?.value;
       const name = expressionLabel(objectExpression);
@@ -7753,7 +7762,7 @@ class TypeChecker {
         `A list index must be a whole number (integer), but this is ${describeValue(position)}.${this.#widenedNote(expression)}${ROUND_FIX}.`,
         expression.span,
       );
-    else {
+    else
       this.#reportUnless(
         index,
         (member) => isScalar(member, "integer") || (keyed && isScalar(member, "string")),
@@ -7762,14 +7771,12 @@ class TypeChecker {
           ? "An index is a whole number (integer) for a list, or text (string) for a dict"
           : "A list index is a whole number (integer)",
       );
-      if (isScalar(position, "integer") && !negative) this.#checkNegativeIndex(expression);
-    }
   }
 
-  /** A list index the compiler knows is below 0, which no element has. */
+  /** A whole-number list index the compiler knows is below 0, which no element has. */
   #checkNegativeIndex(expression: Expression): void {
     const known = this.#known(expression);
-    if (typeof known === "number" && known < 0)
+    if (typeof known === "number" && Number.isInteger(known) && known < 0)
       this.#report(typeCode.invalidListIndex, NEGATIVE_INDEX_MESSAGE, expression.span);
   }
 
