@@ -96,19 +96,6 @@ function staticScalar(expression: Expression): { readonly value: StaticScalar } 
   return runCompileTask(staticScalarTask(expression));
 }
 
-/**
- * A known finite number, duration, or angle, with the runtime's operations; anything else is `undefined`. A step that
- * overflows is reported by `findVisibleOverflows`, so callers check only the finite result.
- */
-export function staticQuantity(
-  expression: Expression,
-): number | AnyDuration | StoredAngle | undefined {
-  const known = staticScalar(expression)?.value;
-  return typeof known === "number" || isStaticDuration(known) || isStaticAngle(known)
-    ? known
-    : undefined;
-}
-
 /** Scalar visible text, as the runtime converts the value. */
 function scalarText(value: StaticScalar): string {
   if (typeof value === "string") return value;
