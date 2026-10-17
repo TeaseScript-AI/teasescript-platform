@@ -223,7 +223,7 @@ test("a call that some receiver with the method takes compiles, and its receiver
   const failure = runValidSource(`${DYNAMIC}dynamic([1]).remove()\nexit`).snapshot.failure;
   assert.deepEqual(
     [failure?.code, failure?.message],
-    ["TSR028", "remove() takes one argument, but this call has none."],
+    ["TSR028", "remove() takes 1 argument (value), received 0."],
   );
 });
 

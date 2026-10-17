@@ -1,4 +1,17 @@
-import { unknownNamedArgumentMessage } from "../argument-rules.js";
+import {
+  argumentCountMessage,
+  argumentShapeProblem,
+  dictArgumentsProblem,
+  FIXED_PARAMETERS,
+  getArgumentsProblem,
+  LIST_ONLY_METHODS,
+  NO_ARGUMENTS,
+  POSITIONAL_METHODS,
+  positionalShape,
+  scriptArgumentCountMessage,
+  unknownNamedArgumentMessage,
+} from "../argument-rules.js";
+import { LIST_FUNCTION_SHAPES, MIN_MAX_TAKES } from "../list-function-rules.js";
 import type { DeveloperWarningCode, RuntimeErrorCode } from "../diagnostic-codes.js";
 import { temporalCaptureAt } from "./temporal-captures.js";
 import {
@@ -183,7 +196,11 @@ import {
   STRING_METHODS,
   stringLength,
 } from "./string-operations.js";
-import { LIST_JOIN, unknownTextMemberMessage } from "../text-operations.js";
+import {
+  LIST_JOIN,
+  methodArgumentCountMessage,
+  unknownTextMemberMessage,
+} from "../text-operations.js";
 import { missingPropertyMessage } from "../object-properties.js";
 import { findScriptStorageEntry, storageKey, storageKeyPlace } from "./script-storage.js";
 import {
@@ -2520,13 +2537,13 @@ export class Evaluator {
       expression.callee.name === "toList" &&
       isRange(receiver)
     ) {
-      const count = positional.length + Object.keys(named).length;
-      if (count > 0)
-        throw fault(
-          "TSR028",
-          `toList() takes no arguments, but this call has ${count}.`,
-          expression.span,
-        );
+      const problem = argumentShapeProblem(
+        "toList",
+        NO_ARGUMENTS,
+        positional.length,
+        Object.keys(named),
+      );
+      if (problem !== undefined) throw fault("TSR028", problem.message, expression.span);
       return rangeList(receiver, expression.span);
     }
     if (expression.callee.kind === "property") {
@@ -2572,19 +2589,17 @@ export class Evaluator {
     // Only a list's `get` takes a named argument, its `default:`; a set has no `get`.
     if (namedArgument !== undefined && name !== "get")
       throw fault("TSR015", unknownNamedArgumentMessage(name, namedArgument, []), span);
-    const expect = (count: number): void => {
-      if (positional.length !== count)
-        throw fault(
-          "TSR028",
-          `${name}() takes ${count === 0 ? "no arguments" : count === 1 ? "one argument" : `${count} arguments`}, but this call has ${positional.length === 0 ? "none" : positional.length}.`,
-          span,
-        );
+    // The method's parameters as the compiler checks them for a list or a set.
+    const expect = (): void => {
+      const method = POSITIONAL_METHODS.get(name) ?? LIST_ONLY_METHODS.get(name)!;
+      if (positional.length !== method.parameters!.length)
+        throw fault("TSR028", methodArgumentCountMessage(method, positional.length), span);
     };
     try {
       if (isSet(receiver)) {
         switch (name) {
           case "add":
-            expect(1);
+            expect();
             if (added !== null) assertValueType(positional[0]!, added.check, added.span);
             if (
               receiver.items.length >= MAX_COLLECTION_LENGTH &&
@@ -2594,23 +2609,23 @@ export class Evaluator {
             addSerializableSetValue(receiver, positional[0]!);
             return null;
           case "remove":
-            expect(1);
+            expect();
             removeSerializableSetValue(receiver, positional[0]!);
             return null;
           case "clear":
-            expect(0);
+            expect();
             clearSerializableSet(receiver);
             return null;
           case "contains":
-            expect(1);
+            expect();
             return serializableSetContains(receiver, positional[0]!);
           case "toList":
-            expect(0);
+            expect();
             return createCapturedSerializableList(receiver.items);
           case "intersection":
           case "union":
           case "difference": {
-            expect(1);
+            expect();
             const argument = this.#setOperationArgument(name, positional[0]!, span);
             const items = setOperationItems(name, receiver.items, argument);
             checkCollectionLength(
@@ -2636,7 +2651,7 @@ export class Evaluator {
       }
       switch (name) {
         case "add":
-          expect(1);
+          expect();
           if (added !== null) assertValueType(positional[0]!, added.check, added.span);
           checkCollectionLength(
             "list",
@@ -2648,7 +2663,7 @@ export class Evaluator {
           receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
           return null;
         case "addAll": {
-          expect(1);
+          expect();
           const other = positional[0]!;
           if (!isList(other))
             throw fault(
@@ -2671,7 +2686,7 @@ export class Evaluator {
           return null;
         }
         case "remove": {
-          expect(1);
+          expect();
           const index = this.#findValue(receiver.items, positional[0]!);
           if (index >= 0) this.#removeListItem(receiver, index);
           else {
@@ -2684,7 +2699,7 @@ export class Evaluator {
           return null;
         }
         case "removeAt": {
-          expect(1);
+          expect();
           const index = this.#listPosition(
             receiver,
             receiverPlan,
@@ -2697,7 +2712,7 @@ export class Evaluator {
         }
         case "removeFirst":
         case "removeLast":
-          expect(0);
+          expect();
           if (receiver.items.length === 0)
             throw fault(
               "TSR018",
@@ -2709,24 +2724,24 @@ export class Evaluator {
             name === "removeFirst" ? 0 : receiver.items.length - 1,
           );
         case "clear":
-          expect(0);
+          expect();
           if (receiver.items.length > 0) {
             freezePreparedReferenceDescendants(this.snapshot, receiver);
             receiver.items.length = 0;
           }
           return null;
         case "contains":
-          expect(1);
+          expect();
           return this.#findValue(receiver.items, positional[0]!) >= 0;
         // A value that no element equals has no position: null (#840).
         case "indexOf":
         case "lastIndexOf": {
-          expect(1);
+          expect();
           const index = this.#findValue(receiver.items, positional[0]!, name === "lastIndexOf");
           return index < 0 ? null : index;
         }
         case "count": {
-          expect(1);
+          expect();
           let count = 0;
           for (const item of receiver.items)
             if (serializableEquals(item, positional[0]!)) count += 1;
@@ -2735,12 +2750,11 @@ export class Evaluator {
         // A value that is not a position of the list, such as a negative or fractional index, text, or null, gives the
         // default (#844).
         case "get": {
-          if (positional.length !== 1 || Object.keys(named).length !== 0 || !defaulted)
-            throw fault(
-              "TSR028",
-              "'list.get(index, default: value)' takes an index and a 'default:' value.",
-              span,
-            );
+          const problem = getArgumentsProblem("list", positional.length, [
+            ...Object.keys(named),
+            ...(defaulted ? ["default"] : []),
+          ]);
+          if (problem !== undefined) throw fault("TSR028", problem.message, span);
           const index = positional[0]!;
           return typeof index === "number" &&
             Number.isInteger(index) &&
@@ -2750,11 +2764,11 @@ export class Evaluator {
             : USE_DEFAULT;
         }
         case "toSet":
-          expect(0);
+          expect();
           return createCapturedSerializableSet(receiver.items);
         case "take":
         case "takeLast": {
-          expect(1);
+          expect();
           const count = positional[0]!;
           if (typeof count !== "number" || !Number.isInteger(count) || count < 0)
             throw fault(
@@ -2771,7 +2785,7 @@ export class Evaluator {
         }
         case "sort":
         case "shuffle":
-          expect(0);
+          expect();
           this.#reorderList(
             receiver,
             name === "sort" ? sortOrder(receiver.items, span) : this.#shuffleOrder(receiver, span),
@@ -2779,7 +2793,7 @@ export class Evaluator {
           return null;
         // The last element first: the old indexes from the end.
         case "reverse":
-          expect(0);
+          expect();
           this.#reorderList(
             receiver,
             receiver.items.map((_, index) => receiver.items.length - 1 - index),
@@ -2788,7 +2802,7 @@ export class Evaluator {
         case "intersection":
         case "union":
         case "difference": {
-          expect(1);
+          expect();
           const argument = this.#setOperationArgument(name, positional[0]!, span);
           const items = setOperationItems(name, receiver.items, argument);
           checkCollectionLength(
@@ -2835,16 +2849,11 @@ export class Evaluator {
     const name = callee.name;
     const span = expression.span;
     if (!DICT_METHODS.has(name)) throw fault("TSR016", noCollectionMethod(receiver, name), span);
-    const names = Object.keys(named);
-    const expected = name === "clear" ? 0 : 1;
-    if (positional.length !== expected || names.length !== 0 || (name === "get") !== defaulted)
-      throw fault(
-        "TSR028",
-        name === "get"
-          ? "dict.get(key, default: value) takes a key and a 'default:' value."
-          : `dict.${name}(${name === "clear" ? "" : "key"}) takes ${expected === 0 ? "no arguments" : "one key"}.`,
-        span,
-      );
+    const problem = dictArgumentsProblem(name, positional.length, [
+      ...Object.keys(named),
+      ...(defaulted ? ["default"] : []),
+    ]);
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     if (name === "clear") {
       if (receiver.entries.length > 0) {
         freezePreparedReferenceDescendants(this.snapshot, receiver);
@@ -3464,7 +3473,7 @@ export class Evaluator {
   }
 
   #randomBuiltin(call: RuntimeCapabilityCall): number {
-    this.#expectBuiltinArguments("random", call, 0);
+    this.#expectBuiltinArguments("random", call);
     let random = this.#draw(call.span, "random", null, null, (draw) => draw());
     if (this.control !== null)
       random = outcomeNumber(
@@ -3477,7 +3486,7 @@ export class Evaluator {
   }
 
   #chanceBuiltin(call: RuntimeCapabilityCall): boolean {
-    this.#expectBuiltinArguments("chance", call, 1);
+    this.#expectBuiltinArguments("chance", call);
     const percent = percentage("chance", call.positional[0]!, call.span);
     let chosen = this.#draw(call.span, "chance", null, null, (draw) => sampleChance(draw, percent));
     if (this.control !== null)
@@ -3492,7 +3501,7 @@ export class Evaluator {
   }
 
   #randomIntegerBuiltin(call: RuntimeCapabilityCall): number {
-    this.#expectBuiltinArguments("randomInteger", call, 1);
+    this.#expectBuiltinArguments("randomInteger", call);
     const range = call.positional[0]!;
     if (!isRange(range)) {
       throw fault(
@@ -3595,14 +3604,18 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): SerializableRuntimeValue {
-    // One list, optionally with by:, chooses among its values (V30 §16).
-    const list = positional.length === 1 && Object.keys(named).every((key) => key === "by");
-    if ((positional.length < 2 || Object.keys(named).length !== 0) && !list)
-      throw fault(
-        "TSR028",
-        `${name}(...) takes two or more numbers, durations, angles, or date and time values, such as ${name}(20, total), or one list, such as ${name}(scores).`,
-        span,
-      );
+    // One list, optionally with by:, chooses among its values (V30 §16), as the compiler checks one argument that may be
+    // a list.
+    const list = positional.length === 1;
+    const names = Object.keys(named);
+    const problem = list
+      ? argumentShapeProblem(name, LIST_FUNCTION_SHAPES.get(name)!, 1, names)?.message
+      : names.length > 0
+        ? unknownNamedArgumentMessage(name, names[0]!, [])
+        : positional.length < 2
+          ? argumentCountMessage(name, MIN_MAX_TAKES, positional.length)
+          : undefined;
+    if (problem !== undefined) throw fault("TSR028", problem, span);
     if (list) {
       const values = listValues(name, positional[0]!, named.by, span);
       if (values.length === 0)
@@ -3713,16 +3726,14 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): number {
-    const { parameters, named: names = [], example, apply, random } = NUMERIC_FUNCTIONS.get(name)!;
-    if (
-      positional.length !== parameters.length ||
-      Object.keys(named).some((key) => !names.includes(key))
-    )
-      throw fault(
-        "TSR028",
-        `${name}(...) takes ${parameters.length === 1 ? "one number" : `${parameters.length} numbers (${parameters.join(", ")})`}, such as ${example}.`,
-        span,
-      );
+    const { parameters, named: names = [], apply, random } = NUMERIC_FUNCTIONS.get(name)!;
+    const problem = argumentShapeProblem(
+      name,
+      { ...positionalShape(parameters), names },
+      positional.length,
+      Object.keys(named),
+    );
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     const number = (value: SerializableRuntimeValue, place: string): number => {
       if (typeof value === "number") return value;
       throw fault(
@@ -3762,7 +3773,7 @@ export class Evaluator {
   }
 
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
-    this.#expectBuiltinArguments("escapeMarkup", call, 1);
+    this.#expectBuiltinArguments("escapeMarkup", call);
     const text = call.positional[0]!;
     if (typeof text !== "string")
       throw fault(
@@ -3776,14 +3787,16 @@ export class Evaluator {
     return escapeMarkup(text);
   }
 
-  #expectBuiltinArguments(name: string, call: RuntimeCapabilityCall, count: number): void {
-    if (call.positional.length !== count || Object.keys(call.named).length !== 0) {
-      throw fault(
-        "TSR028",
-        `${name}(...) takes ${count === 1 ? "one argument, without a name" : `${count} arguments, without names`}.`,
-        call.span,
-      );
-    }
+  #expectBuiltinArguments(name: string, call: RuntimeCapabilityCall): void {
+    const parameters = FIXED_PARAMETERS.get(name)!;
+    const problem = argumentShapeProblem(
+      name,
+      positionalShape(parameters),
+      call.positional.length,
+      Object.keys(call.named),
+      parameters.length > 0,
+    );
+    if (problem !== undefined) throw fault("TSR028", problem.message, call.span);
   }
 
   /** Removes one list element, rebasing or freezing prepared references into the list, and returns it. */
@@ -4552,13 +4565,14 @@ function angleFunction(
   named: Readonly<Record<string, SerializableRuntimeValue>>,
   span: SourceSpan,
 ): number | StoredAngle {
-  const { parameters, takes, example, apply } = ANGLE_FUNCTIONS.get(name)!;
-  if (positional.length !== parameters.length || Object.keys(named).length !== 0)
-    throw fault(
-      "TSR028",
-      `${name}(...) takes ${parameters.length === 1 ? `one ${takes}` : `${parameters.length} numbers (${parameters.join(", ")})`}, such as ${example}.`,
-      span,
-    );
+  const { parameters, takes, apply } = ANGLE_FUNCTIONS.get(name)!;
+  const problem = argumentShapeProblem(
+    name,
+    positionalShape(parameters),
+    positional.length,
+    Object.keys(named),
+  );
+  if (problem !== undefined) throw fault("TSR028", problem.message, span);
   const values = positional.map((value) => {
     if (takes === "angle" && isAngle(value)) return value;
     if (takes === "number" && typeof value === "number") return value;
@@ -4722,9 +4736,12 @@ function scriptReference(
   named: Readonly<Record<string, SerializableRuntimeValue>>,
   span: SourceSpan,
 ): SerializableScriptReference {
-  if (positional.length !== 1 || Object.keys(named).some((name) => name !== "label")) {
-    throw fault("TSR028", "script(...) takes one path and an optional 'label:'.", span);
-  }
+  // The number first, then a name, as the compiler reports them.
+  if (positional.length !== 1)
+    throw fault("TSR028", scriptArgumentCountMessage(positional.length), span);
+  const unknown = Object.keys(named).find((name) => name !== "label");
+  if (unknown !== undefined)
+    throw fault("TSR028", unknownNamedArgumentMessage("script", unknown, ["label"]), span);
   const text = (value: SerializableRuntimeValue, part: string): string => {
     if (typeof value === "string") return value;
     throw fault(

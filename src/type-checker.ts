@@ -243,8 +243,8 @@ import {
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import { startValueMessage } from "./start-value-rules.js";
 import {
-  argumentCountMessage,
-  missingDefaultMessage,
+  dictArgumentsProblem,
+  scriptArgumentCountMessage,
   temporalArgumentsMessage,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
@@ -7641,12 +7641,7 @@ class TypeChecker {
         if (positional !== 1)
           this.#report(
             typeCode.argumentCount,
-            argumentCountMessage(
-              "script",
-              "1 argument (path)",
-              positional,
-              `Name a label with 'label:', as in 'script("rooms/hall.tease", label: "start")'.`,
-            ),
+            scriptArgumentCountMessage(positional),
             expression.span,
           );
         for (const [index, item] of expression.arguments.entries()) {
@@ -7840,40 +7835,20 @@ class TypeChecker {
    * `get(key, default: value)` a key and a `default:`. Returns whether they have that form.
    */
   #checkDictArguments(expression: CallExpression, method: string): boolean {
-    const positional = expression.arguments.filter(
-      (argument) => argument.kind === "positionalArgument",
-    );
     const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
-    const unknown = named.find((argument) => method !== "get" || argument.name.name !== "default");
-    if (unknown !== undefined) {
+    const problem = dictArgumentsProblem(
+      method,
+      expression.arguments.length - named.length,
+      named.map((argument) => argument.name.name),
+    );
+    if (problem === undefined) return true;
+    if (problem.kind === "unknownNamedArgument")
       this.#report(
         typeCode.unknownNamedArgument,
-        unknownNamedArgumentMessage(method, unknown.name.name, method === "get" ? ["default"] : []),
-        unknown.name.span,
+        problem.message,
+        named.find((argument) => argument.name.name === problem.name)!.name.span,
       );
-      return false;
-    }
-    const keys = method === "clear" ? 0 : 1;
-    if (positional.length === keys && (method !== "get" || named.length === 1)) return true;
-    this.#report(
-      typeCode.argumentCount,
-      method === "get" && named.length === 0 && positional.length === 1
-        ? missingDefaultMessage(
-            "get(key, default: value)",
-            "for a missing key",
-            "Read a key that must exist as 'dict[key]'.",
-          )
-        : argumentCountMessage(
-            method,
-            method === "get"
-              ? "1 argument (key) and a 'default:'"
-              : method === "clear"
-                ? "no arguments"
-                : "1 argument (key)",
-            positional.length,
-          ),
-      expression.span,
-    );
+    else this.#report(typeCode.argumentCount, problem.message, expression.span);
     return false;
   }
 

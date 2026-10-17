@@ -49,9 +49,14 @@ import {
 import {
   argumentCountMessage,
   argumentsTaken,
+  FIXED_PARAMETERS,
+  getArgumentsProblem,
+  LIST_ONLY_METHODS,
   missingDefaultMessage,
+  POSITIONAL_METHODS,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
+import { MIN_MAX_TAKES } from "./list-function-rules.js";
 import {
   argumentFix,
   argumentTypeMessage,
@@ -319,14 +324,6 @@ function joinShowable(type: StaticType): boolean {
 function capitalized(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
-
-/** The parameters of the built-ins that take a fixed number of positional arguments and no names (V30 §7, §8). */
-const FIXED_PARAMETERS: ReadonlyMap<string, readonly string[]> = new Map([
-  ["random", []],
-  ["chance", ["percent"]],
-  ["randomInteger", ["range"]],
-  ["escapeMarkup", ["text"]],
-]);
 
 /** Argument names and the number of arguments of a built-in that takes fixed positional arguments. */
 export function builtinShapeProblems(name: string, call: CallExpression): OperationProblem[] {
@@ -840,11 +837,7 @@ function minMaxProblems(
     return [
       {
         kind: "argumentCount",
-        message: argumentCountMessage(
-          name,
-          "2 or more arguments, or one list",
-          call.arguments.length,
-        ),
+        message: argumentCountMessage(name, MIN_MAX_TAKES, call.arguments.length),
         span: call.span,
       },
     ];
@@ -1088,47 +1081,6 @@ export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
   "difference",
 ]);
 
-/** A method that takes positional arguments with these names. */
-function positionalMethod(name: string, ...parameters: string[]): [string, MethodParameters] {
-  return [name, { name, parameters: parameters.map((parameter) => ({ name: parameter })) }];
-}
-
-/**
- * The parameters of the methods of lists and sets (V30 §16), timers and media (V30 §22), and date and time values
- * (V30 §35) that take only positional arguments, besides `join`, the searches, `take`, and `takeLast`, which have their
- * own checks. Every other receiver with one of these methods takes as many: text for `contains` and `reverse`, and a dict
- * for `contains`, `remove`, and `clear`. Only a message and a permanent button take `remove()` without arguments (#836).
- */
-const POSITIONAL_METHODS: ReadonlyMap<string, MethodParameters> = new Map([
-  positionalMethod("add", "value"),
-  positionalMethod("addAll", "other"),
-  positionalMethod("remove", "value"),
-  positionalMethod("removeAt", "index"),
-  positionalMethod("removeFirst"),
-  positionalMethod("removeLast"),
-  positionalMethod("clear"),
-  positionalMethod("contains", "value"),
-  positionalMethod("sort"),
-  positionalMethod("shuffle"),
-  positionalMethod("reverse"),
-  positionalMethod("intersection", "other"),
-  positionalMethod("union", "other"),
-  positionalMethod("difference", "other"),
-  positionalMethod("toSet"),
-  positionalMethod("toList"),
-  positionalMethod("pause"),
-  positionalMethod("resume"),
-  positionalMethod("stop"),
-  positionalMethod("toISO"),
-  positionalMethod("formatDate"),
-  positionalMethod("formatTime"),
-  positionalMethod("formatDateTime"),
-  positionalMethod("toAbsoluteDateTime"),
-  positionalMethod("toDateTime"),
-  positionalMethod("toSeconds"),
-  positionalMethod("toMilliseconds"),
-]);
-
 /**
  * The name of every method a value has: those of text (V30 §8), of lists, sets, and dicts (V30 §16), of timer and media
  * handles (V30 §22), of messages and permanent buttons, and of date and time values (V30 §35). Other values, such as
@@ -1249,7 +1201,7 @@ function takeProblems(
     return [
       {
         kind: "argumentCount",
-        message: argumentCountMessage(name, "1 argument (count)", call.arguments.length),
+        message: methodArgumentCountMessage(LIST_ONLY_METHODS.get(name)!, call.arguments.length),
         span: call.span,
       },
     ];
@@ -1300,7 +1252,7 @@ function searchProblems(
     return [
       {
         kind: "argumentCount",
-        message: argumentCountMessage(name, "1 argument (value)", call.arguments.length),
+        message: methodArgumentCountMessage(LIST_ONLY_METHODS.get(name)!, call.arguments.length),
         span: call.span,
       },
     ];
@@ -1326,40 +1278,20 @@ function getProblems(
       },
     ];
   const named = call.arguments.filter((argument) => argument.kind === "namedArgument");
-  const unknown = named.find((argument) => argument.name.name !== "default");
-  if (unknown !== undefined)
-    return [
-      {
-        kind: "unknownNamedArgument",
-        message: unknownNamedArgumentMessage("get", unknown.name.name, ["default"]),
-        span: unknown.name.span,
-      },
-    ];
-  const positional = call.arguments.length - named.length;
-  if (positional === 1 && named.length === 1) return [];
-  const list = receiverType !== undefined;
+  const problem = getArgumentsProblem(
+    receiverType === undefined ? "either" : "list",
+    call.arguments.length - named.length,
+    named.map((argument) => argument.name.name),
+  );
+  if (problem === undefined) return [];
   return [
     {
-      kind: "argumentCount",
-      message:
-        positional === 1 && named.length === 0
-          ? list
-            ? missingDefaultMessage(
-                "get(index, default: value)",
-                "for an index the list does not have",
-                "Read an element that must exist as 'list[index]'.",
-              )
-            : missingDefaultMessage(
-                "get(index or key, default: value)",
-                "for an index or key the value does not have",
-                "Read one that must exist as 'value[index]'.",
-              )
-          : argumentCountMessage(
-              "get",
-              `1 argument (${list ? "index" : "index or key"}) and a 'default:'`,
-              positional,
-            ),
-      span: call.span,
+      kind: problem.kind,
+      message: problem.message,
+      span:
+        problem.kind === "unknownNamedArgument"
+          ? named.find((argument) => argument.name.name === problem.name)!.name.span
+          : call.span,
     },
   ];
 }

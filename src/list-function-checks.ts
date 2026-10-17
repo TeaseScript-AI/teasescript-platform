@@ -1,6 +1,12 @@
 import { argumentCountMessage, unknownNamedArgumentMessage } from "./argument-rules.js";
 import { angleStatisticMessage } from "./angle.js";
 import type { CallExpression, Expression } from "./ast.js";
+import {
+  DICT_WEIGHTS_MESSAGE,
+  LIST_FUNCTION_SHAPES,
+  LIST_WEIGHT_MESSAGE,
+  weightedSourceMessage,
+} from "./list-function-rules.js";
 import { percentageFailure } from "./numeric-functions.js";
 import { RANGE_LIST_FIX, type OperationProblem } from "./operation-checks.js";
 import { staticVisibleText } from "./static-evaluation.js";
@@ -100,8 +106,7 @@ function listFunctionType(
   const { name, call } = context;
   switch (name) {
     case "linearRegression": {
-      if (!shape(context, 1, ["y", "x"], "1 argument (list), and optionally y: and x:"))
-        return UNKNOWN_TYPE;
+      if (!shape(context)) return UNKNOWN_TYPE;
       const list = positionalArguments(call)[0]!;
       const y = named(call, "y");
       const x = named(call, "x");
@@ -143,15 +148,7 @@ function listFunctionType(
     default: {
       // `sum`, `average`, `median`, `percentile`, `stddev`, and `min` or `max` of one list.
       const percentile = name === "percentile";
-      if (
-        !shape(
-          context,
-          percentile ? 2 : 1,
-          ["by"],
-          `${percentile ? "2 arguments (list, percentage)" : "1 argument (list)"}, and optionally by:`,
-        )
-      )
-        return UNKNOWN_TYPE;
+      if (!shape(context)) return UNKNOWN_TYPE;
       if (percentile) {
         const share = positionalArguments(call)[1]!;
         const value = known(share);
@@ -186,13 +183,9 @@ function listFunctionType(
 }
 
 /** Reports names and a number of positional arguments the function does not take; `true` when there are none. */
-function shape(
-  context: Context,
-  positional: number,
-  names: readonly string[],
-  usage: string,
-): boolean {
+function shape(context: Context): boolean {
   const { name, call } = context;
+  const { count: positional, names, takes } = LIST_FUNCTION_SHAPES.get(name)!;
   const before = context.problems.length;
   for (const argument of call.arguments)
     if (argument.kind === "namedArgument" && !names.includes(argument.name.name))
@@ -205,7 +198,7 @@ function shape(
   if (count !== positional)
     context.problems.push({
       kind: "argumentCount",
-      message: argumentCountMessage(name, usage, count),
+      message: argumentCountMessage(name, takes, count),
       span: call.span,
     });
   return context.problems.length === before;
@@ -359,7 +352,7 @@ function typeOfKind(kind: ValueKind | undefined): StaticType {
 /** `predict(line, x)`: a number or duration, as the line's intercept, at an x of the kind of the line's start. */
 function predictType(context: Context): StaticType {
   const { name, call, typeOf } = context;
-  if (!shape(context, 2, [], "2 arguments (line, x)")) return UNKNOWN_TYPE;
+  if (!shape(context)) return UNKNOWN_TYPE;
   const line = call.arguments[0]!.value;
   const x = call.arguments[1]!.value;
   // Whatever the line, each kind x may be is a number or a date and time value that is measured in days.
@@ -444,9 +437,8 @@ function knownKind(type: StaticType): ValueKind | undefined {
 
 /** `randomWeighted`: a key of a dict of weights, or a copy of an element of a list of objects with `weight:`. */
 function weightedType(context: Context): StaticType {
-  const { name, call, typeOf } = context;
-  if (!shape(context, 1, ["weight"], "1 argument (a dict, or a list with weight:)"))
-    return UNKNOWN_TYPE;
+  const { call, typeOf } = context;
+  if (!shape(context)) return UNKNOWN_TYPE;
   const source = call.arguments.find((argument) => argument.kind === "positionalArgument")!.value;
   const weight = named(call, "weight");
   const type = forUse(typeOf(source));
@@ -457,30 +449,16 @@ function weightedType(context: Context): StaticType {
   }
   const value = resolved(type);
   if (value.kind === "dict") {
-    if (weight !== undefined)
-      problem(
-        context,
-        `${name}(...) of a dict takes its weights from the dict. Remove 'weight:'.`,
-        weight,
-      );
+    if (weight !== undefined) problem(context, DICT_WEIGHTS_MESSAGE, weight);
     else valueKind(context, value.element, ["number"], source);
     return STRING_TYPE;
   }
   if (value.kind === "list") {
-    if (weight === undefined)
-      problem(
-        context,
-        `${name}(...) of a list needs weight:, the property that holds each element's weight, as in ${name}(tasks, weight: "chance").`,
-        source,
-      );
+    if (weight === undefined) problem(context, LIST_WEIGHT_MESSAGE, source);
     else valueKind(context, valuesType(context, source, weight, "weight"), ["number"], weight);
     return copyType(value.element);
   }
-  problem(
-    context,
-    `${name}(...) needs a dict of weights or a list of objects, not ${describeValue(value)}.`,
-    source,
-  );
+  problem(context, weightedSourceMessage(describeValue(value)), source);
   return UNKNOWN_TYPE;
 }
 
