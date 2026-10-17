@@ -29,12 +29,16 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { canonicalRegexFlags, compileRegex, regexFlagProblem } from "./regex.js";
 import {
+  COMMANDS,
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
+  PROTECTED_NAME_CODE,
+  protectedNameMessage,
   RENAMED_BUILTINS,
   RENAMED_METHODS,
+  TEASESCRIPT_GRAMMAR_KEYWORDS,
   TEASESCRIPT_PROTECTED_NAMES,
-} from "./protected-names.js";
+} from "./language-facts.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import {
   askOperands,
@@ -468,6 +472,21 @@ class SemanticScope {
   }
 }
 
+/**
+ * The names that a host may not configure, as a global or a built-in, because the language gives them a meaning of its
+ * own: the commands and asks, which the parser reads by name; `takePhoto` and `askImage`, whose calls wait for the
+ * Player; `pi`, which the parser reads as the number it names; and `debugMode`, which the engine reads from the session.
+ */
+const UNCONFIGURABLE_NAMES: ReadonlySet<string> = new Set([
+  ...Object.keys(COMMANDS).filter(
+    (name) => !TEASESCRIPT_GRAMMAR_KEYWORDS.some((keyword) => keyword === name),
+  ),
+  "takePhoto",
+  "askImage",
+  "pi",
+  "debugMode",
+]);
+
 /** How a message names the resource whose block is validated. */
 const HANDLER_NAMES = { timer: "timer", media: "media", button: "button" } as const;
 
@@ -567,34 +586,7 @@ class SemanticValidator {
     this.#root = new SemanticScope(project.scope);
     this.#invalidConfiguredNames = Object.freeze(
       [...(options.globals ?? []), ...(options.builtins ?? [])].filter((name) =>
-        [
-          "showButton",
-          "askText",
-          "askNumber",
-          "askInteger",
-          "askDate",
-          "askTime",
-          "askDateTime",
-          "askPassword",
-          "askBoolean",
-          "askForm",
-          "askBooleans",
-          "askChoice",
-          "choose",
-          "takePhoto",
-          "showCamera",
-          "hideCamera",
-          "stopAudio",
-          "showPermanentButton",
-          "askImage",
-          "showPopup",
-          "openUrl",
-          "exportText",
-          // The parser reads `pi` as the number it names, so a configured `pi` could never be read.
-          "pi",
-          // The engine reads `debugMode` from the session.
-          "debugMode",
-        ].includes(name),
+        UNCONFIGURABLE_NAMES.has(name),
       ),
     );
     this.#builtins = new Set([
@@ -656,11 +648,7 @@ class SemanticValidator {
       if (statement.kind !== "labelStatement") continue;
       const name = statement.name.name;
       if (this.#protectedNames.has(name)) {
-        this.#report(
-          semanticCode.duplicateDeclaration,
-          `Label '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Label'.`,
-          statement.name.span,
-        );
+        this.#report(PROTECTED_NAME_CODE, protectedNameMessage(name, "label"), statement.name.span);
       } else if (this.#labels.has(name)) {
         this.#report(
           semanticCode.invalidLabel,
@@ -924,8 +912,8 @@ class SemanticValidator {
         // Speakers belong to the project, which declared them already.
         if (statement.name.name === PLAYER)
           this.#report(
-            semanticCode.duplicateDeclaration,
-            "'player' is the built-in speaker for the person playing, so it needs no declaration. Assign its fields instead, as in 'player.color = ...'.",
+            PROTECTED_NAME_CODE,
+            protectedNameMessage(PLAYER, "speaker"),
             statement.name.span,
           );
         const declared =
@@ -2213,11 +2201,7 @@ class SemanticValidator {
     declaration?: FunctionDeclaration,
   ): boolean {
     if (this.#protectedNames.has(name)) {
-      this.#report(
-        semanticCode.duplicateDeclaration,
-        `Declaration '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Value'.`,
-        span,
-      );
+      this.#report(PROTECTED_NAME_CODE, protectedNameMessage(name, "other"), span);
       return false;
     }
     if (scope.declare(name, declaration === undefined ? { kind } : { kind, declaration }))

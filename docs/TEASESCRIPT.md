@@ -492,7 +492,8 @@ implementation constraint, not language capacity. Historical diagnostic measurem
 ## Protected names
 
 Grammar keywords, type names, engine names, and implemented core built-ins are centrally protected from user
-declarations. Protecting a name reserves it; it does not make that name callable.
+declarations, in `src/language-facts.ts` with the lexer's keywords, the words the parser reads by name, and the units.
+Protecting a name reserves it; it does not make that name callable.
 
 A Standard Library export does not automatically become a protected grammar keyword. ADR 0018 explicitly protects its
 selected first-POC direct names, and the message-markup specification explicitly protects `escapeMarkup`, as part of

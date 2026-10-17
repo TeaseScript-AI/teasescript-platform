@@ -10,16 +10,8 @@ import {
   sinDegrees,
   tanDegrees,
 } from "./deterministic-math.js";
+import { ANGLE_UNIT_NAMES } from "./language-facts.js";
 import type { NumericFailure } from "./numeric-functions.js";
-
-const ANGLE_UNIT_NAMES: ReadonlyMap<string, AngleUnit> = new Map([
-  ["deg", "deg"],
-  ["degree", "deg"],
-  ["degrees", "deg"],
-  ["rad", "rad"],
-  ["radian", "rad"],
-  ["radians", "rad"],
-]);
 
 /** Resolves a short or long angle unit name: degrees or radians. */
 export function angleUnit(name: string): AngleUnit | undefined {
