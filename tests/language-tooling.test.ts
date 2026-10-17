@@ -4,12 +4,14 @@ import {
   COMMANDS,
   commandFacts,
   CONVERSION_FUNCTIONS,
+  NUMERIC_FUNCTIONS,
   RANDOM_FUNCTIONS,
   CORE_RUNTIME_BUILTINS,
   TEASESCRIPT_GRAMMAR_KEYWORDS,
   TEASESCRIPT_PROTECTED_TYPE_NAMES,
 } from "../src/language-facts.js";
 import { CONVERSIONS } from "../src/conversions.js";
+import { NUMERIC_CONTRACTS } from "../src/numeric-functions.js";
 import { RANDOM_CONTRACTS } from "../src/random-functions.js";
 import { MESSAGE_PRESENTATION_OPTIONS } from "../src/message-presentation.js";
 import {
@@ -409,6 +411,46 @@ test("a random function's call has help from its contract, also while it is bein
   // A method of the same name, a declared name, and a property are no call of the function.
   assert.equal(help("say items.random(", ")\nexit")[0], "say");
   assert.equal(help("function chance(")[0], null);
+});
+
+test("a numeric or angle function's call has help from its contract, also while it is being written", () => {
+  // The help at the end of `source`: its command, the signature's label, and its active parameter.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    return [
+      languageContextHelp(document, position)?.command ?? null,
+      signature?.label ?? null,
+      signature === null ? null : (signature.parameters[signature.activeParameter] ?? null),
+    ];
+  };
+  for (const name of NUMERIC_FUNCTIONS) {
+    const document = createLanguageDocument("file:///main.tease", `say ${name}(`);
+    const position = languagePositionAt(document, document.text.length);
+    const context = languageContextHelp(document, position);
+    assert.deepEqual([context?.command, context?.summary], [name, NUMERIC_CONTRACTS[name].summary]);
+    assert.deepEqual(languageHover(document, position)?.contents, [
+      `**${name}**`,
+      NUMERIC_CONTRACTS[name].summary,
+      `Syntax: \`${context?.syntax}\``,
+    ]);
+  }
+  // The syntax is the call's shape (V30 §13), and the active parameter the argument being written.
+  const round = "round(value [, decimals: number])";
+  assert.deepEqual(help("say round("), ["round", round, "value"]);
+  assert.deepEqual(help("say round(2.675, "), ["round", round, "decimals"]);
+  assert.deepEqual(help("say round(2.675, decimals: "), ["round", round, "decimals"]);
+  assert.deepEqual(help("let level = clamp(level, 1, "), [
+    "clamp",
+    "clamp(value, min, max)",
+    "max",
+  ]);
+  assert.deepEqual(help("let heading = atan2("), ["atan2", "atan2(y, x)", "y"]);
+  assert.deepEqual(help("say sqrt(abs("), ["abs", "abs(value)", "value"]);
+  assert.deepEqual(help("say sin("), ["sin", "sin(angle)", "angle"]);
+  // A declared name is no call of the function.
+  assert.equal(help("function sqrt(")[0], null);
 });
 
 test("askChoice help names set options and the prefill after the options (V30 §19)", () => {

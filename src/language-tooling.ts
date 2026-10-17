@@ -14,6 +14,12 @@ import type {
 import { compileProject, compileSource, isNativeStackExhaustion } from "./compiler.js";
 import { conversionSyntax, CONVERSIONS, isConversion, type Conversion } from "./conversions.js";
 import {
+  isNumericFunction,
+  NUMERIC_CONTRACTS,
+  numericSyntax,
+  type NumericFunction,
+} from "./numeric-functions.js";
+import {
   isRandomFunction,
   RANDOM_CONTRACTS,
   randomSyntax,
@@ -60,6 +66,7 @@ import {
   type AskCommand,
   type CommandName,
   type ConversionName,
+  type NumericFunctionName,
   type RandomFunctionName,
   type RenamedCommand,
   type StatementCommand,
@@ -884,8 +891,11 @@ function declaredSpeakers(source: string): readonly string[] {
   return Object.freeze([...new Set(speakers)]);
 }
 
-/** A built-in whose help comes from its contract: a conversion or a random function (`CONVERSIONS`, `RANDOM_CONTRACTS`). */
-type ContractName = ConversionName | RandomFunctionName;
+/**
+ * A built-in whose help comes from its contract: a conversion, a numeric or angle function, or a random function
+ * (`CONVERSIONS`, `NUMERIC_CONTRACTS`, `RANDOM_CONTRACTS`).
+ */
+type ContractName = ConversionName | NumericFunctionName | RandomFunctionName;
 
 /** A call of a built-in with a contract in the source: its name, where the name is, and where its `(` is. */
 interface ContractCall {
@@ -927,11 +937,17 @@ function locateHelp(
               summary: CONVERSIONS[call.name].summary,
               syntax: conversionSyntax(call.name),
             }
-          : {
-              command: call.name,
-              summary: RANDOM_CONTRACTS[call.name].summary,
-              syntax: randomSyntax(call.name),
-            },
+          : isNumericFunction(call.name)
+            ? {
+                command: call.name,
+                summary: NUMERIC_CONTRACTS[call.name].summary,
+                syntax: numericSyntax(call.name),
+              }
+            : {
+                command: call.name,
+                summary: RANDOM_CONTRACTS[call.name].summary,
+                syntax: randomSyntax(call.name),
+              },
       ),
       range: call.range,
       call,
@@ -1221,7 +1237,9 @@ function locateContractCall(tokens: readonly Token[], offset: number): ContractC
       open.push(
         token.kind === TokenKind.LeftParenthesis &&
           name?.kind === TokenKind.Identifier &&
-          (isConversion(name.lexeme) || isRandomFunction(name.lexeme)) &&
+          (isConversion(name.lexeme) ||
+            isNumericFunction(name.lexeme) ||
+            isRandomFunction(name.lexeme)) &&
           before !== TokenKind.Dot &&
           before !== TokenKind.KeywordFunction
           ? { name: name.lexeme, range: name.span, opener: token.span.start.offset }
@@ -1287,6 +1305,10 @@ function callParameters(
       ...(conversion.fallback === null ? [] : ["default"]),
       ...(conversion.files ? ["files"] : []),
     ]);
+  } else if (isNumericFunction(call.name)) {
+    const numeric: NumericFunction = NUMERIC_CONTRACTS[call.name];
+    form = numeric.parameters;
+    parameters = Object.freeze([...form, ...(numeric.named ?? [])]);
   } else {
     const random: RandomFunction = RANDOM_CONTRACTS[call.name];
     form = random.takes === "choices" ? ["dict"] : random.parameters;
