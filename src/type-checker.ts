@@ -174,12 +174,8 @@ import {
 } from "./choice-rules.js";
 import {
   blockingRepeatMessage,
-  cameraPlacementMessage,
   FINISH_NEVER_RUNS_MESSAGE,
   fileReferenceRule,
-  handleMemberMessage,
-  hasArgumentlessMethods,
-  isCameraPlacement,
   isMediaPosition,
   isMediaRange,
   isMediaRepeatCount,
@@ -193,8 +189,18 @@ import {
   mediaRangeMessage,
   mediaVolumeMessage,
   timerDisplayMessage,
-  type HandleKind,
 } from "./handle-rules.js";
+import {
+  HANDLE_MEMBERS,
+  handleMemberMessage,
+  handleMethod,
+  handleProperty,
+  isHandleKind,
+  kindsWithMethod,
+  kindsWithProperty,
+  type HandleKind,
+  type HandleValueType,
+} from "./handle-members.js";
 import {
   emptyRangeProblem,
   rangeBoundRule,
@@ -264,7 +270,6 @@ import { startValueMessage, startValueOwner } from "./start-value-rules.js";
 import {
   argumentShapeProblem,
   dictArgumentsProblem,
-  NO_ARGUMENTS,
   scriptArgumentCountMessage,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
@@ -476,10 +481,8 @@ const typeCode = {
   argumentCount: "TSV020",
   unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
-  invalidTimerHandleMember: "TSV034",
   mixedDurationOperands: "TSV035",
   invalidMedia: "TSV036",
-  invalidMediaHandleMember: "TSV037",
   invalidStorageKey: "TSV038",
   invalidInteractionPrefill: "TSV039",
   listInText: "TSV040",
@@ -496,7 +499,6 @@ const typeCode = {
   conflictingTag: CONFLICTING_TAG_CODE,
   invalidTagQueryFrom: "TST006",
   randomStartValue: "TSV055",
-  invalidCameraHandleMember: "TSV059",
   unusedFallback: "TSV062",
   changedCopy: "TSV067",
   invalidTimerDisplay: "TSV068",
@@ -3086,9 +3088,10 @@ class TypeChecker {
   }
 
   /**
-   * A camera view's placement, a timer's display, or a media volume that the compiler knows to be wrong, written to what
-   * can only be such a handle, also through an alias, a parameter, a function result, or a collection element. A value
-   * of another type is a type error of the store, and a value the compiler cannot know is checked at runtime (`TSR050`).
+   * A value outside the domain of a handle property (see `HandleDomain`), such as a camera view's placement, that the
+   * compiler knows, written to what can only be such a handle, also through an alias, a parameter, a function result, or
+   * a collection element. A value of another type is a type error of the store, and a value the compiler cannot know is
+   * checked at runtime (`TSR050`).
    */
   #checkHandleValue(
     object: StaticType,
@@ -3098,40 +3101,47 @@ class TypeChecker {
   ): void {
     const receivers = members(nonNullType(object)).map((member) => resolved(member).kind);
     const kind = receivers[0];
-    if (kind === undefined || receivers.some((other) => other !== kind)) return;
+    if (kind === undefined || !isHandleKind(kind) || receivers.some((other) => other !== kind))
+      return;
+    const domain = handleProperty(kind, name)?.assign?.domain;
+    if (domain === undefined) return;
     const report = (message: string) =>
       this.#report(handleMemberCode(kind), message, statement.value.span);
-    const text = isScalar(value, "string") ? staticVisibleText(statement.value) : undefined;
-    if (kind === "camera" && name === "placement") {
-      // Adding text to the placement never gives another placement; any other change is the operation's error.
-      if (statement.operator !== "=") {
-        if (
-          statement.operator === "+=" &&
-          (isScalar(value, "string") || !isKnown(nonNullTypeForUse(value)))
-        )
-          report(cameraPlacementMessage(null));
-      } else if (text !== undefined && !isCameraPlacement(text))
-        report(cameraPlacementMessage(shownChoice(text)));
-    } else if (statement.operator !== "=") return;
-    else if (kind === "timer" && name === "display") {
-      if (text !== undefined && !isTimerDisplay(text))
-        report(timerDisplayMessage(shownChoice(text)));
-    } else if (kind === "media" && name === "volume") {
-      const known = this.#known(statement.value);
-      if (typeof known === "number" && !isMediaVolume(known))
-        report(mediaVolumeMessage(describeShownValue(known)));
+    if (statement.operator !== "=") {
+      // Any other change is the operation's error.
+      if (
+        domain.appended !== undefined &&
+        statement.operator === "+=" &&
+        (isScalar(value, "string") || !isKnown(nonNullTypeForUse(value)))
+      )
+        report(domain.appended);
+      return;
     }
+    let known: string | number | undefined;
+    if (domain.known === "text")
+      known = isScalar(value, "string") ? staticVisibleText(statement.value) : undefined;
+    else {
+      const folded = this.#known(statement.value);
+      if (typeof folded === "number") known = folded;
+    }
+    if (known !== undefined && !domain.accepts(known))
+      report(
+        domain.message(domain.shows === "choice" ? shownChoice(known) : describeShownValue(known)),
+      );
   }
 
   /**
-   * The markup colours of literal text written to what can only be a message handle, checked as `say` checks its text;
-   * text the compiler cannot know falls back when it is shown.
+   * The markup colours of literal text written to a property of message markup, such as a message's text, of what can
+   * only be such a handle, checked as `say` checks its text; text the compiler cannot know falls back when it is shown.
    */
-  #checkMessageText(object: StaticType, statement: AssignmentStatement): void {
+  #checkMessageText(object: StaticType, name: string, statement: AssignmentStatement): void {
     const receivers = members(nonNullType(object));
     if (
       receivers.length > 0 &&
-      receivers.every((member) => resolved(member).kind === "messageHandle")
+      receivers.every((member) => {
+        const kind = resolved(member).kind;
+        return isHandleKind(kind) && handleProperty(kind, name)?.markup === true;
+      })
     )
       this.diagnostics.push(...messageColorDiagnostics(statement.value));
   }
@@ -3274,14 +3284,11 @@ class TypeChecker {
         untyped =
           place === undefined && this.diagnostics.length === before && speakers.includes(false);
         handle = mayBe(receiver, "timer", "media", "camera");
-        // A media position, remaining time, or volume write, and a camera view's placement, first wait for the
-        // previous message's pacing.
-        if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(receiver, "media")) this.#suspend();
-        if (name === "placement" && mayBe(receiver, "camera")) this.#suspend();
-        if (handle)
-          checkValue = (value) => this.#checkHandleValue(receiver, name, statement, value);
-        if (name === "text" && statement.operator === "=")
-          this.#checkMessageText(receiver, statement);
+        // A write that waits for the previous message's pacing, such as a media position's, waits first.
+        const paced = kindsWithProperty(name, (property) => property.paced === true);
+        if (paced.length > 0 && mayBe(receiver, ...paced)) this.#suspend();
+        checkValue = (value) => this.#checkHandleValue(receiver, name, statement, value);
+        if (statement.operator === "=") this.#checkMessageText(receiver, name, statement);
       }
     }
     const loaded = unwrap(statement.value);
@@ -6879,8 +6886,9 @@ class TypeChecker {
       this.#reportProblems(
         memberProblems(callee.object, receiverAtCall, callee.property, expression, typeOf),
       );
-    // Pausing, resuming, or stopping media first waits for the previous message's pacing.
-    if (["pause", "resume", "stop"].includes(method) && mayBe(receiver, "media")) this.#suspend();
+    // A call that waits for the previous message's pacing, such as pausing media, waits first.
+    const paced = kindsWithMethod(method, (contract) => contract.paced === true);
+    if (paced.length > 0 && mayBe(receiver, ...paced)) this.#suspend();
     const collections = members(value).every((member) =>
       ["list", "set"].includes(resolved(member).kind),
     );
@@ -7022,15 +7030,16 @@ class TypeChecker {
         );
     const passing = all.filter((_, index) => results[index] !== undefined);
     if (passing.length === all.length) {
+      // Each member is a handle with the method, which takes its arguments as the first one's does.
       const handle = resolved(all[0]!).kind;
-      const handles = all.every((member) => hasArgumentlessMethods(resolved(member).kind));
-      if (handles && hasArgumentlessMethods(handle)) {
+      const handles = all.every((member) => isHandleKind(resolved(member).kind));
+      if (handles && isHandleKind(handle)) {
         const named = expression.arguments.flatMap((argument) =>
           argument.kind === "namedArgument" ? [argument.name.name] : [],
         );
         const problem = argumentShapeProblem(
           method,
-          NO_ARGUMENTS,
+          handleMethod(handle, method)!.shape,
           expression.arguments.length - named.length,
           named,
         );
@@ -7048,7 +7057,7 @@ class TypeChecker {
         const before = this.diagnostics.length;
         const atCall = members(resolved(receiverAtCall));
         // A message or a permanent button takes `remove()` without arguments, which a list, set, or dict member rejects.
-        const removable = mayBe(receiver, "messageHandle", "permanentButton");
+        const removable = mayBe(receiver, ...kindsWithMethod("remove"));
         const memberResults = all.map((member, index) => {
           const kept = resolved(member);
           // A list or set checks its own methods (see `LIST_METHODS`), but `join`, whose separator is checked below as a
@@ -7123,16 +7132,11 @@ class TypeChecker {
             ? method === "add"
               ? "Dicts have no method 'add'. Store a value by its key, as in dict[key] = value."
               : `Dicts have no method '${method}'. Use contains, remove, clear, or get.`
-            : failing.kind === "timer" ||
-                failing.kind === "media" ||
-                failing.kind === "camera" ||
-                failing.kind === "messageHandle"
+            : isHandleKind(failing.kind)
               ? handleMemberMessage(failing.kind, method, "call")
-              : failing.kind === "permanentButton"
-                ? `Permanent buttons have no method '${method}'. Use remove().`
-                : failing.kind === "speaker" && all.length === 1
-                  ? speakerMethodMessage(method, expressionLabel(callee.object))
-                  : `${capitalize(describeValue(failing))} has no method '${method}'.`,
+              : failing.kind === "speaker" && all.length === 1
+                ? speakerMethodMessage(method, expressionLabel(callee.object))
+                : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
       );
     return UNKNOWN_TYPE;
@@ -7861,10 +7865,7 @@ class TypeChecker {
         ? missingListPropertyMessage(value.kind, name)
         : value.kind === "dict"
           ? `Dicts have no property '${name}'. Use length, keys, or values. To read a value by its key, write '${expressionLabel(expression.object) ?? "dict"}[${JSON.stringify(name)}]'.`
-          : value.kind === "timer" ||
-              value.kind === "media" ||
-              value.kind === "camera" ||
-              value.kind === "messageHandle"
+          : isHandleKind(value.kind)
             ? handleMemberMessage(value.kind, name, "read")
             : `${capitalize(describeValue(value))} has no property '${name}'.`,
       expression.property.span,
@@ -10135,48 +10136,24 @@ function findDecidedSlot(type: StaticType): SourceSpan | null {
 // Types of new places --------------------------------------------------------------------------------------------------
 
 /**
- * The value type of a timer, media, message, or camera view handle property, or `undefined` when it cannot be read or
- * assigned.
+ * The type of a handle property's value (see `HANDLE_MEMBERS`), or `undefined` when it cannot be read or assigned. A
+ * read computes the value, so it is never a place (#941).
  */
 function handlePropertyType(
   handle: HandleKind,
   name: string,
   use: "read" | "assign",
 ): StaticType | undefined {
-  if (handle === "camera") return name === "placement" ? STRING_TYPE : undefined;
-  if (handle === "messageHandle") return name === "text" ? STRING_TYPE : undefined;
-  if (handle === "timer") {
-    switch (name) {
-      case "remaining":
-        return DURATION_TYPE;
-      case "elapsed":
-        return use === "read" ? DURATION_TYPE : undefined;
-      case "display":
-        return STRING_TYPE;
-      case "label":
-        return use === "read" ? optional(STRING_TYPE) : undefined;
-      case "state":
-        return use === "read" ? STRING_TYPE : undefined;
-      case "repeatDuration":
-        return use === "read" ? optional(DURATION_TYPE) : DURATION_TYPE;
-    }
-    return undefined;
-  }
-  switch (name) {
-    case "position":
-      return DURATION_TYPE;
-    case "elapsed":
-      return use === "read" ? DURATION_TYPE : undefined;
-    case "remaining":
-      return use === "read" ? optional(DURATION_TYPE) : DURATION_TYPE;
-    case "duration":
-      return use === "read" ? optional(DURATION_TYPE) : undefined;
-    case "volume":
-      return NUMBER_TYPE;
-    case "state":
-      return use === "read" ? STRING_TYPE : undefined;
-  }
-  return undefined;
+  const property = handleProperty(handle, name);
+  if (property === undefined) return undefined;
+  if (use === "assign")
+    return property.assign === undefined ? undefined : handleValueType(property.assign.type);
+  const type = handleValueType(property.type);
+  return property.nullable === true ? optional(type) : type;
+}
+
+function handleValueType(type: HandleValueType): StaticType {
+  return type === "duration" ? DURATION_TYPE : type === "string" ? STRING_TYPE : NUMBER_TYPE;
 }
 
 // Messages ------------------------------------------------------------------------------------------------------------
@@ -10214,6 +10191,7 @@ function memberPropertyType(type: StaticType, name: string): StaticType | PlaceR
     case "media":
     case "camera":
     case "messageHandle":
+    case "permanentButton":
       return handlePropertyType(value.kind, name, "read");
     case "scalar":
       if (isScalar(value, "string")) return name === "length" ? INTEGER_TYPE : undefined;
@@ -10227,7 +10205,6 @@ function memberPropertyType(type: StaticType, name: string): StaticType | PlaceR
         : undefined;
     case "range":
     case "null":
-    case "permanentButton":
       return undefined;
     default:
       // A speaker keeps its properties, and a value of unknown type may.
@@ -10238,12 +10215,9 @@ function memberPropertyType(type: StaticType, name: string): StaticType | PlaceR
 /** The result type of a method call on one known member type, or `undefined` when it has no such method. */
 function memberMethodType(type: StaticType, method: string): StaticType | undefined {
   const value = resolved(type);
-  if (value.kind === "timer" || value.kind === "media")
-    return ["pause", "resume", "stop"].includes(method) ? NULL_TYPE : undefined;
-  // A message or a permanent button removes itself (#836).
-  if (value.kind === "messageHandle" || value.kind === "permanentButton")
-    return method === "remove" ? NULL_TYPE : undefined;
-  if (value.kind === "camera") return undefined;
+  // Every method of a handle gives null (see `HandleMethod`).
+  if (isHandleKind(value.kind))
+    return handleMethod(value.kind, method) === undefined ? undefined : NULL_TYPE;
   if (value.kind === "speaker" || value.kind === "unknown" || value.kind === "open")
     return UNKNOWN_TYPE;
   // Text operations (V30 §8).
@@ -10302,9 +10276,6 @@ function temporalFieldType(field: TemporalField): StaticType {
   return field.values === undefined ? type : withValues(type, field.values);
 }
 
-/** Property names whose write on a media handle first waits for the previous message's pacing. */
-const MEDIA_PACED_PROPERTIES: ReadonlySet<string> = new Set(["position", "remaining", "volume"]);
-
 /** Whether a value of this type may be of one of the given kinds, such as a handle, including a value of unknown type. */
 function mayBe(
   type: StaticType,
@@ -10329,12 +10300,7 @@ function assignableProperty(
   name: string,
 ):
   { readonly type: StaticType | null } | { readonly problem: string; readonly receiver?: boolean } {
-  if (
-    member.kind === "timer" ||
-    member.kind === "media" ||
-    member.kind === "camera" ||
-    member.kind === "messageHandle"
-  ) {
+  if (isHandleKind(member.kind)) {
     const type = handlePropertyType(member.kind, name, "assign");
     return type === undefined
       ? { problem: handleMemberMessage(member.kind, name, "assign") }
@@ -10916,15 +10882,9 @@ function mixDescription(first: StaticType, other: StaticType): string {
   return `${describeValue(first)} and ${describeValue(other)}`;
 }
 
-/** The code of a problem with a member of a handle or permanent button (see `handle-rules.ts`). */
+/** The code of a problem with a member of a handle (see `HANDLE_MEMBERS`), or of another value. */
 function handleMemberCode(kind: StaticType["kind"]): TypeErrorCode {
-  return kind === "timer"
-    ? typeCode.invalidTimerHandleMember
-    : kind === "media"
-      ? typeCode.invalidMediaHandleMember
-      : kind === "camera"
-        ? typeCode.invalidCameraHandleMember
-        : typeCode.invalidOperand;
+  return isHandleKind(kind) ? HANDLE_MEMBERS[kind].code : typeCode.invalidOperand;
 }
 
 /**

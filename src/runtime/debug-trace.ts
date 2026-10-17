@@ -3,6 +3,7 @@ import {
   type InstructionPlan,
   type PlanSourceLocation,
 } from "../plan/model.js";
+import { HANDLE_KINDS, HANDLE_MEMBERS, handleProperty } from "../handle-members.js";
 import { sourceSpanToPlanLocation } from "../plan/source-location.js";
 import type { RandomFunctionName } from "../language-facts.js";
 import type { ListDrawKind } from "../list-methods.js";
@@ -1716,13 +1717,14 @@ export function stateKey(
 /** The part of a state a change sets; see `TraceStore.writeState`. */
 export type StatePart = { readonly property: string } | "timed" | "whole";
 
-/** Properties of a timer or media handle that its pause, resume, and stop methods change. */
-const TIMED_PROPERTIES: ReadonlySet<string> = new Set([
-  "remaining",
-  "elapsed",
-  "state",
-  "position",
-]);
+/** Properties of a timer or media handle that its pause, resume, and stop methods change (see `HandleProperty`). */
+const TIMED_PROPERTIES: ReadonlySet<string> = new Set(
+  HANDLE_KINDS.flatMap((kind) =>
+    Object.keys(HANDLE_MEMBERS[kind].properties).filter(
+      (name) => handleProperty(kind, name)?.timed === true,
+    ),
+  ),
+);
 
 function partKey(base: string, part: StatePart): string {
   return part === "whole" ? base : part === "timed" ? `${base}#timed` : `${base}.${part.property}`;

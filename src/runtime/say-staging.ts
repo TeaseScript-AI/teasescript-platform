@@ -1,4 +1,5 @@
 import { isConversion } from "../conversions.js";
+import { isAnyHandleMethod } from "../handle-members.js";
 import { isListFunction } from "../list-function-rules.js";
 import { onlyReadsList } from "../list-methods.js";
 import { isNumericFunction } from "../numeric-functions.js";
@@ -20,11 +21,14 @@ const READING_FUNCTIONS: ReadonlySet<string> = new Set(["hashText", "script", "e
  * Whether a call of the method `name` only reads its receiver and arguments, whatever value it is called on: every
  * method of text and of date and time values does (see `TextMethod` and `TemporalMethod`), and no other value has a
  * method of a date and time value's name; a method of lists and sets that only reads them (see `LIST_METHODS`) also
- * only reads text, a dict, or a range that has a method of its name. No method of a timer, media, button, or message
- * handle only reads.
+ * only reads text, a dict, or a range that has a method of its name. A method of a handle changes the handle (see
+ * `HandleMethod`), so no name of one is a reading method.
  */
 export function isReadingMethod(name: string): boolean {
-  return isTextOnlyMethod(name) || isTemporalMethod(name) || onlyReadsList(name);
+  return (
+    !isAnyHandleMethod(name) &&
+    (isTextOnlyMethod(name) || isTemporalMethod(name) || onlyReadsList(name))
+  );
 }
 
 const selectiveSays = new WeakMap<SayInstruction, boolean>();

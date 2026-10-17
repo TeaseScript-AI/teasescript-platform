@@ -1,5 +1,4 @@
 import type { CallShape } from "./conversions.js";
-import type { MethodParameters } from "./text-operations.js";
 
 /**
  * Rules of a call's arguments, each with one message, whichever pass checks the call: compile error `TSV020` for their
@@ -185,22 +184,6 @@ export function scriptArgumentCountMessage(received: number): string {
     `Name a label with 'label:', as in 'script("rooms/hall.tease", label: "start")'.`,
   );
 }
-
-/** A method that takes positional arguments with these names. */
-function positionalMethod(name: string, ...parameters: string[]): [string, MethodParameters] {
-  return [name, { name, parameters: parameters.map((parameter) => ({ name: parameter })) }];
-}
-
-/**
- * The parameters of the methods of timers and media (V30 §22), which take only positional arguments. The methods of
- * lists and sets are in `LIST_METHODS`, those of text in `TEXT_METHODS`, and those of date and time values in
- * `TEMPORAL_METHODS`.
- */
-export const POSITIONAL_METHODS: ReadonlyMap<string, MethodParameters> = new Map([
-  positionalMethod("pause"),
-  positionalMethod("resume"),
-  positionalMethod("stop"),
-]);
 
 /** What `get` reads with a `default:`: an index of a list, a key of a dict, or either, where the compiler knows neither. */
 export type GetReceiver = "list" | "dict" | "either";

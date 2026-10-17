@@ -15,6 +15,7 @@ import { CONVERSIONS } from "../src/conversions.js";
 import { NUMERIC_CONTRACTS } from "../src/numeric-functions.js";
 import { RANDOM_CONTRACTS } from "../src/random-functions.js";
 import { CLOCK_CONTRACTS, TEMPORAL_METHODS } from "../src/temporal-builtins.js";
+import { HANDLE_MEMBERS } from "../src/handle-members.js";
 import { isTextOnlyMethod, TEXT_METHODS } from "../src/text-operations.js";
 import { LIST_FUNCTION_CONTRACTS } from "../src/list-function-rules.js";
 import { LIST_METHODS, type ListMethod } from "../src/list-methods.js";
@@ -633,6 +634,32 @@ test("a method that only lists and sets have has help from its contract, also wh
   assert.equal(help("say add(")[0], "say");
   assert.equal(help("say items.remove(")[0], "say");
   assert.equal(help("say items.indexOf(")[0], "say");
+});
+
+test("a method that only timers and media have has help from its contract, also while it is being written", () => {
+  const help = (source: string) => {
+    const document = createLanguageDocument("file:///main.tease", source);
+    const position = languagePositionAt(document, source.length);
+    const context = languageContextHelp(document, position);
+    return [context?.command ?? null, context?.summary ?? null, context?.syntax ?? null];
+  };
+  // Timers and media share the help of each method, which takes no arguments.
+  for (const kind of ["timer", "media"] as const)
+    for (const [name, method] of Object.entries(HANDLE_MEMBERS[kind].methods)) {
+      assert.deepEqual(help(`music.${name}(`), [name, method.summary, `handle.${name}()`]);
+      const document = createLanguageDocument("file:///main.tease", `music.${name}(`);
+      assert.deepEqual(
+        languageSignatureHelp(document, languagePositionAt(document, document.text.length))
+          ?.parameters,
+        [],
+      );
+    }
+  assert.equal(help("say toString(music.stop(")[0], "stop");
+  // Lists, sets, and dicts have a `remove` too, and a message's and a permanent button's differ.
+  assert.equal(help("say toString(line.remove(")[0], "toString");
+  // A declared function and a property are no call of the method.
+  assert.equal(help("say toString(stop(")[0], "toString");
+  assert.equal(help("say toString((music.pause)(")[0], "toString");
 });
 
 test("askChoice help names set options and the prefill after the options (V30 §19)", () => {

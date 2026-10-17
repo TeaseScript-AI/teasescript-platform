@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MEDIA_PROPERTIES } from "../src/runtime/media.js";
+import { HANDLE_MEMBERS } from "../src/handle-members.js";
 import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
 import type { RuntimeSnapshot } from "../src/runtime/state.js";
-import { TIMER_PROPERTIES } from "../src/runtime/timers.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("resume equivalence preserves list warnings and collection state", () => {
@@ -250,10 +249,16 @@ test("a prepared receiver through any property that its value does not hold resu
     ],
     [
       'let clock = timer async 10 s {\n    say "done"\n}\nlet subject = dynamic(clock)',
-      [...TIMER_PROPERTIES, "state.length"],
+      [...Object.keys(HANDLE_MEMBERS.timer.properties), "state.length"],
     ],
-    ['let sound = playAudio async "a.mp3"\nlet subject = dynamic(sound)', [...MEDIA_PROPERTIES]],
-    ["let view = showCamera stage\nlet subject = dynamic(view)", ["placement"]],
+    [
+      'let sound = playAudio async "a.mp3"\nlet subject = dynamic(sound)',
+      Object.keys(HANDLE_MEMBERS.media.properties),
+    ],
+    [
+      "let view = showCamera stage\nlet subject = dynamic(view)",
+      Object.keys(HANDLE_MEMBERS.camera.properties),
+    ],
   ];
   for (const [setup, properties] of cases)
     for (const property of properties) {

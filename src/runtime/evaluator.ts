@@ -57,6 +57,7 @@ import { normalizeColor } from "../color.js";
 import type {
   AssignmentTargetPlan,
   BinaryExpressionPlan,
+  DelayDisplay,
   ExpressionPlan,
   InstructionPlan,
   PlanSourceLocation,
@@ -191,14 +192,19 @@ import {
 } from "../operand-rules.js";
 import { loweredOperand } from "./lowered-operands.js";
 import {
-  cameraPlacementMessage,
+  assignedTypeMessage,
   handleMemberMessage,
-  isCameraPlacement,
-  isMediaVolume,
-  isTimerDisplay,
-  mediaVolumeMessage,
-  timerDisplayMessage,
-} from "../handle-rules.js";
+  handleMethod,
+  handleProperty,
+  hasAssignableProperties,
+  isAssignableHandleProperty,
+  isHandleMethod,
+  isHandleProperty,
+  type AssignableHandleProperty,
+  type HandleKind,
+  type HandleMethodName,
+  type HandlePropertyName,
+} from "../handle-members.js";
 import { unmeasurableLengthMessage } from "../delay-rules.js";
 import { rangeListLengthProblem, setOperationItems, sortOrder } from "./collection-operations.js";
 import {
@@ -254,7 +260,9 @@ import {
   setCapturedSerializableDictValue,
   setCapturedSerializableProperty,
   setOwnedSerializableDictValue,
+  type SerializableRuntimeCalendarDuration,
   type SerializableRuntimeDict,
+  type SerializableRuntimeDuration,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
   type SerializableRuntimeRange,
@@ -298,6 +306,7 @@ import {
   isMessageHandle,
   isCameraView,
   isPermanentButton,
+  handleKindOf,
 } from "./value-predicates.js";
 import {
   assertValueType,
@@ -1768,13 +1777,11 @@ export class Evaluator {
     if (target.kind === "identifier") return;
     const object = this.evaluate(target.object);
     if (target.kind === "property") {
+      const handle = handleKindOf(object);
       if (
         !isObject(object) &&
         !isSpeakerReference(object) &&
-        !isTimerHandle(object) &&
-        !isMediaHandle(object) &&
-        !isMessageHandle(object) &&
-        !isCameraView(object)
+        (handle === null || !hasAssignableProperties(handle))
       ) {
         throw this.#noAssignableProperties(target.object, object, target.span);
       }
@@ -1794,21 +1801,10 @@ export class Evaluator {
     method: string,
     span: SourceSpan,
   ): void {
-    if (isCameraView(receiver))
-      throw fault("TSR016", handleMemberMessage("camera", method, "call"), span);
-    if (isTimerHandle(receiver) || isMediaHandle(receiver)) {
-      if (!["pause", "resume", "stop"].includes(method)) {
-        throw fault(
-          "TSR016",
-          handleMemberMessage(isTimerHandle(receiver) ? "timer" : "media", method, "call"),
-          span,
-        );
-      }
-      return;
-    }
-    if (isMessageHandle(receiver) || isPermanentButton(receiver)) {
-      if (method !== "remove")
-        throw fault("TSR016", removableHandleMethodMessage(receiver, method), span);
+    const handle = handleKindOf(receiver);
+    if (handle !== null) {
+      if (!isHandleMethod(handle, method))
+        throw fault("TSR016", handleMemberMessage(handle, method, "call"), span);
       return;
     }
     if (typeof receiver === "string") {
@@ -2516,6 +2512,17 @@ export class Evaluator {
         expression.span,
       );
     }
+    if (expression.callee.kind === "property" && isCameraView(receiver)) {
+      const method = this.#handleMethod(
+        "camera",
+        expression.callee.name,
+        positional,
+        named,
+        expression.span,
+      );
+      const unhandled: never = method;
+      throw new Error(`Camera view method '${String(unhandled)}' has no implementation.`);
+    }
     if (expression.callee.kind === "property" && isDict(receiver)) {
       this.#referenceEpoch++;
       return this.#callDict(receiver, expression, positional, named, defaulted);
@@ -2885,9 +2892,7 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): null {
-    if (name !== "remove") throw fault("TSR016", removableHandleMethodMessage(button, name), span);
-    const problem = argumentShapeProblem(name, NO_ARGUMENTS, positional.length, Object.keys(named));
-    if (problem !== undefined) throw fault("TSR028", problem.message, span);
+    this.#handleMethod("permanentButton", name, positional, named, span);
     removePermanentButtons(
       this.snapshot,
       (shown) => shown.button.buttonId === button.buttonId,
@@ -2916,28 +2921,40 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): null {
-    if (!["pause", "resume", "stop"].includes(name)) {
-      throw fault("TSR016", handleMemberMessage("timer", name, "call"), span);
-    }
-    const problem = argumentShapeProblem(name, NO_ARGUMENTS, positional.length, Object.keys(named));
-    if (problem !== undefined) throw fault("TSR028", problem.message, span);
+    const method = this.#handleMethod("timer", name, positional, named, span);
     const timer = this.#timer(handle, span);
     const action = activeTimerAction(this.snapshot, handle.timerId);
     const now = this.snapshot.currentSessionTimeMs;
-    if (name === "stop") {
-      if (action !== undefined) stopTimerAction(this.snapshot, action, span, this.events);
-      return null;
+    switch (method) {
+      case "stop":
+        if (action !== undefined) stopTimerAction(this.snapshot, action, span, this.events);
+        return null;
+      case "pause":
+      case "resume": {
+        if (method === "resume" && timer.state === "paused") {
+          assertRepresentableRound(now, timer.remainingMs!, timer.repeat, span);
+        }
+        const warning = method === "pause" ? pauseTimer(timer, now) : resumeTimer(timer, now);
+        if (warning !== null) this.#warn(warning.code, warning.message, span);
+        // A round that is already due while its expiry work waits behind a block ends now, like `remaining = 0`.
+        if (action !== undefined && timer.state === "paused" && timer.remainingMs === 0) {
+          expireTimerAction(
+            this.snapshot,
+            action,
+            now,
+            span,
+            this.events,
+            this.trace,
+            this.control,
+          );
+        }
+        return null;
+      }
+      default: {
+        const unhandled: never = method;
+        throw new Error(`Timer method '${String(unhandled)}' has no implementation.`);
+      }
     }
-    if (name === "resume" && timer.state === "paused") {
-      assertRepresentableRound(now, timer.remainingMs!, timer.repeat, span);
-    }
-    const warning = name === "pause" ? pauseTimer(timer, now) : resumeTimer(timer, now);
-    if (warning !== null) this.#warn(warning.code, warning.message, span);
-    // A round that is already due while its expiry work waits behind a block ends now, like `remaining = 0`.
-    if (action !== undefined && timer.state === "paused" && timer.remainingMs === 0) {
-      expireTimerAction(this.snapshot, action, now, span, this.events, this.trace, this.control);
-    }
-    return null;
   }
 
   /** Assignment to `remaining`, `display`, or `repeatDuration` of a timer handle. */
@@ -2948,40 +2965,44 @@ export class Evaluator {
     span: SourceSpan,
   ): void {
     const timer = this.#timer(handle, span);
+    const property = this.#assignedHandleProperty("timer", name, value, span);
     const now = this.snapshot.currentSessionTimeMs;
     let warning: TimerWarning | "expired" | null;
-    if (name === "display") {
-      warning = setTimerDisplay(timer, timerDisplayValue(value, span));
-    } else if (name === "remaining" || name === "repeatDuration") {
-      if (!isAnyDuration(value)) {
-        throw fault(
-          "TSR050",
-          `Timer ${name} must be a duration such as '10 s', but this is ${describeShownValue(value)}.`,
-          span,
-        );
-      }
-      exactDurationMilliseconds(value, `Timer ${name}`, span);
-      if (name === "remaining") {
-        if (timer.state === "running" || timer.state === "paused") {
-          assertRepresentableRound(now, Math.max(0, value.milliseconds), timer.repeat, span);
+    switch (property) {
+      case "display":
+        // EVIDENCE: validation: assignedValueProblem accepted it through the display's domain (isTimerDisplay).
+        warning = setTimerDisplay(timer, value as DelayDisplay);
+        break;
+      case "remaining":
+      case "repeatDuration": {
+        // EVIDENCE: validation: assignedValueProblem accepted it as a duration (isAnyDuration).
+        const duration = value as SerializableRuntimeDuration | SerializableRuntimeCalendarDuration;
+        exactDurationMilliseconds(duration, `Timer ${property}`, span);
+        if (property === "remaining") {
+          if (timer.state === "running" || timer.state === "paused") {
+            assertRepresentableRound(now, Math.max(0, duration.milliseconds), timer.repeat, span);
+          }
+          warning = setTimerRemaining(timer, duration.milliseconds, now);
+        } else {
+          if (
+            !(duration.milliseconds > 0) ||
+            !isValidSessionTime(now + duration.milliseconds) ||
+            now + duration.milliseconds <= now
+          ) {
+            throw fault(
+              "TSR050",
+              `Timer repeatDuration must be longer than zero and short enough for scene time to reach, but this is ${describeShownValue(value)}.`,
+              span,
+            );
+          }
+          warning = setTimerRepeatDuration(timer, duration.milliseconds, now);
         }
-        warning = setTimerRemaining(timer, value.milliseconds, now);
-      } else {
-        if (
-          !(value.milliseconds > 0) ||
-          !isValidSessionTime(now + value.milliseconds) ||
-          now + value.milliseconds <= now
-        ) {
-          throw fault(
-            "TSR050",
-            `Timer repeatDuration must be longer than zero and short enough for scene time to reach, but this is ${describeShownValue(value)}.`,
-            span,
-          );
-        }
-        warning = setTimerRepeatDuration(timer, value.milliseconds, now);
+        break;
       }
-    } else {
-      throw fault("TSR003", handleMemberMessage("timer", name, "assign"), span);
+      default: {
+        const unhandled: never = property;
+        throw new Error(`Timer property '${String(unhandled)}' has no implementation.`);
+      }
     }
     if (warning === "expired") {
       expireTimerAction(
@@ -3017,22 +3038,29 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): null {
-    if (!["pause", "resume", "stop"].includes(name)) {
-      throw fault("TSR016", handleMemberMessage("media", name, "call"), span);
-    }
-    const problem = argumentShapeProblem(name, NO_ARGUMENTS, positional.length, Object.keys(named));
-    if (problem !== undefined) throw fault("TSR028", problem.message, span);
+    const method = this.#handleMethod("media", name, positional, named, span);
     const media = this.#media(handle, span);
     const action = activeMediaAction(this.snapshot, handle.mediaId);
-    if (name === "stop") {
-      if (action !== undefined) stopMediaAction(null, this.snapshot, action, this.events, span);
-      return null;
+    switch (method) {
+      case "stop":
+        if (action !== undefined) stopMediaAction(null, this.snapshot, action, this.events, span);
+        return null;
+      case "pause":
+      case "resume": {
+        // Playback already reached by now is committed before its segment changes.
+        if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
+        const now = this.snapshot.currentSessionTimeMs;
+        this.#mediaWarning(
+          method === "pause" ? pauseMedia(media, now) : resumeMedia(media, now),
+          span,
+        );
+        return null;
+      }
+      default: {
+        const unhandled: never = method;
+        throw new Error(`Media method '${String(unhandled)}' has no implementation.`);
+      }
     }
-    // Playback already reached by now is committed before its segment changes.
-    if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
-    const now = this.snapshot.currentSessionTimeMs;
-    this.#mediaWarning(name === "pause" ? pauseMedia(media, now) : resumeMedia(media, now), span);
-    return null;
   }
 
   /** Assignment to `position`, `remaining`, or `volume` of a media handle. */
@@ -3043,33 +3071,40 @@ export class Evaluator {
     span: SourceSpan,
   ): void {
     const media = this.#media(handle, span);
-    if (name === "volume") {
-      if (!isMediaVolume(value))
-        throw fault("TSR050", mediaVolumeMessage(describeShownValue(value)), span);
-      this.#mediaWarning(setMediaVolume(media, value), span);
-      return;
-    }
-    if (name !== "position" && name !== "remaining") {
-      throw fault("TSR003", handleMemberMessage("media", name, "assign"), span);
-    }
-    if (!isAnyDuration(value) || !Number.isFinite(value.milliseconds)) {
-      throw fault(
-        "TSR050",
-        `Media ${name} must be a duration such as '10 s', but this is ${describeShownValue(value)}.`,
-        span,
-      );
-    }
-    exactDurationMilliseconds(value, `Media ${name}`, span);
-    const action = activeMediaAction(this.snapshot, handle.mediaId);
-    // Playback already reached by now is committed before the seek starts a new segment.
-    if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
-    this.#mediaWarning(
-      seekMedia(media, value.milliseconds, this.snapshot.currentSessionTimeMs, name),
-      span,
-    );
-    // A seek to the end of the range completes the pass at once, like a timer's `remaining = 0`.
-    if (action !== undefined) {
-      drainMediaEvents(null, this.snapshot, action, this.events, span, true);
+    const property = this.#assignedHandleProperty("media", name, value, span);
+    switch (property) {
+      case "volume":
+        // EVIDENCE: validation: assignedValueProblem accepted it through the volume's domain (isMediaVolume).
+        this.#mediaWarning(setMediaVolume(media, value as number), span);
+        return;
+      case "position":
+      case "remaining": {
+        // EVIDENCE: validation: assignedValueProblem accepted it as a duration (isAnyDuration).
+        const duration = value as SerializableRuntimeDuration | SerializableRuntimeCalendarDuration;
+        if (!Number.isFinite(duration.milliseconds))
+          throw fault(
+            "TSR050",
+            assignedTypeMessage("media", property, describeShownValue(value)),
+            span,
+          );
+        exactDurationMilliseconds(duration, `Media ${property}`, span);
+        const action = activeMediaAction(this.snapshot, handle.mediaId);
+        // Playback already reached by now is committed before the seek starts a new segment.
+        if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
+        this.#mediaWarning(
+          seekMedia(media, duration.milliseconds, this.snapshot.currentSessionTimeMs, property),
+          span,
+        );
+        // A seek to the end of the range completes the pass at once, like a timer's `remaining = 0`.
+        if (action !== undefined) {
+          drainMediaEvents(null, this.snapshot, action, this.events, span, true);
+        }
+        return;
+      }
+      default: {
+        const unhandled: never = property;
+        throw new Error(`Media property '${String(unhandled)}' has no implementation.`);
+      }
     }
   }
 
@@ -3082,10 +3117,7 @@ export class Evaluator {
 
   /** `view.placement = "window" | "stage"` moves a shown camera view; a hidden one stays hidden and only warns. */
   #assignCameraProperty(name: string, value: SerializableRuntimeValue, span: SourceSpan): void {
-    if (name !== "placement")
-      throw fault("TSR003", handleMemberMessage("camera", name, "assign"), span);
-    if (!isCameraPlacement(value))
-      throw fault("TSR050", cameraPlacementMessage(shownChoice(value)), span);
+    const property = this.#assignedHandleProperty("camera", name, value, span);
     const view = this.#cameraView();
     if (!view.shown) {
       this.#warn(
@@ -3095,7 +3127,16 @@ export class Evaluator {
       );
       return;
     }
-    view.placement = value;
+    switch (property) {
+      case "placement":
+        // EVIDENCE: validation: assignedValueProblem accepted it through the placement's domain (isCameraPlacement).
+        view.placement = value as "window" | "stage";
+        return;
+      default: {
+        const unhandled: never = property;
+        throw new Error(`Camera view property '${String(unhandled)}' has no implementation.`);
+      }
+    }
   }
 
   /** The index of a message handle's live record; snapshot validation keeps one for every handle the state holds. */
@@ -3128,9 +3169,7 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): null {
-    if (name !== "remove") throw fault("TSR016", removableHandleMethodMessage(handle, name), span);
-    const problem = argumentShapeProblem(name, NO_ARGUMENTS, positional.length, Object.keys(named));
-    if (problem !== undefined) throw fault("TSR028", problem.message, span);
+    this.#handleMethod("messageHandle", name, positional, named, span);
     const index = this.#liveMessage(handle, span);
     const record = this.snapshot.liveMessages[index]!;
     if (record.removed === true) return null;
@@ -3167,14 +3206,13 @@ export class Evaluator {
     span: SourceSpan,
     receiver: ExpressionPlan,
   ): void {
-    if (name !== "text")
-      throw fault("TSR003", handleMemberMessage("messageHandle", name, "assign"), span);
-    if (typeof value !== "string")
-      throw fault(
-        "TSR050",
-        `Message property 'text' must be text (string), but this is ${describeShownValue(value)}. Convert it with toString(...) first.`,
-        span,
-      );
+    const property = this.#assignedHandleProperty("messageHandle", name, value, span);
+    if (property !== "text") {
+      const unhandled: never = property;
+      throw new Error(`Message property '${String(unhandled)}' has no implementation.`);
+    }
+    // EVIDENCE: validation: assignedValueProblem accepted it as text, the type the text property takes.
+    const text = value as string;
     const index = this.#liveMessage(handle, span);
     const record = this.snapshot.liveMessages[index]!;
     if (record.removed === true) {
@@ -3186,8 +3224,8 @@ export class Evaluator {
       );
       return;
     }
-    if (record.sourceText === value) return;
-    const content = parseMessageMarkup(value);
+    if (record.sourceText === text) return;
+    const content = parseMessageMarkup(text);
     const sequence = takeSequence(this.snapshot);
     this.events.push(
       Object.freeze({
@@ -3199,11 +3237,11 @@ export class Evaluator {
         span: copySpan(span),
       } satisfies MessageUpdatedEvent),
     );
-    this.snapshot.liveMessages[index] = { messageId: handle.messageId, sourceText: value };
+    this.snapshot.liveMessages[index] = { messageId: handle.messageId, sourceText: text };
     this.trace?.messageText(
       stateKey("message", handle.messageId),
       handle.messageId,
-      value,
+      text,
       span,
       sequence,
     );
@@ -3922,19 +3960,23 @@ export class Evaluator {
       return property;
     }
     if (isCameraView(value)) {
-      if (name !== "placement")
-        throw fault("TSR017", handleMemberMessage("camera", name, "read"), span);
-      return this.#cameraView().placement;
+      const property = this.#readHandleProperty("camera", name, span);
+      switch (property) {
+        case "placement":
+          return this.#cameraView().placement;
+        default: {
+          const unhandled: never = property;
+          throw new Error(`Camera view property '${String(unhandled)}' has no implementation.`);
+        }
+      }
     }
     if (isMediaHandle(value)) {
-      const property = mediaProperty(
-        this.#media(value, span),
-        name,
+      const media = this.#media(value, span);
+      return mediaProperty(
+        media,
+        this.#readHandleProperty("media", name, span),
         this.snapshot.currentSessionTimeMs,
       );
-      if (property === undefined)
-        throw fault("TSR017", handleMemberMessage("media", name, "read"), span);
-      return property;
     }
     if (isCalendarDuration(value)) {
       const property = calendarDurationProperty(value, name);
@@ -3955,19 +3997,25 @@ export class Evaluator {
       return property;
     }
     if (isTimerHandle(value)) {
-      const property = timerProperty(
-        this.#timer(value, span),
-        name,
+      const timer = this.#timer(value, span);
+      return timerProperty(
+        timer,
+        this.#readHandleProperty("timer", name, span),
         this.snapshot.currentSessionTimeMs,
       );
-      if (property === undefined)
-        throw fault("TSR017", handleMemberMessage("timer", name, "read"), span);
-      return property;
     }
     if (isMessageHandle(value)) {
-      if (name !== "text")
-        throw fault("TSR017", handleMemberMessage("messageHandle", name, "read"), span);
+      const property = this.#readHandleProperty("messageHandle", name, span);
+      if (property !== "text") {
+        const unhandled: never = property;
+        throw new Error(`Message property '${String(unhandled)}' has no implementation.`);
+      }
       return this.snapshot.liveMessages[this.#liveMessage(value, span)]!.sourceText;
+    }
+    if (isPermanentButton(value)) {
+      const property = this.#readHandleProperty("permanentButton", name, span);
+      const unhandled: never = property;
+      throw new Error(`Permanent button property '${String(unhandled)}' has no implementation.`);
     }
     throw fault("TSR017", missingMemberMessage(value, name, "property"), span);
   }
@@ -4106,6 +4154,67 @@ export class Evaluator {
   }
 
   /** `TSR003` for a property assignment on a value, which `plan` gives, that has no properties to assign. */
+  /** The property `name` of a handle of `kind` that a read finds (see `HANDLE_MEMBERS`), or `TSR017`. */
+  #readHandleProperty<Kind extends HandleKind>(
+    kind: Kind,
+    name: string,
+    span: SourceSpan,
+  ): HandlePropertyName<Kind> {
+    if (!isHandleProperty(kind, name))
+      throw fault("TSR017", handleMemberMessage(kind, name, "read"), span);
+    return name;
+  }
+
+  /**
+   * The property `name` of a handle of `kind` that `value` may be assigned to (see `HANDLE_MEMBERS`): `TSR003` for one
+   * that cannot be assigned, and `TSR050` for a value it does not take.
+   */
+  #assignedHandleProperty<Kind extends HandleKind>(
+    kind: Kind,
+    name: string,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): AssignableHandleProperty<Kind> {
+    if (!isAssignableHandleProperty(kind, name))
+      throw fault("TSR003", handleMemberMessage(kind, name, "assign"), span);
+    const { type, domain } = handleProperty(kind, name)!.assign!;
+    if (domain !== undefined) {
+      if (!domain.accepts(value))
+        throw fault(
+          "TSR050",
+          domain.message(
+            domain.shows === "choice" ? shownChoice(value) : describeShownValue(value),
+          ),
+          span,
+        );
+    } else if (type === "duration" ? !isAnyDuration(value) : typeof value !== "string")
+      throw fault("TSR050", assignedTypeMessage(kind, name, describeShownValue(value)), span);
+    return name;
+  }
+
+  /**
+   * The method `name` of a handle of `kind` (see `HANDLE_MEMBERS`) for a call with these arguments: `TSR016` for a method
+   * it does not have, and `TSR028` for arguments the method does not take.
+   */
+  #handleMethod<Kind extends HandleKind>(
+    kind: Kind,
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): HandleMethodName<Kind> {
+    if (!isHandleMethod(kind, name))
+      throw fault("TSR016", handleMemberMessage(kind, name, "call"), span);
+    const problem = argumentShapeProblem(
+      name,
+      handleMethod(kind, name)!.shape,
+      positional.length,
+      Object.keys(named),
+    );
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
+    return name;
+  }
+
   #noAssignableProperties(
     plan: ExpressionPlan,
     value: SerializableRuntimeValue,
@@ -4523,16 +4632,6 @@ function noArithmeticResult(
   );
 }
 
-/** The message for a method that a message handle or a permanent button does not have: each has only `remove()`. */
-function removableHandleMethodMessage(
-  handle: SerializableMessageHandle | SerializablePermanentButtonHandle,
-  method: string,
-): string {
-  return isMessageHandle(handle)
-    ? handleMemberMessage("messageHandle", method, "call")
-    : `Permanent buttons have no method '${method}'. Use remove().`;
-}
-
 /** An operand's kind, with the value of a number, duration, or angle, such as `a duration (1 s)`. */
 function kindAndValue(value: SerializableRuntimeValue): string {
   return typeof value === "number" || isAnyDuration(value) || isAngle(value)
@@ -4669,14 +4768,6 @@ function assertRepresentableRound(
       span,
     );
   }
-}
-
-function timerDisplayValue(
-  value: SerializableRuntimeValue,
-  span: SourceSpan,
-): "visible" | "mystery" | "hidden" {
-  if (isTimerDisplay(value)) return value;
-  throw fault("TSR050", timerDisplayMessage(shownChoice(value)), span);
 }
 
 function optionalSpeakerString(

@@ -58,15 +58,16 @@ import {
 } from "./static-types.js";
 import {
   argumentCountMessage,
+  argumentShapeProblem,
   argumentsTaken,
   callShapeNames,
   callShapeProblem,
   FIXED_PARAMETERS,
   getArgumentsProblem,
   missingDefaultMessage,
-  POSITIONAL_METHODS,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
+import { handleMethod, handleMethodNames, kindsWithMethod } from "./handle-members.js";
 import { isListFunction, minMaxValuesProblem, takesValues } from "./list-function-rules.js";
 import {
   countProblem,
@@ -188,7 +189,8 @@ export function memberProblems(
               span: property.span,
             },
           ];
-    return positionalMethodProblems(name, call, true);
+    // Only handles have the other methods, and every handle with one takes the same.
+    return handleMethodProblems(name, call);
   }
   if (type.kind !== "scalar" && type.kind !== "null" && type.kind !== "range") return [];
   if (isScalar(type, "regex"))
@@ -203,8 +205,37 @@ export function memberProblems(
 }
 
 /**
- * Argument names, which text operations, `join`, and the methods of `POSITIONAL_METHODS` and of lists and sets but
- * `get` never take, and the number of arguments.
+ * Argument names and the number of arguments of a method that only handles have, such as `pause()`, as the first handle
+ * with it takes them (see `HandleMethod`).
+ */
+function handleMethodProblems(name: string, call: CallExpression): OperationProblem[] {
+  const kind = kindsWithMethod(name)[0];
+  if (kind === undefined) return [];
+  const named = call.arguments.flatMap((argument) =>
+    argument.kind === "namedArgument" ? [argument.name] : [],
+  );
+  const problem = argumentShapeProblem(
+    name,
+    handleMethod(kind, name)!.shape,
+    call.arguments.length - named.length,
+    named.map((identifier) => identifier.name),
+  );
+  if (problem === undefined) return [];
+  return [
+    {
+      kind: problem.kind,
+      message: problem.message,
+      span:
+        problem.kind === "unknownNamedArgument"
+          ? named.find((identifier) => identifier.name === problem.name)!.span
+          : call.span,
+    },
+  ];
+}
+
+/**
+ * Argument names, which text operations, `join`, and the methods of lists and sets but `get` never take, and the number
+ * of arguments.
  */
 function shapeProblems(member: MethodParameters, call: CallExpression): OperationProblem[] {
   const parameters = member.parameters!;
@@ -1018,25 +1049,24 @@ export function rootName(expression: Expression): string | null {
 }
 
 /**
- * The name of every method a value has: those of text (V30 §8), of lists, sets, and dicts (V30 §16), of timer and media
- * handles (V30 §22), of messages and permanent buttons, and of date and time values (V30 §35). Other values, such as
- * numbers, objects, and speakers, have none. Every method of dicts, messages, and permanent buttons has the name of a
- * method of lists.
+ * The name of every method a value has: those of text (V30 §8), of lists, sets, and dicts (V30 §16), of handles (see
+ * `HANDLE_MEMBERS`), and of date and time values (V30 §35). Other values, such as numbers, objects, and speakers, have
+ * none. Every method of dicts has the name of a method of lists.
  */
 const METHOD_NAMES: ReadonlySet<string> = new Set([
   ...Object.keys(TEXT_METHODS),
   ...Object.keys(LIST_METHODS),
-  ...POSITIONAL_METHODS.keys(),
+  ...handleMethodNames(),
   ...Object.keys(TEMPORAL_METHODS),
 ]);
 
 /**
- * The method `name` as every receiver with it takes its arguments, all of them without a name: a method of
- * `POSITIONAL_METHODS`, or of lists and sets but `get` and `join`. A dict, a range, text, a message, and a permanent
- * button take as many with the methods they share with lists, but a message and a permanent button take `remove()`.
+ * The method `name` as every receiver with it takes its arguments, all of them without a name: a method of lists and
+ * sets but `get` and `join`. A dict, a range, text, a message, and a permanent button take as many with the methods
+ * they share with lists, but a message and a permanent button take `remove()`.
  */
 function positionalMethod(name: string): MethodParameters | undefined {
-  const method = POSITIONAL_METHODS.get(name) ?? listMethod(name);
+  const method = listMethod(name);
   return method !== undefined &&
     !("named" in method && method.named !== undefined) &&
     method.parameters!.every((parameter) => parameter.optional !== true)

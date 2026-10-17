@@ -22,9 +22,10 @@ closing read. The Player's palette (`player/theme/palette.ts`) holds the code co
 (owner direction, #512) instead of keeping colours of its own. Hover and signature help of a conversion, numeric,
 angle, random, clock, or list function call, such as `toNumber(...)`, `round(...)`, `sin(...)`, `chance(...)`,
 `getDate()`, or `sum(...)`, of a method that only text has, such as `name.trim()`, of a method of date and time values,
-such as `started.toISO()`, and of one that only lists and sets have, such as `items.shuffle()`, come from its contract
-in `src/conversions.ts`, `src/numeric-functions.ts`, `src/random-functions.ts`, `src/temporal-builtins.ts`,
-`src/list-function-rules.ts`, `src/text-operations.ts`, or `src/list-methods.ts`, and those of a command cover its
+such as `started.toISO()`, of one that only lists and sets have, such as `items.shuffle()`, and of one that only timers
+and media have, such as `music.pause()`, come from its contract in `src/conversions.ts`, `src/numeric-functions.ts`,
+`src/random-functions.ts`, `src/temporal-builtins.ts`, `src/list-function-rules.ts`, `src/text-operations.ts`,
+`src/list-methods.ts`, or `src/handle-members.ts`, and those of a command cover its
 arguments as the parser reads them and name the options of the parser's tables in `src/parser.ts`, which the parser and
 the name pass check.
 The standalone playground is a local technical workspace, not the production editor. It uses an accessible native

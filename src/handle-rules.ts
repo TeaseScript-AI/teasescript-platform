@@ -4,53 +4,8 @@ import { formatDuration } from "./duration.js";
  * Rules of timers, media, and camera views and of their handles that the type checker and the runtime both check, each
  * with one predicate and one message. A message takes the value as the runtime shows it (`shown`), which the compiler
  * gives for a value it knows. The compile errors are `TSV034` for timers, `TSV036` for a play command or `showImage`,
- * `TSV037` for media handles, and `TSV059` for camera views; message handles have no code of their own (`TSV043`).
+ * `TSV037` for media handles, and `TSV059` for camera views. The members of the handles are in `handle-members.ts`.
  */
-export type HandleKind = "timer" | "media" | "camera" | "messageHandle";
-
-/** The message for a timer, media, message, or camera view handle member that does not exist or cannot be assigned. */
-export function handleMemberMessage(
-  handle: HandleKind,
-  name: string,
-  use: "read" | "assign" | "call",
-): string {
-  if (handle === "messageHandle")
-    return use === "call"
-      ? `Message handles have no method '${name}'. Use remove(), or change the message with its text property.`
-      : use === "assign"
-        ? `Message handle property '${name}' cannot be assigned. You can assign text.`
-        : `Message handles have no property '${name}'. Use the text property.`;
-  if (handle === "camera")
-    return use === "call"
-      ? `Camera views have no method '${name}'. Hide them with hideCamera.`
-      : use === "assign"
-        ? `Camera view property '${name}' cannot be assigned. You can assign placement.`
-        : `Camera views have no property '${name}'. Use the placement property.`;
-  const kind = handle === "timer" ? "Timer" : "Media";
-  if (use === "call")
-    return `${kind} handles have no method '${name}'. Use pause(), resume(), or stop().`;
-  if (use === "read") return `${kind} handles have no property '${name}'.`;
-  return handle === "timer"
-    ? `Timer handle property '${name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`
-    : `Media handle property '${name}' cannot be assigned. You can assign position, remaining, or volume.`;
-}
-
-/**
- * The handles whose methods take no arguments: timers, media, messages, and permanent buttons. Their arguments are
- * checked as `NO_ARGUMENTS` (`argument-rules.ts`), under the handle's own code.
- */
-type ArgumentlessHandle = "timer" | "media" | "messageHandle" | "permanentButton";
-
-const ARGUMENTLESS_HANDLES: ReadonlySet<string> = new Set<ArgumentlessHandle>([
-  "timer",
-  "media",
-  "messageHandle",
-  "permanentButton",
-]);
-
-export function hasArgumentlessMethods(kind: string): kind is ArgumentlessHandle {
-  return ARGUMENTLESS_HANDLES.has(kind);
-}
 
 export function isTimerDisplay(value: unknown): value is "visible" | "mystery" | "hidden" {
   return value === "visible" || value === "mystery" || value === "hidden";

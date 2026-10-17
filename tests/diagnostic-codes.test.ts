@@ -23,7 +23,7 @@ const OWNER_SOURCES: Readonly<Record<DiagnosticOwner, readonly string[]>> = {
   lexer: ["lexer.ts"],
   parser: ["parser.ts", "script-header.ts", "ast-validation.ts"],
   "name pass": ["semantic.ts", "switch-cases.ts"],
-  "type checker": ["type-checker.ts", "authored-presentation.ts"],
+  "type checker": ["type-checker.ts", "authored-presentation.ts", "handle-members.ts"],
   compiler: ["compiler.ts", "image-catalog.ts", "day-waits.ts"],
   lowering: ["compiler/"],
   "plan analysis": ["reachability.ts", "speaker-flow.ts", "compiler.ts"],
