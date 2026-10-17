@@ -208,29 +208,28 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 
 ## Codes with more than one owner
 
-A shared code is one problem found in more than one place when the owners report the same rule, which is allowed only
-when they report it with the same text. It is two problems when the owners report different mistakes under one code,
-which each need a code of their own.
+A shared code is one problem that each owner finds in another place and reports with the same text. Two problems need a
+code each.
 
-- `TSV001` (one problem, same text)
+- `TSV001`
   - parser: a declaration whose name is a keyword or another protected name, where it reads the name
   - name pass: the same rule with the same text (`protectedNameMessage`) where it finds such a declaration, and a name that is already in use
-- `TSV007` (one problem, same text)
+- `TSV007`
   - name pass: a property name that a speaker declaration or an object literal gives twice (`duplicateEntryMessage`)
   - type checker: the same rule with the same text for a key that a dict literal gives twice, also through a computed key whose text is known
-- `TSV020` (one problem, same text)
+- `TSV020`
   - name pass: calls of the script's functions and of the commands it knows by name, such as `load` without `default:`, `askImage`, `showPopup`, `openUrl`, `exportText`, and `takePhoto`, with the messages of `argument-rules.ts`
   - type checker: the same rules with the same texts for method calls, `script(...)`, the functions of the current date and time, and the other built-ins
-- `TSV022` (one problem, same text)
+- `TSV022`
   - name pass: calls of the script's functions and of the commands it knows by name (`unknownNamedArgumentMessage`)
   - type checker: the same rule with the same text for method calls, `script(...)`, and the other built-ins
-- `TSV043` (one problem, same text)
+- `TSV043`
   - type checker: every operation that its operands do not support, among them a speaker property that no declaration or assignment gives a speaker the read may reach (`missingSpeakerPropertyMessage`)
   - plan analysis: the same rule with the same text for a speaker property that a way to the read misses (V30 §37)
-- `TSV055` (one problem, same text)
+- `TSV055`
   - name pass: a start value that says, asks, waits, plays media, calls a function, or uses a local or a later global (`startValueMessage`)
   - type checker: the same rule with the same text for a start value that selects at random, with `.random` or a list in `${...}`, which needs the value's type
-- `TST004` (one problem, same text)
+- `TST004`
   - parser: a tag that a file header gives two different numbers (`conflictingTagMessage`)
   - compiler: the same rule with the same text, naming the image, for the keywords of an image
   - type checker: the same rule with the same text for the written tags of `takePhoto(tags: [...])`
