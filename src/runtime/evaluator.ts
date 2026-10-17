@@ -3,23 +3,13 @@ import {
   callShapeProblem,
   dictArgumentsProblem,
   FIXED_PARAMETERS,
-  getArgumentsProblem,
   NO_ARGUMENTS,
   positionalShape,
   scriptArgumentCountMessage,
   unknownNamedArgumentMessage,
 } from "../argument-rules.js";
+import { isListFunction } from "../list-function-rules.js";
 import {
-  isListFunction,
-  isStatistic,
-  LIST_FUNCTION_CONTRACTS,
-  listFunctionShape,
-  minMaxValuesProblem,
-  takesValues,
-  type MinMaxName,
-} from "../list-function-rules.js";
-import {
-  countProblem,
   emptyListPropertyFailure,
   hasListMethod,
   LIST_METHODS,
@@ -28,7 +18,6 @@ import {
   listProperty,
   missingListMethodMessage,
   missingListPropertyMessage,
-  type ListKind,
   type ListMethod,
   type ElementProperty,
   type MethodOf,
@@ -42,12 +31,9 @@ import {
   isClockFunction,
 } from "../temporal-builtins.js";
 import {
-  combinedDateAndTime,
-  compareTemporal,
   exactDurationMilliseconds,
   missingTemporalMember,
   temporalBinary,
-  temporalConverted,
   temporalNow,
   temporalMethod,
   calendarDurationProperty,
@@ -78,18 +64,8 @@ import {
   lazyDefaultCallOperation,
 } from "../plan/expression-children.js";
 import type { LazyDefaultOperation } from "../lazy-defaults.js";
-import {
-  domainFailure,
-  isNumericFailure,
-  isNumericFunction,
-  numberArgumentMessage,
-  NUMERIC_CONTRACTS,
-  numericResult,
-  type NumberSignature,
-  type NumericFunction,
-} from "../numeric-functions.js";
+import { domainFailure, isNumericFunction } from "../numeric-functions.js";
 import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "../random-functions.js";
-import type { ListFunctionName, NumericFunctionName } from "../language-facts.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
   angleArithmetic,
@@ -108,15 +84,7 @@ import {
   speakerPropertyValue,
 } from "../speaker-terms.js";
 import { accountFieldValue } from "./account.js";
-import {
-  linearRegression,
-  listStatistic,
-  listValuesKind,
-  statisticValues,
-  predict,
-  weightedChoices,
-  weightedIndex,
-} from "./list-statistics.js";
+import { listFunctionValue, weightedChoices, weightedIndex } from "./list-statistics.js";
 import {
   CORE_RUNTIME_BUILTINS,
   type ConversionName,
@@ -175,8 +143,8 @@ import {
   collectionTooLong,
   MAX_COLLECTION_LENGTH,
 } from "./collection-size.js";
-import { base64Text, jsonText, textFromBase64, valueFromJson } from "./json-base64.js";
 import { textSha256 } from "./sha256.js";
+import { callNumbers, conversionResult, joinedValue, numericFunction } from "./pure-operations.js";
 import {
   emptyRangeProblem,
   rangeBoundRule,
@@ -206,7 +174,12 @@ import {
   type HandlePropertyName,
 } from "../handle-members.js";
 import { unmeasurableLengthMessage } from "../delay-rules.js";
-import { rangeListLengthProblem, setOperationItems, sortOrder } from "./collection-operations.js";
+import {
+  findValue,
+  rangeListLengthProblem,
+  readCollection,
+  sortOrder,
+} from "./collection-operations.js";
 import {
   addDurations,
   calendarDuration,
@@ -225,15 +198,9 @@ import {
   ZERO_DIVISOR,
   type AnyDuration,
 } from "../duration.js";
-import {
-  callStringMethod,
-  checkTextArguments,
-  regexFromText,
-  missingMemberMessage,
-} from "./string-operations.js";
+import { callStringMethod, missingMemberMessage } from "./string-operations.js";
 import {
   isTextMethod,
-  LIST_JOIN,
   methodArgumentCountMessage,
   stringLength,
   unknownTextMemberMessage,
@@ -247,7 +214,6 @@ import {
   cloneCapturedSerializableValue,
   cloneSerializableValue,
   findRuntimeIdentity,
-  createCapturedSerializableList,
   createCapturedSerializableSet,
   dictProperty,
   getSerializableDictEntry,
@@ -267,7 +233,6 @@ import {
   type SerializableRuntimeObject,
   type SerializableRuntimeRange,
   type SerializableRuntimeSet,
-  type SerializableRuntimeTemporal,
   type SerializableRuntimeValue,
   type SerializableTimerHandle,
   type SerializableMediaHandle,
@@ -275,8 +240,6 @@ import {
   type SerializableCameraViewHandle,
   type SerializablePermanentButtonHandle,
   type SerializableScriptReference,
-  type SerializableRuntimeProperty,
-  type SerializableSpeakerReference,
 } from "./serializable-values.js";
 import {
   currentTemporalContext,
@@ -361,7 +324,6 @@ import {
 } from "./debug-trace.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
-  booleanFromText,
   CONVERSIONS,
   defaultDescription,
   FILE_TEXT_FUNCTIONS,
@@ -2179,7 +2141,7 @@ export class Evaluator {
       expression.operator === "+" &&
       (typeof left === "string" || typeof right === "string" || isList(left) || isList(right))
     )
-      return this.#joined(expression, left, right);
+      return joinedValue(left, right, expression.span);
     const temporal = temporalBinary(expression.operator, left, right, expression.span);
     if (temporal !== undefined) return temporal;
     if (isAngle(left) || isAngle(right)) return angleBinary(expression, left, right, this.plan);
@@ -2225,36 +2187,6 @@ export class Evaluator {
     }
     if (!Number.isFinite(result)) throw noArithmeticResult(expression, left, right, this.plan);
     return result;
-  }
-
-  /**
-   * `+` on text or a list (V30 §4): two texts join, and two lists give a new list of copies of the left elements, then
-   * the right ones. Nothing converts, so any other operand fails with what to write instead.
-   */
-  #joined(
-    expression: BinaryExpressionPlan,
-    left: SerializableRuntimeValue,
-    right: SerializableRuntimeValue,
-  ): SerializableRuntimeValue {
-    if (typeof left === "string" && typeof right === "string") {
-      checkTextLength(left.length + right.length, "joining with +", expression.span);
-      return left + right;
-    }
-    if (isList(left) && isList(right)) {
-      checkCollectionLength(
-        "list",
-        left.items.length + right.items.length,
-        Math.max(left.items.length, right.items.length),
-        "joining with +",
-        expression.span,
-      );
-      return createCapturedSerializableList(left.items.concat(right.items));
-    }
-    throw fault(
-      "TSR009",
-      `'+' joins two texts or two lists and adds numbers or durations, but these are ${describeRuntimeValue(left)} and ${describeRuntimeValue(right)}.${joinFix(left, right)}`,
-      expression.span,
-    );
   }
 
   /**
@@ -2366,7 +2298,7 @@ export class Evaluator {
       if (isRandomFunction(name))
         return this.#randomFunction(name, positional, named, expression.span);
       if (isNumericFunction(name)) return numericFunction(name, positional, named, expression.span);
-      if (isListFunction(name)) return this.#listFunction(name, positional, named, expression.span);
+      if (isListFunction(name)) return listFunctionValue(name, positional, named, expression.span);
       if (name === "script") return scriptReference(positional, named, expression.span);
       const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
@@ -2644,15 +2576,13 @@ export class Evaluator {
         clearSerializableSet(receiver);
         return null;
       case "contains":
-        return serializableSetContains(receiver, positional[0]!);
       case "toList":
-        return createCapturedSerializableList(receiver.items);
       case "intersection":
       case "union":
       case "difference":
-        return createCapturedSerializableSet(
-          this.#setOperation("set", name, receiver.items, positional[0]!, span),
-        );
+        return readCollection(receiver, name, positional, {}, false, span, (item) =>
+          this.#joinedText(item, span),
+        )!;
       default: {
         const unhandled: never = name;
         throw new Error(`Set method '${String(unhandled)}' has no implementation.`);
@@ -2711,7 +2641,7 @@ export class Evaluator {
         return null;
       }
       case "remove": {
-        const index = this.#findValue(receiver.items, positional[0]!);
+        const index = findValue(receiver.items, positional[0]!);
         if (index >= 0) this.#removeListItem(receiver, index);
         else {
           this.#warn(
@@ -2752,53 +2682,21 @@ export class Evaluator {
         }
         return null;
       case "contains":
-        return this.#findValue(receiver.items, positional[0]!) >= 0;
-      // A value that no element equals has no position: null (#840).
       case "indexOf":
-      case "lastIndexOf": {
-        const index = this.#findValue(receiver.items, positional[0]!, name === "lastIndexOf");
-        return index < 0 ? null : index;
-      }
-      case "count": {
-        let count = 0;
-        for (const item of receiver.items) if (serializableEquals(item, positional[0]!)) count += 1;
-        return count;
-      }
-      // A value that is not a position of the list, such as a negative or fractional index, text, or null, gives the
-      // default (#844).
-      case "get": {
-        const problem = getArgumentsProblem("list", positional.length, [
-          ...Object.keys(named),
-          ...(defaulted ? ["default"] : []),
-        ]);
-        if (problem !== undefined) throw fault("TSR028", problem.message, span);
-        const index = positional[0]!;
-        return typeof index === "number" &&
-          Number.isInteger(index) &&
-          index >= 0 &&
-          index < receiver.items.length
-          ? receiver.items[index]!
-          : USE_DEFAULT;
-      }
+      case "lastIndexOf":
+      case "count":
+      case "get":
       case "toSet":
-        return createCapturedSerializableSet(receiver.items);
       case "take":
-      case "takeLast": {
-        const count = positional[0]!;
-        if (typeof count !== "number")
-          throw fault(
-            "TSR057",
-            listArgumentMessage(name, "count", describeRuntimeValue(count), "other"),
-            span,
-          );
-        const problem = countProblem(name, count);
-        if (problem !== undefined) throw fault("TSR057", problem, span);
-        // A count beyond the length takes the whole list.
-        return createCapturedSerializableList(
-          name === "take"
-            ? receiver.items.slice(0, count)
-            : receiver.items.slice(Math.max(0, receiver.items.length - count)),
+      case "takeLast":
+      case "intersection":
+      case "union":
+      case "difference":
+      case "join": {
+        const value = readCollection(receiver, name, positional, named, defaulted, span, (item) =>
+          this.#joinedText(item, span),
         );
+        return value === undefined ? USE_DEFAULT : value;
       }
       case "sort":
       case "shuffle":
@@ -2814,25 +2712,6 @@ export class Evaluator {
           receiver.items.map((_, index) => receiver.items.length - 1 - index),
         );
         return null;
-      case "intersection":
-      case "union":
-      case "difference":
-        return createCapturedSerializableList(
-          this.#setOperation("list", name, receiver.items, positional[0]!, span),
-        );
-      case "join": {
-        checkTextArguments(LIST_JOIN, positional, span);
-        // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
-        const separator = (positional[0] as string | undefined) ?? ", ";
-        let length = separator.length * Math.max(0, receiver.items.length - 1);
-        const texts = receiver.items.map((item) => {
-          const text = this.#joinedText(item, span);
-          length += text.length;
-          return text;
-        });
-        checkTextLength(length, "join", span);
-        return texts.join(separator);
-      }
       default: {
         const unhandled: never = name;
         throw new Error(`List method '${String(unhandled)}' has no implementation.`);
@@ -3615,28 +3494,13 @@ export class Evaluator {
     span: SourceSpan,
   ): SerializableRuntimeValue | typeof USE_DEFAULT {
     const conversion: Conversion = CONVERSIONS[name];
-    // Only a call with a written `files: false` is an ordinary call; with files it is a file store.
-    if (conversion.files && named.files !== undefined && named.files !== false)
-      throw fault(
-        "TSR028",
-        internalFault(`${name}(...) with files reached an ordinary call instead of a file store.`),
-        span,
-      );
-    const problem = callShapeProblem(
-      name,
-      conversion,
-      positional.length,
-      Object.keys(named),
-      defaulted,
-    );
-    if (problem !== undefined) throw fault("TSR028", problem.message, span);
-    const pair = positional.length === 2 ? conversion.pair : undefined;
-    const converted = CONVERSION_RUNS[name](positional, {
+    const converted = conversionResult(name, positional, named, defaulted, {
       span,
       text: (value) => visibleText(value, span, currentTemporalContext(this.snapshot)),
       speakerProperties: (speaker) => this.speakerById(speaker.speakerId, span).properties,
     });
     if (converted !== undefined) return converted;
+    const pair = positional.length === 2 ? conversion.pair : undefined;
     if (defaulted) return USE_DEFAULT;
     // A conversion of a value fails; any other conversion gives its default or fails as it runs.
     if (conversion.takes !== "value")
@@ -3656,121 +3520,6 @@ export class Evaluator {
       conversionFailure(name, conversion, positional[0]!, argument, this.plan),
       span,
     );
-  }
-
-  /** A list function (see `LIST_FUNCTION_CONTRACTS`). */
-  #listFunction(
-    name: ListFunctionName,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    span: SourceSpan,
-  ): SerializableRuntimeValue {
-    if (isStatistic(name)) return listStatistic(name, positional, named, span);
-    if (takesValues(name)) return this.#minMaxBuiltin(name, positional, named, span);
-    switch (name) {
-      case "linearRegression":
-        return linearRegression(positional, named, span);
-      case "predict":
-        return predict(positional, named, span);
-      default: {
-        const unhandled: never = name;
-        throw new Error(`List function '${String(unhandled)}' has no implementation.`);
-      }
-    }
-  }
-
-  /**
-   * `min` or `max` of two or more values that are all numbers, all durations, all angles, or all date or time values of
-   * one kind, or of the values of one list.
-   */
-  #minMaxBuiltin(
-    name: MinMaxName,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    span: SourceSpan,
-  ): SerializableRuntimeValue {
-    // One list, optionally with by:, chooses among its values (V30 §16). As the compiler, which knows the type, the
-    // arguments are checked as one list takes them, else as the values do, also one value that is not a list.
-    const one = positional.length === 1;
-    const names = Object.keys(named);
-    const problem =
-      one && isList(positional[0]!)
-        ? argumentShapeProblem(name, listFunctionShape(name), 1, names)
-        : minMaxValuesProblem(name, positional.length, names);
-    if (problem !== undefined) throw fault("TSR028", problem.message, span);
-    // The values of one list are of one kind it reads, as the compiler checks them (`TSR060`).
-    if (one) {
-      positional = statisticValues(name, positional[0]!, named.by, span);
-      listValuesKind(name, positional, LIST_FUNCTION_CONTRACTS[name].values, span);
-    }
-    const numbers = positional.every((value) => typeof value === "number");
-    const first = positional[0]!;
-    const temporals = positional.filter(
-      (value): value is SerializableRuntimeTemporal =>
-        isTemporal(value) && isTemporal(first) && value.kind === first.kind,
-    );
-    const durations = positional.every(isDuration) || positional.every(isCalendarDuration);
-    const angles = positional.every(isAngle);
-    if (!numbers && !durations && !angles && temporals.length !== positional.length) {
-      const other = positional.find(
-        (value) =>
-          typeof value !== "number" &&
-          !isAnyDuration(value) &&
-          !isAngle(value) &&
-          !isTemporal(value),
-      );
-      throw fault(
-        "TSR059",
-        other === undefined
-          ? `${name}(...) needs values of one kind: all numbers, all durations, all calendar durations, all angles, or all dates, times, datetimes, or absolute dates and times.`
-          : `${name}(...) needs numbers, durations, angles, or date and time values, not ${describeRuntimeValue(other)}.`,
-        span,
-      );
-    }
-    if (angles) {
-      const values = positional.filter(isAngle);
-      let best = values[0]!;
-      for (const candidate of values) {
-        const order = compareAngles(candidate, best);
-        if (name === "min" ? order < 0 : order > 0) best = candidate;
-      }
-      return { ...best };
-    }
-    if (temporals.length === positional.length) {
-      let best = temporals[0]!;
-      for (const candidate of temporals) {
-        const order = compareTemporal(candidate, best);
-        if (name === "min" ? order < 0 : order > 0) best = candidate;
-      }
-      return cloneSerializableValue(best);
-    }
-    // A loop, not a spread into Math.min/Math.max, so a call with very many arguments cannot overflow the native stack.
-    if (numbers) {
-      const values = positional.filter((item): item is number => typeof item === "number");
-      let best = values[0]!;
-      for (const candidate of values)
-        if (name === "min" ? candidate < best : candidate > best) best = candidate;
-      return withoutNegativeZero(best);
-    }
-    // Calendar durations order only within one family (ADR 0026), also those that do not win; zero belongs to every
-    // family. The result keeps its own parts.
-    const values = positional.filter(isAnyDuration);
-    const families = new Set(values.map((item) => durationFamily(durationParts(item))));
-    families.delete("zero");
-    if (values.some(isCalendar) && (families.size > 1 || families.has("mixed")))
-      throw fault(
-        "TSR059",
-        `${name}(...) compares calendar durations of one kind only: months, days, or exact time.`,
-        span,
-      );
-    let best = values[0]!;
-    for (const candidate of values) {
-      const order = compareDurations(candidate, best);
-      if (typeof order === "string")
-        throw fault("TSR059", `${name}(...) cannot compare these durations: ${order}.`, span);
-      if (name === "min" ? order < 0 : order > 0) best = candidate;
-    }
-    return cloneSerializableValue(best);
   }
 
   /** One key of a dict, or element of a list, chosen with one draw, with the chance of its share of the weight. */
@@ -3823,41 +3572,6 @@ export class Evaluator {
     if (problem !== undefined) throw fault("TSR028", problem.message, call.span);
   }
 
-  /**
-   * The elements of `intersection`, `union`, or `difference` of the `items` of a list or set of `kind` and `argument`,
-   * which may be a list or a set whatever the receiver is.
-   */
-  #setOperation(
-    kind: ListKind,
-    name: "intersection" | "union" | "difference",
-    items: readonly SerializableRuntimeValue[],
-    argument: SerializableRuntimeValue,
-    span: SourceSpan,
-  ): SerializableRuntimeValue[] {
-    if (!isList(argument) && !isSet(argument))
-      throw fault(
-        "TSR060",
-        listArgumentMessage(
-          name,
-          "collection",
-          describeRuntimeValue(argument),
-          isRange(argument) ? "range" : "other",
-        ),
-        span,
-      );
-    const result = setOperationItems(name, items, argument.items);
-    const method: ListMethod = LIST_METHODS[name];
-    if (method.grows === true)
-      checkCollectionLength(
-        kind,
-        result.length,
-        Math.max(items.length, argument.items.length),
-        `${name}(...)`,
-        span,
-      );
-    return result;
-  }
-
   /** A uniform random order of the list's items, as their old indexes; a trace records it as one record of its draws. */
   #shuffleOrder(list: SerializableRuntimeList, span: SourceSpan): readonly number[] {
     const length = list.items.length;
@@ -3887,22 +3601,6 @@ export class Evaluator {
     const removed = list.items.splice(index, 1)[0]!;
     refreshPreparedReferenceFallbacks(this.snapshot, rebased);
     return removed;
-  }
-
-  /** The index of the first element equal to `value`, or with `last` of the last one; -1 when there is none. */
-  #findValue(
-    items: readonly SerializableRuntimeValue[],
-    value: SerializableRuntimeValue,
-    last = false,
-  ): number {
-    // A scalar equals only the same scalar, as strict equality compares it; runtime numbers are never NaN.
-    if (value === null || typeof value !== "object")
-      return last ? items.lastIndexOf(value) : items.indexOf(value);
-    for (let step = 0; step < items.length; step += 1) {
-      const index = last ? items.length - 1 - step : step;
-      if (serializableEquals(items[index]!, value)) return index;
-    }
-    return -1;
   }
 
   #randomItem(
@@ -4238,71 +3936,6 @@ export class Evaluator {
 
 const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
 
-/** A call of a numeric or angle function (see `NUMERIC_CONTRACTS`); a call without a result fails. */
-function numericFunction(
-  name: NumericFunctionName,
-  positional: readonly SerializableRuntimeValue[],
-  named: Readonly<Record<string, SerializableRuntimeValue>>,
-  span: SourceSpan,
-): number | StoredAngle {
-  const numeric: NumericFunction = NUMERIC_CONTRACTS[name];
-  const { numbers, options } = callNumbers(name, numeric, positional, named, span);
-  const result = numericResult(numeric, numbers, options);
-  if (isNumericFailure(result)) throw fault(result.code, result.failure, span);
-  return result;
-}
-
-/**
- * The numbers of a call of a function whose every argument is a number or an angle, such as a numeric function or
- * `chance`, by position and by name, an angle as its degrees; a call of another shape, or with a value of another kind,
- * fails.
- */
-function callNumbers(
-  name: string,
-  signature: NumberSignature & { readonly result: unknown },
-  positional: readonly SerializableRuntimeValue[],
-  named: Readonly<Record<string, SerializableRuntimeValue>>,
-  span: SourceSpan,
-): { readonly numbers: readonly number[]; readonly options: Readonly<Record<string, number>> } {
-  const { parameters, named: names = [] } = signature;
-  const problem = argumentShapeProblem(
-    name,
-    { ...positionalShape(parameters), names },
-    positional.length,
-    Object.keys(named),
-    parameters.length > 0,
-  );
-  if (problem !== undefined) throw fault("TSR028", problem.message, span);
-  const number = (value: SerializableRuntimeValue, place: string): number => {
-    if (signature.takes === "angles") {
-      if (isAngle(value)) return value.degrees;
-    } else if (typeof value === "number") return value;
-    throw fault(
-      "TSR059",
-      numberArgumentMessage(
-        name,
-        signature,
-        describeRuntimeValue(value),
-        typeof value === "number"
-          ? "number"
-          : typeof value === "string"
-            ? "string"
-            : isAngle(value)
-              ? "angle"
-              : "other",
-        place,
-      ),
-      span,
-    );
-  };
-  return {
-    numbers: positional.map((value) => number(value, "")),
-    options: Object.fromEntries(
-      Object.entries(named).map(([key, value]) => [key, number(value, ` as its ${key}:`)]),
-    ),
-  };
-}
-
 /*
  * A resolved draw has the kind of outcome its support admits: control checks every chosen outcome against the support
  * before it is used, and a natural one has its sampler's kind.
@@ -4462,70 +4095,6 @@ function conversionFailure(
       return `${failed} Use ${isSet(value) ? ".toList().join()" : isDict(value) ? ".values.join()" : ".join()"} to combine its ${isDict(value) ? "values" : "elements"} as text.`;
   }
   return `${failed}${fallback}`;
-}
-
-/** What a conversion reads while it runs, besides its arguments. */
-interface ConversionRun {
-  readonly span: SourceSpan;
-  /** A scalar as `${...}` shows it, dates and times in the player's presentation, which `toString` gives. */
-  readonly text: (value: SerializableRuntimeValue) => string;
-  /** A speaker's properties, which `toJson` writes. */
-  readonly speakerProperties: (
-    speaker: SerializableSpeakerReference,
-  ) => readonly SerializableRuntimeProperty[];
-}
-
-/**
- * How each conversion runs (see `CONVERSIONS`): its result, or `undefined` for a value that it does not convert or text
- * that it does not read, for which the call gives its default or fails.
- */
-const CONVERSION_RUNS: {
-  readonly [Name in ConversionName]: (
-    positional: readonly SerializableRuntimeValue[],
-    run: ConversionRun,
-  ) => SerializableRuntimeValue | undefined;
-} = {
-  toString: ([value], run) => (isVisibleScalar(value!) ? run.text(value!) : undefined),
-  toNumber: ([value]) => numberOf(value!),
-  toInteger: ([value]) => {
-    const number = numberOf(value!);
-    return number === undefined ? undefined : withoutNegativeZero(Math.trunc(number));
-  },
-  toBoolean: ([value]) =>
-    typeof value === "boolean"
-      ? value
-      : typeof value === "string"
-        ? booleanFromText(value)
-        : undefined,
-  toDate: ([value]) => temporalConverted("date", value!),
-  toTime: ([value]) => temporalConverted("time", value!),
-  // A date and a time combine into one date and time (V30 §35).
-  toDateTime: ([value, time]) =>
-    time === undefined ? temporalConverted("datetime", value!) : combinedDateAndTime(value!, time),
-  toAbsoluteDateTime: ([value]) => temporalConverted("absoluteDateTime", value!),
-  toRegex: ([text]) => regexFromText(text!),
-  toJson: ([value], run) => jsonText(value!, run.speakerProperties, run.span),
-  // JSON's null is a value; only text that does not read gives the default.
-  fromJson: ([text], run) => (typeof text === "string" ? valueFromJson(text, run.span) : undefined),
-  toBase64: ([text], run) => {
-    if (typeof text !== "string")
-      throw fault(
-        "TSR059",
-        `toBase64(...) ${CONVERSIONS.toBase64.does}, not ${describeRuntimeValue(text!)}.`,
-        run.span,
-      );
-    return base64Text(text, run.span);
-  },
-  fromBase64: ([text]) => (typeof text === "string" ? textFromBase64(text) : undefined),
-};
-
-/** A number, or the number that number text holds (V30 §13), or `undefined` for any other value. */
-function numberOf(value: SerializableRuntimeValue): number | undefined {
-  return typeof value === "number"
-    ? withoutNegativeZero(value)
-    : typeof value === "string"
-      ? numberFromText(value)
-      : undefined;
 }
 
 /** `hashText(text)` (V30 §13): the SHA-256 of the text's UTF-8 bytes. */
@@ -5232,20 +4801,4 @@ export function acceptedDefault(
       );
   }
   return value;
-}
-
-/** What to write instead of `+` on text or a list and a value of another kind; the left operand names what was meant. */
-function joinFix(left: SerializableRuntimeValue, right: SerializableRuntimeValue): string {
-  if (isSet(left) || isSet(right))
-    return " Join sets with union(), or copy a set into a list with toList() first.";
-  if (isList(left) && isRange(right))
-    return " To add the numbers of a range, write list + range.toList().";
-  if (isList(left))
-    return " To add one element, use add(value), or write list + [value] for a new list.";
-  if (isRange(left) && isList(right))
-    return " To add the numbers of a range, write range.toList() + list.";
-  if (typeof left !== "string" && isList(right)) return " Write [value] + list for a new list.";
-  return isVisibleScalar(typeof left === "string" ? right : left)
-    ? ' Put the value in the text instead, as in "${first}${second}".'
-    : "";
 }

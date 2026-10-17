@@ -1,15 +1,26 @@
 import type { RuntimeErrorCode } from "../diagnostic-codes.js";
-import { angleStatisticMessage, angleValue } from "../angle.js";
+import { angleStatisticMessage, angleValue, compareAngles } from "../angle.js";
 import { argumentShapeProblem, type ArgumentShape } from "../argument-rules.js";
-import { exactDuration } from "../duration.js";
+import { withoutNegativeZero } from "../conversions.js";
+import {
+  compareDurations,
+  durationFamily,
+  durationParts,
+  exactDuration,
+  isCalendar,
+} from "../duration.js";
 import type { ListFunctionName } from "../language-facts.js";
 import {
+  isStatistic,
   LIST_FUNCTION_CONTRACTS,
   listFunctionShape,
   listValueMessage,
+  minMaxValuesProblem,
   mixedListValuesMessage,
+  takesValues,
   type ListFunction,
   type ListValueKind,
+  type MinMaxName,
   type StatisticName,
 } from "../list-function-rules.js";
 import { RANDOM_CONTRACTS } from "../random-functions.js";
@@ -38,9 +49,11 @@ import {
   type SerializableRuntimeTemporal,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
+import { compareTemporal } from "./temporal-operations.js";
 import {
   describeRuntimeValue,
   isAngle,
+  isAnyDuration,
   isDict,
   isCalendarDuration,
   isDuration,
@@ -604,6 +617,118 @@ export function weightedIndex(weights: readonly number[], draw: number): number 
     if (compare(target, reached) < 0) return index;
   }
   return last;
+}
+
+/** A call of a list function (see `LIST_FUNCTION_CONTRACTS`). */
+export function listFunctionValue(
+  name: ListFunctionName,
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  span: SourceSpan,
+): SerializableRuntimeValue {
+  if (isStatistic(name)) return listStatistic(name, positional, named, span);
+  if (takesValues(name)) return minMaxValue(name, positional, named, span);
+  switch (name) {
+    case "linearRegression":
+      return linearRegression(positional, named, span);
+    case "predict":
+      return predict(positional, named, span);
+    default: {
+      const unhandled: never = name;
+      throw new Error(`List function '${String(unhandled)}' has no implementation.`);
+    }
+  }
+}
+
+/**
+ * `min` or `max` of two or more values that are all numbers, all durations, all angles, or all date or time values of
+ * one kind, or of the values of one list.
+ */
+function minMaxValue(
+  name: MinMaxName,
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  span: SourceSpan,
+): SerializableRuntimeValue {
+  // One list, optionally with by:, chooses among its values (V30 §16). As the compiler, which knows the type, the
+  // arguments are checked as one list takes them, else as the values do, also one value that is not a list.
+  const one = positional.length === 1;
+  const names = Object.keys(named);
+  const problem =
+    one && isList(positional[0]!)
+      ? argumentShapeProblem(name, listFunctionShape(name), 1, names)
+      : minMaxValuesProblem(name, positional.length, names);
+  if (problem !== undefined) throw fault("TSR028", problem.message, span);
+  // The values of one list are of one kind it reads, as the compiler checks them (`TSR060`).
+  if (one) {
+    positional = statisticValues(name, positional[0]!, named.by, span);
+    listValuesKind(name, positional, LIST_FUNCTION_CONTRACTS[name].values, span);
+  }
+  const numbers = positional.every((value) => typeof value === "number");
+  const first = positional[0]!;
+  const temporals = positional.filter(
+    (value): value is SerializableRuntimeTemporal =>
+      isTemporal(value) && isTemporal(first) && value.kind === first.kind,
+  );
+  const durations = positional.every(isDuration) || positional.every(isCalendarDuration);
+  const angles = positional.every(isAngle);
+  if (!numbers && !durations && !angles && temporals.length !== positional.length) {
+    const other = positional.find(
+      (value) =>
+        typeof value !== "number" && !isAnyDuration(value) && !isAngle(value) && !isTemporal(value),
+    );
+    throw fault(
+      "TSR059",
+      other === undefined
+        ? `${name}(...) needs values of one kind: all numbers, all durations, all calendar durations, all angles, or all dates, times, datetimes, or absolute dates and times.`
+        : `${name}(...) needs numbers, durations, angles, or date and time values, not ${describeRuntimeValue(other)}.`,
+      span,
+    );
+  }
+  if (angles) {
+    const values = positional.filter(isAngle);
+    let best = values[0]!;
+    for (const candidate of values) {
+      const order = compareAngles(candidate, best);
+      if (name === "min" ? order < 0 : order > 0) best = candidate;
+    }
+    return { ...best };
+  }
+  if (temporals.length === positional.length) {
+    let best = temporals[0]!;
+    for (const candidate of temporals) {
+      const order = compareTemporal(candidate, best);
+      if (name === "min" ? order < 0 : order > 0) best = candidate;
+    }
+    return cloneSerializableValue(best);
+  }
+  // A loop, not a spread into Math.min/Math.max, so a call with very many arguments cannot overflow the native stack.
+  if (numbers) {
+    const values = positional.filter((item): item is number => typeof item === "number");
+    let best = values[0]!;
+    for (const candidate of values)
+      if (name === "min" ? candidate < best : candidate > best) best = candidate;
+    return withoutNegativeZero(best);
+  }
+  // Calendar durations order only within one family (ADR 0026), also those that do not win; zero belongs to every
+  // family. The result keeps its own parts.
+  const values = positional.filter(isAnyDuration);
+  const families = new Set(values.map((item) => durationFamily(durationParts(item))));
+  families.delete("zero");
+  if (values.some(isCalendar) && (families.size > 1 || families.has("mixed")))
+    throw fault(
+      "TSR059",
+      `${name}(...) compares calendar durations of one kind only: months, days, or exact time.`,
+      span,
+    );
+  let best = values[0]!;
+  for (const candidate of values) {
+    const order = compareDurations(candidate, best);
+    if (typeof order === "string")
+      throw fault("TSR059", `${name}(...) cannot compare these durations: ${order}.`, span);
+    if (name === "min" ? order < 0 : order > 0) best = candidate;
+  }
+  return cloneSerializableValue(best);
 }
 
 /**
