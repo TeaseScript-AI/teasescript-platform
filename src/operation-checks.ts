@@ -3,6 +3,7 @@ import {
   conversionTo,
   CONVERSIONS,
   defaultDescription,
+  FILE_TEXT_FUNCTIONS,
   isConversion,
   MIN_MAX_BUILTINS,
   unwritableJsonReason,
@@ -50,6 +51,8 @@ import {
 import {
   argumentCountMessage,
   argumentsTaken,
+  callShapeNames,
+  callShapeProblem,
   FIXED_PARAMETERS,
   getArgumentsProblem,
   LIST_ONLY_METHODS,
@@ -57,7 +60,7 @@ import {
   POSITIONAL_METHODS,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
-import { MIN_MAX_TAKES } from "./list-function-rules.js";
+import { minMaxValuesProblem } from "./list-function-rules.js";
 import {
   argumentFix,
   argumentTypeMessage,
@@ -535,8 +538,9 @@ interface ShapedCall {
 }
 
 /**
- * The arguments of a call of `shape` (see `CallShape`), and its problems: a named argument it does not take, a
- * `files:` that is not true or false, the number of positional arguments, and a required `default:` that is missing.
+ * The arguments of a call of `shape` (see `CallShape`), and its problems: each named argument it does not take, a
+ * `files:` that is not true or false, and then the number of positional arguments or a required `default:` that is
+ * missing, with the texts of `callShapeProblem`.
  */
 function shapedCall(
   name: string,
@@ -544,10 +548,7 @@ function shapedCall(
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): ShapedCall {
-  const named = [
-    ...(shape.fallback === null ? [] : ["default"]),
-    ...(shape.files ? ["files"] : []),
-  ];
+  const named = callShapeNames(shape);
   const problems: OperationProblem[] = [];
   const positional: Expression[] = [];
   let fallback: Expression | undefined;
@@ -576,26 +577,9 @@ function shapedCall(
         span: files.span,
       });
   }
-  const required = shape.fallback?.required ?? null;
-  if (positional.length !== 1 && (shape.pair === undefined || positional.length !== 2))
-    problems.push({
-      kind: "argumentCount",
-      message: argumentCountMessage(
-        name,
-        `1 argument (${shape.parameter})${required === null ? "" : " and a 'default:'"}${shape.pair === undefined ? "" : ` or 2 (${shape.pair.join(", ")})`}`,
-        positional.length,
-      ),
-      span: call.span,
-    });
-  else if (required !== null && fallback === undefined)
-    problems.push({
-      kind: "argumentCount",
-      message: missingDefaultMessage(
-        `${name}(${shape.parameter}, default: value)`,
-        `for ${required}`,
-      ),
-      span: call.span,
-    });
+  const problem = callShapeProblem(name, shape, positional.length, [], fallback !== undefined);
+  if (problem !== undefined)
+    problems.push({ kind: "argumentCount", message: problem.message, span: call.span });
   return { problems, positional, fallback };
 }
 
@@ -647,24 +631,10 @@ function conversionProblems(
 }
 
 /**
- * The file and hash functions of text (V30 §13, §33). The text or file is checked where they are called, but
- * `fileFromBase64` gives its default for text it cannot read.
+ * Problems with a call of a file or hash function of text (`FILE_TEXT_FUNCTIONS`): its shape, and text to read that can
+ * never be text. The text or file is checked where they are called, but `fileFromBase64` gives its default for text it
+ * cannot read.
  */
-const FILE_TEXT_FUNCTIONS: ReadonlyMap<string, CallShape> = new Map([
-  [
-    "fileFromBase64",
-    {
-      parameter: "text",
-      fallback: { required: "text that is not valid Base64", type: "any" },
-      files: false,
-    },
-  ],
-  ["fileToBase64", { parameter: "file", fallback: null, files: false }],
-  ["hashText", { parameter: "text", fallback: null, files: false }],
-  ["hashFile", { parameter: "file", fallback: null, files: false }],
-]);
-
-/** Problems with a call of a file or hash function of text: its shape, and text to read that can never be text. */
 function fileTextProblems(
   name: string,
   shape: CallShape,
@@ -845,21 +815,18 @@ function minMaxProblems(
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
-  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
-  if (named !== undefined)
+  const named = call.arguments.filter((argument) => argument.kind === "namedArgument");
+  const problem = minMaxValuesProblem(
+    name,
+    call.arguments.length - named.length,
+    named.map((argument) => argument.name.name),
+  );
+  if (problem !== undefined)
     return [
       {
-        kind: "unknownNamedArgument",
-        message: unknownNamedArgumentMessage(name, named.name.name, []),
-        span: named.name.span,
-      },
-    ];
-  if (call.arguments.length < 2)
-    return [
-      {
-        kind: "argumentCount",
-        message: argumentCountMessage(name, MIN_MAX_TAKES, call.arguments.length),
-        span: call.span,
+        kind: problem.kind,
+        message: problem.message,
+        span: problem.kind === "unknownNamedArgument" ? named[0]!.name.span : call.span,
       },
     ];
   let family: StaticType | undefined;

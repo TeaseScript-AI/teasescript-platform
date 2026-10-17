@@ -1,6 +1,7 @@
 import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import { isAskImageCall, isLockCall, isTakePhotoCall } from "./capture-call.js";
 import { IMAGE_REQUEST_OPTIONS } from "./image-input.js";
+import { EXPORT_TEXT_OPTIONS, OPEN_URL_OPTIONS, SHOW_POPUP_OPTIONS } from "./parser.js";
 import type {
   AssignmentTarget,
   Block,
@@ -2125,10 +2126,10 @@ class SemanticValidator {
             argument.name.span,
           );
         message = true;
-      } else if (name !== "buttonText") {
+      } else if (!SHOW_POPUP_OPTIONS.includes(name)) {
         this.#report(
           semanticCode.unknownNamedArgument,
-          unknownNamedArgumentMessage("showPopup", name, ["message", "buttonText"]),
+          unknownNamedArgumentMessage("showPopup", name, ["message", ...SHOW_POPUP_OPTIONS]),
           argument.name.span,
         );
       }
@@ -2169,17 +2170,13 @@ class SemanticValidator {
     for (const argument of statement.arguments)
       if (
         argument.kind === "namedArgument" &&
-        argument.name.name !== "buttonText" &&
-        argument.name.name !== "alwaysButton" &&
+        !OPEN_URL_OPTIONS.includes(argument.name.name) &&
         // A named address without a positional one is the error above.
         (addressed || argument.name.name !== "url")
       )
         this.#report(
           semanticCode.unknownNamedArgument,
-          unknownNamedArgumentMessage("openUrl", argument.name.name, [
-            "buttonText",
-            "alwaysButton",
-          ]),
+          unknownNamedArgumentMessage("openUrl", argument.name.name, OPEN_URL_OPTIONS),
           argument.name.span,
         );
   }
@@ -2205,14 +2202,13 @@ class SemanticValidator {
     for (const argument of statement.arguments)
       if (
         argument.kind === "namedArgument" &&
-        argument.name.name !== "title" &&
-        argument.name.name !== "fileName" &&
+        !EXPORT_TEXT_OPTIONS.includes(argument.name.name) &&
         // A named text without a positional one is the error above.
         (given || argument.name.name !== "text")
       )
         this.#report(
           semanticCode.unknownNamedArgument,
-          unknownNamedArgumentMessage("exportText", argument.name.name, ["title", "fileName"]),
+          unknownNamedArgumentMessage("exportText", argument.name.name, EXPORT_TEXT_OPTIONS),
           argument.name.span,
         );
   }

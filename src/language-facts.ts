@@ -3,7 +3,7 @@
  * read: the keywords, the protected names (V30 §38), the words the parser reads by name, and the units.
  */
 import type { InteractionExpression } from "./ast.js";
-import { TokenKind } from "./token.js";
+import { TokenKind, type Token } from "./token.js";
 
 /** Names reserved by the accepted V30 TeaseScript specification. */
 export const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
@@ -350,6 +350,11 @@ export interface CommandFacts {
   readonly renamed?: string;
   /** The words that may stand between a play command and its file, as in `playAudio async repeat "a.mp3"`. */
   readonly fileModifiers?: readonly string[];
+  /**
+   * Where a `(` after the word starts its call form: `adjacent` only right after it, as in `timer(duration: 10 s)`, so
+   * `timer (5..10) s` has a value in parentheses, and `any` also after a space, as in `showPopup ("Done")`.
+   */
+  readonly callForm?: "adjacent" | "any";
 }
 
 /**
@@ -368,20 +373,30 @@ export const COMMANDS = Object.freeze({
   fallback: { statement: "line" },
   end: { statement: "line" },
   global: { statement: "start" },
-  load: { value: true },
+  load: { value: true, callForm: "any" },
   showButton: { statement: "line", value: true, interaction: "button" },
-  showPopup: { statement: "line", value: true },
+  showPopup: { statement: "line", value: true, callForm: "any" },
   showImage: { statement: "line" },
   hideImage: { statement: "line" },
   hideCamera: { statement: "line" },
-  openUrl: { statement: "line" },
-  exportText: { statement: "line" },
+  openUrl: { statement: "line", callForm: "any" },
+  exportText: { statement: "line", callForm: "any" },
   stopAudio: { statement: "line" },
-  timer: { statement: "start", value: true },
+  timer: { statement: "start", value: true, callForm: "adjacent" },
   showCamera: { statement: "start", value: true },
   showPermanentButton: { statement: "start", value: true },
-  playAudio: { statement: "start", value: true, fileModifiers: ["async", "repeat"] },
-  playVideo: { statement: "start", value: true, fileModifiers: ["async", "repeat"] },
+  playAudio: {
+    statement: "start",
+    value: true,
+    fileModifiers: ["async", "repeat"],
+    callForm: "adjacent",
+  },
+  playVideo: {
+    statement: "start",
+    value: true,
+    fileModifiers: ["async", "repeat"],
+    callForm: "adjacent",
+  },
   askText: { value: true, interaction: "text" },
   askNumber: { value: true, interaction: "number" },
   askInteger: { value: true, interaction: "integer" },
@@ -427,6 +442,15 @@ export function isAsk(word: string): word is AskCommand {
 /** How the parser reads `word`, or `undefined` for a word it does not read by name (see `COMMANDS`). */
 export function commandFacts(word: string): CommandFacts | undefined {
   return isCommand(word) ? COMMANDS[word] : undefined;
+}
+
+/** Whether `next`, the token after the word `command`, starts the word's call form (see `CommandFacts.callForm`). */
+export function startsCallForm(command: Token, next: Token | undefined): boolean {
+  const form = commandFacts(command.lexeme)?.callForm;
+  return (
+    next?.kind === TokenKind.LeftParenthesis &&
+    (form === "any" || (form === "adjacent" && next.span.start.offset === command.span.end.offset))
+  );
 }
 
 /** The exact units of a duration, from milliseconds to weeks (ADR 0026). */

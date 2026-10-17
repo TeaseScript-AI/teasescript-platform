@@ -31,11 +31,19 @@ import {
 import type { Diagnostic } from "./diagnostics.js";
 import type { ProjectImageFile } from "./image-catalog.js";
 import { lex } from "./lexer.js";
+import { MESSAGE_PRESENTATION_OPTIONS } from "./message-presentation.js";
 import {
   askOptionNames,
+  EXPORT_TEXT_OPTIONS,
+  MEDIA_ARGUMENTS,
+  OPEN_URL_OPTIONS,
   parse,
+  PERMANENT_BUTTON_OPTIONS,
   requiredAskOptionNames,
   SHOW_BUTTON_OPTIONS,
+  SHOW_POPUP_OPTIONS,
+  TIMER_ARGUMENTS,
+  TIMER_DISPLAYS,
   type ParseResult,
   type StatementRange,
 } from "./parser.js";
@@ -45,10 +53,12 @@ import {
   commandFacts,
   isAsk,
   isCommand,
+  startsCallForm,
   TEASESCRIPT_GRAMMAR_KEYWORDS,
   TEASESCRIPT_PROTECTED_NAMES,
   TEASESCRIPT_PROTECTED_TYPE_NAMES,
   type AskCommand,
+  type CommandName,
   type ConversionName,
   type RandomFunctionName,
   type RenamedCommand,
@@ -97,8 +107,8 @@ export interface LanguageCompletionItem {
 }
 
 export interface LanguageContextHelp {
-  /** A compact command, or a conversion or random function called at the position (see `ContractCall`). */
-  readonly command: CompactCommand | ContractName;
+  /** A command, or a conversion or random function called at the position (see `ContractCall`). */
+  readonly command: CompactCommand | OtherCommand | ContractName;
   readonly summary: string;
   readonly syntax: string;
 }
@@ -149,9 +159,11 @@ export interface LanguageToken {
 
 /** The asks under their current names (see `COMMANDS`). */
 type Ask = Exclude<AskCommand, RenamedCommand>;
-/** The commands that have editor help: the compact interactions, and `say`. */
+/** The compact interactions, and `say`, which take a speaker and have help of their own. */
 type CompactCommand = "showButton" | Ask | "say";
 type GrammarKeyword = (typeof TEASESCRIPT_GRAMMAR_KEYWORDS)[number];
+/** The other commands of the engine (see `COMMANDS`), and `wait`, which the lexer reads as a token of its own. */
+type OtherCommand = Exclude<CommandName, GrammarKeyword | RenamedCommand | CompactCommand> | "wait";
 
 /** What a named option takes, for a syntax line; a prefill is written per ask, as the answer it gives. */
 const OPTION_VALUES: Readonly<Record<string, string>> = {
@@ -164,6 +176,19 @@ const OPTION_VALUES: Readonly<Record<string, string>> = {
   outro: "text",
   texts: "list",
   fields: "object",
+  buttonText: "text",
+  alwaysButton: "boolean",
+  title: "text",
+  fileName: "text",
+  duration: "duration",
+  async: "boolean",
+  display: TIMER_DISPLAYS.map((display) => `"${display}"`).join("|"),
+  label: "text",
+  persist: "boolean",
+  file: "file",
+  startAt: "duration",
+  endAt: "duration",
+  volume: "number",
 };
 
 /** The completion of each command that starts a statement (see `COMMANDS`), by what it does. */
@@ -208,6 +233,10 @@ const VALUE_COMPLETIONS: Readonly<
 };
 
 const ASK_HEAD = "[as speaker] [bubble(options)|prose(options)] [question]";
+
+const BUBBLE_OPTIONS: readonly string[] = MESSAGE_PRESENTATION_OPTIONS.bubble;
+/** The options of the modes of a message, for the help of `say`. */
+const MODE_OPTIONS = `The mode bubble(...) takes the options ${listed(BUBBLE_OPTIONS)}, and prose(...) also ${listed(MESSAGE_PRESENTATION_OPTIONS.prose.filter((option) => !BUBBLE_OPTIONS.includes(option)))}.`;
 
 const HELP: Readonly<Record<CompactCommand, LanguageContextHelp>> = Object.freeze({
   showButton: help(
@@ -282,10 +311,88 @@ const HELP: Readonly<Record<CompactCommand, LanguageContextHelp>> = Object.freez
   say: Object.freeze({
     command: "say" as const,
     summary:
-      "Emits visible chat text; a list, set, dict, or object shows in literal notation without markup. Pacing is smart by default. It can also be an exact duration of 0 seconds or more, such as 2 s, or instant. Skip policy may be skippable or unskippable. Used as a value, it gives the message's messageHandle, whose text property changes the message in place; inside a list or call, write say(text, pacing).",
+      "Emits visible chat text; a list, set, dict, or object shows in literal notation without markup. Pacing is smart by default. It can also be an exact duration of 0 seconds or more, such as 2 s, or instant. Skip policy may be skippable or unskippable. Used as a value, it gives the message's messageHandle, whose text property changes the message in place; inside a list or call, write say(text, pacing). " +
+      MODE_OPTIONS,
     syntax:
       "say [as speaker] [bubble(options)|prose(options)] [skippable|unskippable] text [, pacing|instant]  or  say [as speaker] [bubble(options)|prose(options)] [skippable|unskippable] (text [, pacing|instant])",
   }),
+});
+
+/** The help of a command that is no compact interaction, and the parameters of its signature, as its line has them. */
+interface CommandHelp {
+  readonly help: LanguageContextHelp;
+  readonly parameters: readonly string[];
+}
+
+const COMMAND_HELP: Readonly<Record<OtherCommand, CommandHelp>> = Object.freeze({
+  showPopup: commandHelp(
+    "showPopup",
+    "Shows a dialog outside the chat with the message and one button, OK by default, and waits until the player closes it. Only the call form takes buttonText, which renames the button. As a value, it returns how long the popup was open as a duration.",
+    `showPopup message  or  showPopup(message${optionalOptions(SHOW_POPUP_OPTIONS)})`,
+    ["message", ...SHOW_POPUP_OPTIONS],
+  ),
+  showImage: commandHelp(
+    "showImage",
+    "Shows an image on the Stage until the next showImage or hideImage. The image is a file reference, or tagged with tags for a random package image that has them; null clears the Stage.",
+    "showImage file  or  showImage tagged tag, ...",
+    ["file"],
+  ),
+  hideImage: commandHelp(
+    "hideImage",
+    "Clears the Stage image. It takes no arguments.",
+    "hideImage",
+    [],
+  ),
+  hideCamera: commandHelp(
+    "hideCamera",
+    "Hides every camera view. It takes no arguments.",
+    "hideCamera",
+    [],
+  ),
+  openUrl: commandHelp(
+    "openUrl",
+    "Opens an http or https web address in a new tab and waits until it is open. When the browser needs a click first, the Player shows a button, whose text is buttonText, Open link by default; with alwaysButton: true it always shows the button and waits for the click.",
+    `openUrl(url${optionalOptions(OPEN_URL_OPTIONS)})`,
+    ["url", ...OPEN_URL_OPTIONS],
+  ),
+  exportText: commandHelp(
+    "exportText",
+    "Shows the text in a dialog with the buttons Copy, Download, and Close, and waits until the player closes it. The title is Copy or download by default, and a download is saved as fileName, text.txt by default. It gives no value.",
+    `exportText(text${optionalOptions(EXPORT_TEXT_OPTIONS)})`,
+    ["text", ...EXPORT_TEXT_OPTIONS],
+  ),
+  stopAudio: commandHelp(
+    "stopAudio",
+    "Stops every running or paused sound of the session. It takes no arguments; to stop one sound, call stop() on its handle.",
+    "stopAudio",
+    [],
+  ),
+  timer: commandHelp(
+    "timer",
+    "Counts down a duration, such as 30 s or (5..10) s, and waits until the time is up. It is visible by default, or mystery or hidden, and an optional label names it. With async the script continues: as a value it returns the timer's handle, a block runs when it expires, and the named form's repeat starts another round after each one and persist keeps the timer when its file is left.",
+    `timer [async] [${TIMER_DISPLAYS.join("|")}] duration [label] [{ ... }]  or  ${namedForm("timer", TIMER_ARGUMENTS, { repeat: "boolean" })} [{ ... }]`,
+    TIMER_ARGUMENTS,
+  ),
+  showCamera: commandHelp(
+    "showCamera",
+    "Shows the camera's live view in the Player's floating window, or with stage over the Stage image. As a value, it returns the camera view's handle.",
+    "showCamera [stage]",
+    ["stage"],
+  ),
+  showPermanentButton: commandHelp(
+    "showPermanentButton",
+    "Shows a button that stays while the script continues, and returns its handle. The block runs when the button is clicked. With persist: true the button stays when its file is left by goto or end, and every permanent button disappears on exit.",
+    `showPermanentButton text${optionalOptions(PERMANENT_BUTTON_OPTIONS)} { ... }`,
+    ["text", ...PERMANENT_BUTTON_OPTIONS],
+  ),
+  playAudio: mediaHelp("playAudio", "Plays an audio file"),
+  playVideo: mediaHelp("playVideo", "Plays a video file on the Stage"),
+  wait: commandHelp(
+    "wait",
+    "Waits for an exact duration, such as 2 s, or a range with a unit, such as (1..3) s. After a paced message it starts when the message's reading time ends.",
+    "wait duration",
+    ["duration"],
+  ),
 });
 
 export function createLanguageDocument(uri: string, text: string): LanguageDocument {
@@ -427,17 +534,23 @@ export function languageSignatureHelp(
   document: LanguageDocument,
   position: LanguagePosition,
 ): LanguageSignatureHelp | null {
-  const contract = locateHelp(document, position.offset);
-  if (contract !== null && contract.call !== null) {
-    const { parameters, activeParameter } = callParameters(
-      document,
-      contract.call,
-      position.offset,
-    );
+  const found = locateHelp(document, position.offset);
+  if (found !== null && found.call !== null) {
+    const { parameters, activeParameter } = callParameters(document, found.call, position.offset);
     return Object.freeze({
-      label: contract.help.syntax,
-      documentation: contract.help.summary,
+      label: found.help.syntax,
+      documentation: found.help.summary,
       activeParameter,
+      parameters,
+    });
+  }
+  const command = found?.command;
+  if (command !== undefined && command !== null) {
+    const { help, parameters } = COMMAND_HELP[command.name];
+    return Object.freeze({
+      label: help.syntax,
+      documentation: help.summary,
+      activeParameter: command.option === null ? 0 : parameters.indexOf(command.option),
       parameters,
     });
   }
@@ -782,8 +895,8 @@ interface ContractCall {
 }
 
 /**
- * The help at `offset`: of the innermost compact command or call of a built-in with a contract there, with the range
- * of its name, and the call when it is such a built-in's.
+ * The help at `offset`: of the innermost compact command, other command, or call of a built-in with a contract there,
+ * with the range of its name, and the call when it is such a built-in's or another command's.
  */
 function locateHelp(
   document: LanguageDocument,
@@ -792,11 +905,20 @@ function locateHelp(
   readonly help: LanguageContextHelp;
   readonly range: LanguageRange;
   readonly call: ContractCall | null;
+  readonly command: CommandCall | null;
 } | null {
   const compact = locateCompactCommand(document, offset);
-  const call = locateContractCall(document, offset);
-  // A call inside a command, or a command inside a call, starts after it.
-  if (call !== null && (compact === null || call.range.start.offset > compact.range.start.offset))
+  const tokens = statementTokens(document, offset);
+  const call = tokens === null ? null : locateContractCall(tokens, offset);
+  const command =
+    tokens === null
+      ? null
+      : locateCommandCall(tokens, offset, parsedCommands(parseDocument(document.text)));
+  // A call inside a command, or a command inside a call or another command, starts after it.
+  const start = (located: { readonly range: LanguageRange } | null) =>
+    located === null ? -1 : located.range.start.offset;
+  const innermost = Math.max(start(compact), start(call), start(command));
+  if (call !== null && start(call) === innermost)
     return {
       help: Object.freeze(
         isConversion(call.name)
@@ -813,10 +935,267 @@ function locateHelp(
       ),
       range: call.range,
       call,
+      command: null,
     };
+  if (command !== null && start(command) === innermost)
+    return { help: COMMAND_HELP[command.name].help, range: command.range, call: null, command };
   return compact === null
     ? null
-    : { help: HELP[compact.command], range: compact.range, call: null };
+    : { help: HELP[compact.command], range: compact.range, call: null, command: null };
+}
+
+/**
+ * A command with help of its own besides the compact interactions (see `COMMAND_HELP`): its name, where the name is,
+ * and the last named option of its signature written before the offset, or `null`.
+ */
+interface CommandCall {
+  readonly name: OtherCommand;
+  readonly range: LanguageRange;
+  readonly option: string | null;
+}
+
+/** The commands that take a block after their arguments, which holds statements of their own. */
+const BLOCK_COMMANDS: ReadonlySet<OtherCommand> = new Set([
+  "timer",
+  "showPermanentButton",
+  "playAudio",
+  "playVideo",
+]);
+
+/** The tokens of the statement at `offset`, without line breaks, or `null` between statements (see `statementRangeAt`). */
+function statementTokens(document: LanguageDocument, offset: number): readonly Token[] | null {
+  const parsed = parseDocument(document.text);
+  const statement = statementRangeAt(parsed.statementRanges, offset);
+  if (statement === null) return null;
+  return lex(document.text, parsed.regexStarts).tokens.filter(
+    (token) =>
+      token.span.start.offset >= statement.start &&
+      token.span.start.offset < statement.end &&
+      token.kind !== TokenKind.Newline &&
+      token.kind !== TokenKind.EndOfFile,
+  );
+}
+
+/** Where the parser read the arguments of each command, by where its name starts, and the starts of their blocks. */
+interface ParsedCommands {
+  readonly ends: ReadonlyMap<number, number>;
+  readonly blocks: ReadonlySet<number>;
+}
+
+const parsedCommandsOf = new WeakMap<ParseResult, ParsedCommands>();
+
+/** The command ranges of a parse (see `ParseResult.commandRanges`), looked up by offset. */
+function parsedCommands(parsed: ParseResult): ParsedCommands {
+  const known = parsedCommandsOf.get(parsed);
+  if (known !== undefined) return known;
+  const ends = new Map<number, number>();
+  const blocks = new Set<number>();
+  for (const range of parsed.commandRanges) {
+    ends.set(range.start, range.end);
+    if (range.block !== null) blocks.add(range.block);
+  }
+  const commands = { ends, blocks };
+  parsedCommandsOf.set(parsed, commands);
+  return commands;
+}
+
+/** The words a command's short form may write between its name and its value (see `CommandFacts.fileModifiers`). */
+const MODIFIERS: Partial<Readonly<Record<OtherCommand, readonly string[]>>> = {
+  timer: ["async", ...TIMER_DISPLAYS],
+  playAudio: COMMANDS.playAudio.fileModifiers,
+  playVideo: COMMANDS.playVideo.fileModifiers,
+};
+
+/** A command still open where the tokens are read. */
+interface OpenCommand {
+  readonly name: OtherCommand;
+  readonly range: LanguageRange;
+  /** Whether its call form holds its arguments (see `startsCallForm`). */
+  readonly parenthesized: boolean;
+  /** The depth of the delimiters its arguments are written at: inside its parentheses, or where its name is. */
+  readonly level: number;
+  /** Where the parser read its arguments to (see `ParseResult.commandRanges`), or `null` for its call form or if it did not. */
+  end: number | null;
+  option: string | null;
+  argumentStart: boolean;
+  /** Whether a value follows its name and modifiers, after which a `{` starts its block. */
+  operand: boolean;
+}
+
+/**
+ * The innermost command of `COMMAND_HELP` whose name or arguments hold `offset`, read from the tokens of its statement in
+ * one pass. A command whose arguments the parser read, also in a statement it could not read further, ends at the first
+ * token after them, and its call form at the `)` of its parentheses. A command whose arguments are still being written
+ * holds every offset after its name up to its block, a delimiter that closes one opened before it, or, for a command
+ * that gives a value, a comma of the enclosing list or call.
+ */
+function locateCommandCall(
+  tokens: readonly Token[],
+  offset: number,
+  parsed: ParsedCommands,
+): CommandCall | null {
+  // The commands still open, innermost last, and for each open delimiter whether it opens a command's block.
+  const open: OpenCommand[] = [];
+  const delimiters: boolean[] = [];
+  let blocks = 0;
+  // Where the block of a command being written that ended at the `)` of its parentheses may start.
+  let blockAt = -1;
+  for (const [index, token] of tokens.entries()) {
+    const start = token.span.start.offset;
+    // A token that starts at the cursor is after it, but a command whose name starts there holds it. A command whose
+    // arguments the parser read holds the cursor in the space after them only where nothing follows.
+    if (start >= offset) {
+      const name =
+        start === offset && blocks === 0
+          ? helpedCommand(token, tokens[index - 1], tokens[index + 1])
+          : null;
+      if (name !== null) return { name, range: token.span, option: null };
+      while (open.length > 0 && open.at(-1)!.end !== null && offset > open.at(-1)!.end!) open.pop();
+      break;
+    }
+    // A command whose arguments the parser read ends at the token after them, except at a comma before its option that
+    // the cursor is writing, after which it holds the cursor as a command being written does.
+    while (open.length > 0 && open.at(-1)!.end !== null && start >= open.at(-1)!.end!) {
+      const command = open.at(-1)!;
+      if (
+        token.kind === TokenKind.Comma &&
+        delimiters.length === command.level &&
+        optionAfterComma(command.name, tokens, index, offset)
+      ) {
+        command.end = null;
+        break;
+      }
+      open.pop();
+    }
+    const top = open.at(-1);
+    const depth = delimiters.length;
+    const atLevel = top !== undefined && depth === top.level;
+    // The block of a command being written starts at a `{` after its value.
+    const ownBlock =
+      token.kind === TokenKind.LeftBrace &&
+      atLevel &&
+      top.end === null &&
+      !top.parenthesized &&
+      top.operand &&
+      BLOCK_COMMANDS.has(top.name);
+    if (CLOSING_DELIMITERS.has(token.kind)) {
+      if (delimiters.pop() === true) blocks -= 1;
+      // The `)` of a command's parentheses ends it, and so does a delimiter that closes one opened before it.
+      while (open.length > 0 && delimiters.length < open.at(-1)!.level) {
+        const ended = open.pop()!;
+        if (ended.parenthesized && ended.end === null && BLOCK_COMMANDS.has(ended.name))
+          blockAt = index + 1;
+      }
+      if (open.at(-1)?.level === delimiters.length) open.at(-1)!.argumentStart = false;
+    } else if (
+      token.kind === TokenKind.LeftBrace &&
+      (parsed.blocks.has(start) || index === blockAt || ownBlock)
+    ) {
+      // A command's block holds statements of their own, and ends the command.
+      if (ownBlock) open.pop();
+      delimiters.push(true);
+      blocks += 1;
+    } else if (OPENING_DELIMITERS.has(token.kind)) {
+      delimiters.push(false);
+      if (atLevel) top.operand = true;
+      // The command's own `(` starts its first argument.
+      if (top !== undefined)
+        top.argumentStart = top.parenthesized && delimiters.length === top.level;
+    } else if (token.kind === TokenKind.Comma) {
+      // A comma of the enclosing list or call ends a value that a command being written gives.
+      while (open.length > 0 && endsAtComma(open.at(-1)!, depth, tokens, index, offset)) open.pop();
+      const current = open.at(-1);
+      if (current !== undefined && depth === current.level) current.argumentStart = true;
+    } else {
+      if (
+        atLevel &&
+        top.argumentStart &&
+        token.kind === TokenKind.Identifier &&
+        tokens[index + 1]?.kind === TokenKind.Colon &&
+        COMMAND_HELP[top.name].parameters.includes(token.lexeme)
+      )
+        top.option = token.lexeme;
+      if (atLevel) {
+        top.argumentStart = false;
+        if (!top.operand && !(MODIFIERS[top.name] ?? []).includes(token.lexeme)) top.operand = true;
+      }
+      const name = blocks > 0 ? null : helpedCommand(token, tokens[index - 1], tokens[index + 1]);
+      if (name !== null) {
+        const parenthesized = startsCallForm(token, tokens[index + 1]);
+        open.push({
+          name,
+          range: token.span,
+          parenthesized,
+          level: depth + (parenthesized ? 1 : 0),
+          end: parenthesized ? null : (parsed.ends.get(start) ?? null),
+          option: null,
+          argumentStart: false,
+          operand: false,
+        });
+      }
+    }
+  }
+  const innermost = open.at(-1);
+  return innermost === undefined
+    ? null
+    : { name: innermost.name, range: innermost.range, option: innermost.option };
+}
+
+/** The options a command takes after a comma in its short form, as in `showPermanentButton "Stop", persist: true`. */
+const COMMA_OPTIONS: Partial<Readonly<Record<OtherCommand, readonly string[]>>> = {
+  showPermanentButton: PERMANENT_BUTTON_OPTIONS,
+};
+
+/** Whether the comma at `index` starts an option of `command`, one written there or one the cursor after it writes. */
+function optionAfterComma(
+  command: OtherCommand,
+  tokens: readonly Token[],
+  index: number,
+  offset: number,
+): boolean {
+  const options = COMMA_OPTIONS[command];
+  if (options === undefined) return false;
+  const next = tokens[index + 1];
+  return (
+    next === undefined ||
+    next.span.start.offset >= offset ||
+    (next.kind === TokenKind.Identifier &&
+      tokens[index + 2]?.kind === TokenKind.Colon &&
+      options.includes(next.lexeme))
+  );
+}
+
+/**
+ * Whether the comma at `index`, at `depth`, ends `command`, a command being written in its short form that the parser
+ * could not read yet: a command that gives a value ends at a comma of the enclosing list or call, but not at one that
+ * starts its option (see `optionAfterComma`).
+ */
+function endsAtComma(
+  command: OpenCommand,
+  depth: number,
+  tokens: readonly Token[],
+  index: number,
+  offset: number,
+): boolean {
+  if (command.end !== null || command.parenthesized || depth !== command.level) return false;
+  return (
+    commandFacts(command.name)?.value === true &&
+    !optionAfterComma(command.name, tokens, index, offset)
+  );
+}
+
+/** The command of `COMMAND_HELP` that `token` names, unless it is a property or a name before `:`. */
+function helpedCommand(
+  token: Token,
+  previous: Token | undefined,
+  next: Token | undefined,
+): OtherCommand | null {
+  if (previous?.kind === TokenKind.Dot || next?.kind === TokenKind.Colon) return null;
+  if (token.kind === TokenKind.KeywordWait) return "wait";
+  if (token.kind !== TokenKind.Identifier || !Object.hasOwn(COMMAND_HELP, token.lexeme))
+    return null;
+  // EVIDENCE: invariant: the word is a key of COMMAND_HELP, checked above.
+  return token.lexeme as OtherCommand;
 }
 
 /**
@@ -824,17 +1203,7 @@ function locateHelp(
  * `offset`. It is read from the tokens of the statement there, so that a call being written, without its `)`, holds
  * every offset after its name.
  */
-function locateContractCall(document: LanguageDocument, offset: number): ContractCall | null {
-  const parsed = parseDocument(document.text);
-  const statement = statementRangeAt(parsed.statementRanges, offset);
-  if (statement === null) return null;
-  const tokens = lex(document.text, parsed.regexStarts).tokens.filter(
-    (token) =>
-      token.span.start.offset >= statement.start &&
-      token.span.start.offset < statement.end &&
-      token.kind !== TokenKind.Newline &&
-      token.kind !== TokenKind.EndOfFile,
-  );
+function locateContractCall(tokens: readonly Token[], offset: number): ContractCall | null {
   let innermost: ContractCall | null = null;
   const holds = (call: ContractCall | null, end: number) => {
     if (call === null || offset < call.range.start.offset || offset > end) return;
@@ -1095,6 +1464,59 @@ function namedOptions(command: CompactCommand): readonly string[] {
   return command === "showButton"
     ? SHOW_BUTTON_OPTIONS
     : askOptionNames(COMMANDS[command].interaction);
+}
+
+function commandHelp(
+  command: OtherCommand,
+  summary: string,
+  syntax: string,
+  parameters: readonly string[],
+): CommandHelp {
+  return Object.freeze({
+    help: Object.freeze({ command, summary, syntax }),
+    parameters: Object.freeze([...parameters]),
+  });
+}
+
+/** The help of `playAudio` or `playVideo`, whose summary starts with what it `plays`. */
+function mediaHelp(command: "playAudio" | "playVideo", plays: string): CommandHelp {
+  const modifiers = COMMANDS[command].fileModifiers.map((word) => `[${word}]`).join(" ");
+  return commandHelp(
+    command,
+    `${plays} and waits until it ends, or with async lets the script continue and, as a value, returns the media's handle. With async, repeat plays it until it is stopped, and the named form's repeat also takes a count, such as 3 times, or a duration. A block runs at the end of every pass, or holds the cues at, beforeEnd, and finish. The named form also takes startAt, endAt, and volume.`,
+    `${command} ${modifiers} file [{ ... }]  or  ${namedForm(command, MEDIA_ARGUMENTS, { repeat: "true|count times|duration" })} [{ ... }]`,
+    MEDIA_ARGUMENTS,
+  );
+}
+
+/**
+ * ` [, name: value]` for each of `names`, as a syntax line writes the named options a command may leave out; `values`
+ * names what one of them takes where `OPTION_VALUES` does not.
+ */
+function optionalOptions(
+  names: readonly string[],
+  values: Readonly<Record<string, string>> = {},
+): string {
+  return names
+    .map((name) => ` [, ${name}: ${values[name] ?? OPTION_VALUES[name] ?? "value"}]`)
+    .join("");
+}
+
+/** The named form of a command, which needs the first of its `names` and may leave out the others. */
+function namedForm(
+  command: OtherCommand,
+  names: readonly string[],
+  values: Readonly<Record<string, string>> = {},
+): string {
+  const [first, ...others] = names;
+  return `${command}(${first}: ${OPTION_VALUES[first!] ?? "value"}${optionalOptions(others, values)})`;
+}
+
+/** `names` as a sentence lists them: `a`, `a and b`, or `a, b, and c`. */
+function listed(names: readonly string[]): string {
+  return names.length < 3
+    ? names.join(" and ")
+    : `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`;
 }
 
 /**

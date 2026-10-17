@@ -6,8 +6,20 @@ import type { ArgumentPlan, ExpressionPlan, InstructionPlan } from "../src/plan/
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
 import { RuntimeFault } from "../src/runtime/errors.js";
+import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
 import { temporalMethod, temporalNow } from "../src/runtime/temporal-operations.js";
+import { describeValue as describeRuntimeValue } from "../src/runtime/value-types.js";
 import { createSourcePosition, createSourceSpan } from "../src/source.js";
+import {
+  BOOLEAN_TYPE,
+  describeValue,
+  INTEGER_TYPE,
+  NULL_TYPE,
+  NUMBER_TYPE,
+  STRING_TYPE,
+  UNKNOWN_TYPE,
+  type StaticType,
+} from "../src/static-types.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -263,6 +275,37 @@ test("a call's arguments have the compiler's text where the runtime checks them"
     ["say linearRegression()", "say linearRegression([1, 2])", "linearRegression", []],
     [`${TREND}say predict(trend)`, `${TREND}say predict(trend, 1)`, "predict", [1]],
     ["say randomWeighted()", 'say randomWeighted(dict{ "a": 1 })', "randomWeighted", []],
+    // The conversions and `hashText`: a name, the number of arguments, and a `default:` they need.
+    ["say toString(1, 2)", "say toString(1)", "toString", [1, 2]],
+    ['say toNumber("1", x: 1)', 'say toNumber("1")', "toNumber", ["1", ["x", 1]]],
+    ["say toInteger()", 'say toInteger("1")', "toInteger", []],
+    [
+      "let at = toDateTime(1, 2, 3)",
+      'let at = toDateTime("2026-10-04T18:00")',
+      "toDateTime",
+      [1, 2, 3],
+    ],
+    // Without a written `files: false`, `fromJson` is a file store instruction, not a call.
+    [
+      'let x = fromJson("1", files: false)',
+      'let x = fromJson("1", default: null, files: false)',
+      "fromJson",
+      ["1", ["files", false]],
+    ],
+    [
+      'let x = fromJson("1", default: null, files: false, x: 1)',
+      'let x = fromJson("1", default: null, files: false)',
+      "fromJson",
+      [{ kept: 0 }, { kept: 1 }, ["files", false], ["x", 1]],
+    ],
+    [
+      "say toJson(1, files: false, x: 1)",
+      "say toJson(1, files: false)",
+      "toJson",
+      [1, ["files", false], ["x", 1]],
+    ],
+    ['say hashText("a", x: 1)', 'say hashText("a")', "hashText", ["a", ["x", 1]]],
+    ["say hashText()", 'say hashText("a")', "hashText", []],
     // `script(...)` reports the number of arguments first.
     ["let s = script()", 'let s = script("main.tease")', "script", []],
     [
@@ -332,6 +375,119 @@ test("a value of a type the compiler does not know fails with the compiler's tex
     assert.equal(compiled.length, 1, known);
     assert.equal(runtimeFailure(compileValidPlan(`${unknown}\nexit`))[1], compiled[0]![1], unknown);
   }
+});
+
+test("min or max of one value that is not a list fails at run time with the compiler's rule and text", () => {
+  // The compiler takes a value of a type it does not know as maybe a list; one that is not a list breaks the rule of the
+  // arguments' names and number (TSV020, TSV022), which the runtime checks under TSR028.
+  const D = "function dynamic(value) {\n    return value\n}\n";
+  for (const [unknown, known, code] of [
+    [`${D}say min(dynamic(5))`, "say min(5)", "TSV020"],
+    [`${D}say max(dynamic(1..3))`, "say max(1..3)", "TSV020"],
+    [`${D}say min(dynamic(5), by: "w")`, 'say min(5, by: "w")', "TSV022"],
+    [`${D}say max(dynamic("a"), by: "w")`, 'say max("a", by: "w")', "TSV022"],
+  ] as const) {
+    const compiled = diagnostics(known);
+    assert.deepEqual(
+      compiled.map(([found]) => found),
+      [code],
+      known,
+    );
+    assert.deepEqual(
+      runtimeFailure(compileValidPlan(`${unknown}\nexit`)),
+      ["TSR028", compiled[0]![1]],
+      unknown,
+    );
+  }
+});
+
+type ValueKind = Exclude<SerializableRuntimeValue, string | number | boolean | null>["kind"];
+
+test("every kind of runtime value has the compiler's description of its type", () => {
+  const scalar = (name: Extract<StaticType, { kind: "scalar" }>["name"]): StaticType => ({
+    kind: "scalar",
+    name,
+  });
+  // One value of each kind, with the type the compiler gives it.
+  const kinds: {
+    readonly [Kind in ValueKind]: readonly [
+      Extract<SerializableRuntimeValue, { kind: Kind }>,
+      StaticType,
+    ];
+  } = {
+    list: [
+      { kind: "list", items: [] },
+      { kind: "list", element: UNKNOWN_TYPE },
+    ],
+    set: [
+      { kind: "set", items: [] },
+      { kind: "set", element: UNKNOWN_TYPE },
+    ],
+    dict: [
+      { kind: "dict", entries: [] },
+      { kind: "dict", element: UNKNOWN_TYPE },
+    ],
+    object: [
+      { kind: "object", properties: [] },
+      { kind: "object", properties: null },
+    ],
+    range: [{ kind: "range", start: 1, end: 3, inclusive: true }, { kind: "range" }],
+    duration: [{ kind: "duration", milliseconds: 1000 }, scalar("duration")],
+    calendarDuration: [
+      { kind: "calendarDuration", months: 1, days: 0, milliseconds: 0 },
+      scalar("calendarDuration"),
+    ],
+    angle: [{ kind: "angle", degrees: 90 }, scalar("angle")],
+    date: [{ kind: "date", year: 2026, month: 10, day: 4 }, scalar("date")],
+    time: [{ kind: "time", hour: 14, minute: 30, second: 0, millisecond: 0 }, scalar("time")],
+    datetime: [
+      {
+        kind: "datetime",
+        year: 2026,
+        month: 10,
+        day: 4,
+        hour: 14,
+        minute: 30,
+        second: 0,
+        millisecond: 0,
+      },
+      scalar("datetime"),
+    ],
+    absoluteDateTime: [
+      { kind: "absoluteDateTime", epochMilliseconds: 0 },
+      scalar("absoluteDateTime"),
+    ],
+    speakerReference: [
+      { kind: "speakerReference", speakerId: 0, identifier: "anna" },
+      { kind: "speaker" },
+    ],
+    timerHandle: [{ kind: "timerHandle", timerId: 0 }, { kind: "timer" }],
+    mediaHandle: [{ kind: "mediaHandle", mediaId: 0 }, { kind: "media" }],
+    cameraView: [{ kind: "cameraView" }, { kind: "camera" }],
+    permanentButtonHandle: [
+      { kind: "permanentButtonHandle", buttonId: 0 },
+      { kind: "permanentButton" },
+    ],
+    messageHandle: [{ kind: "messageHandle", messageId: 0 }, { kind: "messageHandle" }],
+    script: [{ kind: "script", path: "main.tease", label: null }, scalar("script")],
+    regex: [{ kind: "regex", source: "x", flags: "" }, scalar("regex")],
+  };
+  for (const [value, type] of [
+    ["a", STRING_TYPE],
+    [1, INTEGER_TYPE],
+    [1.5, NUMBER_TYPE],
+    [true, BOOLEAN_TYPE],
+    [null, NULL_TYPE],
+    ...Object.values(kinds),
+  ] as const)
+    assert.equal(describeRuntimeValue(value), describeValue(type), JSON.stringify(value));
+  // A regex where a comparison needs a date or time value, which the compiler cannot see.
+  const D = "function dynamic(value) {\n    return value\n}\n";
+  const [code, message] = runtimeFailure(
+    compileValidPlan(`${D}say dynamic(/x/) < toDate("2026-10-04")\nexit`),
+  );
+  assert.equal(code, "TSR009");
+  assert.ok(message.includes("these are a regex and a date."), message);
 });
 
 test("a speaker property that a read may miss has one text, from the type checker or the speaker flow", () => {

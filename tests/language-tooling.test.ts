@@ -11,7 +11,18 @@ import {
 } from "../src/language-facts.js";
 import { CONVERSIONS } from "../src/conversions.js";
 import { RANDOM_CONTRACTS } from "../src/random-functions.js";
-import { askOptionNames, requiredAskOptionNames, SHOW_BUTTON_OPTIONS } from "../src/parser.js";
+import { MESSAGE_PRESENTATION_OPTIONS } from "../src/message-presentation.js";
+import {
+  askOptionNames,
+  EXPORT_TEXT_OPTIONS,
+  MEDIA_ARGUMENTS,
+  OPEN_URL_OPTIONS,
+  PERMANENT_BUTTON_OPTIONS,
+  requiredAskOptionNames,
+  SHOW_BUTTON_OPTIONS,
+  SHOW_POPUP_OPTIONS,
+  TIMER_ARGUMENTS,
+} from "../src/parser.js";
 import {
   classifyTokens,
   compileSource,
@@ -88,10 +99,63 @@ test("completion offers every command where it starts a statement, and where it 
   }
 });
 
-test("every compact interaction has editor help that names each option the parser accepts", () => {
-  for (const name of engineCommands) {
-    const facts = commandFacts(name)!;
-    if (facts.interaction === undefined || facts.renamed !== undefined) continue;
+/**
+ * The named options of each command that is no compact interaction, as the parser and the name pass accept them, and a
+ * call that gives each of them; the named form of a timer or media needs its first argument.
+ */
+const COMMAND_OPTIONS: Readonly<Record<string, readonly [readonly string[], string]>> = {
+  showPopup: [SHOW_POPUP_OPTIONS, 'showPopup("Done", buttonText: "Continue")'],
+  openUrl: [
+    OPEN_URL_OPTIONS,
+    'openUrl("https://example.com", buttonText: "Open", alwaysButton: true)',
+  ],
+  exportText: [
+    EXPORT_TEXT_OPTIONS,
+    'exportText("Report", title: "Report", fileName: "report.txt")',
+  ],
+  timer: [
+    TIMER_ARGUMENTS.slice(1),
+    'let t = timer(duration: 1 s, async: true, display: "mystery", label: "Beat", repeat: true, persist: true) {\n    say "Beat."\n}',
+  ],
+  showPermanentButton: [
+    PERMANENT_BUTTON_OPTIONS,
+    'let b = showPermanentButton "Stop", persist: true {\n    say "Stopped."\n}',
+  ],
+  playAudio: [
+    MEDIA_ARGUMENTS.slice(1),
+    'let m = playAudio(file: "a.mp3", async: true, repeat: true, startAt: 1 s, endAt: 2 s, volume: 0.5)',
+  ],
+  playVideo: [
+    MEDIA_ARGUMENTS.slice(1),
+    'let m = playVideo(file: "a.mp4", async: true, repeat: 3 times, startAt: 1 s, endAt: 2 s, volume: 0.5)',
+  ],
+};
+
+test("every command has editor help that names each option the parser accepts", () => {
+  for (const name of [...engineCommands, "wait"]) {
+    const facts = commandFacts(name);
+    if (facts?.renamed !== undefined) continue;
+    if (facts?.interaction === undefined) {
+      const document = createLanguageDocument("file:///main.tease", name);
+      const position = languagePositionAt(document, name.length);
+      const help = languageContextHelp(document, position);
+      assert.equal(help?.command, name, name);
+      assert.ok(help.syntax.startsWith(name), name);
+      assert.deepEqual(languageHover(document, position)?.contents, [
+        `**${name}**`,
+        help.summary,
+        `Syntax: \`${help.syntax}\``,
+      ]);
+      const parameters = languageSignatureHelp(document, position)?.parameters ?? [];
+      const [options, call] = COMMAND_OPTIONS[name] ?? [[], null];
+      for (const option of options) {
+        assert.ok(help.syntax.includes(`[, ${option}:`), `${name}: ${option} in ${help.syntax}`);
+        assert.ok(parameters.includes(option), `${name}: ${option} in ${parameters.join(", ")}`);
+      }
+      // The options the help names compile where it names them.
+      if (call !== null) assert.deepEqual(compileSource(`${call}\nexit`).diagnostics, [], call);
+      continue;
+    }
     const source = `let answer = ${name}`;
     const document = createLanguageDocument("file:///main.tease", source);
     const position = languagePositionAt(document, source.length);
@@ -108,6 +172,61 @@ test("every compact interaction has editor help that names each option the parse
       assert.ok(help.syntax.includes(written), `${name}: ${option} in ${help.syntax}`);
     }
     assert.deepEqual(languageSignatureHelp(document, position)?.parameters.slice(2), options, name);
+  }
+});
+
+test("say's help names the options of its message modes", () => {
+  const document = createLanguageDocument("file:///main.tease", 'say "Hi"');
+  const summary = languageContextHelp(document, languagePositionAt(document, 1))?.summary ?? "";
+  for (const option of MESSAGE_PRESENTATION_OPTIONS.prose)
+    assert.ok(summary.includes(option), option);
+});
+
+test("help of a command covers its arguments as the parser reads them, and follows the option being written", () => {
+  // `|` marks the cursor: the command with help there, and the parameter being written.
+  for (const [marked, command, parameter] of [
+    ['showPopup("Done", buttonText: |', "showPopup", "buttonText"],
+    ['let shown = showPopup "Done|"', "showPopup", "message"],
+    ['playAudio(file: "a.mp3", volume: |)', "playAudio", "volume"],
+    ['let t = timer(duration: 1 s, async: true, label: "Go|")', "timer", "label"],
+    ['let b = showPermanentButton "Stop", persist: |', "showPermanentButton", "persist"],
+    ["wait (1..3) s|", "wait", "duration"],
+    // The innermost of a call and a command has the help.
+    ["showPopup toString(count|", "toString", "value"],
+    ['let t = timer async 5 s {\n    say "Hi|"\n}', "say", "text"],
+    ["let t = timer async 5 s {\n    count = 1|\n}", null, null],
+    ["let t = timer(duration: 1 s, async: true)|", null, null],
+    // A comma of the enclosing call ends a command's value, also while it is being written.
+    ['say(showPopup "x", |1 s)', "say", "text"],
+    ['say(showPopup "x", |', "say", "text"],
+    ["say(timer async 5 s, |1 s)", "say", "text"],
+    ["say(showCamera, |1 s)", "say", "text"],
+    // A call form after a space, where the parser reads one, and a value in braces, which is no block.
+    ['showPopup ("x", buttonText: |"Close")', "showPopup", "buttonText"],
+    ['say(showPopup ("x"), |1 s)', "say", "text"],
+    ["timer async { duration: 1 s| }.duration", "timer", "duration"],
+    // Where the parser read a command's arguments in a statement it cannot read yet, such as one without its block.
+    ['showPermanentButton "Go " + { text: "now|" }.text', "showPermanentButton", "text"],
+    ['let t = timer async showPopup "x" "la|bel" {', "timer", "duration"],
+    ['let t = timer async showPopup "x" |"label"', "timer", "duration"],
+    ['let b = showPermanentButton "Stop", |', "showPermanentButton", "text"],
+    // A key or a property named `wait` is no command.
+    ["let x = { wait: 1| }", null, null],
+    ["let x = { wait: 1 }\nsay x.wait|", "say", "text"],
+    ["let t = timer(duration: 1 s, async: true) {\n    wait 1 s\n|}", null, null],
+  ] as const) {
+    const offset = marked.indexOf("|");
+    const document = createLanguageDocument("file:///main.tease", marked.replace("|", ""));
+    const position = languagePositionAt(document, offset);
+    const signature = languageSignatureHelp(document, position);
+    assert.deepEqual(
+      [
+        languageContextHelp(document, position)?.command ?? null,
+        signature === null ? null : signature.parameters[signature.activeParameter],
+      ],
+      [command, parameter],
+      marked,
+    );
   }
 });
 

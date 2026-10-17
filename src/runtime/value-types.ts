@@ -1,4 +1,4 @@
-import type { PlanSourceLocation, TypeCheckPlan, TypePlan } from "../plan/model.js";
+import type { PlanSourceLocation, TypeCheckPlan, TypePlan, TypePlanName } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
 import {
   booleanFromText,
@@ -280,7 +280,8 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
   }
 }
 
-const NAMED_DESCRIPTIONS: Readonly<Record<string, string>> = {
+/** The description of each kind of value that a type names without its parts, in the compiler's wording. */
+const NAMED_DESCRIPTIONS: Readonly<Record<TypePlanName | "object", string>> = {
   string: "text (string)",
   integer: "a whole number (integer)",
   number: "a number",
@@ -301,6 +302,7 @@ const NAMED_DESCRIPTIONS: Readonly<Record<string, string>> = {
   permanentButton: "a permanent button",
   messageHandle: "a message handle",
   script: "a script reference",
+  regex: "a regex",
   object: "an object",
   never: "no value",
 };
@@ -320,7 +322,7 @@ export function describeType(type: TypePlan): string {
         current.element === null ? `a ${current.kind}` : `a ${current.kind} (${typeName(current)})`,
       );
     } else {
-      descriptions.push(NAMED_DESCRIPTIONS[current.kind]!);
+      descriptions.push(NAMED_DESCRIPTIONS[current.kind]);
     }
   }
   return descriptions.join(" or ");
@@ -400,7 +402,7 @@ export function describeValue(value: SerializableRuntimeValue): string {
     case "messageHandle":
       return "a message handle";
     default:
-      return NAMED_DESCRIPTIONS[value.kind]!;
+      return NAMED_DESCRIPTIONS[value.kind];
   }
 }
 
