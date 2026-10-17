@@ -20,10 +20,6 @@ import { validateInstructionPlan } from "../src/plan/validation.js";
 import { TokenKind } from "../src/token.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
-const grammarKeywords: ReadonlySet<string> = new Set(TEASESCRIPT_GRAMMAR_KEYWORDS);
-/** The commands and asks of the engine, without the grammar keywords that the parser also reads by name. */
-const engineCommands = Object.keys(COMMANDS).filter((name) => !grammarKeywords.has(name));
-
 test("every word that the lexer or the parser reads by name is protected, so no declaration can take it", () => {
   const protectedNames: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
   for (const word of [...KEYWORD_TOKENS.keys(), ...Object.keys(COMMANDS)])
@@ -79,8 +75,16 @@ test("a play command's file may follow its words, also inside an interpolation",
   }
 });
 
-test("a host cannot configure a command, an ask, or another name the language reads itself", () => {
-  for (const name of [...engineCommands, "takePhoto", "askImage", "pi", "debugMode"])
+test("a host cannot configure a keyword, a command, an ask, or another name the language reads itself", () => {
+  for (const name of new Set([
+    ...TEASESCRIPT_GRAMMAR_KEYWORDS,
+    ...KEYWORD_TOKENS.keys(),
+    ...Object.keys(COMMANDS),
+    "takePhoto",
+    "askImage",
+    "pi",
+    "debugMode",
+  ]))
     for (const options of [{ globals: [name] }, { builtins: [name] }])
       assert.deepEqual(
         compileSource("exit", options).diagnostics.map(({ code, message }) => [code, message]),

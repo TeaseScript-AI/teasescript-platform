@@ -32,6 +32,7 @@ import { canonicalRegexFlags, compileRegex, regexFlagProblem } from "./regex.js"
 import {
   COMMANDS,
   CORE_RUNTIME_BUILTINS,
+  KEYWORD_TOKENS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   PROTECTED_NAME_CODE,
   protectedNameMessage,
@@ -478,13 +479,14 @@ class SemanticScope {
 
 /**
  * The names that a host may not configure, as a global or a built-in, because the language gives them a meaning of its
- * own: the commands and asks, which the parser reads by name; `takePhoto` and `askImage`, whose calls wait for the
- * Player; `pi`, which the parser reads as the number it names; and `debugMode`, which the engine reads from the session.
+ * own: the grammar keywords, such as `if` and `load`, and `wait`, which the lexer reads as a token of its own; the
+ * commands and asks, which the parser reads by name; `takePhoto` and `askImage`, whose calls wait for the Player;
+ * `pi`, which the parser reads as the number it names; and `debugMode`, which the engine reads from the session.
  */
 const UNCONFIGURABLE_NAMES: ReadonlySet<string> = new Set([
-  ...Object.keys(COMMANDS).filter(
-    (name) => !TEASESCRIPT_GRAMMAR_KEYWORDS.some((keyword) => keyword === name),
-  ),
+  ...TEASESCRIPT_GRAMMAR_KEYWORDS,
+  ...KEYWORD_TOKENS.keys(),
+  ...Object.keys(COMMANDS),
   "takePhoto",
   "askImage",
   "pi",
