@@ -18,7 +18,7 @@ import type { PlanImage, PreparedFormShape, StorageTypePlan, TypeCheckPlan } fro
 import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
-import { CORE_RUNTIME_BUILTINS } from "./language-facts.js";
+import { CORE_RUNTIME_BUILTINS, PROTECTED_NAME_CODE } from "./language-facts.js";
 import { PlanControlFlow } from "./plan/control-flow.js";
 import { Reachability, type ConstantTest, type StatementFlow } from "./reachability.js";
 import {
@@ -243,18 +243,23 @@ function parseFile(path: string, source: string): CompiledProjectFile {
     if (!isNativeStackExhaustion(error)) throw error;
     return { result: stackExhaustionResult(path, source, null, null), source, parsed: null };
   }
+  // A declaration with a protected name, which the parser reports where it reads the name, is a problem of the names
+  // that leaves the syntax whole, so the names of the file are still validated.
   const parserDiagnostics = Object.freeze([
-    ...parsed.diagnostics,
+    ...parsed.diagnostics.filter((diagnostic) => diagnostic.code !== PROTECTED_NAME_CODE),
     ...findNonFiniteNumericLiteralDiagnosticsInStableProgram(parsed.program),
   ]);
+  const semanticDiagnostics = Object.freeze(
+    parsed.diagnostics.filter((diagnostic) => diagnostic.code === PROTECTED_NAME_CODE),
+  );
   return {
     result: Object.freeze({
       path,
       program: parsed.program,
       header: parsed.header,
       parserDiagnostics,
-      semanticDiagnostics: Object.freeze([]),
-      diagnostics: parserDiagnostics,
+      semanticDiagnostics,
+      diagnostics: Object.freeze([...parserDiagnostics, ...semanticDiagnostics]),
     }),
     source,
     parsed,
@@ -288,7 +293,8 @@ function checkProject(
     const names = validateProjectSemantics(
       files.map((file) => ({ path: file.result.path, program: file.result.program })),
       options,
-      (index) => files[index]!.parsed !== null && !hasErrors(files[index]!.result.diagnostics),
+      (index) =>
+        files[index]!.parsed !== null && !hasErrors(files[index]!.result.parserDiagnostics),
       track,
     );
     names.forEach((result, index) => {

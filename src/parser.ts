@@ -95,6 +95,10 @@ import {
   commandFacts,
   isAsk,
   isCommand,
+  KEYWORD_TOKENS,
+  PROTECTED_NAME_CODE,
+  protectedNameMessage,
+  TEASESCRIPT_PROTECTED_NAMES,
   type StatementCommand,
   type ValueCommand,
 } from "./language-facts.js";
@@ -132,6 +136,8 @@ export interface StatementRange {
   readonly start: number;
   readonly end: number;
 }
+
+const PROTECTED_NAMES: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
 
 /**
  * The words that start a statement wherever a line starts with them (see `COMMANDS`), which can never be a value; of
@@ -183,6 +189,8 @@ const parserDiagnosticCode = {
   invalidLoadForm: "TSP040",
   mixedOtherwise: "TSP041",
   invalidTagQuery: "TST001",
+  // The name check's code, given where the parser reads the name (see `#declarationName`).
+  protectedName: PROTECTED_NAME_CODE,
 } as const;
 
 const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
@@ -804,7 +812,11 @@ class Parser {
       return null;
     }
 
-    const name = this.#identifier(this.#advance());
+    // Only a declaration names a speaker of its own; a setter names one declared elsewhere, as in `speaker player`.
+    const name =
+      this.#peek(1).kind === TokenKind.LeftBrace
+        ? this.#declarationName("speaker")
+        : this.#identifier(this.#advance());
     if (this.#match(TokenKind.LeftBrace)) {
       return this.#parseSpeakerDeclaration(keyword, name);
     }
@@ -1261,7 +1273,7 @@ class Parser {
 
   #parseLabelStatement(): LabelStatement | null {
     const keyword = this.#advance();
-    if (!this.#check(TokenKind.Identifier)) {
+    if (!this.#checkDeclarationName()) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedLabelName,
         "Expected a label name after 'label'.",
@@ -1269,7 +1281,7 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const name = this.#identifier(this.#advance());
+    const name = this.#declarationName("label");
     return Object.freeze({ kind: "labelStatement", name, span: spanFrom(keyword.span, name.span) });
   }
 
@@ -2591,7 +2603,7 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const name = this.#identifier(this.#advance());
+    const name = this.#declarationName("other");
     let typeAnnotation: TypeAnnotation | null = null;
     if (this.#match(TokenKind.Colon)) {
       typeAnnotation = this.#parseTypeAnnotation();
@@ -2640,7 +2652,7 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const name = this.#identifier(this.#advance());
+    const name = this.#declarationName("other");
     let typeAnnotation: TypeAnnotation | null = null;
     if (this.#match(TokenKind.Colon)) {
       typeAnnotation = this.#parseTypeAnnotation();
@@ -3065,7 +3077,8 @@ class Parser {
 
   *#parseForStatement(): ParseTask<ForStatement | null> {
     const keyword = this.#advance();
-    if (!this.#checkDeclarationName()) {
+    // An `in` here is the one after the loop variable, which is missing.
+    if (!this.#checkDeclarationName() || this.#check(TokenKind.KeywordIn)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedIdentifier,
         "Expected a loop-variable identifier after 'for'.",
@@ -3073,20 +3086,21 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const variable = this.#identifier(this.#advance());
+    const variable = this.#declarationName("other");
     // `for key, value in dict`: the second name receives each entry's value.
     let valueVariable: Identifier | null = null;
     if (this.#match(TokenKind.Comma)) {
       // A line may break after the comma (V30 §1) before `value in`; another next line stays for recovery.
       let offset = 0;
       while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
-      const next = this.#peek(offset).kind;
+      const next = this.#peek(offset);
       if (
-        (next === TokenKind.Identifier || next === TokenKind.KeywordSet) &&
+        isWord(next) &&
+        next.kind !== TokenKind.KeywordIn &&
         this.#peek(offset + 1).kind === TokenKind.KeywordIn
       )
         this.#skipNewlines();
-      if (!this.#checkDeclarationName()) {
+      if (!this.#checkDeclarationName() || this.#check(TokenKind.KeywordIn)) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedIdentifier,
           "Expected a value-variable identifier after ',', as in 'for key, value in dict'.",
@@ -3094,7 +3108,7 @@ class Parser {
         this.#synchronizeStatement();
         return null;
       }
-      valueVariable = this.#identifier(this.#advance());
+      valueVariable = this.#declarationName("other");
     }
     if (!this.#match(TokenKind.KeywordIn)) {
       this.#reportInsertion(
@@ -3154,7 +3168,7 @@ class Parser {
   /** A function declaration; `globalKeyword` is the `global` before a global function. */
   *#parseFunctionDeclaration(globalKeyword: Token | null): ParseTask<FunctionDeclaration | null> {
     const keyword = this.#advance();
-    if (!this.#checkDeclarationName() && !this.#check(TokenKind.KeywordWait)) {
+    if (!this.#checkDeclarationName()) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedFunctionName,
         "Expected a function identifier after 'function'.",
@@ -3162,7 +3176,7 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const name = this.#identifier(this.#advance());
+    const name = this.#declarationName("other");
     const parameters: FunctionParameter[] = [];
     if (this.#match(TokenKind.LeftParenthesis)) {
       this.#skipNewlines();
@@ -3228,7 +3242,7 @@ class Parser {
       this.#synchronizeParameter();
       return null;
     }
-    const name = this.#identifier(this.#advance());
+    const name = this.#declarationName("other");
     let typeAnnotation: TypeAnnotation | null = null;
     let end = name.span;
     if (this.#match(TokenKind.Colon)) {
@@ -5713,9 +5727,34 @@ class Parser {
     return token.lexeme as StatementCommand | ValueCommand;
   }
 
-  /** The protected keyword `set` parses as a declared name so that its declaration gets the protected-name diagnostic. */
+  /**
+   * Whether a word is where a declaration's name belongs: an identifier, or a keyword, which `#declarationName` reads as
+   * the name so that the declaration gets the protected-name diagnostic with its fix.
+   */
   #checkDeclarationName(): boolean {
-    return this.#check(TokenKind.Identifier) || this.#check(TokenKind.KeywordSet);
+    return isWord(this.#peek());
+  }
+
+  /**
+   * Reads the name of a declaration. A protected name (V30 §38) is an error that names another, as for `let wait = 5`,
+   * which gives the diagnostic of the name check (TSV001) here, where the name is read, so it is also reported when a
+   * later use of the name, such as `${timer}`, cannot be parsed.
+   */
+  #declarationName(declaration: "label" | "speaker" | "other"): Identifier {
+    const token = this.#advance();
+    if (declaration === "speaker" && token.lexeme === "player")
+      this.#reportToken(
+        parserDiagnosticCode.protectedName,
+        "'player' is the built-in speaker for the person playing, so it needs no declaration. Assign its fields instead, as in 'player.color = ...'.",
+        token,
+      );
+    else if (PROTECTED_NAMES.has(token.lexeme))
+      this.#reportToken(
+        parserDiagnosticCode.protectedName,
+        protectedNameMessage(token.lexeme, declaration === "label" ? "label" : "other"),
+        token,
+      );
+    return this.#identifier(token);
   }
 
   #advance(): Token {
@@ -5883,6 +5922,11 @@ function isExpressionStart(token: Token): boolean {
     token.kind === TokenKind.Plus ||
     token.kind === TokenKind.Minus
   );
+}
+
+/** Whether a token is a word: an identifier, or a keyword that the lexer reads as a token of its own. */
+function isWord(token: Token): boolean {
+  return token.kind === TokenKind.Identifier || KEYWORD_TOKENS.get(token.lexeme) === token.kind;
 }
 
 function isStatementStart(kind: TokenKind): boolean {

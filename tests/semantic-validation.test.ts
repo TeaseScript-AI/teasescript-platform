@@ -289,3 +289,67 @@ test("reports a declaration named after the set keyword as a protected name", ()
     );
   }
 });
+
+test("a protected name where a declaration's name belongs gives its diagnostic with the fix in every form", () => {
+  // `wait` and `if` are keyword tokens and `timer` a command the parser reads by name; the diagnostic is the same.
+  for (const name of ["wait", "if", "timer", "round"]) {
+    const forms = [
+      `let ${name} = 1`,
+      `global ${name} = 1`,
+      `function ${name}(x) {\n  return x\n}`,
+      `global function ${name}(x) {\n  return x\n}`,
+      `function sample(${name}) {\n  return 1\n}`,
+      `for ${name} in [1] {\n  say "x"\n}`,
+      `for key, ${name} in dict{ a: 1 } {\n  say "x"\n}`,
+      `speaker ${name} { name: "N" }`,
+      `label ${name}`,
+    ];
+    for (const form of forms) {
+      const source = `${form}\nexit`;
+      const start = source.indexOf(name, form.startsWith("for key") ? 8 : 0);
+      const label = form.startsWith("label");
+      const result = compileSource(source);
+      assert.deepEqual(
+        result.diagnostics.map(({ code, message, span }) => [
+          code,
+          message,
+          span.start.offset,
+          span.end.offset,
+        ]),
+        [
+          [
+            "TSV001",
+            label
+              ? `Label '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Label'.`
+              : `Declaration '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Value'.`,
+            start,
+            start + name.length,
+          ],
+        ],
+        source,
+      );
+      // It is a problem of the names, which leaves the syntax whole.
+      assert.deepEqual(result.parserDiagnostics, [], source);
+    }
+  }
+  // A later use that cannot be parsed does not hide it.
+  assert.deepEqual(
+    compileSource('let timer = 5\nsay "${timer}"\nexit').diagnostics.map(({ code, span }) => [
+      code,
+      span.start.line,
+    ]),
+    [
+      ["TSP012", 1],
+      ["TSV001", 0],
+    ],
+  );
+  // The other problems of the names are still reported, and a missing loop variable is still one.
+  assert.deepEqual(
+    compileSource("let wait = 1\nsay missing\nexit").diagnostics.map(({ code }) => code),
+    ["TSV001", "TSV002"],
+  );
+  assert.deepEqual(
+    compileSource('for in [1] {\n  say "x"\n}\nexit').diagnostics.map(({ code }) => code)[0],
+    "TSP013",
+  );
+});

@@ -836,7 +836,7 @@ test("a value that may be null, or whose type the compiler cannot know, gets no 
 test("otherwise is a keyword that cannot name a variable but still names a property", () => {
   assert.deepEqual(
     diagnostics("let otherwise = 1\nexit").map((diagnostic) => diagnostic[1]),
-    ["TSP013"],
+    ["TSV001"],
   );
   assert.deepEqual(sayTexts("let choice = { otherwise: 2 }\nsay choice.otherwise\nexit"), ["2"]);
 });

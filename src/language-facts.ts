@@ -317,6 +317,19 @@ export const TEASESCRIPT_PROTECTED_NAMES = Object.freeze([
   ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
 ] as const);
 
+/** The code of a declaration that takes a protected name, which the parser reports where it reads the name. */
+export const PROTECTED_NAME_CODE = "TSV001";
+
+/**
+ * Why a declaration may not take a protected name, with the fix (TSV001): another name, such as `waitLabel` for a label
+ * and `waitValue` for any other declaration.
+ */
+export function protectedNameMessage(name: string, declaration: "label" | "other"): string {
+  return declaration === "label"
+    ? `Label '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Label'.`
+    : `Declaration '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Value'.`;
+}
+
 /** How the parser reads a word of `COMMANDS`. */
 export interface CommandFacts {
   /**
