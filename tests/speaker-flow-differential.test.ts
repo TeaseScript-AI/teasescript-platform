@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ProjectSourceFile } from "../src/compiler.js";
-import { compileAndRunVariants, type FlowKnob, type FlowRun } from "./helpers/flow-differential.js";
+import {
+  compileAndRunVariants,
+  type FlowKnob,
+  type FlowLockAnswer,
+  type FlowRun,
+} from "./helpers/flow-differential.js";
 
 /*
  * The flow check of speaker properties against the runtime (V30 §37): for small scripts that store a property on some
@@ -14,8 +19,8 @@ import { compileAndRunVariants, type FlowKnob, type FlowRun } from "./helpers/fl
  *
  * The cases cover the constructs that order what runs: branches and switches, loops, labels and gotos, functions and
  * their defaults, the lazy operators and the `default:` of a `load` or a call, the parts of an ask, a say, a named
- * timer, timer blocks and the helpers they call, permanent buttons, waits and other statements between a store and a
- * read, compound assignment, exits, a fallback, and other files. A construct whose order the check gets wrong fails here. An
+ * timer, timer blocks and the helpers they call, permanent buttons, waits, lock calls and their dialogs, and other
+ * statements between a store and a read, compound assignment, exits, a fallback, and other files. A construct whose order the check gets wrong fails here. An
  * instruction kind without a case here is caught only by the type check of the plan helpers (`satisfies never`), so a
  * new kind that can stand between a store and a read needs a case.
  */
@@ -52,11 +57,26 @@ interface Template {
   readonly kinds?: readonly ("custom" | "field")[];
   /** A case about one property of its own, such as a duration or a number. */
   readonly custom?: Pick<Kind, "set" | "expr">;
+  /** How the Player answers the case's lock steps; without it a run stops at the first. */
+  readonly lock?: FlowLockAnswer;
 }
 
 type SerializableKnob = FlowKnob["value"];
 
 const KNOB = (index: number): string => `let k${index} = load "k${index}", default: false`;
+
+/** The one lock of the lock cases, which a written password opens. */
+const LOCK = "bG9jaw==";
+
+/** A Player that locks into {@link LOCK}, opens it with a written password or else asks, and whose dialog is cancelled. */
+const LOCKS: FlowLockAnswer = (action) =>
+  action.phase === "ask"
+    ? { kind: "cancelled" }
+    : action.call === "encryptText"
+      ? { kind: "locked", text: LOCK }
+      : action.password !== null
+        ? { kind: "opened", text: "inside" }
+        : { kind: "ask" };
 
 const give =
   (set: string) =>
@@ -382,6 +402,44 @@ const TEMPLATES: readonly Template[] = [
       ...k.give("0"),
       'let text = load "k1", default: "x"',
       "let v = fromJson(text, default: give())",
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "a store before a lock call",
+    lock: LOCKS,
+    main: (k) => [
+      k.set,
+      'let locked = encryptText("x", password: "p", timeLock: false)',
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "a store after a lock call",
+    lock: LOCKS,
+    main: (k) => [
+      `let opened = decryptText("${LOCK}", password: "p", default: null)`,
+      k.set,
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "a call in the default of decryptText, which runs only when the lock does not open",
+    knobs: [LOCK],
+    lock: LOCKS,
+    main: (k) => [
+      ...k.give("null"),
+      'let text = load "k1", default: "x"',
+      'let opened = decryptText(text, password: "p", default: give())',
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "a timer block that stores during a lock dialog",
+    lock: LOCKS,
+    main: (k) => [
+      `timer async 1 ms { ${k.set} }`,
+      `let opened = decryptText("${LOCK}", default: null)`,
       `say ${k.expr} // READ`,
     ],
   },
@@ -800,7 +858,8 @@ test("the flow check of speaker properties agrees with the runtime on every way 
               `${label}: ${run.present.join(",") || "no knobs"} failed with ${run.failure.code} at ${run.failure.path}:${run.failure.line}`,
             );
       };
-      const { diagnostics, runs } = compileAndRunVariants(files, knobs);
+      const lock = template.lock ?? null;
+      const { diagnostics, runs } = compileAndRunVariants(files, knobs, {}, null, lock);
       const errors = diagnostics
         .filter((diagnostic) => diagnostic.severity === "error")
         .map((diagnostic) => [
@@ -820,7 +879,13 @@ test("the flow check of speaker properties agrees with the runtime on every way 
       if (errors.length > 0) {
         // The runtime takes the way the check names: some run fails at the read, and for a built-in field every run
         // that reaches it.
-        const taken = compileAndRunVariants(throughVariable(files, marked, kind), knobs);
+        const taken = compileAndRunVariants(
+          throughVariable(files, marked, kind),
+          knobs,
+          {},
+          null,
+          lock,
+        );
         assert.deepEqual(
           taken.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
           [],
