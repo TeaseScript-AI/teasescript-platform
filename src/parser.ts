@@ -4463,6 +4463,19 @@ class Parser {
       // The earlier name of the prefill is read as an option too, so its error names the fix wherever it is written.
       const removed = removedPrefillName(interactionKind);
       const recognized = removed === null ? names : [...names, removed];
+      // Before a `/`, a mode word is the question only where the question parses from it without errors, as for `say`
+      // (see `#canParseCompleteSayValue`): otherwise a regex may start at the `/`, as in `askText prose /[/*]/`, which
+      // the parse looks for again (see `parse`). A word whose question parses divides, as in `askNumber prose / 2`, also
+      // where a regex that the question holds is found first and the parse with it decides again, as in
+      // `askNumber prose / (say prose /x/).text.length`.
+      const slash =
+        presentation === null &&
+        this.#check(TokenKind.Identifier) &&
+        PRESENTATION_MODES.has(this.#peek().lexeme)
+          ? this.#peekAfterSayMode()
+          : null;
+      const diagnosticCount = this.#diagnostics.length;
+      const regexStartCount = this.#regexStarts.length;
       const question =
         isExpressionStart(this.#peek()) &&
         !(this.#blockEndsCompactInteraction && this.#check(TokenKind.LeftBrace)) &&
@@ -4470,6 +4483,12 @@ class Parser {
         this.#askOptionAt(0, recognized) === null
           ? yield* parseChild(this.#parseOr())
           : null;
+      if (
+        slash?.kind === TokenKind.Slash &&
+        this.#diagnostics.length > diagnosticCount &&
+        this.#regexStarts.length === regexStartCount
+      )
+        this.#regexStarts.push(slash.span.start.offset);
       // The named options follow in any order, each after a comma, or first without a question.
       const named: FormArgument[] = [];
       let end = question?.span ?? speaker?.span ?? command.span;
@@ -4858,7 +4877,8 @@ class Parser {
    * `say`: the mode is followed by the question, as in `askText prose "Name?"`, or by the ask's parentheses after its
    * options, as in `askText prose() ("Name?")`. Parentheses right after the word that a value follows are its options,
    * as in `prose(align: "center") "Name?"`; otherwise the word starts the question, as `prose` in `askText prose + "?"`
-   * or the call in `askText prose("Name?")`. Only tokens are read, so nested asks are not parsed again.
+   * or the call in `askText prose("Name?")`. Only tokens are read, so nested asks are not parsed again: before a `/`, the
+   * word is the question, and a regex there is found by parsing it (see `#parseInteractionExpression`).
    */
   #atQuestionPresentation(): boolean {
     if (!this.#check(TokenKind.Identifier) || !PRESENTATION_MODES.has(this.#peek().lexeme))
