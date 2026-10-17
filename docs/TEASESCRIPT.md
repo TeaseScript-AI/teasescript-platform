@@ -485,6 +485,7 @@ surrogate such as `\x{D83D}`; in a regex replacement, `$0` inserts the whole mat
 ## Diagnostics
 
 Parser and semantic diagnostics are deterministic source-associated data. Ordinary syntax failures use this model.
+[`DIAGNOSTICS.md`](DIAGNOSTICS.md) lists their codes with owner and severity.
 TeaseScript defines no authored-syntax nesting maximum; host JavaScript stack exhaustion is an environment-specific
 implementation constraint, not language capacity. Historical diagnostic measurements live in
 [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md).

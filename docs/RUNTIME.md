@@ -1811,7 +1811,8 @@ what to do about it, in whole sentences without semicolons. It quotes source in 
 and shows a long value only as a bounded preview. It uses only names and values the engine has already evaluated. The
 engine source owns the exact text, and a failure that a checkpoint or debug export already recorded keeps its message. A code marked _defect_ means
 that the plan, the engine's state, or the host is wrong rather than the script: continue from an earlier checkpoint or
-restart, and report the failure with its debug export.
+restart, and report the failure with its debug export. Every code is registered in `src/diagnostic-codes.ts`, and
+[`DIAGNOSTICS.md`](DIAGNOSTICS.md) lists the codes of compiler diagnostics.
 
 | Code | What failed | What to do |
 | --- | --- | --- |
@@ -2016,6 +2017,10 @@ no `instructionTrace`. For a source location, `plan.instructions[index].span` ho
 Runtime state must be serializable at every instruction boundary, but normal execution does not need to stringify or persist after every instruction. A production runner may execute many instructions in memory until an event, wait, input, timer, explicit save point, page lifecycle boundary, or configured checkpoint interval.
 
 A checkpoint is currently a self-contained plan-and-snapshot bundle. Restore validates the checkpoint, instruction plan, snapshot, format versions, references, function/call progress, RNG state, and other structural invariants before execution resumes.
+
+A checkpoint that restore rejects throws `CheckpointError` with `TSK001` for an unsupported format or version, `TSK002`
+for a malformed checkpoint, or `TSK003` for text that is not JSON. A state whose checkpoint text would be longer than a
+text can be fails with `TSK004` when it is saved or exported ([`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md)).
 
 Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, `currentSessionTimeMs`, settlement, and event identities. Restore does not read time or silently complete a deadline. After the restored-session activation gate, the Player application submits an explicit observation; the atomic observation operation persists the nondecreasing effective coordinate before settling due actions.
 

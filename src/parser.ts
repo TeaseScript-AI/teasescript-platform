@@ -1,3 +1,4 @@
+import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import { isMessagePresentationOption } from "./message-presentation.js";
 import { parseChild, runParse, type ParseTask } from "./parse-continuation.js";
 import type {
@@ -191,7 +192,7 @@ const parserDiagnosticCode = {
   invalidTagQuery: "TST001",
   // The name check's code, also given where the parser reads the name (see `#declarationName`).
   protectedName: PROTECTED_NAME_CODE,
-} as const;
+} as const satisfies Record<string, OwnedDiagnosticCode<"parser", "error">>;
 
 const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
 

@@ -1,3 +1,4 @@
+import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
@@ -569,6 +570,6 @@ function argumentKind(value: SerializableRuntimeValue): ArgumentKind {
   return isDuration(value) ? "duration" : null;
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }

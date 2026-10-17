@@ -1,3 +1,4 @@
+import type { DeveloperWarningCode } from "../../diagnostic-codes.js";
 import { type InstructionPlan, type PlanSourceLocation, mainSourceSpan } from "../../plan/model.js";
 import { cloneCaptures, sweepRetainedScopes } from "../captures.js";
 import { interruptFrame } from "../activations.js";
@@ -63,7 +64,7 @@ export function mediaSpan(plan: InstructionPlan, owningInstruction: number): Sou
 export function emitDeveloperWarning(
   snapshot: RuntimeSnapshot,
   events: InterpreterEvent[],
-  code: string,
+  code: DeveloperWarningCode,
   message: string,
   span: SourceSpan | PlanSourceLocation,
 ): void {

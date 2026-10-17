@@ -1,3 +1,4 @@
+import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import {
   calendarDuration,
   exactDuration,
@@ -468,6 +469,6 @@ function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }

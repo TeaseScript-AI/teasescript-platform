@@ -1,3 +1,4 @@
+import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import { isAskImageCall, isLockCall, isTakePhotoCall } from "./capture-call.js";
 import { IMAGE_REQUEST_OPTIONS } from "./image-input.js";
 import type {
@@ -154,7 +155,9 @@ const semanticCode = {
   invalidFileTarget: "TSV057",
   noSpeaker: "TSV063",
   invalidRegex: "TSV064",
-} as const;
+} as const satisfies Record<string, NamePassCode>;
+
+type NamePassCode = OwnedDiagnosticCode<"name pass", "error">;
 
 /** Where code runs, for the initialization check: a top-level statement, a function, or a handler and its origin. */
 type FlowContext =
@@ -409,7 +412,7 @@ class ProjectNames {
   /** `checkable` marks an error that leaves the type check its basis (see `LEAVES_TYPES_CHECKABLE`). */
   public report(
     file: number,
-    code: string,
+    code: NamePassCode,
     message: string,
     span: SourceSpan,
     checkable = false,
@@ -2550,7 +2553,7 @@ class SemanticValidator {
     return false;
   }
 
-  #report(code: string, message: string, span: SourceSpan, checkable = false): void {
+  #report(code: NamePassCode, message: string, span: SourceSpan, checkable = false): void {
     this.project.report(this.file, code, message, span, checkable);
   }
 }

@@ -1,3 +1,4 @@
+import type { DiagnosticCodeSeverity, OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import type { ProjectDiagnostic } from "./compiler.js";
 import { createDiagnostic, DiagnosticSeverity } from "./diagnostics.js";
 import type { PlanImage } from "./plan/model.js";
@@ -15,7 +16,7 @@ const imageDiagnosticCode = {
   invalidPath: "TSC009",
   ignoredKeywords: "TST003",
   conflictingTagValue: "TST004",
-} as const;
+} as const satisfies Record<string, OwnedDiagnosticCode<"compiler">>;
 
 /**
  * The image catalog of a project: each image once, in path order, with its keywords read as tags (`bedroom`,
@@ -81,10 +82,10 @@ export function imageCatalog(images: readonly ProjectImageFile[]): {
   };
 }
 
-function imageDiagnostic(
+function imageDiagnostic<C extends OwnedDiagnosticCode<"compiler">>(
   path: string,
-  severity: DiagnosticSeverity,
-  code: string,
+  severity: DiagnosticCodeSeverity<C>,
+  code: C,
   message: string,
 ): ProjectDiagnostic {
   const start = createSourcePosition(0, 0, 0);

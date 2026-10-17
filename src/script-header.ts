@@ -1,3 +1,4 @@
+import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import type { LexResult } from "./lexer.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
@@ -42,7 +43,7 @@ const headerDiagnosticCode = {
   repeatedKeyword: "TSH014",
   expectedLineEnd: "TSH015",
   expectedValue: "TSH016",
-} as const;
+} as const satisfies Record<string, OwnedDiagnosticCode<"parser">>;
 
 const TEXT_FIELDS = ["title", "author", "description"] as const;
 type TextField = (typeof TEXT_FIELDS)[number];
@@ -346,11 +347,10 @@ class HeaderReader {
       return this.#fail(headerDiagnosticCode.emptyKeyword, "A keyword cannot be empty.", text.span);
     }
     if (keywords.has(keyword)) {
-      this.#report(
+      this.#warn(
         headerDiagnosticCode.repeatedKeyword,
         `The keyword '${keyword}' is listed more than once.`,
         text.span,
-        DiagnosticSeverity.Warning,
       );
     } else {
       keywords.add(keyword);
@@ -410,11 +410,10 @@ class HeaderReader {
       );
     }
     if (outcome === "repeated") {
-      this.#report(
+      this.#warn(
         headerDiagnosticCode.repeatedTag,
         `The tag '${tag.name}' is listed more than once.`,
         span,
-        DiagnosticSeverity.Warning,
       );
     }
     return true;
@@ -448,18 +447,17 @@ class HeaderReader {
     return this.tokens[Math.min(this.#index + offset, this.tokens.length - 1)]!;
   }
 
-  #fail(code: string, message: string, span: SourceSpan): false {
+  #fail(code: OwnedDiagnosticCode<"parser", "error">, message: string, span: SourceSpan): false {
     this.#report(code, message, span);
     return false;
   }
 
-  #report(
-    code: string,
-    message: string,
-    span: SourceSpan,
-    severity: DiagnosticSeverity = DiagnosticSeverity.Error,
-  ): void {
-    this.#diagnostics.push(createDiagnostic(severity, code, message, span));
+  #report(code: OwnedDiagnosticCode<"parser", "error">, message: string, span: SourceSpan): void {
+    this.#diagnostics.push(createDiagnostic(DiagnosticSeverity.Error, code, message, span));
+  }
+
+  #warn(code: OwnedDiagnosticCode<"parser", "warning">, message: string, span: SourceSpan): void {
+    this.#diagnostics.push(createDiagnostic(DiagnosticSeverity.Warning, code, message, span));
   }
 }
 

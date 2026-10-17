@@ -1,3 +1,4 @@
+import type { DeveloperWarningCode, RuntimeErrorCode } from "../diagnostic-codes.js";
 import { temporalCaptureAt } from "./temporal-captures.js";
 import {
   combinedDateAndTime,
@@ -2006,7 +2007,7 @@ export class Evaluator {
           kind: "developerWarning",
           sequence: warningSequence,
           severity: "warning",
-          code: "TSW001",
+          code: "TSW001" satisfies DeveloperWarningCode,
           message: `Speaker '${speaker.identifier}' uses its identifier as the display name.`,
           span: copySpan(span),
         } satisfies DeveloperWarningEvent),
@@ -3228,7 +3229,7 @@ export class Evaluator {
     return false;
   }
 
-  #warn(code: string, message: string, span: SourceSpan): void {
+  #warn(code: DeveloperWarningCode, message: string, span: SourceSpan): void {
     this.events.push(
       Object.freeze({
         kind: "developerWarning",
@@ -4418,7 +4419,7 @@ function noArithmeticResult(
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
   program: InstructionPlan,
-  code = "TSR036",
+  code: RuntimeErrorCode = "TSR036",
 ): RuntimeFault {
   const { operator } = expression;
   const label = binaryLabel(expression, program);
@@ -4894,7 +4895,7 @@ function notComparable(
   );
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }
 

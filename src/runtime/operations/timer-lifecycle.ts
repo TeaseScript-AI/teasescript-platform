@@ -1,3 +1,4 @@
+import type { DeveloperWarningCode } from "../../diagnostic-codes.js";
 import {
   type InstructionPlan,
   type PlanSourceLocation,
@@ -214,7 +215,7 @@ export function reportBlockOverrun(
       kind: "developerWarning",
       sequence: takeSequence(snapshot, 1),
       severity: "warning",
-      code: "TSW018",
+      code: "TSW018" satisfies DeveloperWarningCode,
       message: `The timer at ${location} started its next round before its block had finished, because the block took at least as long as its period of ${formatDuration(roundMs)}. While this repeats, the script after the timer cannot continue. Make the block shorter than the period, or the period longer.`,
       span,
     } satisfies DeveloperWarningEvent),

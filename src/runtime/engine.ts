@@ -1,3 +1,4 @@
+import type { DeveloperWarningCode, RuntimeErrorCode } from "../diagnostic-codes.js";
 import { executeFileStore } from "./actions/file-store.js";
 import { executeLock } from "./actions/lock.js";
 import { exactDurationMilliseconds } from "./temporal-operations.js";
@@ -1675,7 +1676,7 @@ interface MaterializedInteractionUi {
   /** The prose a form's speaker says as it opens. */
   readonly prose?: string;
   /** A developer warning about how it opens, such as a `prefill:` that no button's value matches. */
-  readonly warning?: { readonly code: string; readonly message: string };
+  readonly warning?: { readonly code: DeveloperWarningCode; readonly message: string };
   readonly stagedWrites: readonly {
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
@@ -3411,7 +3412,7 @@ function failForBudget(
       : `The script reached its ${steps}-step limit while running this loop. Add a wait, or check the loop's condition.`;
   failSnapshot(
     snapshot,
-    { code: "TSR037", message, span: copySpan(span) },
+    { code: "TSR037" satisfies RuntimeErrorCode, message, span: copySpan(span) },
     instructionSourcePath(plan, index),
     events,
   );
@@ -4097,7 +4098,7 @@ export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan):
   throw fault("TSR050", timerDisplayMessage(shownChoice(value)), span);
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }
 

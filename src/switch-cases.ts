@@ -1,3 +1,4 @@
+import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import { angleDegrees } from "./angle.js";
 import type { Expression, SwitchStatement } from "./ast.js";
 import { durationLiteralValue, durationParts, isCalendar, negateDuration } from "./duration.js";
@@ -11,7 +12,10 @@ import {
   type StaticType,
 } from "./static-types.js";
 
-const switchCaseCode = { invalidCaseValue: "TSV047", overlappingCase: "TSV048" } as const;
+const switchCaseCode = {
+  invalidCaseValue: "TSV047",
+  overlappingCase: "TSV048",
+} as const satisfies Record<string, OwnedDiagnosticCode<"name pass", "error">>;
 
 type SwitchCaseCode = (typeof switchCaseCode)[keyof typeof switchCaseCode];
 

@@ -1,3 +1,4 @@
+import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import {
   buttonBackgroundMessage,
   CHOICE_TEXT_MESSAGE,
@@ -155,6 +156,6 @@ function backgroundColor(value: SerializableRuntimeValue, span: SourceSpan): str
   return normalized;
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }

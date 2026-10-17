@@ -1,3 +1,4 @@
+import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 
 export interface RuntimeErrorInfo {
@@ -15,10 +16,10 @@ export function internalFault(what: string): string {
 }
 
 export class RuntimeFault extends Error {
-  public readonly code: string;
+  public readonly code: RuntimeErrorCode;
   public readonly span: SourceSpan;
 
-  public constructor(code: string, message: string, span: SourceSpan) {
+  public constructor(code: RuntimeErrorCode, message: string, span: SourceSpan) {
     super(message);
     this.name = "RuntimeFault";
     this.code = code;
