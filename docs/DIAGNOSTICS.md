@@ -52,7 +52,7 @@ The codes that more than one owner reports are listed in
 | --- | --- | --- | --- |
 | `TSP001` | Expected a statement | error | parser |
 | `TSP002` | Expected the end of the statement | error | parser |
-| `TSP003` | Expected a speaker name | error | parser |
+| `TSP003` | Expected a speaker name after `speaker` | error | parser |
 | `TSP004` | Expected a property, option, or key name | error | parser |
 | `TSP005` | Expected `:` | error | parser |
 | `TSP006` | Expected a string | error | parser |

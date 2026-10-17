@@ -17,7 +17,7 @@ test("reports a missing say-as identifier without consuming the next line", () =
   const source = 'say as "wrong"\nexit';
   const result = parse(source);
 
-  assert.deepEqual(compactDiagnostics(result), [["TSP003", "error", [7, 0, 7, 7, 0, 7]]]);
+  assert.deepEqual(compactDiagnostics(result), [["TSP029", "error", [7, 0, 7, 7, 0, 7]]]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 

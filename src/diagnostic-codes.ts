@@ -85,7 +85,7 @@ export const DIAGNOSTIC_CODES = {
 
   TSP001: entry(["parser"], "error", "Expected a statement", DOCS.parser),
   TSP002: entry(["parser"], "error", "Expected the end of the statement", DOCS.parser),
-  TSP003: entry(["parser"], "error", "Expected a speaker name", DOCS.parser),
+  TSP003: entry(["parser"], "error", "Expected a speaker name after `speaker`", DOCS.parser),
   TSP004: entry(["parser"], "error", "Expected a property, option, or key name", DOCS.parser),
   TSP005: entry(["parser"], "error", "Expected `:`", DOCS.parser),
   TSP006: entry(["parser"], "error", "Expected a string", DOCS.parser),
