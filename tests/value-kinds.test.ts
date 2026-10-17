@@ -299,6 +299,7 @@ test("say shows a script reference and a regex as their notation, and any other 
   for (const [kind, source, files] of cases) {
     const { problems, said } = outcome(`say pick(${source})\nsay "\${pick(${source})}"`, files);
     assert.deepEqual(problems, [], kind);
+    assert.equal(said.length, 2, kind);
     if (holds(kind, "notation")) {
       assert.equal(said[0], source, kind);
       assert.notEqual(said[1], source, kind);
