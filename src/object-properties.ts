@@ -2,6 +2,19 @@ import { editDistance } from "./form-fields.js";
 import { PLAYER } from "./speaker-terms.js";
 
 /**
+ * The message for a name that a literal gives twice (TSV007): a property of a speaker declaration or an object
+ * literal, or a key of a dict literal, also a computed key whose text the compiler knows.
+ */
+export function duplicateEntryMessage(
+  literal: "speaker" | "object" | "dict",
+  name: string,
+): string {
+  const entry =
+    literal === "dict" ? `dict key ${JSON.stringify(name)}` : `${literal} property '${name}'`;
+  return `Duplicate ${entry}. Each ${literal === "dict" ? "key" : "property"} may appear only once. Remove one of the entries.`;
+}
+
+/**
  * The message for a read of a property that an object does not have, naming the properties it has: at runtime
  * (TSR017) those of the object read, at compile time all that its objects can have (#845). `label` is how the source
  * spells the object, or `null`.

@@ -236,6 +236,7 @@ import { createSourceSpan, type SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
 import {
   missingPropertyMessage,
+  duplicateEntryMessage,
   missingSpeakerFieldMessage,
   missingSpeakerPropertyMessage,
   misspelledPropertyHint,
@@ -4709,7 +4710,7 @@ class TypeChecker {
           if (typeof text === "string" && keys.has(text))
             this.#report(
               typeCode.duplicateProperty,
-              `Duplicate dict key ${JSON.stringify(text)}. Each key may appear only once. Remove one of the entries.`,
+              duplicateEntryMessage("dict", text),
               entry.key.span,
             );
           if (typeof text === "string") keys.add(text);

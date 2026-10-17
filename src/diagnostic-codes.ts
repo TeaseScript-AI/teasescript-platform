@@ -169,10 +169,12 @@ export const DIAGNOSTIC_CODES = {
     ...entry(["name pass", "type checker"], "error", "Duplicate property or key", DOCS.values),
     shared: {
       problems: "one",
-      texts: "different",
+      texts: "same",
       parts: [
-        "a property name that a speaker declaration or an object literal gives twice",
-        "a key that a dict literal gives twice, also through a computed key whose text is known",
+        "a property name that a speaker declaration or an object literal gives twice " +
+          "(`duplicateEntryMessage`)",
+        "the same rule with the same text for a key that a dict literal gives twice, also " +
+          "through a computed key whose text is known",
       ],
     },
   },

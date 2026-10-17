@@ -76,6 +76,7 @@ import {
   setsDefaultSpeaker,
 } from "./project-globals.js";
 import { PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
+import { duplicateEntryMessage } from "./object-properties.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -929,7 +930,7 @@ class SemanticValidator {
           if (names.has(property.name.name)) {
             this.#report(
               semanticCode.duplicateProperty,
-              `Duplicate speaker property '${property.name.name}'.`,
+              duplicateEntryMessage("speaker", property.name.name),
               property.name.span,
             );
           }
@@ -1928,7 +1929,7 @@ class SemanticValidator {
         if (names.has(property.name.name))
           this.#report(
             semanticCode.duplicateProperty,
-            `Duplicate object property '${property.name.name}'.`,
+            duplicateEntryMessage("object", property.name.name),
             property.name.span,
           );
         names.add(property.name.name);

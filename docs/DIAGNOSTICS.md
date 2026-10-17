@@ -215,9 +215,9 @@ which each need a code of their own.
 - `TSV001` (one problem, same text)
   - parser: a declaration whose name is a keyword or another protected name, where it reads the name
   - name pass: the same rule with the same text (`protectedNameMessage`) where it finds such a declaration, and a name that is already in use
-- `TSV007` (one problem, different texts)
-  - name pass: a property name that a speaker declaration or an object literal gives twice
-  - type checker: a key that a dict literal gives twice, also through a computed key whose text is known
+- `TSV007` (one problem, same text)
+  - name pass: a property name that a speaker declaration or an object literal gives twice (`duplicateEntryMessage`)
+  - type checker: the same rule with the same text for a key that a dict literal gives twice, also through a computed key whose text is known
 - `TSV020` (one problem, different texts)
   - name pass: calls of the script's functions and of built-ins by name, such as `load` without `default:`, `askImage`, `showPopup`, `openUrl`, `exportText`, and `takePhoto`
   - type checker: method calls, `script(...)`, and the functions of the current date and time
