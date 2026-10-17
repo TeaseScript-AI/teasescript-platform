@@ -2034,7 +2034,7 @@ export function isIdentityType(type: StaticType): boolean {
 }
 
 /** Whether an annotation can name the kind a type without members holds (`written`). */
-export function isWritten(type: StaticType): boolean {
+function isWritten(type: StaticType): boolean {
   const kind = valueKindOfType(type);
   return kind === undefined || VALUE_KINDS[kind].written;
 }

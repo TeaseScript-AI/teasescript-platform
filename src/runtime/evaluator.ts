@@ -4245,14 +4245,7 @@ function ordered(
   const family = orderedFamily(kind);
   if (family === undefined || !ordersWith(kind, valueKindOf(right)))
     throw unordered(expression, left, right, program);
-  const order = orderWithin(family, left, right);
-  if (typeof order === "string")
-    throw fault(
-      "TSR009",
-      // EVIDENCE: invariant: only durations give a reason why they have no order.
-      `${formatDuration(left as AnyDuration)} and ${formatDuration(right as AnyDuration)} cannot be compared: ${order}.`,
-      expression.span,
-    );
+  const order = orderWithin(family, left, right, expression.span);
   switch (expression.operator) {
     case "<":
       return order < 0;
@@ -4265,12 +4258,16 @@ function ordered(
   }
 }
 
-/** The order of two values of the ordered `family` (-1, 0, or 1), or why two calendar durations have none. */
+/**
+ * The order of two values of the ordered `family`: -1, 0, or 1. Two calendar durations of different families, such as
+ * months and days, have none (`TSR009`).
+ */
 function orderWithin(
   family: OrderedFamily,
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
-): number | string {
+  span: SourceSpan,
+): number {
   switch (family) {
     case "number":
       if (typeof left === "number" && typeof right === "number")
@@ -4282,7 +4279,15 @@ function orderWithin(
       break;
     case "duration":
     case "calendarDuration":
-      if (isAnyDuration(left) && isAnyDuration(right)) return compareDurations(left, right);
+      if (isAnyDuration(left) && isAnyDuration(right)) {
+        const order = compareDurations(left, right);
+        if (typeof order === "number") return order;
+        throw fault(
+          "TSR009",
+          `${formatDuration(left)} and ${formatDuration(right)} cannot be compared: ${order}.`,
+          span,
+        );
+      }
       break;
     case "angle":
       if (isAngle(left) && isAngle(right)) return compareAngles(left, right);
@@ -4324,13 +4329,16 @@ function unordered(
       `'${operator}' cannot compare ${kindAndValue(left)} with ${kindAndValue(right)}. Use an angle on both sides.`,
       expression.span,
     );
-  if (isAnyDuration(left) && isAnyDuration(right))
-    return fault(
-      "TSR009",
-      // EVIDENCE: invariant: an exact and a calendar duration never have an order, so their comparison gives the reason.
-      `${formatDuration(left)} and ${formatDuration(right)} cannot be compared: ${compareDurations(left, right) as string}.`,
-      expression.span,
-    );
+  // An exact and a calendar duration never have an order, so their comparison gives the reason.
+  if (isAnyDuration(left) && isAnyDuration(right)) {
+    const order = compareDurations(left, right);
+    if (typeof order === "string")
+      return fault(
+        "TSR009",
+        `${formatDuration(left)} and ${formatDuration(right)} cannot be compared: ${order}.`,
+        expression.span,
+      );
+  }
   if (isAnyDuration(left) || isAnyDuration(right))
     return fault(
       "TSR009",

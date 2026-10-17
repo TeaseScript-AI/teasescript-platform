@@ -505,10 +505,6 @@ const KINDS_BY_RECORD: ReadonlyMap<string, ValueKind> = new Map(
   }),
 );
 
-export function isValueKind(name: string): name is ValueKind {
-  return Object.hasOwn(VALUE_KINDS, name);
-}
-
 /** The kind of a runtime value: of a number, `integer` when it is whole and `number` otherwise. */
 export function valueKindOf(value: SerializableRuntimeValue): ValueKind {
   if (value === null) return "null";

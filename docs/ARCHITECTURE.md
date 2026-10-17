@@ -127,6 +127,9 @@ binding, speaker, and collection operations used while evaluating. The internal
 `src/runtime/prepared-references.ts` module owns prepared-reference encoding,
 resolution, detachment, and list-mutation rebasing, while
 `src/runtime/value-predicates.ts` supplies the small shared value-narrowing seam.
+`src/value-kinds.ts` has one entry per kind of value: its type name and description, its runtime predicate and
+stored form, and whether `==`, `<`, `${...}`, `toJson`, buttons, `case`, and dict keys take it; the compiler, the
+runtime, and the editor read these facts there.
 
 No `src/standard-library/` shell exists yet because the implemented ADR 0018 POC forms are fully lowered by the
 parser/compiler/runtime; linked reusable Standard Library modules remain future work.
