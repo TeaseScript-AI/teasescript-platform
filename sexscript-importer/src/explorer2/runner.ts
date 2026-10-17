@@ -158,8 +158,7 @@ export async function loadRuntime2(): Promise<Runtime2> {
   const alternatives = callOf(module, "randomDrawAlternatives", record);
   // The runtime's own check of a chosen outcome against a draw's support (it answers a problem as text), so that V2
   // never chooses an outcome the runtime would refuse.
-  const control: unknown = await import(repositoryBuildUrl("src/runtime/random-control.js").href);
-  const checked = callOf(control, "checkedOutcome", (value) => typeof value !== "string");
+  const checked = callOf(module, "checkedOutcome", (value) => typeof value !== "string");
   const context = isRecord(module) ? module.RuntimeDebugContext : undefined;
   if (typeof context !== "function")
     throw new Error("The repository build has no RuntimeDebugContext; explorer V2 needs it.");
@@ -1195,6 +1194,10 @@ export class Runner {
         if (kind === "storeTemporary") {
           const { origins } = originsOfReads(readsAt(instruction.value, made, call));
           setTemporary(call, Number(instruction.temporaryId), origins);
+          // A load whose default is computed only when it is used (#938) also stores whether it is: that depends on
+          // what the load read.
+          if (typeof instruction.defaultTemporary === "number")
+            setTemporary(call, instruction.defaultTemporary, origins);
         } else if (kind === "end" || kind === "transfer") {
           letGoOfEndedCalls();
         } else if (kind === "callFunction") {
