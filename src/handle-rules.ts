@@ -104,6 +104,11 @@ export function isMediaRepeatCount(count: number): boolean {
   return Number.isSafeInteger(count) && count >= 1;
 }
 
+/** Whether media can repeat for `milliseconds`. */
+export function isRepeatBudget(milliseconds: number): boolean {
+  return Number.isFinite(milliseconds) && milliseconds > 0;
+}
+
 export const MEDIA_REPEAT_COUNT_RULE =
   "A repeat count must be a whole number of at least 1, such as '3 times'";
 

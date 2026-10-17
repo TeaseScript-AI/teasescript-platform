@@ -146,6 +146,7 @@ import {
   isMediaPosition,
   isMediaRange,
   isMediaRepeatCount,
+  isRepeatBudget,
   isMediaVolume,
   isTimerDisplay,
   MEDIA_REPEAT_COUNT_RULE,
@@ -174,6 +175,9 @@ import {
 import { withoutNegativeZero } from "./conversions.js";
 import {
   buttonTimeoutMessage,
+  isDelayLength,
+  isRoundLength,
+  isTimeoutLength,
   negativeDelayMessage,
   pacingMessage,
   reachesSceneTime,
@@ -2897,7 +2901,7 @@ class TypeChecker {
         unitFix(pacing),
       );
       const known = this.#knownLength(pacing);
-      if (known !== undefined && known.milliseconds < 0)
+      if (known !== undefined && !isDelayLength(known.milliseconds))
         this.#report(
           typeCode.invalidRepeatCount,
           pacingMessage(formatDuration(known)),
@@ -6288,6 +6292,7 @@ class TypeChecker {
         ? [expression.left, expression.right]
         : [expression.operand],
       result,
+      operator,
     );
     let failed: readonly StaticType[];
     if ("type" in outcome) {
@@ -6593,6 +6598,7 @@ class TypeChecker {
     operands: readonly StaticType[],
     expressions: readonly Expression[],
     result: (...values: StaticType[]) => StaticType | undefined,
+    operator?: string,
   ): { readonly type: StaticType } | { readonly failed: readonly StaticType[] } {
     const values = operands.map((operand) => resolved(operand));
     const lefts = members(values[0]!);
@@ -6683,7 +6689,14 @@ class TypeChecker {
       const all = index === 0 ? lefts : rights;
       const failing = all.find((member) => !passing.includes(member));
       if (passing.length > 0 && failing !== undefined) {
-        this.#reportMayBe(expressions[index]!, failing, passing);
+        this.#reportMayBe(
+          expressions[index]!,
+          failing,
+          passing,
+          operator !== undefined && mixesDurationAndNumber(operator, failed)
+            ? typeCode.mixedDurationOperands
+            : typeCode.invalidOperand,
+        );
         return { type: UNKNOWN_TYPE };
       }
     }
@@ -8197,7 +8210,7 @@ class TypeChecker {
         const problem =
           known === undefined
             ? undefined
-            : !(known.milliseconds > 0)
+            : !isTimeoutLength(known.milliseconds)
               ? buttonTimeoutMessage(formatDuration(known))
               : !reachesSceneTime(known.milliseconds)
                 ? timeoutSceneTimeMessage("showButton")
@@ -8538,14 +8551,13 @@ class TypeChecker {
     milliseconds: number,
     shown: string,
   ): void {
-    const problem =
-      milliseconds < 0
-        ? negativeDelayMessage(command, shown)
-        : repeat && milliseconds === 0
-          ? zeroRoundMessage(shown)
-          : !reachesSceneTime(milliseconds)
-            ? sceneTimeMessage(command)
-            : undefined;
+    const problem = !isDelayLength(milliseconds)
+      ? negativeDelayMessage(command, shown)
+      : repeat && !isRoundLength(milliseconds)
+        ? zeroRoundMessage(shown)
+        : !reachesSceneTime(milliseconds)
+          ? sceneTimeMessage(command)
+          : undefined;
     if (problem !== undefined) this.#report(typeCode.invalidRepeatCount, problem, expression.span);
   }
 
@@ -8689,7 +8701,7 @@ class TypeChecker {
           typeCode.invalidMedia,
         );
         const known = this.#knownLength(operand);
-        if (known !== undefined && !(known.milliseconds > 0))
+        if (known !== undefined && !isRepeatBudget(known.milliseconds))
           this.#report(
             typeCode.invalidMedia,
             `${MEDIA_REPEAT_RULE}, but this is ${formatDuration(known)}.`,
@@ -8799,8 +8811,14 @@ class TypeChecker {
     const text = (member: StaticType): boolean => isScalar(member, "string");
     const all = members(type);
     const failing = all.filter((member) => !text(member));
-    if (!isKnown(nonNullTypeForUse(type)) || failing.length === 0) return;
-    if (failing.length < all.length)
+    // A sign gives a number, a duration, or an angle, never text, also of an operand the compiler cannot know.
+    const key = unwrap(expression);
+    const signed =
+      key.kind === "unaryExpression" &&
+      key.operator !== "not" &&
+      !isKnown(nonNullTypeForUse(this.#typeOf(key.operand)));
+    if (!signed && (!isKnown(nonNullTypeForUse(type)) || failing.length === 0)) return;
+    if (!signed && failing.length < all.length)
       this.#reportMayBe(
         expression,
         failing.find((member) => member.kind !== "null") ?? failing[0]!,

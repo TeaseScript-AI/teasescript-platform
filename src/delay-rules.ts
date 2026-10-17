@@ -2,14 +2,31 @@ import { formatDuration } from "./duration.js";
 
 /**
  * The rules of a wait's or timer's length, a `say` pacing, and an interaction's timeout, each with one message: compile
- * error `TSV011` where the compiler knows the value, and otherwise runtime error
- * `TSR050` (`TSR052` for an askForm). A message takes the value as the runtime shows it (`shown`), which the compiler
- * gives for a value it knows.
+ * error `TSV011` where the compiler knows the value, and otherwise runtime error `TSR050` (`TSR052` for an askForm). A
+ * message takes the value as the runtime shows it (`shown`), which the compiler gives for a value it knows.
  */
 
-/** Scene time is at most `Number.MAX_SAFE_INTEGER` milliseconds, so a longer length can never be reached. */
+/**
+ * Scene time is at most `Number.MAX_SAFE_INTEGER` milliseconds, so the compiler knows that a longer length can never be
+ * reached; the runtime checks the deadline from the current scene time.
+ */
 export function reachesSceneTime(milliseconds: number): boolean {
   return milliseconds <= Number.MAX_SAFE_INTEGER;
+}
+
+/** Whether a wait, timer, or say pacing can last `milliseconds`: no length is below zero. */
+export function isDelayLength(milliseconds: number): boolean {
+  return !(milliseconds < 0);
+}
+
+/** Whether a round of a repeating timer can last `milliseconds`. */
+export function isRoundLength(milliseconds: number): boolean {
+  return milliseconds > 0;
+}
+
+/** Whether an interaction can time out after `milliseconds`. */
+export function isTimeoutLength(milliseconds: number): boolean {
+  return Number.isFinite(milliseconds) && milliseconds > 0;
 }
 
 export function negativeDelayMessage(command: "wait" | "timer", shown: string): string {

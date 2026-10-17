@@ -272,9 +272,9 @@ interface CheckedProject {
 }
 
 /**
- * Validates the names of the files without syntax errors, then, when every file is free of errors, the types of the
- * whole project. Returns what the checks found for the lowering and the checks that follow the plan, or `null` when the
- * project has an error.
+ * Validates the names of the files without syntax errors, then, when every file is free of errors that leave the type
+ * check without a basis (see `stopsTypeCheck`), the types of the whole project. Returns what the checks found for the
+ * lowering and the checks that follow the plan, or `null` when the project has an error.
  */
 function checkProject(
   files: CompiledProjectFile[],

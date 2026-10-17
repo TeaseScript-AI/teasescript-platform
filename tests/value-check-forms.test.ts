@@ -522,6 +522,23 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
       null,
     ],
     [
+      // A sign never gives text, also of a value the compiler cannot know.
+      [
+        ["function f(k) {\n    save 1 as -k\n}", "-k"],
+        ["function f(k) {\n    delete ((+k))\n}", "((+k))"],
+        [`${PICK}save 1 as -pick(3)`, "-pick(3)"],
+      ],
+      "TSV038",
+      "Storage key must be a string.",
+      null,
+    ],
+    [
+      [["function f(k) {\n    return load(-k, default: 0)\n}", "-k"]],
+      "TSV038",
+      "Storage key must be a string. To compare the loaded value, write 'load(\"k\", default: null) == null'.",
+      null,
+    ],
+    [
       [
         ['showButton "Go", background: "nope"', '"nope"'],
         ['showButton "Go", background: ("nope")', '("nope")'],
@@ -572,8 +589,15 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
       null,
     ],
   ]);
-  // A duration with a number has its own code in every form, with the fix for the operand.
-  for (const source of ["say 1 + 2 s", "let n = 1\nsay n + 2 s", "say (1) + 2 s"])
+  // A duration with a number has its own code in every form, with the fix for the operand, also where a union may
+  // hold the number.
+  for (const source of [
+    "say 1 + 2 s",
+    "let n = 1\nsay n + 2 s",
+    "say (1) + 2 s",
+    "function f(n: number | duration) {\n    say 1 s + n\n}",
+    "function f(n: number | duration) {\n    say n + 1 s\n}",
+  ])
     assert.deepEqual(
       diagnostics(source).map(([code]) => code),
       ["TSV035"],

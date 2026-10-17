@@ -47,6 +47,8 @@ import { UNIT_AMOUNT_RULE, unitAmountFix } from "../operand-rules.js";
 import { buttonBackgroundMessage } from "../choice-rules.js";
 import {
   buttonTimeoutMessage,
+  isDelayLength,
+  isRoundLength,
   negativeDelayMessage,
   pacingMessage,
   sceneTimeMessage,
@@ -68,6 +70,7 @@ import {
   isMediaRange,
   isMediaRepeatCount,
   isMediaVolume,
+  isRepeatBudget,
   MEDIA_REPEAT_COUNT_RULE,
   MEDIA_REPEAT_RULE,
   isTimerDisplay,
@@ -3219,7 +3222,7 @@ function sayDurationMs(
         instruction.span,
       );
     const milliseconds = exactDurationMilliseconds(pacingValue, "Say pacing", instruction.span);
-    if (milliseconds < 0)
+    if (!isDelayLength(milliseconds))
       throw fault("TSR050", pacingMessage(describeShownValue(pacingValue)), instruction.span);
     return exactPacingMilliseconds(milliseconds);
   } catch (error) {
@@ -3465,11 +3468,11 @@ export function timerDurationMs(
     typeof amount !== "number" ||
     (unit === null && !isDuration(drawn)) ||
     !Number.isFinite(amount) ||
-    amount < 0
+    !isDelayLength(amount)
   ) {
     throw fault(
       "TSR050",
-      typeof amount === "number" && amount < 0 && (unit !== null || isDuration(drawn))
+      typeof amount === "number" && !isDelayLength(amount) && (unit !== null || isDuration(drawn))
         ? negativeDelayMessage(command, describeShownValue(drawn))
         : `A ${command} takes a duration, but this is ${describeShownValue(drawn)}. ${durationFix(drawn, "30 s")}`,
       span,
@@ -3575,7 +3578,7 @@ function startTimer(
     "timer",
     instruction.duration.span,
   );
-  if (instruction.repeat && roundDurationMs <= 0)
+  if (instruction.repeat && !isRoundLength(roundDurationMs))
     throw fault(
       "TSR050",
       zeroRoundMessage(describeShownValue(duration)),
@@ -3824,7 +3827,7 @@ function mediaRepeat(
   if (isAnyDuration(value)) {
     // A calendar duration has no fixed length (ADR 0026), whatever its parts.
     const milliseconds = exactDurationMilliseconds(value, "A repeat budget", repeat.value.span);
-    if (Number.isFinite(milliseconds) && milliseconds > 0) return { kind: "budget", milliseconds };
+    if (isRepeatBudget(milliseconds)) return { kind: "budget", milliseconds };
   }
   throw fault(
     "TSR050",
