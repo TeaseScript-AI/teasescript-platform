@@ -147,6 +147,9 @@ async function main() {
         ["camera", () => cameraScenario(cdp, origin)],
         ["viewfinder", () => viewfinderScenario(cdp, origin)],
         ["lock", () => lockScenario(cdp, origin)],
+        ["password", () => passwordScenario(cdp, origin)],
+        ["passwordInterruption", () => passwordInterruptionScenario(cdp, origin)],
+        ["lockKept", () => lockKeptScenario(cdp, origin)],
       ];
       const named = (process.env.PLAYER_SMOKE_ONLY ?? "")
         .split(",")
@@ -169,7 +172,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, and the lock dialogs",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, and a lock dialog kept across a reload",
       );
     } finally {
       cdp.close();
@@ -1982,6 +1985,166 @@ async function lockScenario(cdp, origin) {
       false,
       "A typed password was kept",
     );
+  } finally {
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
+}
+
+/** A real Enter key in the focused field. */
+async function pressEnter(cdp) {
+  for (const type of ["keyDown", "keyUp"])
+    await cdp.call("Input.dispatchKeyEvent", {
+      type,
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      ...(type === "keyDown" ? { text: "\r" } : {}),
+    });
+}
+
+/**
+ * askPassword (V30 §20) in the composer, coarsely: its answer is the hash of what was typed; written directly in
+ * `password:` its field asks twice for an encrypt call and once for a decrypt call; and with an opener written `true`,
+ * the lock dialog follows the field. No typed password is shown or kept.
+ */
+async function passwordScenario(cdp, origin) {
+  const identifier = await standInRelays(cdp);
+  try {
+    await setViewport(cdp, 1280, 800);
+    await navigate(cdp, `${origin}/player/?package=passwords`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+    const said = (text) =>
+      `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim().endsWith(${JSON.stringify(text)}))`;
+    const field = `document.querySelector('[data-composer-input]')`;
+    const fieldOpen = (question) =>
+      `${said(question)} && ${field}?.type === 'password' && !${field}.disabled`;
+    const repeat = `!!document.querySelector('[data-composer-repeat]')`;
+
+    await waitFor(cdp, fieldOpen("Your code?"), 8_000, "askPassword did not open a password field");
+    await typeInto(cdp, "[data-composer-input]", "corner");
+    await pressEnter(cdp);
+    await waitFor(cdp, said("Same: true"), 8_000, "askPassword did not give the typed text's hash");
+
+    // In `password:` of an encrypt call the field asks twice, of a decrypt call once.
+    await waitFor(cdp, fieldOpen("Choose a code") + ` && ${repeat}`, 8_000, "No repeat field");
+    await typeInto(cdp, "[data-composer-input]", "field pass");
+    await typeInto(cdp, "[data-composer-repeat]", "field pass");
+    await pressEnter(cdp);
+    await waitFor(cdp, said("Locked."), 15_000, "The password field did not lock");
+    await waitFor(cdp, fieldOpen("Type it again") + ` && !(${repeat})`, 8_000, "No field to open");
+    await typeInto(cdp, "[data-composer-input]", "field pass");
+    await pressEnter(cdp);
+    await waitFor(cdp, said("Opened: Field note"), 15_000, "The password field did not open it");
+
+    // With `timeLock: true` the lock dialog follows the field and asks for the time lock alone.
+    await waitFor(cdp, fieldOpen("Choose another code"), 8_000, "No field before the dialog");
+    await typeInto(cdp, "[data-composer-input]", "timed pass");
+    await typeInto(cdp, "[data-composer-repeat]", "timed pass");
+    await pressEnter(cdp);
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-lock-dialog="lock"] [data-lock-time]') && !document.querySelector('[data-lock-password]')`,
+      8_000,
+      "The lock dialog did not follow the field with the time lock alone",
+    );
+    await physicalClick(cdp, "[data-lock-submit]");
+    await waitFor(cdp, said("Locked with a time."), 15_000, "The field and dialog did not lock");
+    assertEqual(
+      await value(
+        cdp,
+        `/corner|field pass|timed pass/u.test(JSON.stringify([document.body.innerText, localStorage, sessionStorage]))`,
+      ),
+      false,
+      "A typed password was shown or kept",
+    );
+  } finally {
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
+}
+
+/**
+ * askPassword's fields and blocks, a focused input check: a block that returns at once leaves askPassword's field empty
+ * again, and a lock's password field that a block asks over a form leaves the form's text being typed as it was.
+ */
+async function passwordInterruptionScenario(cdp, origin) {
+  await setViewport(cdp, 1280, 800);
+  await navigate(cdp, `${origin}/player/?package=password-interruptions`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const said = (text) =>
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim().endsWith(${JSON.stringify(text)}))`;
+  const input = `document.querySelector('[data-composer-input]')`;
+  const repeat = `document.querySelector('[data-composer-repeat]')`;
+  const field = (id) => `document.querySelector('[data-form-field="${id}"]')`;
+  await waitFor(
+    cdp,
+    `${said("Code?")} && ${input}?.type === 'password' && !${input}.disabled`,
+    8_000,
+    "askPassword did not open its field",
+  );
+  await typeInto(cdp, "[data-composer-input]", "unsent password");
+  await clickLabelled(cdp, "Ping", "[data-permanent-button]");
+  await waitFor(cdp, said("Pinged"), 8_000, "The block did not run");
+  await waitFor(
+    cdp,
+    `${input}?.type === 'password' && ${input}.value === ''`,
+    8_000,
+    "askPassword kept a password typed before a block that returned at once",
+  );
+  await typeInto(cdp, "[data-composer-input]", "corner");
+  await pressEnter(cdp);
+
+  // A lock's password field over a form leaves the form's text being typed for when it returns.
+  await waitFor(cdp, `!!${field("name")}`, 8_000, "The form did not appear");
+  await physicalClick(cdp, '[data-form-field="name"]');
+  await waitFor(cdp, `${input}.value === "Ada" && document.activeElement === ${input}`);
+  await cdp.call("Input.insertText", { text: "Bea" });
+  // Sooner than the form takes the text from the composer.
+  await delay(100);
+  await clickLabelled(cdp, "Lock it", "[data-permanent-button]");
+  await waitFor(
+    cdp,
+    `${said("Interrupting password")} && !!${repeat} && !${input}.disabled`,
+    8_000,
+    "The lock's password field did not open",
+  );
+  assertEqual(await value(cdp, `${input}.value`), "", "The password field took the form's text");
+  await typeInto(cdp, "[data-composer-input]", "p");
+  await typeInto(cdp, "[data-composer-repeat]", "p");
+  await pressEnter(cdp);
+  await waitFor(
+    cdp,
+    `!${repeat} && !!${field("name")} && ${input}.value === "Bea"`,
+    15_000,
+    "The form's text being typed was lost after a lock's password field",
+  );
+}
+
+/**
+ * A lock's dialog that asks again after a block that waited is the session's newly presented interaction, so a reload
+ * continues at the dialog, not at the block's button.
+ */
+async function lockKeptScenario(cdp, origin) {
+  const identifier = await standInRelays(cdp);
+  try {
+    await setViewport(cdp, 1280, 800);
+    await navigate(cdp, `${origin}/player/?package=lock-kept`);
+    const start = "[data-session-start]";
+    await waitFor(cdp, `!!document.querySelector('${start}')`);
+    await physicalClick(cdp, start);
+    const dialog = `document.querySelector('[data-lock-dialog="lock"]')`;
+    const resume = `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === 'Resume')`;
+    await waitFor(cdp, `!!${dialog}`, 8_000, "The lock dialog did not open");
+    // A timer's block interrupts it and waits for its own button.
+    await waitFor(cdp, `${resume} && !${dialog}`, 8_000, "The block did not interrupt the dialog");
+    await clickLabelled(cdp, "Resume", "[data-foreground-controls] button");
+    await waitFor(cdp, `!!${dialog}`, 8_000, "The lock dialog did not ask again");
+    await reloadKept(cdp, "after the block returned");
+    await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Continue'`);
+    await physicalClick(cdp, start);
+    await waitFor(cdp, `!!${dialog}`, 8_000, "Continue did not return to the lock dialog");
+    assertEqual(await value(cdp, resume), false, "Continue returned to the block's button");
   } finally {
     await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
   }

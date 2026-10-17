@@ -210,6 +210,7 @@ export {
   type ActionCompletionOptions,
 } from "./runtime/operations/complete-action.js";
 export type { CapturedMediaAdmission } from "./runtime/actions/capture.js";
+export { textSha256 } from "./runtime/sha256.js";
 export {
   fileType,
   OCTET_STREAM,

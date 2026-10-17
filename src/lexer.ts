@@ -870,6 +870,7 @@ function isInteractionCommand(value: string | undefined): boolean {
     value === "askDate" ||
     value === "askTime" ||
     value === "askDateTime" ||
+    value === "askPassword" ||
     value === "askBoolean" ||
     value === "askForm" ||
     value === "askBooleans" ||

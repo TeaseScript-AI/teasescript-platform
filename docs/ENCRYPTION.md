@@ -2,8 +2,8 @@
 
 - **Status:** Current technical description of the locks of `encryptText`, `encryptFile`, `decryptText`, and
   `decryptFile` ([V30 §13](specifications/accepted-syntaxes-v30.md#encryption)).
-- **Use when:** changing the lock format, its openers, the drand time lock, the Player's lock dialogs, or what a session
-  records of a lock.
+- **Use when:** changing the lock format, its openers, the drand time lock, the Player's lock dialogs and password
+  fields, or what a session records of a lock.
 - **Does not define:** the language surface (V30), the engine's lock instruction and action
   ([`RUNTIME.md`](RUNTIME.md#locks)), or the dialogs' presentation ([`PLAYER-UI.md`](ui/PLAYER-UI.md)).
 
@@ -91,11 +91,14 @@ that locking still works when the Player goes offline later.
   to it ([V30 §33](specifications/accepted-syntaxes-v30.md#stored-files)).
 - Every call waits for the Player, and the engine records its result: a restore or a replay reuses it without the
   network, the store, or the password ([`RUNTIME.md`](RUNTIME.md#locks)).
-- K, a KEK, a password typed in a Player dialog, and the beacon never reach the engine, so no snapshot, checkpoint,
-  save, event, recorded call, Debug view, or debug export holds them. Debug shows a lock step's call, phase, whether a
-  password was written, its time lock's moment, and the openers the player sets in the lock dialog.
+- K, a KEK, a password typed in a Player dialog or in the password field of `password: askPassword(...)`, and the
+  beacon never reach the engine, so no snapshot, checkpoint, save, event, recorded call, Debug view, or debug export
+  holds them. Debug shows a lock step's call, phase, whether a password was written or its field asks for one, its time
+  lock's moment, and the openers the player sets in the lock dialog.
 - A password, text, or file the script passes is a script value: like any value it is in the state while the script
-  holds it, and so in a debug export's replay data, which the player chooses. A decrypt call's result is recorded as its
+  holds it, and so in a debug export's replay data, which the player chooses. `askPassword(...)` anywhere but directly
+  in `password:` gives the script the hash of the typed text, which is recorded like any answer; a lock made with that
+  hash as its password opens for anyone who can read it. A decrypt call's result is recorded as its
   answer and is in the replay data too. Readable sections of a debug export never show a lock step's text or password.
 
 ## Honest limits

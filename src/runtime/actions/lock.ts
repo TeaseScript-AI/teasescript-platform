@@ -12,7 +12,7 @@ import {
   takeSequence,
 } from "../operations/support.js";
 import type { SerializableRuntimeValue } from "../serializable-values.js";
-import type { RuntimeSnapshot } from "../state.js";
+import { currentTemporalContext, type RuntimeSnapshot } from "../state.js";
 import {
   base64FromBinary,
   binaryFromBase64,
@@ -24,6 +24,7 @@ import {
 } from "../stored-files.js";
 import { temporalCaptureAt, wallClockAt } from "../temporal-captures.js";
 import { checkTextLength, messageText } from "../text-length.js";
+import { fieldText } from "../value-text.js";
 import { describeRuntimeValue } from "../value-predicates.js";
 import type { CapturedMediaAdmission } from "./capture.js";
 import type {
@@ -35,9 +36,10 @@ import type {
 
 // The calls that lock and open text and stored files (V30 §13). A `lock` instruction asks the Player and waits, and runs
 // again with each answer, which the completion hands off: in its `work` phase the Player locks or opens with what it has;
-// when it must ask the player, the instruction waits again in an `ask` phase, which its dialog answers, and then works
-// again with what the player typed, which never reaches the engine. Every run reads the same operands. A decrypt call's
-// `default:` runs only when it is used, as the instructions after it.
+// when it must ask the player, the instruction waits again in an `ask` phase, which its dialog or, for
+// `password: askPassword(...)`, its password field answers, and then works again with what the player typed, which never
+// reaches the engine. Every run reads the same operands. A decrypt call's `default:` runs only when it is used, as the
+// instructions after it.
 
 /** The moment the lock dialog suggests for its time lock: 7 days from now (owner decisions, 2026-10-13 and 2026-10-14). */
 const SUGGESTED_TIME_LOCK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -49,12 +51,14 @@ const LOCK_CHOICES: readonly RuntimeLockChoice[] = ["timeLock", "password"];
 interface LockOperands {
   readonly value: SerializableRuntimeValue;
   readonly password: SerializableRuntimeValue | undefined;
+  /** The password field of `password: askPassword(...)`, with its hint as text, or `null`. */
+  readonly passwordField: RuntimeLockActionSnapshot["passwordField"];
   readonly timeLock: SerializableRuntimeValue | undefined;
 }
 
 /**
  * An encrypt call's openers: the password and the time lock's moment it gives, and those the player chooses in the lock
- * dialog, written `true` or, without any written, all of them.
+ * dialog, written `true` or, without any written, all of them. A password field gives its password when the call locks.
  */
 interface EncryptOpeners {
   readonly password: string | null;
@@ -73,6 +77,7 @@ type LockStep =
       readonly choices: readonly RuntimeLockChoice[];
       readonly dialogActionId: number | null;
       readonly notice: RuntimeLockNotice | null;
+      readonly passwordField: RuntimeLockActionSnapshot["passwordField"];
     };
 
 /** Whether a call locks; the others open. */
@@ -94,9 +99,19 @@ export function executeLock(
       internalFault(`The slot for the result of ${instruction.call}(...) is already in use.`),
       copySpan(span),
     );
+  const field = instruction.passwordField;
   const operands: LockOperands = {
     value: evaluator.evaluate(instruction.value),
     password: instruction.password === null ? undefined : evaluator.evaluate(instruction.password),
+    passwordField:
+      field === null
+        ? null
+        : {
+            hint:
+              field.hint === null
+                ? null
+                : fieldText(evaluator.evaluate(field.hint), span, currentTemporalContext(snapshot)),
+          },
     timeLock: instruction.timeLock === null ? undefined : evaluator.evaluate(instruction.timeLock),
   };
   const handoff = snapshot.interactionResultHandoff;
@@ -156,7 +171,7 @@ function startLock(
   operands: LockOperands,
   snapshot: RuntimeSnapshot,
 ): LockStep {
-  const { value, password } = operands;
+  const { value, password, passwordField } = operands;
   const span = instruction.span;
   const call = instruction.call;
   if (!locks(call) && password !== undefined && typeof password !== "string")
@@ -176,10 +191,13 @@ function startLock(
     // Text that is not Base64 is no lock, as for `fromBase64`.
     const binary = binaryFromBase64(value);
     if (binary === undefined) return { result: USE_DEFAULT };
-    return workStep(base64FromBinary(binary), written, null);
+    const lock = base64FromBinary(binary);
+    return passwordField === null ? workStep(lock, written, null) : fieldStep(lock, passwordField);
   }
-  if (call === "decryptFile")
-    return workStep(storedFile(call, value, snapshot, span), written, null);
+  if (call === "decryptFile") {
+    const file = storedFile(call, value, snapshot, span);
+    return passwordField === null ? workStep(file, written, null) : fieldStep(file, passwordField);
+  }
   const openers = encryptOpeners(call, operands, span);
   const text = call === "encryptText" ? value : storedFile(call, value, snapshot, span);
   if (typeof text !== "string")
@@ -188,14 +206,21 @@ function startLock(
       `encryptText(...) locks text (string), not ${describeRuntimeValue(text)}.`,
       copySpan(span),
     );
-  if (openers.choices.length === 0 && openers.password === null && openers.timeLockMs === null)
+  if (
+    openers.choices.length === 0 &&
+    openers.password === null &&
+    passwordField === null &&
+    openers.timeLockMs === null
+  )
     throw new RuntimeFault(
       "TSR059",
       `${call}(...) has no way to open, because 'password:' and 'timeLock:' are both false, so nothing could ever open it. Give one of them a value, or true to let the player choose.`,
       copySpan(span),
     );
-  // An opener written `true`, or each without any written, is chosen by the player in the Player's lock dialog.
-  if (openers.choices.length > 0) return dialogStep(call, text, openers, snapshot, span);
+  // An opener written `true`, or each without any written, is chosen by the player in the Player's lock dialog, after
+  // the password field of `password: askPassword(...)` asked for its password.
+  if (openers.choices.length > 0 || passwordField !== null)
+    return dialogStep(call, text, openers, passwordField, snapshot, span);
   return workStep(text, openers.password, openers.timeLockMs);
 }
 
@@ -205,7 +230,7 @@ function startLock(
  */
 function encryptOpeners(
   call: LockCall,
-  { password, timeLock }: LockOperands,
+  { password, passwordField, timeLock }: LockOperands,
   span: LockInstruction["span"],
 ): EncryptOpeners {
   if (password !== undefined && typeof password !== "string" && typeof password !== "boolean")
@@ -220,7 +245,7 @@ function encryptOpeners(
       `'timeLock:' of ${call}(...) takes a moment (absoluteDateTime), true, or false, not ${describeRuntimeValue(timeLock)}.`,
       copySpan(span),
     );
-  const written = password !== undefined || timeLock !== undefined;
+  const written = password !== undefined || passwordField !== null || timeLock !== undefined;
   const chosen = { password, timeLock };
   return {
     password: typeof password === "string" ? password : null,
@@ -238,17 +263,37 @@ function workStep(value: string, password: string | null, timeLockMs: number | n
     choices: [],
     dialogActionId: null,
     notice: null,
+    passwordField: null,
+  };
+}
+
+/** The password field of a decrypt call's `password: askPassword(...)`, which asks before the call opens. */
+function fieldStep(
+  value: string,
+  passwordField: NonNullable<RuntimeLockActionSnapshot["passwordField"]>,
+): LockStep {
+  return {
+    phase: "ask",
+    value,
+    password: null,
+    timeLockMs: null,
+    choices: [],
+    dialogActionId: null,
+    notice: null,
+    passwordField,
   };
 }
 
 /**
- * The lock dialog, which asks the player for the openers they choose; a chosen time lock is suggested 7 days from now.
- * The step after it locks with the openers the call gives and what the player chose.
+ * An encrypt call's password field, of `password: askPassword(...)`, and the lock dialog, which asks the player for the
+ * openers they choose, a chosen time lock suggested 7 days from now. The step after them locks with the openers the call
+ * gives and what the player gave.
  */
 function dialogStep(
   call: LockCall,
   value: string,
   { password, timeLockMs, choices }: EncryptOpeners,
+  passwordField: RuntimeLockActionSnapshot["passwordField"],
   snapshot: RuntimeSnapshot,
   span: LockInstruction["span"],
 ): LockStep {
@@ -262,6 +307,7 @@ function dialogStep(
     choices,
     dialogActionId: null,
     notice: null,
+    passwordField,
   };
 }
 
@@ -321,20 +367,25 @@ function nextLockStep(
     case "submitted": {
       // The operands were checked when the first run asked.
       const value = startValue(call, operands.value);
-      if (!locks(call))
-        return outcome === "submitted"
-          ? { ...workStep(value, null, null), dialogActionId: actionId }
-          : {
-              phase: "ask",
-              value,
-              password: null,
-              timeLockMs: null,
-              choices: [],
-              dialogActionId: null,
-              notice: detail === "wrongPassword" || detail === "unreachable" ? detail : null,
-            };
+      const field = operands.passwordField;
+      if (!locks(call)) {
+        if (outcome === "submitted")
+          return { ...workStep(value, null, null), dialogActionId: actionId, passwordField: field };
+        // The password field asks again for a password that this Player no longer has.
+        if (field !== null) return fieldStep(value, field);
+        return {
+          phase: "ask",
+          value,
+          password: null,
+          timeLockMs: null,
+          choices: [],
+          dialogActionId: null,
+          notice: detail === "wrongPassword" || detail === "unreachable" ? detail : null,
+          passwordField: null,
+        };
+      }
       const openers = encryptOpeners(call, operands, span);
-      // The step after the dialog locks with what the player chose there, instead of the moment it suggested.
+      // The step after the dialog locks with what the player gave there, instead of the moment it suggested.
       if (outcome === "submitted")
         return {
           phase: "work",
@@ -344,9 +395,10 @@ function nextLockStep(
           choices: openers.choices,
           dialogActionId: actionId,
           notice: null,
+          passwordField: field,
         };
-      // The lock dialog asks again, suggesting its time lock from now.
-      return dialogStep(call, value, openers, snapshot, span);
+      // The password field and the lock dialog ask again, a chosen time lock suggested from now.
+      return dialogStep(call, value, openers, field, snapshot, span);
     }
   }
 }
@@ -407,6 +459,7 @@ function requestLock(
     choices: step.choices,
     dialogActionId: step.dialogActionId,
     notice: step.notice,
+    passwordField: step.passwordField,
     resumes: 0,
   });
   snapshot.nextActionId += 1;
@@ -479,8 +532,8 @@ export type LockCompletion =
  * `{ kind: "opened", text }` of `decryptText`, `{ kind: "opened", file, type }` of `decryptFile`, whose type its bytes
  * give and whose file the trusted host vouches for with that type's kind, `{ kind: "notOpened" }` when a decrypt call
  * does not open, `{ kind: "failed", reason: "unreadable" | "unavailable" }`, or `{ kind: "ask", notice? }` when the Player
- * must ask the player: for a decrypt call without `password:`, or when the typed answer of the dialog was lost. In
- * `ask`: `{ kind: "submitted" }`, or `{ kind: "cancelled" }` for a decrypt call.
+ * must ask the player: for a decrypt call without `password:`, or when the typed answer of the dialog or password field
+ * was lost. In `ask`: `{ kind: "submitted" }`, or `{ kind: "cancelled" }` for the unlock dialog.
  */
 export function resolveLockCompletion(
   payload: unknown,
@@ -497,7 +550,14 @@ export function resolveLockCompletion(
   ) => ({ ok: true, outcome, detail, stored }) as const;
   if (action.phase === "ask") {
     if (payload.kind === "submitted" && keys === "kind") return ok("submitted");
-    if (payload.kind === "cancelled" && keys === "kind" && !encrypts) return ok("cancelled");
+    // The unlock dialog has Cancel; the password field, like any ask, has none.
+    if (
+      payload.kind === "cancelled" &&
+      keys === "kind" &&
+      !encrypts &&
+      action.passwordField === null
+    )
+      return ok("cancelled");
     return invalidLockPayload();
   }
   switch (payload.kind) {
@@ -546,11 +606,13 @@ export function resolveLockCompletion(
         break;
       return ok(payload.reason === "unreadable" ? "unreadable" : "failed");
     case "ask": {
-      // Only the dialog's own call asks: a decrypt call without `password:`, or one whose typed answer was lost.
+      // Only the dialog's own call asks: a decrypt call without `password:`, or one whose typed answer was lost. The
+      // password field asks again only for a password this Player no longer has.
       if (encrypts ? action.dialogActionId === null : action.password !== null) break;
       if (keys === "kind") return ok("ask");
       if (
         encrypts ||
+        action.passwordField !== null ||
         keys !== "kind,notice" ||
         (payload.notice !== "unreachable" &&
           (payload.notice !== "wrongPassword" || action.dialogActionId === null))

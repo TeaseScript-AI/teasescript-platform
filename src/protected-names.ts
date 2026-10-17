@@ -152,6 +152,7 @@ export const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "askDate",
   "askTime",
   "askDateTime",
+  "askPassword",
   "wait",
   "timer",
   "showPermanentButton",

@@ -55,6 +55,7 @@ import {
   type RandomControlOptions,
   type RandomDrawRequest,
   type RandomDrawResolutionOutcome,
+  textSha256,
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import { formValueText } from "../src/interaction-answers.js";
@@ -794,6 +795,12 @@ export function playerRuntimeForeground(
         // A native date control has no year 0000, so such a default is shown and edited as ISO text.
         ...(action.ui.prefill?.startsWith("0000") === true ? { isoText: true as const } : {}),
       });
+    case "password":
+      return Object.freeze({
+        kind: "ask-password",
+        accessibleName,
+        hint: action.ui.hint ?? "Type your response…",
+      });
     case "image":
       return Object.freeze({
         kind: "ask-image",
@@ -1017,8 +1024,8 @@ export interface PlayerRuntimeDebugNow {
     readonly at: PlayerDebugSourceLocation;
     /**
      * A lock step's openers, never its text, password, or key: whether its dialog asks the player, whether a password
-     * was written, its time lock's moment in epoch milliseconds, or `null`, which the lock dialog suggests for a chosen
-     * time lock, and the openers the player chooses in the lock dialog.
+     * was written or its password field asks for one, its time lock's moment in epoch milliseconds, or `null`, which the
+     * lock dialog suggests for a chosen time lock, and the openers the player chooses in the lock dialog.
      */
     readonly lock?: {
       readonly dialog: boolean;
@@ -1178,9 +1185,12 @@ export function playerRuntimeDebugNow(
             at: debugLocation(plan, foreground.owningInstruction),
             ...(foreground.kind === "lock"
               ? {
+                  // The password field of `password: askPassword(...)` is a password opener, not the dialog.
                   lock: Object.freeze({
-                    dialog: foreground.phase === "ask",
-                    password: foreground.password !== null,
+                    dialog:
+                      foreground.phase === "ask" &&
+                      (foreground.passwordField === null || foreground.choices.length > 0),
+                    password: foreground.password !== null || foreground.passwordField !== null,
                     timeLockMs: foreground.timeLockMs,
                     choices: foreground.choices,
                   }),
@@ -1388,6 +1398,15 @@ export function submitPlayerRuntimeComposer(
         ? cancelPlayerRuntimeForm(session)
         : stepPlayerRuntimeFormField(session, fields[0]!.id);
   }
+  // A password is answered with the SHA-256 of what was typed, as hashText gives it; the text itself goes nowhere. As
+  // askText needs text, it needs a password: an empty field answers nothing.
+  if (action?.ui.kind === "password")
+    return submittedText === ""
+      ? null
+      : completePlayerAction(session, action, {
+          kind: "submittedPassword",
+          hash: textSha256(submittedText),
+        });
   // The exact text of a skippable image request's skip control skips it; other text never answers an image request.
   if (action?.ui.kind === "image")
     return submittedText === IMAGE_SKIP_TEXT ? skipPlayerRuntimeImage(session) : null;
@@ -2580,6 +2599,7 @@ function interactionAccessibleName(value: InteractionAccessibleName): string {
     number: "Number",
     chooseOption: "Choose an option",
     continue: "Continue",
+    password: "Password",
   }[value.key];
 }
 

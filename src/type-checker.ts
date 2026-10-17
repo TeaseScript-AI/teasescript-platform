@@ -7991,6 +7991,15 @@ class TypeChecker {
     expression: Expression,
     type: StaticType,
   ): void {
+    // A password is typed by the person who knows it, never suggested (V30 §20).
+    if (kind === "password") {
+      this.#report(
+        typeCode.invalidOperand,
+        "askPassword takes no 'prefill:', since a password is never suggested. Remove 'prefill:'.",
+        expression.span,
+      );
+      return;
+    }
     const name = expression.kind === "identifier" ? expression.name : null;
     const value = nonNullTypeForUse(type);
     const holds = !isKnown(type)
@@ -11411,6 +11420,8 @@ function interactionResultType(
       return TIME_TYPE;
     case "datetime":
       return DATETIME_TYPE;
+    case "password":
+      return STRING_TYPE;
   }
 }
 

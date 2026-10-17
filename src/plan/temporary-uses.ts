@@ -112,6 +112,7 @@ export function requiredInstructionTemporaries(
     case "lock":
       collect(instruction.value);
       if (instruction.password !== null) collect(instruction.password);
+      if (instruction.passwordField?.hint) collect(instruction.passwordField.hint);
       if (instruction.timeLock !== null) collect(instruction.timeLock);
       break;
     case "storageWrite":
@@ -157,6 +158,9 @@ export function requiredInstructionTemporaries(
           instruction.preparedUi.kind === "form"
         ) {
           output.add(instruction.preparedUi.requestTemporary);
+        } else if (instruction.preparedUi.kind === "password") {
+          if (instruction.preparedUi.hintTemporary !== null)
+            output.add(instruction.preparedUi.hintTemporary);
         } else if (instruction.preparedUi.kind !== "choice") {
           if (instruction.preparedUi.hintTemporary !== null)
             output.add(instruction.preparedUi.hintTemporary);

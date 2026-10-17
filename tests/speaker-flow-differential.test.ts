@@ -68,15 +68,18 @@ const KNOB = (index: number): string => `let k${index} = load "k${index}", defau
 /** The one lock of the lock cases, which a written password opens. */
 const LOCK = "bG9jaw==";
 
-/** A Player that locks into {@link LOCK}, opens it with a written password or else asks, and whose dialog is cancelled. */
-const LOCKS: FlowLockAnswer = (action) =>
-  action.phase === "ask"
-    ? { kind: "cancelled" }
-    : action.call === "encryptText"
-      ? { kind: "locked", text: LOCK }
-      : action.password !== null
-        ? { kind: "opened", text: "inside" }
-        : { kind: "ask" };
+/**
+ * A Player that locks into {@link LOCK} and opens it with a password, written or typed in a password field, or else
+ * asks in its dialog, which is cancelled.
+ */
+const LOCKS: FlowLockAnswer = (action) => {
+  if (action.phase === "ask")
+    return action.passwordField === null ? { kind: "cancelled" } : { kind: "submitted" };
+  if (action.call === "encryptText") return { kind: "locked", text: LOCK };
+  return action.password !== null || action.dialogActionId !== null
+    ? { kind: "opened", text: "inside" }
+    : { kind: "ask" };
+};
 
 const give =
   (set: string) =>
@@ -444,6 +447,15 @@ const TEMPLATES: readonly Template[] = [
     ],
   },
   {
+    name: "a timer block that stores during a lock call's password field",
+    lock: LOCKS,
+    main: (k) => [
+      `timer async 1 ms { ${k.set} }`,
+      `let opened = decryptText("${LOCK}", password: askPassword("Password"), default: null)`,
+      `say ${k.expr} // READ`,
+    ],
+  },
+  {
     name: "a read in the default of a get",
     knobs: [undefined],
     skips: true,
@@ -488,6 +500,19 @@ const TEMPLATES: readonly Template[] = [
     main: (k) => [
       ...k.give("1"),
       `let a = askNumber "Q?", prefill: give(), hint: ${k.expr} // READ`,
+    ],
+  },
+  {
+    name: "askPassword with a call in its question then a read in its hint",
+    ask: true,
+    main: (k) => [...k.give('"Q?"'), `let a = askPassword give(), hint: ${k.expr} // READ`],
+  },
+  {
+    name: "a lock call's password field with a call in its question then a read in its hint",
+    ask: true,
+    main: (k) => [
+      ...k.give('"Q?"'),
+      `let o = decryptText("${LOCK}", password: askPassword(give(), hint: ${k.expr}), default: null) // READ`,
     ],
   },
   {

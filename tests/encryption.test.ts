@@ -86,11 +86,14 @@ class FakePlayer {
     this.#typed = null;
     if (action.call === "encryptText" || action.call === "encryptFile") {
       if (action.dialogActionId !== null && typed === null) return { kind: "ask" };
-      // The openers the player chose come from the dialog, the others from the call.
+      // The password field and the openers the player chose come from what was typed, the others from the call.
       const lock: FakeLock = {
         content:
           action.call === "encryptText" ? action.value : this.files.get(action.value)!.content,
-        password: action.choices.includes("password") ? (typed?.password ?? null) : action.password,
+        password:
+          action.passwordField !== null || action.choices.includes("password")
+            ? (typed?.password ?? null)
+            : action.password,
         timeLockMs: action.choices.includes("timeLock")
           ? (typed?.timeLockMs ?? null)
           : action.timeLockMs,
@@ -100,6 +103,8 @@ class FakePlayer {
         ? { kind: "locked", text }
         : { kind: "locked", file: this.keep("application/octet-stream", text) };
     }
+    if (action.dialogActionId !== null && action.passwordField !== null && typed === null)
+      return { kind: "ask" };
     const text =
       action.call === "decryptText" ? action.value : this.files.get(action.value)?.content;
     const lock = text === undefined ? undefined : this.locks.get(text);
@@ -108,8 +113,13 @@ class FakePlayer {
     const passed = lock.timeLockMs !== null && lock.timeLockMs <= this.nowMs(action);
     const opens = password !== null ? password === lock.password : passed;
     if (!opens) {
-      // A written password gives the default; so does a lock with nothing else to try.
-      if (action.password !== null || (lock.password === null && passed))
+      // A written password gives the default, also one from the password field; so does a lock with nothing else to
+      // try.
+      if (
+        action.password !== null ||
+        action.passwordField !== null ||
+        (lock.password === null && passed)
+      )
         return { kind: "notOpened" };
       return password === null ? { kind: "ask" } : { kind: "ask", notice: "wrongPassword" };
     }
@@ -411,6 +421,169 @@ test("a lock dialog whose typed answer was lost, as on a reload, asks again", ()
   );
 });
 
+test("password: askPassword(...) asks in the password field, says its question, and keeps the typed text out", () => {
+  const player = new FakePlayer();
+  player.dialogs.push(
+    { password: "s3cret pass" },
+    { password: "s3cret pass" },
+    { password: "xyzzy" },
+  );
+  const played = play(
+    [
+      'let locked = encryptText("corner time", password: askPassword("Choose a code", hint: "The code"), timeLock: getAbsoluteDateTime() + 7 days)',
+      'let opened = decryptText(locked, password: askPassword "Your code?", default: null)',
+      'let wrong = decryptText(locked, password: (askPassword("Again?")), default: "no")',
+      "exit",
+    ].join("\n"),
+    player,
+  );
+  const { locked, opened, wrong } = variables(played);
+  assert.equal(opened, "corner time");
+  assert.equal(wrong, "no");
+  // An encrypt call keeps its time lock; the field asks first, and the step after it works with its password.
+  const moment = WALL_CLOCK_MS + 7 * DAY_MS;
+  assert.deepEqual(asked(played), [
+    ["encryptText", "ask", null, moment, false, null, []],
+    ["encryptText", "work", null, moment, true, null, []],
+    ["decryptText", "ask", null, null, false, null, []],
+    ["decryptText", "work", null, null, true, null, []],
+    ["decryptText", "ask", null, null, false, null, []],
+    ["decryptText", "work", null, null, true, null, []],
+  ]);
+  assert.deepEqual(
+    played.steps.map((step) => step.passwordField),
+    [
+      { hint: "The code" },
+      { hint: "The code" },
+      { hint: null },
+      { hint: null },
+      { hint: null },
+      { hint: null },
+    ],
+  );
+  assert.deepEqual(player.locks.get(String(locked)), {
+    content: "corner time",
+    password: "s3cret pass",
+    timeLockMs: moment,
+  });
+  // Each question is said as an ask says it; nothing typed reaches the events, the state, or a checkpoint.
+  assert.deepEqual(
+    played.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["Choose a code", "Your code?", "Again?"],
+  );
+  assert.ok(!played.events.some((event) => event.kind === "playerTranscript"));
+  const kept = JSON.stringify([
+    played.events,
+    serializeCheckpoint(createCheckpoint(played.plan, played.snapshot)),
+  ]);
+  assert.ok(!kept.includes("s3cret") && !kept.includes("xyzzy"));
+});
+
+test("a password field and the openers written true ask in one step, and the lock takes both answers", () => {
+  const player = new FakePlayer();
+  player.dialogs.push({ password: "typed words", timeLockMs: WALL_CLOCK_MS + 2 * DAY_MS });
+  const played = play(
+    ['let both = encryptText("both", password: askPassword("Code?"), timeLock: true)', "exit"].join(
+      "\n",
+    ),
+    player,
+  );
+  assert.deepEqual(player.locks.get(String(variables(played).both)), {
+    content: "both",
+    password: "typed words",
+    timeLockMs: WALL_CLOCK_MS + 2 * DAY_MS,
+  });
+  assert.deepEqual(asked(played), [
+    ["encryptText", "ask", null, WALL_CLOCK_MS + 7 * DAY_MS, false, null, ["timeLock"]],
+    ["encryptText", "work", null, null, true, null, ["timeLock"]],
+  ]);
+  assert.deepEqual(
+    played.steps.map((step) => step.passwordField),
+    [{ hint: null }, { hint: null }],
+  );
+  // The password is the field's, so the dialog never chooses it, and the step keeps its field.
+  const plan = compileValidPlan(
+    'let both = encryptText("both", password: askPassword("Code?"), timeLock: true)\nexit',
+  );
+  const started = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { wallClockMs: WALL_CLOCK_MS }),
+  ).snapshot;
+  const step = lockStep(started);
+  for (const change of [{ choices: ["timeLock", "password"] }, { passwordField: null }])
+    assert.notDeepEqual(
+      validateRuntimeSnapshot({ ...started, foregroundAction: { ...step, ...change } }, plan)
+        .errors,
+      [],
+      JSON.stringify(change),
+    );
+});
+
+test("a password field says its question where password: stands, and asks again for a password the Player lost", () => {
+  const source = [
+    "function shown(text: string): string {",
+    "    say text, instant",
+    "    return text",
+    "}",
+    'let opened = decryptText(shown("bG9jaw=="), password: askPassword(shown("Code?")), default: shown("none"))',
+    'let locked = encryptText("x", password: askPassword("New code"), timeLock: false)',
+    "exit",
+  ].join("\n");
+  /** Forgets the first password typed, and keeps the second. */
+  class ForgetfulPlayer extends FakePlayer {
+    override answer(action: RuntimeLockActionSnapshot) {
+      if (action.phase === "ask" && this.dialogs.length === 0) {
+        this.forget = false;
+        this.dialogs.push({ password: "b" });
+      }
+      return super.answer(action);
+    }
+  }
+  const player = new ForgetfulPlayer();
+  player.forget = true;
+  player.dialogs.push({ password: "a" });
+  const lost = play(source.replace(/\nlet locked.*/u, ""), player);
+  // The arguments in written order, the question where `password:` stands; text that is no lock gives the default.
+  assert.deepEqual(
+    lost.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["bG9jaw==", "Code?", "Code?", "none"],
+  );
+  // The typed password was lost, so the field asked again.
+  assert.deepEqual(
+    asked(lost).map((step) => step.slice(0, 2)),
+    [
+      ["decryptText", "ask"],
+      ["decryptText", "work"],
+      ["decryptText", "ask"],
+      ["decryptText", "work"],
+    ],
+  );
+  assert.equal(variables(lost).opened, "none");
+  // The field has no Cancel.
+  const plan = compileValidPlan(
+    'let opened = decryptText("bG9jaw==", password: askPassword("Code?"), default: null)\nexit',
+  );
+  const started = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+  const field = lockStep(started);
+  assert.equal(
+    completeAction(plan, started, {
+      actionId: field.actionId,
+      actionKind: "lock",
+      payload: { kind: "cancelled" },
+    }).outcome.kind,
+    "invalidPayload",
+  );
+  // With a password field, `timeLock: false` leaves the password alone.
+  const kept = new FakePlayer();
+  kept.dialogs.push({ password: "a" }, { password: "b" });
+  const played = play(source, kept);
+  assert.deepEqual(kept.locks.get(String(variables(played).locked)), {
+    content: "x",
+    password: "b",
+    timeLockMs: null,
+  });
+});
+
 test("encryptFile locks a stored file into a locked file, and decryptFile opens it into a file of its type", () => {
   const player = new FakePlayer();
   const photo = player.keep("image/png", "PNG bytes");
@@ -697,6 +870,30 @@ test("a due expiry block interrupts a lock dialog, which asks again afterwards, 
   const after = run(working, completed.snapshot);
   assert.ok(after.events.some((event) => event.kind === "say" && event.text === "Time is up"));
   assert.equal(after.snapshot.status, "halted");
+
+  // The password field of `password: askPassword(...)` is interrupted as the dialog is, and asks anew afterwards.
+  const asking = compileValidPlan(
+    [
+      'timer async 1 s { say "Time is up", instant\n wait 2 s }',
+      'let locked = encryptText("x", password: askPassword("Code?"), timeLock: false)',
+      "exit",
+    ].join("\n"),
+  );
+  let field = run(
+    asking,
+    createImmediatePacingRuntimeSnapshot(asking, { wallClockMs: WALL_CLOCK_MS }),
+  );
+  const first = lockStep(field.snapshot);
+  assert.deepEqual([first.phase, first.passwordField, first.resumes], ["ask", { hint: null }, 0]);
+  field = run(asking, observeTime(asking, field.snapshot, 1000).snapshot);
+  assert.equal(field.snapshot.foregroundAction?.kind, "delay");
+  field = run(asking, observeTime(asking, field.snapshot, 3000).snapshot);
+  assert.deepEqual(validateRuntimeSnapshot(field.snapshot, asking).errors, []);
+  const anew = lockStep(field.snapshot);
+  assert.deepEqual(
+    [anew.actionId, anew.phase, anew.passwordField, anew.resumes],
+    [first.actionId, "ask", { hint: null }, 1],
+  );
 });
 
 test("a lock completion must fit its call and step, and its handoff is checked on restore", () => {

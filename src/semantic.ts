@@ -615,6 +615,7 @@ class SemanticValidator {
           "askDate",
           "askTime",
           "askDateTime",
+          "askPassword",
           "askBoolean",
           "askForm",
           "askBooleans",

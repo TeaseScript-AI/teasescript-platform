@@ -452,7 +452,8 @@ hidden until a session is shown. A script that does not compile cannot start: in
 diagnostics, each with its file, line, and message. The player's activation of Start is the user activation that later
 audible media playback relies on, so scripts may play audio from their first statement without a separate unlock step.
 
-The Player keeps the session in this browser: at each interaction it newly presents, when it ends, and when the page
+The Player keeps the session in this browser: at each interaction it newly presents, a lock's dialog or password field
+too, also one that asks again after a block, when it ends, and when the page
 is hidden, it stores the session's state, the events that led to it, and the photos only the session uses, which no
 save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/kept-sessions.ts`). Opening the script
 again, after a reload or with the browser closed in between, shows **Continue** on the start page instead of Start; it
@@ -915,9 +916,18 @@ keyboard. `askDate`, `askTime`, and `askDateTime` replace the composer's text fi
 date-and-time control, which submits ISO text, and show the hint beside it. These native controls cover the years 0001
 through 9999; a prefill in year 0000, which they cannot show, is offered as editable ISO text in the text field. When
 Send moves to an interaction whose field is of the other kind, the editing focus and the keyboard's state move to the
-new field. A prefill starts as the composer text,
-which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint restore the
-composer shows the prefill again, and unsent edits are not kept.
+new field. `askPassword` masks the composer's field, which keeps its one line, with an eye button at its end, "Show
+password" or "Hide password", that shows the text while the person typing chooses to, and "Caps Lock is on" under it
+while a key event reports Caps Lock; an empty field answers nothing, and the answer adds no line to the chat; after a
+block interrupted it, the field is empty again. The password field of `password: askPassword(...)` in an encrypt or
+decrypt call is the same masked field; an encrypt call's adds a "Repeat password" field below it, past a dividing line,
+with its own eye button, "Show repeated password" or "Hide repeated password". Enter in the first moves to it, and Send
+or Enter there locks only when both match, else the composer notice says "The passwords do not match", the repeat
+empties, and the password is selected. A call with openers written `true` shows its lock dialog once the passwords
+match, and locks with both answers. While the Player locks or opens, the fields are read-only. The field starts empty each time it shows, also after a block interrupted it, and takes the
+focus back when the player was typing in the composer before it; nothing typed in it is kept. A prefill starts as the
+composer text, which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint
+restore the composer shows the prefill again, and unsent edits are not kept.
 
 `askImage(...)` that allows files shows a paperclip before the composer's input, named "Attach an image", with the
 request's `hint:` as the input's hint, or "Add an image…" without one. The paperclip opens the browser's native file

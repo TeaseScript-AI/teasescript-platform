@@ -257,6 +257,7 @@ const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionK
   ["askDate", "date"],
   ["askTime", "time"],
   ["askDateTime", "datetime"],
+  ["askPassword", "password"],
   ["askBoolean", "boolean"],
   ["askForm", "form"],
   ["askBooleans", "booleans"],
@@ -290,20 +291,30 @@ const NAMED_ASK_OPTIONS: ReadonlyMap<InteractionExpression["interactionKind"], r
   ]);
 /** The one named argument of `askChoice`, written once after its options. */
 const CHOICE_OPTIONS: readonly string[] = ["prefill"];
+/** The one named argument of `askPassword`: a password is never suggested, so it has no `prefill:`. */
+const PASSWORD_OPTIONS: readonly string[] = ["hint"];
 /** The named options of `showButton` after its label. */
 export const SHOW_BUTTON_OPTIONS: readonly string[] = ["background", "timeout"];
 
 /** The named arguments of an ask, such as `prefill:` and `hint:` of `askText`, as the parser accepts them. */
 export function askOptionNames(kind: InteractionExpression["interactionKind"]): readonly string[] {
-  return kind === "choice" ? CHOICE_OPTIONS : (NAMED_ASK_OPTIONS.get(kind) ?? ASK_OPTIONS);
+  if (kind === "choice") return CHOICE_OPTIONS;
+  return kind === "password" ? PASSWORD_OPTIONS : (NAMED_ASK_OPTIONS.get(kind) ?? ASK_OPTIONS);
 }
+
+/** The named arguments the parser reads for an ask: its own, and for `askPassword` a `prefill:` the type check refuses. */
+function readAskOptionNames(kind: InteractionExpression["interactionKind"]): readonly string[] {
+  return kind === "password" ? READ_PASSWORD_OPTIONS : askOptionNames(kind);
+}
+const READ_PASSWORD_OPTIONS: readonly string[] = [...PASSWORD_OPTIONS, "prefill"];
 /**
  * The earlier name of an ask's `prefill:`, which is a compile error that names the fix (owner decision on #512,
  * 2026-10-08): `default:`, or `defaults:` for `askBooleans`.
  */
 function removedPrefillName(kind: InteractionExpression["interactionKind"]): string | null {
   if (kind === "booleans") return "defaults";
-  return kind === "choice" || kind === "form" ? null : "default";
+  // askPassword came after the rename and never had one.
+  return kind === "choice" || kind === "form" || kind === "password" ? null : "default";
 }
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
 const OPENING_TOKENS: ReadonlySet<TokenKind> = new Set([
@@ -4227,6 +4238,7 @@ class Parser {
       this.#checkIdentifier("askDate") ||
       this.#checkIdentifier("askTime") ||
       this.#checkIdentifier("askDateTime") ||
+      this.#checkIdentifier("askPassword") ||
       this.#checkIdentifier("askBoolean") ||
       this.#checkIdentifier("askForm") ||
       this.#checkIdentifier("askBooleans") ||
@@ -4432,7 +4444,7 @@ class Parser {
     }
 
     if (interactionKind !== "choice") {
-      const names = askOptionNames(interactionKind);
+      const names = readAskOptionNames(interactionKind);
       // The earlier name of the prefill is read as an option too, so its error names the fix wherever it is written.
       const removed = removedPrefillName(interactionKind);
       const recognized = removed === null ? names : [...names, removed];
@@ -4694,7 +4706,7 @@ class Parser {
     const parts = this.#boundedArguments(
       command,
       call,
-      askOptionNames(interactionKind),
+      readAskOptionNames(interactionKind),
       parserDiagnosticCode.unsupportedInteractionForm,
     );
     if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
