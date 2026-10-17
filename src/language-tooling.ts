@@ -26,6 +26,14 @@ import {
   type RandomFunction,
 } from "./random-functions.js";
 import {
+  CLOCK_CONTRACTS,
+  isClockFunction,
+  isTemporalMethod,
+  TEMPORAL_METHODS,
+  temporalSyntax,
+  type TemporalMethodName,
+} from "./temporal-builtins.js";
+import {
   isTextOnlyMethod,
   TEXT_METHODS,
   textMethodSyntax,
@@ -71,6 +79,7 @@ import {
   TEASESCRIPT_PROTECTED_TYPE_NAMES,
   type AskCommand,
   type CommandName,
+  type ClockFunctionName,
   type ConversionName,
   type NumericFunctionName,
   type RandomFunctionName,
@@ -120,7 +129,10 @@ export interface LanguageCompletionItem {
 }
 
 export interface LanguageContextHelp {
-  /** A command, or a built-in function or a method of text called at the position (see `ContractCall`). */
+  /**
+   * A command, or a built-in function or a method of text or of date and time values called at the position (see
+   * `ContractCall`).
+   */
   readonly command: CompactCommand | OtherCommand | ContractName;
   readonly summary: string;
   readonly syntax: string;
@@ -898,18 +910,30 @@ function declaredSpeakers(source: string): readonly string[] {
 }
 
 /**
- * A built-in whose help comes from its contract: a conversion, a numeric or angle function, a random function, or a
- * method that only text has (`CONVERSIONS`, `NUMERIC_CONTRACTS`, `RANDOM_CONTRACTS`, `TEXT_METHODS`). A method that other
- * values have too, such as `contains`, may be called on a value the editor does not know, so it has none.
+ * A built-in whose help comes from its contract: a conversion, a numeric or angle function, a random function, a clock
+ * read, a method that only text has, or a method of date and time values (`CONVERSIONS`, `NUMERIC_CONTRACTS`,
+ * `RANDOM_CONTRACTS`, `CLOCK_CONTRACTS`, `TEXT_METHODS`, `TEMPORAL_METHODS`). A method that other values have too, such
+ * as `contains`, may be called on a value the editor does not know, so it has none.
  */
-type ContractName = ConversionName | NumericFunctionName | RandomFunctionName | TextMethodName;
+type ContractName =
+  | ConversionName
+  | NumericFunctionName
+  | RandomFunctionName
+  | ClockFunctionName
+  | TextMethodName
+  | TemporalMethodName;
 
-/** A call of a built-in with a contract in the source: its name, where the name is, and where its `(` is. */
-interface ContractCall {
-  readonly name: ContractName;
-  readonly range: LanguageRange;
-  readonly opener: number;
-}
+/**
+ * A call of a built-in with a contract in the source: its name, whether it is a method, where the name is, and where its
+ * `(` is. A date and time value's `toDateTime()` is a method of the same name as a conversion.
+ */
+type ContractCall = { readonly range: LanguageRange; readonly opener: number } & (
+  | {
+      readonly method: false;
+      readonly name: ConversionName | NumericFunctionName | RandomFunctionName | ClockFunctionName;
+    }
+  | { readonly method: true; readonly name: TextMethodName | TemporalMethodName }
+);
 
 /**
  * The help at `offset`: of the innermost compact command, other command, or call of a built-in with a contract there,
@@ -936,36 +960,7 @@ function locateHelp(
     located === null ? -1 : located.range.start.offset;
   const innermost = Math.max(start(compact), start(call), start(command));
   if (call !== null && start(call) === innermost)
-    return {
-      help: Object.freeze(
-        isConversion(call.name)
-          ? {
-              command: call.name,
-              summary: CONVERSIONS[call.name].summary,
-              syntax: conversionSyntax(call.name),
-            }
-          : isNumericFunction(call.name)
-            ? {
-                command: call.name,
-                summary: NUMERIC_CONTRACTS[call.name].summary,
-                syntax: numericSyntax(call.name),
-              }
-            : isRandomFunction(call.name)
-              ? {
-                  command: call.name,
-                  summary: RANDOM_CONTRACTS[call.name].summary,
-                  syntax: randomSyntax(call.name),
-                }
-              : {
-                  command: call.name,
-                  summary: TEXT_METHODS[call.name].summary,
-                  syntax: textMethodSyntax(call.name),
-                },
-      ),
-      range: call.range,
-      call,
-      command: null,
-    };
+    return { help: Object.freeze(contractHelp(call)), range: call.range, call, command: null };
   if (command !== null && start(command) === innermost)
     return { help: COMMAND_HELP[command.name].help, range: command.range, call: null, command };
   return compact === null
@@ -1227,6 +1222,45 @@ function helpedCommand(
   return token.lexeme as OtherCommand;
 }
 
+/** The help of a call of a built-in with a contract, from its contract. */
+function contractHelp(call: ContractCall): LanguageContextHelp {
+  if (call.method)
+    return isTemporalMethod(call.name)
+      ? {
+          command: call.name,
+          summary: TEMPORAL_METHODS[call.name].summary,
+          syntax: temporalSyntax(call.name),
+        }
+      : {
+          command: call.name,
+          summary: TEXT_METHODS[call.name].summary,
+          syntax: textMethodSyntax(call.name),
+        };
+  if (isConversion(call.name))
+    return {
+      command: call.name,
+      summary: CONVERSIONS[call.name].summary,
+      syntax: conversionSyntax(call.name),
+    };
+  if (isNumericFunction(call.name))
+    return {
+      command: call.name,
+      summary: NUMERIC_CONTRACTS[call.name].summary,
+      syntax: numericSyntax(call.name),
+    };
+  if (isRandomFunction(call.name))
+    return {
+      command: call.name,
+      summary: RANDOM_CONTRACTS[call.name].summary,
+      syntax: randomSyntax(call.name),
+    };
+  return {
+    command: call.name,
+    summary: CLOCK_CONTRACTS[call.name].summary,
+    syntax: temporalSyntax(call.name),
+  };
+}
+
 /**
  * The innermost call of a built-in with a contract whose name, or whose arguments up to the `)` that closes it, hold
  * `offset`. It is read from the tokens of the statement there, so that a call being written, without its `)`, holds
@@ -1244,28 +1278,28 @@ function locateContractCall(tokens: readonly Token[], offset: number): ContractC
   for (const [index, token] of tokens.entries()) {
     if (OPENING_DELIMITERS.has(token.kind)) {
       const name = tokens[index - 1];
-      // After a dot, a method that only text has, also `repeat`, which the lexer reads as a keyword. A method of the same
-      // name as a function, such as a datetime's `toAbsoluteDateTime()`, and a declared function are not calls of the
-      // built-in.
+      // After a dot, a method that only text has, also `repeat`, which the lexer reads as a keyword, or a method of date
+      // and time values, also one of the same name as a function, such as a datetime's `toAbsoluteDateTime()`. A declared
+      // function is not a call of the built-in.
       const before = tokens[index - 2]?.kind;
-      const word = name?.lexeme ?? "";
-      const contract: ContractName | null =
-        token.kind !== TokenKind.LeftParenthesis || name === undefined
-          ? null
-          : before === TokenKind.Dot
-            ? isTextOnlyMethod(word)
-              ? word
-              : null
-            : name.kind === TokenKind.Identifier &&
-                before !== TokenKind.KeywordFunction &&
-                (isConversion(word) || isNumericFunction(word) || isRandomFunction(word))
-              ? word
-              : null;
-      open.push(
-        contract === null || name === undefined
-          ? null
-          : { name: contract, range: name.span, opener: token.span.start.offset },
-      );
+      let call: ContractCall | null = null;
+      if (token.kind === TokenKind.LeftParenthesis && name !== undefined) {
+        const word = name.lexeme;
+        const at = { range: name.span, opener: token.span.start.offset };
+        if (before === TokenKind.Dot) {
+          if (isTextOnlyMethod(word) || isTemporalMethod(word))
+            call = { ...at, method: true, name: word };
+        } else if (
+          name.kind === TokenKind.Identifier &&
+          before !== TokenKind.KeywordFunction &&
+          (isConversion(word) ||
+            isNumericFunction(word) ||
+            isRandomFunction(word) ||
+            isClockFunction(word))
+        )
+          call = { ...at, method: false, name: word };
+      }
+      open.push(call);
     } else if (CLOSING_DELIMITERS.has(token.kind))
       holds(open.pop() ?? null, token.span.start.offset);
   }
@@ -1315,7 +1349,7 @@ function callParameters(
   }
   let form: readonly string[];
   let parameters: readonly string[];
-  if (isConversion(call.name)) {
+  if (!call.method && isConversion(call.name)) {
     const conversion: Conversion = CONVERSIONS[call.name];
     form =
       conversion.pair !== undefined && positional >= (named === null ? 1 : 2)
@@ -1326,16 +1360,20 @@ function callParameters(
       ...(conversion.fallback === null ? [] : ["default"]),
       ...(conversion.files ? ["files"] : []),
     ]);
-  } else if (isNumericFunction(call.name)) {
+  } else if (!call.method && isNumericFunction(call.name)) {
     const numeric: NumericFunction = NUMERIC_CONTRACTS[call.name];
     form = numeric.parameters;
     parameters = Object.freeze([...form, ...(numeric.named ?? [])]);
-  } else if (isRandomFunction(call.name)) {
+  } else if (!call.method && isRandomFunction(call.name)) {
     const random: RandomFunction = RANDOM_CONTRACTS[call.name];
     form = random.takes === "choices" ? ["dict"] : random.parameters;
     parameters = Object.freeze([...form, ...(random.takes === "choices" ? ["weight"] : [])]);
-  } else {
+  } else if (call.method && !isTemporalMethod(call.name)) {
     form = TEXT_METHODS[call.name].parameters.map((parameter) => parameter.name);
+    parameters = Object.freeze(form);
+  } else {
+    // A clock read and a method of date and time values take no arguments.
+    form = [];
     parameters = Object.freeze(form);
   }
   return {
