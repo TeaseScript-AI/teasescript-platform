@@ -71,19 +71,23 @@ export function legacyFacts(
         .sort((left, right) => compareText(left.name, right.name)),
     }))
     .sort((left, right) => compareText(left.name, right.name));
+  // Each load belongs to one key: group them once, not once per key.
+  const loadsByKey = new Map<string, SolvedTypeFacts["storage"][number]["loads"][number][]>();
+  for (const load of checker.storageLoads) {
+    const loads = loadsByKey.get(load.key) ?? [];
+    loads.push({
+      site: factSite(spanFiles.get(load.at) ?? -1, load.at),
+      type: typeKey(load.type, true, true),
+      declared: load.declared,
+    });
+    loadsByKey.set(load.key, loads);
+  }
   const storageFacts = [...storage]
     .map(([key, kept]) => ({
       key,
       type: typeKey(kept.type, true, true),
       declared: kept.declared,
-      loads: checker.storageLoads
-        .filter((load) => load.key === key)
-        .map((load) => ({
-          site: factSite(spanFiles.get(load.at) ?? -1, load.at),
-          type: typeKey(load.type, true, true),
-          declared: load.declared,
-        }))
-        .sort((left, right) => compareSites(left.site, right.site)),
+      loads: (loadsByKey.get(key) ?? []).sort((left, right) => compareSites(left.site, right.site)),
     }))
     .sort((left, right) => compareText(left.key, right.key));
   return {

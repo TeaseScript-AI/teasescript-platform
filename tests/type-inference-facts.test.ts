@@ -148,8 +148,10 @@ test("the facts list the custom properties of speakers and the names no speaker 
       "exit",
     ].join("\n"),
   }).facts();
-  // A store through a speaker the compiler cannot tell apart leaves the property's name without a type, for every
-  // speaker (ADR 0021 rule 1.7): `score` is unchecked and `vera` keeps no type for it.
+  // A store through a speaker the compiler cannot tell apart is not checked (ADR 0021 rule 1.7); that the legacy
+  // inference then keeps no type for the property's name on any speaker is its own mechanism (`UncheckedProperties`),
+  // recorded here as the oracle for the replacement, not as a language rule: `score` is unchecked and `vera` keeps
+  // no type for it.
   assert.deepEqual(facts.speakers, [
     { name: "vera", properties: [{ name: "mood", type: "string" }] },
   ]);

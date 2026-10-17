@@ -165,7 +165,8 @@ export interface SolvedTypeFacts {
   }[];
   /**
    * Author functions: the parameter types their declaration and defaults give, the parameters as the body accepts
-   * them, and the result, each `null` while unknown (a function never needed is never completed).
+   * them, and the result. `null` stands for a part the analysis did not compute; a part it computed but could not
+   * know is the text `unknown`. The legacy check completes every declared function, called or not (ADR 0021 §1.6).
    */
   readonly functions: readonly {
     readonly site: FactSite;
