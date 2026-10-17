@@ -14,11 +14,18 @@
 // also runs once in each (tests/helpers/flow-differential.ts, within its limits), and the tool compares what each run
 // says, its status and its failure; the instructions a run executed are numbered by its own plan, so they are not
 // compared.
-// A case is identical or differs, first by error (one build threw), then diagnostics, plan, or runs.
-// --time R measures instead: per case one warm-up compile per build, then R rounds of base and head in turn, and it
-// prints each build's median compile time and their ratio; with --run it also compares.
+// --internal also compares what the checks before lowering find, also where the compilation is rejected: it repeats
+// checkProject of src/compiler.ts with each build's own modules (keep it in step), with the parser's diagnostics and the
+// name checks of every file, and, unless an error leaves the type check without a basis (the build's `stopsTypeCheck`,
+// or else any error), the whole TypeCheckResult (`checkTypes` of src/type-inference/index.js, or else of
+// src/type-checker.js). That result is encoded as JSON by site: an AST node becomes its file's index and its span's
+// offsets, a Map or Set is sorted by the encoded text, and an object of a class keeps its own properties and is
+// reported. With --out, a head build that exports `analyzeTypes` also records the facts of its analysis (`headFacts`).
+// A case is identical or differs, first by error (one build threw), then diagnostics, plan, runs, or internal.
+// --time R measures: per case one warm-up compile per build, then R rounds of base and head in turn, and it prints each
+// build's median compile time and their ratio; with --run or --internal it also compares.
 // Usage: node tools/compiler-differential.mjs --base <dist> --head <dist> [--generated N --seed S]
-//   [--cases <path>]... [--run] [--out <file.json>] [--limit N] [--time R] [--json]
+//   [--cases <path>]... [--run] [--internal] [--out <file.json>] [--limit N] [--time R] [--json]
 // --limit (20 by default) caps the differing cases it prints, --out writes every case and both builds' forms of each
 // difference, and --json prints the summary as JSON. Exit status: 0 all identical (or only timed), 1 any difference,
 // 2 usage, a missing or failing build, or an unreadable case.
@@ -28,13 +35,14 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const usage = `Usage: node tools/compiler-differential.mjs --base <dist> --head <dist> [--generated N --seed S]
-  [--cases <path>]... [--run] [--out <file.json>] [--limit N] [--time R] [--json]`;
+  [--cases <path>]... [--run] [--internal] [--out <file.json>] [--limit N] [--time R] [--json]`;
 const BUILD_PARAMETER = "differential-build";
-const CLASSES = ["identical", "diagnostics", "plan", "runs", "error"];
+const CLASSES = ["identical", "diagnostics", "plan", "runs", "internal", "error"];
 // The order in which a case's first difference is chosen: when a build threw, nothing else of it can be compared.
-const PRECEDENCE = ["error", "diagnostics", "plan", "runs"];
+const PRECEDENCE = ["error", "diagnostics", "plan", "runs", "internal"];
 const SHOWN_LINES = 12;
 const SHOWN_VALUE = 160;
+const ERROR_SEVERITY = "error";
 // Where only one of two values has an element or a property.
 const absent = Symbol("absent");
 
@@ -73,7 +81,7 @@ for (let index = 0; index < options.generated; index += 1) {
 }
 for (const path of options.cases) addCases(resolve(path), cases);
 
-const compare = options.time === 0 || options.run;
+const compare = options.time === 0 || options.run || options.internal;
 const started = performance.now();
 const compared = compare ? cases.map(compareCase) : [];
 const elapsedMs = performance.now() - started;
@@ -107,6 +115,7 @@ function parseArguments(args) {
     seed: null,
     cases: [],
     run: false,
+    internal: false,
     out: null,
     limit: 20,
     time: 0,
@@ -125,6 +134,7 @@ function parseArguments(args) {
     else if (arg === "--seed") parsed.seed = integer(arg, value(), -Infinity);
     else if (arg === "--cases") parsed.cases.push(value());
     else if (arg === "--run") parsed.run = true;
+    else if (arg === "--internal") parsed.internal = true;
     else if (arg === "--out") parsed.out = value();
     else if (arg === "--limit") parsed.limit = integer(arg, value(), 0);
     else if (arg === "--time") parsed.time = integer(arg, value(), 1);
@@ -159,13 +169,47 @@ async function loadBuild(name, dist) {
     return import(url.href);
   };
   try {
-    const { compileProject } = await load("src/compiler.js");
+    const { compileProject, CORE_RUNTIME_BUILTINS } = await load("src/compiler.js");
     const { compileAndRunVariants } = await load("tests/helpers/flow-differential.js");
     const fuzz = await load("tests/property/source-fuzz.js");
-    return { name, root, compileProject, compileAndRunVariants, fuzz };
+    const checks = options.internal ? await checkModules(root, load, CORE_RUNTIME_BUILTINS) : null;
+    return { name, root, compileProject, compileAndRunVariants, fuzz, checks };
   } catch (error) {
     failLoad(`Cannot load the ${name} build from ${root}: ${describeError(error)}`);
   }
+}
+
+// What --internal repeats of checkProject, from the build's own modules.
+async function checkModules(root, load, builtins) {
+  const { parse } = await load("src/parser.js");
+  const { validateProjectSemantics, stopsTypeCheck } = await load("src/semantic.js");
+  const { PROTECTED_NAME_CODE } = await load("src/language-facts.js");
+  const { findNonFiniteNumericLiteralDiagnosticsInStableProgram } =
+    await load("src/ast-validation.js");
+  const { capturesTaggedPhotos } = await load("src/capture-call.js");
+  const { runsOnItsOwn } = await load("src/project-globals.js");
+  const { compareProjectPaths, packagePathProblem } = await load("src/project-paths.js");
+  const inference = existsSync(join(root, "src/type-inference/index.js"))
+    ? await load("src/type-inference/index.js")
+    : {};
+  const checkTypes = inference.checkTypes ?? (await load("src/type-checker.js")).checkTypes;
+  const checks = {
+    builtins,
+    parse,
+    validateProjectSemantics,
+    stopsTypeCheck: stopsTypeCheck ?? ((diagnostic) => diagnostic.severity === ERROR_SEVERITY),
+    protectedNameCode: PROTECTED_NAME_CODE,
+    nonFiniteLiterals: findNonFiniteNumericLiteralDiagnosticsInStableProgram,
+    capturesTaggedPhotos,
+    runsOnItsOwn,
+    compareProjectPaths,
+    packagePathProblem,
+    checkTypes,
+    analyzeTypes: inference.analyzeTypes ?? null,
+  };
+  const missing = Object.keys(checks).filter((key) => checks[key] === undefined);
+  if (missing.length > 0) throw new Error(`--internal needs ${missing.join(", ")}.`);
+  return checks;
 }
 
 function addCases(path, found) {
@@ -264,15 +308,28 @@ function compareCase(testCase) {
       } else if (base.run.runsText !== head.run.runsText) differences.push("runs");
     }
   }
+  if (options.internal) {
+    [base.checks, head.checks] = builds.map((build) => checksOutcome(build, testCase.files));
+    nonJson.push(...base.checks.nonJson, ...head.checks.nonJson);
+    if (base.checks.threw !== undefined || head.checks.threw !== undefined) {
+      if (base.checks.threw !== head.checks.threw) {
+        if (!differences.includes("error")) differences.push("error");
+      } else threwInBoth ??= `checks: ${base.checks.threw}`;
+    } else if (base.checks.text !== head.checks.text) differences.push("internal");
+  }
   differences.sort((a, b) => PRECEDENCE.indexOf(a) - PRECEDENCE.indexOf(b));
   return {
     id: testCase.id,
     class: differences[0] ?? "identical",
     ...(differences.length > 1 ? { differences } : {}),
     ...(base.run === undefined ? {} : { ran: true }),
+    ...(base.checks?.typesChecked === true && head.checks?.typesChecked === true
+      ? { typesChecked: true }
+      : {}),
     ...(threwInBoth === null ? {} : { threwInBoth }),
     ...(nonJson.length === 0 ? {} : { nonJson }),
     ...(differences.length === 0 ? {} : { base: normalised(base), head: normalised(head) }),
+    ...(head.checks?.facts === undefined ? {} : { headFacts: head.checks.facts }),
   };
 }
 
@@ -313,13 +370,235 @@ function runOutcome(build, files) {
   }
 }
 
+// What checkProject finds before lowering, with the build's own modules. The files are those compileProject keeps, in
+// project order; their checks see the same options and inputs as the compiler's.
+function checksOutcome(build, sourceFiles) {
+  const checks = build.checks;
+  try {
+    const files = sourceFiles
+      .filter(
+        ({ path }, index) =>
+          checks.packagePathProblem(path) === null &&
+          sourceFiles.findIndex((file) => file.path === path) === index,
+      )
+      .sort((left, right) => checks.compareProjectPaths(left.path, right.path))
+      .map(({ path, source }) => {
+        const { program, header, diagnostics } = checks.parse(source);
+        const literals = checks.nonFiniteLiterals(program);
+        return {
+          path,
+          program,
+          header,
+          parse: [...diagnostics, ...literals],
+          // As parseFile: a protected declaration name is a problem of the names, which leaves the syntax whole.
+          syntaxError: [
+            ...diagnostics.filter((diagnostic) => diagnostic.code !== checks.protectedNameCode),
+            ...literals,
+          ].some((diagnostic) => diagnostic.severity === ERROR_SEVERITY),
+        };
+      });
+    const projectFiles = files.map(({ path, program }) => ({ path, program }));
+    const checkOptions = {
+      builtins: Object.freeze([...checks.builtins]),
+      capturesTaggedPhotos: checks.capturesTaggedPhotos(files.map((file) => file.program)),
+      scriptCatalog: files.map((file) => ({ path: file.path, tags: scriptTags(file, checks) })),
+    };
+    const names = checks.validateProjectSemantics(
+      projectFiles,
+      checkOptions,
+      (index) => !files[index].syntaxError,
+    );
+    const typesChecked = !files.some((file, index) =>
+      [...file.parse, ...names[index].diagnostics].some(checks.stopsTypeCheck),
+    );
+    const typeOptions = {
+      ...checkOptions,
+      sharedWrites: new Map(names.flatMap((result) => [...result.sharedWrites])),
+      written: {
+        lets: new Set(names.flatMap((result) => [...result.writtenLets])),
+        globals: new Set(names.flatMap((result) => [...result.writtenGlobals])),
+      },
+      speakers: new Map(names.flatMap((result) => [...result.speakers])),
+    };
+    const types = typesChecked ? checks.checkTypes(projectFiles, typeOptions) : null;
+    const context = { sites: astSites(files), found: [] };
+    const found = {
+      files: files.map((file, index) => ({
+        path: file.path,
+        parse: file.parse.map((diagnostic) => diagnosticLine(diagnostic, file.path)),
+        names: encoded(
+          {
+            diagnostics: names[index].diagnostics.map((diagnostic) =>
+              diagnosticLine(diagnostic, file.path),
+            ),
+            sharedWrites: names[index].sharedWrites,
+            writtenLets: names[index].writtenLets,
+            writtenGlobals: names[index].writtenGlobals,
+            speakers: names[index].speakers,
+          },
+          `internal.files[${index}].names`,
+          context,
+        ),
+      })),
+      types:
+        types === null
+          ? null
+          : encoded(
+              {
+                ...types,
+                diagnostics: types.diagnostics.map((diagnostics, index) =>
+                  diagnostics.map((diagnostic) => diagnosticLine(diagnostic, files[index].path)),
+                ),
+              },
+              "internal.types",
+              context,
+            ),
+    };
+    if (types !== null && Object.getPrototypeOf(types) !== Object.prototype)
+      context.found.push({ path: "internal.types", kind: "class object" });
+    const facts =
+      types !== null &&
+      build.name === "head" &&
+      options.out !== null &&
+      checks.analyzeTypes !== null
+        ? canonical(
+            checks.analyzeTypes({ files: projectFiles, options: typeOptions }).facts(),
+            "headFacts",
+            context.found,
+          )
+        : undefined;
+    return {
+      found,
+      text: JSON.stringify(found),
+      typesChecked,
+      ...(facts === undefined ? {} : { facts }),
+      nonJson: context.found.map((value) => ({ build: build.name, ...value })),
+    };
+  } catch (error) {
+    return { threw: describeError(error), nonJson: [] };
+  }
+}
+
+// As the compiler's scriptTags: a file's header tags in name order, or null for a file of declarations only.
+function scriptTags(file, checks) {
+  if (!file.program.statements.some(checks.runsOnItsOwn)) return null;
+  return [...(file.header?.tags ?? [])].sort((left, right) => (left.name < right.name ? -1 : 1));
+}
+
+// The file of every AST node: each object of a file's program or header that has a span. A span holds no nodes.
+function astSites(files) {
+  const sites = new WeakMap();
+  files.forEach((file, index) => {
+    const work = [file.program, file.header];
+    while (work.length > 0) {
+      const value = work.pop();
+      if (value === null || typeof value !== "object" || sites.has(value)) continue;
+      if (Array.isArray(value)) {
+        work.push(...value);
+        continue;
+      }
+      if (!isSpan(value.span)) continue;
+      sites.set(value, index);
+      for (const [key, item] of Object.entries(value)) if (key !== "span") work.push(item);
+    }
+  });
+  return sites;
+}
+
+function isSpan(value) {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof value.start?.offset === "number" &&
+    typeof value.end?.offset === "number"
+  );
+}
+
+// The value as canonical JSON data. An AST node, or an object with a string `kind` and a span, becomes
+// {"$site": "<file>:<start offset>-<end offset>", "kind": ...}, with `?` as the file of a node no program of the case
+// holds. A Map becomes {"$map": [[key, value], ...]} and a Set {"$set": [...]}, sorted by the encoded text; other
+// objects have sorted keys, and properties that are undefined are left out. What JSON cannot hold otherwise is converted
+// as by `canonical`, and recorded in `context.found` with its path, as is an object of a class, which keeps its own
+// properties, and a Map or Set with two members that encode alike.
+function encoded(value, path, context) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") return canonical(value, path, context.found);
+  if (Array.isArray(value))
+    return value.map((item, index) => encoded(item, `${path}[${index}]`, context) ?? null);
+  if (value instanceof Map)
+    return {
+      $map: sortedMembers(
+        [...value].map(([key, item], index) => [
+          encoded(key, `${path}.$map[${index}][0]`, context),
+          encoded(item, `${path}.$map[${index}][1]`, context),
+        ]),
+        ([key]) => JSON.stringify(key),
+        path,
+        context,
+      ),
+    };
+  if (value instanceof Set)
+    return {
+      $set: sortedMembers(
+        [...value].map((item, index) => encoded(item, `${path}.$set[${index}]`, context)),
+        (item) => JSON.stringify(item),
+        path,
+        context,
+      ),
+    };
+  if (typeof value === "object") {
+    const file = context.sites.get(value);
+    if (file !== undefined || (typeof value.kind === "string" && isSpan(value.span)))
+      return {
+        $site: `${file ?? "?"}:${value.span.start.offset}-${value.span.end.offset}`,
+        ...(typeof value.kind === "string" ? { kind: value.kind } : {}),
+      };
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null)
+      context.found.push({ path, kind: `${prototype.constructor?.name ?? "unnamed"} object` });
+    if (Object.getOwnPropertySymbols(value).length > 0)
+      context.found.push({ path, kind: "symbol key" });
+    const result = {};
+    for (const key of Object.keys(value).sort()) {
+      if (value[key] !== undefined)
+        result[key] = encoded(value[key], `${path}${member(key)}`, context);
+    }
+    return result;
+  }
+  if (value === undefined) return undefined;
+  if (typeof value === "function") {
+    context.found.push({ path, kind: "function" });
+    return { $function: value.name };
+  }
+  return canonical(value, path, context.found);
+}
+
+// The members by their key's text, then by their whole text, so that the order they were added in does not count.
+function sortedMembers(members, keyText, path, context) {
+  const keyed = members.map((item) => ({ item, key: keyText(item), text: JSON.stringify(item) }));
+  keyed.sort((a, b) => compareText(a.key, b.key) || compareText(a.text, b.text));
+  if (keyed.some((entry, index) => index > 0 && entry.key === keyed[index - 1].key))
+    context.found.push({ path, kind: "members that encode alike" });
+  return keyed.map((entry) => entry.item);
+}
+
+function compareText(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 // Each compile gets its own file objects, so no build can see what another did to its input.
 function copied(files) {
   return files.map(({ path, source }) => ({ path, source }));
 }
 
 function normalised(outcome) {
-  if (outcome.threw !== undefined) return { threw: outcome.threw };
+  const checks =
+    outcome.checks === undefined
+      ? {}
+      : outcome.checks.threw === undefined
+        ? { internal: outcome.checks.found }
+        : { checksThrew: outcome.checks.threw };
+  if (outcome.threw !== undefined) return { threw: outcome.threw, ...checks };
   return {
     diagnostics: outcome.diagnostics,
     plan: outcome.plan,
@@ -328,6 +607,7 @@ function normalised(outcome) {
       : outcome.run.threw === undefined
         ? { runs: outcome.run.runs }
         : { runsThrew: outcome.run.threw }),
+    ...checks,
   };
 }
 
@@ -451,6 +731,8 @@ function comparisonSummary(entries, milliseconds) {
   return {
     runsCompared: options.run,
     casesRun: entries.filter((entry) => entry.ran === true).length,
+    internalCompared: options.internal,
+    casesTypesChecked: entries.filter((entry) => entry.typesChecked === true).length,
     elapsedMs: round(milliseconds),
     classes: counts,
     threwInBoth: entries
@@ -492,25 +774,40 @@ function timingSummary(entries) {
   };
 }
 
-// A short account of a difference: the lines only one build has, or the first path at which the values differ.
+// A short account of each difference: the lines only one build has, or the first path at which the values differ.
 function detail(entry) {
+  const [first, ...others] = entry.differences ?? [entry.class];
+  return [
+    ...classDetail(entry, first),
+    ...others.flatMap((name) => [
+      `${name}:`,
+      ...classDetail(entry, name).map((line) => `  ${line}`),
+    ]),
+  ];
+}
+
+function classDetail(entry, name) {
   const { base, head } = entry;
-  if (entry.class === "error") {
+  if (name === "error") {
     const outcome = (side) =>
-      side.threw !== undefined
-        ? `threw ${side.threw}`
-        : side.runsThrew !== undefined
-          ? `run threw ${side.runsThrew}`
-          : side.runs !== undefined
-            ? "compiled and ran"
-            : "compiled";
+      [
+        side.threw !== undefined
+          ? `threw ${side.threw}`
+          : side.runsThrew !== undefined
+            ? `run threw ${side.runsThrew}`
+            : side.runs !== undefined
+              ? "compiled and ran"
+              : "compiled",
+        ...(side.checksThrew !== undefined
+          ? [`checks threw ${side.checksThrew}`]
+          : side.internal !== undefined
+            ? ["checked"]
+            : []),
+      ].join(", ");
     return [`- ${outcome(base)}`, `+ ${outcome(head)}`];
   }
-  if (entry.class === "diagnostics") return lineDifference(base.diagnostics, head.diagnostics);
-  const difference =
-    entry.class === "plan"
-      ? firstDifference(base.plan, head.plan, "plan")
-      : firstDifference(base.runs, head.runs, "runs");
+  if (name === "diagnostics") return lineDifference(base.diagnostics, head.diagnostics);
+  const difference = firstDifference(base[name], head[name], name);
   return [`at ${difference.path}`, `- ${value(difference.base)}`, `+ ${value(difference.head)}`];
 }
 
@@ -545,7 +842,8 @@ function printSummary(result, entries, timedEntries) {
   if (entries.length > 0) {
     const perCase = result.cases === 0 ? 0 : result.elapsedMs / result.cases;
     console.log(
-      `${result.cases} cases compared${result.runsCompared ? `, ${result.casesRun} also run,` : ""} in ` +
+      `${result.cases} cases compared${result.runsCompared ? `, ${result.casesRun} also run,` : ""}` +
+        `${result.internalCompared ? ` with their checks (${result.casesTypesChecked} type-checked),` : ""} in ` +
         `${(result.elapsedMs / 1000).toFixed(1)} s (${perCase.toFixed(1)} ms per case)`,
     );
     for (const name of CLASSES) console.log(`  ${name.padEnd(12)}${result.classes[name]}`);
