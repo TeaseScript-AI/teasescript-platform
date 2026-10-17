@@ -12,6 +12,7 @@ import type {
   TypeAnnotation,
 } from "./ast.js";
 import { compileProject, compileSource, isNativeStackExhaustion } from "./compiler.js";
+import { conversionSyntax, CONVERSIONS, isConversion, type Conversion } from "./conversions.js";
 import {
   askParts,
   sayOperands,
@@ -42,6 +43,7 @@ import {
   TEASESCRIPT_PROTECTED_NAMES,
   TEASESCRIPT_PROTECTED_TYPE_NAMES,
   type AskCommand,
+  type ConversionName,
   type RenamedCommand,
   type StatementCommand,
   type ValueCommand,
@@ -88,7 +90,8 @@ export interface LanguageCompletionItem {
 }
 
 export interface LanguageContextHelp {
-  readonly command: CompactCommand;
+  /** A compact command, or a conversion called at the position (see `CONVERSIONS`). */
+  readonly command: CompactCommand | ConversionName;
   readonly summary: string;
   readonly syntax: string;
 }
@@ -397,17 +400,16 @@ export function languageContextHelp(
   document: LanguageDocument,
   position: LanguagePosition,
 ): LanguageContextHelp | null {
-  const located = locateCompactCommand(document, position.offset);
-  return located === null ? null : HELP[located.command];
+  return locateHelp(document, position.offset)?.help ?? null;
 }
 
 export function languageHover(
   document: LanguageDocument,
   position: LanguagePosition,
 ): LanguageHover | null {
-  const located = locateCompactCommand(document, position.offset);
+  const located = locateHelp(document, position.offset);
   if (located === null) return null;
-  const help = HELP[located.command];
+  const { help } = located;
   return Object.freeze({
     range: located.range,
     contents: Object.freeze([`**${help.command}**`, help.summary, `Syntax: \`${help.syntax}\``]),
@@ -418,6 +420,16 @@ export function languageSignatureHelp(
   document: LanguageDocument,
   position: LanguagePosition,
 ): LanguageSignatureHelp | null {
+  const call = locateHelp(document, position.offset)?.conversion;
+  if (call !== undefined && call !== null) {
+    const { parameters, activeParameter } = conversionParameters(document, call, position.offset);
+    return Object.freeze({
+      label: conversionSyntax(call.name),
+      documentation: CONVERSIONS[call.name].summary,
+      activeParameter,
+      parameters,
+    });
+  }
   const located = locateCompactCommand(document, position.offset);
   if (located === null) return null;
   const help = HELP[located.command];
@@ -748,6 +760,147 @@ function declaredSpeakers(source: string): readonly string[] {
   return Object.freeze([...new Set(speakers)]);
 }
 
+/** A call of a conversion in the source: its name, where the name is, and where its `(` is. */
+interface ConversionCall {
+  readonly name: ConversionName;
+  readonly range: LanguageRange;
+  readonly opener: number;
+}
+
+/**
+ * The help at `offset`: of the innermost compact command or conversion call there, with the range of its name, and
+ * the call when it is a conversion's.
+ */
+function locateHelp(
+  document: LanguageDocument,
+  offset: number,
+): {
+  readonly help: LanguageContextHelp;
+  readonly range: LanguageRange;
+  readonly conversion: ConversionCall | null;
+} | null {
+  const compact = locateCompactCommand(document, offset);
+  const conversion = locateConversionCall(document, offset);
+  // A call inside a command, or a command inside a call, starts after it.
+  if (
+    conversion !== null &&
+    (compact === null || conversion.range.start.offset > compact.range.start.offset)
+  )
+    return {
+      help: Object.freeze({
+        command: conversion.name,
+        summary: CONVERSIONS[conversion.name].summary,
+        syntax: conversionSyntax(conversion.name),
+      }),
+      range: conversion.range,
+      conversion,
+    };
+  return compact === null
+    ? null
+    : { help: HELP[compact.command], range: compact.range, conversion: null };
+}
+
+/**
+ * The innermost call of a conversion whose name, or whose arguments up to the `)` that closes it, hold `offset`. It is
+ * read from the tokens of the statement there, so that a call being written, without its `)`, holds every offset after
+ * its name.
+ */
+function locateConversionCall(document: LanguageDocument, offset: number): ConversionCall | null {
+  const parsed = parseDocument(document.text);
+  const statement = statementRangeAt(parsed.statementRanges, offset);
+  if (statement === null) return null;
+  const tokens = lex(document.text, parsed.regexStarts).tokens.filter(
+    (token) =>
+      token.span.start.offset >= statement.start &&
+      token.span.start.offset < statement.end &&
+      token.kind !== TokenKind.Newline &&
+      token.kind !== TokenKind.EndOfFile,
+  );
+  let innermost: ConversionCall | null = null;
+  const holds = (call: ConversionCall | null, end: number) => {
+    if (call === null || offset < call.range.start.offset || offset > end) return;
+    if (innermost === null || call.range.start.offset > innermost.range.start.offset)
+      innermost = call;
+  };
+  // The delimiters still open, innermost last, with the conversion call that each `(` opens.
+  const open: (ConversionCall | null)[] = [];
+  for (const [index, token] of tokens.entries()) {
+    if (OPENING_DELIMITERS.has(token.kind)) {
+      const name = tokens[index - 1];
+      // A method of the same name, such as a datetime's `toAbsoluteDateTime()`, and a declared function are not calls of
+      // the conversion.
+      const before = tokens[index - 2]?.kind;
+      open.push(
+        token.kind === TokenKind.LeftParenthesis &&
+          name?.kind === TokenKind.Identifier &&
+          isConversion(name.lexeme) &&
+          before !== TokenKind.Dot &&
+          before !== TokenKind.KeywordFunction
+          ? { name: name.lexeme, range: name.span, opener: token.span.start.offset }
+          : null,
+      );
+    } else if (CLOSING_DELIMITERS.has(token.kind))
+      holds(open.pop() ?? null, token.span.start.offset);
+  }
+  for (const call of open) holds(call, Infinity);
+  return innermost;
+}
+
+/**
+ * The signature parameters of a conversion call, its positional ones and then its named ones, and the one at `offset`:
+ * the named argument written there, or the next positional one, or after them the first named one. The second form of
+ * a pair, `toDateTime(date, time)`, is the call's once it has a second positional argument.
+ */
+function conversionParameters(
+  document: LanguageDocument,
+  call: ConversionCall,
+  offset: number,
+): { readonly parameters: readonly string[]; readonly activeParameter: number } {
+  const conversion: Conversion = CONVERSIONS[call.name];
+  const start = call.opener + 1;
+  const end = Math.max(start, offset);
+  const tokens = lex(
+    document.text.slice(start, end),
+    regexStartsWithin(parseDocument(document.text).regexStarts, start, end),
+  ).tokens.filter(
+    (token) => token.kind !== TokenKind.EndOfFile && token.kind !== TokenKind.Newline,
+  );
+  let depth = 0;
+  let positional = 0;
+  let named: string | null = null;
+  let argumentStart = true;
+  for (const [index, token] of tokens.entries()) {
+    if (OPENING_DELIMITERS.has(token.kind)) depth += 1;
+    else if (CLOSING_DELIMITERS.has(token.kind)) depth -= 1;
+    else if (depth === 0 && token.kind === TokenKind.Comma) {
+      if (named === null) positional += 1;
+      named = null;
+      argumentStart = true;
+      continue;
+    } else if (
+      depth === 0 &&
+      argumentStart &&
+      token.kind === TokenKind.Identifier &&
+      tokens[index + 1]?.kind === TokenKind.Colon
+    )
+      named = token.lexeme;
+    argumentStart = false;
+  }
+  const form =
+    conversion.pair !== undefined && positional >= (named === null ? 1 : 2)
+      ? conversion.pair
+      : [conversion.parameter];
+  const parameters = Object.freeze([
+    ...form,
+    ...(conversion.fallback === null ? [] : ["default"]),
+    ...(conversion.files ? ["files"] : []),
+  ]);
+  return {
+    parameters,
+    activeParameter: named !== null ? parameters.indexOf(named) : Math.min(positional, form.length),
+  };
+}
+
 function locateCompactCommand(
   document: LanguageDocument,
   offset: number,
@@ -823,6 +976,14 @@ function parseDocument(text: string): ParseResult {
  * block, or there is none, so the offset lies between statements.
  */
 function statementStartAt(ranges: readonly StatementRange[], offset: number): number | null {
+  return statementRangeAt(ranges, offset)?.start ?? null;
+}
+
+/** The innermost statement range around `offset`, or `null` when that is a statement block or there is none. */
+function statementRangeAt(
+  ranges: readonly StatementRange[],
+  offset: number,
+): StatementRange | null {
   let innermost: StatementRange | null = null;
   for (const range of ranges) {
     if (range.start > offset || offset > range.end) continue;
@@ -834,7 +995,7 @@ function statementStartAt(ranges: readonly StatementRange[], offset: number): nu
     )
       innermost = range;
   }
-  return innermost?.kind === "statement" ? innermost.start : null;
+  return innermost?.kind === "statement" ? innermost : null;
 }
 
 /**

@@ -496,21 +496,9 @@ function* regexMatches(
 /**
  * `toRegex(text, default:)` (V30 §8): a regex of the pattern text, with its flags written inside it, such as `(?i)`.
  * Text that RE2 rejects or that is over the regex limits, and a value that is not text, give `undefined`, for the
- * default, which `named` leaves out (`defaulted`).
+ * default.
  */
-export function regexFromText(
-  positional: readonly SerializableRuntimeValue[],
-  named: Readonly<Record<string, SerializableRuntimeValue>>,
-  defaulted: boolean,
-  span: SourceSpan,
-): SerializableRegex | undefined {
-  if (positional.length !== 1 || Object.keys(named).length !== 0 || !defaulted)
-    throw fault(
-      "TSR028",
-      "toRegex(...) takes one text and a default:, such as toRegex(text, default: null).",
-      span,
-    );
-  const text = positional[0]!;
+export function regexFromText(text: SerializableRuntimeValue): SerializableRegex | undefined {
   if (typeof text !== "string" || !compileRegex(text, "").ok) return undefined;
   return { kind: "regex", source: text, flags: "" };
 }

@@ -99,7 +99,13 @@ import {
   readTagText,
   type Tag,
 } from "./tags.js";
-import { CONVERSION_RESULTS, isTemporalConversionResult, numberFromText } from "./conversions.js";
+import {
+  conversionTo,
+  CONVERSIONS,
+  isConversion,
+  numberFromText,
+  type Conversion,
+} from "./conversions.js";
 import {
   builtinCallProblems,
   builtinShapeProblems,
@@ -120,7 +126,11 @@ import {
   RANGE_LIST_FIX,
   type OperationProblem,
 } from "./operation-checks.js";
-import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./language-facts.js";
+import {
+  CORE_RUNTIME_BUILTINS,
+  PLATFORM_STANDARD_LIBRARY_PRELUDE,
+  type ConversionName,
+} from "./language-facts.js";
 import { NUMERIC_FUNCTIONS, percentageFailure, type NumericArgument } from "./numeric-functions.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
@@ -7358,6 +7368,48 @@ class TypeChecker {
     return angleFunction.returns === "angle" ? ANGLE_TYPE : NUMBER_TYPE;
   }
 
+  /**
+   * Checks a call of a conversion and gives its result type (see `CONVERSIONS`): a value of its result type, or with a
+   * default that may be any value, or `null` too, the result or the default; what JSON holds is known only when the
+   * script runs.
+   */
+  #conversionType(
+    name: ConversionName,
+    expression: CallExpression,
+    values: readonly StaticType[],
+  ): StaticType {
+    const conversion: Conversion = CONVERSIONS[name];
+    const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+    this.#reportProblems(problems);
+    // Without a default, a call fails for anything but text, so a value that may be something else names the check
+    // first.
+    if (conversion.takes === "text" && conversion.fallback === null && problems.length === 0)
+      this.#reportUnless(
+        values[0]!,
+        (member) => isScalar(member, "string"),
+        expression.arguments[0]!.value,
+        `${name}(...) ${conversion.does}`,
+      );
+    if (conversion.result === "unknown") return UNKNOWN_TYPE;
+    const result = scalarType(conversion.result);
+    const fallback = expression.arguments.findIndex(
+      (item) => item.kind === "namedArgument" && item.name.name === "default",
+    );
+    const fallbackType = fallback === -1 ? undefined : values[fallback]!;
+    switch (conversion.fallback?.type) {
+      case "any":
+        return fallbackType === undefined ? result : union([result, fallbackType]);
+      case "optional":
+        return fallbackType !== undefined &&
+          isKnown(fallbackType) &&
+          isAssignable(optional(result), fallbackType)
+          ? union([result, fallbackType])
+          : optional(result);
+      default:
+        return result;
+    }
+  }
+
   /** Argument and result types of the implemented built-ins; injected host functions return unknown values. */
   #builtinType(
     name: string,
@@ -7366,6 +7418,7 @@ class TypeChecker {
   ): StaticType {
     if (NUMERIC_FUNCTIONS.has(name)) return this.#numericFunctionType(name, expression, values);
     if (ANGLE_FUNCTIONS.has(name)) return this.#angleFunctionType(name, expression, values);
+    if (isConversion(name)) return this.#conversionType(name, expression, values);
     // `min` and `max` of one argument that may be a list are list functions too (V30 §16).
     const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
     const list =
@@ -7502,54 +7555,30 @@ class TypeChecker {
           result = result === undefined ? undefined : arithmeticType("+", result, number);
         return result !== undefined && isNumeric(result) ? result : UNKNOWN_TYPE;
       }
-      case "toString":
-      case "toNumber":
-      case "toInteger":
-      case "toBoolean":
-      case "toDate":
-      case "toTime":
-      case "toDateTime":
-      case "toAbsoluteDateTime":
-        this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
-        return scalarType(CONVERSION_RESULTS.get(name)!);
-      case "toJson":
-      case "fromJson":
-      case "toBase64":
-      case "fromBase64":
       case "fileFromBase64":
       case "fileToBase64":
       case "hashText":
       case "hashFile": {
-        // The JSON or Base64 text of a value or a stored file, what such text holds, and the SHA-256 of text or a stored
-        // file (V30 §13 and §33).
+        // A stored file from Base64 text, the Base64 text of a stored file, and the SHA-256 of text or a stored file
+        // (V30 §13 and §33).
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
         this.#reportProblems(problems);
-        if (
-          (name === "toBase64" ||
-            name === "fileToBase64" ||
-            name === "hashText" ||
-            name === "hashFile") &&
-          problems.length === 0
-        )
+        if (name !== "fileFromBase64" && problems.length === 0)
           this.#reportUnless(
             value!,
             (member) => isScalar(member, "string"),
             argument!.value,
-            name === "toBase64"
-              ? "toBase64(...) encodes text (string)"
-              : name === "hashText"
-                ? "hashText(...) hashes text (string)"
-                : name === "hashFile"
-                  ? "hashFile(...) hashes a stored file, which is text (string)"
-                  : "fileToBase64(...) reads a stored file, which is text (string)",
+            name === "hashText"
+              ? "hashText(...) hashes text (string)"
+              : name === "hashFile"
+                ? "hashFile(...) hashes a stored file, which is text (string)"
+                : "fileToBase64(...) reads a stored file, which is text (string)",
           );
-        // What JSON holds is known only when the script runs; Base64 holds text, a stored file is named by text, a hash
-        // is text, or the result is the default.
-        if (name === "fromJson") return UNKNOWN_TYPE;
+        // A stored file is named by text, a hash is text, or the result is the default.
         const fallback = expression.arguments.findIndex(
           (item) => item.kind === "namedArgument" && item.name.name === "default",
         );
-        return (name === "fromBase64" || name === "fileFromBase64") && fallback !== -1
+        return name === "fileFromBase64" && fallback !== -1
           ? union([STRING_TYPE, values[fallback]!])
           : STRING_TYPE;
       }
@@ -7576,19 +7605,6 @@ class TypeChecker {
           (item) => item.kind === "namedArgument" && item.name.name === "default",
         );
         return fallback !== -1 ? union([STRING_TYPE, values[fallback]!]) : STRING_TYPE;
-      }
-      case "toRegex": {
-        // A regex from pattern text, or the default, a regex or null (V30 §8).
-        this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
-        const fallback = expression.arguments.findIndex(
-          (item) => item.kind === "namedArgument" && item.name.name === "default",
-        );
-        const fallbackType = fallback === -1 ? undefined : values[fallback]!;
-        return fallbackType !== undefined &&
-          isKnown(fallbackType) &&
-          isAssignable(optional(REGEX_TYPE), fallbackType)
-          ? union([REGEX_TYPE, fallbackType])
-          : optional(REGEX_TYPE);
       }
       case "escapeMarkup":
         if (argument !== undefined && value !== undefined)
@@ -8437,7 +8453,7 @@ class TypeChecker {
             resolved(type).kind === "null"
               ? EMPTY_FIELD_FIX
               : isScalar(type, "string")
-                ? ` Convert the text with ${TEMPORAL_CONVERSION_NAMES[kind]}(...).`
+                ? ` Convert the text with ${conversionTo(kind)}(...).`
                 : ""
           }`,
           expression.span,
@@ -11352,11 +11368,10 @@ function conversionFix(
   if (isScalar(kept, "duration") && isNumeric(value)) return ` ${unitFix(expression)}`;
   if (isScalar(kept, "angle") && isNumeric(value)) return ` ${unitFix(expression, "deg")}`;
   // Date and time values are written as ISO text and converted.
-  const conversion = [...CONVERSION_RESULTS].find(
-    ([, result]) => isTemporalConversionResult(result) && isScalar(kept, result),
-  );
+  const conversion =
+    kept.kind === "scalar" && TEMPORAL_KINDS.has(kept.name) ? conversionTo(kept.name) : undefined;
   if (conversion !== undefined && isScalar(value, "string"))
-    return ` Convert the text with ${conversion[0]}(...).`;
+    return ` Convert the text with ${conversion}(...).`;
   if (isScalar(kept, "string") && (isNumeric(value) || isScalar(value, "boolean"))) {
     const label =
       expression === null ? null : (expressionLabel(expression) ?? literalText(expression));
@@ -11702,11 +11717,6 @@ function interactionResultType(
 }
 
 const TEMPORAL_ASKS = { date: "askDate", time: "askTime", datetime: "askDateTime" } as const;
-const TEMPORAL_CONVERSION_NAMES = {
-  date: "toDate",
-  time: "toTime",
-  datetime: "toDateTime",
-} as const;
 
 function scalarType(name: ScalarTypeName): StaticType {
   return { kind: "scalar", name };

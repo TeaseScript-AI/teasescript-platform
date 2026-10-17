@@ -69,7 +69,7 @@ import {
   weightedChoices,
   weightedIndex,
 } from "./list-statistics.js";
-import { CORE_RUNTIME_BUILTINS } from "../language-facts.js";
+import { CORE_RUNTIME_BUILTINS, type ConversionName } from "../language-facts.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { internalFault, RuntimeFault } from "./errors.js";
 import type { InstructionTraceCollector, RuntimeInstructionObserver } from "./instruction-trace.js";
@@ -219,6 +219,8 @@ import {
   type SerializableCameraViewHandle,
   type SerializablePermanentButtonHandle,
   type SerializableScriptReference,
+  type SerializableRuntimeProperty,
+  type SerializableSpeakerReference,
 } from "./serializable-values.js";
 import {
   currentTemporalContext,
@@ -251,6 +253,7 @@ import {
 } from "./value-predicates.js";
 import {
   assertValueType,
+  cannotConvert,
   describeShownValue,
   shownChoice,
   describeValue as describeTypedValue,
@@ -302,18 +305,16 @@ import {
 import { isValidSessionTime } from "./actions/delay.js";
 import {
   booleanFromText,
-  CONVERSION_RESULTS,
-  DATA_TEXT_FUNCTIONS,
-  describeConversionResult,
-  isConversionName,
-  isConversionResult,
-  isTemporalConversionResult,
+  CONVERSIONS,
+  defaultDescription,
+  fitsDefault,
+  isConversion,
   numberFromText,
   MIN_MAX_BUILTINS,
-  temporalTextProblem,
   withoutNegativeZero,
-  type ConversionName,
-  type ConversionResult,
+  type CallShape,
+  type Conversion,
+  type ValueConversion,
 } from "../conversions.js";
 
 export interface RuntimeCapabilityCall {
@@ -2336,8 +2337,8 @@ export class Evaluator {
   ): SerializableRuntimeValue | typeof USE_DEFAULT {
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
-      if (isConversionName(name))
-        return this.#conversionBuiltin(
+      if (isConversion(name))
+        return this.#conversion(
           name,
           positional,
           named,
@@ -2345,10 +2346,7 @@ export class Evaluator {
           expression.arguments[0]?.value,
           expression.span,
         );
-      if (DATA_TEXT_FUNCTIONS.has(name))
-        return this.#dataTextFunction(name, positional, named, defaulted, expression.span);
-      if (name === "toRegex")
-        return regexFromText(positional, named, defaulted, expression.span) ?? USE_DEFAULT;
+      if (name === "hashText") return hashedText(positional, named, expression.span);
       if (NUMERIC_FUNCTIONS.has(name))
         return this.#numericFunction(name, positional, named, expression.span);
       if (ANGLE_FUNCTIONS.has(name)) return angleFunction(name, positional, named, expression.span);
@@ -3532,8 +3530,12 @@ export class Evaluator {
     return drawn;
   }
 
-  /** `toString`, `toNumber`, `toInteger`, or `toBoolean` (V30 §13), with the optional `default:` fallback. */
-  #conversionBuiltin(
+  /**
+   * A conversion (see `CONVERSIONS`), run by its `CONVERSION_RUNS` entry: its result, or for a value it cannot use
+   * `USE_DEFAULT` when the call has a `default:`, which `named` leaves out (`defaulted`), and otherwise a failure that
+   * names the fix.
+   */
+  #conversion(
     name: ConversionName,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
@@ -3541,113 +3543,46 @@ export class Evaluator {
     argument: ExpressionPlan | undefined,
     span: SourceSpan,
   ): SerializableRuntimeValue | typeof USE_DEFAULT {
-    const extra = Object.keys(named)[0];
-    const result = CONVERSION_RESULTS.get(name)!;
-    // A date and a time combine into one date and time (V30 §35).
-    const parts = result === "datetime" && positional.length === 2;
-    if ((positional.length !== 1 && !parts) || extra !== undefined)
-      throw fault(
-        "TSR028",
-        `${name}(...) takes one value and an optional default:, such as ${name}(value, default: ...).`,
-        span,
-      );
-    const value = positional[0]!;
-    const converted = parts
-      ? combinedDateAndTime(value, positional[1]!)
-      : this.#converted(result, value, span);
-    if (converted !== undefined) return converted;
-    if (defaulted) return USE_DEFAULT;
-    if (parts)
-      throw fault(
-        "TSR058",
-        `toDateTime(date, time) combines a date and a time, not ${describeRuntimeValue(value)} and ${describeRuntimeValue(positional[1]!)}.`,
-        span,
-      );
-    throw fault("TSR058", conversionFailure(name, result, value, argument, this.plan), span);
-  }
-
-  /** The converted value, or `undefined` when `value` cannot be converted. */
-  #converted(
-    result: ConversionResult,
-    value: SerializableRuntimeValue,
-    span: SourceSpan,
-  ): SerializableRuntimeValue | undefined {
-    if (isTemporalConversionResult(result)) return temporalConverted(result, value);
-    if (result === "string")
-      return isVisibleScalar(value)
-        ? visibleText(value, span, currentTemporalContext(this.snapshot))
-        : undefined;
-    if (result === "boolean")
-      return typeof value === "boolean"
-        ? value
-        : typeof value === "string"
-          ? booleanFromText(value)
-          : undefined;
-    const number =
-      typeof value === "number"
-        ? withoutNegativeZero(value)
-        : typeof value === "string"
-          ? numberFromText(value)
-          : undefined;
-    return number === undefined || result === "number"
-      ? number
-      : withoutNegativeZero(Math.trunc(number));
-  }
-
-  /**
-   * `toJson`, `fromJson`, `toBase64`, `fromBase64`, or `hashText` (V30 §13), `toJson` and `fromJson` with
-   * `files: false`. Text that does not read as JSON or Base64, or a value that is not text, gives the `default:` of a
-   * reading function, never a runtime error.
-   */
-  #dataTextFunction(
-    name: string,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    defaulted: boolean,
-    span: SourceSpan,
-  ): SerializableRuntimeValue | typeof USE_DEFAULT {
-    const reads = name === "fromJson" || name === "fromBase64";
-    // Only a `toJson` or `fromJson` with a written `files: false` is an ordinary call; with files it is a file store.
-    const takesFiles = name === "toJson" || name === "fromJson";
-    if (takesFiles && named.files !== undefined && named.files !== false)
+    const conversion: Conversion = CONVERSIONS[name];
+    // Only a call with a written `files: false` is an ordinary call; with files it is a file store.
+    if (conversion.files && named.files !== undefined && named.files !== false)
       throw fault(
         "TSR028",
         internalFault(`${name}(...) with files reached an ordinary call instead of a file store.`),
         span,
       );
-    const names = Object.keys(named).filter((key) => !takesFiles || key !== "files");
-    if (positional.length !== 1 || names.length !== 0 || reads !== defaulted)
+    const pair = positional.length === 2 ? conversion.pair : undefined;
+    if (
+      (positional.length !== 1 && pair === undefined) ||
+      Object.keys(named).some((key) => !conversion.files || key !== "files") ||
+      (conversion.fallback !== null && conversion.fallback.required !== null && !defaulted)
+    )
+      throw fault("TSR028", callShapeFailure(name, conversion), span);
+    const converted = CONVERSION_RUNS[name](positional, {
+      span,
+      text: (value) => visibleText(value, span, currentTemporalContext(this.snapshot)),
+      speakerProperties: (speaker) => this.speakerById(speaker.speakerId, span).properties,
+    });
+    if (converted !== undefined) return converted;
+    if (defaulted) return USE_DEFAULT;
+    // A conversion of a value fails; any other conversion gives its default or fails as it runs.
+    if (conversion.takes !== "value")
       throw fault(
         "TSR028",
-        reads
-          ? `${name}(...) takes one text and a default:, such as ${name}(text, default: null).`
-          : `${name}(...) takes one ${name === "toJson" ? "value" : "text"} and no named arguments.`,
+        internalFault(`${name}(...) gave no result and has no default:.`),
         span,
       );
-    const value = positional[0]!;
-    if (name === "toJson")
-      return jsonText(
-        value,
-        (speaker) => this.speakerById(speaker.speakerId, span).properties,
+    if (pair !== undefined)
+      throw fault(
+        "TSR058",
+        `${name}(${pair.join(", ")}) combines a ${pair[0]} and a ${pair[1]}, not ${describeRuntimeValue(positional[0]!)} and ${describeRuntimeValue(positional[1]!)}.`,
         span,
       );
-    if (name === "toBase64" || name === "hashText") {
-      if (typeof value !== "string")
-        throw fault(
-          "TSR059",
-          `${name}(...) ${name === "toBase64" ? "encodes" : "hashes"} text (string), not ${describeRuntimeValue(value)}.`,
-          span,
-        );
-      return name === "toBase64" ? base64Text(value, span) : textSha256(value);
-    }
-    const read =
-      typeof value !== "string"
-        ? undefined
-        : name === "fromJson"
-          ? valueFromJson(value, span)
-          : textFromBase64(value);
-    // JSON's null is a value; only text that does not read gives the default.
-    return read === undefined ? USE_DEFAULT : read;
+    throw fault(
+      "TSR058",
+      conversionFailure(name, conversion, positional[0]!, argument, this.plan),
+      span,
+    );
   }
 
   /**
@@ -4335,12 +4270,13 @@ function notNumberKind(value: SerializableRuntimeValue): "null" | "numeric text"
 }
 
 /**
- * Why `value` does not convert to `result`, and what to do: a comparison for `toBoolean` of a number or text, `join()`
- * for a collection of shown values, and otherwise a `default:` fallback.
+ * Why `value` does not convert, and what to do: a comparison for `toBoolean` of a number or text, `join()` for a
+ * collection of shown values, and otherwise a `default:` fallback. The compiler gives the first part, `cannotConvert`,
+ * for text it can see.
  */
 function conversionFailure(
   name: ConversionName,
-  result: ConversionResult,
+  conversion: ValueConversion,
   value: SerializableRuntimeValue,
   argument: ExpressionPlan | undefined,
   program: InstructionPlan,
@@ -4349,25 +4285,114 @@ function conversionFailure(
   const fallback = " Give a fallback with 'default:' if the value may not convert.";
   const shown = describeShownValue(value);
   // `toBoolean` keeps 1, 0, and other texts invalid: an explicit comparison says what the script means.
-  if (result === "boolean" && typeof value !== "string")
+  if (conversion.result === "boolean" && typeof value !== "string")
     return typeof value === "number"
-      ? `toBoolean(...) converts text and true or false (boolean), not the number ${shown}. Compare the number instead, such as '${label} != 0'.`
-      : `toBoolean(...) converts text and true or false (boolean), not ${shown}.${fallback}`;
-  const failed = `${name}(...) cannot convert ${shown} to ${describeConversionResult(result)}`;
-  if (typeof value === "string") {
-    if (result === "boolean")
-      return `${failed}. The text must be "true" or "false". Compare the text instead, such as '${label} == ${quotedText(messageText(value))}'.`;
-    if (isTemporalConversionResult(result))
-      return `${failed}${temporalTextProblem(result, value) ?? ""}.${fallback}`;
-    if (result !== "string")
-      return `${failed}. The text must be a number such as 2.5 or -3.${fallback}`;
-  }
-  if (result === "string" && (isList(value) || isSet(value) || isDict(value))) {
+      ? `${name}(...) converts ${conversion.converts}, not the number ${shown}. Compare the number instead, such as '${label} != 0'.`
+      : `${name}(...) converts ${conversion.converts}, not ${shown}.${fallback}`;
+  const failed = cannotConvert(name, conversion, value);
+  if (typeof value === "string" && conversion.result === "boolean")
+    return `${failed} Compare the text instead, such as '${label} == ${quotedText(messageText(value))}'.`;
+  if (conversion.kinds === "shown" && (isList(value) || isSet(value) || isDict(value))) {
     const items = isDict(value) ? value.entries.map((entry) => entry.value) : value.items;
     if (items.every(isVisibleScalar))
-      return `${failed}. Use ${isSet(value) ? ".toList().join()" : isDict(value) ? ".values.join()" : ".join()"} to combine its ${isDict(value) ? "values" : "elements"} as text.`;
+      return `${failed} Use ${isSet(value) ? ".toList().join()" : isDict(value) ? ".values.join()" : ".join()"} to combine its ${isDict(value) ? "values" : "elements"} as text.`;
   }
-  return `${failed}.${fallback}`;
+  return `${failed}${fallback}`;
+}
+
+/** What a conversion reads while it runs, besides its arguments. */
+interface ConversionRun {
+  readonly span: SourceSpan;
+  /** A scalar as `${...}` shows it, dates and times in the player's presentation, which `toString` gives. */
+  readonly text: (value: SerializableRuntimeValue) => string;
+  /** A speaker's properties, which `toJson` writes. */
+  readonly speakerProperties: (
+    speaker: SerializableSpeakerReference,
+  ) => readonly SerializableRuntimeProperty[];
+}
+
+/**
+ * How each conversion runs (see `CONVERSIONS`): its result, or `undefined` for a value that it does not convert or text
+ * that it does not read, for which the call gives its default or fails.
+ */
+const CONVERSION_RUNS: {
+  readonly [Name in ConversionName]: (
+    positional: readonly SerializableRuntimeValue[],
+    run: ConversionRun,
+  ) => SerializableRuntimeValue | undefined;
+} = {
+  toString: ([value], run) => (isVisibleScalar(value!) ? run.text(value!) : undefined),
+  toNumber: ([value]) => numberOf(value!),
+  toInteger: ([value]) => {
+    const number = numberOf(value!);
+    return number === undefined ? undefined : withoutNegativeZero(Math.trunc(number));
+  },
+  toBoolean: ([value]) =>
+    typeof value === "boolean"
+      ? value
+      : typeof value === "string"
+        ? booleanFromText(value)
+        : undefined,
+  toDate: ([value]) => temporalConverted("date", value!),
+  toTime: ([value]) => temporalConverted("time", value!),
+  // A date and a time combine into one date and time (V30 §35).
+  toDateTime: ([value, time]) =>
+    time === undefined ? temporalConverted("datetime", value!) : combinedDateAndTime(value!, time),
+  toAbsoluteDateTime: ([value]) => temporalConverted("absoluteDateTime", value!),
+  toRegex: ([text]) => regexFromText(text!),
+  toJson: ([value], run) => jsonText(value!, run.speakerProperties, run.span),
+  // JSON's null is a value; only text that does not read gives the default.
+  fromJson: ([text], run) => (typeof text === "string" ? valueFromJson(text, run.span) : undefined),
+  toBase64: ([text], run) => {
+    if (typeof text !== "string")
+      throw fault(
+        "TSR059",
+        `toBase64(...) ${CONVERSIONS.toBase64.does}, not ${describeRuntimeValue(text!)}.`,
+        run.span,
+      );
+    return base64Text(text, run.span);
+  },
+  fromBase64: ([text]) => (typeof text === "string" ? textFromBase64(text) : undefined),
+};
+
+/** A number, or the number that number text holds (V30 §13), or `undefined` for any other value. */
+function numberOf(value: SerializableRuntimeValue): number | undefined {
+  return typeof value === "number"
+    ? withoutNegativeZero(value)
+    : typeof value === "string"
+      ? numberFromText(value)
+      : undefined;
+}
+
+/** How a call of `shape` is written, for a plan whose call is not (see `CallShape`). */
+function callShapeFailure(name: string, shape: CallShape): string {
+  if (shape.fallback === null)
+    return `${name}(...) takes one ${shape.parameter} and no named arguments.`;
+  return shape.fallback.required === null
+    ? `${name}(...) takes one ${shape.parameter} and an optional default:, such as ${name}(${shape.parameter}, default: ...).`
+    : `${name}(...) takes one ${shape.parameter} and a default:, such as ${name}(${shape.parameter}, default: null).`;
+}
+
+/** `hashText(text)` (V30 §13): the SHA-256 of the text's UTF-8 bytes. */
+function hashedText(
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  span: SourceSpan,
+): string {
+  if (positional.length !== 1 || Object.keys(named).length !== 0)
+    throw fault(
+      "TSR028",
+      callShapeFailure("hashText", { parameter: "text", fallback: null, files: false }),
+      span,
+    );
+  const text = positional[0]!;
+  if (typeof text !== "string")
+    throw fault(
+      "TSR059",
+      `hashText(...) hashes text (string), not ${describeRuntimeValue(text)}.`,
+      span,
+    );
+  return textSha256(text);
 }
 
 /**
@@ -4956,7 +4981,10 @@ interface EvaluationFrame {
 }
 const callingExpressions = new WeakMap<ExpressionPlan, boolean>();
 
-/** Whether evaluating an expression can run a call. Results are cached per plan node, so nested checks stay linear. */
+/**
+ * Whether evaluating an expression can run a call that may change a value: any call but a conversion, which only reads
+ * (see `Conversion`). Results are cached per plan node, so nested checks stay linear.
+ */
 function mayRunCall(expression: ExpressionPlan): boolean {
   // A node is decided after its children, which are pushed above it.
   const work: { expression: ExpressionPlan; children: readonly ExpressionPlan[] | null }[] = [
@@ -4965,7 +4993,11 @@ function mayRunCall(expression: ExpressionPlan): boolean {
   while (work.length > 0) {
     const current = work.pop()!;
     if (callingExpressions.has(current.expression)) continue;
-    if (current.expression.kind === "call") {
+    if (
+      current.expression.kind === "call" &&
+      (current.expression.callee.kind !== "identifier" ||
+        !isConversion(current.expression.callee.name))
+    ) {
       callingExpressions.set(current.expression, true);
     } else if (current.children !== null) {
       callingExpressions.set(
@@ -5058,9 +5090,9 @@ export const USE_DEFAULT: unique symbol = Symbol("use the default");
 
 /**
  * The default that a call uses, checked as the call checks it: a `get` default that decided the element or value type
- * of an empty list or dict must fit it also in the parts the compiler could not know (ADR 0021 rule 1.7), a
- * conversion's must be of its result type, and `toRegex`'s a regex or `null`. `fromJson`, `fromBase64`,
- * `fileFromBase64`, `decryptText`, and `decryptFile` take any default.
+ * of an empty list or dict must fit it also in the parts the compiler could not know (ADR 0021 rule 1.7), and a
+ * conversion's must be what its `CONVERSIONS` entry takes. `fileFromBase64`, `decryptText`, and `decryptFile` take any
+ * default.
  */
 export function acceptedDefault(
   operation: LazyDefaultOperation,
@@ -5069,20 +5101,16 @@ export function acceptedDefault(
   span: SourceSpan,
 ): SerializableRuntimeValue {
   if (typeCheck !== undefined) assertValueType(value, typeCheck, span);
-  if (isConversionName(operation)) {
-    const result = CONVERSION_RESULTS.get(operation)!;
-    if (!isConversionResult(result, value))
+  if (isConversion(operation)) {
+    const conversion: Conversion = CONVERSIONS[operation];
+    const description = defaultDescription(conversion);
+    if (description !== undefined && !fitsDefault(conversion, value))
       throw fault(
         "TSR058",
-        `${operation}(...) needs ${describeConversionResult(result)} as its default:, not ${describeRuntimeValue(value)}.`,
+        `${operation}(...) needs ${description} as its default:, not ${describeRuntimeValue(value)}.`,
         span,
       );
-  } else if (operation === "toRegex" && value !== null && !isRegex(value))
-    throw fault(
-      "TSR058",
-      `toRegex(...) needs a regex or null as its default:, not ${describeRuntimeValue(value)}.`,
-      span,
-    );
+  }
   return value;
 }
 

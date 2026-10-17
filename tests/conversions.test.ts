@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { CONVERSIONS, type Conversion } from "../src/conversions.js";
+import { CONVERSION_FUNCTIONS } from "../src/language-facts.js";
 import { run } from "../src/runtime/engine.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -106,19 +108,19 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       'say toNumber("hello")\nexit',
       "TSV043",
-      'toNumber(...) cannot convert "hello". The text must be a number such as 2.5 or -3.',
+      'toNumber(...) cannot convert text (string) "hello" to a number. The text must be a number such as 2.5 or -3.',
       '"hello"',
     ],
     [
       'say toInteger("${2} apples", default: 0)\nexit',
       "TSV043",
-      'toInteger(...) cannot convert "2 apples". The text must be a number such as 2.5 or -3.',
+      'toInteger(...) cannot convert text (string) "2 apples" to a whole number (integer). The text must be a number such as 2.5 or -3.',
       '"${2} apples"',
     ],
     [
       'say toBoolean("yes")\nexit',
       "TSV043",
-      'toBoolean(...) cannot convert "yes". The text must be "true" or "false".',
+      'toBoolean(...) cannot convert text (string) "yes" to true or false (boolean). The text must be "true" or "false".',
       '"yes"',
     ],
     [
@@ -305,6 +307,29 @@ test("values that do not convert at runtime raise errors that name the fix", () 
       "toString(...) cannot convert a list to text (string). Use .join() to combine its elements as text.",
     ],
   );
+});
+
+test("text the compiler can see fails as the runtime fails on it, with the runtime's text (V30 §13, §35)", () => {
+  // Every conversion of a value that does not convert "x"; the runtime goes on with what to do.
+  for (const name of CONVERSION_FUNCTIONS) {
+    const conversion: Conversion = CONVERSIONS[name];
+    if (conversion.takes !== "value" || conversion.textProblem("x") === undefined) continue;
+    const compiled = compileSource(`say ${name}("x")\nexit`).diagnostics;
+    const failure = runWithGlobals(`say ${name}(value)\nexit`, { value: "x" }).snapshot.failure;
+    assert.deepEqual(
+      compiled.map(({ code }) => code),
+      ["TSV043"],
+      name,
+    );
+    assert.equal(failure?.code, "TSR058", name);
+    const message = compiled[0]!.message;
+    assert.equal(failure.message.slice(0, message.length), message, name);
+    assert.match(
+      failure.message.slice(message.length),
+      /^ (?:Give a fallback with 'default:' if the value may not convert\.|Compare the text instead, such as 'value == "x"'\.)$/u,
+      name,
+    );
+  }
 });
 
 test("a conversion checks its value as it was evaluated, before later arguments run", () => {

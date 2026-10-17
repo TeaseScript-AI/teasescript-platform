@@ -6,6 +6,7 @@ import { isValidInteractionPrefill } from "../interaction-answers.js";
 import { validImageRequestFields } from "../image-input.js";
 import { canonicalWebUrl } from "../web-url.js";
 import { LOCK_CALLS } from "../capture-call.js";
+import { conversionWaitsForFiles, isConversion, takesDefault, takesFiles } from "../conversions.js";
 import { ANGLE_UNITS, CALENDAR_DURATION_UNITS, DURATION_UNITS } from "../language-facts.js";
 import { compileRegex, isCanonicalRegexFlags } from "../regex.js";
 import {
@@ -1256,23 +1257,17 @@ function validateFileStoreInstruction(
     return;
   }
   const call = value.call;
-  if (
-    call !== "fileFromBase64" &&
-    call !== "fileToBase64" &&
-    call !== "hashFile" &&
-    call !== "toJson" &&
-    call !== "fromJson"
-  ) {
+  const conversion = typeof call === "string" && isConversion(call) && takesFiles(call);
+  if (call !== "fileFromBase64" && call !== "fileToBase64" && call !== "hashFile" && !conversion) {
     errors.push(planError("TSC002", "File store call is invalid.", `${path}.call`));
     return;
   }
-  const takesDefault = call === "fileFromBase64" || call === "fromJson";
-  const takesFiles = call === "toJson" || call === "fromJson";
-  if (takesDefault !== (value.defaultTemporary !== null))
+  const defaulted = call === "fileFromBase64" || (conversion && takesDefault(call));
+  if (defaulted !== (value.defaultTemporary !== null))
     errors.push(
       planError("TSC002", `The default of ${call}(...) is invalid.`, `${path}.defaultTemporary`),
     );
-  else if (takesDefault)
+  else if (defaulted)
     validateDefaultTemporary(
       value.defaultTemporary,
       value.destinationTemporary,
@@ -1280,7 +1275,7 @@ function validateFileStoreInstruction(
       temporaryCount,
       errors,
     );
-  if (!takesFiles && value.files !== null)
+  if (!conversion && value.files !== null)
     errors.push(planError("TSC002", `${call}(...) takes no files:.`, `${path}.files`));
   for (const name of ["value", "files"] as const) {
     const operand = value[name];
@@ -2586,16 +2581,17 @@ function validateExpressionNode(
           planError("TSC002", "takePhoto() must be lowered to a capture instruction.", path),
         );
       }
-      // The file functions, and `toJson` and `fromJson` unless a literal `files: false` keeps files out, may wait for
-      // the Player's file store; they lower to a file store instruction.
+      // The file functions, and a conversion that takes `files:` unless a literal `files: false` keeps files out, may
+      // wait for the Player's file store; they lower to a file store instruction.
       if (
         isRecord(value.callee) &&
         value.callee.kind === "identifier" &&
         (value.callee.name === "fileFromBase64" ||
           value.callee.name === "fileToBase64" ||
           value.callee.name === "hashFile" ||
-          ((value.callee.name === "toJson" || value.callee.name === "fromJson") &&
-            !keepsFilesOut(value.arguments)))
+          (typeof value.callee.name === "string" &&
+            isConversion(value.callee.name) &&
+            conversionWaitsForFiles(value.callee.name, keepsFilesOut(value.arguments))))
       ) {
         errors.push(
           planError(
@@ -3052,7 +3048,7 @@ function invalidPlan(
   return Object.freeze({ valid: false, errors: Object.freeze([planError(code, message, path)]) });
 }
 
-/** Whether the arguments of a `toJson` or `fromJson` call hold a literal `files: false`. */
+/** Whether the arguments of a call of a conversion that takes `files:` hold a literal `files: false`. */
 function keepsFilesOut(callArguments: unknown): boolean {
   return (
     Array.isArray(callArguments) &&
