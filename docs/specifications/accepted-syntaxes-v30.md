@@ -1545,6 +1545,72 @@ A hash hides a secret only when the secret has many possible values. A number fr
 of them. A value that the script chooses itself with `random` can be recovered from the save, because the session's
 random generator is deterministic.
 
+### Encryption
+**Status:** Accepted (Owner decisions, 2026-10-13 and 2026-10-14)
+
+```text
+encryptText(text, password: text, timeLock: moment)
+encryptFile(file, password: text, timeLock: moment)
+decryptText(text, password: text, default: value)
+decryptFile(file, password: text, default: value)
+```
+
+`encryptText` locks text and gives the lock as Base64 text, and `decryptText` opens such text and gives the text it
+locked. `encryptFile` locks a stored file ([§33](#stored-files)) and gives the locked file's reference, and
+`decryptFile` opens a locked file and gives a stored file whose type its bytes give again. The content is encrypted once
+with AES-256-GCM under a new random key, and each way to open the lock, an opener, holds its own copy of that key: any
+one opener opens it ([`ENCRYPTION.md`](../ENCRYPTION.md)).
+
+- `password:` opens with exactly the text it is given.
+- `timeLock:`, a moment (`absoluteDateTime`), is a time lock, a lock that cannot open before a set time: from that
+  moment anyone can open the lock with it, also long after, and before it the time lock opens nothing, while another
+  opener may. The Player fetches the drand network's proof of that moment to open it. A moment in the past opens at
+  once. When the Player can reach the drand network while it locks and the device's clock is behind drand's time, the
+  moment moves later by as much.
+
+Each of these options also takes `true` or `false`. A value is used as given, without asking; `true` lets the player
+set that opener in the Player's lock dialog, and `false` leaves it out, so `timeLock: false` gives no time lock at all.
+A call without any of them lets the player set each, as if each were `true`. A call that gives one of them must give
+each, or it does not compile. A call whose options are all `false` has no way to open: an error at compile time where
+they are written, or when the call runs. **Without a time lock, a lost password means that the content never opens.**
+
+```text
+let locked = encryptFile(photo)                                                  // the player chooses
+let locked = encryptFile(photo, password: "corner", timeLock: false)             // only the password opens it
+let locked = encryptFile(photo, password: false, timeLock: getAbsoluteDateTime() + 3 days)   // a time lock only
+let locked = encryptFile(photo, password: true, timeLock: friday)                // the player sets a password
+```
+
+The lock dialog shows only the openers that are `true`. Its time lock is suggested 7 days ahead, and the player may move
+it to another moment in the future or switch it off; its password is typed twice. It locks once the lock has an opener,
+also one the call gives, and while only a password would open the lock, it warns that a forgotten password means the
+content never opens.
+
+`decryptText` and `decryptFile` need their `default:`, which may be any value, also `null`; a call without one is a
+compile error. A wrong password, a changed lock, text that is not a lock, a time lock whose moment has not come, and a
+cancelled dialog give the default, never a runtime error. The default is evaluated last, and only when it is used (owner
+decision, 2026-10-16). With `password:` a call tries only that password. Without it, a lock whose time lock has passed
+opens without asking; otherwise the Player asks the player with what opens this lock: a password, and the moment its
+time lock opens. A wrong password in that dialog lets the player try again, and Cancel gives the default. When the time
+lock has passed but the Player cannot reach the drand network, the dialog offers to try again, and without another
+opener the call gives the default.
+
+```text
+let photo = decryptFile(locked, password: "corner", default: null)
+let photo = decryptFile(locked, default: null)        // opens if its time has passed, otherwise the Player asks
+```
+
+`decryptText` reads the Base64 as `fromBase64` does ([§13](#json-and-base64)), so a lock survives being copied through a
+chat, and gives the default for a lock whose content is not UTF-8 text. The file calls take the stored files that
+`fileToBase64` reads and fail where it fails ([§33](#stored-files)), and every call fails with a runtime error where the
+browser cannot encrypt at all, as on a Player page without https.
+
+Each call waits for the Player, and its result is recorded: a restore or a replay reuses it without the network, the
+file store, or the password. The Player's dialogs are interactions, which a timer's expiry block interrupts
+([§27](#27-timers)): they ask again once it returns, without what was typed and not yet given. The short step that locks
+or opens is not interrupted; a due block runs once it is done. What the player types in a dialog never becomes a script
+value.
+
 ### Numeric functions
 **Status:** Accepted (Owner decision, 2026-10-07)
 

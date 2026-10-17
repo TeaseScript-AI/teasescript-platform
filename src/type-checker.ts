@@ -74,7 +74,7 @@ import {
   unknownFormTypeMessage,
 } from "./form-fields.js";
 import type { VariableSite } from "./semantic.js";
-import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "./capture-call.js";
+import { isAskImageCall, isFileStoreCall, isLockCall, isTakePhotoCall } from "./capture-call.js";
 import { lazyDefaultArgument } from "./lazy-defaults.js";
 import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "./web-url.js";
 import {
@@ -6478,9 +6478,13 @@ class TypeChecker {
       const entry = scope.resolve(callee.name);
       if (entry?.kind === "function")
         return yield* compileChild(this.#functionCallTask(expression, entry.fn, scope));
-      // A file store call may wait for the Player.
+      // A file store or lock call may wait for the Player.
       const values = yield* compileChild(
-        this.#callArgumentsTask(expression, scope, isFileStoreCall(expression)),
+        this.#callArgumentsTask(
+          expression,
+          scope,
+          isFileStoreCall(expression) || isLockCall(expression),
+        ),
       );
       if (entry === undefined && this.#builtins.has(callee.name))
         return this.#builtinType(callee.name, expression, values);
@@ -7230,6 +7234,30 @@ class TypeChecker {
         return (name === "fromBase64" || name === "fileFromBase64") && fallback !== -1
           ? union([STRING_TYPE, values[fallback]!])
           : STRING_TYPE;
+      }
+      case "encryptText":
+      case "encryptFile":
+      case "decryptText":
+      case "decryptFile": {
+        // Locked text as Base64 or a locked stored file, and what a lock opens to, or the default (V30 §13).
+        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        this.#reportProblems(problems);
+        const index = expression.arguments.findIndex((item) => item.kind === "positionalArgument");
+        if (index !== -1 && problems.every((problem) => problem.kind !== "argumentCount"))
+          this.#reportUnless(
+            values[index]!,
+            (member) => isScalar(member, "string"),
+            expression.arguments[index]!.value,
+            name === "encryptText"
+              ? "encryptText(...) locks text (string)"
+              : name === "decryptText"
+                ? "decryptText(...) opens locked text (string)"
+                : `${name}(...) ${name === "encryptFile" ? "locks" : "opens"} a stored file, which is text (string)`,
+          );
+        const fallback = expression.arguments.findIndex(
+          (item) => item.kind === "namedArgument" && item.name.name === "default",
+        );
+        return fallback !== -1 ? union([STRING_TYPE, values[fallback]!]) : STRING_TYPE;
       }
       case "toRegex": {
         // A regex from pattern text, or the default, a regex or null (V30 §8).
@@ -9486,7 +9514,10 @@ const PURE_BUILTINS: ReadonlySet<string> = new Set([
 function isPureBuiltinCall(expression: CallExpression): boolean {
   const callee = expression.callee;
   return (
-    callee.kind === "identifier" && PURE_BUILTINS.has(callee.name) && !isFileStoreCall(expression)
+    callee.kind === "identifier" &&
+    PURE_BUILTINS.has(callee.name) &&
+    !isFileStoreCall(expression) &&
+    !isLockCall(expression)
   );
 }
 

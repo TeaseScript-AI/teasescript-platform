@@ -4,8 +4,10 @@ import {
   type ProjectSourceFile,
 } from "../../src/compiler.js";
 import type { RuntimeAccountInput } from "../../src/runtime/account.js";
+import type { RuntimeLockActionSnapshot } from "../../src/runtime/actions/model.js";
 import { runtimeTimedWork } from "../../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSession, type RuntimeSessionView } from "../../src/runtime/session.js";
+import type { PlayerLockAnswer } from "../../player/runtime-adapter.js";
 import type { RuntimeStatus } from "../../src/runtime/state.js";
 
 /*
@@ -16,6 +18,9 @@ import type { RuntimeStatus } from "../../src/runtime/state.js";
  * moment something is due, as `npm run probe -- --run` does, so a `wait` passes and a timer fires; it stops when the
  * script ends, fails, or waits for the player or the host.
  */
+
+/** The answer a simulated Player gives a lock step (docs/RUNTIME.md, "Locks"). */
+export type FlowLockAnswer = (action: RuntimeLockActionSnapshot) => PlayerLockAnswer;
 
 export interface FlowKnob {
   readonly key: string;
@@ -43,13 +48,15 @@ const MAX_CLOCK_MOVES = 100;
 
 /**
  * Compiles the project, and when it compiles, runs it once per subset of the knobs. A run types `answer` into each ask
- * it waits for, such as `askInteger`, or stops there when it is `null`.
+ * it waits for, such as `askInteger`, or stops there when it is `null`, and answers each lock step with `lock`, or stops
+ * there. A lock dialog waits for the player, so the clock first moves to each block due while it asks.
  */
 export function compileAndRunVariants(
   files: readonly ProjectSourceFile[],
   knobs: readonly FlowKnob[],
   account: RuntimeAccountInput = {},
   answer: string | null = null,
+  lock: FlowLockAnswer | null = null,
 ): FlowVariants {
   const compiled = compileProject(files);
   const runs: FlowRun[] = [];
@@ -77,6 +84,18 @@ export function compileAndRunVariants(
             interactionKind: action.interactionKind,
             payload: { kind: "submittedText", submittedText: answer },
           };
+          for (const event of session.completeAction(request).events)
+            if (event.kind === "say") says.push(event.text);
+          continue;
+        }
+        if (waiting && action?.kind === "lock" && lock !== null) {
+          const due = action.phase === "ask" ? earliestDueMs(view) : null;
+          if (due !== null) {
+            for (const event of session.observeTime(due).events)
+              if (event.kind === "say") says.push(event.text);
+            continue;
+          }
+          const request = { actionId: action.actionId, actionKind: "lock", payload: lock(action) };
           for (const event of session.completeAction(request).events)
             if (event.kind === "say") says.push(event.text);
           continue;
@@ -113,6 +132,11 @@ function nextDueMs(view: RuntimeSessionView): number | null {
       !due.some((work) => work.actionId === foreground.actionId))
   )
     return null;
+  return earliestDueMs(view, due);
+}
+
+/** The first moment any timed work of the script comes due, or `null` without any. */
+function earliestDueMs(view: RuntimeSessionView, due = runtimeTimedWork(view)): number | null {
   let earliest = Infinity;
   for (const work of due) if (work.deadlineMs < earliest) earliest = work.deadlineMs;
   return Number.isFinite(earliest) ? Math.max(earliest, view.currentSessionTimeMs) : null;

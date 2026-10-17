@@ -4,7 +4,7 @@ import type { LazyDefaultOperation } from "../lazy-defaults.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 97;
+export const INSTRUCTION_PLAN_VERSION = 98;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -167,6 +167,7 @@ export type Instruction =
   | InteractionInstruction
   | CaptureInstruction
   | FileStoreInstruction
+  | LockInstruction
   | GotoInstruction
   | TransferInstruction
   | SetFallbackInstruction
@@ -983,6 +984,36 @@ export interface FileStoreInstruction extends InstructionBase {
   readonly defaultTemporary: number | null;
   /** The written `files:` of `toJson` and `fromJson`; `null` without one, which means `true`. */
   readonly files: ExpressionPlan | null;
+  readonly destinationTemporary: number;
+}
+
+/** The calls that lock and open text and stored files, which `lock` instructions run (V30 §13). */
+export type LockCall = "encryptText" | "encryptFile" | "decryptText" | "decryptFile";
+
+/**
+ * `encryptText(text, ...)`, `encryptFile(file, ...)`, `decryptText(text, ..., default:)`, or
+ * `decryptFile(file, ..., default:)` (V30 §13). It asks the Player to lock or open and waits, with the instruction itself
+ * as the continuation; each answer is handed off and the instruction runs again with it, either to give the result or
+ * to wait again, as while the Player's dialog asks the player. Its operands are temporaries or literals, so every run
+ * reads the same values.
+ */
+export interface LockInstruction extends InstructionBase {
+  readonly kind: "lock";
+  readonly call: LockCall;
+  /** The text, Base64 lock, or stored file. */
+  readonly value: ExpressionPlan;
+  /** The written `password:`: text, or for an encrypt call also `true` or `false`; `null` without one. */
+  readonly password: ExpressionPlan | null;
+  /**
+   * The written `timeLock:` of an encrypt call, a moment, `true`, or `false`; `null` without one. An encrypt call writes
+   * every opener or none, and none means that the player chooses each.
+   */
+  readonly timeLock: ExpressionPlan | null;
+  /**
+   * For a decrypt call, whose `default:` runs as the instructions after this one, as for a `storeTemporary` with
+   * `defaultTemporary`: the temporary that receives whether the call needs it; `null` for an encrypt call.
+   */
+  readonly defaultTemporary: number | null;
   readonly destinationTemporary: number;
 }
 

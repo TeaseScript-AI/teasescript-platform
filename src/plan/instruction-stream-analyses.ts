@@ -1325,6 +1325,7 @@ function producedTemporaryIds(instruction: Record<string, unknown>): readonly nu
     instruction.kind === "interaction" ||
     instruction.kind === "capture" ||
     instruction.kind === "fileStore" ||
+    instruction.kind === "lock" ||
     instruction.kind === "startTimer" ||
     instruction.kind === "playMedia" ||
     instruction.kind === "showCamera" ||

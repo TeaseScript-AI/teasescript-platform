@@ -139,6 +139,22 @@ const CONSTRUCTS: readonly Construct[] = [
     fixed: true,
   },
   {
+    // No time lock, so the run stops where the Player locks.
+    name: "encryptText's password and timeLock",
+    parts: [
+      named("password", TEXT),
+      named("timeLock", { clear: "clearInteger() > 5", read: "x > 9" }),
+    ],
+    line: ([a, b]) => `let r = encryptText("t", ${a}, ${b})`,
+  },
+  {
+    // The text is no lock, so the default runs, after `password:`, which is written after it.
+    name: "decryptText's password and default",
+    parts: [TEXT, TEXT],
+    line: ([a, b]) => `let r = decryptText("x", default: ${b}, password: ${a})`,
+    fixed: true,
+  },
+  {
     name: "named call arguments",
     parts: [named("a", INTEGER), named("b", INTEGER)],
     line: ([a, b]) => `let r = add(${a}, ${b})`,

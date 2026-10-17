@@ -263,17 +263,20 @@ export function executeValidatedWorkspaceSnapshot(
 }
 
 /**
- * The workspace has no camera and no file store: continuing past a pending `takePhoto()` answers it as unavailable, so
- * the script gets `null` and the warning a Player without a camera would produce, and a pending file store as failed,
- * so a file to keep gives its default with a warning. Each continuation answers at most the one action that is already
- * waiting.
+ * The workspace has no camera, no file store, and no locks: continuing past a pending `takePhoto()` answers it as
+ * unavailable, so the script gets `null` and the warning a Player without a camera would produce, a pending file store
+ * as failed, so a file to keep gives its default with a warning, and a lock step as failed, after its dialog as
+ * answered, so the call fails with `TSR086`. Each continuation answers at most the one action that is already waiting.
  */
 function answerWorkspaceCapture(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
 ): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
   const action = snapshot.foregroundAction;
-  if (snapshot.status !== "waiting" || (action?.kind !== "capture" && action?.kind !== "fileStore"))
+  if (
+    snapshot.status !== "waiting" ||
+    (action?.kind !== "capture" && action?.kind !== "fileStore" && action?.kind !== "lock")
+  )
     return { snapshot, events: [] };
   const operation = completeAction(
     plan,
@@ -284,7 +287,16 @@ function answerWorkspaceCapture(
           actionKind: "capture",
           payload: { kind: "unavailable", reason: "unconfigured" },
         }
-      : { actionId: action.actionId, actionKind: "fileStore", payload: { kind: "failed" } },
+      : action.kind === "fileStore"
+        ? { actionId: action.actionId, actionKind: "fileStore", payload: { kind: "failed" } }
+        : {
+            actionId: action.actionId,
+            actionKind: "lock",
+            payload:
+              action.phase === "ask"
+                ? { kind: "submitted" }
+                : { kind: "failed", reason: "unavailable" },
+          },
   );
   return { snapshot: operation.snapshot, events: operation.events };
 }

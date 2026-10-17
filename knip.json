@@ -21,6 +21,8 @@
     "src/**/*.ts",
     "playground/**/*.ts",
     "player/theme/**/*.ts",
+    "player/encryption/**/*.ts",
+    "player/lock-service.ts",
     "player/vue/**/*.{css,ts,vue}",
     "editor/**/*.{css,ts,vue}",
     "tests/**/*.ts",

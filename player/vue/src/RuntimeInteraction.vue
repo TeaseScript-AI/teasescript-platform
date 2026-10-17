@@ -3,7 +3,9 @@ import ForegroundControls, { type ImageControl, type ImageControls } from "./For
 import FormControls from "./FormControls.vue";
 import PopupDialog from "./PopupDialog.vue";
 import ExportTextDialog from "./ExportTextDialog.vue";
-import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import LockDialog from "./LockDialog.vue";
+import type { LockDialog as LockDialogState, LockDialogInput } from "../../lock-service.js";
+import { computed, nextTick, onUnmounted, ref, watch, type Ref } from "vue";
 import { useEventListener } from "@vueuse/core";
 import {
   activePlayerRuntimeInteraction,
@@ -89,7 +91,21 @@ const props = defineProps<{
   debugCountdown?: string | null;
   /** Whether a popup or an exportText dialog is modal; while Debug runs it is not, so the Debug panel stays usable. */
   popupModal?: boolean;
+  /** The dialog of a lock step, while one shows, and how it is answered (`usePlayerSession`'s `lock`). */
+  lock?: {
+    readonly dialog: Readonly<
+      Ref<{ readonly dialog: LockDialogState; readonly busy: boolean } | null>
+    >;
+    readonly submit: (input: LockDialogInput) => void;
+    readonly cancel: () => void;
+  };
 }>();
+// A lock step waits for the Player or its dialog; the composer takes no answer meanwhile.
+const locking = computed(
+  () =>
+    props.session?.state.status === "waiting" &&
+    props.session.state.foregroundAction?.kind === "lock",
+);
 const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession] }>();
 const actionId = computed(() =>
   props.session ? activePlayerRuntimeInteraction(props.session.state)?.actionId : undefined,
@@ -825,6 +841,16 @@ function submit(source: "input" | "button") {
           :area="composition"
           @close="complete(answer('button', closePlayerRuntimeExport))"
         />
+        <LockDialog
+          v-if="lock?.dialog.value"
+          :key="lock.dialog.value.dialog.key"
+          :dialog="lock.dialog.value.dialog"
+          :busy="lock.dialog.value.busy"
+          :modal="popupModal ?? true"
+          :area="composition"
+          @submit="lock.submit"
+          @cancel="lock.cancel"
+        />
         <Composer
           ref="composer"
           v-model="draft"
@@ -844,6 +870,7 @@ function submit(source: "input" | "button") {
           :fresh-after="presentedAt"
           :submitting="submitting || readingImage"
           :placeholder="
+            locking ||
             foreground?.kind === 'popup' ||
             foreground?.kind === 'export-text' ||
             foreground?.kind === 'open-url'

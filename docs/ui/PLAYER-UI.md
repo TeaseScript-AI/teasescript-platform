@@ -986,7 +986,7 @@ adds nothing to the transcript. Meanwhile the composer takes no answer. A block 
 until the block returns, and a restored session opens it again. While Debug runs, the dialog is not modal, so the Debug
 panel and its rewind stay usable beside it: it stands in the middle of the session's area instead of the window, below
 the tools drawer of a narrow layout, and Escape closes it only while focus is inside it. While a popup, an
-`exportText` dialog, or an `openUrl` button waits, the composer shows no hint.
+`exportText` dialog, an `openUrl` button, or a lock waits, the composer shows no hint.
 
 `exportText` opens a dialog like a popup's, named by its title, with the text in a read-only monospace field that wraps
 long lines and scrolls, and the buttons **Copy**, which takes focus, **Download**, and **Close**. Copy writes the whole
@@ -996,6 +996,31 @@ copy it by hand or use Download. Download saves the text as a UTF-8 file with th
 Neither closes the dialog, and the Player never copies or downloads by itself. Close, or Escape, closes it and lets the
 script go on; a click beside it does not, and nothing enters the transcript. Its keys, modality, and placement while
 Debug runs, and its return after a block or a reload, are a popup's.
+
+A lock ([V30 §13](../specifications/accepted-syntaxes-v30.md#encryption)) that must ask the player opens a dialog like a
+popup's, with nothing in the transcript. **Lock**, for an encrypt call with openers that the player sets, shows only
+those openers, under "Choose one or more ways this can be opened again." where it shows more than one, each with a line
+that says what it does: the checked box **Time lock**, "Opens by itself after the time you
+set.", with a date-and-time field prefilled 7 days ahead; and **Password (optional)**, "Opens with a password you
+choose.", which takes focus, or else the date-and-time field does, and, once a password is typed, **Repeat password**,
+which says "The passwords do not match" under it as soon as it differs from the password. Where the password is the only
+opener there can be, its label has no "(optional)". Unchecking the box hides the field, which keeps its moment for when
+the box is checked again. A line above **Lock** says "Without a time, this only opens with the password. If the password
+is forgotten, it never opens." while no time lock would open the lock, or what can be set, such as "Set a time or a
+password.", while nothing would. Its **Lock** button, the only way out, works once the two passwords match and the lock
+has an opener, also one the call gives, and refuses a moment that is not in the future with "Choose a moment in the
+future." under the field. **Unlock**, for a decrypt call, shows "Opens by itself at …" for each time
+lock in the player's locale, a **Password** field where a password opens it, which takes focus, **Unlock**, which tries
+the password as typed, also an empty one, and **Cancel**, which takes focus without a password field; Cancel, or Escape,
+gives the call's default. A wrong password keeps it open with "That password does not open it." under the field; a
+passed time lock whose relays the Player cannot reach shows "Its time has passed, but the time service could not be
+reached." and **Try again** instead of its moment; and a time lock whose moment comes while it shows opens it without
+the player. A password field masks its text, has an eye button, **Show password** or **Hide password**, says "Caps Lock
+is on" under it while it is, and offers no saved or suggested password. While the Player locks or opens with what the
+player gave, the dialog stays and takes no input but keeps focus, and the button that started it reads **Locking…** or
+**Opening…**, as does a line when a time lock opens it by itself. As for a popup, a key held down since before it opened
+does nothing. A block that interrupts the dialog closes it, and it asks again afterwards with empty fields; its modality
+and placement while Debug runs are a popup's.
 
 `openUrl` opens its web address in a new tab. Right after the player's click, such as on a `showButton`, a choice, or a
 form, while the browser still counts it as the player's activation, the Player opens the tab at once and the script goes

@@ -4,11 +4,19 @@ import { CONVERSION_RESULTS, type ConversionName } from "./conversions.js";
 /**
  * The calls whose `default:` runs only when it is used (owner decision, 2026-10-16): a conversion uses it for a value it
  * cannot convert (V30 §13), `toRegex` for text that is no valid pattern (§8), `fromJson` and `fromBase64` for text that
- * does not read (§13), `fileFromBase64` for text that is no file (§33), and the `get` method of a list or dict for a
- * position or key it does not have (§16, §40). `load` and `otherwise` keep their own forms of the rule (§25, §18).
+ * does not read (§13), `fileFromBase64` for text that is no file (§33), `decryptText` and `decryptFile` for a lock they
+ * do not open (§13), and the `get` method of a list or dict for a position or key it does not have (§16, §40). `load`
+ * and `otherwise` keep their own forms of the rule (§25, §18).
  */
 export type LazyDefaultOperation =
-  ConversionName | "toRegex" | "fromJson" | "fromBase64" | "fileFromBase64" | "get";
+  | ConversionName
+  | "toRegex"
+  | "fromJson"
+  | "fromBase64"
+  | "fileFromBase64"
+  | "decryptText"
+  | "decryptFile"
+  | "get";
 
 const LAZY_DEFAULT_FUNCTIONS: ReadonlySet<string> = new Set([
   ...CONVERSION_RESULTS.keys(),
@@ -16,6 +24,8 @@ const LAZY_DEFAULT_FUNCTIONS: ReadonlySet<string> = new Set([
   "fromJson",
   "fromBase64",
   "fileFromBase64",
+  "decryptText",
+  "decryptFile",
 ]);
 
 export function isLazyDefaultOperation(value: unknown): value is LazyDefaultOperation {

@@ -109,6 +109,11 @@ export function requiredInstructionTemporaries(
       collect(instruction.value);
       if (instruction.files !== null) collect(instruction.files);
       break;
+    case "lock":
+      collect(instruction.value);
+      if (instruction.password !== null) collect(instruction.password);
+      if (instruction.timeLock !== null) collect(instruction.timeLock);
+      break;
     case "storageWrite":
       if (instruction.value !== null) collect(instruction.value);
       collect(instruction.key);
@@ -192,6 +197,7 @@ export function instructionKilledTemporaries(instruction: Instruction): Readonly
     case "capture":
       return new Set([instruction.destinationTemporary]);
     case "fileStore":
+    case "lock":
       return instruction.defaultTemporary === null
         ? new Set([instruction.destinationTemporary])
         : new Set([instruction.destinationTemporary, instruction.defaultTemporary]);

@@ -66,7 +66,12 @@ import { canonicalWebUrl } from "../../web-url.js";
 import { canonicalRegexFlags } from "../../regex.js";
 import { copiesAccount } from "../../project-globals.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
-import { isAskImageCall, isFileStoreCall, isTakePhotoCall } from "../../capture-call.js";
+import {
+  isAskImageCall,
+  isFileStoreCall,
+  isLockCall,
+  isTakePhotoCall,
+} from "../../capture-call.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
@@ -1402,6 +1407,9 @@ export class InstructionCompiler {
     if (isFileStoreCall(expression) && expression.kind === "callExpression") {
       return yield* compileChild(this.#lowerFileStoreTask(expression));
     }
+    if (isLockCall(expression) && expression.kind === "callExpression") {
+      return yield* compileChild(this.#lowerLockTask(expression));
+    }
     if (
       expression.kind === "callExpression" &&
       expression.callee.kind === "identifier" &&
@@ -2573,6 +2581,95 @@ export class InstructionCompiler {
     };
   }
 
+  /**
+   * `encryptText`, `encryptFile`, `decryptText`, or `decryptFile` (V30 §13). Like a file store call, its arguments are
+   * evaluated in written order into temporaries, unless they are literals, so that every run of the instruction reads the
+   * same values; they are cleared once it gave its result. A decrypt call's default runs only when it is used, as
+   * instructions after the call.
+   */
+  *#lowerLockTask(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): CompileTask<LoweredExpression> {
+    if (expression.callee.kind !== "identifier")
+      throw new TypeError("A lock call reached lowering without its name.");
+    const call = expression.callee.name;
+    if (
+      call !== "encryptText" &&
+      call !== "encryptFile" &&
+      call !== "decryptText" &&
+      call !== "decryptFile"
+    )
+      throw new TypeError(`'${call}' is not a lock call.`);
+    const lazy = lazyDefaultArgument(expression);
+    const written = expression.arguments.filter((argument) => argument !== lazy?.argument);
+    const lowered = yield* compileChild(
+      this.#lowerOrderedExpressionsTask(written.map((argument) => argument.value)),
+    );
+    const operands: Record<"value" | "password" | "timeLock", ExpressionPlan | null> = {
+      value: null,
+      password: null,
+      timeLock: null,
+    };
+    const temporaryIds: number[] = [];
+    written.forEach((argument, index) => {
+      const operand = lowered[index]!;
+      temporaryIds.push(...operand.temporaryIds);
+      let plan = operand.plan;
+      if (plan.kind !== "temporary" && plan.kind !== "literal") {
+        const temporaryId = this.#allocateTemporary();
+        this.instructions.push({
+          kind: "storeTemporary",
+          temporaryId,
+          value: plan,
+          expectBoolean: false,
+          span: copySpan(argument.value.span),
+        });
+        temporaryIds.push(temporaryId);
+        plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
+      }
+      const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
+      if (name !== "value" && name !== "password" && name !== "timeLock")
+        throw new TypeError(`${call}(...) reached lowering with '${name}:'.`);
+      operands[name] = plan;
+    });
+    const value = operands.value;
+    if (value === null) throw new TypeError(`${call}(...) reached lowering without its value.`);
+    const lock = (destinationTemporary: number, defaultTemporary: number | null): void => {
+      this.instructions.push({
+        kind: "lock",
+        call,
+        value,
+        password: operands.password,
+        timeLock: operands.timeLock,
+        defaultTemporary,
+        destinationTemporary,
+        span: copySpan(expression.span),
+      });
+      this.#emitTemporaryCleanup(temporaryIds, expression.span);
+    };
+    if (lazy !== null)
+      return yield* compileChild(
+        this.#lowerLazyDefaultTask(
+          lock,
+          lazy.argument.value,
+          { defaultOf: lazy.operation },
+          expression,
+        ),
+      );
+    if (call === "decryptText" || call === "decryptFile")
+      throw new TypeError(`${call}(...) reached lowering without its default:.`);
+    const destinationTemporary = this.#allocateTemporary();
+    lock(destinationTemporary, null);
+    return {
+      plan: {
+        kind: "temporary",
+        temporaryId: destinationTemporary,
+        span: copySpan(expression.span),
+      },
+      temporaryIds: [destinationTemporary],
+    };
+  }
+
   #consumeInteractionResult(transientTemporary: number, span: SourceSpan): LoweredExpression {
     const ordinaryTemporary = this.#allocateTemporary();
     this.instructions.push({
@@ -3229,6 +3326,7 @@ export class InstructionCompiler {
         isTakePhotoCall(current.expression) ||
         isAskImageCall(current.expression) ||
         isFileStoreCall(current.expression) ||
+        isLockCall(current.expression) ||
         (current.expression.kind === "callExpression" &&
           current.expression.callee.kind === "identifier" &&
           this.#functionByName.has(current.expression.callee.name))
@@ -3603,6 +3701,8 @@ function assembleExpression(
         throw new TypeError("askImage() reached pure expression assembly.");
       if (isFileStoreCall(expression))
         throw new TypeError("A file store call reached pure expression assembly.");
+      if (isLockCall(expression))
+        throw new TypeError("A lock call reached pure expression assembly.");
       return {
         kind: "call",
         callee: child(expression.callee),

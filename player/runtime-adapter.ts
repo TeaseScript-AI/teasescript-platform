@@ -36,6 +36,9 @@ import {
   type CaptureUnavailableReason,
   type RuntimeCaptureActionSnapshot,
   type RuntimeFileStoreActionSnapshot,
+  type RuntimeLockActionSnapshot,
+  type RuntimeLockChoice,
+  type RuntimeLockNotice,
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSession,
   type RuntimeSessionCall,
@@ -965,7 +968,9 @@ export type PlayerDebugWaitKind =
   | "media"
   | "save"
   | "photo"
-  | "file";
+  | "file"
+  | "lock"
+  | "unlock";
 
 /** One active call, innermost first: a function, a called file, or a timer, media cue or permanent-button block. */
 export interface PlayerDebugCall {
@@ -1010,6 +1015,17 @@ export interface PlayerRuntimeDebugNow {
   readonly waitingAt: {
     readonly kind: PlayerDebugWaitKind;
     readonly at: PlayerDebugSourceLocation;
+    /**
+     * A lock step's openers, never its text, password, or key: whether its dialog asks the player, whether a password
+     * was written, its time lock's moment in epoch milliseconds, or `null`, which the lock dialog suggests for a chosen
+     * time lock, and the openers the player chooses in the lock dialog.
+     */
+    readonly lock?: {
+      readonly dialog: boolean;
+      readonly password: boolean;
+      readonly timeLockMs: number | null;
+      readonly choices: readonly RuntimeLockChoice[];
+    };
   } | null;
   readonly calls: readonly PlayerDebugCall[];
   readonly timers: readonly PlayerDebugTimer[];
@@ -1052,6 +1068,8 @@ function debugWaitKind(
       return "photo";
     case "fileStore":
       return "file";
+    case "lock":
+      return action.call === "encryptText" || action.call === "encryptFile" ? "lock" : "unlock";
   }
 }
 
@@ -1158,6 +1176,16 @@ export function playerRuntimeDebugNow(
         ? Object.freeze({
             kind: debugWaitKind(plan, foreground),
             at: debugLocation(plan, foreground.owningInstruction),
+            ...(foreground.kind === "lock"
+              ? {
+                  lock: Object.freeze({
+                    dialog: foreground.phase === "ask",
+                    password: foreground.password !== null,
+                    timeLockMs: foreground.timeLockMs,
+                    choices: foreground.choices,
+                  }),
+                }
+              : {}),
           })
         : null,
     calls: active ? playerRuntimeCalls(session) : Object.freeze([]),
@@ -1245,6 +1273,58 @@ export function answerPlayerRuntimeFileStore(
   capturedMedia?: CapturedMediaAdmission,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> {
   const request = { actionId, actionKind: "fileStore", payload: answer };
+  const operation = session.engine.call(
+    session,
+    "completeAction",
+    [request],
+    (runtime, admission) =>
+      runtime.completeAction(
+        request,
+        capturedMedia === undefined
+          ? traceOptions(session.debugTrace)
+          : { ...traceOptions(session.debugTrace), capturedMedia: admission(capturedMedia) },
+      ),
+  );
+  return Object.freeze({
+    session: applyOperation(session, operation, "completed"),
+    outcome: operation.outcome,
+  });
+}
+
+/** The lock step the session waits for, or `null`; while an expiry block runs, its dialog is not one. */
+export function activePlayerRuntimeLock(
+  state: PlayerRuntimeState,
+): RuntimeLockActionSnapshot | null {
+  const action = state.status === "waiting" ? state.foregroundAction : null;
+  return action?.kind === "lock" ? action : null;
+}
+
+/**
+ * The Player's answer to a lock step (V30 §13): a lock as Base64 or a locked stored file, an opened text or file of its
+ * type, that it did not open, that it failed, or that it must ask the player; or the dialog's submission or cancel.
+ */
+export type PlayerLockAnswer =
+  | { readonly kind: "locked"; readonly text: string }
+  | { readonly kind: "locked"; readonly file: string }
+  | { readonly kind: "opened"; readonly text: string }
+  | { readonly kind: "opened"; readonly file: string; readonly type: string }
+  | { readonly kind: "notOpened" }
+  | { readonly kind: "failed"; readonly reason: "unreadable" | "unavailable" }
+  | { readonly kind: "ask"; readonly notice?: RuntimeLockNotice }
+  | { readonly kind: "submitted" }
+  | { readonly kind: "cancelled" };
+
+/**
+ * Answers a pending lock step and continues on success. A stored file is accepted only when `capturedMedia` vouches for
+ * it. On `executionPending` the host runs the session and offers the same answer again.
+ */
+export function answerPlayerRuntimeLock(
+  session: PlayerRuntimeSession,
+  actionId: number,
+  answer: PlayerLockAnswer,
+  capturedMedia?: CapturedMediaAdmission,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> {
+  const request = { actionId, actionKind: "lock", payload: answer };
   const operation = session.engine.call(
     session,
     "completeAction",
@@ -1798,16 +1878,18 @@ function nextMediaEventMs(media: RuntimeMediaSnapshot): number | null {
 
 /**
  * Whether time cannot advance before the host answers: catch-up holds for a queued block behind a pending write, a
- * `save`, `delete`, `takePhoto()`, or file store waits for the host, or the session is paused at a random draw.
+ * `save`, `delete`, `takePhoto()`, file store, or lock step waits for the host, or the session is paused at a random
+ * draw. A lock's dialog waits for the player, as an interaction does.
  */
 export function playerRuntimeAwaitsHost(state: RuntimeSessionView): boolean {
-  const pending = state.foregroundAction?.kind;
+  const pending = state.foregroundAction;
   return (
     state.randomDraw !== null ||
     state.currentSessionTimeMs < state.observedSessionTimeMs ||
-    pending === "storageWrite" ||
-    pending === "capture" ||
-    pending === "fileStore"
+    pending?.kind === "storageWrite" ||
+    pending?.kind === "capture" ||
+    pending?.kind === "fileStore" ||
+    (pending?.kind === "lock" && pending.phase === "work")
   );
 }
 

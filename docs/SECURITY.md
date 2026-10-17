@@ -43,6 +43,9 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
 - [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) owns resource-limit classification, coupling evidence, and follow-up routing; this security document owns the trust-boundary behavior.
 - Interaction-result handoff validation is a fixed local structural check and does not add another control-flow fixed point, future-writer scan, or settlement-provenance cache.
 - Package code has no unrestricted external network access; published media uses platform-managed storage/CDN.
+- For a lock's time lock ([`ENCRYPTION.md`](ENCRYPTION.md#drand)) the Player itself, never package code, fetches drand
+  quicknet beacons from four pinned relays without credentials and verifies each against the pinned chain key; a lock is
+  untrusted data, and its PBKDF2 work is bounded. A password typed in a lock dialog, and every key, stays in the Player.
 - Future external APIs use platform-managed typed integrations.
 - LLM output is untrusted input and may not directly rewrite canonical state or bypass deterministic rules.
 - Authored Standard-chat message markup crosses into the Player as validated typed blocks and spans. Angle-bracket HTML

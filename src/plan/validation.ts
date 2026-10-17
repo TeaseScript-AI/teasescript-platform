@@ -5,6 +5,7 @@ import { isInteractionChoiceValue } from "../choice-values.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
 import { validImageRequestFields } from "../image-input.js";
 import { canonicalWebUrl } from "../web-url.js";
+import { LOCK_CALLS } from "../capture-call.js";
 import { compileRegex, isCanonicalRegexFlags } from "../regex.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -1220,6 +1221,9 @@ function validateInstruction(
     case "fileStore":
       validateFileStoreInstruction(value, path, temporaryCount, errors);
       return;
+    case "lock":
+      validateLockInstruction(value, path, temporaryCount, errors);
+      return;
     default:
       errors.push(planError("TSC002", `Unknown instruction kind '${value.kind}'.`, `${path}.kind`));
   }
@@ -1286,6 +1290,76 @@ function validateFileStoreInstruction(
           "A file store operand must be a temporary or a literal.",
           `${path}.${name}`,
         ),
+      );
+    else validateExpression(operand, `${path}.${name}`, errors, false, temporaryCount);
+  }
+  validateTemporaryId(
+    value.destinationTemporary,
+    `${path}.destinationTemporary`,
+    temporaryCount,
+    errors,
+  );
+}
+
+/**
+ * A `lock` instruction runs again with each answer of the Player, so each operand is a temporary or a literal, which
+ * reads the same every time. An encrypt call writes both `password:` and `timeLock:`, or neither; a decrypt call has no
+ * `timeLock:`, and its required `default:` follows it.
+ */
+function validateLockInstruction(
+  value: Record<string, unknown>,
+  path: string,
+  temporaryCount: number,
+  errors: PlanValidationError[],
+): void {
+  if (
+    !hasExactKeys(value, [
+      "kind",
+      "call",
+      "value",
+      "password",
+      "timeLock",
+      "defaultTemporary",
+      "destinationTemporary",
+      "span",
+    ])
+  ) {
+    errors.push(planError("TSC002", "Lock instruction has an invalid shape.", path));
+    return;
+  }
+  const call = value.call;
+  if (
+    call !== "encryptText" &&
+    call !== "encryptFile" &&
+    call !== "decryptText" &&
+    call !== "decryptFile"
+  ) {
+    errors.push(planError("TSC002", "Lock call is invalid.", `${path}.call`));
+    return;
+  }
+  const decrypts = call === "decryptText" || call === "decryptFile";
+  if (decrypts !== (value.defaultTemporary !== null))
+    errors.push(
+      planError("TSC002", `The default of ${call}(...) is invalid.`, `${path}.defaultTemporary`),
+    );
+  else if (decrypts)
+    validateDefaultTemporary(
+      value.defaultTemporary,
+      value.destinationTemporary,
+      path,
+      temporaryCount,
+      errors,
+    );
+  if (decrypts ? value.timeLock !== null : (value.password === null) !== (value.timeLock === null))
+    errors.push(
+      planError("TSC002", `The timeLock: of ${call}(...) is invalid.`, `${path}.timeLock`),
+    );
+  for (const name of ["value", "password", "timeLock"] as const) {
+    const operand = value[name];
+    if (operand === null && name !== "value") continue;
+    if (!isRecord(operand) || (operand.kind !== "temporary" && operand.kind !== "literal"))
+      errors.push(
+        planError("TSC002", "A lock operand must be a temporary or a literal.", `${path}.${name}`),
       );
     else validateExpression(operand, `${path}.${name}`, errors, false, temporaryCount);
   }
@@ -2496,6 +2570,21 @@ function validateExpressionNode(
           planError(
             "TSC002",
             `${value.callee.name}() must be lowered to a file store instruction.`,
+            path,
+          ),
+        );
+      }
+      // The encrypt and decrypt calls wait for the Player; they lower to a lock instruction.
+      if (
+        isRecord(value.callee) &&
+        value.callee.kind === "identifier" &&
+        typeof value.callee.name === "string" &&
+        LOCK_CALLS.has(value.callee.name)
+      ) {
+        errors.push(
+          planError(
+            "TSC002",
+            `${value.callee.name}() must be lowered to a lock instruction.`,
             path,
           ),
         );

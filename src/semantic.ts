@@ -1,4 +1,4 @@
-import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
+import { isAskImageCall, isLockCall, isTakePhotoCall } from "./capture-call.js";
 import { IMAGE_REQUEST_OPTIONS } from "./image-input.js";
 import { normalizeOpaqueColor } from "./color.js";
 import {
@@ -1819,7 +1819,11 @@ class SemanticValidator {
                   ? "A say is not supported in function parameter defaults."
                   : isTakePhotoCall(blockingInteraction)
                     ? "Camera capture is not supported in function parameter defaults."
-                    : "Blocking interactions are not supported in function parameter defaults.",
+                    : isLockCall(blockingInteraction) &&
+                        blockingInteraction.kind === "callExpression" &&
+                        blockingInteraction.callee.kind === "identifier"
+                      ? `${blockingInteraction.callee.name}(...) is not supported in function parameter defaults, because it may ask the player. Call it in the function's body.`
+                      : "Blocking interactions are not supported in function parameter defaults.",
             blockingInteraction.span,
           );
         }
@@ -3393,7 +3397,8 @@ function findFirstInteraction(
       current.kind === "playMediaExpression" ||
       current.kind === "showCameraExpression" ||
       current.kind === "sayExpression" ||
-      (current.kind === "callExpression" && (isTakePhotoCall(current) || isAskImageCall(current)))
+      (current.kind === "callExpression" &&
+        (isTakePhotoCall(current) || isAskImageCall(current) || isLockCall(current)))
     )
       return current;
     const children = expressionChildren(current);

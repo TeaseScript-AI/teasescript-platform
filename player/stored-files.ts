@@ -58,7 +58,7 @@ function hexFromBytes(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function bytesFromBase64(base64: string): Uint8Array<ArrayBuffer> {
+export function bytesFromBase64(base64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
@@ -68,7 +68,7 @@ function bytesFromBase64(base64: string): Uint8Array<ArrayBuffer> {
 /** Base64 works on text of one byte per character, which this many bytes at a time are made into. */
 const BYTE_CHUNK = 8_192;
 
-function base64FromBytes(bytes: Uint8Array): string {
+export function base64FromBytes(bytes: Uint8Array): string {
   const parts: string[] = [];
   for (let start = 0; start < bytes.length; start += BYTE_CHUNK)
     parts.push(String.fromCharCode(...bytes.subarray(start, start + BYTE_CHUNK)));

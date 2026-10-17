@@ -38,10 +38,11 @@ export function startTimerHandler(
     suspendedAction !== null &&
     (suspendedAction.kind === "storageWrite" ||
       suspendedAction.kind === "capture" ||
-      suspendedAction.kind === "fileStore")
+      suspendedAction.kind === "fileStore" ||
+      (suspendedAction.kind === "lock" && suspendedAction.phase !== "ask"))
   ) {
     throw new Error(
-      "Only a foreground delay, interaction, reading time, or media wait can be interrupted.",
+      "Only a foreground delay, interaction, reading time, media wait, or lock dialog can be interrupted.",
     );
   }
   const startedAtMs = snapshot.currentSessionTimeMs;
@@ -153,6 +154,9 @@ function resumedAction(
   action: RuntimeInterruptibleActionSnapshot,
   stoodStillMs: number,
 ): RuntimeInterruptibleActionSnapshot {
+  // A lock's dialog asks again, shown anew; it has no time of its own.
+  if (action.kind === "lock") return Object.freeze({ ...action, resumes: action.resumes + 1 });
+  // A media wait is not timed.
   if (stoodStillMs === 0 || action.kind === "mediaPlayback") return action;
   if (action.kind === "interaction")
     return Object.freeze({ ...action, pausedMs: (action.pausedMs ?? 0) + stoodStillMs });

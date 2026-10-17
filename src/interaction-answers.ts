@@ -42,10 +42,20 @@ export type TypedAnswerKind = "text" | "number" | "integer" | TemporalAnswerKind
 /**
  * What the player is told about a wrong answer, V30 §20's default `invalidMessage`: an answer that is not of the kind a
  * typed ask or form field asks for, or typed text that matches no button of a choice (`choice`) or more than one
- * (`ambiguousChoice`). A malformed host payload gets a protocol message instead.
+ * (`ambiguousChoice`); and in the Player's lock dialogs (V30 §13), a repeated password that differs from the first
+ * (`passwordMismatch`), a password that does not open the lock (`wrongPassword`), and a time lock's moment that is not
+ * in the future (`pastTimeLock`). A malformed host payload gets a protocol message instead.
  */
 const INVALID_ANSWER_MESSAGES: Readonly<
-  Record<TypedAnswerKind | "choice" | "ambiguousChoice", string>
+  Record<
+    | TypedAnswerKind
+    | "choice"
+    | "ambiguousChoice"
+    | "passwordMismatch"
+    | "wrongPassword"
+    | "pastTimeLock",
+    string
+  >
 > = {
   text: "That is wrong. I asked for some text.",
   number: "That is wrong. I asked for a number.",
@@ -55,9 +65,12 @@ const INVALID_ANSWER_MESSAGES: Readonly<
   datetime: "That is wrong. I asked for a date and time.",
   choice: "That is wrong. Type the exact text of one button, or use the buttons above.",
   ambiguousChoice: "More than one button has this text. Use the buttons above.",
+  passwordMismatch: "The passwords do not match",
+  wrongPassword: "That password does not open it.",
+  pastTimeLock: "Choose a moment in the future.",
 };
 
-/** The message for a wrong answer to a typed ask, a typed form field, or a choice. */
+/** The message for a wrong answer to a typed ask, a typed form field, a choice, or a lock dialog. */
 export function invalidAnswerMessage(kind: keyof typeof INVALID_ANSWER_MESSAGES): string {
   return INVALID_ANSWER_MESSAGES[kind];
 }
