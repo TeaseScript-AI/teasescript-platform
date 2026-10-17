@@ -58,9 +58,9 @@ It is a developer aid, not a test.
 For a compiler change meant to preserve behaviour, such as a refactor,
 `node tools/compiler-differential.mjs --base <dist> --head <dist>` loads two builds (each a `dist/` from
 `npm run build:typescript` in its own checkout) in one process, compiles the same generated sources, `.tease` files,
-and projects with each, and classifies every case whose diagnostics, plan, or, with `--run`, runs differ; `--time R`
-compares their compile times instead (options in `tools/compiler-differential.mjs`). It is also a developer aid, not
-a test.
+and projects with each, and classifies every case whose diagnostics, plan, with `--run` runs, or, with `--internal`,
+what the checks before lowering found, such as the whole type check result, differ; `--time R` compares their compile
+times (options in `tools/compiler-differential.mjs`). It is also a developer aid, not a test.
 
 CI and tests verify executable code, scripts, configuration, generated artifacts,
 and real machine-checkable boundaries. They must not freeze living documentation
