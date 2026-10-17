@@ -283,6 +283,12 @@ test("a value that needs more work than the compiler gives is not known, which i
     diagnostics(shared).map((diagnostic) => diagnostic.split(" ").slice(0, 2).join(" ")),
     ["TSV043 2:14"],
   );
+  // A call takes work as large as what it reads, so calls that read one long text use the work up too.
+  const reads = `${text}\n${'say toNumber(t.substring(0, 1) + "x")\n'.repeat(3)}`;
+  assert.deepEqual(
+    diagnostics(reads).map((diagnostic) => diagnostic.split(" ").slice(0, 2).join(" ")),
+    ["TSV043 2:14", "TSV043 3:14"],
+  );
   assert.equal(
     failure(`${DYNAMIC}${text.replace('"a"', 'dynamic("a")')}\nsay toNumber(t + "x")`)?.[0],
     "TSR058",

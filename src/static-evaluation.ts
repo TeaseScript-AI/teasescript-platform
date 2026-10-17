@@ -419,8 +419,9 @@ export type KnownValue = SerializableRuntimeValue;
 
 /**
  * The most work the known values of one check may take together: the UTF-16 code units of the texts and the entries of
- * the lists, sets, and dicts that they build, and the work of their regex searches. Past it, values are not known, so
- * that no script makes the compiler build large values or search for long; a run has far higher limits.
+ * the lists, sets, and dicts that they build and that their calls read, and the work of their regex searches. Past it,
+ * values are not known, so that no script makes the compiler build large values or compute for long; a run has far
+ * higher limits.
  */
 export const KNOWN_VALUE_WORK = 10_000_000;
 
@@ -442,6 +443,8 @@ export class KnownValues {
   readonly #initializer: (identifier: Identifier) => Expression | undefined;
   /** The work left (see `KNOWN_VALUE_WORK`), which regex searches also use up. */
   readonly #work = { remaining: KNOWN_VALUE_WORK };
+  /** The work each list, set, dict, regex, or date and time value takes (see `knownSize`), once it was measured. */
+  readonly #sizes = new WeakMap<object, number>();
 
   public constructor(
     initializer: (identifier: Identifier) => Expression | undefined = () => undefined,
@@ -554,12 +557,22 @@ export class KnownValues {
     const value = this.#built(expression, known);
     if (value === undefined) return undefined;
     // A value that this step built takes work as large as it is.
-    if (typeof value === "string" || (typeof value === "object" && value !== null)) {
-      const size = knownSize(value);
-      if (size === undefined || size > this.#work.remaining) return undefined;
-      this.#work.remaining -= size;
-    }
+    const size = this.#size(value);
+    if (size === undefined || size > this.#work.remaining) return undefined;
+    this.#work.remaining -= size;
     return finite(value)?.value;
+  }
+
+  /** The work `value` takes (see `knownSize`), measured once for each list, set, dict, or other object. */
+  #size(value: KnownValue): number | undefined {
+    if (typeof value === "string") return value.length;
+    if (value === null || typeof value !== "object") return 0;
+    let size = this.#sizes.get(value);
+    if (size === undefined) {
+      size = knownSize(value);
+      if (size !== undefined) this.#sizes.set(value, size);
+    }
+    return size;
   }
 
   /** A value that a step builds from its operands' known values, with the runtime's operations. */
@@ -613,8 +626,17 @@ export class KnownValues {
         }
         return dict;
       }
-      case "callExpression":
+      case "callExpression": {
+        // A call reads its receiver and arguments, which takes work as large as they are, also when it fails.
+        let input = 0;
+        for (const operand of this.#operands(expression)) {
+          const value = known(operand);
+          input += value === undefined ? 0 : (this.#size(value) ?? 0);
+        }
+        if (input > this.#work.remaining) return undefined;
+        this.#work.remaining -= input;
         return this.#run(() => callValue(expression, known));
+      }
       default:
         return knownValue(expression, known);
     }
