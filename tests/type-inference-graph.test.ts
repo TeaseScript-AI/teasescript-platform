@@ -11,19 +11,27 @@ import type { TypeAnalysisRequest } from "../src/type-inference/backend.js";
 import { collectGraph } from "../src/type-inference/collector.js";
 import {
   graphText,
+  type ChoiceElementEvidence,
   type ConstraintGraph,
+  type PlaceId,
   type SyntaxEvidence,
+  type TypeTerm,
 } from "../src/type-inference/graph.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
 import { registryView } from "../src/type-inference/registry-view.js";
 
-/** The request the compiler would make for these files, after name checking. */
+/** The request the compiler would make for these files, after name checking; `null` when they do not parse or resolve. */
 function request(
   files: readonly { readonly path: string; readonly source: string }[],
   globals: readonly string[] = [],
   builtins: readonly string[] = [],
 ): TypeAnalysisRequest | null {
-  const parsed = files.map((file) => ({ path: file.path, program: parse(file.source).program }));
+  const results = files.map((file) => parse(file.source));
+  if (results.some((result) => result.diagnostics.length > 0)) return null;
+  const parsed = files.map((file, index) => ({
+    path: file.path,
+    program: results[index]!.program,
+  }));
   const options = { builtins: [...CORE_RUNTIME_BUILTINS, ...builtins], globals };
   const names = validateProjectSemantics(parsed, options);
   if (
@@ -50,7 +58,7 @@ function collect(source: string): {
   readonly lines: readonly string[];
 } {
   const made = request([{ path: "main.tease", source }]);
-  assert.notEqual(made, null, "the names resolve");
+  assert.notEqual(made, null, "the source parses and its names resolve");
   const graph = collectGraph(made!);
   return { graph, lines: graphText(graph).split("\n") };
 }
@@ -216,7 +224,7 @@ test("asks carry the evidence their result rules read, and handlers are regions 
     [
       'let answer = askChoice back: "Back", "Lines"',
       'let picture = askImage("Picture", allowSkip: false)',
-      'let flags = askBooleans("Which?", texts: ["A", "B"], cancel: "Back")',
+      'let flags = askBooleans("Which?", texts: ["A", "B"], prefill: [false, false], cancel: "Back")',
       'let t = timer async 5 s { say "done" }',
       'let m = playAudio async "a.mp3" { say m.volume }',
       "exit",
@@ -235,7 +243,7 @@ test("asks carry the evidence their result rules read, and handlers are regions 
   );
   expectLine(
     lines,
-    /^operation interaction\.booleans\(, message: @\d+#\d+, texts: @\d+#\d+, cancel: @\d+#\d+\) -> @\d+#\d+ \{"kind":"booleans","cancel":true\} /,
+    /^operation interaction\.booleans\(, message: @\d+#\d+, texts: @\d+#\d+, prefill: @\d+#\d+, cancel: @\d+#\d+\) -> @\d+#\d+ \{"kind":"booleans","cancel":true\} /,
   );
   expectLine(
     lines,
@@ -348,6 +356,22 @@ test("a long operator chain and deep nesting collect without native recursion", 
   const nested = `let y = ${"[".repeat(2000)}1${"]".repeat(2000)}\nexit`;
   const cells = collect(nested).graph.places.filter((place) => place.kind.kind === "cell");
   assert.equal(cells.length, 2000);
+  // A receiver that is a long property path: one held projection per access, then the element the call adds to.
+  const made = request(
+    [{ path: "main.tease", source: `hostValue${".x".repeat(16000)}.add(1)\nexit` }],
+    ["hostValue"],
+  );
+  assert.notEqual(made, null);
+  const projections = collectGraph(made!).constraints.filter(
+    (constraint) => constraint.kind === "project",
+  );
+  assert.equal(projections.filter((constraint) => constraint.step === "element").length, 1);
+  assert.equal(
+    projections.filter(
+      (constraint) => typeof constraint.step === "object" && constraint.step.property === "x",
+    ).length,
+    16000,
+  );
 });
 
 test("only a default that runs when it is needed moves last; other named arguments keep their written order", () => {
@@ -470,69 +494,154 @@ const EXTRA_SOURCES: readonly {
   },
 ];
 
-/** Whether every place and function a constraint names is in the graph. */
+/** The places a term refers to, at any depth. */
+function termPlaces(term: TypeTerm | null): PlaceId[] {
+  if (term === null) return [];
+  switch (term.kind) {
+    case "ref":
+      return [term.place];
+    case "list":
+    case "set":
+    case "dict":
+      return termPlaces(term.element);
+    case "object":
+      return (term.properties ?? []).flatMap((property) => termPlaces(property.type));
+    case "union":
+      return term.members.flatMap(termPlaces);
+    default:
+      return [];
+  }
+}
+
+/** The places syntax evidence refers to: every written element, descriptor part and choice object. */
+function evidencePlaces(evidence: SyntaxEvidence | undefined): (PlaceId | null)[] {
+  const element = (entry: ChoiceElementEvidence): (PlaceId | null)[] => [
+    entry.place,
+    ...(entry.object === null ? [] : [entry.object.value, entry.object.text]),
+  ];
+  switch (evidence?.kind) {
+    case "form":
+      if (evidence.fields === "computed") return [];
+      return evidence.fields.entries.flatMap((field) => {
+        const written = field.written;
+        switch (written.kind) {
+          case "object":
+            return [
+              field.place,
+              written.value,
+              written.min,
+              written.max,
+              ...(written.options === null
+                ? []
+                : [written.options.place, ...(written.options.elements ?? []).flatMap(element)]),
+            ];
+          case "list":
+            return [field.place, ...written.elements.flatMap(element)];
+          default:
+            return [field.place];
+        }
+      });
+    case "choice":
+      return evidence.options.flatMap((option) => [
+        option.place,
+        ...(option.content.kind === "object"
+          ? [option.content.object.value, option.content.object.text]
+          : option.content.kind === "other"
+            ? []
+            : option.content.elements.flatMap(element)),
+      ]);
+    default:
+      return [];
+  }
+}
+
+/** Whether every place and function the graph refers to, in a place's kind, a constraint, a term or evidence, exists. */
 function referencesExist(graph: ConstraintGraph): boolean {
-  const place = (id: number): boolean => id >= 0 && id < graph.places.length;
+  const place = (id: number | null): boolean =>
+    id === null || (id >= 0 && id < graph.places.length);
   const fn = (id: number): boolean => id >= 0 && id < graph.functions.length;
   const named = (entries: readonly { readonly value: number }[]): boolean =>
     entries.every((entry) => place(entry.value));
-  return graph.constraints.every((constraint) => {
-    switch (constraint.kind) {
-      case "has":
-        return place(constraint.place);
-      case "store":
-        return place(constraint.value) && place(constraint.into);
-      case "project":
-        return place(constraint.owner) && place(constraint.into);
-      case "read":
-        return place(constraint.binding) && place(constraint.occurrence);
-      case "assign":
-        return place(constraint.binding) && place(constraint.value);
-      case "mutate":
-        return place(constraint.binding);
-      case "test":
-        return place(constraint.subject);
-      case "operation":
-        return (
-          (constraint.receiver === null || place(constraint.receiver)) &&
-          constraint.arguments.every(place) &&
-          named(constraint.named) &&
-          place(constraint.result)
-        );
-      case "get":
-        return (
-          place(constraint.receiver) &&
-          (constraint.key === null || place(constraint.key)) &&
-          place(constraint.fallback) &&
-          place(constraint.result)
-        );
-      case "fallback":
-        return place(constraint.left) && place(constraint.right) && place(constraint.result);
-      case "call":
-        return (
-          fn(constraint.fn) &&
-          constraint.arguments.every(place) &&
-          named(constraint.named) &&
-          place(constraint.result)
-        );
-      case "return":
-        return fn(constraint.fn) && (constraint.value === null || place(constraint.value));
-      case "exit":
-        return fn(constraint.fn);
-      case "load":
-        return (
-          place(constraint.view) &&
-          (constraint.fallback === null || place(constraint.fallback)) &&
-          place(constraint.result)
-        );
-      case "save":
-      case "speakerStore":
-        return place(constraint.value);
-      case "speakerRead":
-      case "knownValue":
-        return place(constraint.occurrence);
+  const kinds = graph.places.every((owned) => {
+    const kind = owned.kind;
+    switch (kind.kind) {
+      case "cell":
+      case "property":
+        return place(kind.owner);
+      case "parameter":
+      case "result":
+        return fn(kind.fn) && termPlaces(kind.written).every(place);
+      case "binding":
+        return termPlaces(kind.written).every(place);
+      default:
+        return true;
     }
   });
+  return (
+    kinds &&
+    graph.constraints.every((constraint) => {
+      switch (constraint.kind) {
+        case "has":
+          return place(constraint.place) && termPlaces(constraint.type).every(place);
+        case "store":
+          return place(constraint.value) && place(constraint.into);
+        case "project":
+          return place(constraint.owner) && place(constraint.into);
+        case "read":
+          return place(constraint.binding) && place(constraint.occurrence);
+        case "assign":
+          return place(constraint.binding) && place(constraint.value);
+        case "mutate":
+          return place(constraint.binding);
+        case "test":
+          return (
+            place(constraint.subject) &&
+            (constraint.shape.kind !== "type" || termPlaces(constraint.shape.type).every(place))
+          );
+        case "operation":
+          return (
+            place(constraint.receiver) &&
+            constraint.arguments.every(place) &&
+            named(constraint.named) &&
+            place(constraint.result) &&
+            evidencePlaces(constraint.evidence).every(place)
+          );
+        case "get":
+          return (
+            place(constraint.receiver) &&
+            place(constraint.key) &&
+            place(constraint.fallback) &&
+            place(constraint.result)
+          );
+        case "fallback":
+          return place(constraint.left) && place(constraint.right) && place(constraint.result);
+        case "call":
+          return (
+            fn(constraint.fn) &&
+            constraint.arguments.every(place) &&
+            named(constraint.named) &&
+            place(constraint.result)
+          );
+        case "return":
+          return fn(constraint.fn) && place(constraint.value);
+        case "exit":
+          return fn(constraint.fn);
+        case "load":
+          return (
+            place(constraint.view) &&
+            termPlaces(constraint.receiver).every(place) &&
+            place(constraint.fallback) &&
+            place(constraint.result)
+          );
+        case "save":
+        case "speakerStore":
+          return place(constraint.value);
+        case "speakerRead":
+        case "knownValue":
+          return place(constraint.occurrence);
+      }
+    })
+  );
 }
 
 test("the collector resolves every read as the legacy check does, on every repository source", () => {

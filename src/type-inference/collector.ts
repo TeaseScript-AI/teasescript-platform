@@ -1454,11 +1454,15 @@ function builtinFamily(name: string): ContractRef["family"] {
 
 /** The spelling of a receiver for a label, or its site. */
 function label(expression: Expression): string {
-  const node = unwrap(expression);
-  if (node.kind === "identifier") return node.name;
-  if (node.kind === "propertyAccessExpression")
-    return `${label(node.object)}.${node.property.name}`;
-  return `@${node.span.start.offset}`;
+  // A loop, not a descent: a receiver may be a property path of any length.
+  const properties: string[] = [];
+  let node = unwrap(expression);
+  while (node.kind === "propertyAccessExpression") {
+    properties.push(node.property.name);
+    node = unwrap(node.object);
+  }
+  const base = node.kind === "identifier" ? node.name : `@${node.span.start.offset}`;
+  return [base, ...properties.reverse()].join(".");
 }
 
 /** What the source says about an ask beyond its operands' types (see `SyntaxEvidence`). */
