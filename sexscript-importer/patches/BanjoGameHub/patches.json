@@ -48,6 +48,13 @@
       "category": "e",
       "reason": "Legacy bug (creator report): the penalty box (Banjo/penaltybox) picks a second opponent at random and, where it is the first one, takes the next, wrapping back by two past the end with if(pickOpponent2>opponentArray.size()); where the first pick was the last opponent, the next one is opponentArray[size()], past the list, which Groovy read as null and TeaseScript stops at (TSR025). Evident intent: the wrap applies from the size on, >=, so the second opponent is the one before the first (coordinator, speaker work 2026-10-15).",
       "diff": "second-opponent.diff"
+    },
+    {
+      "id": "coin-bet",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): Four Heroes asks the coins bet per round again only below 0, while its message says to set 1 or higher; with a bet of 0 the coins never change, so a game, which ends when one side has no coins, never ends. Ask again below 1, as the message says.",
+      "diff": "coin-bet.diff"
     }
   ]
 }

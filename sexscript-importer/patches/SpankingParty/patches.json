@@ -34,6 +34,13 @@
       "category": "e",
       "reason": "Legacy bug (creator report): in equality mode a party has one guest per player (setSpankers: spankers = players), but loadParty restores the saved number of guests while the player list loaded at the start may now have fewer players; setColors then hands out colours for every guest from a list of `players` colours, so spankersMatched goes below 0 and getRandom of it gives a position below 0 (Groovy read it from the end; V2 explorer turn 16, seed 2: TSR025 colorTemp[-1] / [-2] at Banjo/spankparty.tease:1683 and :1688). Evident intent: equality mode caps the guests at the players, as setSpankers does, when a saved party loads.",
       "diff": "equality-spankers.diff"
+    },
+    {
+      "id": "computer-players",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the number of computer players is asked again only above the limit, so 0 or a negative number was taken; with no computer player the gauntlet's round loop never ends and only Continue buttons are left (explorer V2 trap at spankparty.tease:709-719). Ask again outside 1 to the limit, as the human players' count does.",
+      "diff": "computer-players.diff"
     }
   ],
   "heldStandAlone": {

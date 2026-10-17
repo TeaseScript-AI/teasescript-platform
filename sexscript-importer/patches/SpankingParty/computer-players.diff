@@ -1,0 +1,13 @@
+--- a/scripts/Banjo/spankparty.groovy
++++ b/scripts/Banjo/spankparty.groovy
+@@ -573,7 +573,9 @@
+ 			menuLoop = true
+ 			while(menuLoop) {
+ 				playersComputer = getInteger("How many computer players?\n\n(enter a number from 1 to "+playerComputerLimit+")",1)
+-				if(playersComputer<=playerComputerLimit)
++				// Legacy bug: 0 or fewer computer players were taken, and a gauntlet then never ends; ask again outside 1 to the
++				// limit, as for the human players (patch computer-players).
++				if(playersComputer>0 && playersComputer<=playerComputerLimit)
+ 					menuLoop = false
+ 			}
+ 			npcGender = getSelectedValue("What gender for computer players?",["Mixed","Male","Female"])
