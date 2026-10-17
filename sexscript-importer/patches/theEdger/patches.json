@@ -20,6 +20,13 @@
       "category": "b",
       "reason": "The picture-watching part reads the online lists of pictures and players, pads them to their full length with \"0\" and \"\", and then converts every player code with PlCodeCode[i] as Integer, which fails on a padded \"\". Legacy reached that only when the server's lists were shorter than their full length; the conversion keeps the online values in the package's storage (SX_ONLINE_STORAGE), where the lists start empty, so watching always stopped. An empty player code now reads as 0, the code of no player.",
       "diff": "watch-empty-player-codes.diff"
+    },
+    {
+      "id": "codes-text",
+      "layer": "source",
+      "category": "b",
+      "reason": "getCodes splits a line such as \"Jerk off now!|30|3|3|\" into its codes, counting the parts with C.count(\"|\"). Groovy has count() for text and for lists, and the conversion cannot tell the type of a closure parameter, so it left the loop manual and getCodes gave no codes: the go, stop and cum lines then stopped at their first code (TSR025). Every call passes text, the lines of the package files or a received text with \"\" as its fallback, so the parameter is typed String, which changes nothing in Groovy.",
+      "diff": "codes-text.diff"
     }
   ]
 }
