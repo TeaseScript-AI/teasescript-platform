@@ -44,10 +44,32 @@ import {
 } from "../interaction-limits.js";
 import { rangeLength, rangeStartProblem, rangeText } from "../range-checks.js";
 import { UNIT_AMOUNT_RULE, unitAmountFix } from "../operand-rules.js";
+import { buttonBackgroundMessage } from "../choice-rules.js";
 import {
+  buttonTimeoutMessage,
+  negativeDelayMessage,
+  pacingMessage,
+  sceneTimeMessage,
+  timeoutSceneTimeMessage,
+  zeroRoundMessage,
+} from "../delay-rules.js";
+import {
+  FOR_SOURCE_RULE,
+  isRepeatCount,
+  pairLoopRule,
+  repeatCountFix,
+  repeatCountMessage,
+} from "../loop-rules.js";
+import {
+  blockingRepeatMessage,
+  FINISH_NEVER_RUNS_MESSAGE,
+  fileReferenceRule,
   isMediaPosition,
   isMediaRange,
+  isMediaRepeatCount,
   isMediaVolume,
+  MEDIA_REPEAT_COUNT_RULE,
+  MEDIA_REPEAT_RULE,
   isTimerDisplay,
   mediaPositionMessage,
   mediaRangeMessage,
@@ -1689,11 +1711,7 @@ function materializeInteractionUi(
   const backgroundColor = (value: SerializableRuntimeValue): string => {
     const normalized = normalizeOpaqueColor(value);
     if (normalized === null)
-      throw fault(
-        "TSR052",
-        `A button background must be an opaque CSS colour, such as "#336699", but this is ${describeShownValue(value)}.`,
-        span,
-      );
+      throw fault("TSR052", buttonBackgroundMessage(describeShownValue(value)), span);
     return normalized;
   };
 
@@ -2497,7 +2515,7 @@ function executeLoopStart(
     const scopeDepth = snapshot.frames.length;
     if (instruction.loopKind === "repeat") {
       const value = evaluator.evaluate(instruction.expression);
-      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+      if (typeof value !== "number" || !isRepeatCount(value))
         throw badRepeatCount(instruction.expression, value, plan);
       frame = {
         kind: "repeat",
@@ -2520,7 +2538,7 @@ function executeLoopStart(
         const label = planLabel(instruction.expression, plan);
         throw fault(
           "TSR044",
-          `'for ${instruction.variable}, ${instruction.valueVariable}' goes through the keys and values of a dict, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(evaluated)}.${isList(evaluated) || isSet(evaluated) ? ` Go through a ${isList(evaluated) ? "list" : "set"} with one variable${label === null ? "" : `, such as 'for ${instruction.variable} in ${label}'`}.` : ""}`,
+          `${pairLoopRule(instruction.variable, instruction.valueVariable!)}, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(evaluated)}.${isList(evaluated) || isSet(evaluated) ? ` Go through a ${isList(evaluated) ? "list" : "set"} with one variable${label === null ? "" : `, such as 'for ${instruction.variable} in ${label}'`}.` : ""}`,
           instruction.expression.span,
         );
       }
@@ -2533,7 +2551,7 @@ function executeLoopStart(
         const label = planLabel(instruction.expression, plan);
         throw fault(
           "TSR044",
-          `A 'for' loop goes through a list, set, dict, or range, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(source)}.${source === null ? ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.` : typeof source === "number" && label !== null ? ` To count up to it, write a range, such as '1..=${label}'.` : ""}`,
+          `${FOR_SOURCE_RULE}, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(source)}.${source === null ? ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.` : typeof source === "number" && label !== null ? ` To count up to it, write a range, such as '1..=${label}'.` : ""}`,
           instruction.expression.span,
         );
       }
@@ -2713,12 +2731,7 @@ function badRepeatCount(
   let fix = "";
   if (value === null)
     fix = ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.`;
-  else if (typeof value === "number")
-    fix = !Number.isInteger(value)
-      ? " Round it with floor(...), round(...), or ceil(...) first."
-      : value < 0
-        ? " Check that it is at least 0 first."
-        : " Use a smaller count.";
+  else if (typeof value === "number") fix = repeatCountFix(value);
   else if (typeof value === "string" && numberFromText(value) !== undefined) {
     // Converting the text gives the count it holds, which may still be too small or too large.
     const count = Math.trunc(numberFromText(value)!);
@@ -2731,7 +2744,7 @@ function badRepeatCount(
   }
   return fault(
     "TSR043",
-    `A repeat count must be a whole number (integer) of at least 0, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(value)}.${fix}`,
+    repeatCountMessage(label === null ? "this" : `'${label}'`, describeShownValue(value), fix),
     plan.span,
   );
 }
@@ -2861,7 +2874,7 @@ function formTimeoutMs(timeoutMs: number, snapshot: RuntimeSnapshot, span: Sourc
       "TSR052",
       isValidSessionTime(deadlineMs)
         ? `This askForm timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
-        : "This askForm timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
+        : timeoutSceneTimeMessage("askForm"),
       span,
     );
   return timeoutMs;
@@ -2884,7 +2897,7 @@ function buttonTimeoutMs(
       "TSR050",
       typeof value === "number"
         ? `A showButton timeout is a duration, but this is ${describeShownValue(value)}. ${durationFix(value, "30 s")}`
-        : `A showButton timeout must be a duration greater than zero, but this is ${describeShownValue(value)}.`,
+        : buttonTimeoutMessage(describeShownValue(value)),
       span,
     );
   }
@@ -2901,7 +2914,7 @@ function buttonTimeoutMs(
       "TSR050",
       isValidSessionTime(deadlineMs)
         ? `This showButton timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
-        : "This showButton timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
+        : timeoutSceneTimeMessage("showButton"),
       span,
     );
   }
@@ -3207,11 +3220,7 @@ function sayDurationMs(
       );
     const milliseconds = exactDurationMilliseconds(pacingValue, "Say pacing", instruction.span);
     if (milliseconds < 0)
-      throw fault(
-        "TSR050",
-        `Say pacing must be a duration of at least ${formatDuration(0)}, but this is ${describeShownValue(pacingValue)}.`,
-        instruction.span,
-      );
+      throw fault("TSR050", pacingMessage(describeShownValue(pacingValue)), instruction.span);
     return exactPacingMilliseconds(milliseconds);
   } catch (error) {
     if (error instanceof RuntimeFault) throw error;
@@ -3461,18 +3470,14 @@ export function timerDurationMs(
     throw fault(
       "TSR050",
       typeof amount === "number" && amount < 0 && (unit !== null || isDuration(drawn))
-        ? `${commandName(command)} duration must not be negative, but this is ${describeShownValue(drawn)}.`
+        ? negativeDelayMessage(command, describeShownValue(drawn))
         : `A ${command} takes a duration, but this is ${describeShownValue(drawn)}. ${durationFix(drawn, "30 s")}`,
       span,
     );
   }
   const durationMs = isDuration(drawn) ? amount : amount * DURATION_UNIT_MILLISECONDS[unit!];
   if (!Number.isFinite(durationMs)) {
-    throw fault(
-      "TSR050",
-      `This ${command} is too long for scene time to reach. Use a shorter duration.`,
-      span,
-    );
+    throw fault("TSR050", sceneTimeMessage(command), span);
   }
   return durationMs;
 }
@@ -3496,11 +3501,7 @@ export function futureDeadline(
   }
   const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
   if (!isValidSessionTime(deadlineMs)) {
-    throw fault(
-      "TSR050",
-      `This ${command} is too long for scene time to reach. Use a shorter duration.`,
-      span,
-    );
+    throw fault("TSR050", sceneTimeMessage(command), span);
   }
   if (durationMs > 0 && deadlineMs <= snapshot.currentSessionTimeMs) {
     throw fault(
@@ -3522,10 +3523,6 @@ function durationFix(value: SerializableRuntimeValue, example: string): string {
   return typeof value === "number"
     ? `Give the number a unit, such as '${describeShownValue(value)} s'.`
     : `Use a duration such as '${example}'.`;
-}
-
-function commandName(command: "wait" | "timer"): string {
-  return command === "timer" ? "Timer" : "Wait";
 }
 
 export function timerLabel(value: SerializableRuntimeValue, span: SourceSpan): string {
@@ -3581,7 +3578,7 @@ function startTimer(
   if (instruction.repeat && roundDurationMs <= 0)
     throw fault(
       "TSR050",
-      `A repeating timer needs every round to last longer than zero, but this round can be ${describeShownValue(duration)}. Use a duration of at least 1 second.`,
+      zeroRoundMessage(describeShownValue(duration)),
       instruction.duration.span,
     );
   const deadlineMs = futureDeadline(
@@ -3690,7 +3687,7 @@ function showImage(
   if (image !== null && typeof image !== "string") {
     throw fault(
       "TSR050",
-      `showImage needs an image file reference or null, but this is ${describeShownValue(image)}.`,
+      `${fileReferenceRule("showImage")}, but this is ${describeShownValue(image)}.`,
       instruction.span,
     );
   }
@@ -3813,10 +3810,10 @@ function mediaRepeat(
   const repeat = instruction.repeat;
   if (repeat.kind === "once" || repeat.kind === "indefinite") return { kind: repeat.kind };
   if (repeat.kind === "times") {
-    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    if (typeof value !== "number" || !isMediaRepeatCount(value)) {
       throw fault(
         "TSR050",
-        `A repeat count must be a whole number of at least 1, such as '3 times', but this is ${describeShownValue(value)}.`,
+        `${MEDIA_REPEAT_COUNT_RULE}, but this is ${describeShownValue(value)}.`,
         repeat.count.span,
       );
     }
@@ -3831,7 +3828,7 @@ function mediaRepeat(
   }
   throw fault(
     "TSR050",
-    `Media repeat must be true, false, a count such as '3 times', or a positive duration, but this is ${describeShownValue(value)}.`,
+    `${MEDIA_REPEAT_RULE}, but this is ${describeShownValue(value)}.`,
     repeat.value.span,
   );
 }
@@ -3862,7 +3859,7 @@ function startMedia(
   if (file !== null && typeof file !== "string") {
     throw fault(
       "TSR050",
-      `Media file must be a file reference or null, but this is ${describeShownValue(file)}.`,
+      `${fileReferenceRule(instruction.media === "audio" ? "playAudio" : "playVideo")}, but this is ${describeShownValue(file)}.`,
       instruction.file.span,
     );
   }
@@ -3870,16 +3867,12 @@ function startMedia(
   if (!instruction.async && repeat.kind === "indefinite") {
     throw fault(
       "TSR050",
-      `Blocking media cannot repeat indefinitely. Use '${instruction.media === "audio" ? "playAudio" : "playVideo"} async', a count such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.`,
+      blockingRepeatMessage(instruction.media === "audio" ? "playAudio" : "playVideo"),
       instruction.span,
     );
   }
   if (repeat.kind === "indefinite" && instruction.finishFunctionId !== null) {
-    throw fault(
-      "TSR050",
-      "'finish' never runs for media that repeats indefinitely. Calling stop() does not run it either. Use a count such as 'repeat: 3 times' or a duration such as 'repeat: 60 s', or remove 'finish'.",
-      instruction.span,
-    );
+    throw fault("TSR050", FINISH_NEVER_RUNS_MESSAGE, instruction.span);
   }
   // A supplied option is validated even when it evaluates to null; only an omitted option takes its default.
   const startAtMs =

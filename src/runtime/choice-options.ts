@@ -1,3 +1,11 @@
+import {
+  buttonBackgroundMessage,
+  CHOICE_TEXT_MESSAGE,
+  CHOICE_VALUES_MESSAGE,
+  choicePropertyMessage,
+  EMPTY_CHOICE_MESSAGE,
+  isChoiceObjectProperty,
+} from "../choice-rules.js";
 import { normalizeOpaqueColor } from "../color.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "../interaction-limits.js";
 import type {
@@ -68,12 +76,7 @@ export function expandChoiceOptions(
       add(element, value);
     }
   });
-  if (buttons.length === 0)
-    throw fault(
-      "TSR052",
-      "A choice needs at least one button, but its option lists are empty.",
-      span,
-    );
+  if (buttons.length === 0) throw fault("TSR052", EMPTY_CHOICE_MESSAGE, span);
   return buttons;
 }
 
@@ -105,27 +108,13 @@ function choiceButton(
       );
     return { text: visibleText(option, span, context), value: value ?? choiceValue(option, span) };
   }
-  const extra = option.properties.find(
-    (property) =>
-      property.name !== "value" && property.name !== "text" && property.name !== "background",
-  );
-  if (extra !== undefined)
-    throw fault(
-      "TSR052",
-      `A choice object can only have 'value', 'text', and 'background', but this one has '${extra.name}'. Remove it.`,
-      span,
-    );
+  const extra = option.properties.find((property) => !isChoiceObjectProperty(property.name));
+  if (extra !== undefined) throw fault("TSR052", choicePropertyMessage(extra.name), span);
   const textValue = getSerializableProperty(option, "text");
-  if (textValue === undefined)
-    throw fault("TSR052", "A choice object needs a 'text' property to label its button.", span);
+  if (textValue === undefined) throw fault("TSR052", CHOICE_TEXT_MESSAGE, span);
   const text = fieldText(textValue, span, context);
   const ownValue = getSerializableProperty(option, "value");
-  if (ownValue !== undefined && value !== null)
-    throw fault(
-      "TSR052",
-      "This choice option has two values, one before ':' and one in its value property. Keep one.",
-      span,
-    );
+  if (ownValue !== undefined && value !== null) throw fault("TSR052", CHOICE_VALUES_MESSAGE, span);
   if (ownValue !== undefined && !isVisibleScalar(ownValue))
     throw fault(
       "TSR052",
@@ -162,11 +151,7 @@ function choiceValue(value: SerializableRuntimeValue, span: SourceSpan): Interac
 function backgroundColor(value: SerializableRuntimeValue, span: SourceSpan): string {
   const normalized = normalizeOpaqueColor(value);
   if (normalized === null)
-    throw fault(
-      "TSR052",
-      `A button background must be an opaque CSS colour, such as "#336699", but this is ${describeShownValue(value)}.`,
-      span,
-    );
+    throw fault("TSR052", buttonBackgroundMessage(describeShownValue(value)), span);
   return normalized;
 }
 
