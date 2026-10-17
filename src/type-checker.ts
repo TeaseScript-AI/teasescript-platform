@@ -263,7 +263,7 @@ import {
 } from "./argument-rules.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
-import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
+import { isTextMethod, TEXT_METHODS, type TextMethod } from "./text-operations.js";
 import {
   missingPropertyMessage,
   duplicateEntryMessage,
@@ -6848,7 +6848,7 @@ class TypeChecker {
     // The receiver as it was evaluated, before the arguments run, for the checks of text operations and `join`. Only
     // they use it, so other methods, such as repeated `add` calls on a growing list, do not copy their receiver.
     const receiverAtCall =
-      TEXT_MEMBERS.has(method) || method === "join" ? copyType(receiver) : receiver;
+      isTextMethod(method) || method === "join" ? copyType(receiver) : receiver;
     const typeOf = (argument: Expression): StaticType => this.#typeOf(argument);
     const memberChecks = (): void =>
       this.#reportProblems(
@@ -7012,7 +7012,7 @@ class TypeChecker {
         if (problem !== undefined)
           this.#report(handleMemberCode(handle), problem.message, callee.property.span);
       }
-      const textual = TEXT_MEMBERS.has(method) || method === "join";
+      const textual = isTextMethod(method) || method === "join";
       const collection = all.some((member) => {
         const kept = resolved(member);
         return isListOrSet(kept) || kept.kind === "dict" || kept.kind === "range";
@@ -10204,10 +10204,8 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
   if (value.kind === "speaker" || value.kind === "unknown" || value.kind === "open")
     return UNKNOWN_TYPE;
   // Text operations (V30 §8).
-  if (isScalar(value, "string")) {
-    const member = TEXT_MEMBERS.get(method);
-    return member?.parameters ? textResultType(member) : undefined;
-  }
+  if (isScalar(value, "string"))
+    return isTextMethod(method) ? textResultType(TEXT_METHODS[method]) : undefined;
   if (value.kind === "scalar") return temporalMethodType(value.name, method);
   // A range gives its whole numbers as a new list (V30 §6).
   if (value.kind === "range")
@@ -11676,9 +11674,9 @@ const MEMBER_CHECKED_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
   "open",
 ]);
 
-/** The result type of a text member: a new value, so a `string[]` from `split` decides nothing elsewhere. */
-function textResultType(member: TextMember): StaticType {
-  switch (member.result) {
+/** The result type of a method of text: a new value, so a `string[]` from `split` decides nothing elsewhere. */
+function textResultType(method: TextMethod): StaticType {
+  switch (method.result) {
     case "integer?":
       return optional(INTEGER_TYPE);
     case "string?":
@@ -11689,7 +11687,7 @@ function textResultType(member: TextMember): StaticType {
     case "string?[]?":
       return optional({ kind: "list", element: optional(STRING_TYPE) });
     default:
-      return scalarType(member.result);
+      return scalarType(method.result);
   }
 }
 

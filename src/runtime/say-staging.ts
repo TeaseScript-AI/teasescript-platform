@@ -1,6 +1,7 @@
 import { isConversion } from "../conversions.js";
 import { isNumericFunction } from "../numeric-functions.js";
 import { isRandomFunction } from "../random-functions.js";
+import { isTextOnlyMethod } from "../text-operations.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import type { ExpressionPlan, SayInstruction } from "../plan/model.js";
 
@@ -30,9 +31,10 @@ const READING_FUNCTIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Methods that only read their receiver and arguments on every value that has a method of that name: lists, sets,
- * dicts, text, and date and time values. A name that changes its receiver on any of them, such as `reverse`, which
- * reverses a list in place, is not listed, nor is any method of a timer, media, button, or message handle.
+ * Methods that only read their receiver and arguments on every list, set, dict, and date and time value that has a
+ * method of that name, and on text when it has one too. A name that changes its receiver on any of them, such as
+ * `reverse`, which reverses a list in place, is not listed, nor is any method of a timer, media, button, or message
+ * handle. Every method of text only reads (see `TextMethod`), so one that only text has is not listed either.
  */
 const READING_METHODS: ReadonlySet<string> = new Set([
   "contains",
@@ -48,24 +50,6 @@ const READING_METHODS: ReadonlySet<string> = new Set([
   "union",
   "difference",
   "join",
-  "startsWith",
-  "endsWith",
-  "matches",
-  "find",
-  "capture",
-  "findAll",
-  "substring",
-  "split",
-  "replace",
-  "trim",
-  "trimStart",
-  "trimEnd",
-  "uppercase",
-  "lowercase",
-  "uppercaseFirst",
-  "repeat",
-  "padStart",
-  "padEnd",
   "toISO",
   "formatDate",
   "formatTime",
@@ -75,6 +59,11 @@ const READING_METHODS: ReadonlySet<string> = new Set([
   "toSeconds",
   "toMilliseconds",
 ]);
+
+/** Whether a call of the method `name` only reads its receiver and arguments, whatever value it is called on. */
+export function isReadingMethod(name: string): boolean {
+  return READING_METHODS.has(name) || isTextOnlyMethod(name);
+}
 
 const selectiveSays = new WeakMap<SayInstruction, boolean>();
 
@@ -115,7 +104,7 @@ function changesOnlyGenerator(root: ExpressionPlan): boolean {
               !isConversion(node.callee.name) &&
               !isNumericFunction(node.callee.name) &&
               !isRandomFunction(node.callee.name)
-            : node.callee.kind !== "property" || !READING_METHODS.has(node.callee.name)
+            : node.callee.kind !== "property" || !isReadingMethod(node.callee.name)
         )
           return false;
         break;

@@ -5,6 +5,14 @@ import test from "node:test";
 import { compileProject, compileSource } from "../src/compiler.js";
 import { run } from "../src/runtime/engine.js";
 import { MAX_TEXT_LENGTH } from "../src/runtime/text-length.js";
+import {
+  readsPosition,
+  stringLength,
+  TEXT_METHODS,
+  type DomainValue,
+  type TextMethod,
+  type TextMethodName,
+} from "../src/text-operations.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -574,6 +582,89 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes. Select an element or a property first.",
     ],
   );
+});
+
+/**
+ * Calls of methods of text whose arguments fail one domain, with the runtime's code: each domain of every contract has
+ * one. A position out of range fails with TSR025, any other value with TSR057.
+ */
+const INVALID: readonly {
+  readonly name: TextMethodName;
+  readonly text: string;
+  readonly values: readonly string[];
+  readonly code: "TSR025" | "TSR057";
+}[] = [
+  { name: "count", text: "banana", values: ['""'], code: "TSR057" },
+  { name: "substring", text: "abc", values: ["-1"], code: "TSR025" },
+  { name: "substring", text: "abc", values: ["1", "-1"], code: "TSR025" },
+  { name: "substring", text: "a😀c", values: ["4"], code: "TSR025" },
+  { name: "substring", text: "abc", values: ["1", "4"], code: "TSR025" },
+  { name: "substring", text: "abc", values: ["2", "1"], code: "TSR025" },
+  { name: "replace", text: "aaa", values: ['""', '"x"'], code: "TSR057" },
+  { name: "replace", text: "aaa", values: ["/(a)/", '"$2"'], code: "TSR057" },
+  { name: "repeat", text: "ab", values: ["-1"], code: "TSR057" },
+  { name: "padStart", text: "7", values: ["-1", '"0"'], code: "TSR057" },
+  { name: "padStart", text: "7", values: ["3", '""'], code: "TSR057" },
+  { name: "padEnd", text: "7", values: ["-1", '"0"'], code: "TSR057" },
+  { name: "padEnd", text: "7", values: ["3", '""'], code: "TSR057" },
+];
+
+/** The value an argument of the table above writes: text, a whole number, or a regex literal without flags. */
+function writtenValue(source: string): DomainValue {
+  if (source.startsWith("/")) return { kind: "regex", source: source.slice(1, -1), flags: "" };
+  const text: unknown = JSON.parse(source);
+  return typeof text === "string" ? text : Number(source);
+}
+
+test("a domain of a text method fails alike when the compiler sees the values it reads, whatever the others are", () => {
+  const covered = new Set<string>();
+  for (const { name, text, values, code } of INVALID) {
+    const method: TextMethod = TEXT_METHODS[name];
+    const read = (reads: readonly (number | "length")[]) =>
+      reads.map((position) =>
+        position === "length" ? stringLength(text) : writtenValue(values[position]!),
+      );
+    const failing = method.domains.findIndex(
+      (domain) =>
+        domain.reads.every((position) => position === "length" || position < values.length) &&
+        domain.problem(read(domain.reads), method) !== undefined,
+    );
+    covered.add(`${name} ${failing}`);
+    const domain = method.domains[failing]!;
+    const message = domain.problem(read(domain.reads), method)!;
+    assert.equal(readsPosition(method, domain) ? "TSR025" : "TSR057", code, name);
+    const receiver = JSON.stringify(text);
+    const parameters = values.map((_, position) => `p${position}`).join(", ");
+    // The runtime checks the values it is given.
+    const failure = runValidSource(
+      `function f(t, ${parameters}) {\n    return t.${name}(${parameters})\n}\nsay f(${receiver}, ${values.join(", ")})\nexit`,
+    ).snapshot.failure;
+    assert.deepEqual([failure?.code, failure?.message], [code, message], `${name} ${values}`);
+    // The compiler gives the runtime's text at the last argument the domain reads, when it sees all the values and when it
+    // sees only those the domain reads.
+    const last = Math.max(
+      ...domain.reads.map((position) => (position === "length" ? -1 : position)),
+    );
+    const call = `${receiver}.${name}(${values.join(", ")})`;
+    assert.deepEqual(diagnostics(`say ${call}\nexit`), [["TSV043", message, values[last]!]], call);
+    const seen = `${receiver}.${name}(${values.map((value, position) => (domain.reads.includes(position) ? value : `p${position}`)).join(", ")})`;
+    assert.deepEqual(
+      diagnostics(`function f(${parameters}) {\n    return ${seen}\n}\nexit`),
+      [["TSV043", message, values[last]!]],
+      seen,
+    );
+  }
+  for (const [name, method] of Object.entries(TEXT_METHODS))
+    method.domains.forEach((_, index) =>
+      assert.ok(covered.has(`${name} ${index}`), `${name} domain ${index}`),
+    );
+  // Values the compiler cannot see, and values that no domain refuses, compile.
+  for (const source of [
+    'say "abc".substring(3)\nsay "abc".substring(0, 3)\nsay "ab".repeat(0)\nsay "7".padStart(0, "0")\nexit',
+    'say "aaa".replace(/(a)/, "$1$0$$")\nsay "aaa".replace("a", "$2")\nsay "aaa".count(/x*/)\nexit',
+    'function f(t, n) {\n    return t.substring(4) + "abc".substring(n, 1) + t.replace(n, "$2")\n}\nexit',
+  ])
+    assert.deepEqual(diagnostics(source), [], source);
 });
 
 test("text operations have static result types", () => {

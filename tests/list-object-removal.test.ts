@@ -48,6 +48,11 @@ test("each operand of == and != is read when it is evaluated, left to right", ()
     ],
     ['let items = [1, 2]\nsay "${items != [items.removeFirst(), 2]}"\nexit', "false"],
     ['let items = [1]\nsay "${[items.removeAt(0)] == items}"\nexit', "false"],
+    // A list's `reverse` changes it, although text's only reads.
+    [
+      'let items = [2, 1]\nsay "${items == [items.reverse(), items].get(1, default: [])}"\nexit',
+      "false",
+    ],
   ] as const;
   for (const [source, expected] of cases) {
     const result = runValidSource(source);

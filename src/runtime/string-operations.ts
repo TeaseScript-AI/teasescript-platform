@@ -4,19 +4,23 @@ import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
   argumentFix,
   argumentTypeMessage,
-  beyondLengthMessage,
-  emptyTextMessage,
-  endBeforeStartMessage,
+  isRegexMethod,
+  isTextMember,
+  isTextMethod,
   methodArgumentCountMessage,
-  needsNonEmptyText,
-  negativeMessage,
+  readsPosition,
   regexMemberMessage,
+  stringLength,
   takesRegex,
   takesText,
-  TEXT_MEMBERS,
+  TEXT_METHODS,
   unknownTextMemberMessage,
   type ArgumentKind,
-  type TextMember,
+  type DomainValue,
+  type RegexMethodName,
+  type TextDomain,
+  type TextParameter,
+  type TextSignature,
 } from "../text-operations.js";
 import { checkCollectionLength, MAX_COLLECTION_LENGTH } from "./collection-size.js";
 import { RuntimeFault } from "./errors.js";
@@ -36,16 +40,6 @@ import type { SerializableRegex, SerializableRuntimeValue } from "./serializable
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /**
- * Built-in text operations. Strings are immutable, so every operation returns a new value. Lengths and positions count
- * Unicode code points, and case mapping is the locale-independent Unicode mapping.
- */
-export const STRING_METHODS: ReadonlySet<string> = new Set(
-  [...TEXT_MEMBERS.values()]
-    .filter((member) => member.parameters !== null)
-    .map((member) => member.name),
-);
-
-/**
  * The failure message for a member of a value that has no members, naming the fix when a text operation was meant: a
  * conversion for a scalar, or a null check.
  */
@@ -58,7 +52,7 @@ export function missingMemberMessage(
   const kind = describeRuntimeValue(value);
   const description =
     value === null ? "The value null" : kind.charAt(0).toUpperCase() + kind.slice(1);
-  const textOperation = TEXT_MEMBERS.has(name);
+  const textOperation = isTextMember(name);
   const fix = !textOperation
     ? ""
     : value === null
@@ -70,10 +64,6 @@ export function missingMemberMessage(
         ? " Convert it to text first with toString(...)."
         : "";
   return `${description} has no ${use} '${name}'.${fix}`;
-}
-
-export function stringLength(text: string): number {
-  return codePointCount(text, text.length);
 }
 
 /** The number of code points before UTF-16 `offset`, which must be a code-point boundary. */
@@ -162,18 +152,17 @@ function firstMatch(text: string, search: string): number {
   return -1;
 }
 
+/** A call of a method of text (`TEXT_METHODS`): its arguments are checked, and then it runs. */
 export function callStringMethod(
   text: string,
   name: string,
   positional: readonly SerializableRuntimeValue[],
   span: SourceSpan,
 ): SerializableRuntimeValue {
-  const member = TEXT_MEMBERS.get(name);
-  if (member?.parameters == null)
-    throw fault("TSR016", unknownTextMemberMessage(name, "method"), span);
-  checkTextArguments(member, positional, span);
+  if (!isTextMethod(name)) throw fault("TSR016", unknownTextMemberMessage(name, "method"), span);
+  checkTextArguments(TEXT_METHODS[name], positional, span, text);
   const searched = positional[0];
-  if (searched !== undefined && isRegex(searched))
+  if (searched !== undefined && isRegex(searched) && isRegexMethod(name))
     return regexOperation(text, name, searched, positional[1], span);
   // EVIDENCE: invariant: checkTextArguments proved that every text parameter received text.
   const texts = positional as readonly string[];
@@ -203,20 +192,15 @@ export function callStringMethod(
       for (const _match of literalMatches(text, texts[0]!, false)) occurrences += 1;
       return occurrences;
     }
+    // The domains proved that start and end are within the text, and end not before start.
     case "substring": {
-      const length = stringLength(text);
-      const [start = 0, end = length] = numbers;
-      for (const [index, value] of [start, end].entries()) {
-        if (value > length)
-          throw fault(
-            "TSR025",
-            beyondLengthMessage(member, member.parameters[index]!, value, length),
-            span,
-          );
-      }
-      if (end < start) throw fault("TSR025", endBeforeStartMessage(member, start, end), span);
+      const start = numbers[0]!;
+      const end = numbers[1];
       const startOffset = utf16Offset(text, start);
-      return text.slice(startOffset, utf16Offset(text, end, startOffset, start));
+      return text.slice(
+        startOffset,
+        end === undefined ? text.length : utf16Offset(text, end, startOffset, start),
+      );
     }
     // The parts are a new array of text that nothing else holds, so the list takes it without a copy. Only a text long
     // enough for more parts than a list can hold has them counted first.
@@ -331,8 +315,16 @@ export function callStringMethod(
       }
       return result;
     }
-    default:
-      throw new Error(`Text operation '${name}' has no implementation.`);
+    // A pattern is a regex, which `regexOperation` searches with.
+    case "matches":
+    case "find":
+    case "capture":
+    case "findAll":
+      throw new Error(`Text operation '${name}' takes a regex.`);
+    default: {
+      const unhandled: never = name;
+      throw new Error(`Text operation '${String(unhandled)}' has no implementation.`);
+    }
   }
 }
 
@@ -342,7 +334,7 @@ export function callStringMethod(
  */
 function regexOperation(
   text: string,
-  name: string,
+  name: RegexMethodName,
   regex: SerializableRegex,
   replacement: SerializableRuntimeValue | undefined,
   span: SourceSpan,
@@ -351,7 +343,7 @@ function regexOperation(
   const work = new RegexWork();
   try {
     // A replacement is read once, before any search, so one that refers to a group the regex does not have fails even
-    // without a match.
+    // without a match. This is the domain `replacementGroups` of `replace`, checked inside the regex work.
     let parts: readonly ReplacementPart[] = [];
     if (name === "replace") {
       // EVIDENCE: invariant: checkTextArguments proved that the replacement is text.
@@ -380,7 +372,7 @@ function regexOperation(
  */
 function regexResult(
   text: string,
-  name: string,
+  name: RegexMethodName,
   program: RegexProgram,
   replacement: readonly ReplacementPart[],
   work: RegexWork,
@@ -463,8 +455,10 @@ function regexResult(
       }
       return result + piece(previous, text.length);
     }
-    default:
-      throw new Error(`Text operation '${name}' takes no regex.`);
+    default: {
+      const unhandled: never = name;
+      throw new Error(`Text operation '${String(unhandled)}' takes no regex.`);
+    }
   }
 }
 
@@ -511,44 +505,54 @@ function regexProgram(regex: SerializableRegex, span: SourceSpan): RegexProgram 
 }
 
 /**
- * Checks the arguments of a text operation or `join` against its parameters: their number, text where text is required,
- * non-empty text, and whole numbers of 0 or more for positions and counts. A position's upper bound depends on the text
- * and is checked by `substring`.
+ * Checks the arguments of a method of text, or `join`, against its parameters and domains (see `TextDomain`): their
+ * number, then each argument's type and the domains that read only it, and then the other domains, except those the
+ * regex work checks. `text` is the text the method is called on, which `join` has none of.
  */
 export function checkTextArguments(
-  member: TextMember,
+  member: TextSignature,
   positional: readonly SerializableRuntimeValue[],
   span: SourceSpan,
+  text = "",
 ): void {
-  const parameters = member.parameters!;
+  const parameters = member.parameters;
   const required = parameters.filter((parameter) => parameter.optional !== true).length;
   if (positional.length < required || positional.length > parameters.length)
     throw fault("TSR028", methodArgumentCountMessage(member, positional.length), span);
+  let length: number | undefined;
+  const read = (input: number | "length"): DomainValue => {
+    if (input === "length") return (length ??= stringLength(text));
+    // EVIDENCE: invariant: the loop below checked the argument's type, text, a regex, or a whole number, first.
+    return positional[input] as DomainValue;
+  };
+  const check = (domain: TextDomain): void => {
+    if (domain.reads.some((read) => read !== "length" && read >= positional.length)) return;
+    const problem = domain.problem(domain.reads.map(read), member);
+    if (problem !== undefined)
+      throw fault(readsPosition(member, domain) ? "TSR025" : "TSR057", problem, span);
+  };
+  const readsOnly = (domain: TextDomain): number | undefined =>
+    domain.reads.length === 1 && domain.reads[0] !== "length" ? domain.reads[0] : undefined;
   for (const [index, value] of positional.entries()) {
     const parameter = parameters[index]!;
-    const position = parameter.kind === "position";
-    if (takesRegex(parameter) || takesText(parameter)) {
-      if (takesRegex(parameter) && isRegex(value)) continue;
-      if (!takesText(parameter) || typeof value !== "string")
-        throw fault(
-          "TSR057",
-          argumentTypeMessage(member, parameter, describeRuntimeValue(value)) +
-            argumentFix(parameter, argumentKind(value)),
-          span,
-        );
-      if (needsNonEmptyText(parameter) && value === "")
-        throw fault("TSR057", emptyTextMessage(member, parameter), span);
-    } else if (typeof value !== "number" || !Number.isInteger(value)) {
+    if (!fits(parameter, value))
       throw fault(
-        position ? "TSR024" : "TSR057",
+        parameter.kind === "position" ? "TSR024" : "TSR057",
         argumentTypeMessage(member, parameter, describeRuntimeValue(value)) +
           argumentFix(parameter, argumentKind(value)),
         span,
       );
-    } else if (value < 0) {
-      throw fault(position ? "TSR025" : "TSR057", negativeMessage(member, parameter, value), span);
-    }
+    for (const domain of member.domains) if (readsOnly(domain) === index) check(domain);
   }
+  for (const domain of member.domains)
+    if (readsOnly(domain) === undefined && domain.inRegexWork !== true) check(domain);
+}
+
+/** Whether `value` has a type that `parameter` takes: text, a regex, or a whole number. */
+function fits(parameter: TextParameter, value: SerializableRuntimeValue): boolean {
+  if (takesRegex(parameter) && isRegex(value)) return true;
+  if (takesText(parameter)) return typeof value === "string";
+  return !takesRegex(parameter) && typeof value === "number" && Number.isInteger(value);
 }
 
 function argumentKind(value: SerializableRuntimeValue): ArgumentKind {

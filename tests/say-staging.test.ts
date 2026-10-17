@@ -7,6 +7,7 @@ import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint
 import { executeValidatedInstruction } from "../src/runtime/engine.js";
 import { captureExecutableData } from "../src/runtime/operations/support.js";
 import { sayStagesSelectively } from "../src/runtime/say-staging.js";
+import { TEXT_METHODS } from "../src/text-operations.js";
 import {
   builtSerializableDictIndex,
   type SerializableRuntimeDict,
@@ -86,6 +87,24 @@ test("a say whose expressions only read, compute, and draw stages selectively", 
   );
 });
 
+test("a say that calls a method of text stages selectively, unless a list's method of that name changes the list", () => {
+  const argument = {
+    text: '"b"',
+    textOrRegex: '"b"',
+    regex: "/b/",
+    position: "0",
+    count: "1",
+  } as const;
+  const lines = Object.entries(TEXT_METHODS).map(
+    ([name, method]) =>
+      `say tint.${name}(${method.parameters.map((parameter) => argument[parameter.kind]).join(", ")})`,
+  );
+  // Every method of text only reads, but `reverse` reverses a list in place, and the plan does not know the receiver.
+  assert.deepEqual(
+    staging(lines),
+    Object.keys(TEXT_METHODS).map((name) => name !== "reverse"),
+  );
+});
 test("a say whose expressions may change state, or whose calls are unknown, stages deeply", () => {
   const lines = [
     "say items.removeFirst()",
