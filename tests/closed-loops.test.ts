@@ -75,7 +75,7 @@ test("a while true or label loop with no way out is a warning, which does not pr
   );
 });
 
-test("a way out anywhere in the loop, also nested or in a branch never taken, silences the warning", () => {
+test("a way out anywhere in the loop that can run, also nested, silences the warning", () => {
   for (const [source, options] of [
     [
       'while true {\n    let answer = askChoice "Continue", "Stop"\n    if answer == "Stop" { break }\n}\nexit',
@@ -89,7 +89,6 @@ test("a way out anywhere in the loop, also nested or in a branch never taken, si
       'label again\nsay "Again"\nlet answer = askChoice "Again", "Stop"\nif answer == "Stop" { exit }\nwait 1 s\ngoto again',
       {},
     ],
-    [`${QUIT}while true {\n    if false { break }\n    wait 1 s\n}`, {}],
     [
       `${QUIT}while true {\n    for n in 1..3 {\n        switch n {\n            case 2 { if answer == "Play" { exit } }\n        }\n    }\n}`,
       {},
@@ -111,6 +110,43 @@ test("a way out anywhere in the loop, also nested or in a branch never taken, si
     }),
     [],
   );
+});
+
+test("a way out that cannot run is no way out (owner decision, 2026-10-16)", () => {
+  // In a branch that no literal or type lets run: the branch itself is reported once, unless TSV046 already does.
+  assert.deepEqual(report(`${QUIT}while true {\n    if false { break }\n    wait 1 s\n}`), {
+    diagnostics: ["3 warning TSV058", "4 warning TSV065"],
+    plan: true,
+  });
+  assert.deepEqual(
+    report(
+      `let name: string? = "Ann"\n${QUIT}while true {\n    if name == null { break }\n    wait 1 s\n}`,
+    ),
+    { diagnostics: ["5 warning TSV046", "4 warning TSV058"], plan: true },
+  );
+  // After a statement that never continues, or in the right side of an `and` that never runs.
+  assert.deepEqual(
+    report(`${QUIT}while true {\n    wait 1 s\n    continue\n    break\n}`).diagnostics,
+    ["3 warning TSV058", "6 warning TSV065"],
+  );
+  assert.deepEqual(
+    report(
+      `function ready: boolean { return true }\n${QUIT}while true {\n    let done = false and ready()\n}`,
+    ).diagnostics,
+    ["4 warning TSV058"],
+  );
+  // A block whose creation cannot run, or one in a function that nothing calls, does not silence the warning.
+  for (const block of [
+    "if false {\n    timer async 2 s { exit }\n}",
+    "function limit {\n    timer async 2 s { exit }\n}",
+  ])
+    assert.deepEqual(
+      report(`${block}\n${QUIT}while true { wait 1 s }`).diagnostics.filter(
+        (diagnostic) => !diagnostic.endsWith("TSV065"),
+      ),
+      [`${block.split("\n").length + 3} warning TSV058`],
+      block,
+    );
 });
 
 test("a label loop is an unconditional top-level goto back to an earlier label", () => {
@@ -147,7 +183,7 @@ test("a timer or media block with a way out silences the warning in every file o
   assert.deepEqual(
     projectReport({
       ...closed,
-      "timers.tease": "function limit {\n    timer async 5 s { exit }\n}",
+      "timers.tease": "function limit {\n    timer async 5 s { exit }\n}\nlimit()\nend",
     }),
     [],
   );

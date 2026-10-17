@@ -79,6 +79,11 @@ test("reading a custom property before anything assigns it is a compile error", 
         "main.tease:5",
         "Speaker 'vera' has no 'mood' yet here: nothing assigns it before this line runs. Line 1 of 'setup.tease' assigns it, but that line never runs. Give it a start value, as in 'speaker vera { mood: ... }', or assign it before this line.",
       ],
+      [
+        "TSV065",
+        "setup.tease:1",
+        "This code never runs, because the condition on line 1 is never true. Remove it, or change the condition.",
+      ],
     ],
   );
   // A start value of another file runs before main.tease, and a `load` default runs when the key is missing.
@@ -251,7 +256,8 @@ test("a custom property that only some ways assign is a compile error that names
     ],
   ];
   for (const [name, body, others, expected] of cases) {
-    const main = `${VERA}\n${body}\nexit`;
+    // A script that ends with a goto needs no exit after it.
+    const main = body.endsWith('goto "room.tease"') ? `${VERA}\n${body}` : `${VERA}\n${body}\nexit`;
     assert.deepEqual(diagnostics(main, others), [["TSV043", ...expected]], name);
   }
   // A call counts for what every way through the function assigns.
@@ -337,6 +343,11 @@ test("reading a built-in field, term, or name list where no way gave it one is a
       'function give {\n    return\n    player.firstName = "Sam"\n}\ngive()\nsay player.firstName\nexit',
     ),
     [
+      [
+        "TSV065",
+        "main.tease:3",
+        "This code never runs, because the 'return' on line 2 always leaves the function first. Remove it, or move it before the 'return'.",
+      ],
       [
         "TSV043",
         "main.tease:6",

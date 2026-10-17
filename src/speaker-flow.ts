@@ -1,4 +1,3 @@
-import type { Statement } from "./ast.js";
 import type { ControlOrigin } from "./compiler/compile-program.js";
 import { lazyDefaultArgument } from "./lazy-defaults.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
@@ -9,21 +8,17 @@ import {
   expressionPlanChildren,
 } from "./plan/expression-children.js";
 import { instructionExpressions } from "./plan/instruction-expressions.js";
-import type {
-  CompiledFunctionDefinition,
-  ExpressionPlan,
-  InstructionPlan,
-  PlanSourceLocation,
-} from "./plan/model.js";
+import type { CompiledFunctionDefinition, ExpressionPlan, InstructionPlan } from "./plan/model.js";
 import type { SourceSpan } from "./source.js";
 import { PERSON_FIELDS, PLAYER } from "./speaker-terms.js";
+import { placeKey, type DeadWays } from "./way-facts.js";
 
 /*
  * The flow check of speaker properties (V30 §37): a read of a property through a speaker's name, or as `speaker` where
  * `as` names it, is an error where a way to it misses the custom property, or where no way to it gave the built-in
  * field. It follows the compiled plan, which runs exactly as the session will, with the generic control flow of
  * `plan/control-flow.ts` and the solver of `plan/dataflow.ts`; what it takes from the type check is listed in
- * `SpeakerFlowInput`. Its own choices: what the compiler cannot follow counts as stored (a timer, media, or button
+ * `SpeakerFlowInput`, and which ways run in `DeadWays`. Its own choices: what the compiler cannot follow counts as stored (a timer, media, or button
  * block, a called file, a computed target, a fallback), a call counts for what every way through the function assigns,
  * and a function's start is the meet of its calls.
  */
@@ -48,38 +43,24 @@ export interface SpeakerFlowStore {
 
 /**
  * What the flow check takes from the type check (see `TypeChecker.speakerFlowInput`), by the place of the source it
- * concerns (see {@link placeKey}), which the plan's expressions and instructions carry as their spans.
+ * concerns (see `placeKey`), which the plan's expressions and instructions carry as their spans.
  */
 export interface SpeakerFlowInput {
   /** The reads to follow, by the place of the property access: a declaration or a store somewhere gives the speaker a source of each. */
   readonly reads: ReadonlyMap<string, SpeakerFlowRead>;
   /** The stores through a speaker's name, by the place of the assignment's target. */
   readonly stores: ReadonlyMap<string, SpeakerFlowStore>;
-  /**
-   * Which ways through a branch or loop the type check found possible: for an `if` its `then` and its `else` (also
-   * without one), for a `switch` each case and then no case, for a `while` its body and its end, and for a `repeat` or
-   * `for` its body and no run of it.
-   */
-  readonly paths: ReadonlyMap<Statement, readonly boolean[]>;
-  /** For `and`, `or`, and `otherwise`, by place: whether the right side may run, and whether it may be skipped. */
-  readonly operands: ReadonlyMap<string, readonly boolean[]>;
-}
-
-/** The key of a place in the source: its file and the offsets of its span. */
-export function placeKey(file: number, span: SourceSpan | PlanSourceLocation): string {
-  return "so" in span
-    ? `${file}:${span.so}:${span.eo}`
-    : `${file}:${span.start.offset}:${span.end.offset}`;
 }
 
 /** The TSV043 diagnostics of each file, in plan order, for the reads that a way to them does not prepare. */
 export function speakerFlowDiagnostics(
   plan: InstructionPlan,
   origins: ReadonlyMap<number, ControlOrigin>,
+  ways: DeadWays,
   input: SpeakerFlowInput,
 ): readonly Diagnostic[][] {
   const result = plan.files.map((): Diagnostic[] => []);
-  if (input.reads.size > 0) new SpeakerFlow(plan, origins, input).report(result);
+  if (input.reads.size > 0) new SpeakerFlow(plan, origins, ways, input).report(result);
   return result;
 }
 
@@ -184,17 +165,11 @@ interface NamedStore {
   readonly reaching: Uint8Array;
 }
 
-const TRUE_IMPOSSIBLE = 1;
-const FALSE_IMPOSSIBLE = 2;
-const ITERATE_IMPOSSIBLE = 4;
-const EXHAUSTED_IMPOSSIBLE = 8;
-/** The loop runs at least once: it is left only after its body ran. */
-const RUNS_ONCE = 16;
-
 class SpeakerFlow {
   readonly #plan: InstructionPlan;
   readonly #flow: PlanControlFlow;
   readonly #origins: ReadonlyMap<number, ControlOrigin>;
+  readonly #deadWays: DeadWays;
   readonly #input: SpeakerFlowInput;
   readonly #bits = new Map<string, bigint>();
   #all = 0n;
@@ -207,8 +182,6 @@ class SpeakerFlow {
   readonly #storesOf = new Map<string, number[]>();
   readonly #copies: number[] = [];
   readonly #reads = new Map<number, Read[]>();
-  /** The impossible ways of each `jumpIfFalse` and `loopStart`, from the type check. */
-  readonly #impossible = new Map<number, number>();
   /** The parameters each call supplies, as a bit per parameter index. */
   readonly #masks = new Map<number, bigint>();
   readonly #clones = new Map<number, Map<bigint, Clone>>();
@@ -236,17 +209,18 @@ class SpeakerFlow {
   public constructor(
     plan: InstructionPlan,
     origins: ReadonlyMap<number, ControlOrigin>,
+    ways: DeadWays,
     input: SpeakerFlowInput,
   ) {
     this.#plan = plan;
     this.#flow = new PlanControlFlow(plan);
     this.#origins = origins;
+    this.#deadWays = ways;
     this.#input = input;
     this.#instructionCount = plan.instructions.length;
     for (const read of input.reads.values())
       for (const source of read.sources) this.#allocate(read.speaker, source);
     this.#collectEvents();
-    this.#collectFacts();
     this.#nodeCount = this.#instructionCount;
     this.#allocateClones();
     this.#anywhere = this.#nodeCount;
@@ -327,57 +301,11 @@ class SpeakerFlow {
       }
       const conditional = conditionalExpressionPlanChildren(expression);
       const skipped =
-        conditional.length > 0 && expression.kind === "binary"
-          ? this.#input.operands.get(placeKey(file, expression.span))?.[0] === false
-          : false;
+        conditional.length > 0 &&
+        expression.kind === "binary" &&
+        this.#deadWays.skipsRight(file, expression.span);
       for (const child of expressionPlanChildren(expression))
         work.push({ expression: child, dead: dead || (skipped && conditional.includes(child)) });
-    }
-  }
-
-  /** The ways through each branch and loop that the type check rules out, by the plan's jumps. */
-  #collectFacts(): void {
-    for (const [index, origin] of this.#origins) {
-      let flags = 0;
-      switch (origin.kind) {
-        case "if": {
-          const ways = this.#input.paths.get(origin.statement);
-          if (ways?.[0] === false) flags |= TRUE_IMPOSSIBLE;
-          if (ways?.[1] === false) flags |= FALSE_IMPOSSIBLE;
-          break;
-        }
-        case "case": {
-          const ways = this.#input.paths.get(origin.statement);
-          if (ways?.[origin.index] === false) flags |= TRUE_IMPOSSIBLE;
-          const last = origin.statement.cases.length - 1;
-          if (origin.index === last && ways?.[last + 1] === false) flags |= FALSE_IMPOSSIBLE;
-          break;
-        }
-        case "loop": {
-          const ways = this.#input.paths.get(origin.statement);
-          if (ways?.[0] === false) flags |= ITERATE_IMPOSSIBLE;
-          if (ways?.[1] === false) {
-            flags |= EXHAUSTED_IMPOSSIBLE;
-            if (origin.statement.kind !== "whileStatement") flags |= RUNS_ONCE;
-          }
-          break;
-        }
-        case "operand": {
-          const fact = this.#input.operands.get(
-            placeKey(this.#flow.fileOf(index), origin.expression.span),
-          );
-          if (fact === undefined) break;
-          // `and` and `otherwise` run their right side when the condition holds, `or` when it does not.
-          const runs = origin.expression.operator === "or" ? FALSE_IMPOSSIBLE : TRUE_IMPOSSIBLE;
-          const skip = origin.expression.operator === "or" ? TRUE_IMPOSSIBLE : FALSE_IMPOSSIBLE;
-          if (!fact[0]) flags |= runs;
-          if (!fact[1]) flags |= skip;
-          break;
-        }
-        case "default":
-          break;
-      }
-      if (flags !== 0) this.#impossible.set(index, flags);
     }
   }
 
@@ -569,11 +497,7 @@ class SpeakerFlow {
     if (instruction.kind === "loopControl" && instruction.action === "continue") {
       const start = this.#flow.loopStart(instruction.loopId);
       const loop = start === undefined ? undefined : this.#plan.instructions[start];
-      if (
-        start !== undefined &&
-        loop?.kind === "loopStart" &&
-        ((this.#impossible.get(start) ?? 0) & RUNS_ONCE) !== 0
-      )
+      if (start !== undefined && loop?.kind === "loopStart" && this.#deadWays.runsOnce(start))
         out.push({ node: this.#nodeOf(loop.target, clone), edge: { kind: "exhausted" } });
     }
     return out;
@@ -611,19 +535,12 @@ class SpeakerFlow {
   #possible(mode: Mode, node: number, edge: Edge): boolean {
     if (node >= this.#anywhere) return mode === "may";
     const { index, clone } = this.#decode(node);
-    const flags = this.#impossible.get(index) ?? 0;
     switch (edge.kind) {
       case "true":
-        return (flags & TRUE_IMPOSSIBLE) === 0;
       case "false":
-        return (flags & FALSE_IMPOSSIBLE) === 0;
       case "iterate":
-        return (flags & ITERATE_IMPOSSIBLE) === 0;
       case "exhausted":
-        return (
-          this.#plan.instructions[index]!.kind !== "loopStart" ||
-          (flags & EXHAUSTED_IMPOSSIBLE) === 0
-        );
+        return this.#deadWays.possible(index, edge.kind);
       case "supplied":
       case "omitted": {
         if (clone === null) return true;

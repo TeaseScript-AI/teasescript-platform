@@ -44,13 +44,15 @@ import { compileChild, runCompileTask, type CompileTask } from "./compiler/conti
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
   askOperands,
-  askParts,
   expressionChildren,
+  expressionParts,
+  handlerBlocks,
   namedAskArguments,
-  sayOperands,
   mediaHandlerBlocks,
   mediaOperands,
+  nestedStatements,
   showButtonOptions,
+  statementExpressions,
   timerOperands,
 } from "./expression-children.js";
 import {
@@ -152,12 +154,8 @@ import {
   misspelledPropertyHint,
 } from "./object-properties.js";
 import { GENDER_TERMS, PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
-import {
-  placeKey,
-  type SpeakerFlowInput,
-  type SpeakerFlowRead,
-  type SpeakerFlowStore,
-} from "./speaker-flow.js";
+import type { SpeakerFlowInput, SpeakerFlowRead, SpeakerFlowStore } from "./speaker-flow.js";
+import { placeKey, type WayFacts } from "./way-facts.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -249,7 +247,6 @@ import {
   accountCopy,
   copiesAccount,
   PLAYER_DECLARATION,
-  runsOnItsOwn,
   sessionDeclarations,
   someNode,
 } from "./project-globals.js";
@@ -300,10 +297,13 @@ export interface TypeCheckResult {
   readonly runtimeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
   /** The result shape the runtime needs for each `askForm`. */
   readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
-  /** Whether a file of the project has an `exit` that execution can reach; a project needs one (ADR 0022). */
-  readonly reachesExit: boolean;
-  /** Which statements run, for the checks that follow this flow. */
-  readonly flow: StatementFlow;
+  /** Which ways through the source can run, which the checks that follow the compiled plan take from the check. */
+  readonly ways: WayFacts;
+  /**
+   * The statements that the check found never run once their function, block, or file runs, which its narrowing and its
+   * loop effects follow: the plan's reachability finds the same ones (tests/reachability-differential.test.ts).
+   */
+  readonly unreachable: ReadonlySet<Statement>;
   /** What the flow check of speaker properties needs from the check, once the project is lowered (V30 §37). */
   readonly speakerFlow: SpeakerFlowInput;
   /**
@@ -311,12 +311,6 @@ export interface TypeCheckResult {
    * which a saved value has to fit when the script runs (ADR 0021 §6), sorted by key.
    */
   readonly storageTypes: readonly { readonly key: string; readonly type: TypePlan }[];
-}
-
-/** The statements that never run, and the top-level statements that run and after which execution continues. */
-export interface StatementFlow {
-  readonly unreachable: ReadonlySet<Statement>;
-  readonly continuing: ReadonlySet<Statement>;
 }
 
 /**
@@ -351,7 +345,6 @@ const typeCode = {
   invalidCaptureTag: "TST005",
   invalidTagQueryFrom: "TST006",
   randomStartValue: "TSV055",
-  closedLoop: "TSV058",
   invalidCameraPlacement: "TSV059",
   unusedFallback: "TSV062",
 } as const;
@@ -370,6 +363,54 @@ export function checkTypes(
 ): TypeCheckResult {
   const programs = files.map((file) => file.program);
   const lines = lineNamer(files);
+  // Code that never runs changes nothing (rule 5.5). What a loop, function, or block may change leaves out the code that
+  // the previous check found never runs, and each such choice is checked from nothing, since all that a check finds,
+  // such as the types it decides, rests on the effects it followed. The last check must find that code never runs too:
+  // should it not, the next check leaves out only what both found, and the one after that nothing, which always holds.
+  // Otherwise, when what the last check found never running would leave out more, the next check leaves out that, a
+  // bounded number of times.
+  let dead: DeadCode = { statements: new Set(), operands: new Set() };
+  let effects = projectEffects(programs, dead);
+  let growth = 0;
+  let shrinks = 0;
+  for (;;) {
+    const checked = checkWithEffects(programs, options, onFile, lines, effects);
+    const found = checked.dead;
+    if (!coversDeadCode(found, dead)) {
+      dead =
+        shrinks === 0
+          ? {
+              statements: new Set(
+                [...dead.statements].filter((each) => found.statements.has(each)),
+              ),
+              operands: new Set([...dead.operands].filter((place) => found.operands.has(place))),
+            }
+          : { statements: new Set(), operands: new Set() };
+      shrinks += 1;
+      effects = projectEffects(programs, dead);
+      continue;
+    }
+    if (shrinks === 0 && growth < MAX_DEAD_CODE_ROUNDS) {
+      const fewer = projectEffects(programs, found);
+      if (!sameProjectEffects(fewer, effects)) {
+        dead = found;
+        effects = fewer;
+        growth += 1;
+        continue;
+      }
+    }
+    return checked.result;
+  }
+}
+
+/** The type check of the project with the effects `effects`, and the code it found never runs (see `checkTypes`). */
+function checkWithEffects(
+  programs: readonly Program[],
+  options: TypeCheckOptions,
+  onFile: (file: number) => void,
+  lines: LineNamer,
+  effects: ProjectEffects,
+): { readonly result: TypeCheckResult; readonly dead: DeadCode } {
   // An integer variable is a number when one of its assignments can store a non-whole number, also an assignment
   // after its uses (rule 1.2). A check that finds a new one starts again with that variable declared as a number, so
   // the last check, which finds none, sees every variable with its final type and alone reports. Likewise, a place
@@ -408,7 +449,7 @@ export function checkTypes(
       onFile,
       lines,
     );
-    checker.check(programs);
+    checker.check(programs, effects);
     // A key whose type the runtime cannot check has none.
     const found: Map<string, StorageKeyType> = new Map(
       [...storageKeyTypes(checker.storageLoads)].filter(([, kept]) => typePlan(kept.type) !== null),
@@ -475,20 +516,21 @@ export function checkTypes(
       last = !checker.widenedMore;
     }
     if (last) {
-      const closedLoops = closedLoopWarnings(programs, checker.unreachable);
-      return Object.freeze({
-        diagnostics: Object.freeze(
-          checker.fileDiagnostics.map((diagnostics, file) =>
-            Object.freeze([...diagnostics, ...closedLoops[file]!]),
+      const dead = checker.deadCode();
+      return {
+        result: Object.freeze({
+          diagnostics: Object.freeze(
+            checker.fileDiagnostics.map((diagnostics) => Object.freeze(diagnostics)),
           ),
-        ),
-        speakerFlow: checker.speakerFlowInput(),
-        runtimeChecks: checker.runtimeChecks(),
-        formShapes: checker.formShapes(),
-        reachesExit: checker.reachesExit,
-        flow: Object.freeze({ unreachable: checker.unreachable, continuing: checker.continuing }),
-        storageTypes: storageTypePlans(storage),
-      });
+          speakerFlow: checker.speakerFlowInput(),
+          runtimeChecks: checker.runtimeChecks(),
+          formShapes: checker.formShapes(),
+          ways: checker.ways(),
+          unreachable: dead.statements,
+          storageTypes: storageTypePlans(storage),
+        }),
+        dead,
+      };
     }
     if (!followed) checker.widenFollowers();
   }
@@ -496,6 +538,9 @@ export function checkTypes(
 
 /** How many checks may still change the storage key types (see {@link checkTypes}). */
 const MAX_STORAGE_ROUNDS = 8;
+
+/** How many checks may leave out more code that never runs (see {@link checkTypes}). */
+const MAX_DEAD_CODE_ROUNDS = 4;
 
 /** The runtime checks of the storage keys, sorted by key; a type the runtime cannot check has none. */
 function storageTypePlans(
@@ -1336,16 +1381,8 @@ class TypeChecker {
   /** Whether the statement being checked can run; a `break` after a `return` does not end its loop. */
   #reachable = true;
 
-  /** Whether a reachable `exit` was checked. */
-  reachesExit = false;
-
   /** The statements that never run, by the flow this check follows. */
-  readonly unreachable = new Set<Statement>();
-
-  /** The top-level statements that run and after which execution continues. */
-  readonly continuing = new Set<Statement>();
-
-  #rootStatements: readonly Statement[] | null = null;
+  readonly #unreachable = new Set<Statement>();
 
   /**
    * List and set literals whose elements mix types, with those types. A literal stored in a place of a declared element
@@ -1434,8 +1471,8 @@ class TypeChecker {
   readonly #copyStatements = new WeakSet<Expression>();
 
   // What the flow check of speaker properties needs (see `speakerFlowInput`): the reads of a property through a
-  // speaker's name or `speaker` under `as`, the stores through a speaker's name, and which ways through each branch,
-  // loop, and lazy operand are possible (see `SpeakerFlowInput`).
+  // speaker's name or `speaker` under `as`, and the stores through a speaker's name; and which ways through each branch,
+  // loop, and lazy operand are possible (see `WayFacts`).
   readonly #flowReads = new Map<
     PropertyAccessExpression,
     Omit<SpeakerFlowRead, "sources"> & { readonly file: number }
@@ -1720,20 +1757,12 @@ class TypeChecker {
 
   /**
    * Checks the project: the start values of globals and speakers in the order a session sets them up, then each file,
-   * `main.tease` first, as a single script (rule 6).
+   * `main.tease` first, as a single script (rule 6). `effects` is what its code may change (see `projectEffects`).
    */
-  public check(programs: readonly Program[]): void {
+  public check(programs: readonly Program[], effects: ProjectEffects): void {
     startPropertyLineage();
-    const effects = programs.map(programEffects);
-    const loops = new Map(effects.flatMap((fileEffects) => [...fileEffects.loops]));
-    const sharedGlobals = new Map<string, Sharing>();
-    for (const fileEffects of effects)
-      for (const [name, how] of fileEffects.shared) noteSharing(sharedGlobals, name, how);
-    // While a `call` runs, any file's top level may run and assign globals (ADR 0022 §5, §6).
-    if (effects.some((fileEffects) => fileEffects.callsFiles))
-      for (const fileEffects of effects)
-        for (const [name, how] of fileEffects.rootAssigned) noteSharing(sharedGlobals, name, how);
-    this.#sharedGlobals = sharedGlobals;
+    const loops = effects.loops;
+    this.#sharedGlobals = effects.sharedGlobals;
     const functionsByFile = programs.map(() => new Map<FunctionDeclaration, FunctionType>());
     for (const [file, program] of programs.entries())
       for (const statement of program.statements)
@@ -1753,12 +1782,12 @@ class TypeChecker {
     }
     // main.tease runs right after the start values, so it starts with what they stored, unless a transfer enters it
     // again later; other files start afresh.
-    const startupFlow = effects.some((fileEffects) => fileEffects.entersMain)
+    const startupFlow = effects.files.some((fileEffects) => fileEffects.entersMain)
       ? new Flow()
       : this.#flow;
     for (const [file, program] of programs.entries()) {
       this.#enterFile(file);
-      this.#effects = { shared: effects[file]!.shared, loops };
+      this.#effects = { shared: effects.files[file]!.shared, loops };
       this.#root = new Scope(this.#project);
       this.#outer = this.#root;
       this.#scriptVariables = new Set(
@@ -1775,21 +1804,7 @@ class TypeChecker {
       const rootStatements = program.statements.filter(
         (statement) => statement.kind !== "functionDeclaration",
       );
-      this.#rootStatements = rootStatements;
-      const continues = runCompileTask(this.#statementsTask(rootStatements, this.#root));
-      // A file of declarations only runs nothing on its own, so it has no way to its end.
-      if (continues && rootStatements.some(runsOnItsOwn)) {
-        const last = rootStatements.at(-1)!;
-        const call = last.kind === "expressionStatement" ? unwrapGrouping(last.expression) : null;
-        // A call counts as returning, also of a function that always exits.
-        this.#report(
-          "TSV052",
-          call?.kind === "callExpression" && call.callee.kind === "identifier"
-            ? `This path reaches the end of the file after ${call.callee.name}(). Even if ${call.callee.name} ends the session, add exit (or end) here so the ending is explicit.`
-            : "The script can run past the end of this file. Add exit where the session should finish, or end to return to the file that called this one.",
-          last.span,
-        );
-      }
+      runCompileTask(this.#statementsTask(rootStatements, this.#root));
       // Every script variable has its type now, so every function body is checked, also one that waited for one.
       this.#scriptChecked = true;
       for (const statement of program.statements)
@@ -2072,7 +2087,19 @@ class TypeChecker {
     const stores = new Map<string, SpeakerFlowStore>();
     for (const [statement, { file, ...store }] of this.#flowStores)
       stores.set(placeKey(file, statement.target.span), store);
-    return { reads, stores, paths: this.#pathFacts, operands: this.#operandFacts };
+    return { reads, stores };
+  }
+
+  /** Which ways through each branch, loop, and lazy operand this check found possible. */
+  public ways(): WayFacts {
+    return { paths: this.#pathFacts, operands: this.#operandFacts };
+  }
+
+  /** The code that this check found never runs, which the loop effects of the next check leave out. */
+  public deadCode(): DeadCode {
+    const operands = new Set<string>();
+    for (const [place, ways] of this.#operandFacts) if (!ways[0]) operands.add(place);
+    return { statements: new Set(this.#unreachable), operands };
   }
 
   /** A declared speaker for a message to name in its example, other than the built-in `player`. */
@@ -2246,10 +2273,8 @@ class TypeChecker {
       // A goto can reach a label even when the statements before it never continue.
       if (statement.kind === "labelStatement") continues = true;
       this.#reachable = reachable && continues;
-      if (!this.#reachable) this.unreachable.add(statement);
+      if (!this.#reachable) this.#unreachable.add(statement);
       if (!(yield* compileChild(this.#statementTask(statement, scope)))) continues = false;
-      else if (this.#reachable && statements === this.#rootStatements)
-        this.continuing.add(statement);
     }
     this.#reachable = reachable;
     return continues;
@@ -2483,14 +2508,11 @@ class TypeChecker {
           if ((yield* compileChild(this.#pathTask(switchCase.body, scope, reached))) && reached)
             ends.push(this.#flow.mark());
         }
-        // `default`, or the path without one, runs when no case matched. A path that no value reaches does not continue.
+        // `default`, or the path without one, runs when no case matched: not when no value is left, also because the
+        // cases list every value it can be. A path that no value reaches does not continue.
         this.#flow.restore(start);
-        const restReached = remaining.kind !== "never";
-        // The flow of speaker properties also knows that no value is left when the cases list every value it can be.
-        this.#notePaths(statement, [
-          ...casePaths,
-          restReached && !takesEveryValue(remaining, literals),
-        ]);
+        const restReached = remaining.kind !== "never" && !takesEveryValue(remaining, literals);
+        this.#notePaths(statement, [...casePaths, restReached]);
         if (variable !== null && restReached && remaining !== subject)
           this.#flow.apply(this.#flow.since(start, new Map([[variable, remaining]])));
         if (statement.defaultBlock === null) {
@@ -2598,7 +2620,6 @@ class TypeChecker {
         return false;
       }
       case "exitStatement":
-        if (this.#reachable) this.reachesExit = true;
         return false;
       case "endStatement":
         return false;
@@ -2654,7 +2675,7 @@ class TypeChecker {
     const reachable = this.#reachable;
     if (!reached) this.#reachable = false;
     // An `else if` is a statement outside any statement list; the flow records it like one.
-    if (block.kind !== "block" && !this.#reachable) this.unreachable.add(block);
+    if (block.kind !== "block" && !this.#reachable) this.#unreachable.add(block);
     const continues =
       block.kind === "block"
         ? yield* compileChild(this.#blockTask(block, scope))
@@ -8893,6 +8914,71 @@ interface ProgramEffects {
   readonly loops: ReadonlyMap<Block, LoopEffects>;
 }
 
+/**
+ * The code that a check found never runs: the statements of a branch or loop body that no value takes or after a
+ * statement that never continues, and by place the `and`, `or`, and `otherwise` whose right side never runs.
+ */
+interface DeadCode {
+  readonly statements: ReadonlySet<Statement>;
+  readonly operands: ReadonlySet<string>;
+}
+
+/** Whether `found` holds all of `dead`. */
+function coversDeadCode(found: DeadCode, dead: DeadCode): boolean {
+  for (const statement of dead.statements) if (!found.statements.has(statement)) return false;
+  for (const place of dead.operands) if (!found.operands.has(place)) return false;
+  return true;
+}
+
+/** What the code of a project may change, as the check uses it. */
+interface ProjectEffects {
+  readonly files: readonly ProgramEffects[];
+  readonly loops: ReadonlyMap<Block, LoopEffects>;
+  /** The globals that a function or a timer or media block of any file assigns or changes in place, with how. */
+  readonly sharedGlobals: ReadonlyMap<string, Sharing>;
+}
+
+/** What the code of each file may change, leaving out the code that never runs. */
+function projectEffects(programs: readonly Program[], dead: DeadCode): ProjectEffects {
+  const files = programs.map((program, file) => programEffects(program, file, dead));
+  const sharedGlobals = new Map<string, Sharing>();
+  for (const fileEffects of files)
+    for (const [name, how] of fileEffects.shared) noteSharing(sharedGlobals, name, how);
+  // While a `call` runs, any file's top level may run and assign globals (ADR 0022 §5, §6).
+  if (files.some((fileEffects) => fileEffects.callsFiles))
+    for (const fileEffects of files)
+      for (const [name, how] of fileEffects.rootAssigned) noteSharing(sharedGlobals, name, how);
+  return {
+    files,
+    loops: new Map(files.flatMap((fileEffects) => [...fileEffects.loops])),
+    sharedGlobals,
+  };
+}
+
+/** Whether two sets of effects give a check the same facts. */
+function sameProjectEffects(left: ProjectEffects, right: ProjectEffects): boolean {
+  const sameSharing = (
+    one: ReadonlyMap<string, Sharing>,
+    other: ReadonlyMap<string, Sharing>,
+  ): boolean => one.size === other.size && [...one].every(([name, how]) => other.get(name) === how);
+  return (
+    sameSharing(left.sharedGlobals, right.sharedGlobals) &&
+    left.files.every(
+      (fileEffects, file) =>
+        fileEffects.entersMain === right.files[file]!.entersMain &&
+        sameSharing(fileEffects.shared, right.files[file]!.shared),
+    ) &&
+    [...left.loops].every(([body, loop]) => {
+      const other = right.loops.get(body);
+      return (
+        other !== undefined &&
+        loop.suspends === other.suspends &&
+        sameSharing(loop.writes, other.writes)
+      );
+    })
+  );
+}
+
 interface LoopNode {
   readonly body: Block;
   readonly parent: LoopNode | null;
@@ -8900,48 +8986,53 @@ interface LoopNode {
   suspends: boolean;
 }
 
-type EffectWork =
-  | { readonly statement: Statement; readonly loop: LoopNode | null; readonly inside: boolean }
-  | { readonly expression: Expression; readonly loop: LoopNode | null; readonly inside: boolean };
+/** A node to walk, with the innermost loop around it, whether it stands in a function or block, and whether it runs. */
+type EffectWork = {
+  readonly loop: LoopNode | null;
+  readonly inside: boolean;
+  readonly runs: boolean;
+} & ({ readonly statement: Statement } | { readonly expression: Expression });
 
 /**
  * Collects in one pass the names that functions and blocks assign, and the effects of every loop. A loop's effects
- * include those of the loops inside it, but not those of timer or media blocks it starts, which run later, nor those of
- * code that a literal rules out, which never runs.
+ * include those of the loops inside it, but not those of timer or media blocks it starts, which run later. Code that
+ * `dead` holds never runs, so it changes nothing; a loop in it has effects of its own, for the check of its body.
  */
-function programEffects(program: Program): ProgramEffects {
+function programEffects(program: Program, file: number, dead: DeadCode): ProgramEffects {
   const shared = new Map<string, Sharing>();
   const rootAssigned = new Map<string, Sharing>();
-  const write = (name: string, how: Sharing, loop: LoopNode | null, inside: boolean): void => {
-    noteSharing(inside ? shared : rootAssigned, name, how);
-    if (loop !== null) noteSharing(loop.writes, name, how);
-  };
   let callsFiles = false;
   let entersMain = false;
-  // The value that literals give each condition the walk asks about.
-  const conditions = new Map<Expression, boolean | undefined>();
   const nodes: LoopNode[] = [];
   const work: EffectWork[] = [];
   const enter = (
     statements: readonly Statement[],
     loop: LoopNode | null,
     inside: boolean,
+    runs: boolean,
   ): void => {
     for (let index = statements.length - 1; index >= 0; index -= 1)
-      work.push({ statement: statements[index]!, loop, inside });
+      work.push({ statement: statements[index]!, loop, inside, runs });
   };
   const loopNode = (body: Block, parent: LoopNode | null): LoopNode => {
     const node: LoopNode = { body, parent, writes: new Map(), suspends: false };
     nodes.push(node);
     return node;
   };
-  const handlers = (node: Statement | Expression): void => {
-    for (const block of handlerBlocks(node)) enter(block.statements, null, true);
-  };
-  enter(program.statements, null, false);
+  enter(program.statements, null, false, true);
   while (work.length > 0) {
     const item = work.pop()!;
-    const { loop, inside } = item;
+    // Code that never runs is part of no loop around it.
+    const runs = item.runs && !("statement" in item && dead.statements.has(item.statement));
+    const loop = runs === item.runs ? item.loop : null;
+    const { inside } = item;
+    const write = (name: string, how: Sharing): void => {
+      if (runs) noteSharing(inside ? shared : rootAssigned, name, how);
+      if (loop !== null) noteSharing(loop.writes, name, how);
+    };
+    const handlers = (node: Statement | Expression): void => {
+      for (const block of handlerBlocks(node)) enter(block.statements, null, true, runs);
+    };
     if ("expression" in item) {
       const expression = item.expression;
       if (
@@ -8963,36 +9054,31 @@ function programEffects(program: Program): ProgramEffects {
         COLLECTION_CHANGES.has(callee.property.name)
       ) {
         const root = rootName(callee.object);
-        if (root !== null) write(root, "changes", loop, inside);
+        if (root !== null) write(root, "changes");
       }
       handlers(expression);
-      if (
+      // The right side of an `and`, `or`, or `otherwise` that never runs changes nothing.
+      const skipped =
         expression.kind === "binaryExpression" &&
         (expression.operator === "and" ||
           expression.operator === "or" ||
-          expression.operator === "otherwise")
-      ) {
-        // The operands of an `and`, `or`, or `otherwise` chain after a literal that decides its result never run, so
-        // they are part of no loop.
-        let runs = true;
-        for (const operand of chainOperands(expression)) {
-          work.push({ expression: operand, loop: runs ? loop : null, inside });
-          // A condition that literals decide is never null either.
-          const decides =
-            expression.operator === "otherwise"
-              ? isNonNullLiteral(operand) || literalCondition(operand, conditions) !== undefined
-              : literalCondition(operand, conditions) === (expression.operator === "or");
-          runs &&= !decides;
-        }
-        continue;
-      }
-      for (const part of expressionParts(expression)) work.push({ expression: part, loop, inside });
+          expression.operator === "otherwise") &&
+        dead.operands.has(placeKey(file, expression.span))
+          ? expression.right
+          : null;
+      for (const part of expressionParts(expression))
+        work.push(
+          part === skipped
+            ? { expression: part, loop: null, inside, runs: false }
+            : { expression: part, loop, inside, runs },
+        );
       continue;
     }
     const statement = item.statement;
     if (loop !== null && SUSPENDING_STATEMENTS.has(statement.kind)) loop.suspends = true;
-    if (statement.kind === "callFileStatement") callsFiles = true;
+    if (runs && statement.kind === "callFileStatement") callsFiles = true;
     if (
+      runs &&
       (statement.kind === "gotoStatement" ||
         statement.kind === "callFileStatement" ||
         statement.kind === "fallbackStatement") &&
@@ -9001,58 +9087,40 @@ function programEffects(program: Program): ProgramEffects {
     )
       entersMain = true;
     // The `default:` form of a global assigns it where the declaration runs.
-    if (statement.kind === "globalStatement" && statement.assignment !== null)
+    if (runs && statement.kind === "globalStatement" && statement.assignment !== null)
       noteSharing(inside ? shared : rootAssigned, statement.name.name, "assigns");
     if (statement.kind === "assignmentStatement") {
       // A store into an element or property changes the variable that holds it in place, too.
       const root = rootName(statement.target);
       if (root !== null)
-        write(root, statement.target.kind === "identifier" ? "assigns" : "changes", loop, inside);
+        write(root, statement.target.kind === "identifier" ? "assigns" : "changes");
       // A timer or media property write may run a block at once.
       if (statement.target.kind !== "identifier" && loop !== null) loop.suspends = true;
     }
     handlers(statement);
     switch (statement.kind) {
       case "functionDeclaration":
-        enter(statement.body.statements, null, true);
+        enter(statement.body.statements, null, true, runs);
         // A parameter default runs in the function too, and the blocks it shows run later.
         for (const parameter of statement.parameters)
           if (parameter.defaultValue !== null)
-            work.push({ expression: parameter.defaultValue, loop: null, inside: true });
+            work.push({ expression: parameter.defaultValue, loop: null, inside: true, runs });
         continue;
-      case "ifStatement": {
-        // A branch that a literal condition rules out never runs, so it is part of no loop.
-        const condition = literalCondition(statement.condition, conditions);
-        enter(statement.thenBlock.statements, condition === false ? null : loop, inside);
-        if (statement.elseBlock !== null)
-          enter(
-            statement.elseBlock.kind === "ifStatement"
-              ? [statement.elseBlock]
-              : statement.elseBlock.statements,
-            condition === true ? null : loop,
-            inside,
-          );
-        break;
-      }
       case "whileStatement": {
         const node = loopNode(statement.body, loop);
-        // A body that a literal rules out never runs, so it is part of no loop, and its own loop changes nothing.
-        const runs = literalCondition(statement.condition, conditions) !== false;
-        enter(statement.body.statements, runs ? node : null, inside);
-        work.push({ expression: statement.condition, loop: node, inside });
+        enter(statement.body.statements, node, inside, runs);
+        work.push({ expression: statement.condition, loop: node, inside, runs });
         continue;
       }
       case "repeatStatement":
-      case "forStatement": {
-        const node = loopNode(statement.body, loop);
-        enter(statement.body.statements, runsNoTime(statement) ? null : node, inside);
+      case "forStatement":
+        enter(statement.body.statements, loopNode(statement.body, loop), inside, runs);
         break;
-      }
       default:
-        enter(nestedStatements(statement), loop, inside);
+        enter(nestedStatements(statement), loop, inside, runs);
     }
     for (const expression of statementExpressions(statement))
-      work.push({ expression, loop, inside });
+      work.push({ expression, loop, inside, runs });
   }
   // Inner loops come after the loops around them, so walking backwards adds each loop's effects to its parent.
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
@@ -9070,236 +9138,6 @@ function programEffects(program: Program): ProgramEffects {
       nodes.map((node) => [node.body, { writes: node.writes, suspends: node.suspends }]),
     ),
   };
-}
-
-/** The operands of a chain of one operator, from the left; a part in parentheses is an operand of its own. */
-function chainOperands(root: Extract<Expression, { kind: "binaryExpression" }>): Expression[] {
-  const operands: Expression[] = [];
-  let left: Expression = root;
-  while (left.kind === "binaryExpression" && left.operator === root.operator) {
-    operands.push(left.right);
-    left = left.left;
-  }
-  operands.push(left);
-  return operands.reverse();
-}
-
-/**
- * The value that literals give a condition, as the type check decides it: `true` or `false`, also in parentheses or
- * after `not`, and an `and` chain with an operand that is `false` this way, or whose operands are all `true`, and an
- * `or` chain the other way round. `known` keeps the value of each part, so each part is evaluated once, without native
- * recursion.
- */
-function literalCondition(
-  condition: Expression,
-  known: Map<Expression, boolean | undefined>,
-): boolean | undefined {
-  const pending = [condition];
-  while (pending.length > 0) {
-    const node = pending.at(-1)!;
-    if (known.has(node)) {
-      pending.pop();
-      continue;
-    }
-    const parts = conditionParts(node);
-    const unknown = parts.filter((part) => !known.has(part));
-    if (unknown.length > 0) {
-      for (const part of unknown) pending.push(part);
-      continue;
-    }
-    pending.pop();
-    const values = parts.map((part) => known.get(part));
-    known.set(node, conditionValue(node, values));
-  }
-  return known.get(condition);
-}
-
-/** The parts whose values decide a condition: what stands in parentheses or after `not`, or a chain's operands. */
-function conditionParts(node: Expression): readonly Expression[] {
-  if (node.kind === "parenthesizedExpression") return [node.expression];
-  if (node.kind === "unaryExpression" && node.operator === "not") return [node.operand];
-  if (node.kind === "binaryExpression" && (node.operator === "and" || node.operator === "or"))
-    return chainOperands(node);
-  return [];
-}
-
-/** A condition's value from the values of its {@link conditionParts}, or `undefined` when literals do not decide it. */
-function conditionValue(
-  node: Expression,
-  values: readonly (boolean | undefined)[],
-): boolean | undefined {
-  if (node.kind === "booleanLiteral") return node.value;
-  if (node.kind === "parenthesizedExpression") return values[0];
-  if (node.kind === "unaryExpression" && node.operator === "not")
-    return values[0] === undefined ? undefined : !values[0];
-  if (node.kind !== "binaryExpression" || (node.operator !== "and" && node.operator !== "or"))
-    return undefined;
-  const decides = node.operator === "or";
-  if (values.includes(decides)) return decides;
-  return values.every((value) => value === !decides) ? !decides : undefined;
-}
-
-/** A literal other than `null`, also in parentheses, so a fallback after it never runs. */
-function isNonNullLiteral(expression: Expression): boolean {
-  return [
-    "numberLiteral",
-    "durationLiteral",
-    "stringLiteral",
-    "booleanLiteral",
-    "listLiteral",
-    "setLiteral",
-    "dictLiteral",
-    "objectLiteral",
-  ].includes(unwrap(expression).kind);
-}
-
-/** Whether the body of a `repeat` or `for` loop certainly runs no time, as the type check decides it. */
-function runsNoTime(
-  statement: Extract<Statement, { kind: "repeatStatement" | "forStatement" }>,
-): boolean {
-  if (statement.kind === "forStatement") return isEmptyLiteral(statement.iterable);
-  const times = staticNumber(statement.count);
-  return times !== undefined && times < 1;
-}
-
-/** The statements that leave a loop or the session, or may: one of them is a way out of the loop it stands in. */
-const LOOP_EXITS: ReadonlySet<Statement["kind"]> = new Set([
-  "breakStatement",
-  "returnStatement",
-  "endStatement",
-  "exitStatement",
-  "gotoStatement",
-  "callFileStatement",
-]);
-
-/** The engine functions, which only compute a value; a call of any other function may leave a loop. */
-const ENGINE_FUNCTIONS: ReadonlySet<string> = new Set(CORE_RUNTIME_BUILTINS);
-
-/** A `while true` loop, and whether its body has a way out. */
-interface EndlessLoop {
-  readonly statement: Extract<Statement, { kind: "whileStatement" }>;
-  readonly parent: EndlessLoop | null;
-  exits: boolean;
-}
-
-/** A node to walk, with the innermost `while true` around it and whether it stands in a timer or media block. */
-type ExitWork = { readonly loop: EndlessLoop | null; readonly handler: boolean } & (
-  { readonly statement: Statement } | { readonly expression: Expression }
-);
-
-/**
- * Warns about each loop with no way out once it starts (#578): a `while true`, and a top-level `goto` back to an earlier
- * label of its file, whose loop is the statements between them. A `break`, `return`, `end`, `exit`, any other `goto`, a
- * `call` of a file, or a call of a function other than an engine function is a way out wherever it stands in the loop,
- * also in a branch that no value takes. A timer or media block may run during any loop, so when a block of the project
- * has a way out, no loop is reported. Neither is a loop that never runs by the flow of the type check.
- */
-function closedLoopWarnings(
-  programs: readonly Program[],
-  unreachable: ReadonlySet<Statement>,
-): readonly (readonly Diagnostic[])[] {
-  let blockExits = false;
-  const loops: { readonly file: number; readonly loop: EndlessLoop }[] = [];
-  const closed = programs.map((): SourceSpan[] => []);
-  /** Walks a top-level statement and returns whether it has a way out. */
-  const walk = (file: number, root: Statement): boolean => {
-    let found = false;
-    const work: ExitWork[] = [{ statement: root, loop: null, handler: false }];
-    const enter = (
-      statements: readonly Statement[],
-      loop: EndlessLoop | null,
-      handler: boolean,
-    ): void => {
-      for (let index = statements.length - 1; index >= 0; index -= 1)
-        work.push({ statement: statements[index]!, loop, handler });
-    };
-    const wayOut = (loop: EndlessLoop | null, handler: boolean): void => {
-      found = true;
-      blockExits ||= handler;
-      // A way out of an inner loop is one of the loops around it too.
-      for (let node = loop; node !== null && !node.exits; node = node.parent) node.exits = true;
-    };
-    while (work.length > 0) {
-      const item = work.pop()!;
-      const { loop, handler } = item;
-      // A timer or media block runs later, outside the loop that starts it.
-      for (const block of handlerBlocks("expression" in item ? item.expression : item.statement))
-        enter(block.statements, null, true);
-      if ("expression" in item) {
-        const expression = item.expression;
-        if (
-          expression.kind === "callExpression" &&
-          !(expression.callee.kind === "identifier" && ENGINE_FUNCTIONS.has(expression.callee.name))
-        )
-          wayOut(loop, handler);
-        for (const part of expressionParts(expression))
-          work.push({ expression: part, loop, handler });
-        continue;
-      }
-      const statement = item.statement;
-      if (LOOP_EXITS.has(statement.kind)) wayOut(loop, handler);
-      if (statement.kind === "functionDeclaration") {
-        enter(statement.body.statements, null, false);
-        for (const parameter of statement.parameters)
-          if (parameter.defaultValue !== null)
-            work.push({ expression: parameter.defaultValue, loop: null, handler: false });
-        continue;
-      }
-      let inner = loop;
-      if (isWhileTrue(statement)) {
-        inner = { statement, parent: loop, exits: false };
-        loops.push({ file, loop: inner });
-      }
-      enter(nestedStatements(statement), inner, handler);
-      for (const expression of statementExpressions(statement))
-        work.push({ expression, loop, handler });
-    }
-    return found;
-  };
-  for (const [file, program] of programs.entries()) {
-    // The number of top-level statements with a way out before each label.
-    const labels = new Map<string, number>();
-    let count = 0;
-    for (const statement of program.statements) {
-      if (statement.kind === "labelStatement") labels.set(statement.name.name, count);
-      else if (
-        statement.kind === "gotoStatement" &&
-        statement.target.kind === "labelTarget" &&
-        labels.get(statement.target.label.name) === count &&
-        !unreachable.has(statement)
-      )
-        closed[file]!.push(statement.span);
-      // A function runs where it is called, and a call is a way out.
-      if (walk(file, statement) && statement.kind !== "functionDeclaration") count += 1;
-    }
-  }
-  if (blockExits) return programs.map(() => []);
-  for (const { file, loop } of loops)
-    if (!loop.exits && !unreachable.has(loop.statement))
-      closed[file]!.push(
-        createSourceSpan(loop.statement.span.start, loop.statement.condition.span.end),
-      );
-  return closed.map((spans) =>
-    spans
-      .sort((left, right) => left.start.offset - right.start.offset)
-      .map((span) =>
-        createDiagnostic(
-          DiagnosticSeverity.Warning,
-          typeCode.closedLoop,
-          "If this loop starts, it has no way to stop. Add a condition with `break` to leave the loop, or use `exit` to finish the session.",
-          span,
-        ),
-      ),
-  );
-}
-
-/** Whether a statement is `while true`, with or without parentheses. */
-function isWhileTrue(
-  statement: Statement,
-): statement is Extract<Statement, { kind: "whileStatement" }> {
-  if (statement.kind !== "whileStatement") return false;
-  const condition = unwrap(statement.condition);
-  return condition.kind === "booleanLiteral" && condition.value;
 }
 
 /** Methods that change the list or set they are called on. */
@@ -9379,115 +9217,6 @@ function loopValueType(element: StaticType): StaticType {
   if (!readsHeldUnknown(element)) return ownNull(copyType(plainType(element)));
   observe(element);
   return UNKNOWN_TYPE;
-}
-
-/**
- * The statements of the blocks that run as part of a statement: branches and loop bodies, not handler blocks. A
- * `global` with `default:` assigns where it stands.
- */
-function nestedStatements(statement: Statement): readonly Statement[] {
-  switch (statement.kind) {
-    case "globalStatement":
-      return statement.assignment === null ? [] : [statement.assignment];
-    case "ifStatement":
-      return [
-        ...statement.thenBlock.statements,
-        ...(statement.elseBlock === null
-          ? []
-          : statement.elseBlock.kind === "ifStatement"
-            ? [statement.elseBlock]
-            : statement.elseBlock.statements),
-      ];
-    case "whileStatement":
-    case "repeatStatement":
-    case "forStatement":
-      return statement.body.statements;
-    case "switchStatement":
-      return [
-        ...statement.cases.flatMap((switchCase) => switchCase.body.statements),
-        ...(statement.defaultBlock?.statements ?? []),
-      ];
-    default:
-      return [];
-  }
-}
-
-/** The timer, media, or permanent button blocks that a statement or expression registers. */
-function handlerBlocks(node: Statement | Expression): readonly Block[] {
-  if (node.kind === "timerStatement" || node.kind === "timerExpression")
-    return node.handler === null ? [] : [node.handler];
-  if (node.kind === "showPermanentButtonStatement" || node.kind === "showPermanentButtonExpression")
-    return [node.handler];
-  if (node.kind === "playMediaStatement" || node.kind === "playMediaExpression")
-    return mediaHandlerBlocks(node);
-  return [];
-}
-
-/** The expressions a statement evaluates itself, outside its nested blocks. */
-function statementExpressions(statement: Statement): readonly Expression[] {
-  switch (statement.kind) {
-    case "letStatement":
-      return [statement.initializer];
-    case "assignmentStatement":
-      return statement.target.kind === "identifier"
-        ? [statement.value]
-        : [...expressionChildren(statement.target), statement.value];
-    case "expressionStatement":
-      return [statement.expression];
-    case "switchStatement":
-      return [statement.subject, ...statement.cases.flatMap((switchCase) => switchCase.values)];
-    case "speakerDeclaration":
-      return statement.properties.map((property) => property.value);
-    case "sayStatement":
-      return sayOperands(statement);
-    case "showButtonStatement":
-      return showButtonOperands(statement);
-    case "waitStatement":
-      return [statement.duration];
-    case "timerStatement":
-      return timerOperands(statement);
-    case "showPermanentButtonStatement":
-      return [statement.text];
-    case "playMediaStatement":
-      return mediaOperands(statement);
-    case "showImageStatement":
-      return [statement.image];
-    case "showPopupStatement":
-    case "openUrlStatement":
-    case "exportTextStatement":
-      return statement.arguments.map((argument) => argument.value);
-    case "saveStatement":
-      return [statement.value, statement.key];
-    case "deleteStatement":
-      return [statement.key];
-    case "ifStatement":
-    case "whileStatement":
-      return [statement.condition];
-    case "repeatStatement":
-      return [statement.count];
-    case "forStatement":
-      return [statement.iterable];
-    case "returnStatement":
-      return statement.value === null ? [] : [statement.value];
-    case "gotoStatement":
-    case "callFileStatement":
-    case "fallbackStatement":
-      return statement.target?.kind === "scriptTarget" ? [statement.target.expression] : [];
-    default:
-      return [];
-  }
-}
-
-/** The direct subexpressions of an expression, including interaction operands. */
-function expressionParts(expression: Expression): readonly Expression[] {
-  if (expression.kind === "interactionExpression") return askParts(expression);
-  if (expression.kind === "showButtonExpression") return showButtonOperands(expression);
-  if (expression.kind === "sayExpression") return sayOperands(expression);
-  return expressionChildren(expression);
-}
-
-function showButtonOperands(parts: ShowButtonParts): readonly Expression[] {
-  return [parts.label, ...showButtonOptions(parts).map((option) => option.value)];
 }
 
 /**

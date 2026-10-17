@@ -37,13 +37,21 @@ interface Played {
 
 const DECISIONS = new Set(["jumpIfFalse", "loopStart", "transfer", "end"]);
 
-function compile(main: string, others: Readonly<Record<string, string>> = {}): InstructionPlan {
+/** Compiles a project with no diagnostics but the warnings `warnings` names, by code in compiler order. */
+function compile(
+  main: string,
+  others: Readonly<Record<string, string>> = {},
+  warnings: readonly string[] = [],
+): InstructionPlan {
   const files = [
     { path: "main.tease", source: main },
     ...Object.entries(others).map(([path, source]) => ({ path, source })),
   ];
   const compiled = compileProject(files, { images: [] });
-  assert.deepEqual(compiled.diagnostics, []);
+  assert.deepEqual(
+    compiled.diagnostics.map((diagnostic) => `${diagnostic.severity} ${diagnostic.code}`),
+    warnings.map((code) => `warning ${code}`),
+  );
   return compiled.plan!;
 }
 
@@ -340,6 +348,7 @@ test("transfers report where each goto, call, and end went, also across files", 
       "end",
     ].join("\n"),
     { "rooms/a.tease": room("a"), "rooms/b.tease": room("b") },
+    ["TSV065"],
   );
   const from = fresh(plan);
   const [trace] = traced(plan, [], from);

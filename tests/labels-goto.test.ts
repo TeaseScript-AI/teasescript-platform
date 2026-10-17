@@ -211,6 +211,11 @@ test("a variable is used after a label only when every way to the label set it",
   );
   assert.deepEqual(diagnostics("goto later\nlet x = 1\nlabel later\nsay x\nexit"), [
     [
+      "TSV065",
+      2,
+      "This code never runs, because the 'goto' on line 1 always jumps away first. Remove it, or move it before the 'goto'.",
+    ],
+    [
       "TSV054",
       4,
       "A goto can reach this line without running 'let x' first, so x may have no value here. Move the label that the goto jumps to before 'let x', or set x on every way here.",
@@ -278,12 +283,15 @@ test("plan validation keeps gotos on labels and closes each root region with an 
 
 test("a goto that skips a let is found where functions and handlers use the variable", () => {
   for (const use of ["function read { say x }\nread()", "timer async 1 s { say x }\nwait 2 s"]) {
-    assert.deepEqual(codes(`goto later\nlet x = 1\nlabel later\n${use}\nexit`), [["TSV054", 4]]);
+    assert.deepEqual(codes(`goto later\nlet x = 1\nlabel later\n${use}\nexit`), [
+      ["TSV065", 2],
+      ["TSV054", 4],
+    ]);
   }
-  // A goto that cannot run adds no way to the label.
+  // A goto that cannot run adds no way to the label; it is reported as code that never runs.
   assert.deepEqual(
     codes("function f {\n    return\n    goto later\n}\nf()\nlet x = 1\nlabel later\nsay x\nexit"),
-    [],
+    [["TSV065", 3]],
   );
   // A function called before the let is checked when it runs, as before labels existed.
   assert.deepEqual(codes("function read { say x }\nread()\nlet x = 1\nread()\nexit"), []);
@@ -291,22 +299,40 @@ test("a goto that skips a let is found where functions and handlers use the vari
   for (const [start, expected] of [
     [
       'function jump: boolean { goto later }\nif true { say "yes" } else if jump() { say "no" }',
-      [],
+      [["TSV065", 2]],
     ],
-    ["repeat 0 { goto later }", []],
-    ["for value in [] { goto later }", []],
+    ["repeat 0 { goto later }", [["TSV065", 1]]],
+    ["for value in [] { goto later }", [["TSV065", 1]]],
     [
       'function jump: boolean { goto later }\nif false { say "yes" } else if jump() { say "no" }',
-      [["TSV054", 5]],
+      [
+        ["TSV065", 2],
+        ["TSV054", 5],
+      ],
     ],
-    ["repeat 1 { goto later }", [["TSV054", 4]]],
-    ["for value in [1] { goto later }", [["TSV054", 4]]],
+    // The loop runs once, so the `let` after it never runs.
+    [
+      "repeat 1 { goto later }",
+      [
+        ["TSV065", 2],
+        ["TSV054", 4],
+      ],
+    ],
+    [
+      "for value in [1] { goto later }",
+      [
+        ["TSV065", 2],
+        ["TSV054", 4],
+      ],
+    ],
   ] as const) {
     const source = `${start}\nlet x = 1\nlabel later\nsay x\nexit`;
     assert.deepEqual(codes(source), expected, start);
   }
   const deadBranch = compileValidPlan(
     'function jump: boolean { goto later }\nif true { say "yes" } else if jump() { say "no" }\nlet x = 1\nlabel later\nsay x\nexit',
+    {},
+    ["TSV065"],
   );
   assert.deepEqual(
     outputs(run(deadBranch, createImmediatePacingRuntimeSnapshot(deadBranch)).events),
@@ -334,7 +360,7 @@ test("a call counts as returning, so the file still says how it ends", () => {
     codes(
       "function f {\n    if true { return }\n    goto later\n}\nf()\nlet x = 1\nlabel later\nsay x\nexit",
     ),
-    [],
+    [["TSV065", 3]],
   );
 });
 

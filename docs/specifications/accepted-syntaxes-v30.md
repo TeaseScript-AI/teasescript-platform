@@ -4265,16 +4265,17 @@ if passed {
 
 Static analysis should warn, but not necessarily fail compilation, when:
 
-- statements are unreachable;
-- an `exit` is declared but unreachable;
+- statements are unreachable (`TSV065`);
+- an `exit` is declared but unreachable (`TSV066`);
 - a `wait` or timer has a length written in days or weeks, which counts only time while the Player is open (`TSV061`,
   [§27](#time));
 - a loop has no way out once it starts (`TSV058`, on its `while` or `goto`): `while true`, with or without parentheses,
   or an unconditional top-level `goto` back to an earlier label of its file, whose loop is the statements between them.
   A `break`, `return`, `end`, `exit`, any other `goto`, a file `call`, or a call of an author, host, or library function
-  anywhere in the loop is a way out, also nested or in a branch that no value takes. So is one in any timer, media, or
-  button block of the project, which then silences the warning in every file. Recursion and cycles through several
-  labels or files are not checked.
+  anywhere in the loop is a way out, also nested, but not in a branch that can never run, such as `if false { break }`
+  or a branch its types rule out (owner decision, 2026-10-16). So is one in any timer, media, or button block of the
+  project, which then silences the warning in every file. Recursion and cycles through several labels or files are not
+  checked.
 
 ## 31. Popups and system notifications
 **Status:** Accepted

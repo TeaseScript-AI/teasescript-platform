@@ -1907,13 +1907,18 @@ test("calls never decide parameter types, and an unknown return makes a result u
 });
 
 test("a loop that certainly runs, or ends only through a return, ends the function", () => {
-  for (const body of [
-    "repeat 1 {\n        return 1\n    }",
-    "for n in [1] {\n        return n\n    }",
-    "for n in 1..=3 {\n        return n\n    }",
-    "while true {\n        return 1\n        break\n    }",
-  ])
-    assert.deepEqual(codes(`function f: integer {\n    ${body}\n}\nlet a = f()\nexit`), [], body);
+  for (const [body, expected] of [
+    ["repeat 1 {\n        return 1\n    }", []],
+    ["for n in [1] {\n        return n\n    }", []],
+    ["for n in 1..=3 {\n        return n\n    }", []],
+    // The `break` after the `return` never runs.
+    ["while true {\n        return 1\n        break\n    }", [["TSV065", "break"]]],
+  ] as const)
+    assert.deepEqual(
+      codes(`function f: integer {\n    ${body}\n}\nlet a = f()\nexit`),
+      expected,
+      body,
+    );
   assert.deepEqual(
     codes("function f(n): integer {\n    repeat n {\n        return 1\n    }\n}\nexit"),
     [["TSV041", "f"]],

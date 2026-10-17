@@ -19,8 +19,8 @@ import { runValidSource } from "./helpers/run-valid-source.js";
 /** Hides a value's type from the compiler, so a check reaches the runtime. */
 const DYNAMIC = "function dynamic(value) {\n    return value\n}\n";
 
-function says(source: string): string[] {
-  const result = runValidSource(source);
+function says(source: string, warnings: readonly string[] = []): string[] {
+  const result = runValidSource(source, undefined, warnings);
   assert.equal(result.snapshot.failure, null, JSON.stringify(result.snapshot.failure));
   return result.events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
 }
@@ -226,6 +226,7 @@ test("for key, value goes through the entries as they were when it started, with
         "}",
         "exit",
       ].join("\n"),
+      ["TSV065"],
     ),
     ["rope 11", "cuffs 12", "1", 'dict{ "rope": { uses: 101 }, "added": { uses: 0 } }'],
   );
