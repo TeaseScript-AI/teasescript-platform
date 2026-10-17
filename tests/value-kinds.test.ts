@@ -236,8 +236,9 @@ test("the compiler and the runtime name a value of each kind with one text", () 
 });
 
 test("a value of each kind is shown, written as JSON, returned by a button, ordered, a dict key, and saved as V30 says", () => {
+  // Every value equals itself, also as a set's member, which is unique by `==`.
   const checks: readonly (readonly [
-    fact: Fact | "equal",
+    fact: Fact | "equal" | "member",
     body: string,
     shows: "said" | "asked",
   ])[] = [
@@ -246,6 +247,7 @@ test("a value of each kind is shown, written as JSON, returned by a button, orde
     ["choice", 'let c = askChoice [{ value: X, text: "pick" }]', "asked"],
     ["ordered", "say X < X", "said"],
     ["equal", "say X == X", "said"],
+    ["member", "say set[X, X].length", "said"],
     ["dictKey", "let d = dict{}\nd[X] = 1\nsay d.length", "said"],
     ["saved", 'save X as "k"\nsay "saved"', "said"],
   ];
@@ -253,7 +255,7 @@ test("a value of each kind is shown, written as JSON, returned by a button, orde
     for (const kind of VALUE_KIND_NAMES)
       for (const [form, result] of outcomes(kind, body).entries()) {
         const where = `${fact} of ${kind}${form === 0 ? "" : " through pick"}`;
-        const expected = fact === "equal" || holds(kind, fact);
+        const expected = fact === "equal" || fact === "member" || holds(kind, fact);
         assert.equal(
           result.problems.length === 0,
           expected,
@@ -267,6 +269,7 @@ test("a value of each kind is shown, written as JSON, returned by a button, orde
         if (shows === "asked") assert.ok(result.asked, where);
         else assert.equal(result.said.length, 1, where);
         if (fact === "equal") assert.deepEqual(result.said, ["true"], where);
+        if (fact === "member") assert.deepEqual(result.said, ["1"], where);
       }
 });
 
