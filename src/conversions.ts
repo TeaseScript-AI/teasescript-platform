@@ -281,6 +281,21 @@ export function conversionWaitsForFiles(name: ConversionName, filesKeptOut: bool
   return takesFiles(name) && !filesKeptOut;
 }
 
+/** The file and hash functions of text (V30 §13, §33), each called as its `CallShape` says. */
+export const FILE_TEXT_FUNCTIONS: ReadonlyMap<string, CallShape> = new Map([
+  [
+    "fileFromBase64",
+    {
+      parameter: "text",
+      fallback: { required: "text that is not valid Base64", type: "any" },
+      files: false,
+    },
+  ],
+  ["fileToBase64", { parameter: "file", fallback: null, files: false }],
+  ["hashText", { parameter: "text", fallback: null, files: false }],
+  ["hashFile", { parameter: "file", fallback: null, files: false }],
+]);
+
 /** The conversion of text to a value of `result`, which a fix names, such as `toDate` for a date. */
 export function conversionTo(result: ScalarTypeName): ConversionName | undefined {
   return CONVERSION_FUNCTIONS.find(

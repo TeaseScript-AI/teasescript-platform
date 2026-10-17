@@ -1,6 +1,7 @@
 import {
   argumentCountMessage,
   argumentShapeProblem,
+  callShapeProblem,
   dictArgumentsProblem,
   FIXED_PARAMETERS,
   getArgumentsProblem,
@@ -333,12 +334,12 @@ import {
   booleanFromText,
   CONVERSIONS,
   defaultDescription,
+  FILE_TEXT_FUNCTIONS,
   fitsDefault,
   isConversion,
   numberFromText,
   MIN_MAX_BUILTINS,
   withoutNegativeZero,
-  type CallShape,
   type Conversion,
   type ValueConversion,
 } from "../conversions.js";
@@ -3573,13 +3574,15 @@ export class Evaluator {
         internalFault(`${name}(...) with files reached an ordinary call instead of a file store.`),
         span,
       );
+    const problem = callShapeProblem(
+      name,
+      conversion,
+      positional.length,
+      Object.keys(named),
+      defaulted,
+    );
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     const pair = positional.length === 2 ? conversion.pair : undefined;
-    if (
-      (positional.length !== 1 && pair === undefined) ||
-      Object.keys(named).some((key) => !conversion.files || key !== "files") ||
-      (conversion.fallback !== null && conversion.fallback.required !== null && !defaulted)
-    )
-      throw fault("TSR028", callShapeFailure(name, conversion), span);
     const converted = CONVERSION_RUNS[name](positional, {
       span,
       text: (value) => visibleText(value, span, currentTemporalContext(this.snapshot)),
@@ -4376,27 +4379,20 @@ function numberOf(value: SerializableRuntimeValue): number | undefined {
       : undefined;
 }
 
-/** How a call of `shape` is written, for a plan whose call is not (see `CallShape`). */
-function callShapeFailure(name: string, shape: CallShape): string {
-  if (shape.fallback === null)
-    return `${name}(...) takes one ${shape.parameter} and no named arguments.`;
-  return shape.fallback.required === null
-    ? `${name}(...) takes one ${shape.parameter} and an optional default:, such as ${name}(${shape.parameter}, default: ...).`
-    : `${name}(...) takes one ${shape.parameter} and a default:, such as ${name}(${shape.parameter}, default: null).`;
-}
-
 /** `hashText(text)` (V30 §13): the SHA-256 of the text's UTF-8 bytes. */
 function hashedText(
   positional: readonly SerializableRuntimeValue[],
   named: Readonly<Record<string, SerializableRuntimeValue>>,
   span: SourceSpan,
 ): string {
-  if (positional.length !== 1 || Object.keys(named).length !== 0)
-    throw fault(
-      "TSR028",
-      callShapeFailure("hashText", { parameter: "text", fallback: null, files: false }),
-      span,
-    );
+  const problem = callShapeProblem(
+    "hashText",
+    FILE_TEXT_FUNCTIONS.get("hashText")!,
+    positional.length,
+    Object.keys(named),
+    false,
+  );
+  if (problem !== undefined) throw fault("TSR028", problem.message, span);
   const text = positional[0]!;
   if (typeof text !== "string")
     throw fault(

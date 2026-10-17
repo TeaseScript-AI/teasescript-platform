@@ -1,3 +1,4 @@
+import type { CallShape } from "./conversions.js";
 import type { MethodParameters } from "./text-operations.js";
 
 /**
@@ -139,6 +140,51 @@ export function argumentShapeProblem(
     };
   if (received === shape.count) return undefined;
   return { kind: "argumentCount", message: argumentCountMessage(callee, shape.takes, received) };
+}
+
+/** The names that a call of `shape` (see `CallShape`) takes: `default:` and `files:` where it takes them. */
+export function callShapeNames(shape: CallShape): readonly string[] {
+  return [...(shape.fallback === null ? [] : ["default"]), ...(shape.files ? ["files"] : [])];
+}
+
+/**
+ * The first problem with a call of `shape` (see `CallShape`), as the compiler reports it first: the first of `named`
+ * that it does not take, then `received` positional arguments where it takes one, or the two of its pair, then a
+ * `default:` that it needs and that the call leaves out (`defaulted` false). `undefined` when the call fits.
+ */
+export function callShapeProblem(
+  callee: string,
+  shape: CallShape,
+  received: number,
+  named: readonly string[],
+  defaulted: boolean,
+): ArgumentProblem | undefined {
+  const names = callShapeNames(shape);
+  const unknown = named.find((name) => !names.includes(name));
+  if (unknown !== undefined)
+    return {
+      kind: "unknownNamedArgument",
+      name: unknown,
+      message: unknownNamedArgumentMessage(callee, unknown, names),
+    };
+  const required = shape.fallback?.required ?? null;
+  if (received !== 1 && (shape.pair === undefined || received !== 2))
+    return {
+      kind: "argumentCount",
+      message: argumentCountMessage(
+        callee,
+        `1 argument (${shape.parameter})${required === null ? "" : " and a 'default:'"}${shape.pair === undefined ? "" : ` or 2 (${shape.pair.join(", ")})`}`,
+        received,
+      ),
+    };
+  if (required === null || defaulted) return undefined;
+  return {
+    kind: "argumentCount",
+    message: missingDefaultMessage(
+      `${callee}(${shape.parameter}, default: value)`,
+      `for ${required}`,
+    ),
+  };
 }
 
 /** The parameters of the built-ins that take a fixed number of positional arguments and no names (V30 §7, §8). */

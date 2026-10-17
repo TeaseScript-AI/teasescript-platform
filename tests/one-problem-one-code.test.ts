@@ -263,6 +263,37 @@ test("a call's arguments have the compiler's text where the runtime checks them"
     ["say linearRegression()", "say linearRegression([1, 2])", "linearRegression", []],
     [`${TREND}say predict(trend)`, `${TREND}say predict(trend, 1)`, "predict", [1]],
     ["say randomWeighted()", 'say randomWeighted(dict{ "a": 1 })', "randomWeighted", []],
+    // The conversions and `hashText`: a name, the number of arguments, and a `default:` they need.
+    ["say toString(1, 2)", "say toString(1)", "toString", [1, 2]],
+    ['say toNumber("1", x: 1)', 'say toNumber("1")', "toNumber", ["1", ["x", 1]]],
+    ["say toInteger()", 'say toInteger("1")', "toInteger", []],
+    [
+      "let at = toDateTime(1, 2, 3)",
+      'let at = toDateTime("2026-10-04T18:00")',
+      "toDateTime",
+      [1, 2, 3],
+    ],
+    // Without a written `files: false`, `fromJson` is a file store instruction, not a call.
+    [
+      'let x = fromJson("1", files: false)',
+      'let x = fromJson("1", default: null, files: false)',
+      "fromJson",
+      ["1", ["files", false]],
+    ],
+    [
+      'let x = fromJson("1", default: null, files: false, x: 1)',
+      'let x = fromJson("1", default: null, files: false)',
+      "fromJson",
+      [{ kept: 0 }, { kept: 1 }, ["files", false], ["x", 1]],
+    ],
+    [
+      "say toJson(1, files: false, x: 1)",
+      "say toJson(1, files: false)",
+      "toJson",
+      [1, ["files", false], ["x", 1]],
+    ],
+    ['say hashText("a", x: 1)', 'say hashText("a")', "hashText", ["a", ["x", 1]]],
+    ["say hashText()", 'say hashText("a")', "hashText", []],
     // `script(...)` reports the number of arguments first.
     ["let s = script()", 'let s = script("main.tease")', "script", []],
     [
