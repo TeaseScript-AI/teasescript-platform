@@ -283,8 +283,8 @@ available in every build to every user. It currently offers:
   wraps around without opening the dropdown:
   - **Title bar on short screens:** A or B above (default A);
   - **Photo accent:** A, the accent follows the photo, or B, the theme's accent (default);
-  - **Photo colour family:** A, Vibrant; B, Muted; or C, Vibrant when large enough (default), with the share of the
-    photo from which a swatch counts as large enough (default 3 %);
+  - **Photo colour family:** A, Vibrant; B, Muted; or C, Vibrant if large enough, else Muted (default), with the
+    share of the photo from which a swatch counts as large enough (default 3 %);
   - **Photo colour fade time:** A, 0.6 s, or B, 0.3 s (default), for the photo colour fade
     ([Stage and media presentation](#stage-and-media-presentation));
   - **Photo colour blending:** A, Oklab (default), or B, sRGB, for the same fade.
