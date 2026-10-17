@@ -115,6 +115,11 @@ import {
   visibleText,
 } from "./value-text.js";
 import { checkTextLength, MAX_TEXT_LENGTH, messageText, textTooLong } from "./text-length.js";
+import {
+  checkCollectionLength,
+  collectionTooLong,
+  MAX_COLLECTION_LENGTH,
+} from "./collection-size.js";
 import { base64Text, jsonText, textFromBase64, valueFromJson } from "./json-base64.js";
 import { textSha256 } from "./sha256.js";
 import {
@@ -1517,6 +1522,16 @@ export class Evaluator {
     if (isDict(object)) {
       // A new key is added at the end; an existing key keeps its position.
       const key = this.#dictKey(this.evaluate(target.index), target.index.span);
+      if (
+        object.entries.length >= MAX_COLLECTION_LENGTH &&
+        getSerializableDictEntry(object, key) === undefined
+      )
+        throw collectionTooLong(
+          "dict",
+          "assigning to a new key",
+          target.span,
+          object.entries.length + 1,
+        );
       if (receiverDescriptor !== null && !receiverDescriptor.detached) {
         const mutationStep: PreparedReferenceStep = { kind: "key", key };
         detachPreparedReferencesForMutation(this.snapshot, {
@@ -1597,6 +1612,12 @@ export class Evaluator {
       this.assign(target, joined);
       return true;
     }
+    checkCollectionLength(
+      "list",
+      list.items.length + right.items.length,
+      "joining with +",
+      value.span,
+    );
     detachPreparedReferencesForMutation(this.snapshot, {
       rootFrameId: location.frame.id,
       rootName: target.name,
@@ -2182,8 +2203,15 @@ export class Evaluator {
       checkTextLength(left.length + right.length, "joining with +", expression.span);
       return left + right;
     }
-    if (isList(left) && isList(right))
+    if (isList(left) && isList(right)) {
+      checkCollectionLength(
+        "list",
+        left.items.length + right.items.length,
+        "joining with +",
+        expression.span,
+      );
       return createCapturedSerializableList(left.items.concat(right.items));
+    }
     throw fault(
       "TSR009",
       `'+' joins two texts or two lists and adds numbers or durations, but these are ${describeRuntimeValue(left)} and ${describeRuntimeValue(right)}.${joinFix(left, right)}`,
@@ -2542,6 +2570,11 @@ export class Evaluator {
           case "add":
             expect(1);
             if (added !== null) assertValueType(positional[0]!, added.check, added.span);
+            if (
+              receiver.items.length >= MAX_COLLECTION_LENGTH &&
+              !serializableSetContains(receiver, positional[0]!)
+            )
+              throw collectionTooLong("set", "add(...)", span, receiver.items.length + 1);
             addSerializableSetValue(receiver, positional[0]!);
             return null;
           case "remove":
@@ -2560,15 +2593,16 @@ export class Evaluator {
             return createCapturedSerializableList(receiver.items);
           case "intersection":
           case "union":
-          case "difference":
+          case "difference": {
             expect(1);
-            return createCapturedSerializableSet(
-              setOperationItems(
-                name,
-                receiver.items,
-                this.#setOperationArgument(name, positional[0]!, span),
-              ),
+            const items = setOperationItems(
+              name,
+              receiver.items,
+              this.#setOperationArgument(name, positional[0]!, span),
             );
+            checkCollectionLength("set", items.length, `${name}(...)`, span);
+            return createCapturedSerializableSet(items);
+          }
           case "sort":
           case "shuffle":
           case "reverse":
@@ -2585,6 +2619,7 @@ export class Evaluator {
         case "add":
           expect(1);
           if (added !== null) assertValueType(positional[0]!, added.check, added.span);
+          checkCollectionLength("list", receiver.items.length + 1, "add(...)", span);
           receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
           return null;
         case "addAll": {
@@ -2599,6 +2634,12 @@ export class Evaluator {
           // Every element is checked before any is added, and copies are taken first, so a list can add itself.
           if (added !== null)
             for (const item of other.items) assertValueType(item, added.check, added.span);
+          checkCollectionLength(
+            "list",
+            receiver.items.length + other.items.length,
+            "addAll(...)",
+            span,
+          );
           const items = other.items.map((item) => cloneCapturedSerializableValue(item));
           for (const item of items) receiver.items.push(item);
           return null;
@@ -2682,9 +2723,13 @@ export class Evaluator {
             ? receiver.items[index]!
             : USE_DEFAULT;
         }
-        case "toSet":
+        case "toSet": {
           expect(0);
-          return createCapturedSerializableSet(receiver.items);
+          // Equal elements become one member, so the set is counted once it is made, before the script has it.
+          const set = createCapturedSerializableSet(receiver.items);
+          checkCollectionLength("set", set.items.length, "toSet()", span);
+          return set;
+        }
         case "take":
         case "takeLast": {
           expect(1);
@@ -2720,15 +2765,16 @@ export class Evaluator {
           return null;
         case "intersection":
         case "union":
-        case "difference":
+        case "difference": {
           expect(1);
-          return createCapturedSerializableList(
-            setOperationItems(
-              name,
-              receiver.items,
-              this.#setOperationArgument(name, positional[0]!, span),
-            ),
+          const items = setOperationItems(
+            name,
+            receiver.items,
+            this.#setOperationArgument(name, positional[0]!, span),
           );
+          checkCollectionLength("list", items.length, `${name}(...)`, span);
+          return createCapturedSerializableList(items);
+        }
         case "join": {
           checkTextArguments(LIST_JOIN, positional, span);
           // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
@@ -3609,7 +3655,7 @@ export class Evaluator {
       typeof value !== "string"
         ? undefined
         : name === "fromJson"
-          ? valueFromJson(value)
+          ? valueFromJson(value, span)
           : textFromBase64(value);
     // JSON's null is a value; only text that does not read gives the default.
     return read === undefined ? USE_DEFAULT : read;
@@ -4807,7 +4853,7 @@ export function assertIntegerRange(
 
 /**
  * `range.toList()` (V30 §6): the whole numbers of the range as a new list, in order, as `for` goes through them, and at
- * most `MAX_RANGE_LIST_LENGTH` of them, checked before any is added. The list is new and nothing else holds its
+ * most `MAX_COLLECTION_LENGTH` of them, checked before any is added. The list is new and nothing else holds its
  * numbers, so it takes them without a copy.
  */
 function rangeList(range: SerializableRuntimeRange, span: SourceSpan): SerializableRuntimeList {
