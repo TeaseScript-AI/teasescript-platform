@@ -13,6 +13,13 @@
       "category": "b",
       "reason": "The main loop shows the title menu forever; the legacy player ended the script by closing it, and its only exits were the errors for a missing or incomplete sounds folder, which the package's sound files make unreachable. A TeaseScript session needs an end, so the title menu also offers End session.",
       "diff": "end-session.diff"
+    },
+    {
+      "id": "shock-milliseconds",
+      "layer": "source",
+      "category": "b",
+      "reason": "The shock sequence waits each shock time; the last one takes the float residue of the sequence's sum, which can be a positive time far below a millisecond. The legacy timer slept whole milliseconds, so Groovy slept 0 ms there; TeaseScript refuses such a wait late in a scene (TSR050, found by explorer V2 at HitOrZap.tease:424). Wait the shock time in whole milliseconds.",
+      "diff": "shock-milliseconds.diff"
     }
   ]
 }
