@@ -1065,6 +1065,41 @@ test(
   },
 );
 
+// A side of `and false` or `or true` that runs stays where it could fail, as a division by zero; one that cannot fail
+// goes with the test the conversion decided (dead-code.ts; review finding, batch 37).
+test(
+  "keeps a decided test's side that runs where it could fail, and drops one that cannot",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("compiler" in projectResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-dead-fold-"));
+    try {
+      const run = async (lines: string[]) => {
+        const sourcePath = path.join(directory, "fold.groovy");
+        writeFileSync(sourcePath, [...lines, 'show("after")', ""].join("\n"));
+        const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)]);
+        const source = emitTease(program!);
+        const result = projectResult.runner([{ path: "main.tease", source }], {});
+        return { source, status: result.status, code: result.failure?.code ?? null };
+      };
+      for (const test of ["(1 / d > 0) && false", "(1 / d > 0) || true"]) {
+        const result = await run(["def d = 0", `if (${test}) show("inside")`]);
+        assert.match(result.source, /1 \/ d > 0/u, test);
+        assert.deepEqual(
+          { status: result.status, code: result.code },
+          { status: "failed", code: "TSR036" },
+          test,
+        );
+      }
+      const safe = await run(["def d = 0", 'if (d == 0 && false) show("inside")']);
+      assert.doesNotMatch(safe.source, /inside/u);
+      assert.equal(safe.status, "halted");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 // An isolated run asks the legacy profile first, as main.tease does, so a script that reads a player term the profile
 // sets runs as in play (#931 refuses the read where no way to it sets the term; DW_intro's bm.tease).
 test(

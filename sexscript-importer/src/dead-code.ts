@@ -72,7 +72,7 @@ function folded(value: IrExpression): IrExpression {
     return literal(!next.value.value);
   if (next.kind !== "binary" || (next.operator !== "and" && next.operator !== "or")) return next;
   // `and` gives the other side where one is true, false where one is false; `or` the reverse. A side that is dropped
-  // has to be one whose reading has no effect.
+  // has to be one whose reading has no effect and cannot fail, as a division by zero would.
   const absorbing = next.operator === "or";
   for (const [side, other] of [
     [next.left, next.right],
@@ -80,7 +80,7 @@ function folded(value: IrExpression): IrExpression {
   ] as const) {
     if (!isBoolean(side)) continue;
     if (side.value !== absorbing) return other;
-    if (isPure(other)) return literal(absorbing);
+    if (cannotFail(other)) return literal(absorbing);
   }
   return next;
 }
@@ -190,6 +190,28 @@ function isBoolean(
 
 function literal(value: boolean): IrExpression {
   return { kind: "literal", value };
+}
+
+/** A value whose reading has no effect and cannot fail: a literal, a variable, a load, and equality tests of them. */
+function cannotFail(value: IrExpression): boolean {
+  switch (value.kind) {
+    case "literal":
+    case "variable":
+      return true;
+    case "load":
+      return (
+        cannotFail(value.key) &&
+        (value.defaultValue === undefined || cannotFail(value.defaultValue))
+      );
+    case "binary":
+      return (
+        (value.operator === "==" || value.operator === "!=") &&
+        cannotFail(value.left) &&
+        cannotFail(value.right)
+      );
+    default:
+      return false;
+  }
 }
 
 /** A value that reading again gives again, with no effect: literals, variables, members, loads and tests of them. */
