@@ -1,4 +1,4 @@
-import { TEASESCRIPT_PROTECTED_NAMES } from "../../src/protected-names.ts";
+import { TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.ts";
 import { withLegacyStorage } from "./legacy-storage.ts";
 import {
   constantString,

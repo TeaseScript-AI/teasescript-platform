@@ -184,42 +184,42 @@ test("reading a field, term, or name list that no declaration or assignment give
     [
       [
         "TSV043",
-        "Speaker 'vera' has no 'petNames': no declaration or assignment gives it one. Give it a start value, as in 'speaker vera { petNames: ... }', or assign it before reading it.",
+        "Speaker 'vera' has no 'petNames': no declaration or assignment gives it one. Give it a start value, as in 'speaker vera { petNames: ... }', or assign it before this line.",
         "petNames",
       ],
       [
         "TSV043",
-        "Speaker 'vera' has no 'lastName': no declaration or assignment gives it one. Give it a start value, as in 'speaker vera { lastName: ... }', or assign it before reading it.",
+        "Speaker 'vera' has no 'lastName': no declaration or assignment gives it one. Give it a start value, as in 'speaker vera { lastName: ... }', or assign it before this line.",
         "lastName",
       ],
       [
         "TSV043",
-        "Speaker 'vera' has no 'heShe': no declaration or assignment gives it 'heShe' or 'gender'. Give it a gender, as in 'speaker vera { gender: \"female\" }', or assign 'vera.heShe' before reading it.",
+        "Speaker 'vera' has no 'heShe': no declaration or assignment gives it 'heShe' or 'gender'. Give it a gender, as in 'speaker vera { gender: \"female\" }', or assign 'vera.heShe' before this line.",
         "heShe",
       ],
       [
         "TSV043",
-        "Speaker 'vera' has no 'color': no declaration or assignment gives it one. Give it a start value, as in 'speaker vera { color: ... }', or assign it before reading it.",
+        "Speaker 'vera' has no 'color': no declaration or assignment gives it one. Give it a start value, as in 'speaker vera { color: ... }', or assign it before this line.",
         "color",
       ],
       [
         "TSV043",
-        "Speaker 'vera' has no 'title': no declaration or assignment gives it 'title' or 'shortTitle'. Give it a start value, as in 'speaker vera { title: ... }', or assign it before reading it.",
+        "Speaker 'vera' has no 'title': no declaration or assignment gives it 'title' or 'shortTitle'. Give it a start value, as in 'speaker vera { title: ... }', or assign it before this line.",
         "title",
       ],
       [
         "TSV043",
-        "Speaker 'vera' has no 'lovingNames': no declaration or assignment gives it one. Give it a start value, as in 'speaker vera { lovingNames: ... }', or assign it before reading it.",
+        "Speaker 'vera' has no 'lovingNames': no declaration or assignment gives it one. Give it a start value, as in 'speaker vera { lovingNames: ... }', or assign it before this line.",
         "lovingNames",
       ],
       [
         "TSV043",
-        "Speaker 'vera' has no 'degradingNames': no declaration or assignment gives it one. Give it a start value, as in 'speaker vera { degradingNames: ... }', or assign it before reading it.",
+        "Speaker 'vera' has no 'degradingNames': no declaration or assignment gives it one. Give it a start value, as in 'speaker vera { degradingNames: ... }', or assign it before this line.",
         "degradingNames",
       ],
       [
         "TSV043",
-        "Speaker 'vera' has no 'boyGirl': no declaration or assignment gives it 'boyGirl' or 'gender'. Give it a gender, as in 'speaker vera { gender: \"female\" }', or assign 'vera.boyGirl' before reading it.",
+        "Speaker 'vera' has no 'boyGirl': no declaration or assignment gives it 'boyGirl' or 'gender'. Give it a gender, as in 'speaker vera { gender: \"female\" }', or assign 'vera.boyGirl' before this line.",
         "boyGirl",
       ],
     ],
@@ -227,7 +227,7 @@ test("reading a field, term, or name list that no declaration or assignment give
   // Through a speaker the compiler cannot tell apart: an alias, a parameter, or the default speaker, when no speaker
   // gets the field; one that another speaker gets is checked when the script runs.
   const none =
-    "No speaker has 'lastName': no declaration or assignment gives a speaker one. Give a speaker a start value, as in 'speaker vera { lastName: ... }', or assign it before reading it.";
+    "No speaker has 'lastName': no declaration or assignment gives a speaker one. Give it a start value, as in 'speaker vera { lastName: ... }', or assign it before this line.";
   assert.deepEqual(
     mismatches(
       [

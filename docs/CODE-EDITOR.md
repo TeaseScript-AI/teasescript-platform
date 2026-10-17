@@ -19,7 +19,9 @@ theme colours; its own tokenizer marks only strings and line comments, which Mon
 closing read. The Player's palette (`player/theme/palette.ts`) holds the code colours as contrast-checked roles,
 `syntax-keyword`, `syntax-name`, `syntax-string`, `syntax-number`, `syntax-comment`, and `syntax-operator`, which the
 [random draw picker](DEBUGGER.md#random-draws) applies to the same classes; the editor should adopt these roles later
-(owner direction, #512) instead of keeping colours of its own.
+(owner direction, #512) instead of keeping colours of its own. Hover and signature help of a conversion or random
+function call, such as `toNumber(...)` or `chance(...)`, come from its contract in `src/conversions.ts` or
+`src/random-functions.ts`.
 The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
 textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
 validated checkpoint save/restore. Its Player panel provides the first Standard interaction and chat-pacing control POC

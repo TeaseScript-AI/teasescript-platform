@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  COMMANDS,
+  commandFacts,
+  CONVERSION_FUNCTIONS,
+  RANDOM_FUNCTIONS,
+  CORE_RUNTIME_BUILTINS,
+  TEASESCRIPT_GRAMMAR_KEYWORDS,
+  TEASESCRIPT_PROTECTED_TYPE_NAMES,
+} from "../src/language-facts.js";
+import { CONVERSIONS } from "../src/conversions.js";
+import { RANDOM_CONTRACTS } from "../src/random-functions.js";
+import { askOptionNames, requiredAskOptionNames, SHOW_BUTTON_OPTIONS } from "../src/parser.js";
+import {
   classifyTokens,
   compileSource,
   createLanguageDocument,
@@ -54,6 +66,49 @@ test("completion exposes accepted compact commands and takePhoto", () => {
     assert.ok(expression.includes(expected), expected);
   // A fallback may ask (V30 §18).
   assert.ok(labels("let name = nickname otherwise ").includes("askText"));
+});
+
+/** The commands and asks of the engine, without the grammar keywords that the parser also reads by name. */
+const engineCommands = Object.keys(COMMANDS).filter(
+  (name) => !TEASESCRIPT_GRAMMAR_KEYWORDS.some((keyword) => keyword === name),
+);
+
+test("completion offers every command where it starts a statement, and where it gives a value", () => {
+  const statement = labels("");
+  const value = labels("let answer = ");
+  for (const name of engineCommands) {
+    const facts = commandFacts(name)!;
+    assert.equal(statement.includes(name), facts.statement !== undefined, `${name} at a statement`);
+    // An earlier name is no completion.
+    assert.equal(
+      value.includes(name),
+      facts.value === true && facts.renamed === undefined,
+      `${name} as a value`,
+    );
+  }
+});
+
+test("every compact interaction has editor help that names each option the parser accepts", () => {
+  for (const name of engineCommands) {
+    const facts = commandFacts(name)!;
+    if (facts.interaction === undefined || facts.renamed !== undefined) continue;
+    const source = `let answer = ${name}`;
+    const document = createLanguageDocument("file:///main.tease", source);
+    const position = languagePositionAt(document, source.length);
+    const options =
+      facts.interaction === "button" ? SHOW_BUTTON_OPTIONS : askOptionNames(facts.interaction);
+    const required =
+      facts.interaction === "button" ? [] : requiredAskOptionNames(facts.interaction);
+    const help = languageContextHelp(document, position);
+    assert.equal(help?.command, name, name);
+    assert.ok(help.syntax.startsWith(`${name} `), name);
+    for (const option of options) {
+      // An option that the ask needs is written without brackets.
+      const written = required.includes(option) ? `, ${option}:` : `[, ${option}:`;
+      assert.ok(help.syntax.includes(written), `${name}: ${option} in ${help.syntax}`);
+    }
+    assert.deepEqual(languageSignatureHelp(document, position)?.parameters.slice(2), options, name);
+  }
 });
 
 test("completion exposes optional speaker and current say modifiers", () => {
@@ -114,6 +169,127 @@ test("context, hover, and signature help select the compact command and its slot
   const signature = languageSignatureHelp(document, position);
   assert.deepEqual(signature?.parameters, ["speaker", "question", "prefill", "hint"]);
   assert.equal(signature?.activeParameter, 1);
+});
+
+test("a conversion call has help from its contract, also while it is being written", () => {
+  // The help at the end of `source`: its command, the signature's label, and its active parameter.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    return [
+      languageContextHelp(document, position)?.command ?? null,
+      signature?.label ?? null,
+      signature === null ? null : (signature.parameters[signature.activeParameter] ?? null),
+    ];
+  };
+  for (const name of CONVERSION_FUNCTIONS) {
+    const document = createLanguageDocument("file:///main.tease", `say ${name}(value`);
+    const position = languagePositionAt(document, document.text.length);
+    const context = languageContextHelp(document, position);
+    assert.deepEqual([context?.command, context?.summary], [name, CONVERSIONS[name].summary]);
+    assert.deepEqual(languageHover(document, position)?.contents, [
+      `**${name}**`,
+      CONVERSIONS[name].summary,
+      `Syntax: \`${context?.syntax}\``,
+    ]);
+    assert.deepEqual(languageHover(document, position)?.range, {
+      start: languagePositionAt(document, 4),
+      end: languagePositionAt(document, 4 + name.length),
+    });
+  }
+  // The syntax is the call's shape (V30 §8, §13, §35), and the active parameter the argument being written.
+  assert.deepEqual(help("say toNumber("), [
+    "toNumber",
+    "toNumber(value [, default: number])",
+    "value",
+  ]);
+  assert.deepEqual(help("say toNumber(text, default: "), [
+    "toNumber",
+    "toNumber(value [, default: number])",
+    "default",
+  ]);
+  assert.deepEqual(help("let rule = toRegex(text, ", ")\nexit"), [
+    "toRegex",
+    "toRegex(text, default: regex?)",
+    "default",
+  ]);
+  assert.deepEqual(help("say fromJson(text, files: false, default: "), [
+    "fromJson",
+    "fromJson(text, default: value [, files: boolean])",
+    "default",
+  ]);
+  assert.deepEqual(help("say toJson(value, "), [
+    "toJson",
+    "toJson(value [, files: boolean])",
+    "files",
+  ]);
+  const dateTime =
+    "toDateTime(value [, default: datetime])  or  toDateTime(date, time [, default: datetime])";
+  assert.deepEqual(help("let at = toDateTime(text"), ["toDateTime", dateTime, "value"]);
+  assert.deepEqual(help("let at = toDateTime(day, "), ["toDateTime", dateTime, "time"]);
+  // The innermost of a command and a call has the help: a call in a say or an interpolation, an ask in a call.
+  assert.deepEqual(help('say "${toBase64(text'), ["toBase64", "toBase64(text)", "text"]);
+  assert.equal(help('say toString(askText "Name?')[0], "askText");
+  // A method of the same name converts through the player's zone (V30 §35), and a declared name is no call.
+  assert.equal(help("say stamp.toDateTime(", ").toISO()\nexit")[0], "say");
+  assert.equal(help("say local.toAbsoluteDateTime(", ").toISO()\nexit")[0], "say");
+  assert.equal(help("function toNumber(")[0], null);
+  assert.equal(help("say toString(count) + ")[0], "say");
+  assert.equal(help("sa", "y toString(count)\nexit")[0], "say");
+});
+
+test("a random function's call has help from its contract, also while it is being written", () => {
+  // The help at the end of `source`: its command, the signature's label, and its active parameter.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    return [
+      languageContextHelp(document, position)?.command ?? null,
+      signature?.label ?? null,
+      signature === null ? null : (signature.parameters[signature.activeParameter] ?? null),
+    ];
+  };
+  for (const name of RANDOM_FUNCTIONS) {
+    const document = createLanguageDocument("file:///main.tease", `say ${name}(`);
+    const position = languagePositionAt(document, document.text.length);
+    const context = languageContextHelp(document, position);
+    assert.deepEqual([context?.command, context?.summary], [name, RANDOM_CONTRACTS[name].summary]);
+    assert.deepEqual(languageHover(document, position)?.contents, [
+      `**${name}**`,
+      RANDOM_CONTRACTS[name].summary,
+      `Syntax: \`${context?.syntax}\``,
+    ]);
+  }
+  // The syntax is the call's shape (V30 §4), and the active parameter the argument being written.
+  assert.deepEqual(help("say random("), ["random", "random()", null]);
+  assert.deepEqual(help("if chance("), ["chance", "chance(percent)", "percent"]);
+  assert.deepEqual(help("let roll = randomInteger("), [
+    "randomInteger",
+    "randomInteger(range)",
+    "range",
+  ]);
+  assert.deepEqual(help("let pause = randomNormal(30, "), [
+    "randomNormal",
+    "randomNormal(mean, spread)",
+    "spread",
+  ]);
+  assert.deepEqual(help("let reps = round(randomPert(5, 10, "), [
+    "randomPert",
+    "randomPert(min, mostLikely, max)",
+    "max",
+  ]);
+  const weighted = "randomWeighted(dict)  or  randomWeighted(list, weight: text)";
+  assert.deepEqual(help("let task = randomWeighted("), ["randomWeighted", weighted, "dict"]);
+  assert.deepEqual(help("let task = randomWeighted(tasks, weight: "), [
+    "randomWeighted",
+    weighted,
+    "weight",
+  ]);
+  // A method of the same name, a declared name, and a property are no call of the function.
+  assert.equal(help("say items.random(", ")\nexit")[0], "say");
+  assert.equal(help("function chance(")[0], null);
 });
 
 test("askChoice help names set options and the prefill after the options (V30 §19)", () => {
@@ -484,7 +660,7 @@ test("token classes are the compiler's reading of numbers, names, comments, and 
   ]);
 });
 
-test("token classes take keywords, types, and commands from the protected names", () => {
+test("token classes take keywords, types, and commands from the language facts", () => {
   // Every grammar keyword (V30 §38), also the literals and the logical operators.
   assert.deepEqual(tokenClasses("if true and not null { break }"), [
     "if:keyword",
@@ -496,27 +672,42 @@ test("token classes take keywords, types, and commands from the protected names"
     "break:keyword",
     "}:punctuation",
   ]);
-  // Protected engine names are commands: an ask, a built-in function, and an engine reference.
-  assert.deepEqual(tokenClasses('let c = askChoice yes: "Yes"\nlet r = round(player.age)'), [
-    "let:keyword",
-    "c:name",
-    "=:operator",
-    "askChoice:command",
-    "yes:name",
-    "::punctuation",
-    '":string',
-    "Yes:string",
-    '":string',
-    "let:keyword",
-    "r:name",
-    "=:operator",
-    "round:command",
-    "(:punctuation",
-    "player:command",
-    ".:punctuation",
-    "age:name",
-    "):punctuation",
-  ]);
+  // The words that the parser reads as commands or asks are commands; a built-in function, constant, or engine
+  // reference has no colour of its own, so it is a name.
+  assert.deepEqual(
+    tokenClasses('let c = askChoice yes: "Yes"\nshowButton "Go"\nlet r = round(player.age * pi)'),
+    [
+      "let:keyword",
+      "c:name",
+      "=:operator",
+      "askChoice:command",
+      "yes:name",
+      "::punctuation",
+      '":string',
+      "Yes:string",
+      '":string',
+      "showButton:command",
+      '":string',
+      "Go:string",
+      '":string',
+      "let:keyword",
+      "r:name",
+      "=:operator",
+      "round:name",
+      "(:punctuation",
+      "player:name",
+      ".:punctuation",
+      "age:name",
+      "*:operator",
+      "pi:name",
+      "):punctuation",
+    ],
+  );
+  // So is every command and ask, and every built-in function that is no type name.
+  const typeNames: readonly string[] = TEASESCRIPT_PROTECTED_TYPE_NAMES;
+  for (const name of engineCommands) assert.deepEqual(tokenClasses(name), [`${name}:command`]);
+  for (const name of CORE_RUNTIME_BUILTINS)
+    if (!typeNames.includes(name)) assert.deepEqual(tokenClasses(name), [`${name}:name`]);
   assert.deepEqual(tokenClasses("let turn: angle = 90 deg"), [
     "let:keyword",
     "turn:name",
@@ -529,8 +720,8 @@ test("token classes take keywords, types, and commands from the protected names"
 });
 
 test("token classes follow the parse where a word means something else", () => {
-  // In a written type, `set` and `timer` are types; a unit is no function, also after a wait's length; a property is
-  // no protected name.
+  // In a written type, `set` and `timer` are types; a function, a unit, also after a wait's length, and a property are
+  // names.
   const source = [
     'let s: string set = set["a"]',
     "let t: timer? = null",
@@ -542,7 +733,7 @@ test("token classes follow the parse where a word means something else", () => {
   assert.deepEqual(compileSource(`${source}\nexit`).diagnostics, []);
   assert.deepEqual(
     tokenClasses(source).filter((token) => /^(set|timer|min|random):/u.test(token)),
-    ["set:type", "set:keyword", "timer:type", "min:command", "min:name", "min:name", "random:name"],
+    ["set:type", "set:keyword", "timer:type", "min:name", "min:name", "min:name", "random:name"],
   );
   // A keyword after `.` names a property too.
   assert.deepEqual(compileSource("say {set: 1}.set\nexit").diagnostics, []);
@@ -607,7 +798,7 @@ test("token classes make a key or a label in name: a name, also a protected word
       "set:name",
       "string:name",
       "max:name",
-      "max:command",
+      "max:name",
       "min:name",
       "default:name",
       "default:name",

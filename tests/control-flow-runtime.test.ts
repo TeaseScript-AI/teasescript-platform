@@ -263,7 +263,7 @@ test("invalid random built-in arguments fail with source-associated errors", () 
       code,
       message,
     ]),
-    [["TSV022", "randomInteger(...) takes no named arguments. Remove 'range:'."]],
+    [["TSV022", "randomInteger() takes its arguments without names. Remove 'range:'."]],
   );
 
   // A percentage the compiler can see, also one it computes, fails as the same value fails at runtime.

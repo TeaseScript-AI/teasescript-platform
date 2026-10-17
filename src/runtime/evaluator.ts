@@ -1,3 +1,19 @@
+import {
+  argumentCountMessage,
+  argumentShapeProblem,
+  dictArgumentsProblem,
+  FIXED_PARAMETERS,
+  getArgumentsProblem,
+  LIST_ONLY_METHODS,
+  NO_ARGUMENTS,
+  POSITIONAL_METHODS,
+  positionalShape,
+  scriptArgumentCountMessage,
+  unknownNamedArgumentMessage,
+} from "../argument-rules.js";
+import { LIST_FUNCTION_SHAPES, MIN_MAX_TAKES } from "../list-function-rules.js";
+import { startValueMessage, type StartValueOwner } from "../start-value-rules.js";
+import type { DeveloperWarningCode, RuntimeErrorCode } from "../diagnostic-codes.js";
 import { temporalCaptureAt } from "./temporal-captures.js";
 import {
   combinedDateAndTime,
@@ -36,7 +52,13 @@ import {
   lazyDefaultCallOperation,
 } from "../plan/expression-children.js";
 import type { LazyDefaultOperation } from "../lazy-defaults.js";
-import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
+import { NUMERIC_FUNCTIONS, type NumberSignature } from "../numeric-functions.js";
+import {
+  isRandomFunction,
+  numbersProblem,
+  RANDOM_CONTRACTS,
+  type RandomFunction,
+} from "../random-functions.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
   ANGLE_FUNCTIONS,
@@ -62,12 +84,15 @@ import {
   linearRegression,
   listStatistic,
   listValues,
-  percentage,
   predict,
   weightedChoices,
   weightedIndex,
 } from "./list-statistics.js";
-import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
+import {
+  CORE_RUNTIME_BUILTINS,
+  type ConversionName,
+  type RandomFunctionName,
+} from "../language-facts.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { internalFault, RuntimeFault } from "./errors.js";
 import type { InstructionTraceCollector, RuntimeInstructionObserver } from "./instruction-trace.js";
@@ -95,13 +120,13 @@ import {
 } from "./prepared-references.js";
 import { nextXorShift32, type RandomSource } from "./random.js";
 import {
-  sampleChance,
   sampleIndex,
   sampleOrder,
   sampleRangeInteger,
   type PrimitiveDraw,
 } from "./random-draws.js";
 import {
+  naturalOf,
   RandomControlSignal,
   type RandomControl,
   type RandomNatural,
@@ -138,7 +163,6 @@ import {
 import { loweredOperand } from "./lowered-operands.js";
 import {
   cameraPlacementMessage,
-  handleArgumentsMessage,
   handleMemberMessage,
   isCameraPlacement,
   isMediaVolume,
@@ -146,6 +170,7 @@ import {
   mediaVolumeMessage,
   timerDisplayMessage,
 } from "../handle-rules.js";
+import { unmeasurableLengthMessage } from "../delay-rules.js";
 import {
   RANGE_LIST_FIX,
   rangeListLengthProblem,
@@ -180,7 +205,11 @@ import {
   STRING_METHODS,
   stringLength,
 } from "./string-operations.js";
-import { LIST_JOIN, unknownTextMemberMessage } from "../text-operations.js";
+import {
+  LIST_JOIN,
+  methodArgumentCountMessage,
+  unknownTextMemberMessage,
+} from "../text-operations.js";
 import { missingPropertyMessage } from "../object-properties.js";
 import { findScriptStorageEntry, storageKey, storageKeyPlace } from "./script-storage.js";
 import {
@@ -216,6 +245,8 @@ import {
   type SerializableCameraViewHandle,
   type SerializablePermanentButtonHandle,
   type SerializableScriptReference,
+  type SerializableRuntimeProperty,
+  type SerializableSpeakerReference,
 } from "./serializable-values.js";
 import {
   currentTemporalContext,
@@ -248,6 +279,7 @@ import {
 } from "./value-predicates.js";
 import {
   assertValueType,
+  cannotConvert,
   describeShownValue,
   shownChoice,
   describeValue as describeTypedValue,
@@ -299,18 +331,16 @@ import {
 import { isValidSessionTime } from "./actions/delay.js";
 import {
   booleanFromText,
-  CONVERSION_RESULTS,
-  DATA_TEXT_FUNCTIONS,
-  describeConversionResult,
-  isConversionName,
-  isConversionResult,
-  isTemporalConversionResult,
+  CONVERSIONS,
+  defaultDescription,
+  fitsDefault,
+  isConversion,
   numberFromText,
   MIN_MAX_BUILTINS,
-  temporalTextProblem,
   withoutNegativeZero,
-  type ConversionName,
-  type ConversionResult,
+  type CallShape,
+  type Conversion,
+  type ValueConversion,
 } from "../conversions.js";
 
 export interface RuntimeCapabilityCall {
@@ -393,8 +423,8 @@ export class Evaluator {
   /** Whether the reference being prepared keeps a copy of its root (`preparedReferenceTemporaries`). */
   #keepPreparedRoot = false;
 
-  /** Whether a start value is being evaluated, which may not select anything at random (ADR 0022 §6). */
-  #startValue = false;
+  /** The global or speaker whose start value is being evaluated, which may not select at random (ADR 0022 §6). */
+  #startValue: StartValueOwner | null = null;
 
   /** With controlled randomness, the generator state before the last draw: its ID. */
   #drawId = 0;
@@ -449,12 +479,15 @@ export class Evaluator {
   }
 
   /** Evaluates the start value of a global or a speaker property. */
-  public evaluateStartValue(expression: ExpressionPlan): SerializableRuntimeValue {
-    this.#startValue = true;
+  public evaluateStartValue(
+    owner: StartValueOwner,
+    expression: ExpressionPlan,
+  ): SerializableRuntimeValue {
+    this.#startValue = owner;
     try {
       return this.evaluate(expression);
     } finally {
-      this.#startValue = false;
+      this.#startValue = null;
     }
   }
 
@@ -2006,7 +2039,7 @@ export class Evaluator {
           kind: "developerWarning",
           sequence: warningSequence,
           severity: "warning",
-          code: "TSW001",
+          code: "TSW001" satisfies DeveloperWarningCode,
           message: `Speaker '${speaker.identifier}' uses its identifier as the display name.`,
           span: copySpan(span),
         } satisfies DeveloperWarningEvent),
@@ -2333,8 +2366,8 @@ export class Evaluator {
   ): SerializableRuntimeValue | typeof USE_DEFAULT {
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
-      if (isConversionName(name))
-        return this.#conversionBuiltin(
+      if (isConversion(name))
+        return this.#conversion(
           name,
           positional,
           named,
@@ -2342,20 +2375,17 @@ export class Evaluator {
           expression.arguments[0]?.value,
           expression.span,
         );
-      if (DATA_TEXT_FUNCTIONS.has(name))
-        return this.#dataTextFunction(name, positional, named, defaulted, expression.span);
-      if (name === "toRegex")
-        return regexFromText(positional, named, defaulted, expression.span) ?? USE_DEFAULT;
+      if (name === "hashText") return hashedText(positional, named, expression.span);
+      if (isRandomFunction(name))
+        return this.#randomFunction(name, positional, named, expression.span);
       if (NUMERIC_FUNCTIONS.has(name))
-        return this.#numericFunction(name, positional, named, expression.span);
+        return numericFunction(name, positional, named, expression.span);
       if (ANGLE_FUNCTIONS.has(name)) return angleFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))
         return this.#minMaxBuiltin(name, positional, named, expression.span);
       if (LIST_STATISTICS.has(name)) return listStatistic(name, positional, named, expression.span);
       if (name === "linearRegression") return linearRegression(positional, named, expression.span);
       if (name === "predict") return predict(positional, named, expression.span);
-      if (name === "randomWeighted")
-        return this.#randomWeighted(positional, named, expression.span);
       if (name === "script") return scriptReference(positional, named, expression.span);
       const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
@@ -2387,15 +2417,6 @@ export class Evaluator {
       let returned: SerializableRuntimeValue;
       try {
         switch (name) {
-          case "random":
-            returned = this.#randomBuiltin(call);
-            break;
-          case "chance":
-            returned = this.#chanceBuiltin(call);
-            break;
-          case "randomInteger":
-            returned = this.#randomIntegerBuiltin(call);
-            break;
           case "escapeMarkup":
             returned = this.#escapeMarkupBuiltin(call);
             break;
@@ -2495,7 +2516,7 @@ export class Evaluator {
       if (name !== undefined)
         throw fault(
           "TSR015",
-          `${expression.callee.name}() takes its arguments without names. Remove '${name}:'.`,
+          unknownNamedArgumentMessage(expression.callee.name, name, []),
           expression.span,
         );
       return callStringMethod(receiver, expression.callee.name, positional, expression.span);
@@ -2519,13 +2540,13 @@ export class Evaluator {
       expression.callee.name === "toList" &&
       isRange(receiver)
     ) {
-      const count = positional.length + Object.keys(named).length;
-      if (count > 0)
-        throw fault(
-          "TSR028",
-          `toList() takes no arguments, but this call has ${count}.`,
-          expression.span,
-        );
+      const problem = argumentShapeProblem(
+        "toList",
+        NO_ARGUMENTS,
+        positional.length,
+        Object.keys(named),
+      );
+      if (problem !== undefined) throw fault("TSR028", problem.message, expression.span);
       return rangeList(receiver, expression.span);
     }
     if (expression.callee.kind === "property") {
@@ -2570,24 +2591,18 @@ export class Evaluator {
     const namedArgument = Object.keys(named)[0];
     // Only a list's `get` takes a named argument, its `default:`; a set has no `get`.
     if (namedArgument !== undefined && name !== "get")
-      throw fault(
-        "TSR015",
-        `${name}() takes its arguments without names. Remove '${namedArgument}:'.`,
-        span,
-      );
-    const expect = (count: number): void => {
-      if (positional.length !== count)
-        throw fault(
-          "TSR028",
-          `${name}() takes ${count === 0 ? "no arguments" : count === 1 ? "one argument" : `${count} arguments`}, but this call has ${positional.length === 0 ? "none" : positional.length}.`,
-          span,
-        );
+      throw fault("TSR015", unknownNamedArgumentMessage(name, namedArgument, []), span);
+    // The method's parameters as the compiler checks them for a list or a set.
+    const expect = (): void => {
+      const method = POSITIONAL_METHODS.get(name) ?? LIST_ONLY_METHODS.get(name)!;
+      if (positional.length !== method.parameters!.length)
+        throw fault("TSR028", methodArgumentCountMessage(method, positional.length), span);
     };
     try {
       if (isSet(receiver)) {
         switch (name) {
           case "add":
-            expect(1);
+            expect();
             if (added !== null) assertValueType(positional[0]!, added.check, added.span);
             if (
               receiver.items.length >= MAX_COLLECTION_LENGTH &&
@@ -2597,23 +2612,23 @@ export class Evaluator {
             addSerializableSetValue(receiver, positional[0]!);
             return null;
           case "remove":
-            expect(1);
+            expect();
             removeSerializableSetValue(receiver, positional[0]!);
             return null;
           case "clear":
-            expect(0);
+            expect();
             clearSerializableSet(receiver);
             return null;
           case "contains":
-            expect(1);
+            expect();
             return serializableSetContains(receiver, positional[0]!);
           case "toList":
-            expect(0);
+            expect();
             return createCapturedSerializableList(receiver.items);
           case "intersection":
           case "union":
           case "difference": {
-            expect(1);
+            expect();
             const argument = this.#setOperationArgument(name, positional[0]!, span);
             const items = setOperationItems(name, receiver.items, argument);
             checkCollectionLength(
@@ -2639,7 +2654,7 @@ export class Evaluator {
       }
       switch (name) {
         case "add":
-          expect(1);
+          expect();
           if (added !== null) assertValueType(positional[0]!, added.check, added.span);
           checkCollectionLength(
             "list",
@@ -2651,7 +2666,7 @@ export class Evaluator {
           receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
           return null;
         case "addAll": {
-          expect(1);
+          expect();
           const other = positional[0]!;
           if (!isList(other))
             throw fault(
@@ -2674,7 +2689,7 @@ export class Evaluator {
           return null;
         }
         case "remove": {
-          expect(1);
+          expect();
           const index = this.#findValue(receiver.items, positional[0]!);
           if (index >= 0) this.#removeListItem(receiver, index);
           else {
@@ -2687,7 +2702,7 @@ export class Evaluator {
           return null;
         }
         case "removeAt": {
-          expect(1);
+          expect();
           const index = this.#listPosition(
             receiver,
             receiverPlan,
@@ -2700,7 +2715,7 @@ export class Evaluator {
         }
         case "removeFirst":
         case "removeLast":
-          expect(0);
+          expect();
           if (receiver.items.length === 0)
             throw fault(
               "TSR018",
@@ -2712,24 +2727,24 @@ export class Evaluator {
             name === "removeFirst" ? 0 : receiver.items.length - 1,
           );
         case "clear":
-          expect(0);
+          expect();
           if (receiver.items.length > 0) {
             freezePreparedReferenceDescendants(this.snapshot, receiver);
             receiver.items.length = 0;
           }
           return null;
         case "contains":
-          expect(1);
+          expect();
           return this.#findValue(receiver.items, positional[0]!) >= 0;
         // A value that no element equals has no position: null (#840).
         case "indexOf":
         case "lastIndexOf": {
-          expect(1);
+          expect();
           const index = this.#findValue(receiver.items, positional[0]!, name === "lastIndexOf");
           return index < 0 ? null : index;
         }
         case "count": {
-          expect(1);
+          expect();
           let count = 0;
           for (const item of receiver.items)
             if (serializableEquals(item, positional[0]!)) count += 1;
@@ -2738,12 +2753,11 @@ export class Evaluator {
         // A value that is not a position of the list, such as a negative or fractional index, text, or null, gives the
         // default (#844).
         case "get": {
-          if (positional.length !== 1 || Object.keys(named).length !== 0 || !defaulted)
-            throw fault(
-              "TSR028",
-              "'list.get(index, default: value)' takes an index and a 'default:' value.",
-              span,
-            );
+          const problem = getArgumentsProblem("list", positional.length, [
+            ...Object.keys(named),
+            ...(defaulted ? ["default"] : []),
+          ]);
+          if (problem !== undefined) throw fault("TSR028", problem.message, span);
           const index = positional[0]!;
           return typeof index === "number" &&
             Number.isInteger(index) &&
@@ -2753,11 +2767,11 @@ export class Evaluator {
             : USE_DEFAULT;
         }
         case "toSet":
-          expect(0);
+          expect();
           return createCapturedSerializableSet(receiver.items);
         case "take":
         case "takeLast": {
-          expect(1);
+          expect();
           const count = positional[0]!;
           if (typeof count !== "number" || !Number.isInteger(count) || count < 0)
             throw fault(
@@ -2774,7 +2788,7 @@ export class Evaluator {
         }
         case "sort":
         case "shuffle":
-          expect(0);
+          expect();
           this.#reorderList(
             receiver,
             name === "sort" ? sortOrder(receiver.items, span) : this.#shuffleOrder(receiver, span),
@@ -2782,7 +2796,7 @@ export class Evaluator {
           return null;
         // The last element first: the old indexes from the end.
         case "reverse":
-          expect(0);
+          expect();
           this.#reorderList(
             receiver,
             receiver.items.map((_, index) => receiver.items.length - 1 - index),
@@ -2791,7 +2805,7 @@ export class Evaluator {
         case "intersection":
         case "union":
         case "difference": {
-          expect(1);
+          expect();
           const argument = this.#setOperationArgument(name, positional[0]!, span);
           const items = setOperationItems(name, receiver.items, argument);
           checkCollectionLength(
@@ -2838,16 +2852,11 @@ export class Evaluator {
     const name = callee.name;
     const span = expression.span;
     if (!DICT_METHODS.has(name)) throw fault("TSR016", noCollectionMethod(receiver, name), span);
-    const names = Object.keys(named);
-    const expected = name === "clear" ? 0 : 1;
-    if (positional.length !== expected || names.length !== 0 || (name === "get") !== defaulted)
-      throw fault(
-        "TSR028",
-        name === "get"
-          ? "dict.get(key, default: value) takes a key and a 'default:' value."
-          : `dict.${name}(${name === "clear" ? "" : "key"}) takes ${expected === 0 ? "no arguments" : "one key"}.`,
-        span,
-      );
+    const problem = dictArgumentsProblem(name, positional.length, [
+      ...Object.keys(named),
+      ...(defaulted ? ["default"] : []),
+    ]);
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     if (name === "clear") {
       if (receiver.entries.length > 0) {
         freezePreparedReferenceDescendants(this.snapshot, receiver);
@@ -2883,8 +2892,8 @@ export class Evaluator {
     span: SourceSpan,
   ): null {
     if (name !== "remove") throw fault("TSR016", removableHandleMethodMessage(button, name), span);
-    if (positional.length !== 0 || Object.keys(named).length !== 0)
-      throw fault("TSR028", handleArgumentsMessage("permanentButton", name), span);
+    const problem = argumentShapeProblem(name, NO_ARGUMENTS, positional.length, Object.keys(named));
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     removePermanentButtons(
       this.snapshot,
       (shown) => shown.button.buttonId === button.buttonId,
@@ -2916,9 +2925,8 @@ export class Evaluator {
     if (!["pause", "resume", "stop"].includes(name)) {
       throw fault("TSR016", handleMemberMessage("timer", name, "call"), span);
     }
-    if (positional.length !== 0 || Object.keys(named).length !== 0) {
-      throw fault("TSR028", handleArgumentsMessage("timer", name), span);
-    }
+    const problem = argumentShapeProblem(name, NO_ARGUMENTS, positional.length, Object.keys(named));
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     const timer = this.#timer(handle, span);
     const action = activeTimerAction(this.snapshot, handle.timerId);
     const now = this.snapshot.currentSessionTimeMs;
@@ -3018,9 +3026,8 @@ export class Evaluator {
     if (!["pause", "resume", "stop"].includes(name)) {
       throw fault("TSR016", handleMemberMessage("media", name, "call"), span);
     }
-    if (positional.length !== 0 || Object.keys(named).length !== 0) {
-      throw fault("TSR028", handleArgumentsMessage("media", name), span);
-    }
+    const problem = argumentShapeProblem(name, NO_ARGUMENTS, positional.length, Object.keys(named));
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     const media = this.#media(handle, span);
     const action = activeMediaAction(this.snapshot, handle.mediaId);
     if (name === "stop") {
@@ -3128,8 +3135,8 @@ export class Evaluator {
     span: SourceSpan,
   ): null {
     if (name !== "remove") throw fault("TSR016", removableHandleMethodMessage(handle, name), span);
-    if (positional.length !== 0 || Object.keys(named).length !== 0)
-      throw fault("TSR028", handleArgumentsMessage("messageHandle", name), span);
+    const problem = argumentShapeProblem(name, NO_ARGUMENTS, positional.length, Object.keys(named));
+    if (problem !== undefined) throw fault("TSR028", problem.message, span);
     const index = this.#liveMessage(handle, span);
     const record = this.snapshot.liveMessages[index]!;
     if (record.removed === true) return null;
@@ -3228,7 +3235,7 @@ export class Evaluator {
     return false;
   }
 
-  #warn(code: string, message: string, span: SourceSpan): void {
+  #warn(code: DeveloperWarningCode, message: string, span: SourceSpan): void {
     this.events.push(
       Object.freeze({
         kind: "developerWarning",
@@ -3394,7 +3401,7 @@ export class Evaluator {
     let draws = 0;
     const outcome = sample(() => {
       draws += 1;
-      return this.#drawRandom(span);
+      return this.#drawRandom(span, operation);
     });
     if (trace !== null && draws > 0)
       trace.random(operation, span, choices, range, before, this.#randomState(), draws);
@@ -3443,11 +3450,20 @@ export class Evaluator {
     return this.capabilities.random === undefined ? this.snapshot.rng.state : null;
   }
 
-  #drawRandom(span: SourceSpan): number {
-    if (this.#startValue)
+  #drawRandom(span: SourceSpan, operation: RuntimeDebugRandomOperation): number {
+    // The compiler reports '.random' and a list in '${...}' where it knows the value's type, and every other random
+    // operation of a start value as a call.
+    if (this.#startValue !== null)
       throw fault(
         "TSR067",
-        "A start value cannot select anything at random: it is set up at the start of the session, before the story runs.",
+        startValueMessage(this.#startValue, {
+          kind:
+            operation === "collectionRandom"
+              ? "random"
+              : operation === "interpolation"
+                ? "shownList"
+                : "call",
+        }),
         span,
       );
     const random =
@@ -3466,45 +3482,48 @@ export class Evaluator {
     return random;
   }
 
-  #randomBuiltin(call: RuntimeCapabilityCall): number {
-    this.#expectBuiltinArguments("random", call, 0);
-    let random = this.#draw(call.span, "random", null, null, (draw) => draw());
-    if (this.control !== null)
-      random = outcomeNumber(
-        this.#resolve(call.span, "random", { kind: "number", value: random }, () => ({
-          kind: "unit",
-        })),
+  /**
+   * A call of a random function (see `RANDOM_CONTRACTS`), whose arguments are checked before it draws. A debug trace
+   * records its draws as one record under its name, and under random control a host may choose the outcome.
+   */
+  #randomFunction(
+    name: RandomFunctionName,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    const random: RandomFunction = RANDOM_CONTRACTS[name];
+    if (random.takes === "choices") return this.#randomWeighted(positional, named, span);
+    if (random.takes === "range") {
+      const problem = argumentShapeProblem(
+        name,
+        positionalShape(random.parameters),
+        positional.length,
+        Object.keys(named),
       );
-    this.trace?.randomResult(random);
-    return random;
-  }
-
-  #chanceBuiltin(call: RuntimeCapabilityCall): boolean {
-    this.#expectBuiltinArguments("chance", call, 1);
-    const percent = percentage("chance", call.positional[0]!, call.span);
-    let chosen = this.#draw(call.span, "chance", null, null, (draw) => sampleChance(draw, percent));
-    if (this.control !== null)
-      chosen = outcomeBoolean(
-        this.#resolve(call.span, "chance", { kind: "boolean", value: chosen }, () => ({
-          kind: "chance",
-          percent,
-        })),
-      );
-    this.trace?.randomResult(chosen);
-    return chosen;
-  }
-
-  #randomIntegerBuiltin(call: RuntimeCapabilityCall): number {
-    this.#expectBuiltinArguments("randomInteger", call, 1);
-    const range = call.positional[0]!;
-    if (!isRange(range)) {
-      throw fault(
-        "TSR040",
-        `randomInteger(range) needs a range such as '1..=6', but this is ${describeShownValue(range)}.`,
-        call.span,
-      );
+      if (problem !== undefined) throw fault("TSR028", problem.message, span);
+      const range = positional[0]!;
+      if (!isRange(range))
+        throw fault(
+          "TSR040",
+          `${name}(range) needs a range such as '1..=6', but this is ${describeShownValue(range)}.`,
+          span,
+        );
+      return this.randomIntegerInRange(range, span, `${name}(range)`, name);
     }
-    return this.randomIntegerInRange(range, call.span, "randomInteger(range)", "randomInteger");
+    const { numbers } = callNumbers(name, random, positional, named, span);
+    const invalid = numbersProblem(random, numbers);
+    if (invalid !== undefined) throw fault("TSR039", invalid, span);
+    let result = this.#draw(span, name, null, null, (draw) => random.sample(numbers, draw));
+    if (this.control !== null) {
+      const resolved = this.#resolve(span, name, naturalOf(result), () => random.support(numbers));
+      // A natural failure stays the draw's failure; a chosen outcome replaces it.
+      if (resolved.kind !== "failure")
+        result = random.result === "boolean" ? outcomeBoolean(resolved) : outcomeNumber(resolved);
+    }
+    if (typeof result === "object") throw fault(result.code, result.failure, span);
+    this.trace?.randomResult(result);
+    return result;
   }
 
   /** Draws one whole number from a non-empty integer range with the session RNG. */
@@ -3533,8 +3552,12 @@ export class Evaluator {
     return drawn;
   }
 
-  /** `toString`, `toNumber`, `toInteger`, or `toBoolean` (V30 §13), with the optional `default:` fallback. */
-  #conversionBuiltin(
+  /**
+   * A conversion (see `CONVERSIONS`), run by its `CONVERSION_RUNS` entry: its result, or for a value it cannot use
+   * `USE_DEFAULT` when the call has a `default:`, which `named` leaves out (`defaulted`), and otherwise a failure that
+   * names the fix.
+   */
+  #conversion(
     name: ConversionName,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
@@ -3542,113 +3565,46 @@ export class Evaluator {
     argument: ExpressionPlan | undefined,
     span: SourceSpan,
   ): SerializableRuntimeValue | typeof USE_DEFAULT {
-    const extra = Object.keys(named)[0];
-    const result = CONVERSION_RESULTS.get(name)!;
-    // A date and a time combine into one date and time (V30 §35).
-    const parts = result === "datetime" && positional.length === 2;
-    if ((positional.length !== 1 && !parts) || extra !== undefined)
-      throw fault(
-        "TSR028",
-        `${name}(...) takes one value and an optional default:, such as ${name}(value, default: ...).`,
-        span,
-      );
-    const value = positional[0]!;
-    const converted = parts
-      ? combinedDateAndTime(value, positional[1]!)
-      : this.#converted(result, value, span);
-    if (converted !== undefined) return converted;
-    if (defaulted) return USE_DEFAULT;
-    if (parts)
-      throw fault(
-        "TSR058",
-        `toDateTime(date, time) combines a date and a time, not ${describeRuntimeValue(value)} and ${describeRuntimeValue(positional[1]!)}.`,
-        span,
-      );
-    throw fault("TSR058", conversionFailure(name, result, value, argument, this.plan), span);
-  }
-
-  /** The converted value, or `undefined` when `value` cannot be converted. */
-  #converted(
-    result: ConversionResult,
-    value: SerializableRuntimeValue,
-    span: SourceSpan,
-  ): SerializableRuntimeValue | undefined {
-    if (isTemporalConversionResult(result)) return temporalConverted(result, value);
-    if (result === "string")
-      return isVisibleScalar(value)
-        ? visibleText(value, span, currentTemporalContext(this.snapshot))
-        : undefined;
-    if (result === "boolean")
-      return typeof value === "boolean"
-        ? value
-        : typeof value === "string"
-          ? booleanFromText(value)
-          : undefined;
-    const number =
-      typeof value === "number"
-        ? withoutNegativeZero(value)
-        : typeof value === "string"
-          ? numberFromText(value)
-          : undefined;
-    return number === undefined || result === "number"
-      ? number
-      : withoutNegativeZero(Math.trunc(number));
-  }
-
-  /**
-   * `toJson`, `fromJson`, `toBase64`, `fromBase64`, or `hashText` (V30 §13), `toJson` and `fromJson` with
-   * `files: false`. Text that does not read as JSON or Base64, or a value that is not text, gives the `default:` of a
-   * reading function, never a runtime error.
-   */
-  #dataTextFunction(
-    name: string,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    defaulted: boolean,
-    span: SourceSpan,
-  ): SerializableRuntimeValue | typeof USE_DEFAULT {
-    const reads = name === "fromJson" || name === "fromBase64";
-    // Only a `toJson` or `fromJson` with a written `files: false` is an ordinary call; with files it is a file store.
-    const takesFiles = name === "toJson" || name === "fromJson";
-    if (takesFiles && named.files !== undefined && named.files !== false)
+    const conversion: Conversion = CONVERSIONS[name];
+    // Only a call with a written `files: false` is an ordinary call; with files it is a file store.
+    if (conversion.files && named.files !== undefined && named.files !== false)
       throw fault(
         "TSR028",
         internalFault(`${name}(...) with files reached an ordinary call instead of a file store.`),
         span,
       );
-    const names = Object.keys(named).filter((key) => !takesFiles || key !== "files");
-    if (positional.length !== 1 || names.length !== 0 || reads !== defaulted)
+    const pair = positional.length === 2 ? conversion.pair : undefined;
+    if (
+      (positional.length !== 1 && pair === undefined) ||
+      Object.keys(named).some((key) => !conversion.files || key !== "files") ||
+      (conversion.fallback !== null && conversion.fallback.required !== null && !defaulted)
+    )
+      throw fault("TSR028", callShapeFailure(name, conversion), span);
+    const converted = CONVERSION_RUNS[name](positional, {
+      span,
+      text: (value) => visibleText(value, span, currentTemporalContext(this.snapshot)),
+      speakerProperties: (speaker) => this.speakerById(speaker.speakerId, span).properties,
+    });
+    if (converted !== undefined) return converted;
+    if (defaulted) return USE_DEFAULT;
+    // A conversion of a value fails; any other conversion gives its default or fails as it runs.
+    if (conversion.takes !== "value")
       throw fault(
         "TSR028",
-        reads
-          ? `${name}(...) takes one text and a default:, such as ${name}(text, default: null).`
-          : `${name}(...) takes one ${name === "toJson" ? "value" : "text"} and no named arguments.`,
+        internalFault(`${name}(...) gave no result and has no default:.`),
         span,
       );
-    const value = positional[0]!;
-    if (name === "toJson")
-      return jsonText(
-        value,
-        (speaker) => this.speakerById(speaker.speakerId, span).properties,
+    if (pair !== undefined)
+      throw fault(
+        "TSR058",
+        `${name}(${pair.join(", ")}) combines a ${pair[0]} and a ${pair[1]}, not ${describeRuntimeValue(positional[0]!)} and ${describeRuntimeValue(positional[1]!)}.`,
         span,
       );
-    if (name === "toBase64" || name === "hashText") {
-      if (typeof value !== "string")
-        throw fault(
-          "TSR059",
-          `${name}(...) ${name === "toBase64" ? "encodes" : "hashes"} text (string), not ${describeRuntimeValue(value)}.`,
-          span,
-        );
-      return name === "toBase64" ? base64Text(value, span) : textSha256(value);
-    }
-    const read =
-      typeof value !== "string"
-        ? undefined
-        : name === "fromJson"
-          ? valueFromJson(value, span)
-          : textFromBase64(value);
-    // JSON's null is a value; only text that does not read gives the default.
-    return read === undefined ? USE_DEFAULT : read;
+    throw fault(
+      "TSR058",
+      conversionFailure(name, conversion, positional[0]!, argument, this.plan),
+      span,
+    );
   }
 
   /**
@@ -3661,15 +3617,21 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): SerializableRuntimeValue {
-    // One list, optionally with by:, chooses among its values (V30 §16).
-    const list = positional.length === 1 && Object.keys(named).every((key) => key === "by");
-    if ((positional.length < 2 || Object.keys(named).length !== 0) && !list)
-      throw fault(
-        "TSR028",
-        `${name}(...) takes two or more numbers, durations, angles, or date and time values, such as ${name}(20, total), or one list, such as ${name}(scores).`,
-        span,
-      );
-    if (list) {
+    // One list, optionally with by:, chooses among its values (V30 §16). As the compiler, which knows the type, names are
+    // checked as one list takes them, else as the values take none; one other value with no other name than 'by:' fails
+    // below as not a list.
+    const one = positional.length === 1;
+    const names = Object.keys(named);
+    const problem =
+      one && isList(positional[0]!)
+        ? argumentShapeProblem(name, LIST_FUNCTION_SHAPES.get(name)!, 1, names)?.message
+        : names.some((key) => !one || key !== "by")
+          ? unknownNamedArgumentMessage(name, names[0]!, [])
+          : positional.length === 0
+            ? argumentCountMessage(name, MIN_MAX_TAKES, 0)
+            : undefined;
+    if (problem !== undefined) throw fault("TSR028", problem, span);
+    if (one) {
       const values = listValues(name, positional[0]!, named.by, span);
       if (values.length === 0)
         throw fault(
@@ -3772,63 +3734,8 @@ export class Evaluator {
     return chosen;
   }
 
-  /** A numeric function of numbers (V30 §13); a call without a result fails. */
-  #numericFunction(
-    name: string,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    span: SourceSpan,
-  ): number {
-    const { parameters, named: names = [], example, apply, random } = NUMERIC_FUNCTIONS.get(name)!;
-    if (
-      positional.length !== parameters.length ||
-      Object.keys(named).some((key) => !names.includes(key))
-    )
-      throw fault(
-        "TSR028",
-        `${name}(...) takes ${parameters.length === 1 ? "one number" : `${parameters.length} numbers (${parameters.join(", ")})`}, such as ${example}.`,
-        span,
-      );
-    const number = (value: SerializableRuntimeValue, place: string): number => {
-      if (typeof value === "number") return value;
-      throw fault(
-        "TSR059",
-        `${name}(...) needs a number${place}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : isAngle(value) ? " Convert it to a number of degrees with toDeg(...) first." : ""}`,
-        span,
-      );
-    };
-    const numbers = positional.map((value) => number(value, ""));
-    const options = Object.fromEntries(
-      Object.entries(named).map(([key, value]) => [key, number(value, ` as its ${key}:`)]),
-    );
-    const invalid = random?.(numbers);
-    if (invalid !== undefined) throw fault(invalid.code, invalid.failure, span);
-    // A trace records a random function's draws as one record, like a shuffle.
-    // EVIDENCE: invariant: each random numeric function is named like its trace operation, such as randomNormal.
-    const operation = name as RuntimeDebugRandomOperation;
-    let result =
-      random === undefined
-        ? apply(numbers, options, NO_DRAWS)
-        : this.#draw(span, operation, null, null, (draw) => apply(numbers, options, draw));
-    if (random !== undefined && this.control !== null) {
-      const resolved = this.#resolve(
-        span,
-        operation,
-        typeof result === "number"
-          ? { kind: "number", value: result }
-          : { kind: "failure", code: result.code, message: result.failure },
-        () => distributionSupport(name, numbers),
-      );
-      // A natural failure stays the draw's failure; a chosen outcome replaces it.
-      if (resolved.kind !== "failure") result = outcomeNumber(resolved);
-    }
-    if (typeof result !== "number") throw fault(result.code, result.failure, span);
-    if (random !== undefined) this.trace?.randomResult(result);
-    return result;
-  }
-
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
-    this.#expectBuiltinArguments("escapeMarkup", call, 1);
+    this.#expectBuiltinArguments("escapeMarkup", call);
     const text = call.positional[0]!;
     if (typeof text !== "string")
       throw fault(
@@ -3842,14 +3749,16 @@ export class Evaluator {
     return escapeMarkup(text);
   }
 
-  #expectBuiltinArguments(name: string, call: RuntimeCapabilityCall, count: number): void {
-    if (call.positional.length !== count || Object.keys(call.named).length !== 0) {
-      throw fault(
-        "TSR028",
-        `${name}(...) takes ${count === 1 ? "one argument, without a name" : `${count} arguments, without names`}.`,
-        call.span,
-      );
-    }
+  #expectBuiltinArguments(name: string, call: RuntimeCapabilityCall): void {
+    const parameters = FIXED_PARAMETERS.get(name)!;
+    const problem = argumentShapeProblem(
+      name,
+      positionalShape(parameters),
+      call.positional.length,
+      Object.keys(call.named),
+      parameters.length > 0,
+    );
+    if (problem !== undefined) throw fault("TSR028", problem.message, call.span);
   }
 
   /** Removes one list element, rebasing or freezing prepared references into the list, and returns it. */
@@ -4179,11 +4088,53 @@ export class Evaluator {
 
 const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
 
-/** The support of a random distribution function's draw, from its checked arguments. */
-function distributionSupport(name: string, numbers: readonly number[]): RandomSupport {
-  if (name === "randomNormal") return { kind: "normal", mean: numbers[0]!, spread: numbers[1]! };
-  if (name === "randomBeta") return { kind: "beta", alpha: numbers[0]!, beta: numbers[1]! };
-  return { kind: "pert", min: numbers[0]!, mostLikely: numbers[1]!, max: numbers[2]! };
+/** A numeric function of numbers (V30 §13); a call without a result fails. */
+function numericFunction(
+  name: string,
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  span: SourceSpan,
+): number {
+  const numeric = NUMERIC_FUNCTIONS.get(name)!;
+  const { numbers, options } = callNumbers(name, numeric, positional, named, span);
+  const result = numeric.apply(numbers, options);
+  if (typeof result !== "number") throw fault(result.code, result.failure, span);
+  return result;
+}
+
+/**
+ * The numbers of a call of a function whose every argument is a number, such as a numeric function or `chance`, by
+ * position and by name; a call of another shape, or with a value that is not a number, fails.
+ */
+function callNumbers(
+  name: string,
+  { parameters, named: names = [] }: NumberSignature,
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  span: SourceSpan,
+): { readonly numbers: readonly number[]; readonly options: Readonly<Record<string, number>> } {
+  const problem = argumentShapeProblem(
+    name,
+    { ...positionalShape(parameters), names },
+    positional.length,
+    Object.keys(named),
+    parameters.length > 0,
+  );
+  if (problem !== undefined) throw fault("TSR028", problem.message, span);
+  const number = (value: SerializableRuntimeValue, place: string): number => {
+    if (typeof value === "number") return value;
+    throw fault(
+      "TSR059",
+      `${name}(...) needs a number${place}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : isAngle(value) ? " Convert it to a number of degrees with toDeg(...) first." : ""}`,
+      span,
+    );
+  };
+  return {
+    numbers: positional.map((value) => number(value, "")),
+    options: Object.fromEntries(
+      Object.entries(named).map(([key, value]) => [key, number(value, ` as its ${key}:`)]),
+    ),
+  };
 }
 
 /*
@@ -4213,11 +4164,6 @@ function outcomeOrder(outcome: RandomNatural): readonly number[] {
     throw new Error("A random draw resolved to another kind of outcome.");
   return outcome.order;
 }
-
-/** The draws of a numeric function that is not random: it never takes one. */
-const NO_DRAWS: PrimitiveDraw = () => {
-  throw new Error("A numeric function that is not random drew a random number.");
-};
 
 /** List, set, and dict methods that change their receiver in place. */
 const MUTATING_METHODS: ReadonlySet<string> = new Set([
@@ -4336,12 +4282,13 @@ function notNumberKind(value: SerializableRuntimeValue): "null" | "numeric text"
 }
 
 /**
- * Why `value` does not convert to `result`, and what to do: a comparison for `toBoolean` of a number or text, `join()`
- * for a collection of shown values, and otherwise a `default:` fallback.
+ * Why `value` does not convert, and what to do: a comparison for `toBoolean` of a number or text, `join()` for a
+ * collection of shown values, and otherwise a `default:` fallback. The compiler gives the first part, `cannotConvert`,
+ * for text it can see.
  */
 function conversionFailure(
   name: ConversionName,
-  result: ConversionResult,
+  conversion: ValueConversion,
   value: SerializableRuntimeValue,
   argument: ExpressionPlan | undefined,
   program: InstructionPlan,
@@ -4350,25 +4297,114 @@ function conversionFailure(
   const fallback = " Give a fallback with 'default:' if the value may not convert.";
   const shown = describeShownValue(value);
   // `toBoolean` keeps 1, 0, and other texts invalid: an explicit comparison says what the script means.
-  if (result === "boolean" && typeof value !== "string")
+  if (conversion.result === "boolean" && typeof value !== "string")
     return typeof value === "number"
-      ? `toBoolean(...) converts text and true or false (boolean), not the number ${shown}. Compare the number instead, such as '${label} != 0'.`
-      : `toBoolean(...) converts text and true or false (boolean), not ${shown}.${fallback}`;
-  const failed = `${name}(...) cannot convert ${shown} to ${describeConversionResult(result)}`;
-  if (typeof value === "string") {
-    if (result === "boolean")
-      return `${failed}. The text must be "true" or "false". Compare the text instead, such as '${label} == ${quotedText(messageText(value))}'.`;
-    if (isTemporalConversionResult(result))
-      return `${failed}${temporalTextProblem(result, value) ?? ""}.${fallback}`;
-    if (result !== "string")
-      return `${failed}. The text must be a number such as 2.5 or -3.${fallback}`;
-  }
-  if (result === "string" && (isList(value) || isSet(value) || isDict(value))) {
+      ? `${name}(...) converts ${conversion.converts}, not the number ${shown}. Compare the number instead, such as '${label} != 0'.`
+      : `${name}(...) converts ${conversion.converts}, not ${shown}.${fallback}`;
+  const failed = cannotConvert(name, conversion, value);
+  if (typeof value === "string" && conversion.result === "boolean")
+    return `${failed} Compare the text instead, such as '${label} == ${quotedText(messageText(value))}'.`;
+  if (conversion.kinds === "shown" && (isList(value) || isSet(value) || isDict(value))) {
     const items = isDict(value) ? value.entries.map((entry) => entry.value) : value.items;
     if (items.every(isVisibleScalar))
-      return `${failed}. Use ${isSet(value) ? ".toList().join()" : isDict(value) ? ".values.join()" : ".join()"} to combine its ${isDict(value) ? "values" : "elements"} as text.`;
+      return `${failed} Use ${isSet(value) ? ".toList().join()" : isDict(value) ? ".values.join()" : ".join()"} to combine its ${isDict(value) ? "values" : "elements"} as text.`;
   }
-  return `${failed}.${fallback}`;
+  return `${failed}${fallback}`;
+}
+
+/** What a conversion reads while it runs, besides its arguments. */
+interface ConversionRun {
+  readonly span: SourceSpan;
+  /** A scalar as `${...}` shows it, dates and times in the player's presentation, which `toString` gives. */
+  readonly text: (value: SerializableRuntimeValue) => string;
+  /** A speaker's properties, which `toJson` writes. */
+  readonly speakerProperties: (
+    speaker: SerializableSpeakerReference,
+  ) => readonly SerializableRuntimeProperty[];
+}
+
+/**
+ * How each conversion runs (see `CONVERSIONS`): its result, or `undefined` for a value that it does not convert or text
+ * that it does not read, for which the call gives its default or fails.
+ */
+const CONVERSION_RUNS: {
+  readonly [Name in ConversionName]: (
+    positional: readonly SerializableRuntimeValue[],
+    run: ConversionRun,
+  ) => SerializableRuntimeValue | undefined;
+} = {
+  toString: ([value], run) => (isVisibleScalar(value!) ? run.text(value!) : undefined),
+  toNumber: ([value]) => numberOf(value!),
+  toInteger: ([value]) => {
+    const number = numberOf(value!);
+    return number === undefined ? undefined : withoutNegativeZero(Math.trunc(number));
+  },
+  toBoolean: ([value]) =>
+    typeof value === "boolean"
+      ? value
+      : typeof value === "string"
+        ? booleanFromText(value)
+        : undefined,
+  toDate: ([value]) => temporalConverted("date", value!),
+  toTime: ([value]) => temporalConverted("time", value!),
+  // A date and a time combine into one date and time (V30 §35).
+  toDateTime: ([value, time]) =>
+    time === undefined ? temporalConverted("datetime", value!) : combinedDateAndTime(value!, time),
+  toAbsoluteDateTime: ([value]) => temporalConverted("absoluteDateTime", value!),
+  toRegex: ([text]) => regexFromText(text!),
+  toJson: ([value], run) => jsonText(value!, run.speakerProperties, run.span),
+  // JSON's null is a value; only text that does not read gives the default.
+  fromJson: ([text], run) => (typeof text === "string" ? valueFromJson(text, run.span) : undefined),
+  toBase64: ([text], run) => {
+    if (typeof text !== "string")
+      throw fault(
+        "TSR059",
+        `toBase64(...) ${CONVERSIONS.toBase64.does}, not ${describeRuntimeValue(text!)}.`,
+        run.span,
+      );
+    return base64Text(text, run.span);
+  },
+  fromBase64: ([text]) => (typeof text === "string" ? textFromBase64(text) : undefined),
+};
+
+/** A number, or the number that number text holds (V30 §13), or `undefined` for any other value. */
+function numberOf(value: SerializableRuntimeValue): number | undefined {
+  return typeof value === "number"
+    ? withoutNegativeZero(value)
+    : typeof value === "string"
+      ? numberFromText(value)
+      : undefined;
+}
+
+/** How a call of `shape` is written, for a plan whose call is not (see `CallShape`). */
+function callShapeFailure(name: string, shape: CallShape): string {
+  if (shape.fallback === null)
+    return `${name}(...) takes one ${shape.parameter} and no named arguments.`;
+  return shape.fallback.required === null
+    ? `${name}(...) takes one ${shape.parameter} and an optional default:, such as ${name}(${shape.parameter}, default: ...).`
+    : `${name}(...) takes one ${shape.parameter} and a default:, such as ${name}(${shape.parameter}, default: null).`;
+}
+
+/** `hashText(text)` (V30 §13): the SHA-256 of the text's UTF-8 bytes. */
+function hashedText(
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  span: SourceSpan,
+): string {
+  if (positional.length !== 1 || Object.keys(named).length !== 0)
+    throw fault(
+      "TSR028",
+      callShapeFailure("hashText", { parameter: "text", fallback: null, files: false }),
+      span,
+    );
+  const text = positional[0]!;
+  if (typeof text !== "string")
+    throw fault(
+      "TSR059",
+      `hashText(...) hashes text (string), not ${describeRuntimeValue(text)}.`,
+      span,
+    );
+  return textSha256(text);
 }
 
 /**
@@ -4418,7 +4454,7 @@ function noArithmeticResult(
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
   program: InstructionPlan,
-  code = "TSR036",
+  code: RuntimeErrorCode = "TSR036",
 ): RuntimeFault {
   const { operator } = expression;
   const label = binaryLabel(expression, program);
@@ -4528,13 +4564,14 @@ function angleFunction(
   named: Readonly<Record<string, SerializableRuntimeValue>>,
   span: SourceSpan,
 ): number | StoredAngle {
-  const { parameters, takes, example, apply } = ANGLE_FUNCTIONS.get(name)!;
-  if (positional.length !== parameters.length || Object.keys(named).length !== 0)
-    throw fault(
-      "TSR028",
-      `${name}(...) takes ${parameters.length === 1 ? `one ${takes}` : `${parameters.length} numbers (${parameters.join(", ")})`}, such as ${example}.`,
-      span,
-    );
+  const { parameters, takes, apply } = ANGLE_FUNCTIONS.get(name)!;
+  const problem = argumentShapeProblem(
+    name,
+    positionalShape(parameters),
+    positional.length,
+    Object.keys(named),
+  );
+  if (problem !== undefined) throw fault("TSR028", problem.message, span);
   const values = positional.map((value) => {
     if (takes === "angle" && isAngle(value)) return value;
     if (takes === "number" && typeof value === "number") return value;
@@ -4622,7 +4659,7 @@ function assertRepresentableRound(
     throw fault(
       "TSR050",
       isValidSessionTime(deadlineMs)
-        ? `Timer remaining time of ${formatDuration(remainingMs)} is too short to measure this late in the scene. Use a longer duration.`
+        ? unmeasurableLengthMessage("Timer remaining time", remainingMs, nowMs, "duration")
         : `Timer remaining time of ${formatDuration(remainingMs)} is too long for scene time to reach. Use a shorter duration.`,
       span,
     );
@@ -4698,9 +4735,12 @@ function scriptReference(
   named: Readonly<Record<string, SerializableRuntimeValue>>,
   span: SourceSpan,
 ): SerializableScriptReference {
-  if (positional.length !== 1 || Object.keys(named).some((name) => name !== "label")) {
-    throw fault("TSR028", "script(...) takes one path and an optional 'label:'.", span);
-  }
+  // The number first, then a name, as the compiler reports them.
+  if (positional.length !== 1)
+    throw fault("TSR028", scriptArgumentCountMessage(positional.length), span);
+  const unknown = Object.keys(named).find((name) => name !== "label");
+  if (unknown !== undefined)
+    throw fault("TSR028", unknownNamedArgumentMessage("script", unknown, ["label"]), span);
   const text = (value: SerializableRuntimeValue, part: string): string => {
     if (typeof value === "string") return value;
     throw fault(
@@ -4894,7 +4934,7 @@ function notComparable(
   );
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }
 
@@ -4957,7 +4997,11 @@ interface EvaluationFrame {
 }
 const callingExpressions = new WeakMap<ExpressionPlan, boolean>();
 
-/** Whether evaluating an expression can run a call. Results are cached per plan node, so nested checks stay linear. */
+/**
+ * Whether evaluating an expression can run a call that may change a value: any call but a conversion's or a random
+ * function's, which only read (see `Conversion` and `RandomFunction`). Results are cached per plan node, so nested
+ * checks stay linear.
+ */
 function mayRunCall(expression: ExpressionPlan): boolean {
   // A node is decided after its children, which are pushed above it.
   const work: { expression: ExpressionPlan; children: readonly ExpressionPlan[] | null }[] = [
@@ -4966,7 +5010,12 @@ function mayRunCall(expression: ExpressionPlan): boolean {
   while (work.length > 0) {
     const current = work.pop()!;
     if (callingExpressions.has(current.expression)) continue;
-    if (current.expression.kind === "call") {
+    if (
+      current.expression.kind === "call" &&
+      (current.expression.callee.kind !== "identifier" ||
+        (!isConversion(current.expression.callee.name) &&
+          !isRandomFunction(current.expression.callee.name)))
+    ) {
       callingExpressions.set(current.expression, true);
     } else if (current.children !== null) {
       callingExpressions.set(
@@ -5059,9 +5108,9 @@ export const USE_DEFAULT: unique symbol = Symbol("use the default");
 
 /**
  * The default that a call uses, checked as the call checks it: a `get` default that decided the element or value type
- * of an empty list or dict must fit it also in the parts the compiler could not know (ADR 0021 rule 1.7), a
- * conversion's must be of its result type, and `toRegex`'s a regex or `null`. `fromJson`, `fromBase64`,
- * `fileFromBase64`, `decryptText`, and `decryptFile` take any default.
+ * of an empty list or dict must fit it also in the parts the compiler could not know (ADR 0021 rule 1.7), and a
+ * conversion's must be what its `CONVERSIONS` entry takes. `fileFromBase64`, `decryptText`, and `decryptFile` take any
+ * default.
  */
 export function acceptedDefault(
   operation: LazyDefaultOperation,
@@ -5070,20 +5119,16 @@ export function acceptedDefault(
   span: SourceSpan,
 ): SerializableRuntimeValue {
   if (typeCheck !== undefined) assertValueType(value, typeCheck, span);
-  if (isConversionName(operation)) {
-    const result = CONVERSION_RESULTS.get(operation)!;
-    if (!isConversionResult(result, value))
+  if (isConversion(operation)) {
+    const conversion: Conversion = CONVERSIONS[operation];
+    const description = defaultDescription(conversion);
+    if (description !== undefined && !fitsDefault(conversion, value))
       throw fault(
         "TSR058",
-        `${operation}(...) needs ${describeConversionResult(result)} as its default:, not ${describeRuntimeValue(value)}.`,
+        `${operation}(...) needs ${description} as its default:, not ${describeRuntimeValue(value)}.`,
         span,
       );
-  } else if (operation === "toRegex" && value !== null && !isRegex(value))
-    throw fault(
-      "TSR058",
-      `toRegex(...) needs a regex or null as its default:, not ${describeRuntimeValue(value)}.`,
-      span,
-    );
+  }
   return value;
 }
 

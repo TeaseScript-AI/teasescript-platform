@@ -1,24 +1,24 @@
 import type { CallExpression, Expression, Identifier, ScalarTypeName } from "./ast.js";
 import {
-  booleanFromText,
-  CONVERSION_RESULTS,
-  DATA_TEXT_FUNCTIONS,
-  describeConversionResult,
-  isConversionName,
-  isTemporalConversionResult,
-  numberFromText,
+  conversionTo,
+  CONVERSIONS,
+  defaultDescription,
+  isConversion,
   MIN_MAX_BUILTINS,
-  TEMPORAL_CONVERSIONS,
-  temporalTextProblem,
   unwritableJsonReason,
   WRITABLE_JSON_FIX,
-  type ConversionResult,
+  type CallShape,
+  type Conversion,
+  type ValueConversion,
 } from "./conversions.js";
+import type { ConversionName } from "./language-facts.js";
 import { LOCK_CALLS } from "./capture-call.js";
-import { NUMERIC_FUNCTIONS } from "./numeric-functions.js";
+import { NUMERIC_FUNCTIONS, type NumberSignature } from "./numeric-functions.js";
+import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "./random-functions.js";
 import { ANGLE_FUNCTIONS, angleArgumentMessage } from "./angle.js";
 import { misspelledPropertyHint } from "./object-properties.js";
 import { parsePublicKey } from "./public-keys.js";
+import { cannotConvert } from "./runtime/value-types.js";
 import type { SourceSpan } from "./source.js";
 import { canonicalRegexFlags, compileRegex, regexFlagProblem, replacementParts } from "./regex.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
@@ -49,12 +49,23 @@ import {
 } from "./static-types.js";
 import {
   argumentCountMessage,
+  argumentsTaken,
+  FIXED_PARAMETERS,
+  getArgumentsProblem,
+  LIST_ONLY_METHODS,
+  missingDefaultMessage,
+  POSITIONAL_METHODS,
+  unknownNamedArgumentMessage,
+} from "./argument-rules.js";
+import { MIN_MAX_TAKES } from "./list-function-rules.js";
+import {
   argumentFix,
   argumentTypeMessage,
   beyondLengthMessage,
   emptyTextMessage,
   endBeforeStartMessage,
   LIST_JOIN,
+  methodArgumentCountMessage,
   needsNonEmptyText,
   negativeMessage,
   regexMemberMessage,
@@ -179,7 +190,7 @@ function shapeProblems(member: MethodParameters, call: CallExpression): Operatio
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${member.name}() takes its arguments without names. Remove '${named.name.name}:'.`,
+        message: unknownNamedArgumentMessage(member.name, named.name.name, []),
         span: named.name.span,
       },
     ];
@@ -188,7 +199,7 @@ function shapeProblems(member: MethodParameters, call: CallExpression): Operatio
     return [
       {
         kind: "argumentCount",
-        message: argumentCountMessage(member, call.arguments.length),
+        message: methodArgumentCountMessage(member, call.arguments.length),
         span: call.span,
       },
     ];
@@ -315,24 +326,24 @@ function capitalized(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** The parameters of the built-ins that take a fixed number of positional arguments and no names (V30 §7, §8). */
-const FIXED_PARAMETERS: ReadonlyMap<string, readonly string[]> = new Map([
-  ["random", []],
-  ["chance", ["percent"]],
-  ["randomInteger", ["range"]],
-  ["escapeMarkup", ["text"]],
-]);
-
 /** Argument names and the number of arguments of a built-in that takes fixed positional arguments. */
 export function builtinShapeProblems(name: string, call: CallExpression): OperationProblem[] {
   const parameters = FIXED_PARAMETERS.get(name);
-  if (parameters === undefined) return [];
+  return parameters === undefined ? [] : fixedShapeProblems(name, parameters, call);
+}
+
+/** Argument names and the number of arguments of a call that takes `parameters` without names. */
+function fixedShapeProblems(
+  name: string,
+  parameters: readonly string[],
+  call: CallExpression,
+): OperationProblem[] {
   const named = call.arguments.find((argument) => argument.kind === "namedArgument");
   if (named !== undefined)
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}(...) takes no named arguments. Remove '${named.name.name}:'.`,
+        message: unknownNamedArgumentMessage(name, named.name.name, [], parameters.length > 0),
         span: named.name.span,
       },
     ];
@@ -340,20 +351,17 @@ export function builtinShapeProblems(name: string, call: CallExpression): Operat
   return [
     {
       kind: "argumentCount",
-      message:
-        parameters.length === 0
-          ? `${name}() takes no arguments, received ${call.arguments.length}.`
-          : `${name}(...) takes ${parameters.length} argument (${parameters.join(", ")}), received ${call.arguments.length}.`,
+      message: argumentCountMessage(name, argumentsTaken(parameters), call.arguments.length),
       span: call.span,
     },
   ];
 }
 
 /**
- * Compile-time problems with a call of a conversion (`toString`, `toNumber`, `toInteger`, `toBoolean`, and the date and
- * time conversions), a numeric function (`round`, `floor`, `ceil`, `abs`, `sqrt`, `pow`), `min`, or `max`: its
- * arguments, a value of a known type it cannot take, constant text that cannot convert (V30 §13, §35), and a `default:`
- * of another type than the result. Other callees give no problems.
+ * Compile-time problems with a call of a conversion (V30 §8, §13, §35), a numeric, random, or angle function, `min`,
+ * `max`, a file or hash function of text, or a lock call: its arguments, a value of a known type it cannot take,
+ * constant text that cannot convert, and a `default:` it cannot give. Other callees, and `randomWeighted`, whose checks
+ * are a list function's, give no problems.
  */
 export function builtinCallProblems(
   name: string,
@@ -361,57 +369,19 @@ export function builtinCallProblems(
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
   if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
-  if (NUMERIC_FUNCTIONS.has(name)) return numericFunctionProblems(name, call, typeOf);
+  if (NUMERIC_FUNCTIONS.has(name))
+    return numberArgumentProblems(name, NUMERIC_FUNCTIONS.get(name)!, call, typeOf);
+  if (isRandomFunction(name)) {
+    const random: RandomFunction = RANDOM_CONTRACTS[name];
+    if (random.takes === "numbers") return numberArgumentProblems(name, random, call, typeOf);
+    return random.takes === "range" ? fixedShapeProblems(name, random.parameters, call) : [];
+  }
   if (ANGLE_FUNCTIONS.has(name)) return angleFunctionProblems(name, call, typeOf);
-  if (
-    DATA_TEXT_FUNCTIONS.has(name) ||
-    name === "fileFromBase64" ||
-    name === "fileToBase64" ||
-    name === "hashFile"
-  )
-    return dataTextProblems(name, call, typeOf);
-  if (name === "toRegex") return regexConversionProblems(call, typeOf);
+  if (isConversion(name)) return conversionProblems(name, CONVERSIONS[name], call, typeOf);
+  const shape = FILE_TEXT_FUNCTIONS.get(name);
+  if (shape !== undefined) return fileTextProblems(name, shape, call, typeOf);
   if (LOCK_CALLS.has(name)) return lockProblems(name, call, typeOf);
-  if (!isConversionName(name)) return [];
-  const result = CONVERSION_RESULTS.get(name)!;
-  const problems: OperationProblem[] = [];
-  let fallback: Expression | undefined;
-  const positional: Expression[] = [];
-  for (const argument of call.arguments) {
-    if (argument.kind === "positionalArgument") positional.push(argument.value);
-    else if (argument.name.name === "default") fallback = argument.value;
-    else
-      problems.push({
-        kind: "unknownNamedArgument",
-        message: `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is 'default:'.`,
-        span: argument.name.span,
-      });
-  }
-  // A date and a time combine into one date and time (V30 §35).
-  const parts = result === "datetime" && positional.length === 2;
-  if (positional.length !== 1 && !parts)
-    problems.push({
-      kind: "argumentCount",
-      message: `${name}(...) takes 1 argument (value)${result === "datetime" ? " or 2 (date, time)" : ""}, received ${positional.length}.`,
-      span: call.span,
-    });
-  if (problems.length > 0) return problems;
-  if (parts) problems.push(...dateTimePartProblems(positional[0]!, positional[1]!, typeOf));
-  else {
-    const value = positional[0]!;
-    const message = conversionProblem(name, result, value, typeOf(value));
-    if (message !== undefined) problems.push({ kind: "invalidOperand", message, span: value.span });
-  }
-  if (fallback !== undefined) {
-    const fallbackType = typeOf(fallback);
-    if (!isAssignable({ kind: "scalar", name: result }, fallbackType))
-      problems.push({
-        kind: "invalidOperand",
-        message: `${name}(...) needs ${describeConversionResult(result)} as its default:, not ${describeValue(fallbackType)}.`,
-        span: fallback.span,
-      });
-  }
-  return problems;
+  return [];
 }
 
 /**
@@ -444,20 +414,27 @@ function lockProblems(
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: `${name}(...) has no parameter '${argument.name.name}'. Its named arguments are ${quoted(parameters, "and")}.`,
+        message: unknownNamedArgumentMessage(name, argument.name.name, parameters),
         span: argument.name.span,
       });
   }
   if (positional !== 1)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes 1 argument (${name.endsWith("File") ? "file" : "text"})${decrypts ? " and a 'default:'" : ""}, received ${positional}.`,
+      message: argumentCountMessage(
+        name,
+        `1 argument (${name.endsWith("File") ? "file" : "text"})${decrypts ? " and a 'default:'" : ""}`,
+        positional,
+      ),
       span: call.span,
     });
   else if (decrypts && !named.has("default"))
     problems.push({
       kind: "argumentCount",
-      message: `'${name}(${name === "decryptText" ? "text" : "file"}, default: value)' needs a 'default:' for when it does not open, such as with a wrong password. Add one, such as 'default: null'.`,
+      message: missingDefaultMessage(
+        `${name}(${name === "decryptText" ? "text" : "file"}, default: value)`,
+        "for when it does not open, such as with a wrong password",
+      ),
       span: call.span,
     });
   // An encrypt call's option also takes `true`, which lets the player choose it, or `false`, which leaves it out.
@@ -550,36 +527,39 @@ function writtenFalse(expression: Expression): boolean {
   return node.kind === "booleanLiteral" && !node.value;
 }
 
+/** The arguments of a call of one positional argument, by role, and the problems with its shape. */
+interface ShapedCall {
+  readonly problems: OperationProblem[];
+  readonly positional: readonly Expression[];
+  readonly fallback: Expression | undefined;
+}
+
 /**
- * Problems with `toJson(value)`, `toBase64(text)`, `fromJson(text, default:)`, `fromBase64(text, default:)`,
- * `fileFromBase64(text, default:)`, `fileToBase64(file)`, `hashText(text)`, or `hashFile(file)` (V30 §13 and §33):
- * their arguments, a required `default:` that is missing, a `files:` of `toJson` or `fromJson` that is not true or
- * false, text to read that can never be text, and a value that is or may hold one that `toJson` cannot write. The text
- * of `toBase64` and `hashText` and the file of `fileToBase64` and `hashFile` are checked where they are called.
+ * The arguments of a call of `shape` (see `CallShape`), and its problems: a named argument it does not take, a
+ * `files:` that is not true or false, the number of positional arguments, and a required `default:` that is missing.
  */
-function dataTextProblems(
+function shapedCall(
   name: string,
+  shape: CallShape,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
-): OperationProblem[] {
-  const reads = name === "fromJson" || name === "fromBase64" || name === "fileFromBase64";
-  const takesFiles = name === "toJson" || name === "fromJson";
+): ShapedCall {
+  const named = [
+    ...(shape.fallback === null ? [] : ["default"]),
+    ...(shape.files ? ["files"] : []),
+  ];
   const problems: OperationProblem[] = [];
   const positional: Expression[] = [];
-  let fallback = false;
+  let fallback: Expression | undefined;
   let files: Expression | undefined;
   for (const argument of call.arguments) {
     if (argument.kind === "positionalArgument") positional.push(argument.value);
-    else if (reads && argument.name.name === "default") fallback = true;
-    else if (takesFiles && argument.name.name === "files") files = argument.value;
+    else if (shape.fallback !== null && argument.name.name === "default") fallback = argument.value;
+    else if (shape.files && argument.name.name === "files") files = argument.value;
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: reads
-          ? `${name}(...) has no parameter '${argument.name.name}'. ${takesFiles ? "Its named arguments are 'default:' and 'files:'." : "Its only named argument is 'default:'."}`
-          : takesFiles
-            ? `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is 'files:'.`
-            : `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`,
+        message: unknownNamedArgumentMessage(name, argument.name.name, named),
         span: argument.name.span,
       });
   }
@@ -596,42 +576,129 @@ function dataTextProblems(
         span: files.span,
       });
   }
-  if (positional.length !== 1)
+  const required = shape.fallback?.required ?? null;
+  if (positional.length !== 1 && (shape.pair === undefined || positional.length !== 2))
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes 1 argument (${name === "toJson" ? "value" : name === "fileToBase64" || name === "hashFile" ? "file" : "text"})${reads ? " and a 'default:'" : ""}, received ${positional.length}.`,
+      message: argumentCountMessage(
+        name,
+        `1 argument (${shape.parameter})${required === null ? "" : " and a 'default:'"}${shape.pair === undefined ? "" : ` or 2 (${shape.pair.join(", ")})`}`,
+        positional.length,
+      ),
       span: call.span,
     });
-  else if (reads && !fallback)
+  else if (required !== null && fallback === undefined)
     problems.push({
       kind: "argumentCount",
-      message: `'${name}(text, default: value)' needs a 'default:' for text that is not valid ${name === "fromJson" ? "JSON" : "Base64"}. Add one, such as 'default: null'.`,
+      message: missingDefaultMessage(
+        `${name}(${shape.parameter}, default: value)`,
+        `for ${required}`,
+      ),
       span: call.span,
     });
-  if (
-    problems.length > 0 ||
-    name === "toBase64" ||
-    name === "fileToBase64" ||
-    name === "hashText" ||
-    name === "hashFile"
-  )
-    return problems;
+  return { problems, positional, fallback };
+}
+
+/**
+ * Problems with a call of a conversion (see `Conversion`): its shape, an argument that can never be what it takes,
+ * text it can see that does not convert, and a `default:` it cannot give. The text of a call without a default, which
+ * fails for anything else, is checked where it is called; text that a call with a default cannot read gives the
+ * default, so only a value that can never be text is an error.
+ */
+function conversionProblems(
+  name: ConversionName,
+  conversion: Conversion,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const { problems, positional, fallback } = shapedCall(name, conversion, call, typeOf);
+  if (problems.length > 0) return problems;
   const value = positional[0]!;
   const type = typeOf(value);
-  if (reads) {
-    // As for a conversion, a value that may be text is read when the script runs.
-    const candidates = members(forUse(type)).map(resolved);
+  if (conversion.takes === "value") {
+    if (conversion.pair !== undefined && positional.length === 2)
+      problems.push(...pairProblems(name, conversion.pair, positional, typeOf));
+    else {
+      const message = conversionProblem(name, conversion, value, type);
+      if (message !== undefined)
+        problems.push({ kind: "invalidOperand", message, span: value.span });
+    }
+  } else if (conversion.takes === "text") {
+    if (conversion.fallback !== null)
+      problems.push(...neverTextProblems(name, conversion.does, value, type));
+  } else problems.push(...unwritableJsonProblems(value, type));
+  const description = defaultDescription(conversion);
+  if (fallback !== undefined && description !== undefined && conversion.result !== "unknown") {
+    const fallbackType = typeOf(fallback);
+    const result: StaticType = { kind: "scalar", name: conversion.result };
     if (
-      candidates.length > 0 &&
-      candidates.every((candidate) => isKnown(candidate) && !isScalar(candidate, "string"))
+      !isAssignable(
+        conversion.fallback?.type === "optional" ? union([result, NULL_TYPE]) : result,
+        fallbackType,
+      )
     )
       problems.push({
         kind: "invalidOperand",
-        message: `${name}(...) reads text (string), not ${describeValue(type)}.`,
-        span: value.span,
+        message: `${name}(...) needs ${description} as its default:, not ${describeValue(fallbackType)}.`,
+        span: fallback.span,
       });
-    return problems;
   }
+  return problems;
+}
+
+/**
+ * The file and hash functions of text (V30 §13, §33). The text or file is checked where they are called, but
+ * `fileFromBase64` gives its default for text it cannot read.
+ */
+const FILE_TEXT_FUNCTIONS: ReadonlyMap<string, CallShape> = new Map([
+  [
+    "fileFromBase64",
+    {
+      parameter: "text",
+      fallback: { required: "text that is not valid Base64", type: "any" },
+      files: false,
+    },
+  ],
+  ["fileToBase64", { parameter: "file", fallback: null, files: false }],
+  ["hashText", { parameter: "text", fallback: null, files: false }],
+  ["hashFile", { parameter: "file", fallback: null, files: false }],
+]);
+
+/** Problems with a call of a file or hash function of text: its shape, and text to read that can never be text. */
+function fileTextProblems(
+  name: string,
+  shape: CallShape,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const { problems, positional } = shapedCall(name, shape, call, typeOf);
+  if (problems.length > 0 || shape.fallback === null) return problems;
+  const value = positional[0]!;
+  return neverTextProblems(name, "reads text (string)", value, typeOf(value));
+}
+
+/** A value that can never be text, which a call that `does` something with text cannot use. */
+function neverTextProblems(
+  name: string,
+  does: string,
+  value: Expression,
+  type: StaticType,
+): OperationProblem[] {
+  const candidates = members(forUse(type)).map(resolved);
+  return candidates.length > 0 &&
+    candidates.every((candidate) => isKnown(candidate) && !isScalar(candidate, "string"))
+    ? [
+        {
+          kind: "invalidOperand",
+          message: `${name}(...) ${does}, not ${describeValue(type)}.`,
+          span: value.span,
+        },
+      ]
+    : [];
+}
+
+/** A value that is or may hold one that `toJson` cannot write (V30 §13). */
+function unwritableJsonProblems(value: Expression, type: StaticType): OperationProblem[] {
   let unwritable: StaticType | undefined;
   containsType(type, (part) => {
     if (
@@ -643,75 +710,19 @@ function dataTextProblems(
     unwritable = part;
     return true;
   });
-  if (unwritable !== undefined) {
-    const kind = describeValue(unwritable);
-    const reason = unwritableJsonReason(SESSION_HANDLE_KINDS.has(unwritable.kind));
-    problems.push({
+  if (unwritable === undefined) return [];
+  const kind = describeValue(unwritable);
+  const reason = unwritableJsonReason(SESSION_HANDLE_KINDS.has(unwritable.kind));
+  return [
+    {
       kind: "invalidOperand",
       message:
         resolved(type) === unwritable
           ? `toJson(...) cannot write ${kind}, which ${reason}. ${WRITABLE_JSON_FIX}`
           : `toJson(...) cannot write ${kind}, which ${reason}, and this is ${describeValue(type)}. ${WRITABLE_JSON_FIX}`,
       span: value.span,
-    });
-  }
-  return problems;
-}
-
-/**
- * Problems with `toRegex(text, default:)` (V30 §8): its arguments, a required `default:` that is missing, text that can
- * never be text, and a `default:` that can be neither a regex nor `null`.
- */
-function regexConversionProblems(
-  call: CallExpression,
-  typeOf: (expression: Expression) => StaticType,
-): OperationProblem[] {
-  const problems: OperationProblem[] = [];
-  const positional: Expression[] = [];
-  let fallback: Expression | undefined;
-  for (const argument of call.arguments) {
-    if (argument.kind === "positionalArgument") positional.push(argument.value);
-    else if (argument.name.name === "default") fallback = argument.value;
-    else
-      problems.push({
-        kind: "unknownNamedArgument",
-        message: `toRegex(...) has no parameter '${argument.name.name}'. Its only named argument is 'default:'.`,
-        span: argument.name.span,
-      });
-  }
-  if (positional.length !== 1)
-    problems.push({
-      kind: "argumentCount",
-      message: `toRegex(...) takes 1 argument (text) and a 'default:', received ${positional.length}.`,
-      span: call.span,
-    });
-  else if (fallback === undefined)
-    problems.push({
-      kind: "argumentCount",
-      message:
-        "'toRegex(text, default: value)' needs a 'default:' for text that is not a valid regex. Add one, such as 'default: null'.",
-      span: call.span,
-    });
-  if (problems.length > 0) return problems;
-  const text = positional[0]!;
-  const candidates = members(forUse(typeOf(text))).map(resolved);
-  if (
-    candidates.length > 0 &&
-    candidates.every((candidate) => isKnown(candidate) && !isScalar(candidate, "string"))
-  )
-    problems.push({
-      kind: "invalidOperand",
-      message: `toRegex(...) reads pattern text (string), not ${describeValue(typeOf(text))}.`,
-      span: text.span,
-    });
-  const fallbackType = typeOf(fallback!);
-  if (!isAssignable(union([REGEX_TYPE, NULL_TYPE]), fallbackType))
-    problems.push({
-      kind: "invalidOperand",
-      message: `toRegex(...) needs a regex or null as its default:, not ${describeValue(fallbackType)}.`,
-      span: fallback!.span,
-    });
-  return problems;
+    },
+  ];
 }
 
 /** The handles of what a script started or showed, which exist only in the current session. */
@@ -724,15 +735,15 @@ const SESSION_HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
 ]);
 
 /**
- * Problems with a numeric function: names it does not take, its number of positional arguments, and arguments that are
- * not numbers.
+ * Problems with a function of numbers, such as a numeric function or `chance`: names it does not take, its number of
+ * positional arguments, and arguments that are not numbers.
  */
-function numericFunctionProblems(
+function numberArgumentProblems(
   name: string,
+  { parameters, named = [] }: NumberSignature,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
-  const { parameters, named = [] } = NUMERIC_FUNCTIONS.get(name)!;
   const problems: OperationProblem[] = [];
   const values: [Expression, string][] = [];
   let positional = 0;
@@ -745,17 +756,19 @@ function numericFunctionProblems(
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message:
-          named.length === 0
-            ? `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`
-            : `${name}(...) has no parameter '${argument.name.name}'. Its only named argument is '${named[0]}:'.`,
+        message: unknownNamedArgumentMessage(
+          name,
+          argument.name.name,
+          named,
+          parameters.length > 0,
+        ),
         span: argument.name.span,
       });
   }
   if (positional !== parameters.length)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes ${parameters.length} argument${parameters.length === 1 ? "" : "s"} (${parameters.join(", ")}), received ${positional}.`,
+      message: argumentCountMessage(name, argumentsTaken(parameters), positional),
       span: call.span,
     });
   if (problems.length > 0) return problems;
@@ -794,14 +807,14 @@ function angleFunctionProblems(
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`,
+        message: unknownNamedArgumentMessage(name, argument.name.name, []),
         span: argument.name.span,
       });
   }
   if (values.length !== parameters.length)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes ${parameters.length} argument${parameters.length === 1 ? "" : "s"} (${parameters.join(", ")}), received ${values.length}.`,
+      message: argumentCountMessage(name, argumentsTaken(parameters), values.length),
       span: call.span,
     });
   if (problems.length > 0) return problems;
@@ -837,7 +850,7 @@ function minMaxProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}(...) takes no named arguments. Remove '${named.name.name}:'.`,
+        message: unknownNamedArgumentMessage(name, named.name.name, []),
         span: named.name.span,
       },
     ];
@@ -845,7 +858,7 @@ function minMaxProblems(
     return [
       {
         kind: "argumentCount",
-        message: `${name}(...) takes 2 or more arguments, or one list, received ${call.arguments.length}.`,
+        message: argumentCountMessage(name, MIN_MAX_TAKES, call.arguments.length),
         span: call.span,
       },
     ];
@@ -885,7 +898,7 @@ function minMaxProblems(
  */
 function conversionProblem(
   name: string,
-  result: ConversionResult,
+  conversion: ValueConversion,
   value: Expression,
   type: StaticType,
 ): string | undefined {
@@ -893,66 +906,61 @@ function conversionProblem(
   if (candidates.length === 0 || candidates.some((candidate) => !isKnown(candidate)))
     return undefined;
   const problems = candidates.map((candidate) =>
-    candidateConversionProblem(name, result, value, candidate),
+    candidateConversionProblem(name, conversion, value, candidate),
   );
   return problems.every((problem) => problem !== undefined) ? problems[0] : undefined;
 }
 
 function candidateConversionProblem(
   name: string,
-  result: ConversionResult,
+  conversion: ValueConversion,
   value: Expression,
   type: StaticType,
 ): string | undefined {
-  const text = isScalar(type, "string") ? staticVisibleText(value) : undefined;
-  if (result === "string") {
-    if (type.kind === "scalar" || type.kind === "null") return undefined;
+  const { kinds, result } = conversion;
+  if (kinds === "shown" ? type.kind === "scalar" || type.kind === "null" : isScalar(type, ...kinds))
+    return undefined;
+  if (isScalar(type, "string")) {
+    // Text it can see converts as the runtime converts it, and does not convert with the runtime's text.
+    const text = staticVisibleText(value);
+    return text === undefined || conversion.textProblem(text) === undefined
+      ? undefined
+      : cannotConvert(name, conversion, text);
+  }
+  if (kinds === "shown") {
     // `.join()` combines only values that are shown as text, so a list of lists or objects needs another fix.
     if (type.kind === "list" || type.kind === "dict") {
       const unjoinable = members(type.element)
         .map(resolved)
         .find((member) => isKnown(member) && member.kind !== "scalar" && member.kind !== "null");
       if (unjoinable !== undefined)
-        return `toString(...) cannot convert ${describeValue(type)}, and ${type.kind === "list" ? ".join() cannot combine its elements" : ".values.join() cannot combine its values"}, which hold ${describeValue(unjoinable)}. Show the whole ${type.kind} with say, or select a value inside it that toString(...) converts.`;
+        return `${name}(...) cannot convert ${describeValue(type)}, and ${type.kind === "list" ? ".join() cannot combine its elements" : ".values.join() cannot combine its values"}, which hold ${describeValue(unjoinable)}. Show the whole ${type.kind} with say, or select a value inside it that ${name}(...) converts.`;
     }
-    return type.kind === "list" || type.kind === "set"
-      ? `toString(...) cannot convert ${describeValue(type)}. Use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`
-      : type.kind === "dict"
-        ? `toString(...) cannot convert ${describeValue(type)}. Use .values.join() to combine its values as text.`
-        : `toString(...) converts text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes, not ${describeValue(type)}.`;
+    if (type.kind === "list" || type.kind === "set")
+      return `${name}(...) cannot convert ${describeValue(type)}. Use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`;
+    if (type.kind === "dict")
+      return `${name}(...) cannot convert ${describeValue(type)}. Use .values.join() to combine its values as text.`;
   }
-  if (isTemporalConversionResult(result)) {
-    const conversion = TEMPORAL_CONVERSIONS[result];
-    if (isScalar(type, ...conversion.from)) return undefined;
-    if (isScalar(type, "string")) {
-      const problem = text === undefined ? undefined : temporalTextProblem(result, text);
-      return problem === undefined
-        ? undefined
-        : `${name}(...) cannot convert ${JSON.stringify(text)}${problem}.`;
-    }
-    return `${name}(...) converts ${conversion.converts}, not ${describeValue(type)}.${zoneMethodFix(result, type, value)}`;
-  }
-  if (result === "boolean") {
-    if (isScalar(type, "boolean")) return undefined;
-    if (isScalar(type, "string"))
-      return text === undefined || booleanFromText(text) !== undefined
-        ? undefined
-        : `toBoolean(...) cannot convert ${JSON.stringify(text)}. The text must be "true" or "false".`;
-    return `toBoolean(...) converts text and true or false (boolean), not ${describeValue(type)}.${isScalar(type, "integer", "number") ? " Compare the number instead, such as value != 0." : ""}`;
-  }
-  if (isScalar(type, "integer", "number")) return undefined;
-  if (isScalar(type, "string"))
-    return text === undefined || numberFromText(text) !== undefined
-      ? undefined
-      : `${name}(...) cannot convert ${JSON.stringify(text)}. The text must be a number such as 2.5 or -3.`;
-  return `${name}(...) converts text and numbers, not ${describeValue(type)}.${isScalar(type, "duration") ? " Divide a duration by a unit instead, such as value / 1 s." : isScalar(type, "angle") ? " Use toDeg(...) or toRad(...) for the size of an angle instead." : ""}`;
+  const fix =
+    result === "boolean"
+      ? isScalar(type, "integer", "number")
+        ? " Compare the number instead, such as value != 0."
+        : ""
+      : result === "number" || result === "integer"
+        ? isScalar(type, "duration")
+          ? " Divide a duration by a unit instead, such as value / 1 s."
+          : isScalar(type, "angle")
+            ? " Use toDeg(...) or toRad(...) for the size of an angle instead."
+            : ""
+        : zoneMethodFix(result, type, value);
+  return `${name}(...) converts ${conversion.converts}, not ${describeValue(type)}.${fix}`;
 }
 
 /**
  * A local date and time and an absolute date and time convert into each other with a method, through the player's zone
  * (V30 §35).
  */
-function zoneMethodFix(result: ConversionResult, type: StaticType, value: Expression): string {
+function zoneMethodFix(result: string, type: StaticType, value: Expression): string {
   const method =
     result === "absoluteDateTime" && isScalar(type, "datetime")
       ? "toAbsoluteDateTime"
@@ -964,17 +972,19 @@ function zoneMethodFix(result: ConversionResult, type: StaticType, value: Expres
     : ` Convert it with '${expressionLabel(value) ?? "value"}.${method}()'.`;
 }
 
-/** `toDateTime(date, time)` needs a date first and a time second; a part that may be one is checked at runtime. */
-function dateTimePartProblems(
-  date: Expression,
-  time: Expression,
+/**
+ * The parts of a conversion's second form, `toDateTime(date, time)`, each of its type; a part that may be one is
+ * checked at runtime.
+ */
+function pairProblems(
+  name: string,
+  pair: readonly [ScalarTypeName, ScalarTypeName],
+  parts: readonly Expression[],
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
   const problems: OperationProblem[] = [];
-  for (const [part, kind, position] of [
-    [date, "date", "first"],
-    [time, "time", "second"],
-  ] as const) {
+  for (const [index, kind] of pair.entries()) {
+    const part = parts[index]!;
     const type = forUse(typeOf(part));
     const candidates = members(type).map(resolved);
     if (
@@ -983,7 +993,7 @@ function dateTimePartProblems(
     )
       problems.push({
         kind: "invalidOperand",
-        message: `toDateTime(date, time) needs a ${kind} ${position}, not ${describeValue(type)}.${isScalar(type, "string") ? ` Convert the text first with ${kind === "date" ? "toDate" : "toTime"}(...).` : ""}`,
+        message: `${name}(${pair.join(", ")}) needs a ${kind} ${index === 0 ? "first" : "second"}, not ${describeValue(type)}.${isScalar(type, "string") ? ` Convert the text first with ${conversionTo(kind)}(...).` : ""}`,
         span: part.span,
       });
   }
@@ -1092,47 +1102,6 @@ export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
   "difference",
 ]);
 
-/** A method that takes positional arguments with these names. */
-function positionalMethod(name: string, ...parameters: string[]): [string, MethodParameters] {
-  return [name, { name, parameters: parameters.map((parameter) => ({ name: parameter })) }];
-}
-
-/**
- * The parameters of the methods of lists and sets (V30 §16), timers and media (V30 §22), and date and time values
- * (V30 §35) that take only positional arguments, besides `join`, the searches, `take`, and `takeLast`, which have their
- * own checks. Every other receiver with one of these methods takes as many: text for `contains` and `reverse`, and a dict
- * for `contains`, `remove`, and `clear`. Only a message and a permanent button take `remove()` without arguments (#836).
- */
-const POSITIONAL_METHODS: ReadonlyMap<string, MethodParameters> = new Map([
-  positionalMethod("add", "value"),
-  positionalMethod("addAll", "other"),
-  positionalMethod("remove", "value"),
-  positionalMethod("removeAt", "index"),
-  positionalMethod("removeFirst"),
-  positionalMethod("removeLast"),
-  positionalMethod("clear"),
-  positionalMethod("contains", "value"),
-  positionalMethod("sort"),
-  positionalMethod("shuffle"),
-  positionalMethod("reverse"),
-  positionalMethod("intersection", "other"),
-  positionalMethod("union", "other"),
-  positionalMethod("difference", "other"),
-  positionalMethod("toSet"),
-  positionalMethod("toList"),
-  positionalMethod("pause"),
-  positionalMethod("resume"),
-  positionalMethod("stop"),
-  positionalMethod("toISO"),
-  positionalMethod("formatDate"),
-  positionalMethod("formatTime"),
-  positionalMethod("formatDateTime"),
-  positionalMethod("toAbsoluteDateTime"),
-  positionalMethod("toDateTime"),
-  positionalMethod("toSeconds"),
-  positionalMethod("toMilliseconds"),
-]);
-
 /**
  * The name of every method a value has: those of text (V30 §8), of lists, sets, and dicts (V30 §16), of timer and media
  * handles (V30 §22), of messages and permanent buttons, and of date and time values (V30 §35). Other values, such as
@@ -1164,7 +1133,11 @@ export function positionalMethodProblems(
   return [
     {
       kind: "argumentCount",
-      message: `remove() takes 1 argument, or none on a message or permanent button, received ${call.arguments.length}.`,
+      message: argumentCountMessage(
+        "remove",
+        "1 argument, or none on a message or permanent button",
+        call.arguments.length,
+      ),
       span: call.span,
     },
   ];
@@ -1241,7 +1214,7 @@ function takeProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}() takes its count without a name. Remove '${named.name.name}:'.`,
+        message: unknownNamedArgumentMessage(name, named.name.name, []),
         span: named.name.span,
       },
     ];
@@ -1249,7 +1222,7 @@ function takeProblems(
     return [
       {
         kind: "argumentCount",
-        message: `${name}() takes 1 argument (count), received ${call.arguments.length}.`,
+        message: methodArgumentCountMessage(LIST_ONLY_METHODS.get(name)!, call.arguments.length),
         span: call.span,
       },
     ];
@@ -1292,7 +1265,7 @@ function searchProblems(
     return [
       {
         kind: "unknownNamedArgument",
-        message: `${name}() takes its value without a name. Remove '${named.name.name}:'.`,
+        message: unknownNamedArgumentMessage(name, named.name.name, []),
         span: named.name.span,
       },
     ];
@@ -1300,7 +1273,7 @@ function searchProblems(
     return [
       {
         kind: "argumentCount",
-        message: `${name}() takes 1 argument (value), received ${call.arguments.length}.`,
+        message: methodArgumentCountMessage(LIST_ONLY_METHODS.get(name)!, call.arguments.length),
         span: call.span,
       },
     ];
@@ -1326,30 +1299,20 @@ function getProblems(
       },
     ];
   const named = call.arguments.filter((argument) => argument.kind === "namedArgument");
-  const unknown = named.find((argument) => argument.name.name !== "default");
-  if (unknown !== undefined)
-    return [
-      {
-        kind: "unknownNamedArgument",
-        message: `get(...) has no parameter '${unknown.name.name}'. Its only named argument is 'default:'.`,
-        span: unknown.name.span,
-      },
-    ];
-  const positional = call.arguments.length - named.length;
-  if (positional === 1 && named.length === 1) return [];
-  const list = receiverType !== undefined;
+  const problem = getArgumentsProblem(
+    receiverType === undefined ? "either" : "list",
+    call.arguments.length - named.length,
+    named.map((argument) => argument.name.name),
+  );
+  if (problem === undefined) return [];
   return [
     {
-      kind: "argumentCount",
-      message:
-        positional === 1 && named.length === 0
-          ? list
-            ? "'get(index, default: value)' needs a 'default:' for an index the list does not have. Read an element that must exist as 'list[index]'."
-            : "'get(index or key, default: value)' needs a 'default:' for an index or key the value does not have. Read one that must exist as 'value[index]'."
-          : list
-            ? "'get(index, default: value)' takes one index and a 'default:'."
-            : "'get(index or key, default: value)' takes one index or key and a 'default:'.",
-      span: call.span,
+      kind: problem.kind,
+      message: problem.message,
+      span:
+        problem.kind === "unknownNamedArgument"
+          ? named.find((argument) => argument.name.name === problem.name)!.name.span
+          : call.span,
     },
   ];
 }

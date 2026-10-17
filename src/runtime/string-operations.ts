@@ -1,12 +1,13 @@
+import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
-  argumentCountMessage,
   argumentFix,
   argumentTypeMessage,
   beyondLengthMessage,
   emptyTextMessage,
   endBeforeStartMessage,
+  methodArgumentCountMessage,
   needsNonEmptyText,
   negativeMessage,
   regexMemberMessage,
@@ -495,21 +496,9 @@ function* regexMatches(
 /**
  * `toRegex(text, default:)` (V30 §8): a regex of the pattern text, with its flags written inside it, such as `(?i)`.
  * Text that RE2 rejects or that is over the regex limits, and a value that is not text, give `undefined`, for the
- * default, which `named` leaves out (`defaulted`).
+ * default.
  */
-export function regexFromText(
-  positional: readonly SerializableRuntimeValue[],
-  named: Readonly<Record<string, SerializableRuntimeValue>>,
-  defaulted: boolean,
-  span: SourceSpan,
-): SerializableRegex | undefined {
-  if (positional.length !== 1 || Object.keys(named).length !== 0 || !defaulted)
-    throw fault(
-      "TSR028",
-      "toRegex(...) takes one text and a default:, such as toRegex(text, default: null).",
-      span,
-    );
-  const text = positional[0]!;
+export function regexFromText(text: SerializableRuntimeValue): SerializableRegex | undefined {
   if (typeof text !== "string" || !compileRegex(text, "").ok) return undefined;
   return { kind: "regex", source: text, flags: "" };
 }
@@ -534,7 +523,7 @@ export function checkTextArguments(
   const parameters = member.parameters!;
   const required = parameters.filter((parameter) => parameter.optional !== true).length;
   if (positional.length < required || positional.length > parameters.length)
-    throw fault("TSR028", argumentCountMessage(member, positional.length), span);
+    throw fault("TSR028", methodArgumentCountMessage(member, positional.length), span);
   for (const [index, value] of positional.entries()) {
     const parameter = parameters[index]!;
     const position = parameter.kind === "position";
@@ -569,6 +558,6 @@ function argumentKind(value: SerializableRuntimeValue): ArgumentKind {
   return isDuration(value) ? "duration" : null;
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }

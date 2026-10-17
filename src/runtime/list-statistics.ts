@@ -1,6 +1,10 @@
+import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import { angleStatisticMessage, angleValue } from "../angle.js";
+import { argumentShapeProblem, type ArgumentShape } from "../argument-rules.js";
 import { exactDuration } from "../duration.js";
+import { LIST_FUNCTION_SHAPES } from "../list-function-rules.js";
 import { percentageFailure } from "../numeric-functions.js";
+import { RANDOM_CONTRACTS } from "../random-functions.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { dateTimeMilliseconds, daysBetween } from "../temporal.js";
@@ -155,13 +159,7 @@ export function listStatistic(
   named: Named,
   span: SourceSpan,
 ): SerializableRuntimeValue {
-  const percentile = name === "percentile";
-  if (positional.length !== (percentile ? 2 : 1) || Object.keys(named).some((key) => key !== "by"))
-    throw fault(
-      "TSR028",
-      `${name}(...) takes a list${percentile ? " and a percentage" : ""}, and optionally by:, such as ${percentile ? "percentile(scores, 10)" : `${name}(scores)`}.`,
-      span,
-    );
+  checkArguments(name, positional, named, span);
   const values = listValues(name, positional[0]!, named.by, span);
   const fewest = LIST_STATISTICS.get(name)!;
   if (values.length < fewest)
@@ -172,7 +170,7 @@ export function listStatistic(
         : `${name}(...) needs at least ${fewest} values, but the list has ${values.length}.`,
       span,
     );
-  const share = percentile ? percentage(name, positional[1]!, span) : 0;
+  const share = name === "percentile" ? percentage(name, positional[1]!, span) : 0;
   const amounts = amountsOf(name, values, span);
   if (amounts.kind === "durations" && name === "sum") {
     // Exact like the other statistics: milliseconds rounded once.
@@ -207,12 +205,8 @@ export function listStatistic(
   return amounts.kind === "numbers" ? (result === 0 ? 0 : result) : exactDuration(result);
 }
 
-/** A percentage from 0 through 100, as `percentile` and `chance` take it. */
-export function percentage(
-  name: string,
-  value: SerializableRuntimeValue,
-  span: SourceSpan,
-): number {
+/** A percentage from 0 through 100, as `percentile` takes it. */
+function percentage(name: string, value: SerializableRuntimeValue, span: SourceSpan): number {
   if (typeof value !== "number")
     throw fault(
       "TSR059",
@@ -294,12 +288,7 @@ export function linearRegression(
   span: SourceSpan,
 ): SerializableRuntimeValue {
   const name = "linearRegression";
-  if (positional.length !== 1 || Object.keys(named).some((key) => key !== "x" && key !== "y"))
-    throw fault(
-      "TSR028",
-      `${name}(...) takes a list, and optionally y: and x:, such as ${name}(scores) or ${name}(sessions, x: "date", y: "count").`,
-      span,
-    );
+  checkArguments(name, positional, named, span);
   if (named.x !== undefined && named.y === undefined)
     throw fault(
       "TSR028",
@@ -448,8 +437,7 @@ export function predict(
   named: Named,
   span: SourceSpan,
 ): SerializableRuntimeValue {
-  if (positional.length !== 2 || Object.keys(named).length !== 0)
-    throw fault("TSR028", "predict(...) takes a line and an x, such as predict(trend, 10).", span);
+  checkArguments("predict", positional, named, span);
   const line = positional[0]!;
   const x = positional[1]!;
   const property = (key: string): SerializableRuntimeValue | undefined =>
@@ -516,7 +504,7 @@ export function predict(
 
 /**
  * The choices and weights of `randomWeighted` (V30 §4): the keys of a dict and its values, or the elements of a list
- * and the property `weight` of each. Weights are numbers of at least 0, and at least one is above 0.
+ * and the property `weight` of each. Weights are numbers, valid as its contract says (see `RANDOM_CONTRACTS`).
  */
 export function weightedChoices(
   positional: readonly SerializableRuntimeValue[],
@@ -524,21 +512,20 @@ export function weightedChoices(
   span: SourceSpan,
 ): { readonly choices: readonly SerializableRuntimeValue[]; readonly weights: readonly number[] } {
   const name = "randomWeighted";
-  const source = positional[0];
-  const dict = source !== undefined && isDict(source);
-  if (
-    positional.length !== 1 ||
-    Object.keys(named).some((key) => key !== "weight") ||
-    (dict ? named.weight !== undefined : named.weight === undefined)
-  )
+  const contract = RANDOM_CONTRACTS[name];
+  checkArguments(name, positional, named, span, contract.shape);
+  const source = positional[0]!;
+  const dict = isDict(source);
+  // A dict has its weights, and anything else needs weight:, as the compiler checks them.
+  if (dict ? named.weight !== undefined : named.weight === undefined)
     throw fault(
       "TSR028",
-      `${name}(...) takes a dict of weights, such as ${name}(dict{ "squats": 3, "plank": 1 }), or a list of objects and weight:, such as ${name}(tasks, weight: "chance").`,
+      contract.sources[dict ? "dict" : isList(source) ? "list" : "other"],
       span,
     );
   const choices = dict
     ? source.entries.map((entry) => entry.key)
-    : listValues(name, source!, undefined, span);
+    : listValues(name, source, undefined, span);
   const weights = dict
     ? source.entries.map((entry) => entry.value)
     : choices.map((choice) => propertyValue(name, choice, "weight", named.weight!, span));
@@ -555,12 +542,12 @@ export function weightedChoices(
         `${name}(...) needs numbers as weights, not ${describeRuntimeValue(weight)}.`,
         span,
       );
-    if (weight < 0)
-      throw fault("TSR039", `${name}(...) needs weights of at least 0, not ${weight}.`, span);
+    const problem = contract.weightProblem(weight);
+    if (problem !== undefined) throw fault("TSR039", problem, span);
     return weight;
   });
-  if (!numbers.some((weight) => weight > 0))
-    throw fault("TSR039", `${name}(...) needs at least one weight above 0.`, span);
+  const problem = contract.weightsProblem(numbers);
+  if (problem !== undefined) throw fault("TSR039", problem, span);
   return { choices, weights: numbers };
 }
 
@@ -582,6 +569,21 @@ export function weightedIndex(weights: readonly number[], draw: number): number 
   return last;
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+/**
+ * Fails as the compiler reports the first problem with the names and the number of a list function's arguments, or of
+ * `randomWeighted`'s, which `shape` gives.
+ */
+function checkArguments(
+  name: string,
+  positional: readonly SerializableRuntimeValue[],
+  named: Named,
+  span: SourceSpan,
+  shape: ArgumentShape = LIST_FUNCTION_SHAPES.get(name)!,
+): void {
+  const problem = argumentShapeProblem(name, shape, positional.length, Object.keys(named));
+  if (problem !== undefined) throw fault("TSR028", problem.message, span);
+}
+
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }

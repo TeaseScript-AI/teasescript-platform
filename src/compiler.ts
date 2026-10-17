@@ -18,7 +18,7 @@ import type { PlanImage, PreparedFormShape, StorageTypePlan, TypeCheckPlan } fro
 import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
-import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
+import { CORE_RUNTIME_BUILTINS, PROTECTED_NAME_CODE } from "./language-facts.js";
 import { PlanControlFlow } from "./plan/control-flow.js";
 import { Reachability, type ConstantTest, type StatementFlow } from "./reachability.js";
 import {
@@ -82,7 +82,7 @@ export interface ProjectCompilationResult {
   readonly plan: InstructionPlan | null;
 }
 
-export { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
+export { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./language-facts.js";
 
 /** Parses, validates, and compiles one source as the `main.tease` of a single-file project, without executing it. */
 export function compileSource(source: string, options: CompileOptions = {}): CompilationResult {
@@ -243,18 +243,23 @@ function parseFile(path: string, source: string): CompiledProjectFile {
     if (!isNativeStackExhaustion(error)) throw error;
     return { result: stackExhaustionResult(path, source, null, null), source, parsed: null };
   }
+  // A declaration with a protected name, which the parser reports where it reads the name, is a problem of the names
+  // that leaves the syntax whole, so the names of the file are still validated.
   const parserDiagnostics = Object.freeze([
-    ...parsed.diagnostics,
+    ...parsed.diagnostics.filter((diagnostic) => diagnostic.code !== PROTECTED_NAME_CODE),
     ...findNonFiniteNumericLiteralDiagnosticsInStableProgram(parsed.program),
   ]);
+  const semanticDiagnostics = Object.freeze(
+    parsed.diagnostics.filter((diagnostic) => diagnostic.code === PROTECTED_NAME_CODE),
+  );
   return {
     result: Object.freeze({
       path,
       program: parsed.program,
       header: parsed.header,
       parserDiagnostics,
-      semanticDiagnostics: Object.freeze([]),
-      diagnostics: parserDiagnostics,
+      semanticDiagnostics,
+      diagnostics: Object.freeze([...parserDiagnostics, ...semanticDiagnostics]),
     }),
     source,
     parsed,
@@ -288,11 +293,17 @@ function checkProject(
     const names = validateProjectSemantics(
       files.map((file) => ({ path: file.result.path, program: file.result.program })),
       options,
-      (index) => files[index]!.parsed !== null && !hasErrors(files[index]!.result.diagnostics),
+      (index) =>
+        files[index]!.parsed !== null && !hasErrors(files[index]!.result.parserDiagnostics),
       track,
     );
     names.forEach((result, index) => {
-      addSemanticDiagnostics(files[index]!, result.diagnostics);
+      // The parser reported the file's protected declaration names already (see `parseFile`).
+      const reported = new Set(files[index]!.result.semanticDiagnostics.map(diagnosticKey));
+      addSemanticDiagnostics(
+        files[index]!,
+        result.diagnostics.filter((diagnostic) => !reported.has(diagnosticKey(diagnostic))),
+      );
       files[index]!.picks = result.picks;
       files[index]!.captures = result.captures;
     });
@@ -627,6 +638,11 @@ function compiledPlanValidationDiagnostic(
       planLocationToSourceSpan(plan.instructions[match.instructionIndex]!.span),
     ),
   };
+}
+
+/** A diagnostic's code, place, and text, which two reports of one problem share. */
+function diagnosticKey({ code, span, message }: Diagnostic): string {
+  return `${code} ${span.start.offset} ${span.end.offset} ${message}`;
 }
 
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {

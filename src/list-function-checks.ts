@@ -1,8 +1,15 @@
+import {
+  argumentCountMessage,
+  unknownNamedArgumentMessage,
+  type ArgumentShape,
+} from "./argument-rules.js";
 import { angleStatisticMessage } from "./angle.js";
 import type { CallExpression, Expression } from "./ast.js";
+import { LIST_FUNCTION_SHAPES } from "./list-function-rules.js";
 import { percentageFailure } from "./numeric-functions.js";
 import { RANGE_LIST_FIX, type OperationProblem } from "./operation-checks.js";
-import { staticVisibleText } from "./static-evaluation.js";
+import { RANDOM_CONTRACTS } from "./random-functions.js";
+import { staticChoiceValue, staticVisibleText } from "./static-evaluation.js";
 import {
   copyType,
   describeValue,
@@ -31,7 +38,6 @@ export const LIST_FUNCTIONS: ReadonlySet<string> = new Set([
   "stddev",
   "linearRegression",
   "predict",
-  "randomWeighted",
 ]);
 
 /** The problems with a call of a list function, the properties it reads by name, and its result type. */
@@ -71,36 +77,56 @@ const TEMPORAL_KINDS: readonly ValueKind[] = ["date", "time", "datetime", "absol
 
 interface Context {
   readonly name: string;
+  /** What the function takes. */
+  readonly shape: ArgumentShape;
   readonly call: CallExpression;
   readonly typeOf: (expression: Expression) => StaticType;
   readonly problems: OperationProblem[];
   readonly reads: ListPropertyRead[];
 }
 
-/**
- * Checks a call of a list function, or of `min` or `max` with one list, and gives its result type. `known` gives a
- * number the compiler can see, such as a constant percentage.
- */
+/** A number the compiler can see, such as a constant percentage or weight, or `undefined`. */
+type Known = (expression: Expression) => number | undefined;
+
+/** Checks a call of a list function, or of `min` or `max` with one list, and gives its result type. */
 export function listFunctionCheck(
   name: string,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
-  known: (expression: Expression) => number | undefined,
+  known: Known,
 ): ListFunctionCheck {
-  const context: Context = { name, call, typeOf, problems: [], reads: [] };
+  const context: Context = {
+    name,
+    shape: LIST_FUNCTION_SHAPES.get(name)!,
+    call,
+    typeOf,
+    problems: [],
+    reads: [],
+  };
   const type = listFunctionType(context, known);
   return { problems: context.problems, reads: context.reads, type };
 }
 
-function listFunctionType(
-  context: Context,
-  known: (expression: Expression) => number | undefined,
-): StaticType {
+/**
+ * Checks a call of `randomWeighted` (see `RANDOM_CONTRACTS`), which reads its weights as a list function reads values,
+ * and gives its result type.
+ */
+export function weightedChoiceCheck(
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+  known: Known,
+): ListFunctionCheck {
+  const { shape } = RANDOM_CONTRACTS.randomWeighted;
+  const context: Context = { name: "randomWeighted", shape, call, typeOf, problems: [], reads: [] };
+  const type = weightedType(context, known);
+  return { problems: context.problems, reads: context.reads, type };
+}
+
+function listFunctionType(context: Context, known: Known): StaticType {
   const { name, call } = context;
   switch (name) {
     case "linearRegression": {
-      if (!shape(context, 1, ["y", "x"], "1 argument (list), and optionally y: and x:"))
-        return UNKNOWN_TYPE;
+      if (!shape(context)) return UNKNOWN_TYPE;
       const list = positionalArguments(call)[0]!;
       const y = named(call, "y");
       const x = named(call, "x");
@@ -137,20 +163,10 @@ function listFunctionType(
     }
     case "predict":
       return predictType(context);
-    case "randomWeighted":
-      return weightedType(context);
     default: {
       // `sum`, `average`, `median`, `percentile`, `stddev`, and `min` or `max` of one list.
       const percentile = name === "percentile";
-      if (
-        !shape(
-          context,
-          percentile ? 2 : 1,
-          ["by"],
-          `${percentile ? "2 arguments (list, percentage)" : "1 argument (list)"}, and optionally by:`,
-        )
-      )
-        return UNKNOWN_TYPE;
+      if (!shape(context)) return UNKNOWN_TYPE;
       if (percentile) {
         const share = positionalArguments(call)[1]!;
         const value = known(share);
@@ -185,29 +201,22 @@ function listFunctionType(
 }
 
 /** Reports names and a number of positional arguments the function does not take; `true` when there are none. */
-function shape(
-  context: Context,
-  positional: number,
-  names: readonly string[],
-  usage: string,
-): boolean {
+function shape(context: Context): boolean {
   const { name, call } = context;
+  const { count: positional, names, takes } = context.shape;
   const before = context.problems.length;
   for (const argument of call.arguments)
     if (argument.kind === "namedArgument" && !names.includes(argument.name.name))
       context.problems.push({
         kind: "unknownNamedArgument",
-        message:
-          names.length === 0
-            ? `${name}(...) takes no named arguments. Remove '${argument.name.name}:'.`
-            : `${name}(...) has no parameter '${argument.name.name}'. ${names.length === 1 ? "Its only named argument is" : "Its named arguments are"} ${names.map((one) => `'${one}:'`).join(" and ")}.`,
+        message: unknownNamedArgumentMessage(name, argument.name.name, names),
         span: argument.name.span,
       });
   const count = call.arguments.filter((argument) => argument.kind === "positionalArgument").length;
   if (count !== positional)
     context.problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes ${usage}, received ${count}.`,
+      message: argumentCountMessage(name, takes, count),
       span: call.span,
     });
   return context.problems.length === before;
@@ -361,7 +370,7 @@ function typeOfKind(kind: ValueKind | undefined): StaticType {
 /** `predict(line, x)`: a number or duration, as the line's intercept, at an x of the kind of the line's start. */
 function predictType(context: Context): StaticType {
   const { name, call, typeOf } = context;
-  if (!shape(context, 2, [], "2 arguments (line, x)")) return UNKNOWN_TYPE;
+  if (!shape(context)) return UNKNOWN_TYPE;
   const line = call.arguments[0]!.value;
   const x = call.arguments[1]!.value;
   // Whatever the line, each kind x may be is a number or a date and time value that is measured in days.
@@ -445,11 +454,12 @@ function knownKind(type: StaticType): ValueKind | undefined {
 }
 
 /** `randomWeighted`: a key of a dict of weights, or a copy of an element of a list of objects with `weight:`. */
-function weightedType(context: Context): StaticType {
-  const { name, call, typeOf } = context;
-  if (!shape(context, 1, ["weight"], "1 argument (a dict, or a list with weight:)"))
-    return UNKNOWN_TYPE;
+function weightedType(context: Context, known: Known): StaticType {
+  const { call, typeOf } = context;
+  if (!shape(context)) return UNKNOWN_TYPE;
   const source = call.arguments.find((argument) => argument.kind === "positionalArgument")!.value;
+  // A dict or list written in the call, whose weights the compiler may see.
+  const written = withoutParentheses(source);
   const weight = named(call, "weight");
   const type = forUse(typeOf(source));
   if (!isKnown(type)) {
@@ -460,30 +470,90 @@ function weightedType(context: Context): StaticType {
   const value = resolved(type);
   if (value.kind === "dict") {
     if (weight !== undefined)
-      problem(
-        context,
-        `${name}(...) of a dict takes its weights from the dict. Remove 'weight:'.`,
-        weight,
-      );
-    else valueKind(context, value.element, ["number"], source);
+      problem(context, RANDOM_CONTRACTS.randomWeighted.sources.dict, weight);
+    else {
+      valueKind(context, value.element, ["number"], source);
+      if (written.kind === "dictLiteral") {
+        // Keys the compiler knows differ, but a later key known only at runtime may replace an entry, and a later known
+        // key an entry whose key is known only at runtime.
+        const weights: Weight[] = [];
+        let laterKeysKnown = true;
+        for (let index = written.entries.length - 1; index >= 0; index -= 1) {
+          const entry = written.entries[index]!;
+          const keyKnown = typeof staticChoiceValue(entry.key)?.value === "string";
+          weights[index] = {
+            at: entry.value,
+            value: known(entry.value),
+            kept: index === written.entries.length - 1 || (keyKnown && laterKeysKnown),
+          };
+          laterKeysKnown &&= keyKnown;
+        }
+        weightProblems(context, source, weights);
+      }
+    }
     return STRING_TYPE;
   }
   if (value.kind === "list") {
     if (weight === undefined)
-      problem(
-        context,
-        `${name}(...) of a list needs weight:, the property that holds each element's weight, as in ${name}(tasks, weight: "chance").`,
-        source,
-      );
-    else valueKind(context, valuesType(context, source, weight, "weight"), ["number"], weight);
+      problem(context, RANDOM_CONTRACTS.randomWeighted.sources.list, source);
+    else {
+      valueKind(context, valuesType(context, source, weight, "weight"), ["number"], weight);
+      const key = staticVisibleText(weight);
+      if (written.kind === "listLiteral" && key !== undefined)
+        weightProblems(
+          context,
+          source,
+          written.elements.map((element) => {
+            const object = withoutParentheses(element);
+            const property =
+              object.kind === "objectLiteral"
+                ? object.properties.find((one) => one.name.name === key)
+                : undefined;
+            return {
+              at: property?.value ?? element,
+              value: property === undefined ? undefined : known(property.value),
+              kept: true,
+            };
+          }),
+        );
+    }
     return copyType(value.element);
   }
-  problem(
-    context,
-    `${name}(...) needs a dict of weights or a list of objects, not ${describeValue(value)}.`,
-    source,
-  );
+  problem(context, RANDOM_CONTRACTS.randomWeighted.sources.other, source);
   return UNKNOWN_TYPE;
+}
+
+function withoutParentheses(expression: Expression): Expression {
+  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
+  return expression;
+}
+
+/** A weight written in a call of `randomWeighted`, and whether the dict that holds it keeps it. */
+interface Weight {
+  readonly at: Expression;
+  readonly value: number | undefined;
+  readonly kept: boolean;
+}
+
+/**
+ * The weights of a dict or list written in the call, as the runtime checks them (see `RANDOM_CONTRACTS`): the first
+ * weight the compiler can see that is invalid, unless a later entry may replace it (`kept`), and otherwise, when it can
+ * see every weight, all of them together.
+ */
+function weightProblems(context: Context, source: Expression, weights: readonly Weight[]): void {
+  const contract = RANDOM_CONTRACTS.randomWeighted;
+  for (const weight of weights) {
+    const message =
+      weight.kept && weight.value !== undefined ? contract.weightProblem(weight.value) : undefined;
+    if (message !== undefined) return problem(context, message, weight.at);
+  }
+  const values = weights.flatMap((weight) => weight.value ?? []);
+  // The weights the runtime reads are some of these, so they fail together when all of these do.
+  const message =
+    values.length > 0 && values.length === weights.length
+      ? contract.weightsProblem(values)
+      : undefined;
+  if (message !== undefined) problem(context, message, source);
 }
 
 /**

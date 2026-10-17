@@ -223,7 +223,7 @@ test("a range, handle member, or media position problem has one code and one tex
         [`${CLOCK}let alias = clock\nalias.pause(1)`, "pause"],
       ],
       "TSV034",
-      "Timer pause() takes no arguments.",
+      "pause() takes no arguments, received 1.",
       // On any receiver, 'pause(1)' is TSV020.
       null,
     ],
@@ -296,6 +296,8 @@ test("a range, handle member, or media position problem has one code and one tex
 test("a length, count, file, repeat, index, loop source, key, colour, or presentation problem has one code and one text in every form", () => {
   const playing = 'playAudio(file: "a.mp3", ';
   const timeout = "Remove 'timeout:' to wait for the click without a time limit.";
+  const form = 'let a = askForm "Q", fields: { rope: false }, ';
+  const formTimeout = "Remove 'timeout:' and 'onTimeout:' to wait without a time limit.";
   checkFamilies([
     [
       [
@@ -384,10 +386,33 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
     ],
     [
       [
+        [`${form}timeout: 0 s, onTimeout: "submit"`, "0 s"],
+        [`${form}timeout: (1 - 1) s, onTimeout: "cancel"`, "(1 - 1) s"],
+        [
+          'let a = askForm("Q", fields: { rope: false }, timeout: 0 ms, onTimeout: "submit")',
+          "0 ms",
+        ],
+      ],
+      "TSV011",
+      `An askForm timeout must be a duration greater than zero, but this is 0 seconds. ${formTimeout}`,
+      [
+        `let d = 0 s\n${form}timeout: d, onTimeout: "submit"`,
+        "TSR052",
+        `An askForm timeout must be a duration greater than zero, but this is 0 seconds. ${formTimeout}`,
+      ],
+    ],
+    [
+      [[`${form}timeout: 1e16 ms, onTimeout: "cancel"`, "1e16 ms"]],
+      "TSV011",
+      "This askForm timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' and 'onTimeout:' to wait without a time limit.",
+      null,
+    ],
+    [
+      [
         ['let t = timer(duration: 1 s, async: true, display: "loud")', '"loud"'],
         ['let t = timer(duration: 1 s, async: true, display: ("loud"))', '("loud")'],
       ],
-      "TSV033",
+      "TSV068",
       'Timer display must be "visible", "mystery", or "hidden", but this is "loud".',
       [
         'let s = "loud"\nlet t = timer(duration: 1 s, async: true, display: s)',
@@ -623,7 +648,7 @@ test("a value problem does not hide a type error elsewhere in the script", () =>
     ['playAudio(file: "a.mp3", startAt: -1 s)', "TSV036"],
     ["wait (-1 s)", "TSV011"],
     ["repeat -1 {\n}", "TSV011"],
-    ['let t = timer(duration: 1 s, async: true, display: "loud")', "TSV033"],
+    ['let t = timer(duration: 1 s, async: true, display: "loud")', "TSV068"],
     ['playAudio(file: "a.mp3", volume: 2)', "TSV036"],
     ["let l = [1]\nsay l[-1]", "TSV045"],
     ["say 1 / 0", "TSV050"],

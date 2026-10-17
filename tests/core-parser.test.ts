@@ -163,8 +163,8 @@ test("accepts every keyword as a property name in unambiguous property positions
   for (const keyword of keywords) {
     const sources = [
       `speaker vera { ${keyword}: "value" }`,
-      `let object = { ${keyword}: 1 }`,
-      `let property = object.${keyword}`,
+      `let record = { ${keyword}: 1 }`,
+      `let property = record.${keyword}`,
       `invoke(${keyword}: 1)`,
     ];
     for (const source of sources) {

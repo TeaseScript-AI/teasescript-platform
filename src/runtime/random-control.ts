@@ -5,13 +5,15 @@ import type {
   PlanSourceLocation,
 } from "../plan/model.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
-import { isPercentage, NUMERIC_FUNCTIONS } from "../numeric-functions.js";
+import { RANDOM_FUNCTIONS } from "../language-facts.js";
+import type { NumericFailure } from "../numeric-functions.js";
+import { isRandomFunction, numbersProblem, RANDOM_CONTRACTS } from "../random-functions.js";
 import type { SourceSpan } from "../source.js";
 import type { RuntimeDebugRandomOperation, TraceStore } from "./debug-trace.js";
 import type { InterpreterEvent } from "./events.js";
 import { weightedIndex } from "./list-statistics.js";
 import { nextXorShift32, XORSHIFT32_ALGORITHM, type XorShift32State } from "./random.js";
-import { sampleChance, sampleIndex, sampleOrder, type PrimitiveDraw } from "./random-draws.js";
+import { sampleIndex, sampleOrder, type PrimitiveDraw } from "./random-draws.js";
 import {
   cloneCapturedSerializableValue,
   validateCapturedSerializableValue,
@@ -33,15 +35,10 @@ import type { RuntimeSnapshot, RuntimeStatus } from "./state.js";
 /** The kinds of semantic random draw: the operations a debug trace names. */
 export type RandomDrawKind = RuntimeDebugRandomOperation;
 
+/** The random functions' draws, which are named after them, and the draws of other operations. */
 export const RANDOM_DRAW_KINDS: readonly RandomDrawKind[] = Object.freeze([
-  "random",
-  "chance",
-  "randomInteger",
+  ...RANDOM_FUNCTIONS,
   "collectionRandom",
-  "randomWeighted",
-  "randomNormal",
-  "randomBeta",
-  "randomPert",
   "interpolation",
   "shuffle",
   "tagQuery",
@@ -220,16 +217,6 @@ export class RandomSuspension extends RandomControlSignal {
 /* Sites                                                                                                            */
 /* ---------------------------------------------------------------------------------------------------------------- */
 
-const RANDOM_BUILTINS: ReadonlySet<string> = new Set([
-  "random",
-  "chance",
-  "randomInteger",
-  "randomWeighted",
-  "randomNormal",
-  "randomBeta",
-  "randomPert",
-]);
-
 interface PlanRandomSites {
   readonly sites: readonly RandomSite[];
   readonly ids: ReadonlySet<string>;
@@ -367,9 +354,8 @@ function drawsTimerDuration(
 
 function drawKindOf(node: ExpressionPlan): RandomDrawKind | null {
   if (node.kind === "call") {
-    if (node.callee.kind === "identifier" && RANDOM_BUILTINS.has(node.callee.name))
-      // EVIDENCE: invariant: each random builtin is named like its draw kind.
-      return node.callee.name as RandomDrawKind;
+    if (node.callee.kind === "identifier" && isRandomFunction(node.callee.name))
+      return node.callee.name;
     if (node.callee.kind === "property" && node.callee.name === "shuffle") return "shuffle";
     return null;
   }
@@ -782,9 +768,9 @@ function resampledNatural(support: RandomSupport, drawId: number): RandomNatural
   const draw: PrimitiveDraw = () => nextXorShift32(rng);
   switch (support.kind) {
     case "unit":
-      return { kind: "number", value: draw() };
+      return naturalOf(RANDOM_CONTRACTS.random.sample([], draw));
     case "chance":
-      return { kind: "boolean", value: sampleChance(draw, support.percent) };
+      return naturalOf(RANDOM_CONTRACTS.chance.sample([support.percent], draw));
     case "integer":
       return {
         kind: "number",
@@ -797,27 +783,21 @@ function resampledNatural(support: RandomSupport, drawId: number): RandomNatural
     case "order":
       return { kind: "order", order: sampleOrder(draw, support.items.length) };
     case "normal":
-      return distributionNatural("randomNormal", [support.mean, support.spread], draw);
+      return naturalOf(RANDOM_CONTRACTS.randomNormal.sample([support.mean, support.spread], draw));
     case "beta":
-      return distributionNatural("randomBeta", [support.alpha, support.beta], draw);
+      return naturalOf(RANDOM_CONTRACTS.randomBeta.sample([support.alpha, support.beta], draw));
     case "pert":
-      return distributionNatural(
-        "randomPert",
-        [support.min, support.mostLikely, support.max],
-        draw,
+      return naturalOf(
+        RANDOM_CONTRACTS.randomPert.sample([support.min, support.mostLikely, support.max], draw),
       );
   }
 }
 
-function distributionNatural(
-  name: "randomNormal" | "randomBeta" | "randomPert",
-  numbers: readonly number[],
-  draw: PrimitiveDraw,
-): RandomNatural {
-  const result = NUMERIC_FUNCTIONS.get(name)!.apply(numbers, {}, draw);
-  return typeof result === "number"
-    ? { kind: "number", value: result }
-    : { kind: "failure", code: result.code, message: result.failure };
+/** The natural result of a random function's draw, from its sample (see `RANDOM_CONTRACTS`). */
+export function naturalOf(sample: number | boolean | NumericFailure): RandomNatural {
+  if (typeof sample === "number") return { kind: "number", value: sample };
+  if (typeof sample === "boolean") return { kind: "boolean", value: sample };
+  return { kind: "failure", code: sample.code, message: sample.failure };
 }
 
 /** The support a draw kind can have. */
@@ -888,7 +868,11 @@ function parseSupport(kind: RandomDrawKind, value: unknown): RandomSupport | str
       if (has()) support = { kind: "unit" };
       break;
     case "chance":
-      if (has("percent") && finite(percent) && isPercentage(percent))
+      if (
+        has("percent") &&
+        finite(percent) &&
+        numbersProblem(RANDOM_CONTRACTS.chance, [percent]) === undefined
+      )
         support = { kind: "chance", percent };
       break;
     case "integer":
@@ -906,17 +890,30 @@ function parseSupport(kind: RandomDrawKind, value: unknown): RandomSupport | str
         Array.isArray(weights) &&
         weights.length === candidates.length
       ) {
-        const checked = weights.filter((weight): weight is number => finite(weight) && weight >= 0);
-        if (checked.length === weights.length && checked.some((weight) => weight > 0))
+        const { weightProblem, weightsProblem } = RANDOM_CONTRACTS.randomWeighted;
+        const checked = weights.filter(
+          (weight): weight is number => finite(weight) && weightProblem(weight) === undefined,
+        );
+        if (checked.length === weights.length && weightsProblem(checked) === undefined)
           support = { kind: "weighted", candidates, weights: checked };
       }
       break;
     case "normal":
-      if (has("mean", "spread") && finite(mean) && finite(spread) && spread >= 0)
+      if (
+        has("mean", "spread") &&
+        finite(mean) &&
+        finite(spread) &&
+        numbersProblem(RANDOM_CONTRACTS.randomNormal, [mean, spread]) === undefined
+      )
         support = { kind: "normal", mean, spread };
       break;
     case "beta":
-      if (has("alpha", "beta") && finite(alpha) && finite(beta) && alpha > 0 && beta > 0)
+      if (
+        has("alpha", "beta") &&
+        finite(alpha) &&
+        finite(beta) &&
+        numbersProblem(RANDOM_CONTRACTS.randomBeta, [alpha, beta]) === undefined
+      )
         support = { kind: "beta", alpha, beta };
       break;
     case "pert":
@@ -925,8 +922,7 @@ function parseSupport(kind: RandomDrawKind, value: unknown): RandomSupport | str
         finite(min) &&
         finite(mostLikely) &&
         finite(max) &&
-        min <= mostLikely &&
-        mostLikely <= max
+        numbersProblem(RANDOM_CONTRACTS.randomPert, [min, mostLikely, max]) === undefined
       )
         support = { kind: "pert", min, mostLikely, max };
       break;

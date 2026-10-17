@@ -1,3 +1,4 @@
+import type { DeveloperWarningCode, RuntimeErrorCode } from "../diagnostic-codes.js";
 import { executeFileStore } from "./actions/file-store.js";
 import { executeLock } from "./actions/lock.js";
 import { exactDurationMilliseconds } from "./temporal-operations.js";
@@ -25,7 +26,7 @@ import {
   instructionSourcePath,
   mainSourceSpan,
 } from "../plan/model.js";
-import { addTag, readTagText, type Tag } from "../tags.js";
+import { addTag, conflictingTagMessage, notATagMessage, readTagText, type Tag } from "../tags.js";
 import {
   messageMarkupVisibleText,
   parseMessageMarkup,
@@ -46,13 +47,14 @@ import { rangeLength, rangeStartProblem, rangeText } from "../range-checks.js";
 import { UNIT_AMOUNT_RULE, unitAmountFix } from "../operand-rules.js";
 import { buttonBackgroundMessage } from "../choice-rules.js";
 import {
-  buttonTimeoutMessage,
   isDelayLength,
   isRoundLength,
   negativeDelayMessage,
   pacingMessage,
   sceneTimeMessage,
+  timeoutLengthMessage,
   timeoutSceneTimeMessage,
+  unmeasurableLengthMessage,
   zeroRoundMessage,
 } from "../delay-rules.js";
 import {
@@ -249,7 +251,7 @@ import { cloneMedia, type RuntimeMediaRepeatSnapshot } from "./media.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
 import { cloneTimer } from "./timers.js";
 import { assertValueType, describeShownValue, shownChoice } from "./value-types.js";
-import { numberFromText } from "../conversions.js";
+import { conversionTo, numberFromText } from "../conversions.js";
 import {
   describeRuntimeValue,
   isDate,
@@ -905,7 +907,10 @@ function executePlannedInstruction(
           instruction.span,
         );
       }
-      const value = evaluator.evaluateStartValue(instruction.value);
+      const value = evaluator.evaluateStartValue(
+        { kind: "global", name: instruction.name },
+        instruction.value,
+      );
       if (instruction.typeCheck !== undefined)
         assertValueType(value, instruction.typeCheck, instruction.value.span);
       snapshot.globals.push({
@@ -949,7 +954,10 @@ function executePlannedInstruction(
             );
           }
           const propertyValue = cloneCapturedSerializableValue(
-            stagedEvaluator.evaluateStartValue(property.value),
+            stagedEvaluator.evaluateStartValue(
+              { kind: "speaker", name: instruction.name },
+              property.value,
+            ),
           );
           if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
             throw fault("TSR050", notSkippableFlag(propertyValue), property.span);
@@ -1675,7 +1683,7 @@ interface MaterializedInteractionUi {
   /** The prose a form's speaker says as it opens. */
   readonly prose?: string;
   /** A developer warning about how it opens, such as a `prefill:` that no button's value matches. */
-  readonly warning?: { readonly code: string; readonly message: string };
+  readonly warning?: { readonly code: DeveloperWarningCode; readonly message: string };
   readonly stagedWrites: readonly {
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
@@ -2066,15 +2074,15 @@ function temporalPrefill(
         ? isTime(value) && value
         : isDateTime(value) && value;
   if (answer !== false) return temporalAnswerText(answer);
-  const [command, noun, conversion] =
+  const [command, noun] =
     kind === "date"
-      ? ["askDate", "a date", "toDate"]
+      ? ["askDate", "a date"]
       : kind === "time"
-        ? ["askTime", "a time", "toTime"]
-        : ["askDateTime", "a date and time", "toDateTime"];
+        ? ["askTime", "a time"]
+        : ["askDateTime", "a date and time"];
   throw fault(
     "TSR052",
-    `The prefill of ${command} must be ${noun}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversion}(...).` : ""}`,
+    `The prefill of ${command} must be ${noun}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversionTo(kind)}(...).` : ""}`,
     span,
   );
 }
@@ -2876,7 +2884,12 @@ function formTimeoutMs(timeoutMs: number, snapshot: RuntimeSnapshot, span: Sourc
     throw fault(
       "TSR052",
       isValidSessionTime(deadlineMs)
-        ? `This askForm timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
+        ? unmeasurableLengthMessage(
+            "This askForm timeout",
+            timeoutMs,
+            snapshot.currentSessionTimeMs,
+            "timeout",
+          )
         : timeoutSceneTimeMessage("askForm"),
       span,
     );
@@ -2900,7 +2913,7 @@ function buttonTimeoutMs(
       "TSR050",
       typeof value === "number"
         ? `A showButton timeout is a duration, but this is ${describeShownValue(value)}. ${durationFix(value, "30 s")}`
-        : buttonTimeoutMessage(describeShownValue(value)),
+        : timeoutLengthMessage("showButton", describeShownValue(value)),
       span,
     );
   }
@@ -2916,7 +2929,12 @@ function buttonTimeoutMs(
     throw fault(
       "TSR050",
       isValidSessionTime(deadlineMs)
-        ? `This showButton timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
+        ? unmeasurableLengthMessage(
+            "This showButton timeout",
+            timeoutMs,
+            snapshot.currentSessionTimeMs,
+            "timeout",
+          )
         : timeoutSceneTimeMessage("showButton"),
       span,
     );
@@ -3411,7 +3429,7 @@ function failForBudget(
       : `The script reached its ${steps}-step limit while running this loop. Add a wait, or check the loop's condition.`;
   failSnapshot(
     snapshot,
-    { code: "TSR037", message, span: copySpan(span) },
+    { code: "TSR037" satisfies RuntimeErrorCode, message, span: copySpan(span) },
     instructionSourcePath(plan, index),
     events,
   );
@@ -3509,7 +3527,12 @@ export function futureDeadline(
   if (durationMs > 0 && deadlineMs <= snapshot.currentSessionTimeMs) {
     throw fault(
       "TSR050",
-      `This ${command} of ${formatDuration(durationMs)} is too short to measure this late in the scene. Use a longer duration.`,
+      unmeasurableLengthMessage(
+        `This ${command}`,
+        durationMs,
+        snapshot.currentSessionTimeMs,
+        "duration",
+      ),
       span,
     );
   }
@@ -4097,7 +4120,7 @@ export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan):
   throw fault("TSR050", timerDisplayMessage(shownChoice(value)), span);
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }
 
@@ -4115,21 +4138,17 @@ function captureTags(value: SerializableRuntimeValue, span: SourceSpan): readonl
   }
   const tags = new Map<string, Tag>();
   for (const item of value.items) {
-    const tag = typeof item === "string" ? readTagText(item) : null;
-    if (tag === null) {
+    if (typeof item !== "string") {
       throw fault(
         "TSR083",
-        `takePhoto(tags:) takes tags such as "bedroom" or "punishment: 4", but it holds ${typeof item === "string" ? `'${item}'` : describeRuntimeValue(item)}.`,
+        `takePhoto(tags:) takes tags such as "bedroom" or "punishment: 4", but it holds ${describeRuntimeValue(item)}.`,
         span,
       );
     }
-    if (addTag(tags, tag) === "conflict") {
-      throw fault(
-        "TSR083",
-        `takePhoto(tags:) gives the tag '${tag.name}' two different numbers. Keep one number for each tag.`,
-        span,
-      );
-    }
+    const tag = readTagText(item);
+    if (tag === null) throw fault("TSR083", notATagMessage(item), span);
+    if (addTag(tags, tag) === "conflict")
+      throw fault("TSR083", conflictingTagMessage(tags.get(tag.name)!, tag), span);
   }
   return [...tags.values()]
     .sort((left, right) => (left.name < right.name ? -1 : 1))

@@ -6,6 +6,8 @@ import { isValidInteractionPrefill } from "../interaction-answers.js";
 import { validImageRequestFields } from "../image-input.js";
 import { canonicalWebUrl } from "../web-url.js";
 import { LOCK_CALLS } from "../capture-call.js";
+import { conversionWaitsForFiles, isConversion, takesDefault, takesFiles } from "../conversions.js";
+import { ANGLE_UNITS, CALENDAR_DURATION_UNITS, DURATION_UNITS } from "../language-facts.js";
 import { compileRegex, isCanonicalRegexFlags } from "../regex.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -77,10 +79,10 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
     return invalidPlan("TSC002", "Instruction plan must be an object.", "$.");
   }
   if (value.format !== INSTRUCTION_PLAN_FORMAT) {
-    errors.push(planError("TSC001", "Unsupported instruction-plan format.", "$.format"));
+    errors.push(planError("TSC010", "Unsupported instruction-plan format.", "$.format"));
   }
   if (value.version !== INSTRUCTION_PLAN_VERSION) {
-    errors.push(planError("TSC001", "Unsupported instruction-plan version.", "$.version"));
+    errors.push(planError("TSC010", "Unsupported instruction-plan version.", "$.version"));
   }
   // After the revision checks, so another revision's fields report that revision as unsupported first.
   rejectUnknownFields(value, PLAN_FIELDS, "$", errors);
@@ -1255,23 +1257,17 @@ function validateFileStoreInstruction(
     return;
   }
   const call = value.call;
-  if (
-    call !== "fileFromBase64" &&
-    call !== "fileToBase64" &&
-    call !== "hashFile" &&
-    call !== "toJson" &&
-    call !== "fromJson"
-  ) {
+  const conversion = typeof call === "string" && isConversion(call) && takesFiles(call);
+  if (call !== "fileFromBase64" && call !== "fileToBase64" && call !== "hashFile" && !conversion) {
     errors.push(planError("TSC002", "File store call is invalid.", `${path}.call`));
     return;
   }
-  const takesDefault = call === "fileFromBase64" || call === "fromJson";
-  const takesFiles = call === "toJson" || call === "fromJson";
-  if (takesDefault !== (value.defaultTemporary !== null))
+  const defaulted = call === "fileFromBase64" || (conversion && takesDefault(call));
+  if (defaulted !== (value.defaultTemporary !== null))
     errors.push(
       planError("TSC002", `The default of ${call}(...) is invalid.`, `${path}.defaultTemporary`),
     );
-  else if (takesDefault)
+  else if (defaulted)
     validateDefaultTemporary(
       value.defaultTemporary,
       value.destinationTemporary,
@@ -1279,7 +1275,7 @@ function validateFileStoreInstruction(
       temporaryCount,
       errors,
     );
-  if (!takesFiles && value.files !== null)
+  if (!conversion && value.files !== null)
     errors.push(planError("TSC002", `${call}(...) takes no files:.`, `${path}.files`));
   for (const name of ["value", "files"] as const) {
     const operand = value[name];
@@ -2585,16 +2581,17 @@ function validateExpressionNode(
           planError("TSC002", "takePhoto() must be lowered to a capture instruction.", path),
         );
       }
-      // The file functions, and `toJson` and `fromJson` unless a literal `files: false` keeps files out, may wait for
-      // the Player's file store; they lower to a file store instruction.
+      // The file functions, and a conversion that takes `files:` unless a literal `files: false` keeps files out, may
+      // wait for the Player's file store; they lower to a file store instruction.
       if (
         isRecord(value.callee) &&
         value.callee.kind === "identifier" &&
         (value.callee.name === "fileFromBase64" ||
           value.callee.name === "fileToBase64" ||
           value.callee.name === "hashFile" ||
-          ((value.callee.name === "toJson" || value.callee.name === "fromJson") &&
-            !keepsFilesOut(value.arguments)))
+          (typeof value.callee.name === "string" &&
+            isConversion(value.callee.name) &&
+            conversionWaitsForFiles(value.callee.name, keepsFilesOut(value.arguments))))
       ) {
         errors.push(
           planError(
@@ -2676,14 +2673,14 @@ function validateExpressionNode(
     case "unit":
       if (
         value.calendar === true
-          ? !isOneOf(value.unit, ["d", "w", "mo", "y"])
+          ? !isOneOf(value.unit, CALENDAR_DURATION_UNITS)
           : value.calendar !== false || !isOneOf(value.unit, DURATION_UNITS)
       )
         errors.push(planError("TSC002", "Duration unit is invalid.", `${path}.unit`));
       pending.push({ value: value.operand, path: `${path}.operand`, assignmentTarget: false });
       return;
     case "angleUnit":
-      if (!isOneOf(value.unit, ["deg", "rad"]))
+      if (!isOneOf(value.unit, ANGLE_UNITS))
         errors.push(planError("TSC002", "Angle unit is invalid.", `${path}.unit`));
       pending.push({ value: value.operand, path: `${path}.operand`, assignmentTarget: false });
       return;
@@ -2922,8 +2919,6 @@ function validateCallArguments(
   });
 }
 
-const DURATION_UNITS = ["ms", "s", "min", "h", "d", "w"] as const;
-
 function validateDurationUnit(value: unknown, path: string, errors: PlanValidationError[]): void {
   if (value !== null && !isOneOf(value, DURATION_UNITS)) {
     errors.push(planError("TSC002", "Duration unit is invalid.", path));
@@ -3053,7 +3048,7 @@ function invalidPlan(
   return Object.freeze({ valid: false, errors: Object.freeze([planError(code, message, path)]) });
 }
 
-/** Whether the arguments of a `toJson` or `fromJson` call hold a literal `files: false`. */
+/** Whether the arguments of a call of a conversion that takes `files:` hold a literal `files: false`. */
 function keepsFilesOut(callArguments: unknown): boolean {
   return (
     Array.isArray(callArguments) &&

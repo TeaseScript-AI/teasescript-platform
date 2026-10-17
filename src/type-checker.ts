@@ -1,3 +1,4 @@
+import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import type {
   ObjectLiteral,
   AssignmentStatement,
@@ -90,8 +91,22 @@ import {
   imageFilterTextProblem,
 } from "./image-input.js";
 import { evaluateTagSteps, passesTagList } from "./tag-query.js";
-import { addTag, normalizeTagName, readTagText, type Tag } from "./tags.js";
-import { CONVERSION_RESULTS, isTemporalConversionResult, numberFromText } from "./conversions.js";
+import {
+  addTag,
+  CONFLICTING_TAG_CODE,
+  conflictingTagMessage,
+  normalizeTagName,
+  notATagMessage,
+  readTagText,
+  type Tag,
+} from "./tags.js";
+import {
+  conversionTo,
+  CONVERSIONS,
+  isConversion,
+  numberFromText,
+  type Conversion,
+} from "./conversions.js";
 import {
   builtinCallProblems,
   builtinShapeProblems,
@@ -112,8 +127,18 @@ import {
   RANGE_LIST_FIX,
   type OperationProblem,
 } from "./operation-checks.js";
-import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
-import { NUMERIC_FUNCTIONS, percentageFailure, type NumericArgument } from "./numeric-functions.js";
+import {
+  CORE_RUNTIME_BUILTINS,
+  PLATFORM_STANDARD_LIBRARY_PRELUDE,
+  type ConversionName,
+  type RandomFunctionName,
+} from "./language-facts.js";
+import {
+  NUMERIC_FUNCTIONS,
+  type NumberSignature,
+  type NumericArgument,
+} from "./numeric-functions.js";
+import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "./random-functions.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
   ANGLE_FUNCTIONS,
@@ -122,7 +147,12 @@ import {
   formatAngle,
   type StoredAngle,
 } from "./angle.js";
-import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
+import {
+  LIST_FUNCTIONS,
+  listFunctionCheck,
+  weightedChoiceCheck,
+  type ListFunctionCheck,
+} from "./list-function-checks.js";
 import { rangeListLengthProblem } from "./runtime/collection-operations.js";
 import { describeShownValue, shownChoice } from "./runtime/value-types.js";
 import {
@@ -139,7 +169,6 @@ import {
   cameraPlacementMessage,
   FINISH_NEVER_RUNS_MESSAGE,
   fileReferenceRule,
-  handleArgumentsMessage,
   handleMemberMessage,
   hasArgumentlessMethods,
   isCameraPlacement,
@@ -174,7 +203,6 @@ import {
 } from "./operand-rules.js";
 import { withoutNegativeZero } from "./conversions.js";
 import {
-  buttonTimeoutMessage,
   isDelayLength,
   isRoundLength,
   isTimeoutLength,
@@ -182,6 +210,7 @@ import {
   pacingMessage,
   reachesSceneTime,
   sceneTimeMessage,
+  timeoutLengthMessage,
   timeoutSceneTimeMessage,
   zeroRoundMessage,
 } from "./delay-rules.js";
@@ -223,12 +252,21 @@ import {
   type StaticScalar,
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
+import { startValueMessage, startValueOwner } from "./start-value-rules.js";
+import {
+  argumentShapeProblem,
+  dictArgumentsProblem,
+  NO_ARGUMENTS,
+  scriptArgumentCountMessage,
+  temporalArgumentsMessage,
+  unknownNamedArgumentMessage,
+} from "./argument-rules.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
 import {
   missingPropertyMessage,
-  missingSpeakerFieldMessage,
+  duplicateEntryMessage,
   missingSpeakerPropertyMessage,
   misspelledPropertyHint,
 } from "./object-properties.js";
@@ -408,7 +446,6 @@ export type RuntimeCheckSite =
   | LoadExpression;
 
 const typeCode = {
-  invalidAssignment: "TSV004",
   duplicateProperty: "TSV007",
   invalidRangeOperand: "TSV010",
   invalidRepeatCount: "TSV011",
@@ -416,7 +453,6 @@ const typeCode = {
   argumentCount: "TSV020",
   unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
-  invalidTimer: "TSV033",
   invalidTimerHandleMember: "TSV034",
   mixedDurationOperands: "TSV035",
   invalidMedia: "TSV036",
@@ -434,11 +470,16 @@ const typeCode = {
   visibleOverflow: "TSV050",
   emptyTagQuery: "TST002",
   invalidCaptureTag: "TST005",
+  conflictingTag: CONFLICTING_TAG_CODE,
   invalidTagQueryFrom: "TST006",
   randomStartValue: "TSV055",
   invalidCameraHandleMember: "TSV059",
   unusedFallback: "TSV062",
-} as const;
+  changedCopy: "TSV067",
+  invalidTimerDisplay: "TSV068",
+} as const satisfies Record<string, OwnedDiagnosticCode<"type checker">>;
+
+type TypeErrorCode = OwnedDiagnosticCode<"type checker", "error">;
 
 /**
  * Checks that every variable, list or set element, object property, function parameter, and function result keeps one
@@ -1970,7 +2011,7 @@ class TypeChecker {
     this.#reachable = true;
     if (declaration.kind === "globalStatement") {
       yield* compileChild(this.#letTask(declaration, this.#project));
-      this.#rejectRandomSelection(declaration.initial);
+      this.#rejectRandomSelection(declaration.initial, declaration);
       return;
     }
     // A custom property keeps the type of its first value, as a property of an object (V30 §37), in an object that the
@@ -2013,7 +2054,7 @@ class TypeChecker {
         this.diagnostics.push(...presentationPropertyDiagnostics(name, property.value));
       const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
       this.#checkSpeakerProperty(name, property.value, type);
-      this.#rejectRandomSelection(property.value);
+      this.#rejectRandomSelection(property.value, declaration);
       if (!this.#keepsType(name)) continue;
       properties.set(
         name,
@@ -2092,11 +2133,8 @@ class TypeChecker {
         // A store that the compiler cannot check may give any speaker a property too.
         const custom = [...new Set([...properties, ...this.#unchecked])];
         return missingSpeakerPropertyMessage(
-          speaker ?? this.#onlySpeaker(),
-          name,
-          custom,
-          [...custom, ...SPEAKER_FIELDS],
-          example,
+          { speaker: speaker ?? this.#onlySpeaker(), name, sources: [], example },
+          { kind: "never", properties: custom, names: [...custom, ...SPEAKER_FIELDS] },
         );
       },
     );
@@ -2292,7 +2330,7 @@ class TypeChecker {
    * Reports a start value that would select a random element: a list shown in `${...}`, or `.random`. A start value is
    * set up before the story runs and uses no random numbers (ADR 0022 §6); the runtime rejects a value of unknown type.
    */
-  #rejectRandomSelection(value: Expression): void {
+  #rejectRandomSelection(value: Expression, owner: GlobalStatement | SpeakerDeclaration): void {
     const work = [value];
     while (work.length > 0) {
       const expression = work.pop()!;
@@ -2303,7 +2341,7 @@ class TypeChecker {
       )
         this.#report(
           typeCode.randomStartValue,
-          "A start value cannot select a random element with '.random': it is set up at the start of the session, before the story runs. Pick the element in the story instead.",
+          startValueMessage(startValueOwner(owner), { kind: "random" }),
           expression.span,
         );
       if (expression.kind === "stringLiteral")
@@ -2311,7 +2349,7 @@ class TypeChecker {
           if (part.kind === "stringInterpolation" && this.#mayBe(part.expression, isList))
             this.#report(
               typeCode.randomStartValue,
-              "A start value cannot show a list in '${...}', which selects a random element: it is set up at the start of the session, before the story runs. Show one element, as in '${items[0]}'.",
+              startValueMessage(startValueOwner(owner), { kind: "shownList" }),
               part.expression.span,
             );
       for (const child of expressionChildren(expression)) work.push(child);
@@ -4698,7 +4736,7 @@ class TypeChecker {
           if (typeof text === "string" && keys.has(text))
             this.#report(
               typeCode.duplicateProperty,
-              `Duplicate dict key ${JSON.stringify(text)}. Each key may appear only once. Remove one of the entries.`,
+              duplicateEntryMessage("dict", text),
               entry.key.span,
             );
           if (typeof text === "string") keys.add(text);
@@ -5113,6 +5151,7 @@ class TypeChecker {
         this.#reportNonDuration(value, type, "An askForm timeout is a duration", "30 s", () =>
           unitFix(value),
         );
+        this.#checkTimeoutLength("askForm", value);
       } else if (name.name === "onTimeout")
         this.#reportUnless(
           type,
@@ -5610,15 +5649,11 @@ class TypeChecker {
         .join("");
       const tag = readTagText(text);
       if (tag === null) {
-        this.#report(
-          typeCode.invalidCaptureTag,
-          `'${text}' is not a tag: use lowercase letters a–z, digits, and hyphens, with an optional number, such as "punishment: 4".`,
-          element.span,
-        );
+        this.#report(typeCode.invalidCaptureTag, notATagMessage(text), element.span);
       } else if (addTag(seen, tag) === "conflict") {
         this.#report(
-          typeCode.invalidCaptureTag,
-          `The tag '${tag.name}' has two different numbers.`,
+          typeCode.conflictingTag,
+          conflictingTagMessage(seen.get(tag.name)!, tag),
           element.span,
         );
       }
@@ -6222,6 +6257,12 @@ class TypeChecker {
     );
   }
 
+  /** The number `expression` is known to have at compile time (see `#known`). */
+  #knownNumber(expression: Expression): number | undefined {
+    const known = this.#known(expression);
+    return typeof known === "number" ? known : undefined;
+  }
+
   /**
    * The number, duration, or angle `expression` is known to have at compile time, folded once per expression from its
    * operands' known values. Iterative, so a long chain of steps does not deepen the native stack.
@@ -6540,11 +6581,14 @@ class TypeChecker {
           const before = this.diagnostics.length;
           this.#report(
             typeCode.invalidOperand,
-            missingSpeakerFieldMessage(
-              check.speaker ?? this.#onlySpeaker(),
-              check.name,
-              fieldSources(check.name),
-              check.speaker ?? this.#exampleSpeaker(),
+            missingSpeakerPropertyMessage(
+              {
+                speaker: check.speaker ?? this.#onlySpeaker(),
+                name: check.name,
+                sources: fieldSources(check.name),
+                example: check.speaker ?? this.#exampleSpeaker(),
+              },
+              { kind: "never", properties: [], names: [] },
             ),
             check.span,
           );
@@ -6955,12 +6999,19 @@ class TypeChecker {
     if (passing.length === all.length) {
       const handle = resolved(all[0]!).kind;
       const handles = all.every((member) => hasArgumentlessMethods(resolved(member).kind));
-      if (handles && hasArgumentlessMethods(handle) && expression.arguments.length > 0)
-        this.#report(
-          handleMemberCode(handle),
-          handleArgumentsMessage(handle, method),
-          callee.property.span,
+      if (handles && hasArgumentlessMethods(handle)) {
+        const named = expression.arguments.flatMap((argument) =>
+          argument.kind === "namedArgument" ? [argument.name.name] : [],
         );
+        const problem = argumentShapeProblem(
+          method,
+          NO_ARGUMENTS,
+          expression.arguments.length - named.length,
+          named,
+        );
+        if (problem !== undefined)
+          this.#report(handleMemberCode(handle), problem.message, callee.property.span);
+      }
       const textual = TEXT_MEMBERS.has(method) || method === "join";
       const collection = all.some((member) => {
         const kept = resolved(member);
@@ -7007,9 +7058,7 @@ class TypeChecker {
       if (all.every(isTemporal) && expression.arguments.length > 0)
         this.#report(
           typeCode.argumentCount,
-          method.startsWith("format")
-            ? `${method}() takes no arguments: it shows the value in the player's own date and time format.`
-            : `${method}() takes no arguments.`,
+          temporalArgumentsMessage(method, expression.arguments.length),
           callee.property.span,
         );
       return all.length === 1 ? results[0]! : union(results.map((result) => result!));
@@ -7241,6 +7290,33 @@ class TypeChecker {
     values: readonly StaticType[],
   ): StaticType {
     const numeric = NUMERIC_FUNCTIONS.get(name)!;
+    const { checked, inputs, named } = this.#numberArguments(name, numeric, expression, values);
+    if (checked && [...inputs, ...Object.values(named)].every((one) => one.known !== undefined)) {
+      const result = numeric.apply(
+        inputs.map((one) => one.known!),
+        Object.fromEntries(Object.entries(named).map(([key, one]) => [key, one.known!])),
+      );
+      if (typeof result !== "number")
+        this.#report(typeCode.invalidOperand, result.failure, expression.span);
+    }
+    const result = numeric.result(inputs, named);
+    return result === "integer" ? INTEGER_TYPE : result === "number" ? NUMBER_TYPE : UNKNOWN_TYPE;
+  }
+
+  /**
+   * Checks the arguments of a function whose every argument is a number, and gives what the compiler knows about them:
+   * the input of each positional parameter and of each named argument, and whether the call has no problem.
+   */
+  #numberArguments(
+    name: string,
+    signature: NumberSignature,
+    expression: CallExpression,
+    values: readonly StaticType[],
+  ): {
+    readonly checked: boolean;
+    readonly inputs: readonly NumericArgument[];
+    readonly named: Readonly<Record<string, NumericArgument>>;
+  } {
     const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
     const fitting = problems.every((problem) => problem.kind === "invalidOperand");
     // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5,
@@ -7269,32 +7345,94 @@ class TypeChecker {
       };
     };
     const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
-    const inputs = numeric.parameters.map((_, index) =>
+    const inputs = signature.parameters.map((_, index) =>
       input(positional[index], expression.arguments.indexOf(positional[index]!)),
     );
     const named: Record<string, NumericArgument> = {};
     expression.arguments.forEach((item, index) => {
       if (item.kind === "namedArgument") named[item.name.name] = input(item, index);
     });
-    const all = [...inputs, ...Object.values(named)];
-    if (problems.length === 0 && all.every((one) => one.known !== undefined)) {
-      const known = inputs.map((one) => one.known!);
-      // A random result is never computed here; only its arguments are checked.
-      const result =
-        numeric.random !== undefined
-          ? numeric.random(known)
-          : numeric.apply(
-              known,
-              Object.fromEntries(Object.entries(named).map(([key, one]) => [key, one.known!])),
-              () => {
-                throw new Error(`${name}(...) draws no random numbers.`);
-              },
-            );
-      if (result !== undefined && typeof result !== "number")
-        this.#report(typeCode.invalidOperand, result.failure, expression.span);
+    return { checked: problems.length === 0, inputs, named };
+  }
+
+  /**
+   * Checks a call of a random function and gives its result type (see `RANDOM_CONTRACTS`). A domain of its numbers is
+   * checked as the runtime checks it once the compiler can see the numbers it reads, whatever the call's other
+   * arguments are; a random result is never computed here.
+   */
+  #randomFunctionType(
+    name: RandomFunctionName,
+    expression: CallExpression,
+    values: readonly StaticType[],
+  ): StaticType {
+    const random: RandomFunction = RANDOM_CONTRACTS[name];
+    switch (random.takes) {
+      case "numbers": {
+        const { inputs } = this.#numberArguments(name, random, expression, values);
+        const positional = expression.arguments.filter(
+          (item) => item.kind === "positionalArgument",
+        );
+        // The first domain that fails, as at runtime; a domain of one number names it.
+        for (const domain of random.domains) {
+          const known = domain.reads.flatMap((position) => inputs[position]!.known ?? []);
+          if (known.length < domain.reads.length) continue;
+          const problem = domain.problem(known);
+          if (problem === undefined) continue;
+          const at = domain.reads.length === 1 ? positional[domain.reads[0]!]!.value : expression;
+          this.#report(typeCode.invalidOperand, problem, at.span);
+          break;
+        }
+        return random.result === "boolean" ? BOOLEAN_TYPE : NUMBER_TYPE;
+      }
+      case "range": {
+        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        this.#reportProblems(problems);
+        // A range's values are checked only when the call's shape is right.
+        if (problems.length === 0) {
+          const range = expression.arguments[0]!.value;
+          this.#reportUnless(
+            values[0]!,
+            (member) => member.kind === "range",
+            range,
+            `${name}(...) takes a range such as 1..=6`,
+          );
+          this.#checkDrawnRange(range, `${name}(range)`);
+        }
+        return INTEGER_TYPE;
+      }
+      case "choices":
+        return this.#listFunctionType(
+          expression,
+          values,
+          weightedChoiceCheck(
+            expression,
+            (item) => this.#typeOf(item),
+            (item) => this.#knownNumber(item),
+          ),
+        );
     }
-    const result = numeric.result(inputs, named);
-    return result === "integer" ? INTEGER_TYPE : result === "number" ? NUMBER_TYPE : UNKNOWN_TYPE;
+  }
+
+  /**
+   * Reports the problems of a call of a list function, after those of an argument that may be null, and gives its result
+   * type.
+   */
+  #listFunctionType(
+    expression: CallExpression,
+    values: readonly StaticType[],
+    check: ListFunctionCheck,
+  ): StaticType {
+    // An argument that may be null names the check first (ADR 0021 rule 1.9); the check uses its other members.
+    expression.arguments.forEach((item, index) => {
+      const all = members(values[index]!);
+      const passing = all.filter((member) => member.kind !== "null");
+      if (passing.length > 0 && passing.length < all.length)
+        this.#reportMayBe(item.value, NULL_TYPE, passing);
+    });
+    this.#reportProblems(check.problems);
+    for (const read of check.reads)
+      this.#noteMissingProperty(read.at, read.name, read.objects, read.at.span, read.message);
+    return check.type;
   }
 
   /**
@@ -7341,14 +7479,58 @@ class TypeChecker {
     return angleFunction.returns === "angle" ? ANGLE_TYPE : NUMBER_TYPE;
   }
 
+  /**
+   * Checks a call of a conversion and gives its result type (see `CONVERSIONS`): a value of its result type, or with a
+   * default that may be any value, or `null` too, the result or the default; what JSON holds is known only when the
+   * script runs.
+   */
+  #conversionType(
+    name: ConversionName,
+    expression: CallExpression,
+    values: readonly StaticType[],
+  ): StaticType {
+    const conversion: Conversion = CONVERSIONS[name];
+    const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+    this.#reportProblems(problems);
+    // Without a default, a call fails for anything but text, so a value that may be something else names the check
+    // first.
+    if (conversion.takes === "text" && conversion.fallback === null && problems.length === 0)
+      this.#reportUnless(
+        values[0]!,
+        (member) => isScalar(member, "string"),
+        expression.arguments[0]!.value,
+        `${name}(...) ${conversion.does}`,
+      );
+    if (conversion.result === "unknown") return UNKNOWN_TYPE;
+    const result = scalarType(conversion.result);
+    const fallback = expression.arguments.findIndex(
+      (item) => item.kind === "namedArgument" && item.name.name === "default",
+    );
+    const fallbackType = fallback === -1 ? undefined : values[fallback]!;
+    switch (conversion.fallback?.type) {
+      case "any":
+        return fallbackType === undefined ? result : union([result, fallbackType]);
+      case "optional":
+        return fallbackType !== undefined &&
+          isKnown(fallbackType) &&
+          isAssignable(optional(result), fallbackType)
+          ? union([result, fallbackType])
+          : optional(result);
+      default:
+        return result;
+    }
+  }
+
   /** Argument and result types of the implemented built-ins; injected host functions return unknown values. */
   #builtinType(
     name: string,
     expression: CallExpression,
     values: readonly StaticType[],
   ): StaticType {
+    if (isRandomFunction(name)) return this.#randomFunctionType(name, expression, values);
     if (NUMERIC_FUNCTIONS.has(name)) return this.#numericFunctionType(name, expression, values);
     if (ANGLE_FUNCTIONS.has(name)) return this.#angleFunctionType(name, expression, values);
+    if (isConversion(name)) return this.#conversionType(name, expression, values);
     // `min` and `max` of one argument that may be a list are list functions too (V30 §16).
     const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
     const list =
@@ -7356,28 +7538,17 @@ class TypeChecker {
       members(nonNullTypeForUse(this.#typeOf(positional[0]!.value))).some(
         (member) => !isKnown(member) || resolved(member).kind === "list",
       );
-    if (LIST_FUNCTIONS.has(name) || (MIN_MAX_NAMES.has(name) && list)) {
-      // An argument that may be null names the check first (ADR 0021 rule 1.9); the checks below use its other members.
-      expression.arguments.forEach((item, index) => {
-        const all = members(values[index]!);
-        const passing = all.filter((member) => member.kind !== "null");
-        if (passing.length > 0 && passing.length < all.length)
-          this.#reportMayBe(item.value, NULL_TYPE, passing);
-      });
-      const check = listFunctionCheck(
-        name,
+    if (LIST_FUNCTIONS.has(name) || (MIN_MAX_NAMES.has(name) && list))
+      return this.#listFunctionType(
         expression,
-        (item) => this.#typeOf(item),
-        (item) => {
-          const known = this.#known(item);
-          return typeof known === "number" ? known : undefined;
-        },
+        values,
+        listFunctionCheck(
+          name,
+          expression,
+          (item) => this.#typeOf(item),
+          (item) => this.#knownNumber(item),
+        ),
       );
-      this.#reportProblems(check.problems);
-      for (const read of check.reads)
-        this.#noteMissingProperty(read.at, read.name, read.objects, read.at.span, read.message);
-      return check.type;
-    }
     const argument = expression.arguments[0];
     const value = values[0];
     // A built-in that takes fixed positional arguments checks their values only when their number is right.
@@ -7385,35 +7556,6 @@ class TypeChecker {
     this.#reportProblems(shape);
     if (shape.length > 0) return FIXED_RESULTS.get(name) ?? UNKNOWN_TYPE;
     switch (name) {
-      case "random":
-        return NUMBER_TYPE;
-      case "chance":
-        if (argument !== undefined && value !== undefined) {
-          this.#reportUnless(
-            value,
-            isNumeric,
-            argument.value,
-            "chance(...) takes a percentage number",
-          );
-          // A percentage the compiler can see is checked as the runtime checks it.
-          const known = this.#known(argument.value);
-          const failure = typeof known === "number" ? percentageFailure(name, known) : undefined;
-          if (failure !== undefined)
-            this.#report(typeCode.invalidOperand, failure, argument.value.span);
-        }
-        return BOOLEAN_TYPE;
-      case "randomInteger":
-        if (argument !== undefined && value !== undefined) {
-          this.#reportUnless(
-            value,
-            (member) => member.kind === "range",
-            argument.value,
-            "randomInteger(...) takes a range such as 1..=6",
-          );
-          if (argument.kind === "positionalArgument")
-            this.#checkDrawnRange(argument.value, "randomInteger(range)");
-        }
-        return INTEGER_TYPE;
       case "min":
       case "max": {
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
@@ -7485,54 +7627,30 @@ class TypeChecker {
           result = result === undefined ? undefined : arithmeticType("+", result, number);
         return result !== undefined && isNumeric(result) ? result : UNKNOWN_TYPE;
       }
-      case "toString":
-      case "toNumber":
-      case "toInteger":
-      case "toBoolean":
-      case "toDate":
-      case "toTime":
-      case "toDateTime":
-      case "toAbsoluteDateTime":
-        this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
-        return scalarType(CONVERSION_RESULTS.get(name)!);
-      case "toJson":
-      case "fromJson":
-      case "toBase64":
-      case "fromBase64":
       case "fileFromBase64":
       case "fileToBase64":
       case "hashText":
       case "hashFile": {
-        // The JSON or Base64 text of a value or a stored file, what such text holds, and the SHA-256 of text or a stored
-        // file (V30 §13 and §33).
+        // A stored file from Base64 text, the Base64 text of a stored file, and the SHA-256 of text or a stored file
+        // (V30 §13 and §33).
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
         this.#reportProblems(problems);
-        if (
-          (name === "toBase64" ||
-            name === "fileToBase64" ||
-            name === "hashText" ||
-            name === "hashFile") &&
-          problems.length === 0
-        )
+        if (name !== "fileFromBase64" && problems.length === 0)
           this.#reportUnless(
             value!,
             (member) => isScalar(member, "string"),
             argument!.value,
-            name === "toBase64"
-              ? "toBase64(...) encodes text (string)"
-              : name === "hashText"
-                ? "hashText(...) hashes text (string)"
-                : name === "hashFile"
-                  ? "hashFile(...) hashes a stored file, which is text (string)"
-                  : "fileToBase64(...) reads a stored file, which is text (string)",
+            name === "hashText"
+              ? "hashText(...) hashes text (string)"
+              : name === "hashFile"
+                ? "hashFile(...) hashes a stored file, which is text (string)"
+                : "fileToBase64(...) reads a stored file, which is text (string)",
           );
-        // What JSON holds is known only when the script runs; Base64 holds text, a stored file is named by text, a hash
-        // is text, or the result is the default.
-        if (name === "fromJson") return UNKNOWN_TYPE;
+        // A stored file is named by text, a hash is text, or the result is the default.
         const fallback = expression.arguments.findIndex(
           (item) => item.kind === "namedArgument" && item.name.name === "default",
         );
-        return (name === "fromBase64" || name === "fileFromBase64") && fallback !== -1
+        return name === "fileFromBase64" && fallback !== -1
           ? union([STRING_TYPE, values[fallback]!])
           : STRING_TYPE;
       }
@@ -7560,19 +7678,6 @@ class TypeChecker {
         );
         return fallback !== -1 ? union([STRING_TYPE, values[fallback]!]) : STRING_TYPE;
       }
-      case "toRegex": {
-        // A regex from pattern text, or the default, a regex or null (V30 §8).
-        this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
-        const fallback = expression.arguments.findIndex(
-          (item) => item.kind === "namedArgument" && item.name.name === "default",
-        );
-        const fallbackType = fallback === -1 ? undefined : values[fallback]!;
-        return fallbackType !== undefined &&
-          isKnown(fallbackType) &&
-          isAssignable(optional(REGEX_TYPE), fallbackType)
-          ? union([REGEX_TYPE, fallbackType])
-          : optional(REGEX_TYPE);
-      }
       case "escapeMarkup":
         if (argument !== undefined && value !== undefined)
           this.#reportUnless(
@@ -7590,7 +7695,7 @@ class TypeChecker {
         if (expression.arguments.length > 0)
           this.#report(
             typeCode.argumentCount,
-            `${name}() takes no arguments.`,
+            temporalArgumentsMessage(name, expression.arguments.length),
             expression.arguments[0]!.value.span,
           );
         return name === "getDate"
@@ -7608,14 +7713,14 @@ class TypeChecker {
         if (positional !== 1)
           this.#report(
             typeCode.argumentCount,
-            `script(...) takes 1 argument (path), received ${positional}. Name a label with label:, as in script("rooms/hall.tease", label: "start").`,
+            scriptArgumentCountMessage(positional),
             expression.span,
           );
         for (const [index, item] of expression.arguments.entries()) {
           if (item.kind === "namedArgument" && item.name.name !== "label")
             this.#report(
               typeCode.unknownNamedArgument,
-              `script(...) has no parameter '${item.name.name}'. Its only named argument is 'label:'.`,
+              unknownNamedArgumentMessage("script", item.name.name, ["label"]),
               item.name.span,
             );
           else if (item.kind === "namedArgument" || positional === 1)
@@ -7802,34 +7907,20 @@ class TypeChecker {
    * `get(key, default: value)` a key and a `default:`. Returns whether they have that form.
    */
   #checkDictArguments(expression: CallExpression, method: string): boolean {
-    const positional = expression.arguments.filter(
-      (argument) => argument.kind === "positionalArgument",
-    );
     const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
-    const unknown = named.find((argument) => method !== "get" || argument.name.name !== "default");
-    if (unknown !== undefined) {
+    const problem = dictArgumentsProblem(
+      method,
+      expression.arguments.length - named.length,
+      named.map((argument) => argument.name.name),
+    );
+    if (problem === undefined) return true;
+    if (problem.kind === "unknownNamedArgument")
       this.#report(
         typeCode.unknownNamedArgument,
-        method === "get"
-          ? `get(...) has no parameter '${unknown.name.name}'. Its only named argument is 'default:'.`
-          : `${method}(...) takes no named arguments.`,
-        unknown.name.span,
+        problem.message,
+        named.find((argument) => argument.name.name === problem.name)!.name.span,
       );
-      return false;
-    }
-    const keys = method === "clear" ? 0 : 1;
-    if (positional.length === keys && (method !== "get" || named.length === 1)) return true;
-    this.#report(
-      typeCode.argumentCount,
-      method === "get"
-        ? named.length === 0 && positional.length === 1
-          ? "get(key, default: value) needs a 'default:' for a missing key. Read a key that must exist as dict[key]."
-          : "get(key, default: value) takes one key and a 'default:'."
-        : method === "clear"
-          ? "clear() takes no arguments."
-          : `${method}(key) takes one key.`,
-      expression.span,
-    );
+    else this.#report(typeCode.argumentCount, problem.message, expression.span);
     return false;
   }
 
@@ -8210,19 +8301,23 @@ class TypeChecker {
           "30 s",
           () => unitFix(option.value),
         );
-        const known = this.#knownLength(option.value);
-        const problem =
-          known === undefined
-            ? undefined
-            : !isTimeoutLength(known.milliseconds)
-              ? buttonTimeoutMessage(formatDuration(known))
-              : !reachesSceneTime(known.milliseconds)
-                ? timeoutSceneTimeMessage("showButton")
-                : undefined;
-        if (problem !== undefined)
-          this.#report(typeCode.invalidRepeatCount, problem, option.value.span);
+        this.#checkTimeoutLength("showButton", option.value);
       }
     }
+  }
+
+  /** Reports a known timeout of an interaction that cannot run: one of zero or less, or one beyond scene time. */
+  #checkTimeoutLength(command: "showButton" | "askForm", value: Expression): void {
+    const known = this.#knownLength(value);
+    const problem =
+      known === undefined
+        ? undefined
+        : !isTimeoutLength(known.milliseconds)
+          ? timeoutLengthMessage(command, formatDuration(known))
+          : !reachesSceneTime(known.milliseconds)
+            ? timeoutSceneTimeMessage(command)
+            : undefined;
+    if (problem !== undefined) this.#report(typeCode.invalidRepeatCount, problem, value.span);
   }
 
   #checkBackground(expression: Expression, type: StaticType): void {
@@ -8306,7 +8401,7 @@ class TypeChecker {
     expression: Expression,
     type: StaticType,
     accepts: (member: StaticType) => boolean,
-    code: string = typeCode.invalidOperand,
+    code: TypeErrorCode = typeCode.invalidOperand,
   ): boolean {
     const all = members(nonNullType(type)).filter(isKnown);
     const passing = all.filter(accepts);
@@ -8405,7 +8500,7 @@ class TypeChecker {
             resolved(type).kind === "null"
               ? EMPTY_FIELD_FIX
               : isScalar(type, "string")
-                ? ` Convert the text with ${TEMPORAL_CONVERSION_NAMES[kind]}(...).`
+                ? ` Convert the text with ${conversionTo(kind)}(...).`
                 : ""
           }`,
           expression.span,
@@ -8581,7 +8676,7 @@ class TypeChecker {
     rule: string,
     example: string,
     fix: () => string,
-    code: string = typeCode.invalidOperand,
+    code: TypeErrorCode = typeCode.invalidOperand,
   ): void {
     const value = nonNullTypeForUse(type);
     const unitless = isNumeric(value) || resolved(value).kind === "range";
@@ -8626,11 +8721,15 @@ class TypeChecker {
           operand,
           "A timer display is text (string)",
           undefined,
-          typeCode.invalidTimer,
+          typeCode.invalidTimerDisplay,
         );
         const text = isScalar(type, "string") ? staticVisibleText(operand) : undefined;
         if (text !== undefined && !isTimerDisplay(text))
-          this.#report(typeCode.invalidTimer, timerDisplayMessage(shownChoice(text)), operand.span);
+          this.#report(
+            typeCode.invalidTimerDisplay,
+            timerDisplayMessage(shownChoice(text)),
+            operand.span,
+          );
       }
     }
     if (timer.handler !== null) this.#pendHandler(timer.handler, null, scope);
@@ -8873,7 +8972,7 @@ class TypeChecker {
     scope: Scope,
     accepts: (type: StaticType) => boolean,
     rule: string,
-    code: string = typeCode.invalidOperand,
+    code: TypeErrorCode = typeCode.invalidOperand,
   ): CompileTask<StaticType> {
     const type = yield* compileChild(this.#expressionTask(expression, scope));
     this.#reportUnless(type, accepts, expression, rule, undefined, code);
@@ -8986,7 +9085,7 @@ class TypeChecker {
     expression: Expression,
     rule: string,
     fix: () => string = () => "",
-    code: string = typeCode.invalidOperand,
+    code: TypeErrorCode = typeCode.invalidOperand,
   ): void {
     const value = nonNullTypeForUse(type);
     if (!isKnown(value)) return;
@@ -9057,7 +9156,7 @@ class TypeChecker {
         node = node.object;
       } else {
         if (node.kind !== "identifier") {
-          this.#report(typeCode.invalidAssignment, changedCopyMessage(changed, node), changed.span);
+          this.#report(typeCode.changedCopy, changedCopyMessage(changed, node), changed.span);
           return;
         }
         break;
@@ -9065,7 +9164,7 @@ class TypeChecker {
     }
     if (computed === undefined) return;
     const owner = resolved(members(nonNullType(this.#typeOf(computed.object)))[0]!).kind;
-    this.#report(typeCode.invalidAssignment, computedCopyMessage(computed, owner), changed.span);
+    this.#report(typeCode.changedCopy, computedCopyMessage(computed, owner), changed.span);
   }
 
   /**
@@ -9109,7 +9208,7 @@ class TypeChecker {
     expression: Expression,
     failing: StaticType,
     passing: readonly StaticType[],
-    code: string = typeCode.invalidOperand,
+    code: TypeErrorCode = typeCode.invalidOperand,
   ): void {
     this.#report(
       code,
@@ -9166,7 +9265,7 @@ class TypeChecker {
     this.diagnostics.splice(start, this.diagnostics.length - start, ...kept);
   }
 
-  #report(code: string, message: string, span: SourceSpan): void {
+  #report(code: TypeErrorCode, message: string, span: SourceSpan): void {
     this.diagnostics.push(createDiagnostic(DiagnosticSeverity.Error, code, message, span));
   }
 }
@@ -10618,12 +10717,7 @@ function isChoiceValue(member: StaticType): boolean {
 const MIN_MAX_NAMES: ReadonlySet<string> = new Set(["min", "max"]);
 
 /** The result types of the built-ins that take fixed positional arguments. */
-const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
-  ["random", NUMBER_TYPE],
-  ["chance", BOOLEAN_TYPE],
-  ["randomInteger", INTEGER_TYPE],
-  ["escapeMarkup", STRING_TYPE],
-]);
+const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([["escapeMarkup", STRING_TYPE]]);
 
 /** Speaker properties shown as text: the display name and the parts it is derived from. */
 const SPEAKER_TEXT_PROPERTIES: ReadonlySet<string> = new Set([
@@ -10849,7 +10943,7 @@ function mixDescription(first: StaticType, other: StaticType): string {
 }
 
 /** The code of a problem with a member of a handle or permanent button (see `handle-rules.ts`). */
-function handleMemberCode(kind: StaticType["kind"]): string {
+function handleMemberCode(kind: StaticType["kind"]): TypeErrorCode {
   return kind === "timer"
     ? typeCode.invalidTimerHandleMember
     : kind === "media"
@@ -11316,11 +11410,10 @@ function conversionFix(
   if (isScalar(kept, "duration") && isNumeric(value)) return ` ${unitFix(expression)}`;
   if (isScalar(kept, "angle") && isNumeric(value)) return ` ${unitFix(expression, "deg")}`;
   // Date and time values are written as ISO text and converted.
-  const conversion = [...CONVERSION_RESULTS].find(
-    ([, result]) => isTemporalConversionResult(result) && isScalar(kept, result),
-  );
+  const conversion =
+    kept.kind === "scalar" && TEMPORAL_KINDS.has(kept.name) ? conversionTo(kept.name) : undefined;
   if (conversion !== undefined && isScalar(value, "string"))
-    return ` Convert the text with ${conversion[0]}(...).`;
+    return ` Convert the text with ${conversion}(...).`;
   if (isScalar(kept, "string") && (isNumeric(value) || isScalar(value, "boolean"))) {
     const label =
       expression === null ? null : (expressionLabel(expression) ?? literalText(expression));
@@ -11666,11 +11759,6 @@ function interactionResultType(
 }
 
 const TEMPORAL_ASKS = { date: "askDate", time: "askTime", datetime: "askDateTime" } as const;
-const TEMPORAL_CONVERSION_NAMES = {
-  date: "toDate",
-  time: "toTime",
-  datetime: "toDateTime",
-} as const;
 
 function scalarType(name: ScalarTypeName): StaticType {
   return { kind: "scalar", name };

@@ -17,6 +17,7 @@ import {
   type SerializableRuntimeObject,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
+import { isConversion } from "../conversions.js";
 import { isOneOf } from "../plan/validation-support.js";
 import { isCanonicalTagList } from "../tags.js";
 import { canonicalWebUrl } from "../web-url.js";
@@ -513,7 +514,8 @@ function validFileStoreAction(
   const count = Math.max(files.length, references.length);
   return (
     fileStoreOperation(owner.call) === action.operation &&
-    (owner.call === "toJson" || owner.call === "fromJson" ? true : count === 1) &&
+    // A conversion's value may hold many files.
+    (isConversion(owner.call) || count === 1) &&
     // `fromJson` keeps only files of a recognized type.
     (owner.call !== "fromJson" ||
       files.every((file: Record<string, unknown>) => isRecognizedFileType(String(file.type))))

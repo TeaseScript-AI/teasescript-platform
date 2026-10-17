@@ -2,6 +2,19 @@ import { editDistance } from "./form-fields.js";
 import { PLAYER } from "./speaker-terms.js";
 
 /**
+ * The message for a name that a literal gives twice (TSV007): a property of a speaker declaration or an object
+ * literal, or a key of a dict literal, also a computed key whose text the compiler knows.
+ */
+export function duplicateEntryMessage(
+  literal: "speaker" | "object" | "dict",
+  name: string,
+): string {
+  const entry =
+    literal === "dict" ? `dict key ${JSON.stringify(name)}` : `${literal} property '${name}'`;
+  return `Duplicate ${entry}. Each ${literal === "dict" ? "key" : "property"} may appear only once. Remove one of the entries.`;
+}
+
+/**
  * The message for a read of a property that an object does not have, naming the properties it has: at runtime
  * (TSR017) those of the object read, at compile time all that its objects can have (#845). `label` is how the source
  * spells the object, or `null`.
@@ -21,17 +34,64 @@ export function missingPropertyMessage(
 }
 
 /**
- * The message for a read of a custom property that no declaration or assignment gives a speaker (V30 §37): of the
- * speaker `speaker`, or of any declared speaker for `null`. `properties` are the custom properties it can have, and
- * `names` every property a misspelled name may be meant as; `example` is a speaker to declare the property in.
+ * A read of a property of a speaker (V30 §37): of `speaker`, or of any declared speaker for `null`. `sources` are the
+ * built-in fields of which the speaker needs one for a field, term, or name list, the field first, and none for a
+ * custom property; `example` is a speaker to declare the property in.
+ */
+export interface SpeakerPropertyRead {
+  readonly speaker: string | null;
+  readonly name: string;
+  readonly sources: readonly string[];
+  readonly example: string;
+}
+
+/** Why a read of a speaker's property may find none. */
+export type SpeakerPropertyGap =
+  /**
+   * No declaration or assignment gives it, as the type checker finds: `properties` are the custom properties the
+   * speaker can have, and `names` every property a misspelled name may be meant as.
+   */
+  | {
+      readonly kind: "never";
+      readonly properties: readonly string[];
+      readonly names: readonly string[];
+    }
+  /** No way to the read gives it first, as the speaker flow finds; `late` names a store that does not, or is empty. */
+  | { readonly kind: "notYet"; readonly late: string }
+  /** A way to the read gives it nothing, as the speaker flow finds: `missing` says which, `assign` where to assign it. */
+  | { readonly kind: "someWays"; readonly missing: string; readonly assign: string };
+
+/**
+ * The message for a read of a speaker's property that it may not have (TSV043): the type checker's when no
+ * declaration or assignment gives it, and the speaker flow's when a way to the read misses it.
  */
 export function missingSpeakerPropertyMessage(
-  speaker: string | null,
-  name: string,
-  properties: readonly string[],
-  names: readonly string[],
-  example: string,
+  read: SpeakerPropertyRead,
+  gap: SpeakerPropertyGap,
 ): string {
+  const { speaker, name, sources } = read;
+  const player = speaker === PLAYER;
+  if (gap.kind === "someWays")
+    return `Speaker '${speaker}' may have no '${name}' here: ${gap.missing}. Assign it ${gap.assign}${player ? "" : `, or give it a start value, as in 'speaker ${speaker} { ${name}: ... }'`}.`;
+  const fix = ` ${speakerPropertyFix(read)}`;
+  const quoted = alternatives(sources);
+  if (gap.kind === "notYet") {
+    const missing =
+      sources.length === 0
+        ? "nothing assigns it"
+        : player
+          ? `nothing copies the account or assigns ${quoted}`
+          : `nothing assigns ${quoted}`;
+    return `Speaker '${speaker}' has no '${name}' yet here: ${missing} before this line runs.${gap.late}${fix}`;
+  }
+  if (sources.length > 0) {
+    const subject =
+      speaker === null ? `No speaker has '${name}'` : `Speaker '${speaker}' has no '${name}'`;
+    const gives = player ? "no assignment or copy of the account" : "no declaration or assignment";
+    const needed = sources.length === 1 ? "one" : alternatives(sources);
+    return `${subject}: ${gives} gives ${speaker === null ? "a speaker" : "it"} ${needed}.${fix}`;
+  }
+  const { properties, names } = gap;
   const one = properties.length === 1;
   let found: string;
   if (speaker === null)
@@ -44,37 +104,19 @@ export function missingSpeakerPropertyMessage(
       properties.length === 0
         ? `Speaker '${speaker}' has no custom properties, so it has no '${name}'.`
         : `Speaker '${speaker}' has no property '${name}'. Its ${one ? "only custom property is" : "custom properties are"} ${nameList(properties)}.`;
-  return (
-    found +
-    (misspelledPropertyHint(name, names) ||
-      (speaker === PLAYER
-        ? ` Assign it before reading it, as in 'player.${name} = ...'.`
-        : ` Give the property a start value, as in 'speaker ${example} { ${name}: ... }', or assign it before reading it.`))
-  );
+  return found + (misspelledPropertyHint(name, names) || fix);
 }
 
-/**
- * The message for a read of a built-in field, term, or name list that no declaration or assignment gives a speaker
- * (V30 §37): of the speaker `speaker`, or of any declared speaker for `null`. `sources` are the fields of which the
- * speaker needs one, the field first; `example` is a speaker to declare it in.
- */
-export function missingSpeakerFieldMessage(
-  speaker: string | null,
-  name: string,
-  sources: readonly string[],
-  example: string,
-): string {
-  const subject =
-    speaker === null ? `No speaker has '${name}'` : `Speaker '${speaker}' has no '${name}'`;
-  const whom = speaker === null ? "a speaker" : "it";
-  const needed = sources.length === 1 ? "one" : alternatives(sources);
-  // The player has no declaration: an assignment or a copy of the account gives it a field.
+/** How to give the speaker of `read` the property before the read. */
+function speakerPropertyFix({ speaker, name, sources, example }: SpeakerPropertyRead): string {
   if (speaker === PLAYER)
-    return `${subject}: no assignment or copy of the account gives ${whom} ${needed}. Copy the account with 'player.copyFrom(account)', or assign ${sources.includes("gender") ? `'player.gender' or 'player.${name}'` : `'player.${name}'`} before reading it.`;
-  const fix = sources.includes("gender")
-    ? `Give ${whom} a gender, as in 'speaker ${example} { gender: "female" }', or assign '${speaker === null ? "" : `${speaker}.`}${name}' before reading it.`
-    : `Give ${whom} a start value, as in 'speaker ${example} { ${name}: ... }', or assign it before reading it.`;
-  return `${subject}: no declaration or assignment gives ${whom} ${needed}. ${fix}`;
+    return sources.length === 0
+      ? `Assign it before this line, as in 'player.${name} = ...'.`
+      : `Copy the account before this line, as in 'player.copyFrom(account)' at the start of the script, or assign ${sources.includes("gender") ? `'player.gender' or 'player.${name}'` : `'player.${name}'`} first.`;
+  const whom = speaker === null ? "a speaker" : "it";
+  return sources.includes("gender")
+    ? `Give ${whom} a gender, as in 'speaker ${example} { gender: "female" }', or assign '${speaker === null ? "" : `${speaker}.`}${name}' before this line.`
+    : `Give it a start value, as in 'speaker ${example} { ${name}: ... }', or assign it before this line.`;
 }
 
 /** Names in quotes as alternatives, as in `'a' or 'b'` and `'a', 'b', or 'c'`. */

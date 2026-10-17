@@ -35,24 +35,21 @@ export function handleMemberMessage(
     : `Media handle property '${name}' cannot be assigned. You can assign position, remaining, or volume.`;
 }
 
-/** The handles whose methods take no arguments, as their messages name them. */
-const ARGUMENTLESS_HANDLES = {
-  timer: "Timer",
-  media: "Media",
-  messageHandle: "Message",
-  permanentButton: "Permanent button",
-} as const;
+/**
+ * The handles whose methods take no arguments: timers, media, messages, and permanent buttons. Their arguments are
+ * checked as `NO_ARGUMENTS` (`argument-rules.ts`), under the handle's own code.
+ */
+type ArgumentlessHandle = "timer" | "media" | "messageHandle" | "permanentButton";
 
-export function hasArgumentlessMethods(kind: string): kind is keyof typeof ARGUMENTLESS_HANDLES {
-  return Object.hasOwn(ARGUMENTLESS_HANDLES, kind);
-}
+const ARGUMENTLESS_HANDLES: ReadonlySet<string> = new Set<ArgumentlessHandle>([
+  "timer",
+  "media",
+  "messageHandle",
+  "permanentButton",
+]);
 
-/** The message for arguments to a method of a timer, media, or message handle, or of a permanent button. */
-export function handleArgumentsMessage(
-  handle: keyof typeof ARGUMENTLESS_HANDLES,
-  method: string,
-): string {
-  return `${ARGUMENTLESS_HANDLES[handle]} ${method}() takes no arguments.`;
+export function hasArgumentlessMethods(kind: string): kind is ArgumentlessHandle {
+  return ARGUMENTLESS_HANDLES.has(kind);
 }
 
 export function isTimerDisplay(value: unknown): value is "visible" | "mystery" | "hidden" {

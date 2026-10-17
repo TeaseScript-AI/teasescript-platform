@@ -1,3 +1,4 @@
+import type { RuntimeErrorCode } from "../../diagnostic-codes.js";
 import type { InstructionPlan, PlanSourceLocation } from "../../plan/model.js";
 import { interruptFrame } from "../activations.js";
 import { cloneInteractionResult } from "../../choice-values.js";
@@ -27,7 +28,8 @@ import type { PendingActionOperationResult, RuntimeOperationResult } from "./mod
 
 export class RuntimeDataError extends Error {
   public constructor(
-    readonly code: "TSR100" | "TSR101",
+    /** Taken from the registry, so a code that it does not give the runtime does not compile. */
+    readonly code: Extract<RuntimeErrorCode, "TSR100" | "TSR101">,
     message: string,
   ) {
     super(message);

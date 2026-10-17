@@ -4,6 +4,7 @@ import {
   type PlanSourceLocation,
 } from "../plan/model.js";
 import { sourceSpanToPlanLocation } from "../plan/source-location.js";
+import type { RandomFunctionName } from "../language-facts.js";
 import type { SourceSpan } from "../source.js";
 import { GLOBAL_SCOPE_ID } from "./prepared-references.js";
 import type { SerializableRuntimeRange, SerializableRuntimeValue } from "./serializable-values.js";
@@ -63,15 +64,10 @@ export type RuntimeDebugRecordKind =
   /** A value whose origin the trace did not record; see its detail for why. */
   | "unrecorded";
 
+/** A semantic random draw: a random function's, by its name, or another operation's. */
 export type RuntimeDebugRandomOperation =
-  | "random"
-  | "chance"
-  | "randomInteger"
+  | RandomFunctionName
   | "collectionRandom"
-  | "randomWeighted"
-  | "randomNormal"
-  | "randomBeta"
-  | "randomPert"
   | "interpolation"
   | "shuffle"
   | "tagQuery"

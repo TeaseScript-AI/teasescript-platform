@@ -432,7 +432,7 @@ test("reading a built-in field, term, or name list where no way gave it one is a
       [
         "TSV043",
         "main.tease:6",
-        `Speaker 'vera' has no 'heShe' yet here: nothing assigns 'heShe' or 'gender' before this line runs. Line 7 assigns 'gender', but only later. Give it a gender, as in 'speaker vera { gender: "female" }', or assign it before this line.`,
+        `Speaker 'vera' has no 'heShe' yet here: nothing assigns 'heShe' or 'gender' before this line runs. Line 7 assigns 'gender', but only later. Give it a gender, as in 'speaker vera { gender: "female" }', or assign 'vera.heShe' before this line.`,
       ],
       [
         "TSV043",

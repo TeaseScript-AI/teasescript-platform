@@ -1,3 +1,4 @@
+import type { DeveloperWarningCode } from "../../diagnostic-codes.js";
 import { randomDrawPending } from "./observe-time.js";
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
 import { interruptFrame } from "../activations.js";
@@ -296,7 +297,7 @@ function completeStorageWrite(
         kind: "developerWarning",
         sequence: takeSequence(current, 2),
         severity: "warning",
-        code: "TSW014",
+        code: "TSW014" satisfies DeveloperWarningCode,
         message: `${action.value === null ? "delete" : "save"} could not persist ${JSON.stringify(
           messageText(action.key),
         )}, so the previous value is kept.`,
@@ -397,7 +398,7 @@ function completeCapture(
         kind: "developerWarning",
         sequence: warningSequence,
         severity: "warning",
-        code: "TSW015",
+        code: "TSW015" satisfies DeveloperWarningCode,
         message: captureUnavailableMessage(resolved.unavailableReason),
         span: copySpan(span),
       } satisfies DeveloperWarningEvent),

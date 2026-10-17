@@ -1,3 +1,4 @@
+import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import { parseChild, runParse, type ParseTask } from "./parse-continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
@@ -6,6 +7,7 @@ import {
   type SourcePosition,
   type SourceSpan,
 } from "./source.js";
+import { COMMANDS, commandFacts, type CommandFacts, KEYWORD_TOKENS } from "./language-facts.js";
 import { createToken, TokenKind, type Token } from "./token.js";
 
 export interface LexResult {
@@ -14,34 +16,6 @@ export interface LexResult {
   readonly comments: readonly SourceSpan[];
   readonly diagnostics: readonly Diagnostic[];
 }
-
-const keywordKinds: ReadonlyMap<string, TokenKind> = new Map([
-  ["speaker", TokenKind.KeywordSpeaker],
-  ["say", TokenKind.KeywordSay],
-  ["wait", TokenKind.KeywordWait],
-  ["as", TokenKind.KeywordAs],
-  ["exit", TokenKind.KeywordExit],
-  ["let", TokenKind.KeywordLet],
-  ["if", TokenKind.KeywordIf],
-  ["else", TokenKind.KeywordElse],
-  ["true", TokenKind.KeywordTrue],
-  ["false", TokenKind.KeywordFalse],
-  ["null", TokenKind.KeywordNull],
-  ["not", TokenKind.KeywordNot],
-  ["and", TokenKind.KeywordAnd],
-  ["or", TokenKind.KeywordOr],
-  ["set", TokenKind.KeywordSet],
-  ["repeat", TokenKind.KeywordRepeat],
-  ["for", TokenKind.KeywordFor],
-  ["in", TokenKind.KeywordIn],
-  ["while", TokenKind.KeywordWhile],
-  ["break", TokenKind.KeywordBreak],
-  ["continue", TokenKind.KeywordContinue],
-  ["function", TokenKind.KeywordFunction],
-  ["return", TokenKind.KeywordReturn],
-  ["is", TokenKind.KeywordIs],
-  ["otherwise", TokenKind.KeywordOtherwise],
-]);
 
 const diagnosticCodes = {
   invalidCharacter: "TSL001",
@@ -53,7 +27,7 @@ const diagnosticCodes = {
   unterminatedComment: "TSL007",
   physicalNewlineInString: "TSL008",
   unterminatedRegex: "TSL009",
-} as const;
+} as const satisfies Record<string, OwnedDiagnosticCode<"lexer", "error">>;
 
 /**
  * Tokenizes the accepted core-language milestone. A `/` at an offset of `regexStarts` starts a regex literal, as one does
@@ -180,7 +154,7 @@ class Lexer {
     while (isIdentifierPart(this.#peek())) this.#advanceCodeUnit();
 
     const lexeme = this.source.slice(startOffset, this.#offset);
-    const kind = keywordKinds.get(lexeme);
+    const kind = KEYWORD_TOKENS.get(lexeme);
     if (kind === undefined) {
       this.#emitValuedToken(TokenKind.Identifier, startOffset, start, this.#position(), lexeme);
     } else {
@@ -605,19 +579,36 @@ class Lexer {
     return this.#offset < this.#quoteSearch.secondToLastQuote;
   }
 
+  /**
+   * Whether the token at `index` ends the words that a play command takes before its file, right after that command, as
+   * `async` in `playAudio async "a.mp3"`; a member such as `obj.playAudio` takes none (see `COMMANDS`).
+   */
+  #endsFileModifiers(index: number): boolean {
+    let command = index;
+    while (command >= 0 && FILE_MODIFIERS.has(this.#tokens[command]!.lexeme)) command -= 1;
+    const modifiers = commandFacts(this.#tokens[command]?.lexeme ?? "")?.fileModifiers;
+    return (
+      command < index &&
+      modifiers !== undefined &&
+      this.#tokens[command - 1]?.kind !== TokenKind.Dot &&
+      this.#tokens.slice(command + 1, index + 1).every((token) => modifiers.includes(token.lexeme))
+    );
+  }
+
   #canStartNestedString(): boolean {
     let index = this.#tokens.length - 1;
     while (this.#tokens[index]?.kind === TokenKind.Newline) index -= 1;
 
+    // A play command takes its file after its words, as in `"${playAudio async "a.mp3"}"`.
+    if (this.#endsFileModifiers(index)) return true;
     const previous = this.#tokens[index];
     const previousKind = previous?.kind;
     if (
       previousKind === TokenKind.Identifier &&
-      // `load` takes an operand, such as `"${load "k", default: "none"}"`, and so do `showPermanentButton` and the bare
-      // `default` of the earlier form, lexed so that `load` can name the fix; a member such as `obj.load` does not.
-      (((previous?.lexeme === "load" ||
-        previous?.lexeme === "default" ||
-        previous?.lexeme === "showPermanentButton") &&
+      // A command that gives a value takes its operand after it, such as `"${load "k", default: "none"}"` and
+      // `"${askText "Name?"}"`, and so does the bare `default` of the earlier form, lexed so that `load` can name the fix;
+      // a member such as `obj.load` does not.
+      (((commandFacts(previous!.lexeme)?.value === true || previous!.lexeme === "default") &&
         this.#tokens[index - 1]?.kind !== TokenKind.Dot) ||
         isInteractionCommand(previous?.lexeme) ||
         (this.#tokens[index - 1]?.kind === TokenKind.KeywordAs &&
@@ -861,23 +852,14 @@ class Lexer {
   }
 }
 
+/** Every word that a play command takes before its file (see `COMMANDS`). */
+const FILE_MODIFIERS: ReadonlySet<string> = new Set(
+  Object.values(COMMANDS).flatMap((facts: CommandFacts) => facts.fileModifiers ?? []),
+);
+
+/** Whether `value` is a compact interaction, which may take `as speaker` and a question's mode (see `COMMANDS`). */
 function isInteractionCommand(value: string | undefined): boolean {
-  return (
-    value === "showButton" ||
-    value === "askText" ||
-    value === "askNumber" ||
-    value === "askInteger" ||
-    value === "askDate" ||
-    value === "askTime" ||
-    value === "askDateTime" ||
-    value === "askPassword" ||
-    value === "askBoolean" ||
-    value === "askForm" ||
-    value === "askBooleans" ||
-    value === "askChoice" ||
-    // The earlier name of `askChoice` is parsed as one, so its error names the fix.
-    value === "choose"
-  );
+  return value !== undefined && commandFacts(value)?.interaction !== undefined;
 }
 
 interface StringScanTextPart {

@@ -1,5 +1,7 @@
+import type { OwnedDiagnosticCode } from "../diagnostic-codes.js";
+
 export interface PlanValidationError {
-  readonly code: "TSC001" | "TSC002";
+  readonly code: OwnedDiagnosticCode<"plan validation">;
   readonly message: string;
   readonly path: string;
 }

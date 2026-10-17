@@ -35,7 +35,8 @@ both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
 TypeScript compilation precedes UI work; compiled tests run only after all builds pass. Each command's output is
 printed together, including warnings. A failure stops the group and subsequent stages; SIGINT/SIGTERM also terminate
-child process groups, escalating after a grace period. `npm run test:verification` checks scheduling, diagnostics and
+child process groups, escalating after a grace period. A command stopped this way is labelled `ABORTED`, not `FAIL`,
+and prints after the failed one. `npm run test:verification` checks scheduling, diagnostics and
 process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`).
 
 Use `VERIFY_SERIAL=1 npm run check` for serial diagnosis or constrained machines; it runs the same commands.

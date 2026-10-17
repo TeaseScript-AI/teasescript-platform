@@ -1,4 +1,4 @@
-import { TEASESCRIPT_PROTECTED_NAMES } from "../../src/protected-names.ts";
+import { TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 
 const PROTECTED: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);

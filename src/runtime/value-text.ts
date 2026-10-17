@@ -1,3 +1,4 @@
+import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import { formatAngle } from "../angle.js";
 import { formatDuration } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
@@ -396,6 +397,6 @@ function isFiniteNumber(value: SerializableRuntimeValue): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
+function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
 }

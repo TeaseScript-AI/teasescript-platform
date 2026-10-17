@@ -27,11 +27,6 @@ export function sampleRangeInteger(
   return range.start + sampleIndex(draw, length);
 }
 
-/** Whether a `percent` chance hits, with one draw, also at 0 and 100. */
-export function sampleChance(draw: PrimitiveDraw, percent: number): boolean {
-  return draw() * 100 < percent;
-}
-
 /**
  * A uniform random order of `length` items as their old indexes (Fisher–Yates), drawing `length - 1` numbers, or none
  * for fewer than two items, so replay and checkpoint resume reproduce it.

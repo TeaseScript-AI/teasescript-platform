@@ -20,7 +20,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { TEASESCRIPT_PROTECTED_NAMES } from "../../src/protected-names.ts";
+import { TEASESCRIPT_PROTECTED_NAMES } from "../src/protected-names.ts";
 import { isRecord } from "../src/ast.ts";
 import { repositoryBuildUrl } from "../src/repository-build.ts";
 import { readUnitsFile } from "./convert-corpus.ts";

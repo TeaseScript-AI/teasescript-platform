@@ -375,7 +375,7 @@ test("remove() takes no arguments", () => {
     compileSource(
       lines('let line = say "Waiting", instant', "line.remove(1)", "exit"),
     ).diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`),
-    ["TSV043 Message remove() takes no arguments."],
+    ["TSV043 remove() takes no arguments, received 1."],
   );
 });
 

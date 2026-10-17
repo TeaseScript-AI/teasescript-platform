@@ -1,4 +1,5 @@
 import type { CalendarDurationUnit, DurationLiteral, DurationUnit, Expression } from "./ast.js";
+import { CALENDAR_DURATION_UNIT_NAMES, DURATION_UNIT_NAMES } from "./language-facts.js";
 
 /**
  * What a unit may follow besides a number literal: a name, a member such as `p.delay` or `list[i]`, a call, or
@@ -22,50 +23,14 @@ export const DURATION_UNIT_MILLISECONDS: Readonly<Record<DurationUnit, number>> 
   w: 604_800_000,
 });
 
-const ELAPSED_UNIT_NAMES: ReadonlyMap<string, DurationUnit> = new Map([
-  ["ms", "ms"],
-  ["millisecond", "ms"],
-  ["milliseconds", "ms"],
-  ["s", "s"],
-  ["second", "s"],
-  ["seconds", "s"],
-  ["min", "min"],
-  ["minute", "min"],
-  ["minutes", "min"],
-  ["h", "h"],
-  ["hour", "h"],
-  ["hours", "h"],
-  ["d", "d"],
-  ["day", "d"],
-  ["days", "d"],
-  ["w", "w"],
-  ["week", "w"],
-  ["weeks", "w"],
-]);
-
-const CALENDAR_UNIT_NAMES: ReadonlyMap<string, CalendarDurationUnit> = new Map([
-  ["d", "d"],
-  ["day", "d"],
-  ["days", "d"],
-  ["w", "w"],
-  ["week", "w"],
-  ["weeks", "w"],
-  ["mo", "mo"],
-  ["month", "mo"],
-  ["months", "mo"],
-  ["y", "y"],
-  ["year", "y"],
-  ["years", "y"],
-]);
-
 /** Resolves a short or long exact unit name, from milliseconds to weeks. */
 export function elapsedDurationUnit(name: string): DurationUnit | undefined {
-  return ELAPSED_UNIT_NAMES.get(name);
+  return DURATION_UNIT_NAMES.get(name);
 }
 
 /** Resolves a short or long unit name after `calendar`: days, weeks, months, or years. */
 export function calendarDurationUnit(name: string): CalendarDurationUnit | undefined {
-  return CALENDAR_UNIT_NAMES.get(name);
+  return CALENDAR_DURATION_UNIT_NAMES.get(name);
 }
 
 /**
@@ -325,6 +290,16 @@ export function formatDuration(duration: number | AnyDuration): string {
   ].filter((piece) => piece !== "");
   if (duration.milliseconds !== 0) pieces.push(formatExact(duration.milliseconds));
   return pieces.length === 0 ? "0 calendar days" : pieces.join(" ");
+}
+
+/**
+ * An exact length as `formatDuration` shows it, but below a millisecond with three significant digits, such as
+ * `4.66e-10 milliseconds`, so that a positive length too short for the clock never shows as 0.
+ */
+export function formatShortDuration(milliseconds: number): string {
+  return milliseconds > 0 && milliseconds < 1
+    ? unitAmount(String(Number(milliseconds.toPrecision(3))), "millisecond")
+    : formatDuration(milliseconds);
 }
 
 function calendarPart(amount: number, unit: "year" | "month" | "day"): string {

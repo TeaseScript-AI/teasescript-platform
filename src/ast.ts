@@ -1,3 +1,4 @@
+import type { ANGLE_UNITS, CALENDAR_DURATION_UNITS, DURATION_UNITS } from "./language-facts.js";
 import type { SourceSpan } from "./source.js";
 
 export interface Program {
@@ -777,10 +778,10 @@ export interface NumberLiteral {
 }
 
 /** Exact units (ADR 0026): a day is 24 hours and a week 168 hours. */
-export type DurationUnit = "ms" | "s" | "min" | "h" | "d" | "w";
+export type DurationUnit = (typeof DURATION_UNITS)[number];
 
 /** Calendar units after `calendar`: days, weeks, months, and years (ADR 0026). They only appear in duration literals. */
-export type CalendarDurationUnit = "d" | "w" | "mo" | "y";
+export type CalendarDurationUnit = (typeof CALENDAR_DURATION_UNITS)[number];
 
 /**
  * A duration literal: an exact one such as `30 s` or `2 days`, or with `calendar` a calendar one such as
@@ -811,7 +812,7 @@ export type UnitExpression = {
 );
 
 /** Angle units (V30 §13): degrees and radians. */
-export type AngleUnit = "deg" | "rad";
+export type AngleUnit = (typeof ANGLE_UNITS)[number];
 
 /**
  * A unit of angle after a number literal, `pi`, a name, a member, a call, or parentheses: the number before it as an

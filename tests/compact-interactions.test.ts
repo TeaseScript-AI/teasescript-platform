@@ -1388,10 +1388,10 @@ test("function-owned interaction result survives checkpoint completion and expli
 });
 
 test("a retained dynamic settlement validates against the UI it recorded, before and after cleanup", () => {
-  const buttonPlan = compiled("showButton label\nexit", { globals: ["label"] });
+  const buttonPlan = compiled("showButton buttonText\nexit", { globals: ["buttonText"] });
   const buttonPending = run(
     buttonPlan,
-    createFreshRuntimeSnapshot(buttonPlan, { globals: { label: "Continue" } }),
+    createFreshRuntimeSnapshot(buttonPlan, { globals: { buttonText: "Continue" } }),
   );
   const buttonCompleted = completePending(buttonPlan, buttonPending.snapshot, "button", {
     kind: "activate",

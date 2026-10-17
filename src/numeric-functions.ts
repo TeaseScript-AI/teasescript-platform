@@ -1,5 +1,5 @@
 import { rounded, withoutNegativeZero } from "./conversions.js";
-import { exp, ln, log10, randomBeta, randomNormal, randomPert } from "./deterministic-math.js";
+import { exp, ln, log10 } from "./deterministic-math.js";
 
 /** What the compiler knows about one argument of a numeric function. */
 export interface NumericArgument {
@@ -9,35 +9,31 @@ export interface NumericArgument {
   readonly known: number | undefined;
 }
 
-/** A built-in function of numbers (V30 §13): every argument is a number, and the result is one too. */
-export interface NumericFunction {
+/** How a function whose every argument is a number is called: a numeric function, or a random one such as `chance`. */
+export interface NumberSignature {
   /** The positional parameter names, which also give the number of positional arguments. */
   readonly parameters: readonly string[];
   /** The named parameters the function may also take, each a number. */
   readonly named?: readonly string[];
-  /** A call that shows how to use the function. */
-  readonly example: string;
+}
+
+/** A built-in function of numbers (V30 §13): every argument is a number, and the result is one too. */
+export interface NumericFunction extends NumberSignature {
   /** The result type, from what the compiler knows about the arguments. */
   readonly result: (
     inputs: readonly NumericArgument[],
     named: Readonly<Record<string, NumericArgument>>,
   ) => "integer" | "number" | "unknown";
-  /** The finite result, or why the call has none; a random function draws from the session RNG with `draw`. */
+  /** The finite result, or why the call has none. */
   readonly apply: (
     values: readonly number[],
     named: Readonly<Record<string, number>>,
-    draw: () => number,
   ) => number | NumericFailure;
-  /**
-   * Marks a function that draws from the session RNG, and gives why its arguments are invalid. The runtime checks them
-   * before any draw; the compiler checks arguments it can see, but never computes a random result.
-   */
-  readonly random?: (values: readonly number[]) => NumericFailure | undefined;
 }
 
 /**
- * Why a call of a numeric function has no result: a compile error when the compiler can see the arguments, and
- * otherwise runtime error `code`, `TSR036` for a result that is not a finite number and `TSR039` for an argument
+ * Why a call of a numeric or random function has no result: a compile error when the compiler can see the arguments,
+ * and otherwise runtime error `code`, `TSR036` for a result that is not a finite number and `TSR039` for an argument
  * outside the function's range.
  */
 export interface NumericFailure {
@@ -46,7 +42,7 @@ export interface NumericFailure {
 }
 
 /** Whether `value` is a percentage from 0 through 100, as `chance` and `percentile` take it (V30 §4, §16). */
-export function isPercentage(value: number): boolean {
+function isPercentage(value: number): boolean {
   return value >= 0 && value <= 100;
 }
 
@@ -63,7 +59,6 @@ export function percentageFailure(name: string, value: number): string | undefin
 function rounding(name: string): NumericFunction {
   return {
     parameters: ["value"],
-    example: `${name}(2.5)`,
     result: () => "integer",
     apply: ([value]) => rounded(name, value!),
   };
@@ -75,13 +70,11 @@ function rounding(name: string): NumericFunction {
  */
 function real(
   parameters: readonly string[],
-  example: string,
   compute: (...values: number[]) => number | undefined,
   failure: (values: readonly number[]) => string,
 ): NumericFunction {
   return {
     parameters,
-    example,
     result: () => "number",
     apply: (values) => {
       const result = compute(...values);
@@ -106,7 +99,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     {
       parameters: ["value"],
       named: ["decimals"],
-      example: "round(2.5)",
       result: (_, { decimals }) => (decimals === undefined ? "integer" : "number"),
       apply: ([value], { decimals }) =>
         decimals === undefined ? rounded("round", value!) : roundedToDecimals(value!, decimals),
@@ -118,7 +110,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "abs",
     {
       parameters: ["value"],
-      example: "abs(-2)",
       result: ([value]) => value!.type,
       apply: ([value]) => Math.abs(value!),
     },
@@ -127,7 +118,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "sign",
     {
       parameters: ["value"],
-      example: "sign(-2)",
       result: () => "integer",
       apply: ([value]) => withoutNegativeZero(Math.sign(value!)),
     },
@@ -136,7 +126,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "sqrt",
     {
       parameters: ["value"],
-      example: "sqrt(2)",
       result: () => "number",
       // IEEE 754 rounds a square root correctly, so every JavaScript engine gives the same result.
       apply: ([value]) =>
@@ -149,7 +138,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "pow",
     {
       parameters: ["base", "exponent"],
-      example: "pow(2, 3)",
       // A whole number to a whole power of at least 0 is whole.
       result: ([base, exponent]) =>
         exponent!.known !== undefined && Number.isInteger(exponent!.known) && exponent!.known >= 0
@@ -162,7 +150,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "mod",
     {
       parameters: ["value", "divisor"],
-      example: "mod(-1, 3)",
       result: together,
       apply: ([value, divisor]) => modulo(value!, divisor!),
     },
@@ -171,7 +158,6 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "clamp",
     {
       parameters: ["value", "min", "max"],
-      example: "clamp(level, 1, 10)",
       result: together,
       apply: ([value, min, max]) =>
         min! > max!
@@ -186,80 +172,16 @@ export const NUMERIC_FUNCTIONS: ReadonlyMap<string, NumericFunction> = new Map([
     "exp",
     real(
       ["value"],
-      "exp(1)",
       exp,
       ([value]) => `exp(${value}) gives a number too large to represent. Use smaller values.`,
     ),
   ],
-  ["ln", real(["value"], "ln(10)", ln, LOGARITHM("ln"))],
-  ["log10", real(["value"], "log10(1000)", log10, LOGARITHM("log10"))],
-  [
-    "randomNormal",
-    {
-      parameters: ["mean", "spread"],
-      example: "randomNormal(20, 5)",
-      result: () => "number",
-      random: ([, spread]) =>
-        spread! < 0
-          ? {
-              failure: `randomNormal(...) needs a spread of at least 0, not ${spread}.`,
-              code: "TSR039",
-            }
-          : undefined,
-      apply: (values, _, draw) =>
-        sampled("randomNormal", values, randomNormal(values[0]!, values[1]!, draw)),
-    },
-  ],
-  [
-    "randomBeta",
-    {
-      parameters: ["alpha", "beta"],
-      example: "randomBeta(2, 5)",
-      result: () => "number",
-      random: ([alpha, beta]) =>
-        alpha! > 0 && beta! > 0
-          ? undefined
-          : {
-              failure: `randomBeta(...) needs an alpha and a beta above 0, not ${alpha} and ${beta}.`,
-              code: "TSR039",
-            },
-      apply: (values, _, draw) =>
-        sampled("randomBeta", values, randomBeta(values[0]!, values[1]!, draw)),
-    },
-  ],
-  [
-    "randomPert",
-    {
-      parameters: ["min", "mostLikely", "max"],
-      example: "randomPert(5, 10, 20)",
-      result: () => "number",
-      random: ([min, mostLikely, max]) =>
-        min! <= mostLikely! && mostLikely! <= max!
-          ? undefined
-          : {
-              failure: `randomPert(...) needs min <= mostLikely <= max, not ${min}, ${mostLikely}, and ${max}.`,
-              code: "TSR039",
-            },
-      apply: (values, _, draw) =>
-        sampled("randomPert", values, randomPert(values[0]!, values[1]!, values[2]!, draw)),
-    },
-  ],
+  ["ln", real(["value"], ln, LOGARITHM("ln"))],
+  ["log10", real(["value"], log10, LOGARITHM("log10"))],
 ]);
 
-/** A value drawn by `name` from `values`, or the failure of one that is too large to represent. */
-function sampled(
-  name: string,
-  values: readonly number[],
-  value: number | undefined,
-): number | NumericFailure {
-  return value === undefined
-    ? noResult(
-        `${name}(${values.join(", ")}) gives a number too large to represent. Use smaller values.`,
-      )
-    : withoutNegativeZero(value);
-}
-
-function noResult(failure: string): NumericFailure {
+/** The failure of a call with no finite result: `TSR036`. */
+export function noResult(failure: string): NumericFailure {
   return { failure, code: "TSR036" };
 }
 
