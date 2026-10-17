@@ -6,8 +6,8 @@ import type {
 } from "../plan/model.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { RANDOM_FUNCTIONS } from "../language-facts.js";
-import type { NumericFailure } from "../numeric-functions.js";
-import { isRandomFunction, numbersProblem, RANDOM_CONTRACTS } from "../random-functions.js";
+import { domainFailure, type NumericFailure } from "../numeric-functions.js";
+import { isRandomFunction, RANDOM_CONTRACTS } from "../random-functions.js";
 import type { SourceSpan } from "../source.js";
 import type { RuntimeDebugRandomOperation, TraceStore } from "./debug-trace.js";
 import type { InterpreterEvent } from "./events.js";
@@ -871,7 +871,7 @@ function parseSupport(kind: RandomDrawKind, value: unknown): RandomSupport | str
       if (
         has("percent") &&
         finite(percent) &&
-        numbersProblem(RANDOM_CONTRACTS.chance, [percent]) === undefined
+        domainFailure(RANDOM_CONTRACTS.chance, [percent]) === undefined
       )
         support = { kind: "chance", percent };
       break;
@@ -903,7 +903,7 @@ function parseSupport(kind: RandomDrawKind, value: unknown): RandomSupport | str
         has("mean", "spread") &&
         finite(mean) &&
         finite(spread) &&
-        numbersProblem(RANDOM_CONTRACTS.randomNormal, [mean, spread]) === undefined
+        domainFailure(RANDOM_CONTRACTS.randomNormal, [mean, spread]) === undefined
       )
         support = { kind: "normal", mean, spread };
       break;
@@ -912,7 +912,7 @@ function parseSupport(kind: RandomDrawKind, value: unknown): RandomSupport | str
         has("alpha", "beta") &&
         finite(alpha) &&
         finite(beta) &&
-        numbersProblem(RANDOM_CONTRACTS.randomBeta, [alpha, beta]) === undefined
+        domainFailure(RANDOM_CONTRACTS.randomBeta, [alpha, beta]) === undefined
       )
         support = { kind: "beta", alpha, beta };
       break;
@@ -922,7 +922,7 @@ function parseSupport(kind: RandomDrawKind, value: unknown): RandomSupport | str
         finite(min) &&
         finite(mostLikely) &&
         finite(max) &&
-        numbersProblem(RANDOM_CONTRACTS.randomPert, [min, mostLikely, max]) === undefined
+        domainFailure(RANDOM_CONTRACTS.randomPert, [min, mostLikely, max]) === undefined
       )
         support = { kind: "pert", min, mostLikely, max };
       break;

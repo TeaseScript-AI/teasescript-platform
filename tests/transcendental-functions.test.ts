@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ANGLE_FUNCTIONS, angleValue } from "../src/angle.js";
 import { compileSource } from "../src/compiler.js";
-import { NUMERIC_FUNCTIONS } from "../src/numeric-functions.js";
+import type { NumericFunctionName } from "../src/language-facts.js";
+import { NUMERIC_CONTRACTS, numericResult } from "../src/numeric-functions.js";
 import { RANDOM_CONTRACTS } from "../src/random-functions.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
@@ -35,16 +35,9 @@ const DYNAMIC = "function dynamic(value) {\n    return value\n}\n";
  * The result of a numeric function, or of an angle function with its angles in degrees: an argument of `sin`, `cos`, or
  * `tan` is an angle of that many degrees, and an angle result is its degrees.
  */
-function apply(name: string, ...values: number[]): number | undefined {
-  const angular = ANGLE_FUNCTIONS.get(name);
-  if (angular !== undefined) {
-    const result = angular.apply(
-      values.map((value) => (angular.takes === "number" ? value : angleValue(value))),
-    );
-    return typeof result === "number" ? result : "degrees" in result ? result.degrees : undefined;
-  }
-  const result = NUMERIC_FUNCTIONS.get(name)!.apply(values, {});
-  return typeof result === "number" ? result : undefined;
+function apply(name: NumericFunctionName, ...values: number[]): number | undefined {
+  const result = numericResult(NUMERIC_CONTRACTS[name], values, {});
+  return typeof result === "number" ? result : "degrees" in result ? result.degrees : undefined;
 }
 
 test("exact angles give exact results", () => {
@@ -70,7 +63,7 @@ test("exact angles give exact results", () => {
 test("exponentials, logarithms, and angles round correctly with the same operations on every JavaScript engine", () => {
   // Correctly rounded values from 60-digit mpmath arithmetic on the exact binary arguments. V8's Math.exp, Math.log,
   // and Math.log10 are one unit in the last place off for these, and degrees converted to radians lose more for tan.
-  const cases: [string, number[], number][] = [
+  const cases: [NumericFunctionName, number[], number][] = [
     ["exp", [-5.240182620473206], 0.005299288988835954],
     ["exp", [1.865231073461473], 6.457427853813894],
     ["ln", [6.985742112079858], 1.9438712307418948],
@@ -87,18 +80,23 @@ test("exponentials, logarithms, and angles round correctly with the same operati
 });
 
 test("a call without a finite result is a compile error when the arguments are known, and a runtime error otherwise", () => {
-  const cases: [string, string][] = [
-    ["ln(0)", "ln(0) has no result: only a number above 0 has a logarithm."],
-    ["log10(-1)", "log10(-1) has no result: only a number above 0 has a logarithm."],
-    ["asin(2)", "asin(2) has no result: only a number from -1 through 1 has an arcsine."],
-    ["acos(-1.5)", "acos(-1.5) has no result: only a number from -1 through 1 has an arccosine."],
+  // A domain of one number names it.
+  const cases: [string, string, string?][] = [
+    ["ln(0)", "ln(0) has no result: only a number above 0 has a logarithm.", "0"],
+    ["log10(-1)", "log10(-1) has no result: only a number above 0 has a logarithm.", "-1"],
+    ["asin(2)", "asin(2) has no result: only a number from -1 through 1 has an arcsine.", "2"],
+    [
+      "acos(-1.5)",
+      "acos(-1.5) has no result: only a number from -1 through 1 has an arccosine.",
+      "-1.5",
+    ],
     ["tan(90 deg)", "tan(90°) has no result: the tangent of 90° is infinite."],
     ["tan(-270 deg)", "tan(-270°) has no result: the tangent of -270° is infinite."],
     ["tan((pi / 2) rad)", "tan(90°) has no result: the tangent of 90° is infinite."],
     ["exp(1000)", "exp(1000) gives a number too large to represent. Use smaller values."],
   ];
-  for (const [call, message] of cases) {
-    assert.deepEqual(diagnostics(`say ${call}\nexit`), [["TSV043", message, call]], call);
+  for (const [call, message, at = call] of cases) {
+    assert.deepEqual(diagnostics(`say ${call}\nexit`), [["TSV043", message, at]], call);
     const hidden = call.replace(/\((.+)\)/u, "(dynamic($1))");
     assert.deepEqual(failure(`${DYNAMIC}say ${hidden}\nexit`), ["TSR036", message], hidden);
   }

@@ -131,22 +131,22 @@ import {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   type ConversionName,
+  type NumericFunctionName,
   type RandomFunctionName,
 } from "./language-facts.js";
 import {
-  NUMERIC_FUNCTIONS,
+  isNumericFailure,
+  isNumericFunction,
+  NUMERIC_CONTRACTS,
+  numericResult,
+  parameterArgument,
+  type NumberDomain,
   type NumberSignature,
   type NumericArgument,
+  type NumericFunction,
 } from "./numeric-functions.js";
 import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "./random-functions.js";
-import {
-  ANGLE_ARITHMETIC_ROUTE,
-  ANGLE_FUNCTIONS,
-  anglePropertyMessage,
-  angleValue,
-  formatAngle,
-  type StoredAngle,
-} from "./angle.js";
+import { ANGLE_ARITHMETIC_ROUTE, anglePropertyMessage, angleValue, formatAngle } from "./angle.js";
 import {
   LIST_FUNCTIONS,
   listFunctionCheck,
@@ -7281,35 +7281,53 @@ class TypeChecker {
   }
 
   /**
-   * Checks the arguments of a numeric function and gives its result type (V30 §13). A call whose arguments the compiler
-   * can see and that has no finite result is a compile error.
+   * Checks a call of a numeric or angle function and gives its result type (see `NUMERIC_CONTRACTS`). A domain of its
+   * numbers is checked as the runtime checks it once the compiler can see the numbers it reads, whatever the call's
+   * other arguments are, and a call whose every argument the compiler can see and that has no finite result is a
+   * compile error.
    */
   #numericFunctionType(
-    name: string,
+    name: NumericFunctionName,
     expression: CallExpression,
     values: readonly StaticType[],
   ): StaticType {
-    const numeric = NUMERIC_FUNCTIONS.get(name)!;
+    const numeric: NumericFunction = NUMERIC_CONTRACTS[name];
     const { checked, inputs, named } = this.#numberArguments(name, numeric, expression, values);
-    if (checked && [...inputs, ...Object.values(named)].every((one) => one.known !== undefined)) {
-      const result = numeric.apply(
+    const failed = this.#checkDomains(numeric, numeric.domains, expression, inputs, named);
+    if (
+      checked &&
+      !failed &&
+      [...inputs, ...Object.values(named)].every((one) => one.known !== undefined)
+    ) {
+      const result = numericResult(
+        numeric,
         inputs.map((one) => one.known!),
         Object.fromEntries(Object.entries(named).map(([key, one]) => [key, one.known!])),
       );
-      if (typeof result !== "number")
+      if (isNumericFailure(result))
         this.#report(typeCode.invalidOperand, result.failure, expression.span);
     }
-    const result = numeric.result(inputs, named);
-    return result === "integer" ? INTEGER_TYPE : result === "number" ? NUMBER_TYPE : UNKNOWN_TYPE;
+    const result =
+      typeof numeric.result === "function" ? numeric.result(inputs, named) : numeric.result;
+    switch (result) {
+      case "integer":
+        return INTEGER_TYPE;
+      case "number":
+        return NUMBER_TYPE;
+      case "angle":
+        return ANGLE_TYPE;
+      case "unknown":
+        return UNKNOWN_TYPE;
+    }
   }
 
   /**
-   * Checks the arguments of a function whose every argument is a number, and gives what the compiler knows about them:
-   * the input of each positional parameter and of each named argument, and whether the call has no problem.
+   * Checks the arguments of a function whose every argument is a number or an angle, and gives what the compiler knows
+   * about them: the input of each positional parameter and of each named argument, and whether the call has no problem.
    */
   #numberArguments(
     name: string,
-    signature: NumberSignature,
+    signature: NumberSignature & { readonly result: unknown },
     expression: CallExpression,
     values: readonly StaticType[],
   ): {
@@ -7319,6 +7337,7 @@ class TypeChecker {
   } {
     const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
     const fitting = problems.every((problem) => problem.kind === "invalidOperand");
+    const angles = signature.takes === "angles";
     // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5,
     // #504 Q1).
     const several = fitting
@@ -7329,19 +7348,30 @@ class TypeChecker {
     const spans = new Set(several.map(({ item }) => item.value.span.start.offset));
     this.#reportProblems(problems.filter((problem) => !spans.has(problem.span.start.offset)));
     for (const { item, type } of several)
-      this.#reportUnless(type, isNumeric, item.value, `${name}(...) takes a number`);
+      this.#reportUnless(
+        type,
+        angles ? (member) => isScalar(member, "angle") : isNumeric,
+        item.value,
+        `${name}(...) takes ${angles ? "an angle" : "a number"}`,
+      );
     const input = (item: CallArgument | undefined, index: number): NumericArgument => {
       if (item === undefined || !fitting) return { type: "unknown", known: undefined };
       const parts = members(nonNullTypeForUse(values[index]!));
       const known = this.#known(item.value);
       return {
         type:
-          parts.length === 0 || !parts.every(isNumeric)
+          angles || parts.length === 0 || !parts.every(isNumeric)
             ? "unknown"
             : parts.every((part) => isScalar(part, "integer"))
               ? "integer"
               : "number",
-        known: typeof known === "number" ? known : undefined,
+        known: angles
+          ? typeof known === "object" && known?.kind === "angle"
+            ? known.degrees
+            : undefined
+          : typeof known === "number"
+            ? known
+            : undefined,
       };
     };
     const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
@@ -7353,6 +7383,40 @@ class TypeChecker {
       if (item.kind === "namedArgument") named[item.name.name] = input(item, index);
     });
     return { checked: problems.length === 0, inputs, named };
+  }
+
+  /**
+   * Reports the first of a call's `domains` that its numbers fail (see `NumberDomain`), of those whose numbers the
+   * compiler can see, whatever the call's other arguments are; a domain of one number names it. Whether one failed.
+   */
+  #checkDomains(
+    signature: NumberSignature,
+    domains: readonly NumberDomain[],
+    expression: CallExpression,
+    inputs: readonly NumericArgument[],
+    named: Readonly<Record<string, NumericArgument>>,
+  ): boolean {
+    const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
+    const namedArguments = Object.fromEntries(
+      expression.arguments.flatMap((item) =>
+        item.kind === "namedArgument" ? [[item.name.name, item]] : [],
+      ),
+    );
+    for (const domain of domains) {
+      const known = domain.reads.flatMap(
+        (parameter) => parameterArgument(signature, parameter, inputs, named)?.known ?? [],
+      );
+      if (known.length < domain.reads.length) continue;
+      const problem = domain.problem(known);
+      if (problem === undefined) continue;
+      const one =
+        domain.reads.length === 1
+          ? parameterArgument<CallArgument>(signature, domain.reads[0]!, positional, namedArguments)
+          : undefined;
+      this.#report(typeCode.invalidOperand, problem, (one?.value ?? expression).span);
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -7368,20 +7432,8 @@ class TypeChecker {
     const random: RandomFunction = RANDOM_CONTRACTS[name];
     switch (random.takes) {
       case "numbers": {
-        const { inputs } = this.#numberArguments(name, random, expression, values);
-        const positional = expression.arguments.filter(
-          (item) => item.kind === "positionalArgument",
-        );
-        // The first domain that fails, as at runtime; a domain of one number names it.
-        for (const domain of random.domains) {
-          const known = domain.reads.flatMap((position) => inputs[position]!.known ?? []);
-          if (known.length < domain.reads.length) continue;
-          const problem = domain.problem(known);
-          if (problem === undefined) continue;
-          const at = domain.reads.length === 1 ? positional[domain.reads[0]!]!.value : expression;
-          this.#report(typeCode.invalidOperand, problem, at.span);
-          break;
-        }
+        const { inputs, named } = this.#numberArguments(name, random, expression, values);
+        this.#checkDomains(random, random.domains, expression, inputs, named);
         return random.result === "boolean" ? BOOLEAN_TYPE : NUMBER_TYPE;
       }
       case "range": {
@@ -7436,50 +7488,6 @@ class TypeChecker {
   }
 
   /**
-   * Checks the arguments of an angle function and gives its result type (V30 §13). A plain number where an angle is
-   * needed names the unit to write, and a call whose arguments the compiler can see and that has no result is a compile
-   * error.
-   */
-  #angleFunctionType(
-    name: string,
-    expression: CallExpression,
-    values: readonly StaticType[],
-  ): StaticType {
-    const angleFunction = ANGLE_FUNCTIONS.get(name)!;
-    const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
-    const takes = (member: StaticType): boolean =>
-      angleFunction.takes === "angle" ? isScalar(member, "angle") : isNumeric(member);
-    // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5).
-    const several = problems.every((problem) => problem.kind === "invalidOperand")
-      ? expression.arguments.flatMap((item, index) =>
-          members(values[index]!).length > 1 ? [{ item, type: values[index]! }] : [],
-        )
-      : [];
-    const spans = new Set(several.map(({ item }) => item.value.span.start.offset));
-    this.#reportProblems(problems.filter((problem) => !spans.has(problem.span.start.offset)));
-    for (const { item, type } of several)
-      this.#reportUnless(
-        type,
-        takes,
-        item.value,
-        `${name}(...) takes ${angleFunction.takes === "angle" ? "an angle" : "a number"}`,
-      );
-    if (problems.length === 0) {
-      const known = expression.arguments.map((item) => this.#known(item.value));
-      const fits = (value: StaticScalar | undefined): value is number | StoredAngle =>
-        angleFunction.takes === "angle"
-          ? value !== null && typeof value === "object" && value.kind === "angle"
-          : typeof value === "number";
-      if (known.every(fits)) {
-        const result = angleFunction.apply(known);
-        if (typeof result !== "number" && "failure" in result)
-          this.#report(typeCode.invalidOperand, result.failure, expression.span);
-      }
-    }
-    return angleFunction.returns === "angle" ? ANGLE_TYPE : NUMBER_TYPE;
-  }
-
-  /**
    * Checks a call of a conversion and gives its result type (see `CONVERSIONS`): a value of its result type, or with a
    * default that may be any value, or `null` too, the result or the default; what JSON holds is known only when the
    * script runs.
@@ -7528,8 +7536,7 @@ class TypeChecker {
     values: readonly StaticType[],
   ): StaticType {
     if (isRandomFunction(name)) return this.#randomFunctionType(name, expression, values);
-    if (NUMERIC_FUNCTIONS.has(name)) return this.#numericFunctionType(name, expression, values);
-    if (ANGLE_FUNCTIONS.has(name)) return this.#angleFunctionType(name, expression, values);
+    if (isNumericFunction(name)) return this.#numericFunctionType(name, expression, values);
     if (isConversion(name)) return this.#conversionType(name, expression, values);
     // `min` and `max` of one argument that may be a list are list functions too (V30 §16).
     const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");

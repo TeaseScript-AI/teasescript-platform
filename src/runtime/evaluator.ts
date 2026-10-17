@@ -52,17 +52,20 @@ import {
   lazyDefaultCallOperation,
 } from "../plan/expression-children.js";
 import type { LazyDefaultOperation } from "../lazy-defaults.js";
-import { NUMERIC_FUNCTIONS, type NumberSignature } from "../numeric-functions.js";
 import {
-  isRandomFunction,
-  numbersProblem,
-  RANDOM_CONTRACTS,
-  type RandomFunction,
-} from "../random-functions.js";
+  domainFailure,
+  isNumericFailure,
+  isNumericFunction,
+  numberArgumentMessage,
+  NUMERIC_CONTRACTS,
+  numericResult,
+  type NumberSignature,
+  type NumericFunction,
+} from "../numeric-functions.js";
+import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "../random-functions.js";
+import type { NumericFunctionName } from "../language-facts.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
-  ANGLE_FUNCTIONS,
-  angleArgumentMessage,
   angleArithmetic,
   angleDegrees,
   anglePropertyMessage,
@@ -2378,9 +2381,7 @@ export class Evaluator {
       if (name === "hashText") return hashedText(positional, named, expression.span);
       if (isRandomFunction(name))
         return this.#randomFunction(name, positional, named, expression.span);
-      if (NUMERIC_FUNCTIONS.has(name))
-        return numericFunction(name, positional, named, expression.span);
-      if (ANGLE_FUNCTIONS.has(name)) return angleFunction(name, positional, named, expression.span);
+      if (isNumericFunction(name)) return numericFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))
         return this.#minMaxBuiltin(name, positional, named, expression.span);
       if (LIST_STATISTICS.has(name)) return listStatistic(name, positional, named, expression.span);
@@ -3511,9 +3512,9 @@ export class Evaluator {
         );
       return this.randomIntegerInRange(range, span, `${name}(range)`, name);
     }
-    const { numbers } = callNumbers(name, random, positional, named, span);
-    const invalid = numbersProblem(random, numbers);
-    if (invalid !== undefined) throw fault("TSR039", invalid, span);
+    const { numbers, options } = callNumbers(name, random, positional, named, span);
+    const invalid = domainFailure(random, numbers, options);
+    if (invalid !== undefined) throw fault(invalid.code, invalid.failure, span);
     let result = this.#draw(span, name, null, null, (draw) => random.sample(numbers, draw));
     if (this.control !== null) {
       const resolved = this.#resolve(span, name, naturalOf(result), () => random.support(numbers));
@@ -4085,31 +4086,33 @@ export class Evaluator {
 
 const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
 
-/** A numeric function of numbers (V30 §13); a call without a result fails. */
+/** A call of a numeric or angle function (see `NUMERIC_CONTRACTS`); a call without a result fails. */
 function numericFunction(
-  name: string,
+  name: NumericFunctionName,
   positional: readonly SerializableRuntimeValue[],
   named: Readonly<Record<string, SerializableRuntimeValue>>,
   span: SourceSpan,
-): number {
-  const numeric = NUMERIC_FUNCTIONS.get(name)!;
+): number | StoredAngle {
+  const numeric: NumericFunction = NUMERIC_CONTRACTS[name];
   const { numbers, options } = callNumbers(name, numeric, positional, named, span);
-  const result = numeric.apply(numbers, options);
-  if (typeof result !== "number") throw fault(result.code, result.failure, span);
+  const result = numericResult(numeric, numbers, options);
+  if (isNumericFailure(result)) throw fault(result.code, result.failure, span);
   return result;
 }
 
 /**
- * The numbers of a call of a function whose every argument is a number, such as a numeric function or `chance`, by
- * position and by name; a call of another shape, or with a value that is not a number, fails.
+ * The numbers of a call of a function whose every argument is a number or an angle, such as a numeric function or
+ * `chance`, by position and by name, an angle as its degrees; a call of another shape, or with a value of another kind,
+ * fails.
  */
 function callNumbers(
   name: string,
-  { parameters, named: names = [] }: NumberSignature,
+  signature: NumberSignature & { readonly result: unknown },
   positional: readonly SerializableRuntimeValue[],
   named: Readonly<Record<string, SerializableRuntimeValue>>,
   span: SourceSpan,
 ): { readonly numbers: readonly number[]; readonly options: Readonly<Record<string, number>> } {
+  const { parameters, named: names = [] } = signature;
   const problem = argumentShapeProblem(
     name,
     { ...positionalShape(parameters), names },
@@ -4119,10 +4122,24 @@ function callNumbers(
   );
   if (problem !== undefined) throw fault("TSR028", problem.message, span);
   const number = (value: SerializableRuntimeValue, place: string): number => {
-    if (typeof value === "number") return value;
+    if (signature.takes === "angles") {
+      if (isAngle(value)) return value.degrees;
+    } else if (typeof value === "number") return value;
     throw fault(
       "TSR059",
-      `${name}(...) needs a number${place}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : isAngle(value) ? " Convert it to a number of degrees with toDeg(...) first." : ""}`,
+      numberArgumentMessage(
+        name,
+        signature,
+        describeRuntimeValue(value),
+        typeof value === "number"
+          ? "number"
+          : typeof value === "string"
+            ? "string"
+            : isAngle(value)
+              ? "angle"
+              : "other",
+        place,
+      ),
       span,
     );
   };
@@ -4547,36 +4564,6 @@ function angleBinary(
   );
 }
 
-/** A call of an angle function (V30 §13), whose arguments must be of the kinds it takes. */
-function angleFunction(
-  name: string,
-  positional: readonly SerializableRuntimeValue[],
-  named: Readonly<Record<string, SerializableRuntimeValue>>,
-  span: SourceSpan,
-): number | StoredAngle {
-  const { parameters, takes, apply } = ANGLE_FUNCTIONS.get(name)!;
-  const problem = argumentShapeProblem(
-    name,
-    positionalShape(parameters),
-    positional.length,
-    Object.keys(named),
-  );
-  if (problem !== undefined) throw fault("TSR028", problem.message, span);
-  const values = positional.map((value) => {
-    if (takes === "angle" && isAngle(value)) return value;
-    if (takes === "number" && typeof value === "number") return value;
-    throw fault(
-      "TSR059",
-      angleArgumentMessage(name, takes, describeRuntimeValue(value), typeof value),
-      span,
-    );
-  });
-  const result = apply(values);
-  if (typeof result !== "number" && "failure" in result)
-    throw fault(result.code, result.failure, span);
-  return result;
-}
-
 /** `TSR013` or `TSR031`: the host built-in `name` returned a value that a script cannot hold, for `reason`. */
 function invalidReturn(name: string, reason: string): string {
   return internalFault(
@@ -4988,9 +4975,9 @@ interface EvaluationFrame {
 const callingExpressions = new WeakMap<ExpressionPlan, boolean>();
 
 /**
- * Whether evaluating an expression can run a call that may change a value: any call but a conversion's or a random
- * function's, which only read (see `Conversion` and `RandomFunction`). Results are cached per plan node, so nested
- * checks stay linear.
+ * Whether evaluating an expression can run a call that may change a value: any call but a conversion's, a random
+ * function's, or a numeric or angle function's, which only read (see `Conversion`, `RandomFunction`, and
+ * `NumericFunction`). Results are cached per plan node, so nested checks stay linear.
  */
 function mayRunCall(expression: ExpressionPlan): boolean {
   // A node is decided after its children, which are pushed above it.
@@ -5004,7 +4991,8 @@ function mayRunCall(expression: ExpressionPlan): boolean {
       current.expression.kind === "call" &&
       (current.expression.callee.kind !== "identifier" ||
         (!isConversion(current.expression.callee.name) &&
-          !isRandomFunction(current.expression.callee.name)))
+          !isRandomFunction(current.expression.callee.name) &&
+          !isNumericFunction(current.expression.callee.name)))
     ) {
       callingExpressions.set(current.expression, true);
     } else if (current.children !== null) {

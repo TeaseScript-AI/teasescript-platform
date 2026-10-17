@@ -1,38 +1,19 @@
 import { isConversion } from "../conversions.js";
+import { isNumericFunction } from "../numeric-functions.js";
 import { isRandomFunction } from "../random-functions.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import type { ExpressionPlan, SayInstruction } from "../plan/model.js";
 
 /**
  * Engine functions that only read copies of their arguments and the scene clock, and return a new value; so do the
- * conversions and the random functions, apart from drawing from the session generator (see `Conversion` and
- * `RandomFunction`). A host built-in runs code the engine has not checked, so it is not listed.
+ * conversions, the numeric and angle functions, and the random functions, apart from drawing from the session generator
+ * (see `Conversion`, `NumericFunction`, and `RandomFunction`). A host built-in runs code the engine has not checked, so
+ * it is not listed.
  */
 const READING_FUNCTIONS: ReadonlySet<string> = new Set([
   "hashText",
-  "round",
-  "floor",
-  "ceil",
   "min",
   "max",
-  "abs",
-  "sqrt",
-  "pow",
-  "sign",
-  "mod",
-  "clamp",
-  "exp",
-  "ln",
-  "log10",
-  "sin",
-  "cos",
-  "tan",
-  "asin",
-  "acos",
-  "atan",
-  "atan2",
-  "toDeg",
-  "toRad",
   "sum",
   "average",
   "median",
@@ -132,6 +113,7 @@ function changesOnlyGenerator(root: ExpressionPlan): boolean {
           node.callee.kind === "identifier"
             ? !READING_FUNCTIONS.has(node.callee.name) &&
               !isConversion(node.callee.name) &&
+              !isNumericFunction(node.callee.name) &&
               !isRandomFunction(node.callee.name)
             : node.callee.kind !== "property" || !READING_METHODS.has(node.callee.name)
         )
