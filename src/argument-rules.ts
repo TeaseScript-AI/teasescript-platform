@@ -1,8 +1,9 @@
 /**
  * Rules of a call's arguments, each with one message, whichever pass checks the call: compile error `TSV020` for their
  * number and form, and `TSV022` for a name the callee does not take. The name pass checks the script's functions and
- * the commands it knows by name, the type checker the methods and the other built-ins. Text operations use the same
- * message for their number of arguments at runtime (`TSR028`).
+ * the commands it knows by name, the type checker the methods and the other built-ins. Where the runtime checks the
+ * same rule, for a plan that this compiler did not check, it gives the same message: the number of arguments of a text
+ * operation (`TSR028`), a name given to a method of text, a list, or a set (`TSR015`), and the date and time calls.
  */
 
 /** What a callee takes, as in `no arguments`, `1 argument (text)`, or `1 to 2 arguments (start, end)`. */
