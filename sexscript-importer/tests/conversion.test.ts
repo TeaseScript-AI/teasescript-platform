@@ -553,7 +553,7 @@ test(
       const sourcePath = path.join(directory, "start.groovy");
       writeFileSync(
         sourcePath,
-        'setInfos(4, "Lines", "A check.", "Me", "v1", 0xFFFFFF, "en", ["test"])\n\n// After a break.\ndef count = "x"\nshow(count.toInteger())\n',
+        'setInfos(4, "Lines", "A check.", "Me", "v1", 0xFFFFFF, "en", ["test"])\n\n// After a break.\ndef count = "x" + getRandom(1)\nshow(count.toInteger())\n',
       );
       const files = [await parseGroovySource(sourcePath)];
       const written = emitTease(lowerSelfContainedPackage(files)[0]!).split("\n");
@@ -1084,8 +1084,8 @@ test(
         return { source, status: result.status, code: result.failure?.code ?? null };
       };
       const failing: Array<[string[], string]> = [
-        [["def d = 0", 'if ((1 / d > 0) && false) show("inside")'], "TSR036"],
-        [["def d = 0", 'if ((1 / d > 0) || true) show("inside")'], "TSR036"],
+        [["def d = getRandom(1)", 'if ((1 / d > 0) && false) show("inside")'], "TSR036"],
+        [["def d = getRandom(1)", 'if ((1 / d > 0) || true) show("inside")'], "TSR036"],
         [
           [
             'def check = { -> if (value == 0 && false) show("inside") }',
@@ -1954,7 +1954,7 @@ test(
           "def s3 = 0",
           "s2 = s1 / 2",
           "s3 = s1 - s2",
-          "def zero = 0",
+          "def zero = getRandom(1)",
           'def kept = loadInteger("game.points")',
           "if (kept == null) kept = 1 / zero",
           'show("" + points + " " + missing + " " + s2 + " " + s3 + " " + kept)',
