@@ -27,6 +27,7 @@ import {
   packagePathProblem,
 } from "../project-paths.js";
 import { isCanonicalTagList, normalizeTagName } from "../tags.js";
+import { VALUE_KIND_NAMES, VALUE_KINDS } from "../value-kinds.js";
 import { isLazyDefaultOperation } from "../lazy-defaults.js";
 import { lazyDefaultArgumentIndex, lazyDefaultCallOperation } from "./expression-children.js";
 import {
@@ -2425,29 +2426,13 @@ function validateTypePlan(root: unknown, rootPath: string, errors: PlanValidatio
   }
 }
 
-const TYPE_PLAN_NAMES = [
-  "string",
-  "boolean",
-  "integer",
-  "number",
-  "duration",
-  "calendarDuration",
-  "angle",
-  "date",
-  "time",
-  "datetime",
-  "absoluteDateTime",
+/**
+ * The types a plan names without parts (`TypePlanName`): every kind of value but collections and objects (`VALUE_KINDS`),
+ * and `never`. Each check of a value of one of them validates the value itself.
+ */
+const TYPE_PLAN_NAMES: readonly string[] = [
+  ...VALUE_KIND_NAMES.filter((kind) => VALUE_KINDS[kind].type !== "parts"),
   "never",
-  "null",
-  "range",
-  "speaker",
-  "timer",
-  "media",
-  "camera",
-  "permanentButton",
-  "messageHandle",
-  "script",
-  "regex",
 ];
 
 function validateExpressionNode(

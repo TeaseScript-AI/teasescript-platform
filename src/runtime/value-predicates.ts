@@ -22,7 +22,6 @@ import type {
   SerializableScriptReference,
   SerializableRegex,
 } from "./serializable-values.js";
-import type { HandleKind } from "../handle-members.js";
 
 export function isList(value: SerializableRuntimeValue): value is SerializableRuntimeList {
   return typeof value === "object" && value !== null && value.kind === "list";
@@ -97,15 +96,6 @@ export function isCameraView(
   return typeof value === "object" && value !== null && value.kind === "cameraView";
 }
 
-/** The kind of handle a value is, as the compiler names it (see `HANDLE_MEMBERS`), or `null` for another value. */
-export function handleKindOf(value: SerializableRuntimeValue): HandleKind | null {
-  if (isTimerHandle(value)) return "timer";
-  if (isMediaHandle(value)) return "media";
-  if (isCameraView(value)) return "camera";
-  if (isMessageHandle(value)) return "messageHandle";
-  return isPermanentButton(value) ? "permanentButton" : null;
-}
-
 export function isScriptReference(
   value: SerializableRuntimeValue,
 ): value is SerializableScriptReference {
@@ -114,42 +104,6 @@ export function isScriptReference(
 
 export function isRegex(value: SerializableRuntimeValue): value is SerializableRegex {
   return typeof value === "object" && value !== null && value.kind === "regex";
-}
-
-/** A plain-language description of a runtime value's kind for error messages, such as "a number". */
-export function describeRuntimeValue(value: SerializableRuntimeValue): string {
-  if (value === null) return "null";
-  if (typeof value === "string") return "text (string)";
-  if (typeof value === "number") return "a number";
-  if (typeof value === "boolean") return "true or false (boolean)";
-  switch (value.kind) {
-    case "object":
-      return "an object";
-    case "speakerReference":
-      return "a speaker";
-    case "timerHandle":
-      return "a timer handle";
-    case "mediaHandle":
-      return "a media handle";
-    case "cameraView":
-      return "a camera view";
-    case "permanentButtonHandle":
-      return "a permanent button";
-    case "messageHandle":
-      return "a message handle";
-    case "datetime":
-      return "a date and time";
-    case "absoluteDateTime":
-      return "an absolute date and time";
-    case "calendarDuration":
-      return "a calendar duration";
-    case "angle":
-      return "an angle";
-    case "script":
-      return "a script reference";
-    default:
-      return `a ${value.kind}`;
-  }
 }
 
 export function isDate(value: SerializableRuntimeValue): value is SerializableRuntimeDate {

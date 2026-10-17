@@ -506,7 +506,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "say text.contains(part)\nexit",
       { text: "abc", part: 1 },
       "TSR057",
-      "contains() needs text (string) or a regex for 'part', not a number. Convert it with toString(...).",
+      "contains() needs text (string) or a regex for 'part', not a whole number (integer). Convert it with toString(...).",
     ],
     [
       "say text.repeat(times)\nexit",
@@ -542,7 +542,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "say value.trim()\nexit",
       { value: 5 },
       "TSR016",
-      "A number has no method 'trim'. Convert it to text first with toString(...).",
+      "A whole number (integer) has no method 'trim'. Convert it to text first with toString(...).",
     ],
     [
       "say value.length\nexit",

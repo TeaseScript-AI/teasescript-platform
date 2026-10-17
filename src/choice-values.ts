@@ -5,29 +5,28 @@ import {
   validateCapturedSerializableValue,
   type SerializableRuntimeValue,
 } from "./runtime/serializable-values.js";
-
-/** The kinds of record a choice value may be besides a scalar. */
-const CHOICE_VALUE_KINDS: ReadonlySet<string> = new Set([
-  "duration",
-  "calendarDuration",
-  "angle",
-  "date",
-  "time",
-  "datetime",
-  "absoluteDateTime",
-]);
+import { VALUE_KINDS, valueKindOf, type ValueKind } from "./value-kinds.js";
 
 /**
- * Whether `value` is a canonical choice value: a scalar, a duration, an angle, or a date or time value. A number is finite and
- * never `-0`.
+ * Whether `value` is a canonical choice value: a value of a kind whose `choice` is set (`VALUE_KINDS`). A number is
+ * finite and never `-0`.
  */
 export function isInteractionChoiceValue(value: unknown): value is InteractionChoiceValue {
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0);
   if (validateCapturedSerializableValue(value) !== null) return false;
   // EVIDENCE: validation: validateCapturedSerializableValue accepted the value as a runtime value.
-  const record = value as Exclude<SerializableRuntimeValue, string | number | boolean | null>;
-  return CHOICE_VALUE_KINDS.has(record.kind);
+  return VALUE_KINDS[valueKindOf(value as SerializableRuntimeValue)].choice;
+}
+
+/**
+ * Why a button cannot return a value of `kind` that it shows, such as a script reference or a regex, from the compiler
+ * and the runtime (`TSR052`), or `undefined` when it may return the value or does not show it.
+ */
+export function unreturnableChoiceMessage(kind: ValueKind): string | undefined {
+  const { choice, shown, description } = VALUE_KINDS[kind];
+  if (choice || shown === null) return undefined;
+  return `A button cannot return ${description}. Give the buttons text or number values, and pick ${description.replace(/^an? /u, "the ")} from the answer.`;
 }
 
 export function cloneInteractionChoiceValue(value: InteractionChoiceValue): InteractionChoiceValue {

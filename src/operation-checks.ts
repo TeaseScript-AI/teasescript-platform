@@ -5,7 +5,6 @@ import {
   defaultDescription,
   FILE_TEXT_FUNCTIONS,
   isConversion,
-  unwritableJsonReason,
   WRITABLE_JSON_FIX,
   type CallShape,
   type Conversion,
@@ -32,12 +31,8 @@ import type { SourceSpan } from "./source.js";
 import { staticVisibleText, type KnownValue } from "./static-evaluation.js";
 import {
   ANGLE_TYPE,
-  CALENDAR_DURATION_TYPE,
   containsType,
-  DATE_TYPE,
-  DATETIME_TYPE,
   describeValue,
-  DURATION_TYPE,
   INTEGER_TYPE,
   isAssignable,
   isKnown,
@@ -49,12 +44,20 @@ import {
   REGEX_TYPE,
   resolved,
   STRING_TYPE,
-  TIME_TYPE,
   typeName,
   union,
-  ABSOLUTE_DATE_TIME_TYPE,
+  valueKindOfType,
+  isIdentityType,
+  isShown,
   type StaticType,
 } from "./static-types.js";
+import {
+  orderedFamily,
+  unwritableJsonReason,
+  VALUE_KINDS,
+  type OrderedFamily,
+  type ValueKind,
+} from "./value-kinds.js";
 import {
   argumentCountMessage,
   argumentShapeProblem,
@@ -68,7 +71,12 @@ import {
 } from "./argument-rules.js";
 import { DICT_METHODS, dictMethod } from "./dict-operations.js";
 import { handleMethod, handleMethodNames, kindsWithMethod } from "./handle-members.js";
-import { isListFunction, minMaxValuesProblem, takesValues } from "./list-function-rules.js";
+import {
+  isListFunction,
+  LIST_FUNCTION_CONTRACTS,
+  minMaxValuesProblem,
+  takesValues,
+} from "./list-function-rules.js";
 import {
   countProblem,
   LIST_METHODS,
@@ -382,14 +390,9 @@ function unshowableElement(
   return undefined;
 }
 
-/**
- * Whether a value of this type may be shown by `join`: text, a number, true or false, a duration, an angle, a date or
- * time value, or null; `join` checks the value.
- */
+/** Whether a value of this type may be shown by `join` (`isShown`); `join` checks the value. */
 function joinShowable(type: StaticType): boolean {
-  return members(type).some(
-    (member) => !isKnown(member) || ["scalar", "null"].includes(resolved(member).kind),
-  );
+  return members(type).some(isShown);
 }
 
 function capitalized(text: string): string {
@@ -747,19 +750,17 @@ function neverTextProblems(
 /** A value that is or may hold one that `toJson` cannot write (V30 §13). */
 function unwritableJsonProblems(value: Expression, type: StaticType): OperationProblem[] {
   let unwritable: StaticType | undefined;
+  let unwritableKind: ValueKind | undefined;
   containsType(type, (part) => {
-    if (
-      !SESSION_HANDLE_KINDS.has(part.kind) &&
-      part.kind !== "range" &&
-      !isScalar(part, "calendarDuration", "script", "regex")
-    )
-      return false;
+    const kind = valueKindOfType(part);
+    if (kind === undefined || VALUE_KINDS[kind].json !== null) return false;
     unwritable = part;
+    unwritableKind = kind;
     return true;
   });
-  if (unwritable === undefined) return [];
+  if (unwritable === undefined || unwritableKind === undefined) return [];
   const kind = describeValue(unwritable);
-  const reason = unwritableJsonReason(SESSION_HANDLE_KINDS.has(unwritable.kind));
+  const reason = unwritableJsonReason(unwritableKind);
   return [
     {
       kind: "invalidOperand",
@@ -771,15 +772,6 @@ function unwritableJsonProblems(value: Expression, type: StaticType): OperationP
     },
   ];
 }
-
-/** The handles of what a script started or showed, which exist only in the current session. */
-const SESSION_HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
-  "timer",
-  "media",
-  "camera",
-  "permanentButton",
-  "messageHandle",
-]);
 
 /**
  * Problems with a function of numbers or angles, such as a numeric or angle function or `chance`: names it does not
@@ -846,6 +838,11 @@ function numberArgumentProblems(
   return problems;
 }
 
+/** The type of each kind of value that `min` and `max` compare, in the order of their contract. */
+const MIN_MAX_TYPES: readonly StaticType[] = LIST_FUNCTION_CONTRACTS.min.values.map(
+  (kind): StaticType => (kind === "number" ? NUMBER_TYPE : { kind: "scalar", name: kind }),
+);
+
 /**
  * Problems with `min` or `max`: two or more positional arguments that are all numbers or all durations. A possibly null
  * argument is checked by its other members (V30 §34); its value is checked at runtime.
@@ -873,19 +870,8 @@ function minMaxProblems(
   for (const argument of call.arguments) {
     const type = typeOf(argument.value);
     if (!isKnown(forUse(type))) continue;
-    // Numbers, durations, calendar durations, angles, or date and time values of one kind (V30 §35) compare with each
-    // other.
-    const kind = isAssignable(NUMBER_TYPE, type)
-      ? NUMBER_TYPE
-      : [
-          DURATION_TYPE,
-          CALENDAR_DURATION_TYPE,
-          ANGLE_TYPE,
-          DATE_TYPE,
-          TIME_TYPE,
-          DATETIME_TYPE,
-          ABSOLUTE_DATE_TIME_TYPE,
-        ].find((candidate) => isAssignable(candidate, type));
+    // Values of one kind that `min` and `max` compare (`LIST_FUNCTION_CONTRACTS`) compare with each other.
+    const kind = MIN_MAX_TYPES.find((candidate) => isAssignable(candidate, type));
     const message =
       kind === undefined
         ? `${name}(...) needs numbers, durations, angles, or date and time values, not ${describeValue(forUse(type))}.`
@@ -927,8 +913,7 @@ function candidateConversionProblem(
   text: string | undefined,
 ): string | undefined {
   const { kinds, result } = conversion;
-  if (kinds === "shown" ? type.kind === "scalar" || type.kind === "null" : isScalar(type, ...kinds))
-    return undefined;
+  if (kinds === "shown" ? isShown(type) : isScalar(type, ...kinds)) return undefined;
   if (isScalar(type, "string")) {
     // Text it can see converts as the runtime converts it, and does not convert with the runtime's text.
     return text === undefined || conversion.textProblem(text) === undefined
@@ -940,7 +925,7 @@ function candidateConversionProblem(
     if (type.kind === "list" || type.kind === "dict") {
       const unjoinable = members(type.element)
         .map(resolved)
-        .find((member) => isKnown(member) && member.kind !== "scalar" && member.kind !== "null");
+        .find((member) => isKnown(member) && !isShown(member));
       if (unjoinable !== undefined)
         return `${name}(...) cannot convert ${describeValue(type)}, and ${type.kind === "list" ? ".join() cannot combine its elements" : ".values.join() cannot combine its values"}, which hold ${describeValue(unjoinable)}. Show the whole ${type.kind} with say, or select a value inside it that ${name}(...) converts.`;
     }
@@ -1277,19 +1262,6 @@ function getProblems(
 }
 
 /**
- * The kinds of speakers and of handles to what a script started or showed, which no literal can write. Every copy of
- * one names the same speaker or handle, so a change through any copy reaches it.
- */
-export const HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
-  "timer",
-  "media",
-  "camera",
-  "permanentButton",
-  "messageHandle",
-  "speaker",
-]);
-
-/**
  * The message for a value that may be of a member type an operation does not support, naming the test that makes it
  * safe: `!= null` for null, which also narrows it. Only a plain variable narrows, so a property or element is first
  * kept in a variable. For null, the message also names a fallback, unless the value is what the operation changes.
@@ -1320,7 +1292,7 @@ export function mayBeMessage(
  * media, has no value to write as a fallback, so it gets none.
  */
 export function fallbackFix(label: string, passing: readonly StaticType[]): string {
-  if (passing.some((type) => HANDLE_KINDS.has(resolved(type).kind))) return "";
+  if (passing.some(isIdentityType)) return "";
   const every = (...names: ScalarTypeName[]) =>
     passing.length > 0 && passing.every((type) => isScalar(type, ...names));
   const value = every("integer", "number")
@@ -1357,35 +1329,19 @@ function nullCheckProblem(
   };
 }
 
-/** Why elements of `element` type cannot be sorted, or `undefined` when they can or may. */
+/** Why elements of `element` type cannot be sorted, or `undefined` when they can or may: one ordered family only. */
 function sortProblem(element: StaticType): string | undefined {
   const candidates = members(element).map(resolved);
   if (candidates.some((candidate) => !isKnown(candidate))) return undefined;
-  const kindOf = (candidate: StaticType): string | undefined =>
-    isScalar(candidate, "integer", "number")
-      ? "numbers"
-      : isScalar(candidate, "string")
-        ? "text"
-        : isScalar(candidate, "duration")
-          ? "durations"
-          : isScalar(candidate, "calendarDuration")
-            ? "calendar durations"
-            : isScalar(candidate, "angle")
-              ? "angles"
-              : isScalar(candidate, "date")
-                ? "dates"
-                : isScalar(candidate, "time")
-                  ? "times"
-                  : isScalar(candidate, "datetime")
-                    ? "dates and times"
-                    : isScalar(candidate, "absoluteDateTime")
-                      ? "absolute dates and times"
-                      : undefined;
-  const unsortable = candidates.find((candidate) => kindOf(candidate) === undefined);
+  const familyOfType = (candidate: StaticType): OrderedFamily | undefined => {
+    const kind = valueKindOfType(candidate);
+    return kind === undefined ? undefined : orderedFamily(kind);
+  };
+  const unsortable = candidates.find((candidate) => familyOfType(candidate) === undefined);
   if (unsortable !== undefined)
     return `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeValue(unsortable)}.`;
-  const kinds = new Set(candidates.map(kindOf));
-  return kinds.size > 1
-    ? `sort() needs elements of one kind, but this list may hold ${[...kinds].join(" and ")}.`
+  const families = new Set(candidates.map(familyOfType));
+  return families.size > 1
+    ? `sort() needs elements of one kind, but this list may hold ${[...families].map((family) => VALUE_KINDS[family!].plural).join(" and ")}.`
     : undefined;
 }

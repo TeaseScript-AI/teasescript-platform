@@ -11,8 +11,9 @@ import {
   validateCapturedSerializableValue,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
-import { describeRuntimeValue, isMessageHandle } from "./value-predicates.js";
+import { isMessageHandle } from "./value-predicates.js";
 import { describeShownValue } from "./value-types.js";
+import { describeValue } from "../value-kinds.js";
 
 /** One key of the session's view of script storage; the stored value is never `null`. */
 export interface RuntimeScriptStorageEntrySnapshot {
@@ -118,7 +119,7 @@ export function assertPersistable(
 ): void {
   const identity = findRuntimeIdentity(value);
   if (identity !== null) {
-    const kind = describeRuntimeValue(identity);
+    const kind = describeValue(identity);
     const fix = isMessageHandle(identity)
       ? " Save the message's text instead."
       : " Save values such as text, numbers, or lists instead.";

@@ -492,7 +492,10 @@ test("fields the compiler cannot know open the form with the shape of their valu
   const failure = run(number, createImmediatePacingRuntimeSnapshot(number)).snapshot.failure;
   assert.deepEqual(
     [failure?.code, failure?.message],
-    ["TSR052", "askForm fields: must be an object or a dict of fields, not a number."],
+    [
+      "TSR052",
+      "askForm fields: must be an object or a dict of fields, not a whole number (integer).",
+    ],
   );
 });
 

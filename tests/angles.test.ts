@@ -317,7 +317,7 @@ test("where the compiler cannot see the type, the same mistakes fail at runtime"
     [
       "say dynamic(90 deg) + dynamic(3)",
       "TSR009",
-      "'+' cannot combine an angle (90°) and a number (3). Add or subtract two angles, or multiply or divide an angle by a number.",
+      "'+' cannot combine an angle (90°) and the number 3. Add or subtract two angles, or multiply or divide an angle by a number.",
     ],
     [
       "say dynamic(5 s) - dynamic(90 deg)",
@@ -327,7 +327,7 @@ test("where the compiler cannot see the type, the same mistakes fail at runtime"
     [
       "say dynamic(90 deg) >= dynamic(3)",
       "TSR009",
-      "'>=' cannot compare an angle (90°) with a number (3). Use an angle on both sides.",
+      "'>=' cannot compare an angle (90°) with the number 3. Use an angle on both sides.",
     ],
     [
       'say dynamic("x") rad',

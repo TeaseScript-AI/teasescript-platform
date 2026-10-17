@@ -1,6 +1,7 @@
 import type { ScalarTypeName } from "./ast.js";
 import { isNumberAnswerText } from "./interaction-answers.js";
 import { CONVERSION_FUNCTIONS, type ConversionName } from "./language-facts.js";
+import type { SerializableRuntimeValue } from "./runtime/serializable-values.js";
 import {
   parseIsoDate,
   parseIsoDateTime,
@@ -8,6 +9,7 @@ import {
   parseIsoTimestamp,
   type TemporalResult,
 } from "./temporal.js";
+import { VALUE_KINDS } from "./value-kinds.js";
 
 /**
  * How a built-in of one positional argument is called: the conversions, and the file and hash functions of text (V30
@@ -344,40 +346,13 @@ export function fitsDefault(conversion: Conversion, value: unknown): boolean {
 
 /** A plain-language description of a conversion result, such as "a whole number (integer)". */
 export function describeConversionResult(result: ConversionResult): string {
-  switch (result) {
-    case "string":
-      return "text (string)";
-    case "number":
-      return "a number";
-    case "integer":
-      return "a whole number (integer)";
-    case "boolean":
-      return "true or false (boolean)";
-    case "date":
-      return "a date";
-    case "time":
-      return "a time";
-    case "datetime":
-      return "a date and time";
-    case "absoluteDateTime":
-      return "an absolute date and time";
-    case "regex":
-      return "a regex";
-  }
+  return VALUE_KINDS[result].description;
 }
 
 /** Whether `value` is already a value of `result`, as a `default:` fallback must be. */
 function isConversionResult(result: ConversionResult, value: unknown): boolean {
-  if (typeof value === "object" && value !== null) return "kind" in value && value.kind === result;
-  return result === "integer" ? Number.isInteger(value) : typeof value === result;
-}
-
-/**
- * Why `toJson` cannot write a value, after "which": a handle exists only in the current session, and a calendar duration,
- * a range, and a script reference have no JSON form.
- */
-export function unwritableJsonReason(session: boolean): string {
-  return session ? "exists only in the current session" : "has no JSON form";
+  // EVIDENCE: invariant: a kind's predicate reads only the JavaScript type and a record's kind, so it takes any value.
+  return VALUE_KINDS[result].is(value as SerializableRuntimeValue);
 }
 
 export const WRITABLE_JSON_FIX =

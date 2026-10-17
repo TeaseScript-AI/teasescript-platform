@@ -755,11 +755,12 @@ test("public keys and keys are checked when they compile and when they run", () 
     {
       code: "TSR059",
       message:
-        "'publicKey:' of encryptText(...) takes a public key (string), a list of them, true, or false, but its list holds a number.",
+        "'publicKey:' of encryptText(...) takes a public key (string), a list of them, true, or false, but its list holds a whole number (integer).",
     },
     {
       code: "TSR059",
-      message: "'key:' of decryptText(...) takes an unlock key as text (string), not a number.",
+      message:
+        "'key:' of decryptText(...) takes an unlock key as text (string), not a whole number (integer).",
     },
     {
       code: "TSR059",
@@ -955,12 +956,13 @@ test("an encrypt call fails at runtime without a way to open, with an argument o
     },
     {
       code: "TSR059",
-      message: "'password:' of encryptText(...) takes text (string), true, or false, not a number.",
+      message:
+        "'password:' of encryptText(...) takes text (string), true, or false, not a whole number (integer).",
     },
     {
       code: "TSR059",
       message:
-        "'timeLock:' of encryptText(...) takes a moment (absoluteDateTime), true, or false, not a number.",
+        "'timeLock:' of encryptText(...) takes a moment (absoluteDateTime), true, or false, not a whole number (integer).",
     },
     {
       code: "TSR059",
@@ -977,7 +979,10 @@ test("an encrypt call fails at runtime without a way to open, with an argument o
       message:
         'decryptFile(...) opens a stored file, but "images/a.jpg" is not one. Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or encryptFile(...) gave for a file.',
     },
-    { code: "TSR059", message: "decryptText(...) opens locked text (string), not a number." },
+    {
+      code: "TSR059",
+      message: "decryptText(...) opens locked text (string), not a whole number (integer).",
+    },
   ]);
   // Only a time lock the player chooses needs the clock, to suggest its moment.
   assert.deepEqual(

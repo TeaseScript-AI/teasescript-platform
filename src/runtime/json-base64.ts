@@ -1,5 +1,5 @@
 import type { RuntimeErrorCode } from "../diagnostic-codes.js";
-import { unwritableJsonReason, WRITABLE_JSON_FIX } from "../conversions.js";
+import { WRITABLE_JSON_FIX } from "../conversions.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
@@ -20,7 +20,7 @@ import type {
 } from "./serializable-values.js";
 import { binaryFromBase64 } from "./stored-files.js";
 import { checkTextLength, textTooLong } from "./text-length.js";
-import { describeRuntimeValue } from "./value-predicates.js";
+import { describeValue, unwritableJsonReason, VALUE_KINDS, valueKindOf } from "../value-kinds.js";
 
 // `toJson`, `fromJson`, `toBase64`, and `fromBase64` (V30 §13), which exchange data with other programs as text. Native
 // JSON writes and reads each text and number, and native Base64 and UTF-8 do the rest; the structure is walked here,
@@ -90,6 +90,8 @@ export function jsonText(
       write(storedFile?.(current) ?? jsonString(current, span));
       continue;
     }
+    if (VALUE_KINDS[valueKindOf(current)].json === null)
+      throw fault("TSR059", unwritableMessage(current, item.nested), span);
     switch (current.kind) {
       case "list":
       case "set": {
@@ -138,7 +140,7 @@ export function jsonText(
         write(String(current.degrees));
         continue;
       default:
-        throw fault("TSR059", unwritableMessage(current, item.nested), span);
+        throw new Error(`toJson(...) has no JSON form for ${describeValue(current)}.`);
     }
   }
   return out.join("");
@@ -146,23 +148,12 @@ export function jsonText(
 
 /** Why `toJson` cannot write `value`, which it holds or is. */
 function unwritableMessage(value: SerializableRuntimeValue, nested: boolean): string {
-  const kind = describeRuntimeValue(value);
-  const reason = unwritableJsonReason(
-    typeof value === "object" && value !== null && SESSION_KINDS.has(value.kind),
-  );
+  const kind = describeValue(value);
+  const reason = unwritableJsonReason(valueKindOf(value));
   return nested
     ? `toJson(...) cannot write this value: it holds ${kind}, which ${reason}. ${WRITABLE_JSON_FIX}`
     : `toJson(...) cannot write ${kind}, which ${reason}. ${WRITABLE_JSON_FIX}`;
 }
-
-/** The handles of what a script started or showed, which exist only in the current session. */
-const SESSION_KINDS: ReadonlySet<string> = new Set([
-  "timerHandle",
-  "mediaHandle",
-  "cameraView",
-  "permanentButtonHandle",
-  "messageHandle",
-]);
 
 /** `text` as a JSON string, as native JSON writes it, or `TSR084` when that would be longer than a text can be. */
 function jsonString(text: string, span: SourceSpan): string {

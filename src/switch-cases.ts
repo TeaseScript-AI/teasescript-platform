@@ -9,8 +9,10 @@ import {
   isNumeric,
   members,
   resolved,
+  valueKindOfType,
   type StaticType,
 } from "./static-types.js";
+import { mayEqualKinds, VALUE_KINDS, type ValueKind } from "./value-kinds.js";
 
 const switchCaseCode = {
   invalidCaseValue: "TSV047",
@@ -25,6 +27,8 @@ export type SwitchCaseReport = (code: SwitchCaseCode, message: string, span: Sou
 type CaseValue =
   | {
       readonly kind: "literal";
+      /** The kind of the literal's value, which must be one a case may be (`case`). */
+      readonly of: ValueKind;
       /** Equal for literals that compare equal with `==`, so `2` and `2.0` collide. */
       readonly key: string;
       readonly number: number | undefined;
@@ -79,9 +83,11 @@ export function impossibleCaseMessage(
   const possible = members(subjectType).some((member) => {
     if (!isKnown(member)) return true;
     if (range) return isNumeric(member);
-    if (literal.kind === "scalar" && member.kind === "scalar")
-      return member.name === literal.name || (isNumeric(member) && isNumeric(literal));
-    return member.kind === literal.kind;
+    // A value only ever equals one of its family (`mayEqualKinds`).
+    const [kind, literalKind] = [valueKindOfType(member), valueKindOfType(literal)];
+    return kind !== undefined && literalKind !== undefined
+      ? mayEqualKinds(kind, literalKind)
+      : member.kind === literal.kind;
   });
   if (possible) return undefined;
   const described = `${describeSubject(subject)} is ${describeValue(subjectType)}`;
@@ -139,9 +145,14 @@ function caseValue(
   // Speakers compare by identity (V30 §37), and a declared speaker name always refers to the same speaker.
   const literal =
     unwrapped.kind === "identifier" && isSpeaker(unwrapped.name)
-      ? { key: `speaker:${unwrapped.name}`, number: undefined, text: unwrapped.name }
+      ? {
+          of: "speaker" as const,
+          key: `speaker:${unwrapped.name}`,
+          number: undefined,
+          text: unwrapped.name,
+        }
       : literalValue(unwrapped);
-  if (literal === undefined) {
+  if (literal === undefined || !VALUE_KINDS[literal.of].case) {
     report(
       switchCaseCode.invalidCaseValue,
       'A case value must be a literal such as "open", 3, true, or null, a declared speaker, or a number range ' +
@@ -161,12 +172,19 @@ function literalValue(
     const text = `${negative ? "-" : ""}${operand.amount.raw} ${operand.calendar ? "calendar " : ""}${operand.unit}`;
     const literal = durationLiteralValue(operand);
     // A calendar amount that is not whole is reported where the literal is typed.
-    if (typeof literal === "string") return { key: `duration:${text}`, number: undefined, text };
+    if (typeof literal === "string")
+      return {
+        of: operand.calendar ? "calendarDuration" : "duration",
+        key: `duration:${text}`,
+        number: undefined,
+        text,
+      };
     // `==` compares a calendar duration by its parts and never equals an exact one, so `1 calendar day` and `24 h` are
     // different cases, while `1 d` and `24 h` are the same.
     const value = negative ? negateDuration(literal) : literal;
     const parts = durationParts(value);
     return {
+      of: isCalendar(value) ? "calendarDuration" : "duration",
       key: `${isCalendar(value) ? "calendarDuration" : "duration"}:${parts.months}:${parts.days}:${parts.milliseconds}`,
       number: undefined,
       text,
@@ -179,6 +197,7 @@ function literalValue(
     const text = `${negative ? "-" : ""}${operand.operand.raw} ${operand.unit}`;
     // An angle too large to represent is reported where the literal is checked.
     return {
+      of: "angle",
       key: degrees === undefined ? `angle:${text}` : `angle:${degrees === 0 ? 0 : degrees}`,
       number: undefined,
       text,
@@ -187,6 +206,7 @@ function literalValue(
   const number = numberLiteral(expression);
   if (number !== undefined) {
     return {
+      of: Number.isInteger(number.value) ? "integer" : "number",
       // `==` compares integers and numbers by value, and -0 equals 0.
       key: `number:${number.value === 0 ? 0 : number.value}`,
       number: number.value,
@@ -200,16 +220,22 @@ function literalValue(
         if (part.kind !== "stringText") return undefined;
         value += part.value;
       }
-      return { key: `string:${value}`, number: undefined, text: JSON.stringify(value) };
+      return {
+        of: "string",
+        key: `string:${value}`,
+        number: undefined,
+        text: JSON.stringify(value),
+      };
     }
     case "booleanLiteral":
       return {
+        of: "boolean",
         key: `boolean:${expression.value}`,
         number: undefined,
         text: String(expression.value),
       };
     case "nullLiteral":
-      return { key: "null", number: undefined, text: "null" };
+      return { of: "null", key: "null", number: undefined, text: "null" };
     default:
       return undefined;
   }

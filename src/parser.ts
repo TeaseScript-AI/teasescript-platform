@@ -104,6 +104,7 @@ import {
   type StatementCommand,
   type ValueCommand,
 } from "./language-facts.js";
+import { VALUE_KIND_NAMES, VALUE_KINDS } from "./value-kinds.js";
 import { lex } from "./lexer.js";
 import { readMisplacedHeader, readScriptHeader, type ScriptHeader } from "./script-header.js";
 import { isTagListOption, tagPredicateSteps } from "./tag-query.js";
@@ -5879,30 +5880,13 @@ const CLOSING_DELIMITERS: ReadonlySet<TokenKind> = new Set([
   TokenKind.RightBrace,
 ]);
 
+/**
+ * The type names that are identifiers: every kind that an annotation writes (`VALUE_KINDS`), but those that the lexer
+ * reads as a token of their own, `speaker`, `set`, and `null` (`typeName`).
+ */
 const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
-  (
-    [
-      "string",
-      "boolean",
-      "integer",
-      "number",
-      "date",
-      "time",
-      "datetime",
-      "absoluteDateTime",
-      "duration",
-      "calendarDuration",
-      "angle",
-      "list",
-      "dict",
-      "object",
-      "range",
-      "timer",
-      "media",
-      "messageHandle",
-      "script",
-      "regex",
-    ] as const
+  VALUE_KIND_NAMES.filter(
+    (kind): kind is TypeName => VALUE_KINDS[kind].written && !KEYWORD_TOKENS.has(kind),
   ).map((name) => [name, name]),
 );
 

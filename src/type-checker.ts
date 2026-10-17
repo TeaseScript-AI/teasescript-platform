@@ -116,7 +116,6 @@ import {
   collectionMethodProblems,
   expressionLabel,
   fallbackFix,
-  HANDLE_KINDS,
   mayBeMessage,
   dictMethodProblems,
   memberProblems,
@@ -218,6 +217,7 @@ import {
 import {
   logicalOperandRule,
   notNumberFix,
+  orderRule,
   UNIT_AMOUNT_RULE,
   unitAmountFix,
 } from "./operand-rules.js";
@@ -368,7 +368,6 @@ import {
   settle,
   STRING_TYPE,
   TIME_TYPE,
-  ABSOLUTE_DATE_TIME_TYPE,
   SCRIPT_TYPE,
   REGEX_TYPE,
   typeFromAnnotation,
@@ -400,8 +399,14 @@ import {
   type Origin,
   type Origins,
   type PartOrigin,
+  valueKindOfType,
+  isIdentityType,
+  isScalarKind,
+  isShown,
   type StaticType,
 } from "./static-types.js";
+import { mayEqualKinds, ordersWith, VALUE_KIND_NAMES, VALUE_KINDS } from "./value-kinds.js";
+import { unreturnableChoiceMessage } from "./choice-values.js";
 import { checksProperties, typePlan } from "./type-plans.js";
 import {
   accountCopy,
@@ -5242,7 +5247,7 @@ class TypeChecker {
         if (unwrap(value).kind !== "objectLiteral")
           this.#reportUnless(
             type,
-            (member) => isShowable(member) || resolved(member).kind === "object",
+            (member) => isShown(member) || resolved(member).kind === "object",
             value,
             `'${name.name}:' takes text or a button object { text, background? }`,
           );
@@ -5549,7 +5554,7 @@ class TypeChecker {
         this.#reportUnless(
           type,
           (member) =>
-            member.kind === "list" && (!isKnown(member.element) || isShowable(member.element)),
+            member.kind === "list" && (!isKnown(member.element) || isShown(member.element)),
           argument.value,
           "'texts:' takes a list of texts",
         );
@@ -5567,7 +5572,7 @@ class TypeChecker {
         if (unwrap(argument.value).kind !== "objectLiteral")
           this.#reportUnless(
             type,
-            (member) => isShowable(member) || resolved(member).kind === "object",
+            (member) => isShown(member) || resolved(member).kind === "object",
             argument.value,
             "'cancel:' takes text or a button object { text, background? }",
           );
@@ -6243,17 +6248,13 @@ class TypeChecker {
       case "<=":
       case ">":
       case ">=":
-        this.#operation(expression.operator, [left, right], expression, (a, b) =>
-          (isNumeric(a) && isNumeric(b)) ||
-          (isScalar(a, "string") && isScalar(b, "string")) ||
-          (isScalar(a, "duration") && isScalar(b, "duration")) ||
-          (isScalar(a, "calendarDuration") && isScalar(b, "calendarDuration")) ||
-          (isScalar(a, "angle") && isScalar(b, "angle")) ||
-          // Date and time values order only within one kind (V30 §35).
-          (isTemporal(a) && typeName(a) === typeName(b))
+        this.#operation(expression.operator, [left, right], expression, (a, b) => {
+          // Values order only within one family, so date and time values within one kind (V30 §35).
+          const [first, second] = [valueKindOfType(a), valueKindOfType(b)];
+          return first !== undefined && second !== undefined && ordersWith(first, second)
             ? BOOLEAN_TYPE
-            : undefined,
-        );
+            : undefined;
+        });
         return BOOLEAN_TYPE;
       default: {
         // Two lists whose element types mix are reported as `union()` reports them (V30 §16).
@@ -8074,11 +8075,14 @@ class TypeChecker {
     return false;
   }
 
-  /** A dict key is text (`dictKeyMessage`). */
+  /** A dict key is text (`dictKey`, `dictKeyMessage`). */
   #checkDictKey(type: StaticType, expression: Expression): void {
     this.#reportUnless(
       type,
-      (member) => isScalar(member, "string"),
+      (member) => {
+        const kind = valueKindOfType(member);
+        return kind !== undefined && VALUE_KINDS[kind].dictKey;
+      },
       expression,
       (given) =>
         dictKeyMessage(given, isNumeric(nonNullTypeForUse(type)), expressionLabel(expression)),
@@ -8210,7 +8214,7 @@ class TypeChecker {
             option.expression,
             type,
             (element) =>
-              (written === null ? isChoiceValue(element) : isShowable(element)) ||
+              (written === null ? isChoiceValue(element) : isShown(element)) ||
               resolved(element).kind === "object",
             () =>
               this.#report(
@@ -8304,7 +8308,7 @@ class TypeChecker {
     const accepted = (member: StaticType): boolean => {
       const kind = resolved(member).kind;
       return (
-        (returns ? isChoiceValue(member) : isShowable(member)) ||
+        (returns ? isChoiceValue(member) : isShown(member)) ||
         kind === "object" ||
         (!inList && (kind === "list" || kind === "set"))
       );
@@ -8314,7 +8318,7 @@ class TypeChecker {
         typeCode.invalidInteractionChoice,
         inList && (member.kind === "list" || member.kind === "set")
           ? "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set."
-          : (unreturnableChoiceMessage(member) ??
+          : (unreturnableChoice(member) ??
               "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set."),
         entry.span,
       ),
@@ -8354,11 +8358,11 @@ class TypeChecker {
             this.#checkMembers(
               property.value,
               propertyType,
-              (member) => unreturnableChoiceMessage(member) === undefined,
+              (member) => unreturnableChoice(member) === undefined,
               (member) =>
                 this.#report(
                   typeCode.invalidInteractionChoice,
-                  unreturnableChoiceMessage(member)!,
+                  unreturnableChoice(member)!,
                   property.value.span,
                 ),
             );
@@ -8386,7 +8390,7 @@ class TypeChecker {
     const text = table.get("text");
     if (text === undefined) return;
     const shown = (member: StaticType): boolean =>
-      !isKnown(member) || resolved(member).kind === "null" || isShowable(member);
+      !isKnown(member) || resolved(member).kind === "null" || isShown(member);
     if (!members(text).some(shown))
       this.#checkShownText(expression, text, "the text of a choice option");
   }
@@ -8400,7 +8404,7 @@ class TypeChecker {
       const reported = this.#checkMembers(
         expression,
         type,
-        (member) => isShowable(member) || resolved(member).kind === "list",
+        (member) => isShown(member) || resolved(member).kind === "list",
         (member) =>
           this.#report(
             typeCode.unshowableValue,
@@ -8411,7 +8415,7 @@ class TypeChecker {
           ),
       );
       if (!reported)
-        this.#checkElements(expression, type, isShowable, () =>
+        this.#checkElements(expression, type, isShown, () =>
           this.#report(
             typeCode.unshowableValue,
             "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.",
@@ -8427,7 +8431,7 @@ class TypeChecker {
         value.span,
       );
     for (const element of value.elements)
-      this.#checkMembers(element, this.#typeOf(element), isShowable, () =>
+      this.#checkMembers(element, this.#typeOf(element), isShown, () =>
         this.#report(
           typeCode.unshowableValue,
           "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.",
@@ -8587,7 +8591,7 @@ class TypeChecker {
 
   /** Only `${...}` selects from a list; a list in a text field is an error, at runtime when it is not known here. */
   #checkShownText(expression: Expression, type: StaticType, field: string): void {
-    this.#checkMembers(expression, type, isShowable, (member) =>
+    this.#checkMembers(expression, type, isShown, (member) =>
       member.kind === "list"
         ? this.#report(
             typeCode.listInText,
@@ -9301,9 +9305,7 @@ class TypeChecker {
     let computed: Extract<Expression, { kind: "propertyAccessExpression" }> | undefined;
     for (let node = start; ;) {
       const type = this.#typeOf(node);
-      const reference = members(type).some(
-        (member) => !isKnown(member) || HANDLE_KINDS.has(resolved(member).kind),
-      );
+      const reference = members(type).some((member) => !isKnown(member) || isIdentityType(member));
       if (nonNullType(type).kind === "never") return;
       if (reference) break;
       if (node.kind === "parenthesizedExpression") node = node.expression;
@@ -9921,18 +9923,9 @@ function mayFit(type: StaticType, result: StaticType): boolean {
   );
 }
 
+/** What an operand the compiler cannot know may be for an operator: a value of a scalar kind, or a list. */
 const OPERAND_KINDS: readonly StaticType[] = [
-  INTEGER_TYPE,
-  NUMBER_TYPE,
-  STRING_TYPE,
-  BOOLEAN_TYPE,
-  DURATION_TYPE,
-  CALENDAR_DURATION_TYPE,
-  ANGLE_TYPE,
-  DATE_TYPE,
-  TIME_TYPE,
-  DATETIME_TYPE,
-  ABSOLUTE_DATE_TIME_TYPE,
+  ...VALUE_KIND_NAMES.flatMap((kind) => (isScalarKind(kind) ? [scalarType(kind)] : [])),
   { kind: "list", element: UNKNOWN_TYPE },
 ];
 
@@ -10032,11 +10025,12 @@ function isPureBuiltinCall(expression: CallExpression): boolean {
 const SESSION_VALUES =
   "Speakers, camera views, permanent buttons, and timer, media, or message handles";
 
-/** Whether a value of this type is or holds one that exists only in the current session and cannot be saved. */
+/**
+ * Whether a value of this type is or holds one that exists only in the current session and cannot be saved: a value with
+ * an identity (`hasIdentity`).
+ */
 function holdsSessionValue(type: StaticType): boolean {
-  return containsType(type, (part) =>
-    ["speaker", "timer", "media", "camera", "permanentButton", "messageHandle"].includes(part.kind),
-  );
+  return containsType(type, isIdentityType);
 }
 
 /**
@@ -10557,27 +10551,13 @@ function dictValueType(type: StaticType): StaticType | undefined {
  * name, or `undefined` when the union can be declared.
  */
 function unnamedMixFix(mixed: StaticType): string | undefined {
-  if (containsType(mixed, (part) => part.kind === "camera"))
-    return "a camera view's type cannot be declared, so keep camera views apart from other values";
-  if (containsType(mixed, (part) => part.kind === "permanentButton"))
-    return "a permanent button's type cannot be declared, so keep permanent buttons apart from other values";
+  for (const kind of VALUE_KIND_NAMES) {
+    const { written, description, plural } = VALUE_KINDS[kind];
+    if (!written && containsType(mixed, (part) => valueKindOfType(part) === kind))
+      return `${description}'s type cannot be declared, so keep ${plural} apart from other values`;
+  }
   return undefined;
 }
-
-/** Value kinds that `${...}` cannot show. */
-const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
-  "list",
-  "set",
-  "dict",
-  "object",
-  "range",
-  "timer",
-  "media",
-  "messageHandle",
-  "camera",
-  "permanentButton",
-  "speaker",
-]);
 
 /**
  * The type of a choice whose button values the source shows: one type per family of values, such as text or numbers,
@@ -10663,17 +10643,9 @@ function mayCompareEqual(left: StaticType, right: StaticType): boolean {
   const uncertain = (type: StaticType) =>
     !isKnown(type) || members(type).some((part) => !isKnown(part));
   if (uncertain(left) || uncertain(right)) return true;
-  return members(left)
-    .map(resolved)
-    .some((a) =>
-      members(right)
-        .map(resolved)
-        .some((b) =>
-          a.kind === "scalar" && b.kind === "scalar"
-            ? a.name === b.name || (isNumeric(a) && isNumeric(b))
-            : a.kind === b.kind,
-        ),
-    );
+  // Every member is known, so each has a kind.
+  const kinds = (type: StaticType) => members(type).map((member) => valueKindOfType(member)!);
+  return kinds(left).some((a) => kinds(right).some((b) => mayEqualKinds(a, b)));
 }
 
 function comparedLiteral(expression: Expression): readonly PossibleValue[] | undefined {
@@ -10758,25 +10730,16 @@ function describeLiterals(values: readonly PossibleValue[]): string {
     : `${written.slice(0, -1).join(", ")} or ${written.at(-1)!}`;
 }
 
-/** Whether `${...}` and text fields show a value of this member type as text. */
-function isShowable(member: StaticType): boolean {
-  return !UNSHOWABLE_KINDS.has(resolved(member).kind);
+/** Why a button cannot return a value of this member type, which it shows, such as a script reference or a regex. */
+function unreturnableChoice(member: StaticType): string | undefined {
+  const kind = valueKindOfType(member);
+  return kind === undefined ? undefined : unreturnableChoiceMessage(kind);
 }
 
-/** Why a button cannot return a value of this member type, which it may show: a script reference or a regex. */
-function unreturnableChoiceMessage(member: StaticType): string | undefined {
-  for (const [name, description] of [
-    ["script", "a script reference"],
-    ["regex", "a regex"],
-  ] as const)
-    if (isScalar(member, name))
-      return `A button cannot return ${description}. Give the buttons text or number values, and pick ${description.replace("a ", "the ")} from the answer.`;
-  return undefined;
-}
-
-/** Whether a button may return a value of this member type: one that is shown, other than a script reference or regex. */
+/** Whether a button may return a value of this member type (`choice`), or may. */
 function isChoiceValue(member: StaticType): boolean {
-  return isShowable(member) && unreturnableChoiceMessage(member) === undefined;
+  const kind = valueKindOfType(member);
+  return kind === undefined || VALUE_KINDS[kind].choice;
 }
 
 /** The result types of the built-ins that take fixed positional arguments. */
@@ -11068,7 +11031,7 @@ function operatorMessage(
     const temporal = isTemporal(left!) ? left! : isTemporal(right!) ? right! : undefined;
     if (temporal !== undefined)
       return `'${operator}' compares ${describeValue(temporal)} only with another ${temporalNoun(temporal)}, not with ${describeValue(temporal === left ? right! : left!)}.${expression.kind === "binaryExpression" ? temporalPairFix(expression, operator, left!, right!) : ""}`;
-    return `'${operator}' compares two numbers, two texts, two durations, two calendar durations, or two angles, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
+    return `${orderRule(operator)}, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
   }
   if (operator === "/" && mixedDurations)
     return "'/' cannot divide a calendar duration and a duration by each other. A calendar day or month has no fixed length. Divide two calendar durations, or two durations.";
@@ -11168,7 +11131,7 @@ function joinMessage(
   }
   if (text(left) !== text(right) && (text(left) || !list(right))) {
     const other = text(left) ? right : left;
-    const fix = isShowable(other)
+    const fix = isShown(other)
       ? ` Put the value in the text instead, as in ${interpolationFix(expression)}.`
       : "";
     return `'+' joins text only with other text, not with ${describeValue(other)}.${fix}`;
@@ -11444,7 +11407,7 @@ function operandFix(operand: StaticType, type: StaticType, statement: Assignment
   const target = expressionLabel(statement.target);
   if (statement.operator !== "+=" || target === null) return "";
   const value = operandLabel(statement.value) ?? "value";
-  if (isScalar(operand, "string") && isShowable(type))
+  if (isScalar(operand, "string") && isShown(type))
     return ` Put the value in the text instead, as in '${target} += "\${${value}}"'.`;
   if (resolved(operand).kind === "list" && resolved(type).kind === "range")
     return ` To add the numbers of a range, use '${target} += ${rangeListText(statement.value)}'.`;
@@ -11750,11 +11713,10 @@ const GENERIC_FORM_ANSWER_TYPE = union([
   DATE_TYPE,
   TIME_TYPE,
   DATETIME_TYPE,
-  // A cycle may return any choice value but `null`.
-  DURATION_TYPE,
-  CALENDAR_DURATION_TYPE,
-  ANGLE_TYPE,
-  ABSOLUTE_DATE_TIME_TYPE,
+  // A cycle may return any choice value (`choice`) but `null`.
+  ...VALUE_KIND_NAMES.flatMap((kind) =>
+    VALUE_KINDS[kind].choice && isScalarKind(kind) ? [scalarType(kind)] : [],
+  ),
 ]);
 
 /** The kind of an `askForm` field that starts with a value of `type`, or `null` when its kind is not known. */

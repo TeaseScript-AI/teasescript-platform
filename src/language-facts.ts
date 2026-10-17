@@ -4,6 +4,7 @@
  */
 import type { InteractionExpression } from "./ast.js";
 import { TokenKind, type Token } from "./token.js";
+import { VALUE_KIND_NAMES, VALUE_KINDS } from "./value-kinds.js";
 
 /** Names reserved by the accepted V30 TeaseScript specification. */
 export const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
@@ -77,30 +78,6 @@ export const KEYWORD_TOKENS: ReadonlyMap<string, TokenKind> = new Map([
   ["is", TokenKind.KeywordIs],
   ["otherwise", TokenKind.KeywordOtherwise],
 ]);
-
-export const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
-  "string",
-  "boolean",
-  "integer",
-  "number",
-  "date",
-  "time",
-  "datetime",
-  "absoluteDateTime",
-  "calendarDuration",
-  // The earlier name stays reserved, so its use is a compile error that names the fix (ADR 0026).
-  "timestamp",
-  "duration",
-  "angle",
-  "list",
-  "dict",
-  "object",
-  "range",
-  "media",
-  "messageHandle",
-  "script",
-  "regex",
-] as const);
 
 /** The conversions (V30 §8, §13, §35), whose contracts are in `conversions.ts`. */
 export const CONVERSION_FUNCTIONS = Object.freeze([
@@ -264,6 +241,21 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "findImages",
   "findScripts",
 ] as const);
+
+/**
+ * The protected type names (V30 §38): the name of every kind that an annotation writes (`VALUE_KINDS`) that is no grammar
+ * keyword or engine name, as `null`, `set`, `speaker`, and `timer` are. The earlier name `timestamp` stays reserved, so
+ * its use is a compile error that names the fix (ADR 0026).
+ */
+export const TEASESCRIPT_PROTECTED_TYPE_NAMES: readonly string[] = Object.freeze([
+  ...VALUE_KIND_NAMES.filter(
+    (kind) =>
+      VALUE_KINDS[kind].written &&
+      !TEASESCRIPT_GRAMMAR_KEYWORDS.some((keyword) => keyword === kind) &&
+      !TEASESCRIPT_PROTECTED_ENGINE_NAMES.some((name) => name === kind),
+  ),
+  "timestamp",
+]);
 
 export const CORE_RUNTIME_BUILTINS = Object.freeze([
   ...RANDOM_FUNCTIONS,

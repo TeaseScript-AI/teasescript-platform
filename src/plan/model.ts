@@ -3,6 +3,7 @@ import type { FileConversion } from "../conversions.js";
 import type { StoredCalendarDuration, StoredDuration } from "../duration.js";
 import type { LazyDefaultOperation } from "../lazy-defaults.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
+import type { PlainKind, ScalarKind } from "../value-kinds.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
 export const INSTRUCTION_PLAN_VERSION = 100;
@@ -1250,29 +1251,8 @@ export type TypePlan =
   | { readonly kind: "object"; readonly properties: readonly TypePropertyPlan[] }
   | { readonly kind: "union"; readonly members: readonly TypePlan[] };
 
-export type TypePlanName =
-  | "string"
-  | "boolean"
-  | "integer"
-  | "number"
-  | "duration"
-  | "calendarDuration"
-  | "angle"
-  | "date"
-  | "time"
-  | "datetime"
-  | "absoluteDateTime"
-  | "never"
-  | "null"
-  | "range"
-  | "speaker"
-  | "timer"
-  | "media"
-  | "camera"
-  | "permanentButton"
-  | "messageHandle"
-  | "script"
-  | "regex";
+/** The types a plan names without parts: every kind of value but collections and objects, and `never`. */
+export type TypePlanName = ScalarKind | PlainKind | "never";
 
 export interface TypePropertyPlan {
   readonly name: string;

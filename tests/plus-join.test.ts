@@ -230,15 +230,15 @@ test("+ on values known only when the script runs joins them or fails with the f
   );
   assert.deepEqual(failure(`${DYNAMIC}say "Score: " + dynamic(5)\nexit`), [
     "TSR009",
-    "'+' joins two texts or two lists and adds numbers or durations, but these are text (string) and a number. Put the value in the text instead, as in \"${first}${second}\".",
+    "'+' joins two texts or two lists and adds numbers or durations, but these are text (string) and a whole number (integer). Put the value in the text instead, as in \"${first}${second}\".",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nsay items + dynamic(2)\nexit`), [
     "TSR009",
-    "'+' joins two texts or two lists and adds numbers or durations, but these are a list and a number. To add one element, use add(value), or write list + [value] for a new list.",
+    "'+' joins two texts or two lists and adds numbers or durations, but these are a list and a whole number (integer). To add one element, use add(value), or write list + [value] for a new list.",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nitems.addAll(dynamic(2))\nexit`), [
     "TSR060",
-    "addAll() needs a list, not a number.",
+    "addAll() needs a list, not a whole number (integer).",
   ]);
   // Elements of unknown type are checked against the list's element type.
   assert.deepEqual(

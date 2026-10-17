@@ -20,6 +20,7 @@ import {
   mixedListValuesMessage,
   takesValues,
   type ListFunction,
+  listValueKind,
   type ListValueKind,
   type MinMaxName,
   type StatisticName,
@@ -52,17 +53,17 @@ import {
 } from "./serializable-values.js";
 import { compareTemporal } from "./temporal-operations.js";
 import {
-  describeRuntimeValue,
   isAngle,
   isAnyDuration,
   isDict,
-  isCalendarDuration,
   isDuration,
   isList,
   isObject,
   isRange,
   isTemporal,
 } from "./value-predicates.js";
+import { describeValue, familyOf, VALUE_KINDS, valueKindOf } from "../value-kinds.js";
+import { isTemporalKind } from "../temporal-builtins.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -83,7 +84,7 @@ function listValues(
   if (!isList(list))
     throw fault(
       "TSR059",
-      `${name}(...) needs a list, not ${describeRuntimeValue(list)}.${isRange(list) ? RANGE_LIST_FIX : ""}`,
+      `${name}(...) needs a list, not ${describeValue(list)}.${isRange(list) ? RANGE_LIST_FIX : ""}`,
       span,
     );
   if (by === undefined) return list.items;
@@ -101,13 +102,13 @@ function propertyValue(
   if (typeof property !== "string")
     throw fault(
       "TSR059",
-      `${name}(...) needs the name of a property as its ${option}:, not ${describeRuntimeValue(property)}.`,
+      `${name}(...) needs the name of a property as its ${option}:, not ${describeValue(property)}.`,
       span,
     );
   if (!isObject(item))
     throw fault(
       "TSR060",
-      `${name}(...) needs a list of objects for ${option}:, not a list that holds ${describeRuntimeValue(item)}.`,
+      `${name}(...) needs a list of objects for ${option}:, not a list that holds ${describeValue(item)}.`,
       span,
     );
   const found = item.properties.find((entry) => entry.name === property);
@@ -152,11 +153,7 @@ function amountsOf(
 
 /** The kind of a value that a list function may read, or `undefined` for another value. */
 function kindOf(value: SerializableRuntimeValue): ListValueKind | undefined {
-  if (typeof value === "number") return "number";
-  if (isDuration(value)) return "duration";
-  if (isCalendarDuration(value)) return "calendarDuration";
-  if (isAngle(value)) return "angle";
-  return isTemporal(value) ? value.kind : undefined;
+  return listValueKind(valueKindOf(value));
 }
 
 /**
@@ -176,7 +173,7 @@ function listValuesKind(
   if (other !== undefined)
     throw fault(
       "TSR060",
-      listValueMessage(name, kinds, describeRuntimeValue(other), kindOf(other), x),
+      listValueMessage(name, kinds, describeValue(other), kindOf(other), x),
       span,
     );
   const found = new Set(values.map(kindOf));
@@ -263,7 +260,7 @@ function numbersOf(
     if (typeof value !== "number")
       throw fault(
         "TSR059",
-        `${name}(...) needs a number as its ${parameter}, not ${describeRuntimeValue(value)}.`,
+        `${name}(...) needs a number as its ${parameter}, not ${describeValue(value)}.`,
         span,
       );
     return value;
@@ -507,7 +504,7 @@ function predict(
   )
     throw fault(
       "TSR059",
-      `predict(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${describeRuntimeValue(line)}.`,
+      `predict(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${describeValue(line)}.`,
       span,
     );
   // intercept + slope × (x - start), exactly, with x - start in days, and rounded once.
@@ -524,7 +521,7 @@ function predict(
       "TSR059",
       isAngle(x)
         ? angleStatisticMessage("predict")
-        : `predict(...) needs ${describeRuntimeValue(start!)} as its x, like the line's start, not ${describeRuntimeValue(x)}.`,
+        : `predict(...) needs ${VALUE_KINDS[familyOf(valueKindOf(start!))].description} as its x, like the line's start, not ${describeValue(x)}.`,
       span,
     );
   const value = quotient(
@@ -577,7 +574,7 @@ export function weightedChoices(
     if (typeof weight !== "number")
       throw fault(
         "TSR060",
-        `${name}(...) needs numbers as weights, not ${describeRuntimeValue(weight)}.`,
+        `${name}(...) needs numbers as weights, not ${describeValue(weight)}.`,
         span,
       );
     const problem = contract.weightProblem(weight);
@@ -652,28 +649,24 @@ function minMaxValue(
     positional = statisticValues(name, positional[0]!, named.by, span);
     listValuesKind(name, positional, LIST_FUNCTION_CONTRACTS[name].values, span);
   }
-  const numbers = positional.every((value) => typeof value === "number");
-  const first = positional[0]!;
-  const temporals = positional.filter(
-    (value): value is SerializableRuntimeTemporal =>
-      isTemporal(value) && isTemporal(first) && value.kind === first.kind,
-  );
-  const durations = positional.every(isDuration) || positional.every(isCalendarDuration);
-  const angles = positional.every(isAngle);
-  if (!numbers && !durations && !angles && temporals.length !== positional.length) {
-    const other = positional.find(
-      (value) =>
-        typeof value !== "number" && !isAnyDuration(value) && !isAngle(value) && !isTemporal(value),
-    );
+  // Values of one kind that `min` and `max` compare (`LIST_FUNCTION_CONTRACTS`), as the compiler checks them.
+  const compared = LIST_FUNCTION_CONTRACTS[name].values;
+  const kinds = positional.map((value) => listValueKind(valueKindOf(value)));
+  const kind = kinds[0];
+  if (kind === undefined || !compared.includes(kind) || kinds.some((other) => other !== kind)) {
+    const other = positional.find((_, index) => {
+      const otherKind = kinds[index];
+      return otherKind === undefined || !compared.includes(otherKind);
+    });
     throw fault(
       "TSR059",
       other === undefined
         ? `${name}(...) needs values of one kind: all numbers, all durations, all calendar durations, all angles, or all dates, times, datetimes, or absolute dates and times.`
-        : `${name}(...) needs numbers, durations, angles, or date and time values, not ${describeRuntimeValue(other)}.`,
+        : `${name}(...) needs numbers, durations, angles, or date and time values, not ${describeValue(other)}.`,
       span,
     );
   }
-  if (angles) {
+  if (kind === "angle") {
     const values = positional.filter(isAngle);
     let best = values[0]!;
     for (const candidate of values) {
@@ -682,7 +675,8 @@ function minMaxValue(
     }
     return { ...best };
   }
-  if (temporals.length === positional.length) {
+  if (isTemporalKind(kind)) {
+    const temporals = positional.filter(isTemporal);
     let best = temporals[0]!;
     for (const candidate of temporals) {
       const order = compareTemporal(candidate, best);
@@ -691,7 +685,7 @@ function minMaxValue(
     return cloneSerializableValue(best);
   }
   // A loop, not a spread into Math.min/Math.max, so a call with very many arguments cannot overflow the native stack.
-  if (numbers) {
+  if (kind === "number") {
     const values = positional.filter((item): item is number => typeof item === "number");
     let best = values[0]!;
     for (const candidate of values)

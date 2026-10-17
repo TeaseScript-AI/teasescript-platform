@@ -253,7 +253,6 @@ import { cloneTimer } from "./timers.js";
 import { assertValueType, describeShownValue, shownChoice } from "./value-types.js";
 import { conversionTo, numberFromText } from "../conversions.js";
 import {
-  describeRuntimeValue,
   isDate,
   isDateTime,
   isDict,
@@ -271,6 +270,7 @@ import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "../web-url.js";
 import { expandChoiceOptions, preselectedChoice } from "./choice-options.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { DURATION_UNIT_MILLISECONDS, formatDuration } from "../duration.js";
+import { describeValue } from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -1889,7 +1889,7 @@ function materializeInteractionUi(
       else if (prefill !== null && !(typeof prefill === "string" && isBlankTextAnswer(prefill)))
         throw fault(
           "TSR052",
-          `The prefill of askBoolean must be true or false, not ${describeRuntimeValue(prefill)}.`,
+          `The prefill of askBoolean must be true or false, not ${describeValue(prefill)}.`,
           span,
         );
     } else if (prepared.prefillTemporary !== undefined) {
@@ -1936,7 +1936,7 @@ function materializeInteractionUi(
 function prefillNotation(value: SerializableRuntimeValue): string {
   if (typeof value === "string") return JSON.stringify(value);
   if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return describeRuntimeValue(value);
+  return describeValue(value);
 }
 
 /**
@@ -1973,7 +1973,7 @@ function imageInteractionUi(
       if (typeof argument !== "boolean")
         throw fault(
           "TSR052",
-          `askImage(${name}:) takes true or false, not ${describeRuntimeValue(argument)}.`,
+          `askImage(${name}:) takes true or false, not ${describeValue(argument)}.`,
           span,
         );
       if (name === "allowCamera") allowCamera = argument;
@@ -2009,8 +2009,8 @@ function imageFilterTexts(
     throw fault(
       "TSR052",
       option === "types"
-        ? `askImage(types:) takes a list of file extensions, such as [".png"], not ${describeRuntimeValue(value)}.`
-        : `askImage(mime:) takes a list of image MIME types, such as ["image/png"], not ${describeRuntimeValue(value)}.`,
+        ? `askImage(types:) takes a list of file extensions, such as [".png"], not ${describeValue(value)}.`
+        : `askImage(mime:) takes a list of image MIME types, such as ["image/png"], not ${describeValue(value)}.`,
       span,
     );
   if (value.items.length === 0) throw fault("TSR052", emptyImageFilterMessage(option), span);
@@ -2018,7 +2018,7 @@ function imageFilterTexts(
     if (typeof item !== "string")
       throw fault(
         "TSR052",
-        `askImage(${option}:) takes texts such as ${option === "types" ? '".png"' : '"image/png"'}, but it holds ${describeRuntimeValue(item)}.`,
+        `askImage(${option}:) takes texts such as ${option === "types" ? '".png"' : '"image/png"'}, but it holds ${describeValue(item)}.`,
         span,
       );
     const problem = imageFilterTextProblem(option, item);
@@ -2082,7 +2082,7 @@ function temporalPrefill(
         : ["askDateTime", "a date and time"];
   throw fault(
     "TSR052",
-    `The prefill of ${command} must be ${noun}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversionTo(kind)}(...).` : ""}`,
+    `The prefill of ${command} must be ${noun}, not ${describeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversionTo(kind)}(...).` : ""}`,
     span,
   );
 }
@@ -4132,7 +4132,7 @@ function captureTags(value: SerializableRuntimeValue, span: SourceSpan): readonl
   if (!isList(value) && !isSet(value)) {
     throw fault(
       "TSR083",
-      `takePhoto(tags:) takes a list of tags, but this is ${describeRuntimeValue(value)}.`,
+      `takePhoto(tags:) takes a list of tags, but this is ${describeValue(value)}.`,
       span,
     );
   }
@@ -4141,7 +4141,7 @@ function captureTags(value: SerializableRuntimeValue, span: SourceSpan): readonl
     if (typeof item !== "string") {
       throw fault(
         "TSR083",
-        `takePhoto(tags:) takes tags such as "bedroom" or "punishment: 4", but it holds ${describeRuntimeValue(item)}.`,
+        `takePhoto(tags:) takes tags such as "bedroom" or "punishment: 4", but it holds ${describeValue(item)}.`,
         span,
       );
     }

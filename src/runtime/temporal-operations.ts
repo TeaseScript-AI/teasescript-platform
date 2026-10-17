@@ -69,8 +69,8 @@ import {
   isTime,
   isAbsoluteDateTime,
 } from "./value-predicates.js";
-import { describeValue } from "./value-types.js";
 import { wallClockAt, type RuntimeTemporalCapture } from "./temporal-captures.js";
+import { describeValue } from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -370,9 +370,9 @@ function moment(value: SerializableRuntimeTemporal): number {
 }
 
 /**
- * Ordering and arithmetic with a date or time operand (V30 §35, ADR 0026), or `undefined` when neither operand is one.
- * No operator reads a zone: exact durations apply only to an absolute date and time, and calendar units only to local
- * dates and dates and times.
+ * Arithmetic with a date or time operand (V30 §35, ADR 0026), or `undefined` when neither operand is one; the evaluator
+ * orders them. No operator reads a zone: exact durations apply only to an absolute date and time, and calendar units
+ * only to local dates and dates and times.
  */
 export function temporalBinary(
   operator: string,
@@ -381,19 +381,6 @@ export function temporalBinary(
   span: SourceSpan,
 ): SerializableRuntimeValue | undefined {
   if (!isTemporal(left) && !isTemporal(right)) return undefined;
-  if (["<", "<=", ">", ">="].includes(operator)) {
-    if (!isTemporal(left) || !isTemporal(right) || left.kind !== right.kind)
-      throw fault(
-        "TSR009",
-        `'${operator}' orders two values of the same kind, such as two dates or two absolute dates and times, but these are ${describeValue(left)} and ${describeValue(right)}.`,
-        span,
-      );
-    const order = compareTemporal(left, right);
-    if (operator === "<") return order < 0;
-    if (operator === "<=") return order <= 0;
-    if (operator === ">") return order > 0;
-    return order >= 0;
-  }
   if (operator === "+" || operator === "-") {
     // A duration is added to or subtracted from the value written first, as in `started + 1 h`.
     if (isAnyDuration(right) && (isDate(left) || isAbsoluteDateTime(left) || isDateTime(left)))

@@ -28,14 +28,9 @@ import { copySpan } from "./operations/support.js";
 import { caseMappedLength, checkTextLength, textLengthLimit, textTooLong } from "./text-length.js";
 import { compileRegex, replacementParts, type ReplacementPart } from "../regex.js";
 import { REGEX_WORK_EXCEEDED, RegexWork, type RegexProgram } from "../regex-engine.js";
-import {
-  describeRuntimeValue,
-  isAngle,
-  isAnyDuration,
-  isDuration,
-  isRegex,
-} from "./value-predicates.js";
+import { isAngle, isAnyDuration, isDuration, isRegex } from "./value-predicates.js";
 import type { SerializableRegex, SerializableRuntimeValue } from "./serializable-values.js";
+import { describeValue } from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -49,7 +44,7 @@ export function missingMemberMessage(
   use: "method" | "property",
 ): string {
   if (isRegex(value)) return regexMemberMessage(name, use);
-  const kind = describeRuntimeValue(value);
+  const kind = describeValue(value);
   const description =
     value === null ? "The value null" : kind.charAt(0).toUpperCase() + kind.slice(1);
   const textOperation = isTextMember(name);
@@ -538,7 +533,7 @@ export function checkTextArguments(
     if (!fits(parameter, value))
       throw fault(
         parameter.kind === "position" ? "TSR024" : "TSR057",
-        argumentTypeMessage(member, parameter, describeRuntimeValue(value)) +
+        argumentTypeMessage(member, parameter, describeValue(value)) +
           argumentFix(parameter, argumentKind(value)),
         span,
       );

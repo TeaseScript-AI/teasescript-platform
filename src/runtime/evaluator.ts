@@ -43,6 +43,7 @@ import {
 import {
   exactDurationMilliseconds,
   missingTemporalMember,
+  compareTemporal,
   temporalBinary,
   temporalNow,
   temporalMethod,
@@ -166,6 +167,7 @@ import {
 import {
   logicalOperandRule,
   notNumberFix,
+  orderRule,
   UNIT_AMOUNT_RULE,
   unitAmountFix,
 } from "../operand-rules.js";
@@ -183,6 +185,7 @@ import {
   type HandleKind,
   type HandleMethodName,
   type HandlePropertyName,
+  handleKindOf,
 } from "../handle-members.js";
 import { unmeasurableLengthMessage } from "../delay-rules.js";
 import {
@@ -262,7 +265,6 @@ import {
   MAX_RUNTIME_SESSION_TIME_MS,
 } from "./state.js";
 import {
-  describeRuntimeValue,
   isAngle,
   isAnyDuration,
   isCalendarDuration,
@@ -271,8 +273,6 @@ import {
   isList,
   isObject,
   isRange,
-  isScriptReference,
-  isRegex,
   isSet,
   isSpeakerReference,
   isTemporal,
@@ -281,14 +281,12 @@ import {
   isMessageHandle,
   isCameraView,
   isPermanentButton,
-  handleKindOf,
 } from "./value-predicates.js";
 import {
   assertValueType,
   cannotConvert,
   describeShownValue,
   shownChoice,
-  describeValue as describeTypedValue,
   matchesValueType,
   storedValueMismatch,
 } from "./value-types.js";
@@ -346,6 +344,15 @@ import {
   type Conversion,
   type ValueConversion,
 } from "../conversions.js";
+import {
+  describeValue,
+  isDictKey,
+  orderedFamily,
+  ordersWith,
+  VALUE_KINDS,
+  valueKindOf,
+  type OrderedFamily,
+} from "../value-kinds.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -2041,10 +2048,12 @@ export class Evaluator {
     );
   }
 
-  /** `say` text. A value other than a scalar shows in code-like notation, escaped so that markup leaves it literal. */
+  /**
+   * `say` text. A value shown as text (`shown`) shows as its text, and any other in code-like notation, escaped so that
+   * markup leaves it literal: a script reference shows as the call that makes it, and a regex as its literal.
+   */
   public sayText(value: SerializableRuntimeValue, span: SourceSpan): string {
-    // A script reference shows as the call that makes it, and a regex as its literal, which are notation too.
-    if (isVisibleScalar(value) && !isScriptReference(value) && !isRegex(value))
+    if (isVisibleScalar(value) && VALUE_KINDS[valueKindOf(value)].shown === "text")
       return visibleText(value, span, currentTemporalContext(this.snapshot));
     const notation = valueNotation(
       value,
@@ -2149,23 +2158,13 @@ export class Evaluator {
       (typeof left === "string" || typeof right === "string" || isList(left) || isList(right))
     )
       return joinedValue(left, right, expression.span);
+    if (["<", "<=", ">", ">="].includes(expression.operator))
+      return ordered(expression, left, right, this.plan);
     const temporal = temporalBinary(expression.operator, left, right, expression.span);
     if (temporal !== undefined) return temporal;
     if (isAngle(left) || isAngle(right)) return angleBinary(expression, left, right, this.plan);
     if (isAnyDuration(left) || isAnyDuration(right))
       return this.#durationBinary(expression, left, right);
-    if (["<", "<=", ">", ">="].includes(expression.operator)) {
-      if (
-        (typeof left !== "number" || typeof right !== "number") &&
-        (typeof left !== "string" || typeof right !== "string")
-      ) {
-        throw notComparable(expression, left, right, this.plan);
-      }
-      if (expression.operator === "<") return left < right;
-      if (expression.operator === "<=") return left <= right;
-      if (expression.operator === ">") return left > right;
-      return left >= right;
-    }
     const leftNumber = operandNumber(expression, "left", left, this.plan);
     const rightNumber = operandNumber(expression, "right", right, this.plan);
     let result: number;
@@ -2197,9 +2196,8 @@ export class Evaluator {
   }
 
   /**
-   * Duration arithmetic and comparison (ADR 0026); mixing with plain numbers is explicit only. A calendar duration stays
-   * one, its months and days stay whole, and calendar durations compare and divide only within one family, never with
-   * an exact duration.
+   * Duration arithmetic (ADR 0026); mixing with plain numbers is explicit only. A calendar duration stays one, its months
+   * and days stay whole, and calendar durations divide only within one family, never with an exact duration.
    */
   #durationBinary(
     expression: BinaryExpressionPlan,
@@ -2248,22 +2246,6 @@ export class Evaluator {
           if (!Number.isFinite(ratio)) throw noArithmeticResult(expression, left, right, this.plan);
           return ratio;
         }
-        case "<":
-        case "<=":
-        case ">":
-        case ">=": {
-          const order = compareDurations(left, right);
-          if (typeof order === "string")
-            throw fault(
-              "TSR009",
-              `${formatDuration(left)} and ${formatDuration(right)} cannot be compared: ${order}.`,
-              span,
-            );
-          if (operator === "<") return order < 0;
-          if (operator === "<=") return order <= 0;
-          if (operator === ">") return order > 0;
-          return order >= 0;
-        }
       }
     } else if (isAnyDuration(left) && typeof right === "number") {
       if (operator === "*") return result(scaleDuration(left, right));
@@ -2273,9 +2255,7 @@ export class Evaluator {
     }
     throw fault(
       "TSR009",
-      ["<", "<=", ">", ">="].includes(operator)
-        ? `'${operator}' cannot compare ${kindAndValue(left)} with ${kindAndValue(right)}. Use a duration on both sides.`
-        : `'${operator}' cannot combine ${kindAndValue(left)} and ${kindAndValue(right)}. Add or subtract two durations, or multiply or divide a duration by a number.`,
+      `'${operator}' cannot combine ${kindAndValue(left)} and ${kindAndValue(right)}. Add or subtract two durations, or multiply or divide a duration by a number.`,
       span,
     );
   }
@@ -2375,7 +2355,7 @@ export class Evaluator {
       // Handles and speaker references name records that only the runtime creates; a host cannot hand one out.
       const identity = findRuntimeIdentity(copied);
       if (identity !== null) {
-        const kind = describeRuntimeValue(identity);
+        const kind = describeValue(identity);
         throw fault(
           "TSR013",
           internalFault(
@@ -2628,7 +2608,7 @@ export class Evaluator {
             listArgumentMessage(
               name,
               "list",
-              describeRuntimeValue(other),
+              describeValue(other),
               isSet(other) ? "set" : isRange(other) ? "range" : "other",
             ),
             span,
@@ -3312,7 +3292,7 @@ export class Evaluator {
     if (typeof value !== "number" || !Number.isFinite(value)) {
       throw fault(
         "TSR080",
-        `A tag's number is compared with a number, but this is ${describeRuntimeValue(value)}.`,
+        `A tag's number is compared with a number, but this is ${describeValue(value)}.`,
         span,
       );
     }
@@ -3521,7 +3501,7 @@ export class Evaluator {
     if (pair !== undefined)
       throw fault(
         "TSR058",
-        `${name}(${pair.join(", ")}) combines a ${pair[0]} and a ${pair[1]}, not ${describeRuntimeValue(positional[0]!)} and ${describeRuntimeValue(positional[1]!)}.`,
+        `${name}(${pair.join(", ")}) combines a ${pair[0]} and a ${pair[1]}, not ${describeValue(positional[0]!)} and ${describeValue(positional[1]!)}.`,
         span,
       );
     throw fault(
@@ -3560,7 +3540,7 @@ export class Evaluator {
     if (typeof text !== "string")
       throw fault(
         "TSR059",
-        `escapeMarkup(...) needs text, not ${describeRuntimeValue(text)}.${text !== null && isVisibleScalar(text) ? " Convert it with toString(...) first." : isList(text) && text.items.every(isVisibleScalar) ? " Use .join() to combine its elements as text." : ""}`,
+        `escapeMarkup(...) needs text, not ${describeValue(text)}.${text !== null && isVisibleScalar(text) ? " Convert it with toString(...) first." : isList(text) && text.items.every(isVisibleScalar) ? " Use .join() to combine its elements as text." : ""}`,
         call.span,
       );
     // Escaping puts a backslash before some characters, so only a text that could get too long is measured first.
@@ -3729,13 +3709,13 @@ export class Evaluator {
     if (!isList(value) && !isDict(value)) throw this.#notIndexable("TSR008", plan, value, span);
   }
 
-  /** The key that `keyPlan` gave as `value`, which is text (`dictKeyMessage`). */
+  /** The key that `keyPlan` gave as `value`, which is text (`dictKey`, `dictKeyMessage`). */
   #dictKey(value: SerializableRuntimeValue, keyPlan: ExpressionPlan): string {
-    if (typeof value !== "string")
+    if (!isDictKey(value))
       throw fault(
         "TSR062",
         dictKeyMessage(
-          describeTypedValue(value),
+          describeValue(value),
           typeof value === "number",
           planLabel(keyPlan, this.plan),
         ),
@@ -4116,11 +4096,7 @@ function hashedText(
   if (problem !== undefined) throw fault("TSR028", problem.message, span);
   const text = positional[0]!;
   if (typeof text !== "string")
-    throw fault(
-      "TSR059",
-      `hashText(...) hashes text (string), not ${describeRuntimeValue(text)}.`,
-      span,
-    );
+    throw fault("TSR059", `hashText(...) hashes text (string), not ${describeValue(text)}.`, span);
   return textSha256(text);
 }
 
@@ -4204,18 +4180,21 @@ function noArithmeticResult(
   );
 }
 
-/** An operand's kind, with the value of a number, duration, or angle, such as `a duration (1 s)`. */
+/**
+ * An operand's kind, with the value of a duration or an angle, such as `a duration (1 s)`, or a number as `the number 5`.
+ */
 function kindAndValue(value: SerializableRuntimeValue): string {
-  return typeof value === "number" || isAnyDuration(value) || isAngle(value)
-    ? `${describeRuntimeValue(value)} (${operandText(value)})`
-    : describeRuntimeValue(value);
+  if (typeof value === "number") return `the number ${operandText(value)}`;
+  return isAnyDuration(value) || isAngle(value)
+    ? `${describeValue(value)} (${operandText(value)})`
+    : describeValue(value);
 }
 
 /** A number, duration, or angle operand as a message shows it. */
 function operandText(value: SerializableRuntimeValue): string {
   if (typeof value === "number") return String(withoutNegativeZero(value));
   if (isAngle(value)) return formatAngle(value);
-  return isAnyDuration(value) ? formatDuration(value) : describeRuntimeValue(value);
+  return isAnyDuration(value) ? formatDuration(value) : describeValue(value);
 }
 
 function isZero(value: SerializableRuntimeValue): boolean {
@@ -4227,8 +4206,8 @@ function isZero(value: SerializableRuntimeValue): boolean {
 }
 
 /**
- * Angle arithmetic and comparison (V30 §13): angles add, subtract, and compare by size, divide into a number, and
- * multiply or divide by a number. Any other operand or operator is an error that names what works.
+ * Angle arithmetic (V30 §13): angles add and subtract, divide into a number, and multiply or divide by a number. Any
+ * other operand or operator is an error that names what works.
  */
 function angleBinary(
   expression: BinaryExpressionPlan,
@@ -4237,14 +4216,6 @@ function angleBinary(
   program: InstructionPlan,
 ): SerializableRuntimeValue {
   const operator = expression.operator;
-  const compares = ["<", "<=", ">", ">="].includes(operator);
-  if (compares && isAngle(left) && isAngle(right)) {
-    const order = compareAngles(left, right);
-    if (operator === "<") return order < 0;
-    if (operator === "<=") return order <= 0;
-    if (operator === ">") return order > 0;
-    return order >= 0;
-  }
   const operand = (value: SerializableRuntimeValue): number | StoredAngle | undefined =>
     typeof value === "number" || isAngle(value) ? value : undefined;
   const a = operand(left);
@@ -4257,11 +4228,126 @@ function angleBinary(
   }
   throw fault(
     "TSR009",
-    compares
-      ? `'${operator}' cannot compare ${kindAndValue(left)} with ${kindAndValue(right)}. Use an angle on both sides.`
-      : `'${operator}' cannot combine ${kindAndValue(left)} and ${kindAndValue(right)}. ${ANGLE_ARITHMETIC_ROUTE}`,
+    `'${operator}' cannot combine ${kindAndValue(left)} and ${kindAndValue(right)}. ${ANGLE_ARITHMETIC_ROUTE}`,
     expression.span,
   );
+}
+
+/**
+ * `<`, `<=`, `>`, or `>=` (V30 §5): two values of one family that orders (`ordersWith`), numbers and texts as JavaScript
+ * orders them, and durations, angles, and date and time values by their own order. Any other pair fails with `TSR009`.
+ */
+function ordered(
+  expression: BinaryExpressionPlan,
+  left: SerializableRuntimeValue,
+  right: SerializableRuntimeValue,
+  program: InstructionPlan,
+): boolean {
+  const kind = valueKindOf(left);
+  const family = orderedFamily(kind);
+  if (family === undefined || !ordersWith(kind, valueKindOf(right)))
+    throw unordered(expression, left, right, program);
+  const order = orderWithin(family, left, right, expression.span);
+  switch (expression.operator) {
+    case "<":
+      return order < 0;
+    case "<=":
+      return order <= 0;
+    case ">":
+      return order > 0;
+    default:
+      return order >= 0;
+  }
+}
+
+/**
+ * The order of two values of the ordered `family`: -1, 0, or 1. Two calendar durations of different families, such as
+ * months and days, have none (`TSR009`).
+ */
+function orderWithin(
+  family: OrderedFamily,
+  left: SerializableRuntimeValue,
+  right: SerializableRuntimeValue,
+  span: SourceSpan,
+): number {
+  switch (family) {
+    case "number":
+      if (typeof left === "number" && typeof right === "number")
+        return left < right ? -1 : left > right ? 1 : 0;
+      break;
+    case "string":
+      if (typeof left === "string" && typeof right === "string")
+        return left < right ? -1 : left > right ? 1 : 0;
+      break;
+    case "duration":
+    case "calendarDuration":
+      if (isAnyDuration(left) && isAnyDuration(right)) {
+        const order = compareDurations(left, right);
+        if (typeof order === "number") return order;
+        throw fault(
+          "TSR009",
+          `${formatDuration(left)} and ${formatDuration(right)} cannot be compared: ${order}.`,
+          span,
+        );
+      }
+      break;
+    case "angle":
+      if (isAngle(left) && isAngle(right)) return compareAngles(left, right);
+      break;
+    case "date":
+    case "time":
+    case "datetime":
+    case "absoluteDateTime":
+      if (isTemporal(left) && isTemporal(right)) return compareTemporal(left, right);
+      break;
+    default: {
+      const unhandled: never = family;
+      throw new Error(`The values of '${String(unhandled)}' have no order.`);
+    }
+  }
+  throw new Error(`Only two values of the family '${family}' are ordered.`);
+}
+
+/**
+ * `TSR009` for `<`, `<=`, `>`, or `>=` with values of different families or of a family without order: the rule of the
+ * operands' family, a date or time value's first, then an angle's, then a duration's.
+ */
+function unordered(
+  expression: BinaryExpressionPlan,
+  left: SerializableRuntimeValue,
+  right: SerializableRuntimeValue,
+  program: InstructionPlan,
+): RuntimeFault {
+  const operator = expression.operator;
+  if (isTemporal(left) || isTemporal(right))
+    return fault(
+      "TSR009",
+      `'${operator}' orders two values of the same kind, such as two dates or two absolute dates and times, but these are ${describeValue(left)} and ${describeValue(right)}.`,
+      expression.span,
+    );
+  if (isAngle(left) || isAngle(right))
+    return fault(
+      "TSR009",
+      `'${operator}' cannot compare ${kindAndValue(left)} with ${kindAndValue(right)}. Use an angle on both sides.`,
+      expression.span,
+    );
+  // An exact and a calendar duration never have an order, so their comparison gives the reason.
+  if (isAnyDuration(left) && isAnyDuration(right)) {
+    const order = compareDurations(left, right);
+    if (typeof order === "string")
+      return fault(
+        "TSR009",
+        `${formatDuration(left)} and ${formatDuration(right)} cannot be compared: ${order}.`,
+        expression.span,
+      );
+  }
+  if (isAnyDuration(left) || isAnyDuration(right))
+    return fault(
+      "TSR009",
+      `'${operator}' cannot compare ${kindAndValue(left)} with ${kindAndValue(right)}. Use a duration on both sides.`,
+      expression.span,
+    );
+  return notComparable(expression, left, right, program);
 }
 
 /** `TSR013` or `TSR031`: the host built-in `name` returned a value that a script cannot hold, for `reason`. */
@@ -4406,7 +4492,7 @@ function scriptReference(
     if (typeof value === "string") return value;
     throw fault(
       "TSR058",
-      `script(...) takes ${part} as text (string), not ${describeRuntimeValue(value)}.`,
+      `script(...) takes ${part} as text (string), not ${describeValue(value)}.`,
       span,
     );
   };
@@ -4568,8 +4654,8 @@ function rangeList(range: SerializableRuntimeRange, span: SourceSpan): Serializa
 }
 
 /**
- * `TSR009`: `<`, `<=`, `>`, or `>=` with operands that are not two numbers or two texts, with the values and, for null or
- * numeric text, the fix.
+ * `TSR009`: `<`, `<=`, `>`, or `>=` with operands of no family that orders (`orderRule`), with the values and, for null
+ * or numeric text, the fix.
  */
 function notComparable(
   expression: BinaryExpressionPlan,
@@ -4590,7 +4676,7 @@ function notComparable(
     fix = " Convert the text with toNumber(...) first.";
   return fault(
     "TSR009",
-    `'${expression.operator}' compares two numbers, two texts, or two durations, but these are ${describeShownValue(left)} and ${describeShownValue(right)}.${fix}`,
+    `${orderRule(expression.operator)}, but these are ${describeShownValue(left)} and ${describeShownValue(right)}.${fix}`,
     expression.span,
   );
 }
@@ -4721,7 +4807,7 @@ function tagNames(
   if (!isList(value) && !isSet(value)) {
     throw fault(
       "TSR081",
-      `'${option}:' takes a list of tag names, but this is ${describeRuntimeValue(value)}.`,
+      `'${option}:' takes a list of tag names, but this is ${describeValue(value)}.`,
       span,
     );
   }
@@ -4730,7 +4816,7 @@ function tagNames(
     if (name === null) {
       throw fault(
         "TSR081",
-        `'${option}:' takes tag names, which use lowercase letters a–z, digits, and hyphens, but it holds ${typeof item === "string" ? `'${item}'` : describeRuntimeValue(item)}.`,
+        `'${option}:' takes tag names, which use lowercase letters a–z, digits, and hyphens, but it holds ${typeof item === "string" ? `'${item}'` : describeValue(item)}.`,
         span,
       );
     }
@@ -4792,7 +4878,7 @@ export function acceptedDefault(
     if (description !== undefined && !fitsDefault(conversion, value))
       throw fault(
         "TSR058",
-        `${operation}(...) needs ${description} as its default:, not ${describeRuntimeValue(value)}.`,
+        `${operation}(...) needs ${description} as its default:, not ${describeValue(value)}.`,
         span,
       );
   }

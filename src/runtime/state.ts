@@ -107,8 +107,8 @@ import {
 import type { RuntimePermanentButtonInvocationSnapshot } from "./permanent-buttons.js";
 import { stringLength } from "../text-operations.js";
 import { calendarDurationProperty, temporalProperty } from "./temporal-operations.js";
-import { handleKindOf, isCalendarDuration, isTemporal } from "./value-predicates.js";
-import { isHandleProperty } from "../handle-members.js";
+import { isCalendarDuration, isTemporal } from "./value-predicates.js";
+import { handleKindOf, isHandleProperty } from "../handle-members.js";
 import { isCameraPlacement } from "../handle-rules.js";
 import { validatePermanentButtonState } from "./permanent-button-validation.js";
 import {
