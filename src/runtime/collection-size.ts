@@ -36,14 +36,20 @@ export function collectionTooLong(
   );
 }
 
-/** Fails with `TSR088` before `operation` makes a `kind` of `length` elements, members, or keys, more than it can hold. */
+/**
+ * Fails with `TSR088` before `operation` makes a `kind` of `length` elements, members, or keys, more than it can hold and
+ * more than `longest`, the longest collection it is made from (0 for none). A collection restored longer than the limit
+ * from an older save keeps working until something would make it, or a collection made from it, longer still.
+ */
 export function checkCollectionLength(
   kind: CollectionKind,
   length: number,
+  longest: number,
   operation: string,
   span: SourceSpan,
 ): void {
-  if (length > MAX_COLLECTION_LENGTH) throw collectionTooLong(kind, operation, span, length);
+  if (length > MAX_COLLECTION_LENGTH && length > longest)
+    throw collectionTooLong(kind, operation, span, length);
 }
 
 /**

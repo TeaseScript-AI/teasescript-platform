@@ -1615,6 +1615,7 @@ export class Evaluator {
     checkCollectionLength(
       "list",
       list.items.length + right.items.length,
+      Math.max(list.items.length, right.items.length),
       "joining with +",
       value.span,
     );
@@ -2207,6 +2208,7 @@ export class Evaluator {
       checkCollectionLength(
         "list",
         left.items.length + right.items.length,
+        Math.max(left.items.length, right.items.length),
         "joining with +",
         expression.span,
       );
@@ -2595,12 +2597,15 @@ export class Evaluator {
           case "union":
           case "difference": {
             expect(1);
-            const items = setOperationItems(
-              name,
-              receiver.items,
-              this.#setOperationArgument(name, positional[0]!, span),
+            const argument = this.#setOperationArgument(name, positional[0]!, span);
+            const items = setOperationItems(name, receiver.items, argument);
+            checkCollectionLength(
+              "set",
+              items.length,
+              Math.max(receiver.items.length, argument.length),
+              `${name}(...)`,
+              span,
             );
-            checkCollectionLength("set", items.length, `${name}(...)`, span);
             return createCapturedSerializableSet(items);
           }
           case "sort":
@@ -2619,7 +2624,13 @@ export class Evaluator {
         case "add":
           expect(1);
           if (added !== null) assertValueType(positional[0]!, added.check, added.span);
-          checkCollectionLength("list", receiver.items.length + 1, "add(...)", span);
+          checkCollectionLength(
+            "list",
+            receiver.items.length + 1,
+            receiver.items.length,
+            "add(...)",
+            span,
+          );
           receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
           return null;
         case "addAll": {
@@ -2637,6 +2648,7 @@ export class Evaluator {
           checkCollectionLength(
             "list",
             receiver.items.length + other.items.length,
+            Math.max(receiver.items.length, other.items.length),
             "addAll(...)",
             span,
           );
@@ -2723,13 +2735,9 @@ export class Evaluator {
             ? receiver.items[index]!
             : USE_DEFAULT;
         }
-        case "toSet": {
+        case "toSet":
           expect(0);
-          // Equal elements become one member, so the set is counted once it is made, before the script has it.
-          const set = createCapturedSerializableSet(receiver.items);
-          checkCollectionLength("set", set.items.length, "toSet()", span);
-          return set;
-        }
+          return createCapturedSerializableSet(receiver.items);
         case "take":
         case "takeLast": {
           expect(1);
@@ -2767,12 +2775,15 @@ export class Evaluator {
         case "union":
         case "difference": {
           expect(1);
-          const items = setOperationItems(
-            name,
-            receiver.items,
-            this.#setOperationArgument(name, positional[0]!, span),
+          const argument = this.#setOperationArgument(name, positional[0]!, span);
+          const items = setOperationItems(name, receiver.items, argument);
+          checkCollectionLength(
+            "list",
+            items.length,
+            Math.max(receiver.items.length, argument.length),
+            `${name}(...)`,
+            span,
           );
-          checkCollectionLength("list", items.length, `${name}(...)`, span);
           return createCapturedSerializableList(items);
         }
         case "join": {

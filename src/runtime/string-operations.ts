@@ -222,13 +222,13 @@ export function callStringMethod(
     case "split": {
       if (texts[0] === "") {
         if (text.length > MAX_COLLECTION_LENGTH)
-          checkCollectionLength("list", stringLength(text), "split(...)", span);
+          checkCollectionLength("list", stringLength(text), 0, "split(...)", span);
         return { kind: "list", items: Array.from(text) };
       }
       if (Math.floor(text.length / texts[0]!.length) + 1 > MAX_COLLECTION_LENGTH) {
         let count = 1;
         for (const _match of literalMatches(text, texts[0]!, false)) count += 1;
-        checkCollectionLength("list", count, "split(...)", span);
+        checkCollectionLength("list", count, 0, "split(...)", span);
       }
       const parts: string[] = [];
       let last = 0;

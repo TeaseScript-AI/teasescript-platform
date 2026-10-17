@@ -258,13 +258,21 @@ test("each operation makes a list, set, or dict of exactly the limit and refuses
   }
 });
 
-// `toSet()` checks the set it makes, which only a list longer than the limit can make too long.
-test("a checkpoint holding a longer list restores, and toSet() of that list is refused", () => {
-  const source =
-    "let xs = (1..=1000000).toList()\nwait 1 s\nsay xs.length\nlet members = xs.toSet()\nexit";
+test("a list restored longer than the limit keeps working until something would make it longer", () => {
+  const source = [
+    "let xs = (1..=1000000).toList()",
+    "wait 1 s",
+    "xs.addAll([])",
+    "xs += []",
+    "let copy = xs + []",
+    "say copy.length",
+    "say xs.union([]).length",
+    "xs.add(0)",
+    "exit",
+  ].join("\n");
   const session = createFreshRuntimeSession(compileValidPlan(source), IMMEDIATE);
   session.run();
-  // A session saved before the limit, holding one element more.
+  // A save from before the limit, whose list has one element more: what main makes of `xs.add(1000001)`.
   const checkpoint = JSON.parse(serializeCheckpoint(session.exportCheckpoint()));
   checkpoint.snapshot.frames[0].bindings
     .find((binding: { name: string }) => binding.name === "xs")
@@ -272,7 +280,7 @@ test("a checkpoint holding a longer list restores, and toSet() of that list is r
   const restored = deserializeRuntimeSession(JSON.stringify(checkpoint));
   restored.observeTime(1_000);
   assert.deepEqual(ranUntilFailure(restored, source), [
-    ["1000001"],
-    ["TSR088", set("toSet()", "1,000,001"), "xs.toSet()"],
+    ["1000001", "1000001"],
+    ["TSR088", list("add(...)", "1,000,002"), "xs.add(0)"],
   ]);
 });
