@@ -106,7 +106,7 @@ import {
   type RuntimeSettledMediaSnapshot,
 } from "./media.js";
 import type { RuntimePermanentButtonInvocationSnapshot } from "./permanent-buttons.js";
-import { stringLength } from "./string-operations.js";
+import { stringLength } from "../text-operations.js";
 import { calendarDurationProperty, temporalProperty } from "./temporal-operations.js";
 import {
   isCalendarDuration,

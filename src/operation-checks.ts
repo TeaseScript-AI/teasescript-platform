@@ -25,7 +25,7 @@ import { misspelledPropertyHint } from "./object-properties.js";
 import { parsePublicKey } from "./public-keys.js";
 import { cannotConvert } from "./runtime/value-types.js";
 import type { SourceSpan } from "./source.js";
-import { canonicalRegexFlags, compileRegex, regexFlagProblem, replacementParts } from "./regex.js";
+import { canonicalRegexFlags, regexFlagProblem } from "./regex.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
   ANGLE_TYPE,
@@ -68,22 +68,24 @@ import { minMaxValuesProblem } from "./list-function-rules.js";
 import {
   argumentFix,
   argumentTypeMessage,
-  beyondLengthMessage,
-  emptyTextMessage,
-  endBeforeStartMessage,
+  isTextMember,
+  isTextMethod,
   LIST_JOIN,
   methodArgumentCountMessage,
-  needsNonEmptyText,
-  negativeMessage,
   regexMemberMessage,
+  stringLength,
   takesRegex,
   takesText,
-  TEXT_MEMBERS,
+  TEXT_METHODS,
   unknownTextMemberMessage,
   type ArgumentKind,
+  type DomainValue,
   type MethodParameters,
-  type TextMember,
+  type TextDomain,
+  type TextParameter,
+  type TextSignature,
 } from "./text-operations.js";
+import type { SerializableRegex } from "./runtime/serializable-values.js";
 
 /**
  * A compile-time problem with a built-in operation: a wrong number of arguments, an argument name it does not take, or
@@ -124,15 +126,15 @@ export function memberProblems(
     { kind: "invalidOperand", message, span: property.span },
   ];
   if (type.kind === "scalar" && type.name === "string") {
-    const member = TEXT_MEMBERS.get(name);
-    if (member === undefined)
+    if (name === "length") return call === null ? [] : problem(LENGTH_PROPERTY);
+    if (!isTextMethod(name))
       return problem(unknownTextMemberMessage(name, call === null ? "property" : "method"));
-    if (member.parameters === null) return call === null ? [] : problem(LENGTH_PROPERTY);
+    const method = TEXT_METHODS[name];
     if (call === null)
       return problem(
-        `'${name}' is a method. Write ${name}(${member.parameters.length === 0 ? "" : "..."}) with parentheses.`,
+        `'${name}' is a method. Write ${name}(${method.parameters.length === 0 ? "" : "..."}) with parentheses.`,
       );
-    return argumentProblems(member, call, typeOf, staticVisibleText(receiver));
+    return argumentProblems(method, call, typeOf, staticVisibleText(receiver));
   }
   if (type.kind === "list" && name === "join") {
     if (call === null) return problem("'join' is a method. Write .join() with parentheses.");
@@ -165,8 +167,8 @@ export function memberProblems(
     if (LIST_SEARCHES.has(name)) return searchProblems(name, undefined, property, call);
     // A list's `get` takes an index and a dict's a key, each with a `default:`.
     if (name === "get") return getProblems(undefined, property, call);
-    const member = name === "join" ? LIST_JOIN : TEXT_MEMBERS.get(name);
-    if (member?.parameters)
+    const member = name === "join" ? LIST_JOIN : isTextMethod(name) ? TEXT_METHODS[name] : null;
+    if (member !== null)
       return name === "contains"
         ? shapeProblems(member, call)
         : argumentProblems(member, call, typeOf, undefined);
@@ -178,7 +180,7 @@ export function memberProblems(
   if (isScalar(type, "regex"))
     return problem(regexMemberMessage(name, call === null ? "property" : "method"));
   const fix =
-    type.kind === "scalar" && TEXT_MEMBERS.has(name)
+    type.kind === "scalar" && isTextMember(name)
       ? " Convert it to text first with toString(...)."
       : "";
   return problem(
@@ -213,25 +215,50 @@ function shapeProblems(member: MethodParameters, call: CallExpression): Operatio
   return [];
 }
 
+/**
+ * The problems with the arguments of a method of text or `join` that the compiler can see: their shape, each argument's
+ * type, and each domain whose values it knows, with the runtime's text (see `TextDomain`), where the arguments the
+ * domain reads have no other problem. A domain is checked after the last argument it reads, and reported there.
+ * `receiverText` is the text the method is called on, when it is known.
+ */
 function argumentProblems(
-  member: TextMember,
+  member: TextSignature,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
   receiverText: string | undefined,
 ): OperationProblem[] {
   const shape = shapeProblems(member, call);
   if (shape.length > 0) return shape;
-  const parameters = member.parameters!;
+  const parameters = member.parameters;
   const problems: OperationProblem[] = [];
-  const positions: (number | undefined)[] = [];
+  // The known value of each argument, `undefined` where it is not known, and `null` after a problem with it.
+  const values: (DomainValue | undefined | null)[] = [];
   let length: number | undefined;
+  const check = (domain: TextDomain): void => {
+    const known: DomainValue[] = [];
+    for (const read of domain.reads) {
+      const value =
+        read !== "length"
+          ? values[read]
+          : receiverText === undefined
+            ? undefined
+            : (length ??= stringLength(receiverText));
+      if (value === undefined || value === null) return;
+      known.push(value);
+    }
+    const message = domain.problem(known, member);
+    if (message === undefined) return;
+    for (const read of domain.reads) if (read !== "length") values[read] = null;
+    problems.push({
+      kind: "invalidOperand",
+      message,
+      span: call.arguments[lastArgument(domain)]!.value.span,
+    });
+  };
   for (const [index, argument] of call.arguments.entries()) {
     const parameter = parameters[index]!;
     const value = argument.value;
     const type = typeOf(value);
-    const fail = (message: string): void => {
-      problems.push({ kind: "invalidOperand", message, span: value.span });
-    };
     const text = takesText(parameter);
     const searches = takesRegex(parameter);
     const needed = searches
@@ -242,6 +269,7 @@ function argumentProblems(
         ? STRING_TYPE
         : INTEGER_TYPE;
     if (!isAssignable(needed, type)) {
+      values[index] = null;
       problems.push(
         nullCheckProblem(value, type, needed) ?? {
           kind: "invalidOperand",
@@ -253,50 +281,29 @@ function argumentProblems(
       );
       continue;
     }
-    if (text || searches) {
-      if (needsNonEmptyText(parameter) && staticVisibleText(value) === "")
-        fail(emptyTextMessage(member, parameter));
-      continue;
-    }
-    const known = staticNumber(value);
-    if (parameter.kind === "position") positions.push(known);
-    if (known === undefined) continue;
-    if (known < 0) {
-      fail(negativeMessage(member, parameter, known));
-    } else if (parameter.kind === "position" && receiverText !== undefined) {
-      length ??= codePointLength(receiverText);
-      if (known > length) fail(beyondLengthMessage(member, parameter, known, length));
-    }
+    values[index] = knownArgument(parameter, value);
+    for (const domain of member.domains) if (lastArgument(domain) === index) check(domain);
   }
-  const [start, end] = positions;
-  if (problems.length === 0 && start !== undefined && end !== undefined && end < start)
-    problems.push({
-      kind: "invalidOperand",
-      message: endBeforeStartMessage(member, start, end),
-      span: call.arguments[1]!.value.span,
-    });
-  if (problems.length === 0 && member.name === "replace")
-    problems.push(...replacementProblems(call));
   return problems;
 }
 
-/**
- * A replacement that refers to a group the regex does not have (V30 §8), when the search is a regex literal and the
- * replacement's text is known. A literal RE2 rejects is reported where it is written.
- */
-function replacementProblems(call: CallExpression): OperationProblem[] {
-  let search = call.arguments[0]!.value;
-  while (search.kind === "parenthesizedExpression") search = search.expression;
-  const replacement = call.arguments[1]!.value;
-  const text = staticVisibleText(replacement);
-  if (search.kind !== "regexLiteral" || text === undefined) return [];
-  if (regexFlagProblem(search.flags) !== null) return [];
-  const compiled = compileRegex(search.source, canonicalRegexFlags(search.flags));
-  if (!compiled.ok) return [];
-  const parts = replacementParts(text, search.source, compiled.program.groups);
-  return parts.ok
-    ? []
-    : [{ kind: "invalidOperand", message: parts.problem, span: replacement.span }];
+/** The position of the last argument a domain reads. */
+function lastArgument(domain: TextDomain): number {
+  return Math.max(...domain.reads.map((read) => (read === "length" ? -1 : read)));
+}
+
+/** The value of an argument of `parameter` that the compiler knows: text, a whole number, or a regex literal. */
+function knownArgument(parameter: TextParameter, value: Expression): DomainValue | undefined {
+  if (!takesText(parameter) && !takesRegex(parameter)) return staticNumber(value);
+  return (takesText(parameter) ? staticVisibleText(value) : undefined) ?? knownRegex(value);
+}
+
+/** The regex of a literal, also in parentheses, with valid flags; one RE2 rejects is reported where it is written. */
+function knownRegex(expression: Expression): SerializableRegex | undefined {
+  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
+  if (expression.kind !== "regexLiteral" || regexFlagProblem(expression.flags) !== null)
+    return undefined;
+  return { kind: "regex", source: expression.source, flags: canonicalRegexFlags(expression.flags) };
 }
 
 /**
@@ -964,13 +971,6 @@ function argumentKind(type: StaticType): ArgumentKind {
     : null;
 }
 
-function codePointLength(text: string): number {
-  let length = 0;
-  for (let index = 0; index < text.length; index += text.codePointAt(index)! > 0xffff ? 2 : 1)
-    length += 1;
-  return length;
-}
-
 /**
  * The type an operation acts on: a possibly null value acts on its other members (V30 §34), and a value that is only
  * `null` stays `null`, so its misuse is still visible.
@@ -1041,9 +1041,7 @@ export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
  * numbers, objects, and speakers, have none.
  */
 const METHOD_NAMES: ReadonlySet<string> = new Set([
-  ...[...TEXT_MEMBERS.values()]
-    .filter((member) => member.parameters !== null)
-    .map(({ name }) => name),
+  ...Object.keys(TEXT_METHODS),
   LIST_JOIN.name,
   ...COLLECTION_METHODS,
   ...POSITIONAL_METHODS.keys(),

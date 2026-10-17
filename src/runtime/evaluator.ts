@@ -205,12 +205,12 @@ import {
   checkTextArguments,
   regexFromText,
   missingMemberMessage,
-  STRING_METHODS,
-  stringLength,
 } from "./string-operations.js";
 import {
+  isTextMethod,
   LIST_JOIN,
   methodArgumentCountMessage,
+  stringLength,
   unknownTextMemberMessage,
 } from "../text-operations.js";
 import { missingPropertyMessage } from "../object-properties.js";
@@ -1800,7 +1800,7 @@ export class Evaluator {
       return;
     }
     if (typeof receiver === "string") {
-      if (!STRING_METHODS.has(method))
+      if (!isTextMethod(method))
         throw fault("TSR016", unknownTextMemberMessage(method, "method"), span);
       return;
     }
