@@ -235,6 +235,7 @@ import { startValueMessage } from "./start-value-rules.js";
 import {
   argumentCountMessage,
   missingDefaultMessage,
+  temporalArgumentsMessage,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
@@ -7025,14 +7026,7 @@ class TypeChecker {
       if (all.every(isTemporal) && expression.arguments.length > 0)
         this.#report(
           typeCode.argumentCount,
-          argumentCountMessage(
-            method,
-            "no arguments",
-            expression.arguments.length,
-            method.startsWith("format")
-              ? "It shows the value in the player's own date and time format."
-              : undefined,
-          ),
+          temporalArgumentsMessage(method, expression.arguments.length),
           callee.property.span,
         );
       return all.length === 1 ? results[0]! : union(results.map((result) => result!));
@@ -7613,7 +7607,7 @@ class TypeChecker {
         if (expression.arguments.length > 0)
           this.#report(
             typeCode.argumentCount,
-            argumentCountMessage(name, "no arguments", expression.arguments.length),
+            temporalArgumentsMessage(name, expression.arguments.length),
             expression.arguments[0]!.value.span,
           );
         return name === "getDate"

@@ -29,6 +29,22 @@ export function argumentCountMessage(
 }
 
 /**
+ * A call with `received` arguments of a function of the current date and time or a method of a date or time value,
+ * which take none (V30 §35), from the compiler (`TSV020`) and the runtime (`TSR028`, `TSR015`). A format follows the
+ * player's settings.
+ */
+export function temporalArgumentsMessage(name: string, received: number): string {
+  return argumentCountMessage(
+    name,
+    "no arguments",
+    received,
+    name.startsWith("format")
+      ? "It shows the value in the player's own date and time format."
+      : undefined,
+  );
+}
+
+/**
  * A named argument `name` that `callee` does not take. `names` are the names it takes; a callee that takes none takes
  * its arguments without names, or no arguments at all when `positional` is false.
  */

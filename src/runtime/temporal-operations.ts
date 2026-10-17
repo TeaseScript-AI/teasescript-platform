@@ -1,3 +1,4 @@
+import { temporalArgumentsMessage } from "../argument-rules.js";
 import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import {
   calendarDuration,
@@ -103,7 +104,11 @@ export function temporalNow(
   span: SourceSpan,
 ): SerializableRuntimeTemporal {
   if (positional.length > 0 || Object.keys(named).length > 0)
-    throw fault("TSR028", `${name}() takes no arguments.`, span);
+    throw fault(
+      "TSR028",
+      temporalArgumentsMessage(name, positional.length + Object.keys(named).length),
+      span,
+    );
   const epochMilliseconds = wallClockAt(capture, atMs);
   if (epochMilliseconds === undefined)
     throw fault(
@@ -276,7 +281,11 @@ export function temporalMethod(
   if (!hasTemporalMethod(value, name))
     throw fault("TSR016", `${capitalize(describeKind(value.kind))} has no method '${name}'.`, span);
   if (positional.length > 0 || Object.keys(named).length > 0)
-    throw fault("TSR015", `${name}() takes no arguments.`, span);
+    throw fault(
+      "TSR015",
+      temporalArgumentsMessage(name, positional.length + Object.keys(named).length),
+      span,
+    );
   if (name === "toISO") {
     switch (value.kind) {
       case "date":

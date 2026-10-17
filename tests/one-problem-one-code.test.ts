@@ -3,6 +3,10 @@ import test from "node:test";
 
 import { compileSource, type CompileOptions } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
+import { RuntimeFault } from "../src/runtime/errors.js";
+import { temporalMethod, temporalNow } from "../src/runtime/temporal-operations.js";
+import { createSourcePosition, createSourceSpan } from "../src/source.js";
+import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 
 // One problem gets one code and one text, whichever pass, path, or form of the source finds it, and two problems get a
 // code each (IMPLEMENTATION-AND-REVIEW.md, "One home for each language rule").
@@ -125,6 +129,45 @@ test("each argument rule has one text in both passes", () => {
     ],
   ] as const)
     assert.deepEqual(diagnostics(source), [[code, message]], source);
+});
+
+test("a date or time call with arguments has the compiler's text where the runtime checks it", () => {
+  // The runtime checks the calls of a plan that this compiler did not check.
+  const span = createSourceSpan(createSourcePosition(0, 0, 0), createSourcePosition(1, 0, 1));
+  const capture = {
+    boundaryMs: 0,
+    sinceEventSequence: 0,
+    epochMs: null,
+    context: DEFAULT_TEMPORAL_CONTEXT,
+  };
+  const day = { kind: "date", year: 2026, month: 10, day: 4 } as const;
+  const fault = (run: () => void): readonly [string, string] => {
+    try {
+      run();
+    } catch (error) {
+      if (error instanceof RuntimeFault) return [error.code, error.message];
+      throw error;
+    }
+    assert.fail("The call did not fail.");
+  };
+  for (const [source, run, code] of [
+    ["say getDate(1)", () => temporalNow("getDate", [1], {}, capture, 0, span), "TSR028"],
+    [
+      'say toDate("2026-10-04").toISO(1)',
+      () => temporalMethod(day, "toISO", [1], {}, DEFAULT_TEMPORAL_CONTEXT, span),
+      "TSR015",
+    ],
+    [
+      'say toDate("2026-10-04").formatDate(1)',
+      () => temporalMethod(day, "formatDate", [1], {}, DEFAULT_TEMPORAL_CONTEXT, span),
+      "TSR015",
+    ],
+  ] as const) {
+    const compiled = diagnostics(source);
+    assert.equal(compiled.length, 1, source);
+    assert.equal(compiled[0]![0], "TSV020", source);
+    assert.deepEqual(fault(run), [code, compiled[0]![1]], source);
+  }
 });
 
 test("a speaker property that a read may miss has one text, from the type checker or the speaker flow", () => {
