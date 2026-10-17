@@ -8,11 +8,12 @@
 // generator, tests/property/source-fuzz.ts) for index 0 to N-1, each as the main.tease of a single-file project.
 // --cases takes a .tease file (a single-file project), a directory with a main.tease (one project of every .tease file
 // in it), or any other directory, which it searches for both.
-// Each build compiles each case from its source and the tool compares the diagnostics, as
-// `path:line:column severity code message` by file and position, and the plan, as JSON with sorted keys. A plan value
-// that JSON cannot hold, such as a Set, is converted and reported. With --run, a case with a plan in both builds also
-// runs once in each (tests/helpers/flow-differential.ts, within its limits), and the tool compares what each run says,
-// its status and its failure; the instructions a run executed are numbered by its own plan, so they are not compared.
+// Each build compiles each case from its source and the tool compares the diagnostics in the compiler's order, as
+// `path:startLine:startColumn-endLine:endColumn severity code message`, and the plan, as JSON with sorted keys. A plan
+// value that JSON cannot hold, such as a Set, is converted and reported. With --run, a case with a plan in both builds
+// also runs once in each (tests/helpers/flow-differential.ts, within its limits), and the tool compares what each run
+// says, its status and its failure; the instructions a run executed are numbered by its own plan, so they are not
+// compared.
 // A case is identical or differs, first by error (one build threw), then diagnostics, plan, or runs.
 // --time R measures instead: per case one warm-up compile per build, then R rounds of base and head in turn, and it
 // prints each build's median compile time and their ratio; with --run it also compares.
@@ -281,7 +282,9 @@ function compileOutcome(build, files) {
     const nonJson = [];
     const plan = result.plan === null ? null : canonical(result.plan, "plan", nonJson);
     return {
-      diagnostics: diagnosticLines(result.diagnostics, files),
+      diagnostics: result.diagnostics.map((diagnostic) =>
+        diagnosticLine(diagnostic, diagnostic.path),
+      ),
       plan,
       planText: JSON.stringify(plan),
       nonJson: nonJson.map((value) => ({ build: build.name, ...value })),
@@ -328,25 +331,13 @@ function normalised(outcome) {
   };
 }
 
-// By the case's file order, then position; a sort is stable, so diagnostics at one position keep their order.
 // Spans count lines and columns from 0; editors count from 1.
-function diagnosticLines(diagnostics, files) {
-  const order = (path) => {
-    const index = files.findIndex((file) => file.path === path);
-    return index === -1 ? files.length : index;
-  };
-  return [...diagnostics]
-    .sort(
-      (a, b) =>
-        order(a.path) - order(b.path) ||
-        (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) ||
-        a.span.start.line - b.span.start.line ||
-        a.span.start.column - b.span.start.column,
-    )
-    .map(
-      (d) =>
-        `${d.path}:${d.span.start.line + 1}:${d.span.start.column + 1} ${d.severity} ${d.code} ${d.message}`,
-    );
+function diagnosticLine(diagnostic, path) {
+  const { start, end } = diagnostic.span;
+  return (
+    `${path}:${start.line + 1}:${start.column + 1}-${end.line + 1}:${end.column + 1} ` +
+    `${diagnostic.severity} ${diagnostic.code} ${diagnostic.message}`
+  );
 }
 
 // The value with sorted object keys. What JSON cannot hold is converted, so it is still compared, and recorded with its
