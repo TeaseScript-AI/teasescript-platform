@@ -69,7 +69,7 @@ test("a play command's file may follow its words, also inside an interpolation",
     // The parser reads the words, so what remains is that "${...}" cannot show the handle the command gives.
     assert.deepEqual(
       compileSource(`${source}\nexit`).diagnostics.map(({ code }) => code),
-      [source.includes(" async ") ? "TSV042" : "TSV036"],
+      [source.includes(" async ") ? "TSV042" : "TSV069"],
       source,
     );
   }
