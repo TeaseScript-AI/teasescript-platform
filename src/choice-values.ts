@@ -25,7 +25,7 @@ export function isInteractionChoiceValue(value: unknown): value is InteractionCh
  */
 export function unreturnableChoiceMessage(kind: ValueKind): string | undefined {
   const { choice, shown, description } = VALUE_KINDS[kind];
-  if (choice || !shown) return undefined;
+  if (choice || shown === null) return undefined;
   return `A button cannot return ${description}. Give the buttons text or number values, and pick ${description.replace(/^an? /u, "the ")} from the answer.`;
 }
 

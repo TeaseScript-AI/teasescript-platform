@@ -158,7 +158,9 @@ function prefix(text: string, limit: number): string {
 
 /** Whether `visibleText` accepts the value: one of a kind that is `shown`, and a finite number. */
 export function isVisibleScalar(value: SerializableRuntimeValue): boolean {
-  return typeof value === "number" ? Number.isFinite(value) : VALUE_KINDS[valueKindOf(value)].shown;
+  return typeof value === "number"
+    ? Number.isFinite(value)
+    : VALUE_KINDS[valueKindOf(value)].shown !== null;
 }
 
 /** An element as `join` shows it: a value `visibleText` shows, and otherwise a failure. */

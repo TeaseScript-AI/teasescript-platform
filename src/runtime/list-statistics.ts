@@ -63,7 +63,7 @@ import {
   isRange,
   isTemporal,
 } from "./value-predicates.js";
-import { describeValue, valueKindOf } from "../value-kinds.js";
+import { describeValue, familyOf, VALUE_KINDS, valueKindOf } from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -521,7 +521,7 @@ function predict(
       "TSR059",
       isAngle(x)
         ? angleStatisticMessage("predict")
-        : `predict(...) needs ${describeValue(start!)} as its x, like the line's start, not ${describeValue(x)}.`,
+        : `predict(...) needs ${VALUE_KINDS[familyOf(valueKindOf(start!))].description} as its x, like the line's start, not ${describeValue(x)}.`,
       span,
     );
   const value = quotient(

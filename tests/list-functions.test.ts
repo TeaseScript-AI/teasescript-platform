@@ -169,7 +169,7 @@ test("statistics report empty lists, values they cannot read, and percentages ou
       "TSR060",
       "median(...) needs a list of objects for by:, not a list that holds a whole number (integer).",
     ],
-    ["sum(dynamic(5))", "TSR059", "sum(...) needs a list, not a number."],
+    ["sum(dynamic(5))", "TSR059", "sum(...) needs a list, not a whole number (integer)."],
     [
       "sum(dynamic([1e308, 1e308]))",
       "TSR036",

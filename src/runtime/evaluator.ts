@@ -273,8 +273,6 @@ import {
   isList,
   isObject,
   isRange,
-  isScriptReference,
-  isRegex,
   isSet,
   isSpeakerReference,
   isTemporal,
@@ -351,6 +349,7 @@ import {
   isDictKey,
   orderedFamily,
   ordersWith,
+  VALUE_KINDS,
   valueKindOf,
   type OrderedFamily,
 } from "../value-kinds.js";
@@ -2049,10 +2048,12 @@ export class Evaluator {
     );
   }
 
-  /** `say` text. A value other than a scalar shows in code-like notation, escaped so that markup leaves it literal. */
+  /**
+   * `say` text. A value shown as text (`shown`) shows as its text, and any other in code-like notation, escaped so that
+   * markup leaves it literal: a script reference shows as the call that makes it, and a regex as its literal.
+   */
   public sayText(value: SerializableRuntimeValue, span: SourceSpan): string {
-    // A script reference shows as the call that makes it, and a regex as its literal, which are notation too.
-    if (isVisibleScalar(value) && !isScriptReference(value) && !isRegex(value))
+    if (isVisibleScalar(value) && VALUE_KINDS[valueKindOf(value)].shown === "text")
       return visibleText(value, span, currentTemporalContext(this.snapshot));
     const notation = valueNotation(
       value,

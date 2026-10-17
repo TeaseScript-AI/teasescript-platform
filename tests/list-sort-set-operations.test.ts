@@ -296,6 +296,6 @@ test("values the compiler cannot know are checked at runtime", () => {
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nsay items.union(dynamic(5))\nexit`), [
     "TSR060",
-    "union() needs a list or a set, not a number.",
+    "union() needs a list or a set, not a whole number (integer).",
   ]);
 });

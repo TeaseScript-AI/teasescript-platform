@@ -17,6 +17,7 @@ import {
   type ListValueKind,
 } from "./list-function-rules.js";
 import { TEMPORAL_KINDS, type TemporalKind } from "./temporal-builtins.js";
+import { familyOf, VALUE_KINDS } from "./value-kinds.js";
 import { RANGE_LIST_FIX } from "./list-methods.js";
 import type { OperationProblem } from "./operation-checks.js";
 import { RANDOM_CONTRACTS } from "./random-functions.js";
@@ -429,7 +430,7 @@ function predictType(context: Context, positions: readonly ListValueKind[]): Sta
     if (!fits)
       problem(
         context,
-        `${name}(...) needs ${startKind === "integer" || startKind === "number" ? "a number" : describeValue({ kind: "scalar", name: startKind })} as its x, like the line's start, not ${describeValue(xType)}.`,
+        `${name}(...) needs ${VALUE_KINDS[familyOf(startKind)].description} as its x, like the line's start, not ${describeValue(xType)}.`,
         x,
       );
   }

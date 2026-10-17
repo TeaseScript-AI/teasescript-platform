@@ -101,17 +101,17 @@ test("mixing plain numbers with durations fails instead of guessing a unit", () 
     [
       "let n = 1",
       "n - 1 s",
-      `'-' cannot combine a number (1) and a duration (1 second). ${arithmetic}`,
+      `'-' cannot combine the number 1 and a duration (1 second). ${arithmetic}`,
     ],
     [
       "let n = 2",
       "n / 1 s",
-      `'/' cannot combine a number (2) and a duration (1 second). ${arithmetic}`,
+      `'/' cannot combine the number 2 and a duration (1 second). ${arithmetic}`,
     ],
     [
       "let n = 2",
       "1 s < n",
-      "'<' cannot compare a duration (1 second) with a number (2). Use a duration on both sides.",
+      "'<' cannot compare a duration (1 second) with the number 2. Use a duration on both sides.",
     ],
     [
       "let d = 1 s",

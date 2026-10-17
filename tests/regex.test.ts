@@ -606,7 +606,7 @@ test("the regex operations check their arguments", () => {
   assert.equal(runtime.snapshot.failure?.code, "TSR057");
   assert.equal(
     runtime.snapshot.failure?.message,
-    "split() needs text (string) or a regex for 'separator', not a number. Convert it with toString(...).",
+    "split() needs text (string) or a regex for 'separator', not a whole number (integer). Convert it with toString(...).",
   );
 });
 

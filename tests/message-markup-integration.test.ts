@@ -46,7 +46,10 @@ test("runs escapeMarkup through the protected Platform Standard Library prelude"
   );
   // `dynamic` hides the argument's type from the compiler, so the runtime check rejects it.
   for (const [argument, message] of [
-    ["1", "escapeMarkup(...) needs text, not a number. Convert it with toString(...) first."],
+    [
+      "1",
+      "escapeMarkup(...) needs text, not a whole number (integer). Convert it with toString(...) first.",
+    ],
     [
       "[1]",
       "escapeMarkup(...) needs text, not a list. Use .join() to combine its elements as text.",

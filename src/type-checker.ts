@@ -10732,7 +10732,7 @@ function describeLiterals(values: readonly PossibleValue[]): string {
 /** Whether `${...}` and text fields show a value of this member type as text (`shown`), or may. */
 function isShowable(member: StaticType): boolean {
   const kind = valueKindOfType(member);
-  return kind === undefined || VALUE_KINDS[kind].shown;
+  return kind === undefined || VALUE_KINDS[kind].shown !== null;
 }
 
 /** Why a button cannot return a value of this member type, which it shows, such as a script reference or a regex. */
