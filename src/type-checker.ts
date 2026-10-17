@@ -388,6 +388,16 @@ export function checkTypes(
   let effects = projectEffects(programs, dead);
   let deadRounds = 0;
   let deadKept = false;
+  // What a check found, such as a type it decided or widened, rests on the effects it followed and on the unchecked
+  // properties it knew, so a check with other effects or more of them starts again from nothing.
+  const startAgain = (): void => {
+    widened.clear();
+    decided.clear();
+    copies.clear();
+    kept.clear();
+    storage = guess ?? new Map();
+    storageRounds = 0;
+  };
   for (;;) {
     const guessed: boolean = storage === guess;
     const uncheckedBefore = guessed ? [...unchecked] : [];
@@ -428,12 +438,7 @@ export function checkTypes(
     // A check that found more of them read those properties with the types they no longer keep, so what it found rests
     // on those types: the next check starts again from nothing but the larger set, which only grows.
     if (checker.uncheckedMore) {
-      widened.clear();
-      decided.clear();
-      copies.clear();
-      kept.clear();
-      storage = guess ?? new Map();
-      storageRounds = 0;
+      startAgain();
       continue;
     }
     let storageChanged = false;
@@ -471,24 +476,26 @@ export function checkTypes(
       last = !checker.widenedMore;
     }
     if (last) {
-      const found = checker.deadCode();
-      if (!coversDeadCode(found, dead)) {
+      const deadFound = checker.deadCode();
+      if (!coversDeadCode(deadFound, dead)) {
         dead = {
           statements: new Set(
-            [...dead.statements].filter((statement) => found.statements.has(statement)),
+            [...dead.statements].filter((statement) => deadFound.statements.has(statement)),
           ),
-          operands: new Set([...dead.operands].filter((place) => found.operands.has(place))),
+          operands: new Set([...dead.operands].filter((place) => deadFound.operands.has(place))),
         };
         effects = projectEffects(programs, dead);
         deadKept = true;
+        startAgain();
         continue;
       }
       if (!deadKept && deadRounds < MAX_DEAD_CODE_ROUNDS) {
-        const fewer = projectEffects(programs, found);
+        const fewer = projectEffects(programs, deadFound);
         if (!sameProjectEffects(fewer, effects)) {
-          dead = found;
+          dead = deadFound;
           effects = fewer;
           deadRounds += 1;
+          startAgain();
           continue;
         }
       }

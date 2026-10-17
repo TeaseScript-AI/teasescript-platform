@@ -2,18 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ProjectDiagnostic, ProjectSourceFile } from "../src/compiler.js";
+import { PlanControlFlow } from "../src/plan/control-flow.js";
 import { compileAndRunVariants, type FlowKnob } from "./helpers/flow-differential.js";
 
 /*
- * Which code can run, against the runtime (V30 §30): for small scripts, every way is run, and each statement of interest
- * is a marker, `say MARK`, which says its own place. Where the compiler reports that a marker never runs, no run says
- * it; where it does not, some run does. The compiler reports it with TSV065 or TSV066 on the marker or on a statement
- * around it, and where one problem gets one code, with TSV046 on the condition just before it that is always false or
- * whose case never matches, or with TSV058 on the loop just before it.
+ * Which code can run, against the runtime (V30 §30): for small scripts, every way is run. No instruction of a statement
+ * that TSV065 or TSV066 reports, such as an `exit`, runs on any way. Each other statement of interest is a marker,
+ * `say MARK`, which says its own place: where the compiler reports that a marker never runs, no run says it, and where
+ * it does not, some run does. The compiler reports it with TSV065 or TSV066 on the marker or on a statement around it,
+ * and where one problem gets one code, with TSV046 on the condition just before it that is always false or whose case
+ * never matches, or with TSV058 on the loop just before it.
  *
  * By the rules that decide what can run, the cases keep clear of code that never runs without such a report: code after
  * a call of a function that never returns (a call counts as returning, ADR 0022 §4.3), in a function that no call that
- * can run reaches, in a block that no code that can run creates, and in a file nothing enters. Within a run of
+ * can run reaches or that only a parameter default reaches that every call supplies (a default counts as running where
+ * its function runs), in a block that no code that can run creates, and in a file nothing enters. Within a run of
  * statements that never run, only the first one is a marker.
  */
 
@@ -261,6 +264,66 @@ const cases: readonly Case[] = [
     },
   },
   {
+    name: "an exit that never runs",
+    knobs: 1,
+    files: {
+      "main.tease": [
+        KNOB,
+        "if k {",
+        "  goto done",
+        "  exit",
+        "}",
+        "if false {",
+        "  exit",
+        "}",
+        "say MARK",
+        "label done",
+        "say MARK",
+        "exit",
+      ].join("\n"),
+    },
+  },
+  {
+    name: "while true with 'end' in a called file",
+    knobs: 1,
+    files: {
+      "main.tease": [KNOB, "if k {", '  call "loop.tease"', "  say MARK", "}", "exit"].join("\n"),
+      "loop.tease": [
+        "let n = 0",
+        "while true {",
+        "  say MARK",
+        "  n += 1",
+        "  if n > 1 {",
+        "    end",
+        "  }",
+        "  wait 1 s",
+        "}",
+        "say MARK",
+        "end",
+      ].join("\n"),
+    },
+  },
+  {
+    name: "a parameter default, supplied and left out",
+    files: {
+      "main.tease": [
+        "function give: integer {",
+        "  say MARK",
+        "  return 1",
+        "}",
+        "function show(value = give()) {",
+        "  say MARK",
+        "  if value > 5 {",
+        "    say MARK",
+        "  }",
+        "}",
+        "show()",
+        "show(7)",
+        "exit",
+      ].join("\n"),
+    },
+  },
+  {
     name: "timer and button blocks",
     files: {
       "main.tease": [
@@ -362,13 +425,31 @@ test("a statement reported as never running never runs, and one not reported run
     const knobs: FlowKnob[] = Array.from({ length: testCase.knobs ?? 0 }, (_, index) => ({
       key: `k${index + 1}`,
     }));
-    const { diagnostics, runs } = compileAndRunVariants(files, knobs, {}, null, null, true);
+    const { diagnostics, plan, runs } = compileAndRunVariants(files, knobs, {}, null, null, true);
     assert.deepEqual(
       diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
       [],
       testCase.name,
     );
     assert.notEqual(runs.length, 0, testCase.name);
+    // No instruction of a reported statement runs.
+    const flow = new PlanControlFlow(plan!);
+    for (const index of new Set(runs.flatMap((run) => [...run.executed]))) {
+      const { span } = plan!.instructions[index]!;
+      const path = plan!.files[flow.fileOf(index)]!.path;
+      const reportedHere = diagnostics.find(
+        (diagnostic) =>
+          (diagnostic.code === "TSV065" || diagnostic.code === "TSV066") &&
+          diagnostic.path === path &&
+          diagnostic.span.start.offset <= span.so &&
+          span.eo <= diagnostic.span.end.offset,
+      );
+      assert.equal(
+        reportedHere,
+        undefined,
+        `${testCase.name}: ${path}:${span.sl + 1} runs, but is reported as never running`,
+      );
+    }
     for (const run of runs) assert.equal(run.failure, null, `${testCase.name}: ${run.present}`);
     const said = new Set(runs.flatMap((run) => run.says));
     const sources = new Map(files.map((file) => [file.path, file.source]));
@@ -380,9 +461,9 @@ test("a statement reported as never running never runs, and one not reported run
         `${testCase.name}: ${marker.text} ${never ? "is reported, but runs" : "is not reported, but never runs"}`,
       );
     }
-    // Each report of code that never runs stands on a marker, so the cases check all of them.
+    // Each report of code other than an `exit` stands on a marker, so the cases check what follows its first statement.
     for (const diagnostic of diagnostics)
-      if (diagnostic.code === "TSV065" || diagnostic.code === "TSV066")
+      if (diagnostic.code === "TSV065")
         assert.ok(
           markers.some(
             (marker) =>
@@ -441,6 +522,27 @@ test("a loop keeps a narrowing that only code which never runs would end, and no
       assert.deepEqual(run.says, ["1", "1", "1"].slice(0, run.says.length), source);
     }
   }
+  // A type that `y` takes from `x`, which only code that never runs would widen: the check that leaves that code out
+  // decides it afresh, so `repeat y` takes a whole number.
+  const decided = [
+    "let x: integer | string = 1",
+    "let y = null",
+    "repeat 3 {",
+    "  if y != null { repeat y { wait 1 ms } }",
+    "  y = x",
+    '  if false { x = "s" }',
+    "}",
+    "exit",
+  ].join("\n");
+  const taken = compileAndRunVariants([{ path: "main.tease", source: decided }], []);
+  assert.deepEqual(
+    taken.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV065"],
+  );
+  assert.deepEqual(
+    taken.runs.map((run) => [run.status, run.failure]),
+    [["halted", null]],
+  );
   // Where such code can run, the loop forgets the narrowing, and the read is an error.
   for (const body of [
     ["if k {", "  y = null", "}"],

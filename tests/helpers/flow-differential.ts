@@ -3,6 +3,7 @@ import {
   type ProjectDiagnostic,
   type ProjectSourceFile,
 } from "../../src/compiler.js";
+import type { InstructionPlan } from "../../src/plan/model.js";
 import type { RuntimeAccountInput } from "../../src/runtime/account.js";
 import type { RuntimeLockActionSnapshot } from "../../src/runtime/actions/model.js";
 import { runtimeTimedWork } from "../../src/runtime/operations/observe-time.js";
@@ -37,10 +38,14 @@ export interface FlowRun {
   readonly failure: { readonly code: string; readonly path: string; readonly line: number } | null;
   /** The texts the run said, in order. */
   readonly says: readonly string[];
+  /** The plan indices of the instructions the run executed. */
+  readonly executed: ReadonlySet<number>;
 }
 
 export interface FlowVariants {
   readonly diagnostics: readonly ProjectDiagnostic[];
+  /** The compiled plan, or `null` when the project has an error. */
+  readonly plan: InstructionPlan | null;
   /** One run per subset of the knobs, in binary order; none when the project has an error. */
   readonly runs: readonly FlowRun[];
 }
@@ -76,9 +81,13 @@ export function compileAndRunVariants(
       });
       const says: string[] = [];
       const pressed = new Set<number>();
+      const executed = new Set<number>();
       let view = session.view();
       for (let moves = 0; ; moves += 1) {
-        for (const event of session.run().events) if (event.kind === "say") says.push(event.text);
+        // Only `run` executes instructions: the other operations settle what the script waits for, or queue a block.
+        const step = session.run({ instructionTrace: true });
+        for (const index of step.instructionTrace?.instructions ?? []) executed.add(index);
+        for (const event of step.events) if (event.kind === "say") says.push(event.text);
         view = session.view();
         const waiting = view.status === "waiting" && moves < MAX_CLOCK_MOVES;
         const button = pressButtons
@@ -130,9 +139,14 @@ export function compileAndRunVariants(
             ? null
             : { code: failure.code, path: failure.path, line: failure.span.start.line + 1 },
         says,
+        executed,
       });
     }
-  return { diagnostics: compiled.diagnostics, runs };
+  return {
+    diagnostics: compiled.diagnostics,
+    plan: runs.length === 0 ? null : compiled.plan,
+    runs,
+  };
 }
 
 /**
