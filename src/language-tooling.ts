@@ -14,6 +14,12 @@ import type {
 import { compileProject, compileSource, isNativeStackExhaustion } from "./compiler.js";
 import { conversionSyntax, CONVERSIONS, isConversion, type Conversion } from "./conversions.js";
 import {
+  isRandomFunction,
+  RANDOM_CONTRACTS,
+  randomSyntax,
+  type RandomFunction,
+} from "./random-functions.js";
+import {
   askParts,
   sayOperands,
   mediaHandlerBlocks,
@@ -44,6 +50,7 @@ import {
   TEASESCRIPT_PROTECTED_TYPE_NAMES,
   type AskCommand,
   type ConversionName,
+  type RandomFunctionName,
   type RenamedCommand,
   type StatementCommand,
   type ValueCommand,
@@ -90,8 +97,8 @@ export interface LanguageCompletionItem {
 }
 
 export interface LanguageContextHelp {
-  /** A compact command, or a conversion called at the position (see `CONVERSIONS`). */
-  readonly command: CompactCommand | ConversionName;
+  /** A compact command, or a conversion or random function called at the position (see `ContractCall`). */
+  readonly command: CompactCommand | ContractName;
   readonly summary: string;
   readonly syntax: string;
 }
@@ -420,12 +427,16 @@ export function languageSignatureHelp(
   document: LanguageDocument,
   position: LanguagePosition,
 ): LanguageSignatureHelp | null {
-  const call = locateHelp(document, position.offset)?.conversion;
-  if (call !== undefined && call !== null) {
-    const { parameters, activeParameter } = conversionParameters(document, call, position.offset);
+  const contract = locateHelp(document, position.offset);
+  if (contract !== null && contract.call !== null) {
+    const { parameters, activeParameter } = callParameters(
+      document,
+      contract.call,
+      position.offset,
+    );
     return Object.freeze({
-      label: conversionSyntax(call.name),
-      documentation: CONVERSIONS[call.name].summary,
+      label: contract.help.syntax,
+      documentation: contract.help.summary,
       activeParameter,
       parameters,
     });
@@ -760,16 +771,19 @@ function declaredSpeakers(source: string): readonly string[] {
   return Object.freeze([...new Set(speakers)]);
 }
 
-/** A call of a conversion in the source: its name, where the name is, and where its `(` is. */
-interface ConversionCall {
-  readonly name: ConversionName;
+/** A built-in whose help comes from its contract: a conversion or a random function (`CONVERSIONS`, `RANDOM_CONTRACTS`). */
+type ContractName = ConversionName | RandomFunctionName;
+
+/** A call of a built-in with a contract in the source: its name, where the name is, and where its `(` is. */
+interface ContractCall {
+  readonly name: ContractName;
   readonly range: LanguageRange;
   readonly opener: number;
 }
 
 /**
- * The help at `offset`: of the innermost compact command or conversion call there, with the range of its name, and
- * the call when it is a conversion's.
+ * The help at `offset`: of the innermost compact command or call of a built-in with a contract there, with the range
+ * of its name, and the call when it is such a built-in's.
  */
 function locateHelp(
   document: LanguageDocument,
@@ -777,35 +791,40 @@ function locateHelp(
 ): {
   readonly help: LanguageContextHelp;
   readonly range: LanguageRange;
-  readonly conversion: ConversionCall | null;
+  readonly call: ContractCall | null;
 } | null {
   const compact = locateCompactCommand(document, offset);
-  const conversion = locateConversionCall(document, offset);
+  const call = locateContractCall(document, offset);
   // A call inside a command, or a command inside a call, starts after it.
-  if (
-    conversion !== null &&
-    (compact === null || conversion.range.start.offset > compact.range.start.offset)
-  )
+  if (call !== null && (compact === null || call.range.start.offset > compact.range.start.offset))
     return {
-      help: Object.freeze({
-        command: conversion.name,
-        summary: CONVERSIONS[conversion.name].summary,
-        syntax: conversionSyntax(conversion.name),
-      }),
-      range: conversion.range,
-      conversion,
+      help: Object.freeze(
+        isConversion(call.name)
+          ? {
+              command: call.name,
+              summary: CONVERSIONS[call.name].summary,
+              syntax: conversionSyntax(call.name),
+            }
+          : {
+              command: call.name,
+              summary: RANDOM_CONTRACTS[call.name].summary,
+              syntax: randomSyntax(call.name),
+            },
+      ),
+      range: call.range,
+      call,
     };
   return compact === null
     ? null
-    : { help: HELP[compact.command], range: compact.range, conversion: null };
+    : { help: HELP[compact.command], range: compact.range, call: null };
 }
 
 /**
- * The innermost call of a conversion whose name, or whose arguments up to the `)` that closes it, hold `offset`. It is
- * read from the tokens of the statement there, so that a call being written, without its `)`, holds every offset after
- * its name.
+ * The innermost call of a built-in with a contract whose name, or whose arguments up to the `)` that closes it, hold
+ * `offset`. It is read from the tokens of the statement there, so that a call being written, without its `)`, holds
+ * every offset after its name.
  */
-function locateConversionCall(document: LanguageDocument, offset: number): ConversionCall | null {
+function locateContractCall(document: LanguageDocument, offset: number): ContractCall | null {
   const parsed = parseDocument(document.text);
   const statement = statementRangeAt(parsed.statementRanges, offset);
   if (statement === null) return null;
@@ -816,24 +835,24 @@ function locateConversionCall(document: LanguageDocument, offset: number): Conve
       token.kind !== TokenKind.Newline &&
       token.kind !== TokenKind.EndOfFile,
   );
-  let innermost: ConversionCall | null = null;
-  const holds = (call: ConversionCall | null, end: number) => {
+  let innermost: ContractCall | null = null;
+  const holds = (call: ContractCall | null, end: number) => {
     if (call === null || offset < call.range.start.offset || offset > end) return;
     if (innermost === null || call.range.start.offset > innermost.range.start.offset)
       innermost = call;
   };
-  // The delimiters still open, innermost last, with the conversion call that each `(` opens.
-  const open: (ConversionCall | null)[] = [];
+  // The delimiters still open, innermost last, with the call of a built-in with a contract that each `(` opens.
+  const open: (ContractCall | null)[] = [];
   for (const [index, token] of tokens.entries()) {
     if (OPENING_DELIMITERS.has(token.kind)) {
       const name = tokens[index - 1];
       // A method of the same name, such as a datetime's `toAbsoluteDateTime()`, and a declared function are not calls of
-      // the conversion.
+      // the built-in.
       const before = tokens[index - 2]?.kind;
       open.push(
         token.kind === TokenKind.LeftParenthesis &&
           name?.kind === TokenKind.Identifier &&
-          isConversion(name.lexeme) &&
+          (isConversion(name.lexeme) || isRandomFunction(name.lexeme)) &&
           before !== TokenKind.Dot &&
           before !== TokenKind.KeywordFunction
           ? { name: name.lexeme, range: name.span, opener: token.span.start.offset }
@@ -847,16 +866,16 @@ function locateConversionCall(document: LanguageDocument, offset: number): Conve
 }
 
 /**
- * The signature parameters of a conversion call, its positional ones and then its named ones, and the one at `offset`:
- * the named argument written there, or the next positional one, or after them the first named one. The second form of
- * a pair, `toDateTime(date, time)`, is the call's once it has a second positional argument.
+ * The signature parameters of a call of a built-in with a contract, its positional ones and then its named ones, and
+ * the one at `offset`: the named argument written there, or the next positional one, or after them the first named
+ * one. The second form of a pair, `toDateTime(date, time)`, is the call's once it has a second positional argument;
+ * `randomWeighted` names its dict, or list with `weight:`, as `dict`.
  */
-function conversionParameters(
+function callParameters(
   document: LanguageDocument,
-  call: ConversionCall,
+  call: ContractCall,
   offset: number,
 ): { readonly parameters: readonly string[]; readonly activeParameter: number } {
-  const conversion: Conversion = CONVERSIONS[call.name];
   const start = call.opener + 1;
   const end = Math.max(start, offset);
   const tokens = lex(
@@ -886,15 +905,24 @@ function conversionParameters(
       named = token.lexeme;
     argumentStart = false;
   }
-  const form =
-    conversion.pair !== undefined && positional >= (named === null ? 1 : 2)
-      ? conversion.pair
-      : [conversion.parameter];
-  const parameters = Object.freeze([
-    ...form,
-    ...(conversion.fallback === null ? [] : ["default"]),
-    ...(conversion.files ? ["files"] : []),
-  ]);
+  let form: readonly string[];
+  let parameters: readonly string[];
+  if (isConversion(call.name)) {
+    const conversion: Conversion = CONVERSIONS[call.name];
+    form =
+      conversion.pair !== undefined && positional >= (named === null ? 1 : 2)
+        ? conversion.pair
+        : [conversion.parameter];
+    parameters = Object.freeze([
+      ...form,
+      ...(conversion.fallback === null ? [] : ["default"]),
+      ...(conversion.files ? ["files"] : []),
+    ]);
+  } else {
+    const random: RandomFunction = RANDOM_CONTRACTS[call.name];
+    form = random.takes === "choices" ? ["dict"] : random.parameters;
+    parameters = Object.freeze([...form, ...(random.takes === "choices" ? ["weight"] : [])]);
+  }
   return {
     parameters,
     activeParameter: named !== null ? parameters.indexOf(named) : Math.min(positional, form.length),

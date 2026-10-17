@@ -208,3 +208,14 @@ export function numbersProblem(
   }
   return undefined;
 }
+
+/**
+ * The call as the editor's help writes it, from its shape, such as `randomNormal(mean, spread)` or
+ * `randomWeighted(dict)  or  randomWeighted(list, weight: text)`.
+ */
+export function randomSyntax(name: RandomFunctionName): string {
+  const random: RandomFunction = RANDOM_CONTRACTS[name];
+  return random.takes === "choices"
+    ? `${name}(dict)  or  ${name}(list, weight: text)`
+    : `${name}(${random.parameters.join(", ")})`;
+}
