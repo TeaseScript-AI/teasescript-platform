@@ -436,11 +436,27 @@ test("token classes are the compiler's reading of numbers, names, comments, and 
     "exit:keyword",
     "// done:comment",
   ]);
-  // After a message mode the parser expects a value, so the slash starts a regex (V30 §8).
-  assert.deepEqual(tokenClasses("say prose /[a-z]+/"), [
+  // After a message mode the parser expects a value, so the slash starts a regex (V30 §8), also one whose class holds
+  // what starts a comment elsewhere; a comment stays one right after an operator and before a division.
+  assert.deepEqual(tokenClasses("say prose /[a-z]+/\nsay prose /[/*]/"), [
     "say:keyword",
     "prose:name",
     "/[a-z]+/:regex",
+    "say:keyword",
+    "prose:name",
+    "/[/*]/:regex",
+  ]);
+  assert.deepEqual(tokenClasses("let x = /* c */ 6\nsay x /* c */ / 2"), [
+    "let:keyword",
+    "x:name",
+    "=:operator",
+    "/* c */:comment",
+    "6:number",
+    "say:keyword",
+    "x:name",
+    "/* c */:comment",
+    "/:operator",
+    "2:number",
   ]);
 });
 
