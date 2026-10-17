@@ -82,6 +82,12 @@ const CONSTRUCTS: readonly Construct[] = [
     fixed: true,
   },
   {
+    name: "askPassword's question and hint",
+    parts: [TEXT, named("hint", TEXT)],
+    line: ([a, b]) => `let a = askPassword ${a}, ${b}`,
+    fixed: true,
+  },
+  {
     name: "an ask's hint and prefill",
     parts: [named("hint", TEXT), named("prefill", TEXT)],
     line: ([a, b]) => `let a = askText "Q", ${a}, ${b}`,
@@ -143,6 +149,18 @@ const CONSTRUCTS: readonly Construct[] = [
     name: "encryptText's password and timeLock",
     parts: [
       named("password", TEXT),
+      named("timeLock", { clear: "clearInteger() > 5", read: "x > 9" }),
+    ],
+    line: ([a, b]) => `let r = encryptText("t", ${a}, ${b})`,
+  },
+  {
+    // The question of a password field is said where `password:` stands; the field then waits for the player.
+    name: "a lock call's password field and timeLock",
+    parts: [
+      named("password", {
+        clear: 'askPassword("${clearText()}")',
+        read: 'askPassword("${x + 1}")',
+      }),
       named("timeLock", { clear: "clearInteger() > 5", read: "x > 9" }),
     ],
     line: ([a, b]) => `let r = encryptText("t", ${a}, ${b})`,
