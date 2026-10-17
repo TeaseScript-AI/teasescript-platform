@@ -6844,9 +6844,12 @@ class TypeChecker {
       }
     }
     const values = yield* compileChild(this.#callArgumentsTask(expression, scope));
-    // Only a list has removeAt, so its position is a list index on any receiver.
+    // Only a list has removeAt, so its position is a list index on any receiver; a list checks it with its other index
+    // rules below.
+    const listReceiver = values.length === 1 && isKnown(value) && members(value).every(isList);
     if (
       method === "removeAt" &&
+      !listReceiver &&
       expression.arguments.length === 1 &&
       expression.arguments[0]!.kind === "positionalArgument"
     )
@@ -6860,8 +6863,8 @@ class TypeChecker {
           this.#reportMixedChoice(argument.value, () => ONE_TYPE_FIX);
       return UNKNOWN_TYPE;
     }
-    if (method === "removeAt" && values.length === 1 && members(value).every(isList))
-      this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value, true);
+    if (method === "removeAt" && listReceiver)
+      this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
     // As for a dict, the default may decide the element type of a list that no value decided yet (V30 §16), before
     // anything reads the element.
     const listDefault = expression.arguments[1];
@@ -7718,8 +7721,8 @@ class TypeChecker {
   /**
    * Checks `object[index]`: only lists, indexed by a whole number, and dicts, by a text key, are indexed, and every
    * member of a union must be the same one. An object has fixed properties, so it points to a dict. A list index below
-   * 0 is checked here unless the caller handles it (`belowZero`): a list's `get` gives its default for it, and
-   * `removeAt` checks it on any receiver.
+   * 0 is an error, but not for a list's `get` (`belowZero`), which gives its default for it; one that is not whole has
+   * the error of that.
    */
   #checkIndex(
     object: StaticType,
@@ -7732,6 +7735,7 @@ class TypeChecker {
     // Also on a receiver that may be null or is not known: no list has an element below 0.
     if (
       !belowZero &&
+      !isScalar(nonNullTypeForUse(index), "number") &&
       members(nonNullType(object)).some(
         (member) => !isKnown(member) || resolved(member).kind === "list",
       )
@@ -7786,10 +7790,10 @@ class TypeChecker {
       );
   }
 
-  /** A whole-number list index the compiler knows is below 0, which no element has. */
+  /** A list index the compiler knows is below 0, which no element has. */
   #checkNegativeIndex(expression: Expression): void {
     const known = this.#known(expression);
-    if (typeof known === "number" && Number.isInteger(known) && known < 0)
+    if (typeof known === "number" && known < 0)
       this.#report(typeCode.invalidListIndex, NEGATIVE_INDEX_MESSAGE, expression.span);
   }
 

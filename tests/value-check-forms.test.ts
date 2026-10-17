@@ -481,9 +481,13 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
         ["let l = [1]\nsay l[(0 - 1)]", "(0 - 1)"],
         ["let l = [1]\nl[-1] = 2", "-1"],
         ["let l = [1]\nl.removeAt(-1)", "-1"],
-        // Only a list has an index or removeAt, so the receiver need not be known.
+        // Only a list has an index or removeAt, so the receiver need not be known, and on a receiver the compiler
+        // cannot know, removeAt checks no other index rule.
         ["function f(x) {\n    say x[-1]\n}", "-1"],
         ["function f(x) {\n    x.removeAt(-1)\n}", "-1"],
+        ["function f(x) {\n    x.removeAt(-1.5)\n}", "-1.5"],
+        ["function f(x) {\n    x.removeAt((-3 / 2))\n}", "(-3 / 2)"],
+        [`${PICK}say pick([1]).removeAt(-1.5)`, "-1.5"],
       ],
       "TSV045",
       "A list index cannot be negative. The first element is at index 0, and the last at length - 1.",
