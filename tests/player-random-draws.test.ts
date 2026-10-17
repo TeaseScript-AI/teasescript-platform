@@ -436,7 +436,8 @@ test("the picker's code has the compiler's classes, lexed as the parser reads th
       ["/[a-z]+/", "regex"],
     ],
   );
-  assert.equal(roll!.segments.find((segment) => segment.text === "randomInteger")?.kind, "command");
+  // A built-in function is a name: the themes have no colour of their own for it.
+  assert.equal(roll!.segments.find((segment) => segment.text === "randomInteger")?.kind, "name");
 });
 
 test("Show whole block fits the smallest statement or block around the draw that the default lines do not show whole", () => {
