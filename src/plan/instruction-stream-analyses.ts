@@ -54,6 +54,7 @@ export function validateLabelPositions(
   files: readonly PlanFileBoundaries[],
   errors: PlanValidationError[],
 ): void {
+  if (files.every((file) => file.labelInstructions.size === 0)) return;
   recordValidationTestWork("labelPositionAnalyses");
   const flow = new PlanControlFlow(plan);
   files.forEach((file, fileIndex) => {
