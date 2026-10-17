@@ -274,9 +274,17 @@ test("a value that needs more work than the compiler gives is not known, which i
     withRegexWorkLimit(4, () => diagnostics(search)),
     [],
   );
-  // Nor does text longer than the known values may take together, which the compiler does not build; the run still
-  // fails on it.
-  const long = `say toNumber("ab".repeat(${KNOWN_VALUE_WORK}))`;
-  assert.deepEqual(diagnostics(long), []);
-  assert.equal(failure(long)?.[0], "TSR058");
+  // The texts that known values build share one bound: a text within the work left is known, and one past it is not,
+  // although alone it would be. The run still fails on both.
+  const text = `let t = "a".repeat(${Math.floor(KNOWN_VALUE_WORK * 0.3)})`;
+  assert.deepEqual(diagnostics(`${text}\nsay toNumber(t + "x")`).length, 1);
+  const shared = `${text}\nsay toNumber(t + t)\nsay toNumber(t + "x")`;
+  assert.deepEqual(
+    diagnostics(shared).map((diagnostic) => diagnostic.split(" ").slice(0, 2).join(" ")),
+    ["TSV043 2:14"],
+  );
+  assert.equal(
+    failure(`${DYNAMIC}${text.replace('"a"', 'dynamic("a")')}\nsay toNumber(t + "x")`)?.[0],
+    "TSR058",
+  );
 });

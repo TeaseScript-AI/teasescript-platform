@@ -1534,9 +1534,9 @@ class TypeChecker {
 
   /**
    * The code being checked, in which a `let` declared in it counts its first value: a file's top level, a function's
-   * parameters and body, or a block of a timer, media, or button.
+   * parameters and body, or a block of a timer, media, or button; before them, the start values.
    */
-  #body: object | null = null;
+  #body: object = this.#project;
 
   /** The `let` declarations and globals that some code writes (see `TypeCheckOptions.written`), or `null` for all. */
   readonly #written: NonNullable<TypeCheckOptions["written"]> | null;
