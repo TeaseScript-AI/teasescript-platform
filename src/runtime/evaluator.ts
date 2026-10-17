@@ -135,6 +135,7 @@ import {
   type RandomNatural,
   type RandomSupport,
 } from "./random-control.js";
+import { isReadingMethod } from "./say-staging.js";
 import {
   isVisibleScalar,
   quotedText,
@@ -4976,8 +4977,8 @@ const callingExpressions = new WeakMap<ExpressionPlan, boolean>();
 
 /**
  * Whether evaluating an expression can run a call that may change a value: any call but a conversion's, a random
- * function's, or a numeric or angle function's, which only read (see `Conversion`, `RandomFunction`, and
- * `NumericFunction`). Results are cached per plan node, so nested checks stay linear.
+ * function's, a numeric or angle function's, or a method's that only reads (see `Conversion`, `RandomFunction`,
+ * `NumericFunction`, and `isReadingMethod`). Results are cached per plan node, so nested checks stay linear.
  */
 function mayRunCall(expression: ExpressionPlan): boolean {
   // A node is decided after its children, which are pushed above it.
@@ -4987,12 +4988,14 @@ function mayRunCall(expression: ExpressionPlan): boolean {
   while (work.length > 0) {
     const current = work.pop()!;
     if (callingExpressions.has(current.expression)) continue;
+    const callee = current.expression.kind === "call" ? current.expression.callee : null;
     if (
-      current.expression.kind === "call" &&
-      (current.expression.callee.kind !== "identifier" ||
-        (!isConversion(current.expression.callee.name) &&
-          !isRandomFunction(current.expression.callee.name) &&
-          !isNumericFunction(current.expression.callee.name)))
+      callee !== null &&
+      (callee.kind === "identifier"
+        ? !isConversion(callee.name) &&
+          !isRandomFunction(callee.name) &&
+          !isNumericFunction(callee.name)
+        : callee.kind !== "property" || !isReadingMethod(callee.name))
     ) {
       callingExpressions.set(current.expression, true);
     } else if (current.children !== null) {
