@@ -370,7 +370,6 @@ export const ANGLE_TYPE = scalar("angle");
 export const DATE_TYPE = scalar("date");
 export const TIME_TYPE = scalar("time");
 export const DATETIME_TYPE = scalar("datetime");
-export const ABSOLUTE_DATE_TIME_TYPE = scalar("absoluteDateTime");
 export const SCRIPT_TYPE = scalar("script");
 export const REGEX_TYPE = scalar("regex");
 
