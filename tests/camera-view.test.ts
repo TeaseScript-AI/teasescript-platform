@@ -150,6 +150,9 @@ test("the compiler and runtime reject what a camera view cannot do", () => {
     ["showCamera(1)\nexit", "TSP035"],
   ] as const)
     assert.ok(codes(source).includes(code), `${source}: ${codes(source).join(", ")}`);
+  // Adding a number, or subtracting, is the operation's type error alone.
+  for (const change of ["+= 5", '-= "stage"'])
+    assert.deepEqual(codes(`let view = showCamera\nview.placement ${change}\nexit`), ["TSV041"]);
   // The compiler follows the handle's type through aliases, function results, and collections.
   for (const source of [
     'let view = showCamera\nlet alias = view\nalias.placement = "nowhere"\nexit',

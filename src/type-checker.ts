@@ -2918,9 +2918,14 @@ class TypeChecker {
       this.#report(handleMemberCode(kind), message, statement.value.span);
     const text = isScalar(value, "string") ? staticVisibleText(statement.value) : undefined;
     if (kind === "camera" && name === "placement") {
-      // A compound assignment adds to the placement, which never gives another placement.
-      if (statement.operator !== "=") report(cameraPlacementMessage(null));
-      else if (text !== undefined && !isCameraPlacement(text))
+      // Adding text to the placement never gives another placement; any other change is the operation's error.
+      if (statement.operator !== "=") {
+        if (
+          statement.operator === "+=" &&
+          (isScalar(value, "string") || !isKnown(nonNullTypeForUse(value)))
+        )
+          report(cameraPlacementMessage(null));
+      } else if (text !== undefined && !isCameraPlacement(text))
         report(cameraPlacementMessage(shownChoice(text)));
     } else if (statement.operator !== "=") return;
     else if (kind === "timer" && name === "display") {
