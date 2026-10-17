@@ -14,6 +14,7 @@ import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { dateTimeMilliseconds, daysBetween } from "../temporal.js";
 import { RANGE_LIST_FIX } from "./collection-operations.js";
 import { RuntimeFault } from "./errors.js";
+import { describeValue } from "./value-types.js";
 import {
   add,
   compare,
@@ -531,7 +532,7 @@ export function weightedChoices(
         ? DICT_WEIGHTS_MESSAGE
         : isList(source)
           ? LIST_WEIGHT_MESSAGE
-          : weightedSourceMessage(describeRuntimeValue(source)),
+          : weightedSourceMessage(describeValue(source)),
       span,
     );
   const choices = dict

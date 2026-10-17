@@ -374,7 +374,7 @@ test("a shared code is one problem with one text", () => {
     // @ts-expect-error -- two problems need a code each
     { problems: "two", parts: [] },
     // @ts-expect-error -- the owners of a code report it with one text
-    { problems: "one", texts: "different", parts: [] },
+    { texts: "different", parts: [] },
   ];
   assert.equal(forms.length, 2);
 });

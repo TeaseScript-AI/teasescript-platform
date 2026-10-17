@@ -37,7 +37,10 @@ export const DICT_WEIGHTS_MESSAGE =
 
 export const LIST_WEIGHT_MESSAGE = `randomWeighted(...) of a list needs weight:, the property that holds each element's weight, as in randomWeighted(tasks, weight: "chance").`;
 
-/** `randomWeighted` of something else than a dict or a list, `shown` as the runtime shows it or its type. */
+/**
+ * `randomWeighted` of something else than a dict or a list: `shown` is its type at compile time, and the kind of the
+ * value at runtime, in the compiler's wording (`describeValue`), without the element type of a collection.
+ */
 export function weightedSourceMessage(shown: string): string {
   return `randomWeighted(...) needs a dict of weights or a list of objects, not ${shown}.`;
 }

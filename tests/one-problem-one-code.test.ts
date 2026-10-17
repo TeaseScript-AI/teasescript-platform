@@ -192,13 +192,14 @@ function runtimeFailure(plan: InstructionPlan): readonly [string, string] {
 type Written = number | string | boolean;
 
 /**
- * The plan of `valid` whose first call of `callee` has the arguments `written` instead: a value, or `[name, value]`
- * for a named argument. It is a plan that the compiler did not check.
+ * The plan of `valid` whose first call of `callee` has the arguments `written` instead: a value, `[name, value]` for a
+ * named argument, or `{ kept: index }` for the call's own argument at `index`. It is a plan that the compiler did not
+ * check.
  */
 function forgedCall(
   valid: string,
   callee: string,
-  written: readonly (Written | readonly [string, Written])[],
+  written: readonly (Written | readonly [string, Written] | { readonly kept: number })[],
 ): InstructionPlan {
   const plan = structuredClone(compileValidPlan(`${valid}\nexit`));
   const find = (node: unknown): { arguments: unknown } | undefined => {
@@ -222,10 +223,14 @@ function forgedCall(
   };
   const span = { so: 0, sl: 0, sc: 0, eo: 1, el: 0, ec: 1 };
   const literal = (value: Written): ExpressionPlan => ({ kind: "literal", value, span });
-  find(plan.instructions)!.arguments = written.map((argument): ArgumentPlan =>
-    typeof argument === "object"
-      ? { kind: "named", name: argument[0], value: literal(argument[1]), span }
-      : { kind: "positional", value: literal(argument), span },
+  const call = find(plan.instructions)!;
+  const own = Array.isArray(call.arguments) ? call.arguments : [];
+  call.arguments = written.map((argument): ArgumentPlan =>
+    typeof argument !== "object"
+      ? { kind: "positional", value: literal(argument), span }
+      : "kept" in argument
+        ? own[argument.kept]
+        : { kind: "named", name: argument[0], value: literal(argument[1]), span },
   );
   return plan;
 }
@@ -249,7 +254,9 @@ test("a call's arguments have the compiler's text where the runtime checks them"
     // `min` and `max` of values or of one list.
     ["say min()", "say min(1, 2)", "min", []],
     ["say max(1, 2, by: 3)", "say max(1, 2)", "max", [1, 2, ["by", 3]]],
-    ["say min([1, 2], x: 1)", "say min([1, 2])", "min", [1, ["x", 1]]],
+    ["say min([1, 2], x: 1)", "say min([1, 2])", "min", [{ kept: 0 }, ["x", 1]]],
+    ["say min(5, x: 1)", "say min(5, 6)", "min", [5, ["x", 1]]],
+    ['say max(5, by: "w", x: 1)', "say max(5, 6)", "max", [5, ["by", "w"], ["x", 1]]],
     // The list functions.
     ["say sum([1], x: 1)", "say sum([1])", "sum", [1, ["x", 1]]],
     ["say percentile([1])", "say percentile([1], 50)", "percentile", [1]],
@@ -301,6 +308,7 @@ test("a value of a type the compiler does not know fails with the compiler's tex
       'say randomWeighted(dict{ "a": 1 }, weight: "w")',
     ],
     [`${D}say randomWeighted(dynamic([{ w: 1 }]))`, "say randomWeighted([{ w: 1 }])"],
+    [`${D}say randomWeighted(dynamic(5))`, "say randomWeighted(5)"],
     // A start value, which may not select at random, of a key that the compiler cannot read.
     ['global pick = (load "pi" + "cks", default: [1, 2]).random', "global pick = [1, 2].random"],
     ['global shown = "${load "pi" + "cks", default: [1, 2]}"', 'global shown = "${[1, 2]}"'],

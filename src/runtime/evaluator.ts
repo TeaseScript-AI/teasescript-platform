@@ -3614,19 +3614,21 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): SerializableRuntimeValue {
-    // One list, optionally with by:, chooses among its values (V30 §16), as the compiler checks one argument that may be
-    // a list.
-    const list = positional.length === 1;
+    // One list, optionally with by:, chooses among its values (V30 §16). As the compiler, which knows the type, names are
+    // checked as one list takes them, else as the values take none; one other value with no other name than 'by:' fails
+    // below as not a list.
+    const one = positional.length === 1;
     const names = Object.keys(named);
-    const problem = list
-      ? argumentShapeProblem(name, LIST_FUNCTION_SHAPES.get(name)!, 1, names)?.message
-      : names.length > 0
-        ? unknownNamedArgumentMessage(name, names[0]!, [])
-        : positional.length < 2
-          ? argumentCountMessage(name, MIN_MAX_TAKES, positional.length)
-          : undefined;
+    const problem =
+      one && isList(positional[0]!)
+        ? argumentShapeProblem(name, LIST_FUNCTION_SHAPES.get(name)!, 1, names)?.message
+        : names.some((key) => !one || key !== "by")
+          ? unknownNamedArgumentMessage(name, names[0]!, [])
+          : positional.length === 0
+            ? argumentCountMessage(name, MIN_MAX_TAKES, 0)
+            : undefined;
     if (problem !== undefined) throw fault("TSR028", problem, span);
-    if (list) {
+    if (one) {
       const values = listValues(name, positional[0]!, named.by, span);
       if (values.length === 0)
         throw fault(
