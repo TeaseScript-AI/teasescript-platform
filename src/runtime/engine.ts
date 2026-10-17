@@ -47,13 +47,14 @@ import { rangeLength, rangeStartProblem, rangeText } from "../range-checks.js";
 import { UNIT_AMOUNT_RULE, unitAmountFix } from "../operand-rules.js";
 import { buttonBackgroundMessage } from "../choice-rules.js";
 import {
-  buttonTimeoutMessage,
   isDelayLength,
   isRoundLength,
   negativeDelayMessage,
   pacingMessage,
   sceneTimeMessage,
+  timeoutLengthMessage,
   timeoutSceneTimeMessage,
+  unmeasurableLengthMessage,
   zeroRoundMessage,
 } from "../delay-rules.js";
 import {
@@ -2877,7 +2878,12 @@ function formTimeoutMs(timeoutMs: number, snapshot: RuntimeSnapshot, span: Sourc
     throw fault(
       "TSR052",
       isValidSessionTime(deadlineMs)
-        ? `This askForm timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
+        ? unmeasurableLengthMessage(
+            "This askForm timeout",
+            timeoutMs,
+            snapshot.currentSessionTimeMs,
+            "timeout",
+          )
         : timeoutSceneTimeMessage("askForm"),
       span,
     );
@@ -2901,7 +2907,7 @@ function buttonTimeoutMs(
       "TSR050",
       typeof value === "number"
         ? `A showButton timeout is a duration, but this is ${describeShownValue(value)}. ${durationFix(value, "30 s")}`
-        : buttonTimeoutMessage(describeShownValue(value)),
+        : timeoutLengthMessage("showButton", describeShownValue(value)),
       span,
     );
   }
@@ -2917,7 +2923,12 @@ function buttonTimeoutMs(
     throw fault(
       "TSR050",
       isValidSessionTime(deadlineMs)
-        ? `This showButton timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
+        ? unmeasurableLengthMessage(
+            "This showButton timeout",
+            timeoutMs,
+            snapshot.currentSessionTimeMs,
+            "timeout",
+          )
         : timeoutSceneTimeMessage("showButton"),
       span,
     );
@@ -3510,7 +3521,12 @@ export function futureDeadline(
   if (durationMs > 0 && deadlineMs <= snapshot.currentSessionTimeMs) {
     throw fault(
       "TSR050",
-      `This ${command} of ${formatDuration(durationMs)} is too short to measure this late in the scene. Use a longer duration.`,
+      unmeasurableLengthMessage(
+        `This ${command}`,
+        durationMs,
+        snapshot.currentSessionTimeMs,
+        "duration",
+      ),
       span,
     );
   }

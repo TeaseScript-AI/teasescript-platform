@@ -190,7 +190,7 @@ export const DIAGNOSTIC_CODES = {
   TSV011: entry(
     ["type checker"],
     "error",
-    "Invalid wait, timer, repeat count, or pacing",
+    "Invalid wait, timer, repeat count, pacing, or timeout",
     DOCS.values,
   ),
   TSV012: entry(["type checker"], "error", "Invalid `for` loop source", DOCS.values),

@@ -7,6 +7,7 @@ import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
+import { sayTexts } from "./helpers/runtime-events.js";
 
 function diagnostics(source: string): string[] {
   return compileSource(source).diagnostics.map(
@@ -255,4 +256,61 @@ test("at the last scene time, a positive wait, timer, timeout, or timer round fa
     ),
     null,
   );
+});
+
+test("a positive length too short for the clock late in a scene names its length and the shortest one the clock measures", () => {
+  // Runs from scene time 0 until the script stops, letting scene time reach each wait's deadline.
+  const ended = (source: string) => {
+    const plan = compileValidPlan(source);
+    let result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+    while (
+      result.snapshot.status === "waiting" &&
+      result.snapshot.foregroundAction?.kind === "delay"
+    ) {
+      result = observeTime(plan, result.snapshot, result.snapshot.foregroundAction.deadlineMs);
+      result = run(plan, result.snapshot);
+    }
+    return result;
+  };
+  const tiny = "let s = 0.000000000000001\n";
+  // At 1 h the clock measures steps of 2^-31 ms; a wait of 1e-12 ms ends where it starts.
+  const late = ended(`${tiny}wait 1 h\nwait s s\nsay "after"\nexit`).snapshot;
+  assert.equal(late.currentSessionTimeMs, 3_600_000);
+  assert.deepEqual(
+    [late.failure?.code, late.failure?.message],
+    [
+      "TSR050",
+      "This wait of 1e-12 milliseconds is too short to measure this late in the scene, where the shortest duration the clock can measure is 4.66e-10 milliseconds. Use a longer duration.",
+    ],
+  );
+  // The same wait at the start of the scene runs.
+  const early = ended(`${tiny}wait s s\nsay "after"\nexit`);
+  assert.equal(early.snapshot.status, "halted");
+  assert.deepEqual(sayTexts(early), ["after"]);
+  // Every length the clock measures from the scene time shows both.
+  const shown =
+    "of 1e-12 milliseconds is too short to measure this late in the scene, where the shortest duration the clock can measure is 4.66e-10 milliseconds.";
+  for (const [source, code, message] of [
+    ["let t = timer async s s", "TSR050", `This timer ${shown} Use a longer duration.`],
+    ["timer s s", "TSR050", `This timer ${shown} Use a longer duration.`],
+    [
+      "let t = timer async 5 s\nt.remaining = s s",
+      "TSR050",
+      `Timer remaining time ${shown} Use a longer duration.`,
+    ],
+    ['say "x", s s', "TSR050", `This say pacing ${shown} Use a longer pause.`],
+    [
+      'let e = showButton "Go", timeout: s s',
+      "TSR050",
+      `This showButton timeout ${shown} Use a longer timeout.`,
+    ],
+    [
+      'let a = askForm fields: { n: { type: "integer", value: 1 } }, timeout: s s, onTimeout: "submit"',
+      "TSR052",
+      `This askForm timeout ${shown} Use a longer timeout.`,
+    ],
+  ] as const) {
+    const failed = ended(`${tiny}wait 1 h\n${source}\nexit`).snapshot.failure;
+    assert.deepEqual([failed?.code, failed?.message], [code, message], source);
+  }
 });

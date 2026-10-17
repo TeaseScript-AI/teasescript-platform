@@ -127,7 +127,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV008` | `break` or `continue` outside a loop | error | name pass |
 | `TSV009` | Chained range | error | name pass |
 | `TSV010` | Invalid range bound or empty range | error | type checker |
-| `TSV011` | Invalid wait, timer, repeat count, or pacing | error | type checker |
+| `TSV011` | Invalid wait, timer, repeat count, pacing, or timeout | error | type checker |
 | `TSV012` | Invalid `for` loop source | error | type checker |
 | `TSV013` | Duplicate function | error | name pass |
 | `TSV014` | Duplicate parameter | error | name pass |

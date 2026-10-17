@@ -20,10 +20,6 @@ import { validateInstructionPlan } from "../src/plan/validation.js";
 import { TokenKind } from "../src/token.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
-const grammarKeywords: ReadonlySet<string> = new Set(TEASESCRIPT_GRAMMAR_KEYWORDS);
-/** The commands and asks of the engine, without the grammar keywords that the parser also reads by name. */
-const engineCommands = Object.keys(COMMANDS).filter((name) => !grammarKeywords.has(name));
-
 test("every word that the lexer or the parser reads by name is protected, so no declaration can take it", () => {
   const protectedNames: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
   for (const word of [...KEYWORD_TOKENS.keys(), ...Object.keys(COMMANDS)])
@@ -59,8 +55,36 @@ test("a string may follow every command that gives a value, also inside an inter
   }
 });
 
-test("a host cannot configure a command, an ask, or another name the language reads itself", () => {
-  for (const name of [...engineCommands, "takePhoto", "askImage", "pi", "debugMode"])
+test("a play command's file may follow its words, also inside an interpolation", () => {
+  // The reported source, and each word of each play command alone and all together.
+  const sources = ['say "${playAudio async "a.mp3"}"'];
+  for (const [name, facts] of Object.entries(COMMANDS))
+    if ("fileModifiers" in facts)
+      for (const words of [...facts.fileModifiers.map((word) => [word]), facts.fileModifiers])
+        sources.push(`say "\${${name} ${words.join(" ")} "x"}"`);
+  for (const source of sources) {
+    const { tokens, diagnostics } = lex(source);
+    assert.deepEqual(diagnostics, [], source);
+    assert.equal(tokens.filter((token) => token.kind === TokenKind.StringStart).length, 2, source);
+    // The parser reads the words, so what remains is that "${...}" cannot show the handle the command gives.
+    assert.deepEqual(
+      compileSource(`${source}\nexit`).diagnostics.map(({ code }) => code),
+      [source.includes(" async ") ? "TSV042" : "TSV036"],
+      source,
+    );
+  }
+});
+
+test("a host cannot configure a keyword, a command, an ask, or another name the language reads itself", () => {
+  for (const name of new Set([
+    ...TEASESCRIPT_GRAMMAR_KEYWORDS,
+    ...KEYWORD_TOKENS.keys(),
+    ...Object.keys(COMMANDS),
+    "takePhoto",
+    "askImage",
+    "pi",
+    "debugMode",
+  ]))
     for (const options of [{ globals: [name] }, { builtins: [name] }])
       assert.deepEqual(
         compileSource("exit", options).diagnostics.map(({ code, message }) => [code, message]),

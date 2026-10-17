@@ -8,6 +8,8 @@ if (names.length === 0) throw new Error("Pass npm script names to run.");
 const serial = process.env.VERIFY_SERIAL === "1";
 const scratch = mkdtempSync(join(tmpdir(), "verification-"));
 const children = new Set();
+// The steps this runner stopped after another step failed, or on a signal. A failed step prints before them.
+const aborted = new Set();
 let stopping = false;
 let forceTimer;
 let exitCode = 0;
@@ -36,6 +38,7 @@ function stop(code) {
   stopping = true;
   exitCode = code;
   const active = [...children].filter((child) => signalTree(child, "SIGTERM"));
+  for (const child of active) aborted.add(child);
   if (active.length === 0) return;
   forceTimer = setTimeout(() => {
     for (const child of active) signalTree(child, "SIGKILL");
@@ -68,9 +71,8 @@ async function run(name, index) {
       stop(1);
     });
     child.on("close", (code, signal) => {
-      console.log(
-        `\n[${name}] ${code === 0 ? "PASS" : "FAIL"} (${((performance.now() - start) / 1000).toFixed(2)}s)`,
-      );
+      const status = code === 0 ? "PASS" : aborted.has(child) ? "ABORTED" : "FAIL";
+      console.log(`\n[${name}] ${status} (${((performance.now() - start) / 1000).toFixed(2)}s)`);
       process.stdout.write(readFileSync(path));
       if (code !== 0 && !stopping) {
         console.error(`${name}: ${signal ? `signal ${signal}` : `exit ${code}`}`);

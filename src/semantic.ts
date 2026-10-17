@@ -32,6 +32,7 @@ import { canonicalRegexFlags, compileRegex, regexFlagProblem } from "./regex.js"
 import {
   COMMANDS,
   CORE_RUNTIME_BUILTINS,
+  KEYWORD_TOKENS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   PROTECTED_NAME_CODE,
   protectedNameMessage,
@@ -50,6 +51,7 @@ import {
   sayOperands,
   showButtonOptions,
   tagQueryOperands,
+  timerOperands,
 } from "./expression-children.js";
 import { validateSwitchCases } from "./switch-cases.js";
 import {
@@ -477,13 +479,14 @@ class SemanticScope {
 
 /**
  * The names that a host may not configure, as a global or a built-in, because the language gives them a meaning of its
- * own: the commands and asks, which the parser reads by name; `takePhoto` and `askImage`, whose calls wait for the
- * Player; `pi`, which the parser reads as the number it names; and `debugMode`, which the engine reads from the session.
+ * own: the grammar keywords, such as `if` and `load`, and `wait`, which the lexer reads as a token of its own; the
+ * commands and asks, which the parser reads by name; `takePhoto` and `askImage`, whose calls wait for the Player;
+ * `pi`, which the parser reads as the number it names; and `debugMode`, which the engine reads from the session.
  */
 const UNCONFIGURABLE_NAMES: ReadonlySet<string> = new Set([
-  ...Object.keys(COMMANDS).filter(
-    (name) => !TEASESCRIPT_GRAMMAR_KEYWORDS.some((keyword) => keyword === name),
-  ),
+  ...TEASESCRIPT_GRAMMAR_KEYWORDS,
+  ...KEYWORD_TOKENS.keys(),
+  ...Object.keys(COMMANDS),
   "takePhoto",
   "askImage",
   "pi",
@@ -795,10 +798,7 @@ class SemanticValidator {
   #handlerOwner: "timer" | "media" | "button" = "timer";
 
   #validateTimer(timer: TimerParts, scope: SemanticScope, valuePosition: boolean): void {
-    if (typeof timer.display === "object" && timer.display !== null)
-      this.#validateExpression(timer.display, scope, null);
-    this.#validateExpression(timer.duration, scope, null);
-    if (timer.label !== null) this.#validateExpression(timer.label, scope, null);
+    for (const operand of timerOperands(timer)) this.#validateExpression(operand, scope, null);
     if (!timer.async) {
       const invalid = timer.handler ?? (timer.repeat || timer.persist ? timer : null);
       if (invalid !== null) {

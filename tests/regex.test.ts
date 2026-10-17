@@ -340,6 +340,39 @@ test("after a message mode or skip word, a regex may hold what reads as a commen
   );
 });
 
+test("after an ask's message mode, a regex question may hold what reads as a comment or an operator elsewhere", () => {
+  // As for `say`, a mode word before a `/` is the question only where the question parses from it without errors. Each
+  // ask shows its question and waits for the answer.
+  for (const [source, question] of [
+    ["let a = askText prose /x/", "/x/"],
+    ["let a = askText prose /[/*]/", "/[/*]/"],
+    ["let a = askText prose /[/]/", "/[/]/"],
+    ['let a = askText bubble() /[//]/, hint: "h"', "/[//]/"],
+    ['let a = askNumber as vera prose(align: "center") /[*/]/', "/[*/]/"],
+    ['say "${askText prose /[/*]/}"', "/[/*]/"],
+  ] as const)
+    assert.deepEqual(said('speaker vera {\n    name: "Vera"\n}', source), [question], source);
+  // A word whose question parses divides, also over a comment that a regex there would hold.
+  assert.deepEqual(said("let prose = 8", "let a = askNumber prose / [4 /* four */][0]"), ["2"]);
+  assert.deepEqual(said("let bubble = 6", "let a = askNumber bubble /* a comment */ / 2"), ["3"]);
+  // A regex that the divided question holds is found first, so the word before the division stays the question.
+  for (const [lines, shown] of [
+    [
+      ["let prose = 8", "let a = askNumber prose / (say prose /x/).text.length"],
+      ["/x/", "2.6666666666666665"],
+    ],
+    [
+      ["let bubble = 8", "let a = askInteger bubble / (say bubble /[/*]/).text.length"],
+      ["/[/*]/", "0.8888888888888888"],
+    ],
+    [
+      ["let prose = 8", "let a = askText prose / (say prose /x/).text.length"],
+      ["/x/", "2.6666666666666665"],
+    ],
+  ] as const)
+    assert.deepEqual(said(...lines), shown, lines.join("\n"));
+});
+
 test("an unterminated regex literal is reported at its opening slash", () => {
   assert.deepEqual(diagnostics("let r = /abc\nexit")[0], [
     "TSL009",

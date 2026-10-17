@@ -352,6 +352,8 @@ export interface CommandFacts {
   readonly interaction?: InteractionExpression["interactionKind"] | "button";
   /** The current name of an earlier one, which the parser reads as that one and reports with the fix. */
   readonly renamed?: string;
+  /** The words that may stand between a play command and its file, as in `playAudio async repeat "a.mp3"`. */
+  readonly fileModifiers?: readonly string[];
 }
 
 /**
@@ -382,8 +384,8 @@ export const COMMANDS = Object.freeze({
   timer: { statement: "start", value: true },
   showCamera: { statement: "start", value: true },
   showPermanentButton: { statement: "start", value: true },
-  playAudio: { statement: "start", value: true },
-  playVideo: { statement: "start", value: true },
+  playAudio: { statement: "start", value: true, fileModifiers: ["async", "repeat"] },
+  playVideo: { statement: "start", value: true, fileModifiers: ["async", "repeat"] },
   askText: { value: true, interaction: "text" },
   askNumber: { value: true, interaction: "number" },
   askInteger: { value: true, interaction: "integer" },
