@@ -21,6 +21,11 @@ import {
   type NumberSignature,
 } from "./numeric-functions.js";
 import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "./random-functions.js";
+import {
+  isTemporalMethod,
+  TEMPORAL_METHODS,
+  temporalArgumentsMessage,
+} from "./temporal-builtins.js";
 import { misspelledPropertyHint } from "./object-properties.js";
 import { parsePublicKey } from "./public-keys.js";
 import { cannotConvert } from "./runtime/value-types.js";
@@ -172,6 +177,17 @@ export function memberProblems(
       return name === "contains"
         ? shapeProblems(member, call)
         : argumentProblems(member, call, typeOf, undefined);
+    // Only date and time values have their methods, which take no arguments.
+    if (isTemporalMethod(name))
+      return call.arguments.length === 0
+        ? []
+        : [
+            {
+              kind: "argumentCount",
+              message: temporalArgumentsMessage(name, call.arguments.length),
+              span: property.span,
+            },
+          ];
     // Every receiver with one of the other methods takes as many arguments, but a message or a permanent button may take
     // `remove()` without any.
     return positionalMethodProblems(name, call, true);
@@ -1045,6 +1061,7 @@ const METHOD_NAMES: ReadonlySet<string> = new Set([
   LIST_JOIN.name,
   ...COLLECTION_METHODS,
   ...POSITIONAL_METHODS.keys(),
+  ...Object.keys(TEMPORAL_METHODS),
 ]);
 
 /**

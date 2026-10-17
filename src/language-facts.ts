@@ -161,6 +161,16 @@ export const NUMERIC_FUNCTIONS = Object.freeze([
 
 export type NumericFunctionName = (typeof NUMERIC_FUNCTIONS)[number];
 
+/** The clock reads (V30 §35), whose contracts are in `temporal-builtins.ts`. */
+export const CLOCK_FUNCTIONS = Object.freeze([
+  "getDate",
+  "getTime",
+  "getDateTime",
+  "getAbsoluteDateTime",
+] as const);
+
+export type ClockFunctionName = (typeof CLOCK_FUNCTIONS)[number];
+
 const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "player",
   ...RANDOM_FUNCTIONS,
@@ -185,10 +195,7 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "encryptFile",
   "decryptText",
   "decryptFile",
-  "getDate",
-  "getTime",
-  "getDateTime",
-  "getAbsoluteDateTime",
+  ...CLOCK_FUNCTIONS,
   // The earlier names stay reserved, so their calls are compile errors that name the fix (ADR 0026).
   "toTimestamp",
   "getTimestamp",
@@ -272,10 +279,7 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "encryptFile",
   "decryptText",
   "decryptFile",
-  "getDate",
-  "getTime",
-  "getDateTime",
-  "getAbsoluteDateTime",
+  ...CLOCK_FUNCTIONS,
   "script",
 ] as const);
 

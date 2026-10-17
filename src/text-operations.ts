@@ -344,9 +344,9 @@ export function isTextMember(name: string): boolean {
 }
 
 /**
- * Whether only text has a method `name`: no list, set, dict, handle, or date and time value has one
- * (`POSITIONAL_METHODS`, `LIST_ONLY_METHODS`, and `get` and `join`, which text does not have), so a call of it is a call
- * of the text method.
+ * Whether only text has a method `name`: no list, set, dict, or handle has one (`POSITIONAL_METHODS`, `LIST_ONLY_METHODS`,
+ * and `get` and `join`, which text does not have), and no date and time value has a method of a text method's name
+ * (`TEMPORAL_METHODS`), so a call of it is a call of the text method.
  */
 export function isTextOnlyMethod(name: string): name is TextMethodName {
   return isTextMethod(name) && !POSITIONAL_METHODS.has(name) && !LIST_ONLY_METHODS.has(name);

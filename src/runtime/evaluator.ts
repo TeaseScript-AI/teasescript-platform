@@ -16,11 +16,15 @@ import { startValueMessage, type StartValueOwner } from "../start-value-rules.js
 import type { DeveloperWarningCode, RuntimeErrorCode } from "../diagnostic-codes.js";
 import { temporalCaptureAt } from "./temporal-captures.js";
 import {
+  calendarDurationPropertyMessage,
+  hasTemporalMethod,
+  isClockFunction,
+} from "../temporal-builtins.js";
+import {
   combinedDateAndTime,
   compareTemporal,
-  hasTemporalMethod,
   exactDurationMilliseconds,
-  TEMPORAL_GETTERS,
+  missingTemporalMember,
   temporalBinary,
   temporalConverted,
   temporalNow,
@@ -1806,12 +1810,8 @@ export class Evaluator {
       return;
     }
     if (isTemporal(receiver)) {
-      if (!hasTemporalMethod(receiver, method))
-        throw fault(
-          "TSR016",
-          `${describeRuntimeValue(receiver).replace(/^a/u, "A")} has no method '${method}'.`,
-          span,
-        );
+      if (!hasTemporalMethod(receiver.kind, method))
+        throw fault("TSR016", missingTemporalMember(receiver, method, "method", null), span);
       return;
     }
     if (isRange(receiver) && method === "toList") return;
@@ -2406,7 +2406,7 @@ export class Evaluator {
           expression.callee.span,
         );
       }
-      if (TEMPORAL_GETTERS.has(name)) {
+      if (isClockFunction(name)) {
         const now = this.snapshot.currentSessionTimeMs;
         const capture = temporalCaptureAt(this.snapshot.temporalCaptures, now);
         return temporalNow(name, positional, named, capture, now, expression.span);
@@ -3891,11 +3891,7 @@ export class Evaluator {
     if (isCalendarDuration(value)) {
       const property = calendarDurationProperty(value, name);
       if (property === undefined)
-        throw fault(
-          "TSR017",
-          `A calendar duration has no property '${name}'. Use months, days, or exactOffset.`,
-          span,
-        );
+        throw fault("TSR017", calendarDurationPropertyMessage(name), span);
       return property;
     }
     if (isDuration(value)) throw fault("TSR017", durationPropertyMessage(name), span);
@@ -3905,9 +3901,7 @@ export class Evaluator {
       if (property === undefined)
         throw fault(
           "TSR017",
-          value.kind === "absoluteDateTime"
-            ? `An absolute date and time has no property '${name}'. Convert it with toDateTime() to read local fields.`
-            : `This ${value.kind} has no property '${name}'.`,
+          missingTemporalMember(value, name, "property", this.#optionalLabel(object)),
           span,
         );
       return property;
@@ -4977,8 +4971,9 @@ const callingExpressions = new WeakMap<ExpressionPlan, boolean>();
 
 /**
  * Whether evaluating an expression can run a call that may change a value: any call but a conversion's, a random
- * function's, a numeric or angle function's, or a method's that only reads (see `Conversion`, `RandomFunction`,
- * `NumericFunction`, and `isReadingMethod`). Results are cached per plan node, so nested checks stay linear.
+ * function's, a numeric or angle function's, a clock read's, or a method's that only reads (see `Conversion`,
+ * `RandomFunction`, `NumericFunction`, `ClockFunction`, and `isReadingMethod`). Results are cached per plan node, so
+ * nested checks stay linear.
  */
 function mayRunCall(expression: ExpressionPlan): boolean {
   // A node is decided after its children, which are pushed above it.
@@ -4994,7 +4989,8 @@ function mayRunCall(expression: ExpressionPlan): boolean {
       (callee.kind === "identifier"
         ? !isConversion(callee.name) &&
           !isRandomFunction(callee.name) &&
-          !isNumericFunction(callee.name)
+          !isNumericFunction(callee.name) &&
+          !isClockFunction(callee.name)
         : callee.kind !== "property" || !isReadingMethod(callee.name))
     ) {
       callingExpressions.set(current.expression, true);

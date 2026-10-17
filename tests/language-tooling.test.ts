@@ -13,6 +13,7 @@ import {
 import { CONVERSIONS } from "../src/conversions.js";
 import { NUMERIC_CONTRACTS } from "../src/numeric-functions.js";
 import { RANDOM_CONTRACTS } from "../src/random-functions.js";
+import { CLOCK_CONTRACTS, TEMPORAL_METHODS } from "../src/temporal-builtins.js";
 import { isTextOnlyMethod, TEXT_METHODS } from "../src/text-operations.js";
 import { MESSAGE_PRESENTATION_OPTIONS } from "../src/message-presentation.js";
 import {
@@ -353,9 +354,18 @@ test("a conversion call has help from its contract, also while it is being writt
   // The innermost of a command and a call has the help: a call in a say or an interpolation, an ask in a call.
   assert.deepEqual(help('say "${toBase64(text'), ["toBase64", "toBase64(text)", "text"]);
   assert.equal(help('say toString(askText "Name?')[0], "askText");
-  // A method of the same name converts through the player's zone (V30 §35), and a declared name is no call.
-  assert.equal(help("say stamp.toDateTime(", ").toISO()\nexit")[0], "say");
-  assert.equal(help("say local.toAbsoluteDateTime(", ").toISO()\nexit")[0], "say");
+  // A method of the same name converts through the player's zone (V30 §35), so it has its own help, and a declared name
+  // is no call.
+  assert.deepEqual(help("say stamp.toDateTime(", ").toISO()\nexit"), [
+    "toDateTime",
+    "value.toDateTime()",
+    null,
+  ]);
+  assert.deepEqual(help("say local.toAbsoluteDateTime(", ").toISO()\nexit"), [
+    "toAbsoluteDateTime",
+    "value.toAbsoluteDateTime()",
+    null,
+  ]);
   assert.equal(help("function toNumber(")[0], null);
   assert.equal(help("say toString(count) + ")[0], "say");
   assert.equal(help("sa", "y toString(count)\nexit")[0], "say");
@@ -498,10 +508,33 @@ test("a method that only text has has help from its contract, also while it is b
   // `repeat`, which the lexer reads as a keyword, and a call inside another's arguments.
   assert.deepEqual(help('say "ab".repeat('), ["repeat", "text.repeat(count)", "count"]);
   assert.equal(help("say toNumber(code.trim(), default: ", "0)")[0], "toNumber");
-  // A function, a method of another value, and a property are no call of the method.
+  // A function and a property are no call of the method.
   assert.equal(help("say trim(")[0], "say");
-  assert.equal(help("say stamp.toDateTime(")[0], "say");
   assert.equal(help("say (name.trim)(")[0], "say");
+});
+
+test("a clock read or a method of a date or time value has help from its contract, also while it is being written", () => {
+  const help = (source: string) => {
+    const document = createLanguageDocument("file:///main.tease", source);
+    const position = languagePositionAt(document, source.length);
+    const context = languageContextHelp(document, position);
+    return [context?.command ?? null, context?.summary ?? null, context?.syntax ?? null];
+  };
+  for (const [name, read] of Object.entries(CLOCK_CONTRACTS))
+    assert.deepEqual(help(`let now = ${name}(`), [name, read.summary, `${name}()`]);
+  for (const [name, method] of Object.entries(TEMPORAL_METHODS))
+    assert.deepEqual(help(`say stamp.${name}(`), [name, method.summary, `value.${name}()`]);
+  // A method of the same name as a conversion is the method, and the conversion stays the function.
+  assert.equal(help("say stamp.toDateTime(")[1], TEMPORAL_METHODS.toDateTime.summary);
+  assert.equal(help("say toDateTime(")[1], CONVERSIONS.toDateTime.summary);
+  assert.deepEqual(help("say toNumber(getDate().toISO(), default: "), [
+    "toNumber",
+    CONVERSIONS.toNumber.summary,
+    "toNumber(value [, default: number])",
+  ]);
+  // A declared function and a property are no call of the built-in.
+  assert.notEqual(help("function getDate(")[0], "getDate");
+  assert.equal(help("say (stamp.toISO)(")[0], "say");
 });
 
 test("askChoice help names set options and the prefill after the options (V30 §19)", () => {
