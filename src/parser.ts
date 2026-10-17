@@ -189,7 +189,7 @@ const parserDiagnosticCode = {
   invalidLoadForm: "TSP040",
   mixedOtherwise: "TSP041",
   invalidTagQuery: "TST001",
-  // The name check's code, given where the parser reads the name (see `#declarationName`).
+  // The name check's code, also given where the parser reads the name (see `#declarationName`).
   protectedName: PROTECTED_NAME_CODE,
 } as const;
 
@@ -5737,21 +5737,15 @@ class Parser {
 
   /**
    * Reads the name of a declaration. A protected name (V30 §38) is an error that names another, as for `let wait = 5`,
-   * which gives the diagnostic of the name check (TSV001) here, where the name is read, so it is also reported when a
-   * later use of the name, such as `${timer}`, cannot be parsed.
+   * which gives the name check's diagnostic (TSV001) also here, where the name is read, so it is reported when a later
+   * use of the name, such as `${timer}`, cannot be parsed and the name check does not run.
    */
   #declarationName(declaration: "label" | "speaker" | "other"): Identifier {
     const token = this.#advance();
-    if (declaration === "speaker" && token.lexeme === "player")
+    if (PROTECTED_NAMES.has(token.lexeme))
       this.#reportToken(
         parserDiagnosticCode.protectedName,
-        "'player' is the built-in speaker for the person playing, so it needs no declaration. Assign its fields instead, as in 'player.color = ...'.",
-        token,
-      );
-    else if (PROTECTED_NAMES.has(token.lexeme))
-      this.#reportToken(
-        parserDiagnosticCode.protectedName,
-        protectedNameMessage(token.lexeme, declaration === "label" ? "label" : "other"),
+        protectedNameMessage(token.lexeme, declaration),
         token,
       );
     return this.#identifier(token);

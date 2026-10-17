@@ -317,14 +317,19 @@ export const TEASESCRIPT_PROTECTED_NAMES = Object.freeze([
   ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
 ] as const);
 
-/** The code of a declaration that takes a protected name, which the parser reports where it reads the name. */
+/** The code of a declaration that takes a protected name. */
 export const PROTECTED_NAME_CODE = "TSV001";
 
 /**
  * Why a declaration may not take a protected name, with the fix (TSV001): another name, such as `waitLabel` for a label
- * and `waitValue` for any other declaration.
+ * and `waitValue` for any other declaration; a speaker `player` needs none.
  */
-export function protectedNameMessage(name: string, declaration: "label" | "other"): string {
+export function protectedNameMessage(
+  name: string,
+  declaration: "label" | "speaker" | "other",
+): string {
+  if (declaration === "speaker" && name === "player")
+    return "'player' is the built-in speaker for the person playing, so it needs no declaration. Assign its fields instead, as in 'player.color = ...'.";
   return declaration === "label"
     ? `Label '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Label'.`
     : `Declaration '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Value'.`;

@@ -298,7 +298,12 @@ function checkProject(
       track,
     );
     names.forEach((result, index) => {
-      addSemanticDiagnostics(files[index]!, result.diagnostics);
+      // The parser reported the file's protected declaration names already (see `parseFile`).
+      const reported = new Set(files[index]!.result.semanticDiagnostics.map(diagnosticKey));
+      addSemanticDiagnostics(
+        files[index]!,
+        result.diagnostics.filter((diagnostic) => !reported.has(diagnosticKey(diagnostic))),
+      );
       files[index]!.picks = result.picks;
       files[index]!.captures = result.captures;
     });
@@ -633,6 +638,11 @@ function compiledPlanValidationDiagnostic(
       planLocationToSourceSpan(plan.instructions[match.instructionIndex]!.span),
     ),
   };
+}
+
+/** A diagnostic's code, place, and text, which two reports of one problem share. */
+function diagnosticKey({ code, span, message }: Diagnostic): string {
+  return `${code} ${span.start.offset} ${span.end.offset} ${message}`;
 }
 
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {

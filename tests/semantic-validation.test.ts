@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { parse } from "../src/parser.js";
+import { validateSemantics } from "../src/semantic.js";
 
 test("reports unknown variables and withholds an executable plan", () => {
   const result = compileSource("let score = missing + 1");
@@ -308,30 +310,39 @@ test("a protected name where a declaration's name belongs gives its diagnostic w
       const source = `${form}\nexit`;
       const start = source.indexOf(name, form.startsWith("for key") ? 8 : 0);
       const label = form.startsWith("label");
-      const result = compileSource(source);
-      assert.deepEqual(
-        result.diagnostics.map(({ code, message, span }) => [
-          code,
-          message,
-          span.start.offset,
-          span.end.offset,
-        ]),
+      const expected = [
         [
-          [
-            "TSV001",
-            label
-              ? `Label '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Label'.`
-              : `Declaration '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Value'.`,
-            start,
-            start + name.length,
-          ],
+          "TSV001",
+          label
+            ? `Label '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Label'.`
+            : `Declaration '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Value'.`,
+          start,
+          start + name.length,
         ],
+      ];
+      const result = compileSource(source);
+      assert.deepEqual(result.diagnostics.map(located), expected, source);
+      // It is a problem of the names, which leaves the syntax whole, and the name check alone reports it too.
+      assert.deepEqual(result.parserDiagnostics, [], source);
+      assert.deepEqual(
+        validateSemantics(parse(source).program).diagnostics.map(located),
+        expected,
         source,
       );
-      // It is a problem of the names, which leaves the syntax whole.
-      assert.deepEqual(result.parserDiagnostics, [], source);
     }
   }
+  // A declared speaker `player` has a text of its own, through both.
+  const player = 'speaker player { name: "P" }\nexit';
+  const playerText = [
+    [
+      "TSV001",
+      "'player' is the built-in speaker for the person playing, so it needs no declaration. Assign its fields instead, as in 'player.color = ...'.",
+      8,
+      14,
+    ],
+  ];
+  assert.deepEqual(compileSource(player).diagnostics.map(located), playerText);
+  assert.deepEqual(validateSemantics(parse(player).program).diagnostics.map(located), playerText);
   // A later use that cannot be parsed does not hide it.
   assert.deepEqual(
     compileSource('let timer = 5\nsay "${timer}"\nexit').diagnostics.map(({ code, span }) => [
@@ -353,3 +364,18 @@ test("a protected name where a declaration's name belongs gives its diagnostic w
     "TSP013",
   );
 });
+
+function located({
+  code,
+  message,
+  span,
+}: {
+  readonly code: string;
+  readonly message: string;
+  readonly span: {
+    readonly start: { readonly offset: number };
+    readonly end: { readonly offset: number };
+  };
+}): readonly [string, string, number, number] {
+  return [code, message, span.start.offset, span.end.offset];
+}

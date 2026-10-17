@@ -310,7 +310,7 @@ class ProjectNames {
       name: Identifier,
       binding: Binding & { readonly project: ProjectDeclaration },
     ): void => {
-      // The parser reports a protected name, and the file's own validation a configured built-in.
+      // A protected name is reported where the file's own statements are validated.
       if (protectedNames.has(name.name)) return;
       const existing = this.scope.resolve(name.name);
       if (existing === undefined) {
@@ -487,9 +487,6 @@ const UNCONFIGURABLE_NAMES: ReadonlySet<string> = new Set([
   "debugMode",
 ]);
 
-/** The names that the language protects, whose declarations the parser reports where it reads them. */
-const LANGUAGE_PROTECTED_NAMES: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
-
 /** How a message names the resource whose block is validated. */
 const HANDLER_NAMES = { timer: "timer", media: "media", button: "button" } as const;
 
@@ -651,12 +648,7 @@ class SemanticValidator {
       if (statement.kind !== "labelStatement") continue;
       const name = statement.name.name;
       if (this.#protectedNames.has(name)) {
-        if (!LANGUAGE_PROTECTED_NAMES.has(name))
-          this.#report(
-            PROTECTED_NAME_CODE,
-            protectedNameMessage(name, "label"),
-            statement.name.span,
-          );
+        this.#report(PROTECTED_NAME_CODE, protectedNameMessage(name, "label"), statement.name.span);
       } else if (this.#labels.has(name)) {
         this.#report(
           semanticCode.invalidLabel,
@@ -917,7 +909,13 @@ class SemanticValidator {
         return;
       }
       case "speakerDeclaration": {
-        // Speakers belong to the project, which declared them already; the parser reports a declared `player`.
+        // Speakers belong to the project, which declared them already.
+        if (statement.name.name === PLAYER)
+          this.#report(
+            PROTECTED_NAME_CODE,
+            protectedNameMessage(PLAYER, "speaker"),
+            statement.name.span,
+          );
         const declared =
           statement.name.name === PLAYER
             ? false
@@ -2203,9 +2201,7 @@ class SemanticValidator {
     declaration?: FunctionDeclaration,
   ): boolean {
     if (this.#protectedNames.has(name)) {
-      // The parser reports a name that the language protects; a configured built-in is reported here.
-      if (!LANGUAGE_PROTECTED_NAMES.has(name))
-        this.#report(PROTECTED_NAME_CODE, protectedNameMessage(name, "other"), span);
+      this.#report(PROTECTED_NAME_CODE, protectedNameMessage(name, "other"), span);
       return false;
     }
     if (scope.declare(name, declaration === undefined ? { kind } : { kind, declaration }))
