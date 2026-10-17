@@ -91,6 +91,27 @@ test("a range, handle member, or media position problem has one code and one tex
       ],
     ],
     [
+      // A name that says "duration" is still a range bound, which takes a number.
+      [["let durationValue = 1 calendar day\nfor i in durationValue..3 {\n}", "durationValue"]],
+      "TSV010",
+      "'durationValue..3' needs a number for 'durationValue', but this is a calendar duration. Use a number instead.",
+      [
+        `${PICK}let durationValue = pick(1 calendar day)\nfor i in durationValue..3 {\n}`,
+        "TSR027",
+        "'durationValue..3' needs a number for 'durationValue', but this is 1 calendar day. Use a number instead.",
+      ],
+    ],
+    [
+      [["let durationValue = 1 calendar day\nfor i in 1..durationValue {\n}", "durationValue"]],
+      "TSV010",
+      "'1..durationValue' needs a number for 'durationValue', but this is a calendar duration. Use a number instead.",
+      [
+        `${PICK}let durationValue = pick(1 calendar day)\nfor i in 1..durationValue {\n}`,
+        "TSR027",
+        "'1..durationValue' needs a number for 'durationValue', but this is 1 calendar day. Use a number instead.",
+      ],
+    ],
+    [
       [
         ['let low = "a"\nsay randomInteger(low..=3)', "low"],
         ['let low = "a"\nsay randomInteger((low)..=3)', "(low)"],

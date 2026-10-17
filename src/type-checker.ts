@@ -8673,7 +8673,7 @@ class TypeChecker {
     }
     // Where a duration is wanted, a calendar duration needs the reason it does not fit (ADR 0026).
     const reason =
-      isScalar(value, "calendarDuration") && rule.includes("duration")
+      isScalar(value, "calendarDuration") && accepts(DURATION_TYPE)
         ? " A calendar day or month has no fixed length. Use a fixed length such as '1 day' or '24 h'."
         : "";
     this.#report(
