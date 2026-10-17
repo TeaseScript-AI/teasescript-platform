@@ -7057,7 +7057,7 @@ class TypeChecker {
         const before = this.diagnostics.length;
         const atCall = members(resolved(receiverAtCall));
         // A message or a permanent button takes `remove()` without arguments, which a list, set, or dict member rejects.
-        const removable = mayBe(receiver, "messageHandle", "permanentButton");
+        const removable = mayBe(receiver, ...kindsWithMethod("remove"));
         const memberResults = all.map((member, index) => {
           const kept = resolved(member);
           // A list or set checks its own methods (see `LIST_METHODS`), but `join`, whose separator is checked below as a
