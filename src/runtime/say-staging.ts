@@ -1,15 +1,16 @@
 import { isConversion } from "../conversions.js";
 import { isNumericFunction } from "../numeric-functions.js";
 import { isRandomFunction } from "../random-functions.js";
+import { isClockFunction, isTemporalMethod } from "../temporal-builtins.js";
 import { isTextOnlyMethod } from "../text-operations.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import type { ExpressionPlan, SayInstruction } from "../plan/model.js";
 
 /**
- * Engine functions that only read copies of their arguments and the scene clock, and return a new value; so do the
- * conversions, the numeric and angle functions, and the random functions, apart from drawing from the session generator
- * (see `Conversion`, `NumericFunction`, and `RandomFunction`). A host built-in runs code the engine has not checked, so
- * it is not listed.
+ * Engine functions that only read copies of their arguments and return a new value; so do the conversions, the numeric
+ * and angle functions, and the random functions, apart from drawing from the session generator, and the clock reads,
+ * which read the session clock (see `Conversion`, `NumericFunction`, `RandomFunction`, and `ClockFunction`). A host
+ * built-in runs code the engine has not checked, so it is not listed.
  */
 const READING_FUNCTIONS: ReadonlySet<string> = new Set([
   "hashText",
@@ -22,19 +23,16 @@ const READING_FUNCTIONS: ReadonlySet<string> = new Set([
   "stddev",
   "linearRegression",
   "predict",
-  "getDate",
-  "getTime",
-  "getDateTime",
-  "getAbsoluteDateTime",
   "script",
   "escapeMarkup",
 ]);
 
 /**
- * Methods that only read their receiver and arguments on every list, set, dict, and date and time value that has a
- * method of that name, and on text when it has one too. A name that changes its receiver on any of them, such as
- * `reverse`, which reverses a list in place, is not listed, nor is any method of a timer, media, button, or message
- * handle. Every method of text only reads (see `TextMethod`), so one that only text has is not listed either.
+ * Methods that only read their receiver and arguments on every list, set, and dict that has a method of that name, and
+ * on text when it has one too. A name that changes its receiver on any of them, such as `reverse`, which reverses a list
+ * in place, is not listed, nor is any method of a timer, media, button, or message handle. Every method of text and of
+ * date and time values only reads (see `TextMethod` and `TemporalMethod`), and no other value has a method of a date and
+ * time value's name, so one that only text or only date and time values have is not listed either.
  */
 const READING_METHODS: ReadonlySet<string> = new Set([
   "contains",
@@ -50,19 +48,11 @@ const READING_METHODS: ReadonlySet<string> = new Set([
   "union",
   "difference",
   "join",
-  "toISO",
-  "formatDate",
-  "formatTime",
-  "formatDateTime",
-  "toDateTime",
-  "toAbsoluteDateTime",
-  "toSeconds",
-  "toMilliseconds",
 ]);
 
 /** Whether a call of the method `name` only reads its receiver and arguments, whatever value it is called on. */
 export function isReadingMethod(name: string): boolean {
-  return READING_METHODS.has(name) || isTextOnlyMethod(name);
+  return READING_METHODS.has(name) || isTextOnlyMethod(name) || isTemporalMethod(name);
 }
 
 const selectiveSays = new WeakMap<SayInstruction, boolean>();
@@ -103,7 +93,8 @@ function changesOnlyGenerator(root: ExpressionPlan): boolean {
             ? !READING_FUNCTIONS.has(node.callee.name) &&
               !isConversion(node.callee.name) &&
               !isNumericFunction(node.callee.name) &&
-              !isRandomFunction(node.callee.name)
+              !isRandomFunction(node.callee.name) &&
+              !isClockFunction(node.callee.name)
             : node.callee.kind !== "property" || !isReadingMethod(node.callee.name)
         )
           return false;

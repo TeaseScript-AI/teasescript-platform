@@ -34,22 +34,6 @@ export function argumentCountMessage(
 }
 
 /**
- * A call with `received` arguments of a function of the current date and time or a method of a date or time value,
- * which take none (V30 §35), from the compiler (`TSV020`) and the runtime (`TSR028`, `TSR015`). A format follows the
- * player's settings.
- */
-export function temporalArgumentsMessage(name: string, received: number): string {
-  return argumentCountMessage(
-    name,
-    "no arguments",
-    received,
-    name.startsWith("format")
-      ? "It shows the value in the player's own date and time format."
-      : undefined,
-  );
-}
-
-/**
  * A named argument `name` that `callee` does not take. `names` are the names it takes; a callee that takes none takes
  * its arguments without names, or no arguments at all when `positional` is false.
  */
@@ -208,10 +192,11 @@ function positionalMethod(name: string, ...parameters: string[]): [string, Metho
 }
 
 /**
- * The parameters of the methods of lists and sets (V30 §16), timers and media (V30 §22), and date and time values
- * (V30 §35) that take only positional arguments, besides `join`, the searches, `take`, and `takeLast`, which have their
- * own checks. Every other receiver with one of these methods takes as many: text for `contains` and `reverse`, and a dict
- * for `contains`, `remove`, and `clear`. Only a message and a permanent button take `remove()` without arguments (#836).
+ * The parameters of the methods of lists and sets (V30 §16) and timers and media (V30 §22) that take only positional
+ * arguments, besides `join`, the searches, `take`, and `takeLast`, which have their own checks. Every other receiver with
+ * one of these methods takes as many: text for `contains` and `reverse`, and a dict for `contains`, `remove`, and
+ * `clear`. Only a message and a permanent button take `remove()` without arguments (#836). The methods of date and time
+ * values are in `TEMPORAL_METHODS`.
  */
 export const POSITIONAL_METHODS: ReadonlyMap<string, MethodParameters> = new Map([
   positionalMethod("add", "value"),
@@ -233,14 +218,6 @@ export const POSITIONAL_METHODS: ReadonlyMap<string, MethodParameters> = new Map
   positionalMethod("pause"),
   positionalMethod("resume"),
   positionalMethod("stop"),
-  positionalMethod("toISO"),
-  positionalMethod("formatDate"),
-  positionalMethod("formatTime"),
-  positionalMethod("formatDateTime"),
-  positionalMethod("toAbsoluteDateTime"),
-  positionalMethod("toDateTime"),
-  positionalMethod("toSeconds"),
-  positionalMethod("toMilliseconds"),
 ]);
 
 /** The parameter of `take`, `takeLast`, and the searches of a list (V30 §16), which a set does not have. */

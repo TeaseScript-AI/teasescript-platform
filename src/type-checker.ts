@@ -258,12 +258,27 @@ import {
   dictArgumentsProblem,
   NO_ARGUMENTS,
   scriptArgumentCountMessage,
-  temporalArgumentsMessage,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import { isTextMethod, TEXT_METHODS, type TextMethod } from "./text-operations.js";
+import {
+  CALENDAR_DURATION_PARTS,
+  calendarDurationPropertyMessage,
+  CLOCK_CONTRACTS,
+  hasTemporalField,
+  hasTemporalMethod,
+  isCalendarDurationPart,
+  isClockFunction,
+  isTemporalKind,
+  isTemporalMethod,
+  TEMPORAL_FIELDS,
+  TEMPORAL_METHODS,
+  temporalArgumentsMessage,
+  temporalMemberMessage,
+  type TemporalField,
+} from "./temporal-builtins.js";
 import {
   missingPropertyMessage,
   duplicateEntryMessage,
@@ -7055,7 +7070,7 @@ class TypeChecker {
         return memberResults.length === 1 ? memberResults[0]! : union(memberResults);
       }
       // The methods of date and time values take no arguments; a format follows the player's settings.
-      if (all.every(isTemporal) && expression.arguments.length > 0)
+      if (all.every(isTemporal) && isTemporalMethod(method) && expression.arguments.length > 0)
         this.#report(
           typeCode.argumentCount,
           temporalArgumentsMessage(method, expression.arguments.length),
@@ -7065,6 +7080,19 @@ class TypeChecker {
     }
     const failing = resolved(all.find((_, index) => results[index] === undefined)!);
     if (passing.length > 0) this.#reportMayBe(callee.object, failing, passing);
+    // A date or time value has the methods of its kind (V30 §35).
+    else if (all.length === 1 && failing.kind === "scalar" && isTemporalKind(failing.name))
+      this.#report(
+        typeCode.invalidOperand,
+        temporalMemberMessage(
+          capitalize(describeValue(failing)),
+          failing.name,
+          method,
+          "method",
+          "value",
+        ),
+        callee.property.span,
+      );
     // Text operations and values without methods name what to write instead (V30 §8).
     else if (all.length === 1 && MEMBER_CHECKED_KINDS.has(failing.kind)) memberChecks();
     // A set has no order to sort, shuffle, reverse, or take from, and no positions or repeated members to search for
@@ -7538,6 +7566,16 @@ class TypeChecker {
     if (isRandomFunction(name)) return this.#randomFunctionType(name, expression, values);
     if (isNumericFunction(name)) return this.#numericFunctionType(name, expression, values);
     if (isConversion(name)) return this.#conversionType(name, expression, values);
+    if (isClockFunction(name)) {
+      // A clock read takes no arguments (see `ClockFunction`).
+      if (expression.arguments.length > 0)
+        this.#report(
+          typeCode.argumentCount,
+          temporalArgumentsMessage(name, expression.arguments.length),
+          expression.arguments[0]!.value.span,
+        );
+      return scalarType(CLOCK_CONTRACTS[name].result);
+    }
     // `min` and `max` of one argument that may be a list are list functions too (V30 §16).
     const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
     const list =
@@ -7694,24 +7732,6 @@ class TypeChecker {
             "escapeMarkup(...) takes text (string)",
           );
         return STRING_TYPE;
-      case "getDate":
-      case "getTime":
-      case "getDateTime":
-      case "getAbsoluteDateTime":
-        // The current date and time take no arguments (V30 §35).
-        if (expression.arguments.length > 0)
-          this.#report(
-            typeCode.argumentCount,
-            temporalArgumentsMessage(name, expression.arguments.length),
-            expression.arguments[0]!.value.span,
-          );
-        return name === "getDate"
-          ? DATE_TYPE
-          : name === "getTime"
-            ? TIME_TYPE
-            : name === "getDateTime"
-              ? DATETIME_TYPE
-              : ABSOLUTE_DATE_TIME_TYPE;
       case "script": {
         // `script(path)` or `script(path, label: name)`, both text (V30 §29).
         const positional = expression.arguments.filter(
@@ -7770,11 +7790,17 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const value = resolved(failing);
-    // An absolute date and time has no local fields until it is converted through the player's zone.
-    if (isScalar(value, "absoluteDateTime") && temporalFieldType("datetime", name) !== undefined) {
+    // A date or time value has the fields of its kind (V30 §35); an absolute date and time is converted for a local one.
+    if (value.kind === "scalar" && isTemporalKind(value.name)) {
       this.#report(
         typeCode.invalidOperand,
-        `An absolute date and time has no property '${name}'. Convert it first, as in '${expressionLabel(expression.object) ?? "value"}.toDateTime().${name}'.`,
+        temporalMemberMessage(
+          capitalize(describeValue(value)),
+          value.name,
+          name,
+          "property",
+          expressionLabel(expression.object) ?? "value",
+        ),
         expression.property.span,
       );
       return UNKNOWN_TYPE;
@@ -7791,7 +7817,7 @@ class TypeChecker {
     if (isScalar(value, "calendarDuration")) {
       this.#report(
         typeCode.invalidOperand,
-        `A calendar duration has no property '${name}'. Use months, days, or exactOffset.`,
+        calendarDurationPropertyMessage(name),
         expression.property.span,
       );
       return UNKNOWN_TYPE;
@@ -10173,15 +10199,14 @@ function memberPropertyType(type: StaticType, name: string): StaticType | PlaceR
       return handlePropertyType(value.kind, name, "read");
     case "scalar":
       if (isScalar(value, "string")) return name === "length" ? INTEGER_TYPE : undefined;
-      // A calendar duration has its components; an exact duration has none (ADR 0026).
+      // A calendar duration has its parts; an exact duration has none (ADR 0026).
       if (value.name === "calendarDuration")
-        return name === "days" || name === "months"
-          ? INTEGER_TYPE
-          : name === "exactOffset"
-            ? DURATION_TYPE
-            : undefined;
-      if (value.name === "duration" || value.name === "angle") return undefined;
-      return temporalFieldType(value.name, name);
+        return isCalendarDurationPart(name)
+          ? scalarType(CALENDAR_DURATION_PARTS[name].result)
+          : undefined;
+      return isTemporalKind(value.name) && hasTemporalField(value.name, name)
+        ? temporalFieldType(TEMPORAL_FIELDS[name])
+        : undefined;
     case "range":
     case "null":
     case "permanentButton":
@@ -10206,7 +10231,10 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
   // Text operations (V30 §8).
   if (isScalar(value, "string"))
     return isTextMethod(method) ? textResultType(TEXT_METHODS[method]) : undefined;
-  if (value.kind === "scalar") return temporalMethodType(value.name, method);
+  if (value.kind === "scalar")
+    return isTemporalKind(value.name) && hasTemporalMethod(value.name, method)
+      ? scalarType(TEMPORAL_METHODS[method].result)
+      : undefined;
   // A range gives its whole numbers as a new list (V30 §6).
   if (value.kind === "range")
     return method === "toList" ? { kind: "list", element: INTEGER_TYPE } : undefined;
@@ -10266,70 +10294,16 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
   }
 }
 
-/** The weekday names a date's `weekday` field is, from Monday (V30 §35). */
-const WEEKDAY_TYPE = withValues(STRING_TYPE, [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-  "Sunday",
-]);
-
-/** A date's ISO `weekdayNumber`: Monday is 1 and Sunday is 7. */
-const WEEKDAY_NUMBER_TYPE = withValues(INTEGER_TYPE, [1, 2, 3, 4, 5, 6, 7]);
-
-const TEMPORAL_KINDS: ReadonlySet<ScalarTypeName> = new Set([
-  "date",
-  "time",
-  "datetime",
-  "absoluteDateTime",
-]);
-
 /** Whether a value of this type is a date, time, date and time, or absolute date and time. */
 function isTemporal(type: StaticType): boolean {
   const value = resolved(type);
-  return value.kind === "scalar" && TEMPORAL_KINDS.has(value.name);
+  return value.kind === "scalar" && isTemporalKind(value.name);
 }
 
-/** The type of a read-only field of a date or time value (V30 §35); an absolute date and time has none. */
-function temporalFieldType(kind: ScalarTypeName, name: string): StaticType | undefined {
-  if (kind === "date" || kind === "datetime") {
-    if (["year", "month", "day", "weekNumber", "weekYear"].includes(name)) return INTEGER_TYPE;
-    if (name === "weekday") return WEEKDAY_TYPE;
-    if (name === "weekdayNumber") return WEEKDAY_NUMBER_TYPE;
-  }
-  if (
-    (kind === "time" || kind === "datetime") &&
-    ["hour", "minute", "second", "millisecond"].includes(name)
-  )
-    return INTEGER_TYPE;
-  return undefined;
-}
-
-/** The result of a method of a date or time value, or `undefined` when it has none (V30 §35). */
-function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | undefined {
-  if (!TEMPORAL_KINDS.has(kind)) return undefined;
-  switch (method) {
-    case "toISO":
-      return STRING_TYPE;
-    case "formatDate":
-      return kind === "time" ? undefined : STRING_TYPE;
-    case "formatTime":
-      return kind === "date" ? undefined : STRING_TYPE;
-    case "formatDateTime":
-      return kind === "datetime" || kind === "absoluteDateTime" ? STRING_TYPE : undefined;
-    case "toAbsoluteDateTime":
-      return kind === "datetime" ? ABSOLUTE_DATE_TIME_TYPE : undefined;
-    case "toDateTime":
-      return kind === "absoluteDateTime" ? DATETIME_TYPE : undefined;
-    case "toSeconds":
-    case "toMilliseconds":
-      return kind === "absoluteDateTime" ? INTEGER_TYPE : undefined;
-    default:
-      return undefined;
-  }
+/** The type of a field of a date or time value (see `TemporalField`), narrowed to its values where it has few. */
+function temporalFieldType(field: TemporalField): StaticType {
+  const type = scalarType(field.result);
+  return field.values === undefined ? type : withValues(type, field.values);
 }
 
 /** Property names whose write on a media handle first waits for the previous message's pacing. */
@@ -10373,7 +10347,11 @@ function assignableProperty(
   if (member.kind === "speaker" || member.kind === "unknown" || member.kind === "open")
     return { type: null };
   if (member.kind === "object" && member.properties === null) return { type: null };
-  if (member.kind === "scalar" && temporalFieldType(member.name, name) !== undefined)
+  if (
+    member.kind === "scalar" &&
+    isTemporalKind(member.name) &&
+    hasTemporalField(member.name, name)
+  )
     return {
       problem: `Property '${name}' of ${describeValue(member)} cannot be assigned. Date and time values do not change.`,
     };
@@ -11416,7 +11394,7 @@ function conversionFix(
   if (isScalar(kept, "angle") && isNumeric(value)) return ` ${unitFix(expression, "deg")}`;
   // Date and time values are written as ISO text and converted.
   const conversion =
-    kept.kind === "scalar" && TEMPORAL_KINDS.has(kept.name) ? conversionTo(kept.name) : undefined;
+    kept.kind === "scalar" && isTemporalKind(kept.name) ? conversionTo(kept.name) : undefined;
   if (conversion !== undefined && isScalar(value, "string"))
     return ` Convert the text with ${conversion}(...).`;
   if (isScalar(kept, "string") && (isNumeric(value) || isScalar(value, "boolean"))) {

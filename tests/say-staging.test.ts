@@ -7,6 +7,7 @@ import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint
 import { executeValidatedInstruction } from "../src/runtime/engine.js";
 import { captureExecutableData } from "../src/runtime/operations/support.js";
 import { sayStagesSelectively } from "../src/runtime/say-staging.js";
+import { CLOCK_CONTRACTS, TEMPORAL_METHODS } from "../src/temporal-builtins.js";
 import { TEXT_METHODS } from "../src/text-operations.js";
 import {
   builtSerializableDictIndex,
@@ -105,6 +106,24 @@ test("a say that calls a method of text stages selectively, unless a list's meth
     Object.keys(TEXT_METHODS).map((name) => name !== "reverse"),
   );
 });
+test("a say that reads the clock or calls a method of a date or time value stages selectively", () => {
+  // A clock read reads the session clock, and a method of a date or time value only reads it (see `ClockFunction` and
+  // `TemporalMethod`); neither changes a value.
+  const clock = Object.keys(CLOCK_CONTRACTS).map((name) => `say ${name}()`);
+  const value = {
+    date: "getDate()",
+    time: "getTime()",
+    datetime: "getDateTime()",
+    absoluteDateTime: "getAbsoluteDateTime()",
+  } as const;
+  const methods = Object.entries(TEMPORAL_METHODS).flatMap(([name, method]) =>
+    method.receivers.map((kind) => `say ${value[kind]}.${name}()`),
+  );
+  const results = staging([...clock, ...methods]);
+  assert.equal(results.length, clock.length + methods.length);
+  assert.ok(results.every(Boolean));
+});
+
 test("a say whose expressions may change state, or whose calls are unknown, stages deeply", () => {
   const lines = [
     "say items.removeFirst()",
