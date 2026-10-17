@@ -8,7 +8,13 @@ import {
 import { angleStatisticMessage } from "./angle.js";
 import type { ListFunctionName } from "./language-facts.js";
 import { percentageFailure, type NumberDomain } from "./numeric-functions.js";
-import { orderedFamily, VALUE_KINDS, type OrderedFamily, type ValueKind } from "./value-kinds.js";
+import {
+  ORDERED_FAMILIES,
+  orderedFamily,
+  VALUE_KINDS,
+  type OrderedFamily,
+  type ValueKind,
+} from "./value-kinds.js";
 
 /**
  * The list functions (V30 §16, and `min` and `max`, V30 §13): one contract each, which the type checker, the runtime,
@@ -70,17 +76,11 @@ export type ListFunction = {
 /** The kinds of values a statistic reads. */
 const AMOUNTS: readonly ListValueKind[] = ["number", "duration"];
 
-/** The kinds of values `min` and `max` compare. */
-const ORDERED: readonly ListValueKind[] = [
-  "number",
-  "duration",
-  "calendarDuration",
-  "angle",
-  "date",
-  "time",
-  "datetime",
-  "absoluteDateTime",
-];
+/** The kinds of values `min` and `max` compare: every ordered family a list function reads (`listValueKind`). */
+const ORDERED: readonly ListValueKind[] = ORDERED_FAMILIES.flatMap((family) => {
+  const kind = listValueKind(family);
+  return kind === undefined ? [] : [kind];
+});
 
 /** The kinds of x a line reads, each measured in steps or days. */
 const POSITIONS: readonly ListValueKind[] = ["number", "date", "datetime", "absoluteDateTime"];

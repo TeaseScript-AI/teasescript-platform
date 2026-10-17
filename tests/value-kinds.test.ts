@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { HANDLE_KINDS } from "../src/handle-members.js";
-import { escapeMarkup } from "../src/message-markup.js";
-import { compileSource, createFreshRuntimeSession } from "../src/index.js";
+import { compileProject, createFreshRuntimeSession } from "../src/index.js";
 import { TEASESCRIPT_PROTECTED_TYPE_NAMES } from "../src/language-facts.js";
 import {
   validateSerializableValue,
@@ -167,9 +166,15 @@ interface Outcome {
   readonly asked: boolean;
 }
 
-/** Compiles `body` after `SETUP` and, without errors, runs it; the media loads, and the run stops at an ask. */
-function outcome(body: string): Outcome {
-  const compiled = compileSource(`${SETUP}\n${body}\nexit`);
+/**
+ * Compiles `body` after `SETUP`, as `main.tease` beside the empty `files` of a project, and, without errors, runs it; the
+ * media loads, and the run stops at an ask.
+ */
+function outcome(body: string, files: readonly string[] = []): Outcome {
+  const compiled = compileProject([
+    { path: "main.tease", source: `${SETUP}\n${body}\nexit` },
+    ...files.map((path) => ({ path, source: "exit" })),
+  ]);
   const errors = compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (compiled.plan === null || errors.length > 0)
     return {
@@ -284,15 +289,20 @@ test("values of one family order, and values of two do not", () => {
     }
 });
 
-test("say shows a value in notation, escaped, where V30 says so, and any other shown value as its text", () => {
-  // A regex and text with a markup character; a script reference has none.
-  for (const [kind, source] of [
-    ["regex", "/a\\*/"],
-    ["string", '"a\\\\*"'],
-  ] as const) {
-    const { said } = outcome(`say pick(${source})\nsay "\${pick(${source})}"`);
-    assert.equal(said.length, 2, kind);
-    assert.equal(said[0], holds(kind, "notation") ? escapeMarkup(said[1]!) : said[1], kind);
+test("say shows a script reference and a regex as their notation, and any other shown value as its text", () => {
+  // Each holds a markup character, which `${...}` reads as markup, while `say` shows a notation as it is.
+  const cases: readonly (readonly [kind: ValueKind, source: string, files: readonly string[]])[] = [
+    ["script", 'script("a`b`.tease")', ["a`b`.tease"]],
+    ["regex", "/a\\*/", []],
+    ["string", '"a`b`"', []],
+  ];
+  for (const [kind, source, files] of cases) {
+    const { problems, said } = outcome(`say pick(${source})\nsay "\${pick(${source})}"`, files);
+    assert.deepEqual(problems, [], kind);
+    if (holds(kind, "notation")) {
+      assert.equal(said[0], source, kind);
+      assert.notEqual(said[1], source, kind);
+    } else assert.equal(said[0], said[1], kind);
   }
 });
 

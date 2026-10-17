@@ -31,12 +31,8 @@ import type { SourceSpan } from "./source.js";
 import { staticVisibleText, type KnownValue } from "./static-evaluation.js";
 import {
   ANGLE_TYPE,
-  CALENDAR_DURATION_TYPE,
   containsType,
-  DATE_TYPE,
-  DATETIME_TYPE,
   describeValue,
-  DURATION_TYPE,
   INTEGER_TYPE,
   isAssignable,
   isKnown,
@@ -48,10 +44,8 @@ import {
   REGEX_TYPE,
   resolved,
   STRING_TYPE,
-  TIME_TYPE,
   typeName,
   union,
-  ABSOLUTE_DATE_TIME_TYPE,
   valueKindOfType,
   isIdentityType,
   isShown,
@@ -77,7 +71,12 @@ import {
 } from "./argument-rules.js";
 import { DICT_METHODS, dictMethod } from "./dict-operations.js";
 import { handleMethod, handleMethodNames, kindsWithMethod } from "./handle-members.js";
-import { isListFunction, minMaxValuesProblem, takesValues } from "./list-function-rules.js";
+import {
+  isListFunction,
+  LIST_FUNCTION_CONTRACTS,
+  minMaxValuesProblem,
+  takesValues,
+} from "./list-function-rules.js";
 import {
   countProblem,
   LIST_METHODS,
@@ -839,6 +838,11 @@ function numberArgumentProblems(
   return problems;
 }
 
+/** The type of each kind of value that `min` and `max` compare, in the order of their contract. */
+const MIN_MAX_TYPES: readonly StaticType[] = LIST_FUNCTION_CONTRACTS.min.values.map(
+  (kind): StaticType => (kind === "number" ? NUMBER_TYPE : { kind: "scalar", name: kind }),
+);
+
 /**
  * Problems with `min` or `max`: two or more positional arguments that are all numbers or all durations. A possibly null
  * argument is checked by its other members (V30 §34); its value is checked at runtime.
@@ -866,19 +870,8 @@ function minMaxProblems(
   for (const argument of call.arguments) {
     const type = typeOf(argument.value);
     if (!isKnown(forUse(type))) continue;
-    // Numbers, durations, calendar durations, angles, or date and time values of one kind (V30 §35) compare with each
-    // other.
-    const kind = isAssignable(NUMBER_TYPE, type)
-      ? NUMBER_TYPE
-      : [
-          DURATION_TYPE,
-          CALENDAR_DURATION_TYPE,
-          ANGLE_TYPE,
-          DATE_TYPE,
-          TIME_TYPE,
-          DATETIME_TYPE,
-          ABSOLUTE_DATE_TIME_TYPE,
-        ].find((candidate) => isAssignable(candidate, type));
+    // Values of one kind that `min` and `max` compare (`LIST_FUNCTION_CONTRACTS`) compare with each other.
+    const kind = MIN_MAX_TYPES.find((candidate) => isAssignable(candidate, type));
     const message =
       kind === undefined
         ? `${name}(...) needs numbers, durations, angles, or date and time values, not ${describeValue(forUse(type))}.`
