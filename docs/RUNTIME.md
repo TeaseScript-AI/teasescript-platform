@@ -1545,7 +1545,8 @@ JSON reading does not for keys that look like whole numbers, and so that any dep
   speaker met again inside its own properties. JSON longer than a text can be fails with `TSR084`.
 - `fromJson` reads RFC 8259 JSON, exactly the texts native JSON reads; a number too large to represent, such as `1e400`,
   gives the default. `-0` reads as `0`, and a whole number beyond the safe integer range as the nearest number, which
-  stays whole.
+  stays whole. An array or object of more elements or keys than a list or dict can hold fails with `TSR088`; it is
+  counted to its end, so text that is not JSON still gives the default.
 - `toBase64` writes a lone surrogate as U+FFFD, as UTF-8 encoding does; a text whose Base64 would be longer than a text
   can be fails with `TSR084`. `fromBase64` keeps a leading byte order mark.
 - A value that is not text, such as `null` from a `string?` or a value of unknown type, gives the default of `fromJson`
@@ -1881,7 +1882,7 @@ restart, and report the failure with its debug export.
 | `TSR085` | A stored file that `fileToBase64`, `toJson`, `encryptFile`, or `decryptFile` needs, which the Player could not read. | Take, choose, or store the file again. |
 | `TSR086` | A lock the browser could not make or open at all, as on a Player page without https, or whose result it could not keep. | Open the Player over https, with room to store files. |
 | `TSR087` | A text operation with a regex that needs more work than the regex work limit allows. | Use a simpler pattern or a shorter text. |
-| `TSR088` | A list, set, or dict larger than the host can hold: in V8, more than 134,217,728 elements in an array or 16,777,216 entries in a `Set` or `Map`. | Build a smaller list, set, or dict. |
+| `TSR088` | A list of more than 1,000,000 elements, a set of more than 1,000,000 members, or a dict of more than 1,000,000 keys ([`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md)), or one larger than the host can hold where no check foresaw it: in V8, more than 134,217,728 elements in an array or 16,777,216 entries in a `Set` or `Map`. | Build a shorter list, set, or dict. |
 | `TSR100` | Instruction-plan data that fails validation. | Compile the script again. |
 | `TSR101` | Runtime-snapshot data that fails validation, or a runtime counter that cannot advance. | Restore a valid checkpoint or start a new session. |
 
