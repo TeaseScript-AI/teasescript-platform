@@ -1065,10 +1065,11 @@ test(
   },
 );
 
-// A side of `and false` or `or true` that runs stays where it could fail, as a division by zero; one that cannot fail
-// goes with the test the conversion decided (dead-code.ts; review finding, batch 37).
+// A side of `and false` or `or true` that runs stays, as it may fail: a division by zero, a variable whose `let` has not
+// run, a key that is no text. A literal left side that decides the test without the right one folds, since the right
+// side never runs (dead-code.ts; review findings, batch 37).
 test(
-  "keeps a decided test's side that runs where it could fail, and drops one that cannot",
+  "keeps a decided test's side that runs, and folds one that never runs",
   { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
   async () => {
     if (!("compiler" in projectResult)) return;
@@ -1082,18 +1083,33 @@ test(
         const result = projectResult.runner([{ path: "main.tease", source }], {});
         return { source, status: result.status, code: result.failure?.code ?? null };
       };
-      for (const test of ["(1 / d > 0) && false", "(1 / d > 0) || true"]) {
-        const result = await run(["def d = 0", `if (${test}) show("inside")`]);
-        assert.match(result.source, /1 \/ d > 0/u, test);
+      const failing: Array<[string[], string]> = [
+        [["def d = 0", 'if ((1 / d > 0) && false) show("inside")'], "TSR036"],
+        [["def d = 0", 'if ((1 / d > 0) || true) show("inside")'], "TSR036"],
+        [
+          [
+            'def check = { -> if (value == 0 && false) show("inside") }',
+            "check()",
+            "def value = 0",
+          ],
+          "TSR070",
+        ],
+        [
+          ['def check = { key -> if (loadBoolean(key) && false) show("inside") }', "check(7)"],
+          "TSR054",
+        ],
+      ];
+      for (const [lines, code] of failing) {
+        const result = await run(lines);
         assert.deepEqual(
           { status: result.status, code: result.code },
-          { status: "failed", code: "TSR036" },
-          test,
+          { status: "failed", code },
+          code,
         );
       }
-      const safe = await run(["def d = 0", 'if (d == 0 && false) show("inside")']);
-      assert.doesNotMatch(safe.source, /inside/u);
-      assert.equal(safe.status, "halted");
+      const shortCircuit = await run(["def d = 0", 'if (false && (1 / d > 0)) show("inside")']);
+      assert.doesNotMatch(shortCircuit.source, /inside/u);
+      assert.equal(shortCircuit.status, "halted");
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

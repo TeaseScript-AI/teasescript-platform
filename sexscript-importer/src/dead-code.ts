@@ -6,7 +6,8 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  * Code no author would write, which the compiler lists as never running (#946: TSV065 "This code never runs", TSV066
  * "This exit never runs"), is not written (readability, owner 2026-10-16; coordinator part M, 2026-10-17):
  * - a test the converter decided, such as a file that exists (`if true`) or a connection (`not true`), keeps only the
- *   branch that runs: in its place where it declares nothing, or else alone in its `if true`;
+ *   branch that runs: in its place where it declares nothing, or else alone in its `if true`; a test with a side that
+ *   runs besides the literal stays as it is;
  * - the `default` of a switch over an `askChoice`, or over a variable just set to one, whose cases take every option's
  *   value; a loop over an empty list (`for file in []`, a folder the package does not hold);
  * - what follows, in its block, a statement after which nothing runs: an `exit`, `goto`, `return`, `break` or
@@ -65,24 +66,37 @@ function track(statement: IrStatement, choices: Map<string, Choice>): void {
     choices.set(statement.target.name, statement.value);
 }
 
-/** A test whose value the converter wrote as a literal, folded: `not true`, `x and false`, `true or x`. */
+/**
+ * A test whose value the converter wrote as a literal, folded so that what runs stays the same: `not true`; an `and` or
+ * `or` whose left side is a literal that decides it without the right one, `false and x` or `true or x`; and a literal
+ * that leaves the other side's value, `true and x` or `x or false`, where that side gives true or false. A side that
+ * runs stays where the literal on the other side decides the result: it may fail, as a division by zero, a variable
+ * whose `let` has not run, or a key that is no text would.
+ */
 function folded(value: IrExpression): IrExpression {
   const next = mapChildren(value, folded);
   if (next.kind === "unary" && next.operator === "not" && isBoolean(next.value))
     return literal(!next.value.value);
   if (next.kind !== "binary" || (next.operator !== "and" && next.operator !== "or")) return next;
-  // `and` gives the other side where one is true, false where one is false; `or` the reverse. A side that is dropped
-  // has to be one whose reading has no effect and cannot fail, as a division by zero would.
-  const absorbing = next.operator === "or";
+  const decider = next.operator === "or";
+  if (isBoolean(next.left) && next.left.value === decider) return next.left;
   for (const [side, other] of [
     [next.left, next.right],
     [next.right, next.left],
-  ] as const) {
-    if (!isBoolean(side)) continue;
-    if (side.value !== absorbing) return other;
-    if (cannotFail(other)) return literal(absorbing);
-  }
+  ] as const)
+    if (isBoolean(side) && side.value !== decider && givesBoolean(other)) return other;
   return next;
+}
+
+/** Whether an expression gives true or false where it gives a value: a literal, a comparison, a test, or `not`. */
+function givesBoolean(value: IrExpression): boolean {
+  if (isBoolean(value)) return true;
+  if (value.kind === "unary") return value.operator === "not";
+  if (value.kind === "typeTest") return true;
+  return (
+    value.kind === "binary" &&
+    ["==", "!=", "<", "<=", ">", ">=", "and", "or", "in"].includes(value.operator)
+  );
 }
 
 /** An `if` or `while` on a literal, as the branch that runs; a loop over an empty list, as nothing. */
@@ -190,28 +204,6 @@ function isBoolean(
 
 function literal(value: boolean): IrExpression {
   return { kind: "literal", value };
-}
-
-/** A value whose reading has no effect and cannot fail: a literal, a variable, a load, and equality tests of them. */
-function cannotFail(value: IrExpression): boolean {
-  switch (value.kind) {
-    case "literal":
-    case "variable":
-      return true;
-    case "load":
-      return (
-        cannotFail(value.key) &&
-        (value.defaultValue === undefined || cannotFail(value.defaultValue))
-      );
-    case "binary":
-      return (
-        (value.operator === "==" || value.operator === "!=") &&
-        cannotFail(value.left) &&
-        cannotFail(value.right)
-      );
-    default:
-      return false;
-  }
 }
 
 /** A value that reading again gives again, with no effect: literals, variables, members, loads and tests of them. */
