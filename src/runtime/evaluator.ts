@@ -147,6 +147,7 @@ import {
   mediaVolumeMessage,
   timerDisplayMessage,
 } from "../handle-rules.js";
+import { unmeasurableLengthMessage } from "../delay-rules.js";
 import {
   RANGE_LIST_FIX,
   rangeListLengthProblem,
@@ -4623,7 +4624,7 @@ function assertRepresentableRound(
     throw fault(
       "TSR050",
       isValidSessionTime(deadlineMs)
-        ? `Timer remaining time of ${formatDuration(remainingMs)} is too short to measure this late in the scene. Use a longer duration.`
+        ? unmeasurableLengthMessage("Timer remaining time", remainingMs, nowMs, "duration")
         : `Timer remaining time of ${formatDuration(remainingMs)} is too long for scene time to reach. Use a shorter duration.`,
       span,
     );

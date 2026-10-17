@@ -1,4 +1,4 @@
-import { formatDuration } from "./duration.js";
+import { formatDuration, formatShortDuration } from "./duration.js";
 
 /**
  * The rules of a wait's or timer's length, a `say` pacing, and an interaction's timeout, each with one message: compile
@@ -39,6 +39,32 @@ export function zeroRoundMessage(shown: string): string {
 
 export function sceneTimeMessage(command: "wait" | "timer"): string {
   return `This ${command} is too long for scene time to reach. Use a shorter duration.`;
+}
+
+/**
+ * The shortest length the scene clock can measure at `sceneTimeMs`: the step from it to the next later time a session
+ * time can hold. A deadline is the scene time plus the length, so a shorter positive length ends at that next time or
+ * at `sceneTimeMs` itself.
+ */
+function clockStepMilliseconds(sceneTimeMs: number): number {
+  const time = new Float64Array([sceneTimeMs]);
+  const bits = new BigUint64Array(time.buffer);
+  bits[0] = bits[0]! + 1n;
+  return time[0]! - sceneTimeMs;
+}
+
+/**
+ * A positive length whose deadline is the scene time it starts at, because late in a scene the clock measures only
+ * longer ones: `subject`, such as "This wait", lasts `milliseconds` from `sceneTimeMs`, and `longer` names what to
+ * make longer.
+ */
+export function unmeasurableLengthMessage(
+  subject: string,
+  milliseconds: number,
+  sceneTimeMs: number,
+  longer: "duration" | "timeout" | "pause",
+): string {
+  return `${subject} of ${formatShortDuration(milliseconds)} is too short to measure this late in the scene, where the shortest duration the clock can measure is ${formatShortDuration(clockStepMilliseconds(sceneTimeMs))}. Use a longer ${longer}.`;
 }
 
 export function pacingMessage(shown: string): string {

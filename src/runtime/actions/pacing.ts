@@ -1,3 +1,4 @@
+import { unmeasurableLengthMessage } from "../../delay-rules.js";
 import { formatDuration } from "../../duration.js";
 import { MAX_RUNTIME_SESSION_TIME_MS } from "../state.js";
 
@@ -46,7 +47,7 @@ export function calculatePacingDeadlineMs(
   if (!isSessionTime(deadlineMs) || deadlineMs <= currentSessionTimeMs) {
     throw new RangeError(
       isSessionTime(deadlineMs)
-        ? "This say pacing is too short to measure this late in the scene. Use a longer pause."
+        ? unmeasurableLengthMessage("This say pacing", durationMs, currentSessionTimeMs, "pause")
         : "This say pacing is too long for scene time to reach. Use a shorter pause.",
     );
   }

@@ -292,6 +292,16 @@ export function formatDuration(duration: number | AnyDuration): string {
   return pieces.length === 0 ? "0 calendar days" : pieces.join(" ");
 }
 
+/**
+ * An exact length as `formatDuration` shows it, but below a millisecond with three significant digits, such as
+ * `4.66e-10 milliseconds`, so that a positive length too short for the clock never shows as 0.
+ */
+export function formatShortDuration(milliseconds: number): string {
+  return milliseconds > 0 && milliseconds < 1
+    ? unitAmount(String(Number(milliseconds.toPrecision(3))), "millisecond")
+    : formatDuration(milliseconds);
+}
+
 function calendarPart(amount: number, unit: "year" | "month" | "day"): string {
   return amount === 0 ? "" : `${amount} calendar ${unit}${Math.abs(amount) === 1 ? "" : "s"}`;
 }

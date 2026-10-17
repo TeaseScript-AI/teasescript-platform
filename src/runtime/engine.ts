@@ -54,6 +54,7 @@ import {
   pacingMessage,
   sceneTimeMessage,
   timeoutSceneTimeMessage,
+  unmeasurableLengthMessage,
   zeroRoundMessage,
 } from "../delay-rules.js";
 import {
@@ -2877,7 +2878,12 @@ function formTimeoutMs(timeoutMs: number, snapshot: RuntimeSnapshot, span: Sourc
     throw fault(
       "TSR052",
       isValidSessionTime(deadlineMs)
-        ? `This askForm timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
+        ? unmeasurableLengthMessage(
+            "This askForm timeout",
+            timeoutMs,
+            snapshot.currentSessionTimeMs,
+            "timeout",
+          )
         : timeoutSceneTimeMessage("askForm"),
       span,
     );
@@ -2917,7 +2923,12 @@ function buttonTimeoutMs(
     throw fault(
       "TSR050",
       isValidSessionTime(deadlineMs)
-        ? `This showButton timeout of ${formatDuration(timeoutMs)} is too short to measure this late in the scene. Use a longer timeout.`
+        ? unmeasurableLengthMessage(
+            "This showButton timeout",
+            timeoutMs,
+            snapshot.currentSessionTimeMs,
+            "timeout",
+          )
         : timeoutSceneTimeMessage("showButton"),
       span,
     );
@@ -3510,7 +3521,12 @@ export function futureDeadline(
   if (durationMs > 0 && deadlineMs <= snapshot.currentSessionTimeMs) {
     throw fault(
       "TSR050",
-      `This ${command} of ${formatDuration(durationMs)} is too short to measure this late in the scene. Use a longer duration.`,
+      unmeasurableLengthMessage(
+        `This ${command}`,
+        durationMs,
+        snapshot.currentSessionTimeMs,
+        "duration",
+      ),
       span,
     );
   }
