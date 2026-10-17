@@ -60,9 +60,12 @@ export function instructionExpressions(instruction: Instruction): readonly Expre
     case "fileStore":
       return [instruction.value, ...(instruction.files === null ? [] : [instruction.files])];
     case "lock":
-      return [instruction.value, instruction.password, instruction.timeLock].filter(
-        (operand): operand is ExpressionPlan => operand !== null,
-      );
+      return [
+        instruction.value,
+        instruction.password,
+        instruction.passwordField?.hint ?? null,
+        instruction.timeLock,
+      ].filter((operand): operand is ExpressionPlan => operand !== null);
     case "storageWrite":
       return [...(instruction.value === null ? [] : [instruction.value]), instruction.key];
     case "playMedia":
