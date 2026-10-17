@@ -84,48 +84,98 @@ function codeLiteralsOf(node: ts.Expression): ts.StringLiteralLike[] | undefined
     : [...whenTrue, ...whenFalse];
 }
 
+/** The module-level `const`s of a file whose value is a code, or a choice between codes. */
+function moduleCodeConstants(
+  source: ts.SourceFile,
+): Map<
+  string,
+  {
+    readonly node: ts.Identifier;
+    readonly literals: readonly ts.StringLiteralLike[];
+    readonly exported: boolean;
+  }
+> {
+  const constants = new Map<
+    string,
+    {
+      readonly node: ts.Identifier;
+      readonly literals: readonly ts.StringLiteralLike[];
+      readonly exported: boolean;
+    }
+  >();
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    if ((statement.declarationList.flags & ts.NodeFlags.Const) === 0) continue;
+    const exported =
+      statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ===
+      true;
+    for (const declaration of statement.declarationList.declarations) {
+      const literals =
+        declaration.initializer === undefined ? undefined : codeLiteralsOf(declaration.initializer);
+      if (ts.isIdentifier(declaration.name) && literals !== undefined)
+        constants.set(declaration.name.text, { node: declaration.name, literals, exported });
+    }
+  }
+  return constants;
+}
+
 /**
  * The codes of one source file, read from its syntax, so comments and messages cannot pose as reporting a code. A
- * code table (`const semanticCode = { unknownVariable: "TSV002" }`) or code constant (`const DAY_WAIT_CODE = "TSV061"`)
- * declares codes; the file reports one where it reads the entry or constant, and a literal elsewhere where it uses it.
- * A code that a comparison or a type names is not reported. Tables and constants are matched by name within their file,
- * so a local of the same name can only count as a read of a code that the file declares.
+ * module-level code table (`const semanticCode = { unknownVariable: "TSV002" }`) or code constant (`const
+ * DAY_WAIT_CODE = "TSV061"`, or one that `exported` lists and the file imports) declares codes; the file reports one
+ * where it reads the entry or constant, and a literal elsewhere where it uses it. A code that a comparison or a type
+ * names is not reported. Constants are matched by name within the file, so a local that shadows one would count as
+ * reading it.
  */
-function sourceCodes(file: string, text: string): SourceCodes {
+function sourceCodes(
+  file: string,
+  text: string,
+  exported: ReadonlyMap<string, readonly string[]> = new Map(),
+): SourceCodes {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
-  const tables = new Map<string, Map<string, string>>();
-  const constants = new Map<string, { readonly node: ts.Identifier; readonly codes: string[] }>();
   const declarations = new Set<ts.Node>();
-  const findDeclarations = (node: ts.Node): void => {
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.initializer !== undefined
-    ) {
-      const initializer = unwrap(node.initializer);
-      const properties = ts.isObjectLiteralExpression(initializer) ? initializer.properties : [];
-      const entries = properties.flatMap((property) => {
-        if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name)) return [];
-        const [literal, ...more] = codeLiteralsOf(property.initializer) ?? [];
-        return literal === undefined || more.length > 0
-          ? []
-          : [{ key: property.name.text, literal }];
-      });
-      const literals = codeLiteralsOf(node.initializer);
-      if (entries.length > 0 && entries.length === properties.length) {
-        tables.set(node.name.text, new Map(entries.map(({ key, literal }) => [key, literal.text])));
-        for (const { literal } of entries) declarations.add(literal);
-      } else if (literals !== undefined) {
-        constants.set(node.name.text, {
-          node: node.name,
-          codes: literals.map((literal) => literal.text),
-        });
-        for (const literal of literals) declarations.add(literal);
-      }
+  const constants = new Map<
+    string,
+    { readonly node: ts.Identifier; readonly codes: readonly string[] }
+  >();
+  for (const [name, constant] of moduleCodeConstants(source)) {
+    constants.set(name, {
+      node: constant.node,
+      codes: constant.literals.map((literal) => literal.text),
+    });
+    for (const literal of constant.literals) declarations.add(literal);
+  }
+  for (const statement of source.statements) {
+    const bindings = ts.isImportDeclaration(statement)
+      ? statement.importClause?.namedBindings
+      : undefined;
+    if (bindings === undefined || !ts.isNamedImports(bindings)) continue;
+    for (const element of bindings.elements) {
+      const codes = exported.get((element.propertyName ?? element.name).text);
+      if (codes !== undefined) constants.set(element.name.text, { node: element.name, codes });
     }
-    ts.forEachChild(node, findDeclarations);
-  };
-  findDeclarations(source);
+  }
+  const tables = new Map<string, ReadonlyMap<string, string>>();
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      const initializer =
+        declaration.initializer === undefined ? undefined : unwrap(declaration.initializer);
+      if (!ts.isIdentifier(declaration.name) || initializer === undefined) continue;
+      if (!ts.isObjectLiteralExpression(initializer)) continue;
+      const entries = initializer.properties.flatMap((property) => {
+        if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name)) return [];
+        const value = unwrap(property.initializer);
+        const codes = ts.isIdentifier(value)
+          ? constants.get(value.text)?.codes
+          : codeLiteralsOf(value)?.map((literal) => literal.text);
+        return codes?.length === 1 ? [{ key: property.name.text, code: codes[0]!, value }] : [];
+      });
+      if (entries.length === 0 || entries.length !== initializer.properties.length) continue;
+      tables.set(declaration.name.text, new Map(entries.map(({ key, code }) => [key, code])));
+      for (const { value } of entries) declarations.add(value);
+    }
+  }
 
   const named: CodeUse[] = [];
   const reported: CodeUse[] = [];
@@ -171,15 +221,18 @@ function sourceCodes(file: string, text: string): SourceCodes {
       reads(node)
     ) {
       reported.push(use(node, tables.get(node.expression.text)!.get(node.name.text)!));
-    } else if (ts.isIdentifier(node) && constants.has(node.text)) {
+    } else if (ts.isIdentifier(node) && constants.has(node.text) && !declarations.has(node)) {
       const constant = constants.get(node.text)!;
       const parent = node.parent;
       const isName =
         node === constant.node ||
+        ts.isImportSpecifier(parent) ||
+        ts.isExportSpecifier(parent) ||
         (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
         ((ts.isPropertyAssignment(parent) ||
           ts.isParameter(parent) ||
-          ts.isVariableDeclaration(parent)) &&
+          ts.isVariableDeclaration(parent) ||
+          ts.isBindingElement(parent)) &&
           parent.name === node);
       if (!isName && reads(node)) for (const code of constant.codes) reported.push(use(node, code));
     }
@@ -189,14 +242,21 @@ function sourceCodes(file: string, text: string): SourceCodes {
   return { named, reported, fragments };
 }
 
-const sources = filesUnder(resolve(root, "src"), ".ts")
+const files = filesUnder(resolve(root, "src"), ".ts")
   .map((path) => relative(root, path).split("\\").join("/"))
   .filter((file) => file !== REGISTRY)
-  .map((file) => ({
-    file,
-    text: readFileSync(resolve(root, file), "utf8"),
-    ...sourceCodes(file, readFileSync(resolve(root, file), "utf8")),
-  }));
+  .map((file) => ({ file, text: readFileSync(resolve(root, file), "utf8") }));
+const exportedConstants = new Map(
+  files.flatMap(({ file, text }) =>
+    [...moduleCodeConstants(ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true))]
+      .filter(([, constant]) => constant.exported)
+      .map(([name, constant]) => [name, constant.literals.map((literal) => literal.text)] as const),
+  ),
+);
+const sources = files.map((source) => ({
+  ...source,
+  ...sourceCodes(source.file, source.text, exportedConstants),
+}));
 
 function ownersOf(file: string): string[] {
   const path = file.slice("src/".length);
@@ -213,33 +273,40 @@ test("the scanner counts the codes that a source reads, not those it declares, c
   const codes = sourceCodes(
     "probe.ts",
     [
-      'const table = { used: "TSV001", unused: "TSV002" } as const;',
+      'import { SHARED, OTHER } from "./codes.js";',
+      'const table = { used: "TSV001", unused: "TSV002", shared: SHARED } as const;',
       'const USED = "TSV003";',
       'const UNUSED = "TSV004";',
       'const either = flag ? "TSV005" : "TSV006";',
-      "report(table.used, USED, either);",
+      "report(table.used, table.shared, USED, either, SHARED, OTHER);",
       'report("TSV007");',
       'if (code === "TSV008") report(other.USED);',
       'type Code = "TSV009";',
       'push({ severity: "warning", code: "TSW010" satisfies Code });',
       'const built = "TSW" + "099";',
+      'function local() { const code = flag ? "TSV011" : "TSV012"; report(code, code); }',
     ].join("\n"),
+    new Map([["SHARED", ["TSV013"]]]),
   );
   assert.deepEqual(
     codes.reported.map(({ line, code, severity }) => [line, code, severity]),
     [
-      [5, "TSV001", undefined],
-      [5, "TSV003", undefined],
-      [5, "TSV005", undefined],
-      [5, "TSV006", undefined],
-      [6, "TSV007", undefined],
-      [9, "TSW010", "warning"],
+      [6, "TSV001", undefined],
+      [6, "TSV013", undefined],
+      [6, "TSV003", undefined],
+      [6, "TSV005", undefined],
+      [6, "TSV006", undefined],
+      [6, "TSV013", undefined],
+      [7, "TSV007", undefined],
+      [10, "TSW010", "warning"],
+      [12, "TSV011", undefined],
+      [12, "TSV012", undefined],
     ],
   );
-  assert.equal(codes.named.length, 10);
+  assert.equal(codes.named.length, 12);
   assert.deepEqual(
     codes.fragments.map(({ line }) => line),
-    [10],
+    [11],
   );
 });
 
