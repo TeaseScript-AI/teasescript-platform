@@ -22,7 +22,7 @@ import { freezeInstructionPlan } from "../plan/freeze.js";
 import { MAIN_FILE_PATH } from "../project-paths.js";
 import { createSourceSpan } from "../source.js";
 import { sourceSpanToPlanLocation } from "../plan/source-location.js";
-import type { RuntimeCheckSite } from "../type-checker.js";
+import type { RuntimeCheckSite } from "../type-inference/backend.js";
 import {
   InstructionCompiler,
   type LoweringCounters,

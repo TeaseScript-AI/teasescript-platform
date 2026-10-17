@@ -28,7 +28,8 @@ import {
   type SemanticValidationOptions,
 } from "./semantic.js";
 import { speakerFlowDiagnostics, type SpeakerFlowInput } from "./speaker-flow.js";
-import { checkTypes, type RuntimeCheckSite } from "./type-checker.js";
+import type { RuntimeCheckSite } from "./type-inference/backend.js";
+import { checkTypes } from "./type-inference/index.js";
 import { createSourcePosition, createSourceSpan } from "./source.js";
 import { DeadWays, type WayFacts } from "./way-facts.js";
 
