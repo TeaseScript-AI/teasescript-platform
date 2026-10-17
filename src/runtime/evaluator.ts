@@ -2007,7 +2007,7 @@ export class Evaluator {
           kind: "developerWarning",
           sequence: warningSequence,
           severity: "warning",
-          code: "TSW001",
+          code: "TSW001" satisfies DeveloperWarningCode,
           message: `Speaker '${speaker.identifier}' uses its identifier as the display name.`,
           span: copySpan(span),
         } satisfies DeveloperWarningEvent),

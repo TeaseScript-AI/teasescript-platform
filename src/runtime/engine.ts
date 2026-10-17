@@ -3412,7 +3412,7 @@ function failForBudget(
       : `The script reached its ${steps}-step limit while running this loop. Add a wait, or check the loop's condition.`;
   failSnapshot(
     snapshot,
-    { code: "TSR037", message, span: copySpan(span) },
+    { code: "TSR037" satisfies RuntimeErrorCode, message, span: copySpan(span) },
     instructionSourcePath(plan, index),
     events,
   );
