@@ -18,7 +18,7 @@ const photoBlending = defineModel<"oklab" | "srgb">("photoBlending", { required:
 const familyLabels: Readonly<Record<PhotoFamily, string>> = {
   vibrant: "A · Vibrant",
   muted: "B · Muted",
-  "large-vibrant": "C · Vibrant when large enough",
+  "large-vibrant": "C · Vibrant if large enough, else Muted",
 };
 function next<T>(options: readonly T[], current: T): T {
   return options[(options.indexOf(current) + 1) % options.length]!;
@@ -61,10 +61,11 @@ function setShare(event: Event) {
     </fieldset>
     <fieldset class="grid gap-2 border-t pt-4" data-ab-test="photo-family">
       <legend class="font-medium">Photo colour family</legend>
+      <!-- A select is as wide as its longest option; min-w-0 keeps a long one within the panel. -->
       <select
         v-model="photoFamily"
         aria-label="Photo colour family"
-        class="min-h-11 rounded-md border border-input bg-transparent px-3"
+        class="min-h-11 min-w-0 rounded-md border border-input bg-transparent px-3"
       >
         <option v-for="family in PHOTO_FAMILIES" :key="family" :value="family">
           {{ familyLabels[family] }}
