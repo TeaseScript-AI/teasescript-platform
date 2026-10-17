@@ -9,7 +9,7 @@
 // --cases takes a .tease file (a single-file project), a directory with a main.tease (one project of every .tease file
 // in it), or any other directory, which it searches for both.
 // Each build compiles each case from its source and the tool compares the diagnostics in the compiler's order, as
-// `path:startLine:startColumn-endLine:endColumn severity code message`, and the plan, as JSON with sorted keys. A plan
+// `path:startLine:startColumn@offset-endLine:endColumn@offset severity code message`, and the plan, as JSON with sorted keys. A plan
 // value that JSON cannot hold, such as a Set, is converted and reported. With --run, a case with a plan in both builds
 // also runs once in each (tests/helpers/flow-differential.ts, within its limits), and the tool compares what each run
 // says, its status and its failure; the instructions a run executed are numbered by its own plan, so they are not
@@ -21,6 +21,11 @@
 // src/type-checker.js). That result is encoded as JSON by site: an AST node becomes its file's index and its span's
 // offsets, a Map or Set is sorted by the encoded text, and an object of a class keeps its own properties and is
 // reported. With --out, a head build that exports `analyzeTypes` also records the facts of its analysis (`headFacts`).
+// Limits of the internal comparison, each reported when met: a node that no program of the case holds encodes without
+// a file (`unregistered site`), so two such nodes with equal spans compare equal; an object of a class compares by its
+// own properties only; a sorted Map or Set loses its insertion order, which no field of the result makes observable
+// today; and the mirror has no recovery from a native stack exhaustion, so a build that throws is an `error` (or
+// `threwInBoth` when both throw alike), not a compared result.
 // A case is identical or differs, first by error (one build threw), then diagnostics, plan, runs, or internal.
 // --time R measures: per case one warm-up compile per build, then R rounds of base and head in turn, and it prints each
 // build's median compile time and their ratio; with --run or --internal it also compares.
@@ -548,11 +553,15 @@ function encoded(value, path, context) {
     };
   if (typeof value === "object") {
     const file = context.sites.get(value);
-    if (file !== undefined || (typeof value.kind === "string" && isSpan(value.span)))
+    if (file !== undefined || (typeof value.kind === "string" && isSpan(value.span))) {
+      // A node that no program of the case holds has no file: two such nodes with equal spans encode alike, so the
+      // comparison is incomplete there and says so.
+      if (file === undefined) context.found.push({ path, kind: "unregistered site" });
       return {
         $site: `${file ?? "?"}:${value.span.start.offset}-${value.span.end.offset}`,
         ...(typeof value.kind === "string" ? { kind: value.kind } : {}),
       };
+    }
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null)
       context.found.push({ path, kind: `${prototype.constructor?.name ?? "unnamed"} object` });
@@ -611,11 +620,13 @@ function normalised(outcome) {
   };
 }
 
-// Spans count lines and columns from 0; editors count from 1.
+// Spans count lines and columns from 0; editors count from 1. The offsets follow each position after `@`, so a
+// diagnostic that only moved by an offset still differs: the line holds the complete span.
 function diagnosticLine(diagnostic, path) {
   const { start, end } = diagnostic.span;
   return (
-    `${path}:${start.line + 1}:${start.column + 1}-${end.line + 1}:${end.column + 1} ` +
+    `${path}:${start.line + 1}:${start.column + 1}@${start.offset}-` +
+    `${end.line + 1}:${end.column + 1}@${end.offset} ` +
     `${diagnostic.severity} ${diagnostic.code} ${diagnostic.message}`
   );
 }
