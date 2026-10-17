@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ProjectDiagnostic, ProjectSourceFile } from "../src/compiler.js";
+import {
+  CORE_RUNTIME_BUILTINS,
+  type ProjectDiagnostic,
+  type ProjectSourceFile,
+} from "../src/compiler.js";
+import { compileStableProject, type LoweringTrace } from "../src/compiler/compile-program.js";
+import { parse } from "../src/parser.js";
 import { PlanControlFlow } from "../src/plan/control-flow.js";
+import { Reachability } from "../src/reachability.js";
+import { validateProjectSemantics } from "../src/semantic.js";
+import { checkTypes } from "../src/type-checker.js";
+import { DeadWays } from "../src/way-facts.js";
 import { compileAndRunVariants, type FlowKnob } from "./helpers/flow-differential.js";
 
 /*
@@ -556,4 +566,50 @@ test("a loop keeps a narrowing that only code which never runs would end, and no
       ["TSV043 6"],
       loop(body),
     );
+});
+
+test("the type check's narrowing follows the same statements that never run as the plan", () => {
+  // The loop effects leave out what the type check found never runs (see `checkTypes`), so it must find what the plan
+  // finds: the statements that cannot run once their function, block, or file runs.
+  for (const testCase of cases) {
+    const files = marked(testCase.files).files.map(({ path, source }) => ({
+      path,
+      program: parse(source).program,
+    }));
+    const options = { builtins: CORE_RUNTIME_BUILTINS };
+    const names = validateProjectSemantics(files, options);
+    const types = checkTypes(files, {
+      ...options,
+      sharedWrites: new Map(names.flatMap((result) => [...result.sharedWrites])),
+      speakers: new Map(names.flatMap((result) => [...result.speakers])),
+    });
+    const trace: LoweringTrace = { origins: new Map(), statements: new Map() };
+    const plan = compileStableProject(
+      files.map((file, index) => ({
+        ...file,
+        picks: names[index]!.picks,
+        captures: names[index]!.captures,
+      })),
+      types.runtimeChecks,
+      () => {},
+      [],
+      types.formShapes,
+      types.storageTypes,
+      trace,
+    );
+    const ways = new DeadWays(new PlanControlFlow(plan), trace.origins, types.ways);
+    const { unreachable } = new Reachability(
+      files.map((file) => file.program),
+      plan,
+      trace,
+      ways,
+    ).statementFlow();
+    for (const [statement, { start, end }] of trace.statements)
+      if (start < end)
+        assert.equal(
+          types.unreachable.has(statement),
+          unreachable.has(statement),
+          `${testCase.name}: the statement at offset ${statement.span.start.offset}`,
+        );
+  }
 });

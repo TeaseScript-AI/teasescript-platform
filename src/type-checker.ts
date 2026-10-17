@@ -299,6 +299,11 @@ export interface TypeCheckResult {
   readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
   /** Which ways through the source can run, which the checks that follow the compiled plan take from the check. */
   readonly ways: WayFacts;
+  /**
+   * The statements that the check found never run once their function, block, or file runs, which its narrowing and its
+   * loop effects follow: the plan's reachability finds the same ones (tests/reachability-differential.test.ts).
+   */
+  readonly unreachable: ReadonlySet<Statement>;
   /** What the flow check of speaker properties needs from the check, once the project is lowered (V30 §37). */
   readonly speakerFlow: SpeakerFlowInput;
   /**
@@ -507,6 +512,7 @@ export function checkTypes(
         runtimeChecks: checker.runtimeChecks(),
         formShapes: checker.formShapes(),
         ways: checker.ways(),
+        unreachable: deadFound.statements,
         storageTypes: storageTypePlans(storage),
       });
     }
