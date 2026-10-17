@@ -57,7 +57,7 @@ const MS_PER_DAY = 86_400_000;
  * The values a statistic of `list` reads: its elements, or with `by` the property of that name of each element, which
  * must then all be objects.
  */
-export function listValues(
+function listValues(
   name: string,
   list: SerializableRuntimeValue,
   by: SerializableRuntimeValue | undefined,

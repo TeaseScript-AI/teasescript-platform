@@ -475,7 +475,7 @@ export type ElementProperty = {
     : never;
 }[ListPropertyName];
 
-export function isListProperty(name: string): name is ListPropertyName {
+function isListProperty(name: string): name is ListPropertyName {
   return Object.hasOwn(LIST_PROPERTIES, name);
 }
 
