@@ -6,7 +6,7 @@ import {
   DICT_WEIGHTS_MESSAGE,
   LIST_FUNCTION_SHAPES,
   LIST_WEIGHT_MESSAGE,
-  weightedSourceMessage,
+  WEIGHTED_SOURCE_MESSAGE,
 } from "../list-function-rules.js";
 import { percentageFailure } from "../numeric-functions.js";
 import type { PlanSourceLocation } from "../plan/model.js";
@@ -14,7 +14,6 @@ import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { dateTimeMilliseconds, daysBetween } from "../temporal.js";
 import { RANGE_LIST_FIX } from "./collection-operations.js";
 import { RuntimeFault } from "./errors.js";
-import { describeValue } from "./value-types.js";
 import {
   add,
   compare,
@@ -528,11 +527,7 @@ export function weightedChoices(
   if (dict ? named.weight !== undefined : named.weight === undefined)
     throw fault(
       "TSR028",
-      dict
-        ? DICT_WEIGHTS_MESSAGE
-        : isList(source)
-          ? LIST_WEIGHT_MESSAGE
-          : weightedSourceMessage(describeValue(source)),
+      dict ? DICT_WEIGHTS_MESSAGE : isList(source) ? LIST_WEIGHT_MESSAGE : WEIGHTED_SOURCE_MESSAGE,
       span,
     );
   const choices = dict

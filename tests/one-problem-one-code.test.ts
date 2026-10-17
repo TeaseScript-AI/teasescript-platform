@@ -309,6 +309,8 @@ test("a value of a type the compiler does not know fails with the compiler's tex
     ],
     [`${D}say randomWeighted(dynamic([{ w: 1 }]))`, "say randomWeighted([{ w: 1 }])"],
     [`${D}say randomWeighted(dynamic(5))`, "say randomWeighted(5)"],
+    [`${D}say randomWeighted(dynamic(set[1]))`, "say randomWeighted(set[1])"],
+    [`${D}say randomWeighted(dynamic(/x/))`, "say randomWeighted(/x/)"],
     // A start value, which may not select at random, of a key that the compiler cannot read.
     ['global pick = (load "pi" + "cks", default: [1, 2]).random', "global pick = [1, 2].random"],
     ['global shown = "${load "pi" + "cks", default: [1, 2]}"', 'global shown = "${[1, 2]}"'],

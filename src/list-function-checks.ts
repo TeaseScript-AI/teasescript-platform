@@ -5,7 +5,7 @@ import {
   DICT_WEIGHTS_MESSAGE,
   LIST_FUNCTION_SHAPES,
   LIST_WEIGHT_MESSAGE,
-  weightedSourceMessage,
+  WEIGHTED_SOURCE_MESSAGE,
 } from "./list-function-rules.js";
 import { percentageFailure } from "./numeric-functions.js";
 import { RANGE_LIST_FIX, type OperationProblem } from "./operation-checks.js";
@@ -458,7 +458,7 @@ function weightedType(context: Context): StaticType {
     else valueKind(context, valuesType(context, source, weight, "weight"), ["number"], weight);
     return copyType(value.element);
   }
-  problem(context, weightedSourceMessage(describeValue(value)), source);
+  problem(context, WEIGHTED_SOURCE_MESSAGE, source);
   return UNKNOWN_TYPE;
 }
 
