@@ -227,11 +227,23 @@ test("invalid random built-in arguments fail with source-associated errors", () 
     );
   }
 
-  for (const [staticRange, message] of [
-    ["1.5..=3", "A statically known randomInteger range must have integer bounds."],
-    // As for a wait or timer range, also when the compiler computes a bound.
-    ["3..3", "A randomInteger range must contain at least one whole number."],
-    ["(2 + 1)..=1", "A randomInteger range must contain at least one whole number."],
+  for (const [staticRange, message, subject] of [
+    [
+      "1.5..=3",
+      "randomInteger(range) needs a range of whole numbers, but its start is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
+      "1.5",
+    ],
+    // As for a wait or timer range, also when the compiler computes a bound, with the runtime's message.
+    [
+      "3..3",
+      "randomInteger(range) needs a range that holds at least one whole number, but 3..3 holds none. Check that the range is not empty first.",
+      "3..3",
+    ],
+    [
+      "(2 + 1)..=1",
+      "randomInteger(range) needs a range that holds at least one whole number, but 3..=1 holds none. Check that the range is not empty first.",
+      "(2 + 1)..=1",
+    ],
   ]) {
     const staticSource = `say randomInteger(${staticRange})`;
     const rejected = compileSource(staticSource);
@@ -242,7 +254,7 @@ test("invalid random built-in arguments fail with source-associated errors", () 
         message,
         staticSource.slice(span.start.offset, span.end.offset),
       ]),
-      [["TSV010", message, staticRange]],
+      [["TSV010", message, subject]],
     );
   }
   // A named argument is the error then, not the empty range.

@@ -247,10 +247,10 @@ test("'not' right after arithmetic or a range operator is one error that names n
       ],
       operator,
     );
-    // In parentheses, the true or false still reaches the operator, which rejects it.
+    // In parentheses, the true or false still reaches the operator, which rejects it; a range rejects it as its bound.
     assert.deepEqual(
       diagnostics(source(form("(not b)"))).map(([code]) => code),
-      ["TSV043"],
+      [range ? "TSV010" : "TSV043"],
       operator,
     );
   }

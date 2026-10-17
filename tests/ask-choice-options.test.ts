@@ -513,9 +513,10 @@ test("a choice of durations is a duration where the compiler checks numbers and 
   ]) {
     const result = compileSource(source);
     assert.equal(result.plan, null, source);
+    // A duration is no range bound.
     assert.deepEqual(
       result.diagnostics.map((diagnostic) => diagnostic.code),
-      ["TSV043"],
+      ["TSV010"],
       source,
     );
   }

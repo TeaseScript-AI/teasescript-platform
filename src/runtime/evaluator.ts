@@ -122,6 +122,17 @@ import {
 } from "./collection-size.js";
 import { base64Text, jsonText, textFromBase64, valueFromJson } from "./json-base64.js";
 import { textSha256 } from "./sha256.js";
+import { emptyRangeProblem, rangeLength, rangeText, wholeRangeMessage } from "../range-checks.js";
+import {
+  cameraPlacementMessage,
+  handleArgumentsMessage,
+  handleMemberMessage,
+  isCameraPlacement,
+  isMediaVolume,
+  isTimerDisplay,
+  mediaVolumeMessage,
+  timerDisplayMessage,
+} from "../handle-rules.js";
 import {
   RANGE_LIST_FIX,
   rangeListLengthProblem,
@@ -1722,16 +1733,12 @@ export class Evaluator {
     span: SourceSpan,
   ): void {
     if (isCameraView(receiver))
-      throw fault(
-        "TSR016",
-        `Camera views have no method '${method}'. Hide them with hideCamera.`,
-        span,
-      );
+      throw fault("TSR016", handleMemberMessage("camera", method, "call"), span);
     if (isTimerHandle(receiver) || isMediaHandle(receiver)) {
       if (!["pause", "resume", "stop"].includes(method)) {
         throw fault(
           "TSR016",
-          `${isTimerHandle(receiver) ? "Timer" : "Media"} handles have no method '${method}'. Use pause(), resume(), or stop().`,
+          handleMemberMessage(isTimerHandle(receiver) ? "timer" : "media", method, "call"),
           span,
         );
       }
@@ -2867,7 +2874,7 @@ export class Evaluator {
   ): null {
     if (name !== "remove") throw fault("TSR016", removableHandleMethodMessage(button, name), span);
     if (positional.length !== 0 || Object.keys(named).length !== 0)
-      throw fault("TSR028", "Permanent button remove() takes no arguments.", span);
+      throw fault("TSR028", handleArgumentsMessage("permanentButton", name), span);
     removePermanentButtons(
       this.snapshot,
       (shown) => shown.button.buttonId === button.buttonId,
@@ -2897,14 +2904,10 @@ export class Evaluator {
     span: SourceSpan,
   ): null {
     if (!["pause", "resume", "stop"].includes(name)) {
-      throw fault(
-        "TSR016",
-        `Timer handles have no method '${name}'. Use pause(), resume(), or stop().`,
-        span,
-      );
+      throw fault("TSR016", handleMemberMessage("timer", name, "call"), span);
     }
     if (positional.length !== 0 || Object.keys(named).length !== 0) {
-      throw fault("TSR028", `Timer ${name}() takes no arguments.`, span);
+      throw fault("TSR028", handleArgumentsMessage("timer", name), span);
     }
     const timer = this.#timer(handle, span);
     const action = activeTimerAction(this.snapshot, handle.timerId);
@@ -2966,11 +2969,7 @@ export class Evaluator {
         warning = setTimerRepeatDuration(timer, value.milliseconds, now);
       }
     } else {
-      throw fault(
-        "TSR003",
-        `Timer handle property '${name}' cannot be assigned. You can assign remaining, display, or repeatDuration.`,
-        span,
-      );
+      throw fault("TSR003", handleMemberMessage("timer", name, "assign"), span);
     }
     if (warning === "expired") {
       expireTimerAction(
@@ -3007,14 +3006,10 @@ export class Evaluator {
     span: SourceSpan,
   ): null {
     if (!["pause", "resume", "stop"].includes(name)) {
-      throw fault(
-        "TSR016",
-        `Media handles have no method '${name}'. Use pause(), resume(), or stop().`,
-        span,
-      );
+      throw fault("TSR016", handleMemberMessage("media", name, "call"), span);
     }
     if (positional.length !== 0 || Object.keys(named).length !== 0) {
-      throw fault("TSR028", `Media ${name}() takes no arguments.`, span);
+      throw fault("TSR028", handleArgumentsMessage("media", name), span);
     }
     const media = this.#media(handle, span);
     const action = activeMediaAction(this.snapshot, handle.mediaId);
@@ -3038,22 +3033,13 @@ export class Evaluator {
   ): void {
     const media = this.#media(handle, span);
     if (name === "volume") {
-      if (typeof value !== "number" || !(value >= 0 && value <= 1)) {
-        throw fault(
-          "TSR050",
-          `Media volume must be a number from 0 through 1, but this is ${describeShownValue(value)}.`,
-          span,
-        );
-      }
+      if (!isMediaVolume(value))
+        throw fault("TSR050", mediaVolumeMessage(describeShownValue(value)), span);
       this.#mediaWarning(setMediaVolume(media, value), span);
       return;
     }
     if (name !== "position" && name !== "remaining") {
-      throw fault(
-        "TSR003",
-        `Media handle property '${name}' cannot be assigned. You can assign position, remaining, or volume.`,
-        span,
-      );
+      throw fault("TSR003", handleMemberMessage("media", name, "assign"), span);
     }
     if (!isAnyDuration(value) || !Number.isFinite(value.milliseconds)) {
       throw fault(
@@ -3086,17 +3072,9 @@ export class Evaluator {
   /** `view.placement = "window" | "stage"` moves a shown camera view; a hidden one stays hidden and only warns. */
   #assignCameraProperty(name: string, value: SerializableRuntimeValue, span: SourceSpan): void {
     if (name !== "placement")
-      throw fault(
-        "TSR003",
-        `Camera view property '${name}' cannot be assigned. You can assign placement.`,
-        span,
-      );
-    if (value !== "window" && value !== "stage")
-      throw fault(
-        "TSR050",
-        `Camera placement must be "window" or "stage", but this is ${shownChoice(value)}.`,
-        span,
-      );
+      throw fault("TSR003", handleMemberMessage("camera", name, "assign"), span);
+    if (!isCameraPlacement(value))
+      throw fault("TSR050", cameraPlacementMessage(shownChoice(value)), span);
     const view = this.#cameraView();
     if (!view.shown) {
       this.#warn(
@@ -3141,7 +3119,7 @@ export class Evaluator {
   ): null {
     if (name !== "remove") throw fault("TSR016", removableHandleMethodMessage(handle, name), span);
     if (positional.length !== 0 || Object.keys(named).length !== 0)
-      throw fault("TSR028", "Message remove() takes no arguments.", span);
+      throw fault("TSR028", handleArgumentsMessage("messageHandle", name), span);
     const index = this.#liveMessage(handle, span);
     const record = this.snapshot.liveMessages[index]!;
     if (record.removed === true) return null;
@@ -3179,11 +3157,7 @@ export class Evaluator {
     receiver: ExpressionPlan,
   ): void {
     if (name !== "text")
-      throw fault(
-        "TSR003",
-        `Message handle property '${name}' cannot be assigned. You can assign text.`,
-        span,
-      );
+      throw fault("TSR003", handleMemberMessage("messageHandle", name, "assign"), span);
     if (typeof value !== "string")
       throw fault(
         "TSR050",
@@ -3531,14 +3505,9 @@ export class Evaluator {
     operation: RuntimeDebugRandomOperation,
   ): number {
     assertIntegerRange(range, subject, span);
+    const empty = emptyRangeProblem(subject, range);
+    if (empty !== null) throw fault("TSR041", empty, span);
     const length = rangeLength(range);
-    if (length < 1) {
-      throw fault(
-        "TSR041",
-        `${subject} needs a range that holds at least one whole number, but ${rangeText(range)} holds none. Check that the range is not empty first.`,
-        span,
-      );
-    }
     let drawn = this.#draw(span, operation, length, range, (draw) =>
       sampleRangeInteger(draw, range, length),
     );
@@ -3988,11 +3957,7 @@ export class Evaluator {
     }
     if (isCameraView(value)) {
       if (name !== "placement")
-        throw fault(
-          "TSR017",
-          `Camera views have no property '${name}'. Use the placement property.`,
-          span,
-        );
+        throw fault("TSR017", handleMemberMessage("camera", name, "read"), span);
       return this.#cameraView().placement;
     }
     if (isMediaHandle(value)) {
@@ -4002,7 +3967,7 @@ export class Evaluator {
         this.snapshot.currentSessionTimeMs,
       );
       if (property === undefined)
-        throw fault("TSR017", `Media handles have no property '${name}'.`, span);
+        throw fault("TSR017", handleMemberMessage("media", name, "read"), span);
       return property;
     }
     if (isCalendarDuration(value)) {
@@ -4036,16 +4001,12 @@ export class Evaluator {
         this.snapshot.currentSessionTimeMs,
       );
       if (property === undefined)
-        throw fault("TSR017", `Timer handles have no property '${name}'.`, span);
+        throw fault("TSR017", handleMemberMessage("timer", name, "read"), span);
       return property;
     }
     if (isMessageHandle(value)) {
       if (name !== "text")
-        throw fault(
-          "TSR017",
-          `Message handles have no property '${name}'. Use the text property.`,
-          span,
-        );
+        throw fault("TSR017", handleMemberMessage("messageHandle", name, "read"), span);
       return this.snapshot.liveMessages[this.#liveMessage(value, span)]!.sourceText;
     }
     throw fault("TSR017", missingMemberMessage(value, name, "property"), span);
@@ -4464,7 +4425,7 @@ function removableHandleMethodMessage(
   method: string,
 ): string {
   return isMessageHandle(handle)
-    ? `Message handles have no method '${method}'. Use remove(), or change the message with its text property.`
+    ? handleMemberMessage("messageHandle", method, "call")
     : `Permanent buttons have no method '${method}'. Use remove().`;
 }
 
@@ -4636,12 +4597,8 @@ function timerDisplayValue(
   value: SerializableRuntimeValue,
   span: SourceSpan,
 ): "visible" | "mystery" | "hidden" {
-  if (value === "visible" || value === "mystery" || value === "hidden") return value;
-  throw fault(
-    "TSR050",
-    `Timer display must be "visible", "mystery", or "hidden", but this is ${shownChoice(value)}.`,
-    span,
-  );
+  if (isTimerDisplay(value)) return value;
+  throw fault("TSR050", timerDisplayMessage(shownChoice(value)), span);
 }
 
 function optionalSpeakerString(
@@ -4834,10 +4791,6 @@ function readTemporary(
   return temporary.value;
 }
 
-function rangeLength(range: SerializableRuntimeRange): number {
-  return Math.max(0, range.end - range.start + (range.inclusive ? 1 : 0));
-}
-
 /** `TSR045` unless `range` has whole-number bounds and a length that a number counts exactly. */
 export function assertIntegerRange(
   range: SerializableRuntimeRange,
@@ -4853,7 +4806,7 @@ export function assertIntegerRange(
     throw fault(
       "TSR045",
       !Number.isInteger(range.start) || !Number.isInteger(range.end)
-        ? `${subject} needs a range of whole numbers, but this range is ${rangeText(range)}. Round its bounds with floor(...), round(...), or ceil(...) first.`
+        ? wholeRangeMessage(subject, `this range is ${rangeText(range)}`)
         : Number.isSafeInteger(range.start) && Number.isSafeInteger(range.end)
           ? `${subject} needs a range it can count, but ${rangeText(range)} holds too many numbers. Use a smaller range.`
           : `${subject} needs a range of whole numbers, but the bounds of ${rangeText(range)} are too large. Use bounds closer to 0.`,
@@ -4875,11 +4828,6 @@ function rangeList(range: SerializableRuntimeRange, span: SourceSpan): Serializa
   for (let position = 0, length = rangeLength(range); position < length; position += 1)
     items.push(range.start + position);
   return { kind: "list", items };
-}
-
-/** A range as the source writes it, such as `1..=6`. */
-function rangeText(range: SerializableRuntimeRange): string {
-  return `${withoutNegativeZero(range.start)}${range.inclusive ? "..=" : ".."}${withoutNegativeZero(range.end)}`;
 }
 
 /**

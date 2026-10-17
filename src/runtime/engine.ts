@@ -42,6 +42,17 @@ import {
   boundedInteractionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
 } from "../interaction-limits.js";
+import { rangeLength, rangeStartProblem, rangeText } from "../range-checks.js";
+import {
+  isMediaPosition,
+  isMediaRange,
+  isMediaVolume,
+  isTimerDisplay,
+  mediaPositionMessage,
+  mediaRangeMessage,
+  mediaVolumeMessage,
+  timerDisplayMessage,
+} from "../handle-rules.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
   type Evaluator,
@@ -2687,10 +2698,6 @@ function iterationValue(
   return isRange(source) ? source.start + position : source.items[position]!;
 }
 
-function rangeLength(range: SerializableRuntimeRange): number {
-  return Math.max(0, range.end - range.start + (range.inclusive ? 1 : 0));
-}
-
 /** `TSR043` for a `repeat` count that is not a whole number of at least 0, with the fix for the value it is. */
 function badRepeatCount(plan: ExpressionPlan, value: SerializableRuntimeValue): RuntimeFault {
   const label = planLabel(plan);
@@ -3410,8 +3417,13 @@ export function timerDurationMs(
   span: SourceSpan,
 ): number {
   const range = isRange(value) && unit !== null ? value : null;
+  const below =
+    range === null
+      ? null
+      : rangeStartProblem(command, false, range.start, unit!, `this range is ${rangeText(range)}`);
+  if (below !== null) throw fault("TSR050", below, span);
   const drawn =
-    range === null || range.start < 0
+    range === null
       ? value
       : evaluator.randomIntegerInRange(range, span, `A ${command}`, "duration");
   const amount =
@@ -3421,9 +3433,7 @@ export function timerDurationMs(
   if (isRange(drawn))
     throw fault(
       "TSR050",
-      unit === null
-        ? `A ${command} takes a duration, but this is the range ${rangeText(drawn)}. Give the range a unit, such as '(${rangeText(drawn)}) s'.`
-        : `A ${command} range must not start below 0, but this range is ${rangeText(drawn)}.`,
+      `A ${command} takes a duration, but this is the range ${rangeText(drawn)}. Give the range a unit, such as '(${rangeText(drawn)}) s'.`,
       span,
     );
   if (
@@ -3500,10 +3510,6 @@ function durationFix(value: SerializableRuntimeValue, example: string): string {
     : `Use a duration such as '${example}'.`;
 }
 
-function rangeText(range: SerializableRuntimeRange): string {
-  return `${range.start}${range.inclusive ? "..=" : ".."}${range.end}`;
-}
-
 function commandName(command: "wait" | "timer"): string {
   return command === "timer" ? "Timer" : "Wait";
 }
@@ -3545,16 +3551,12 @@ function startTimer(
       : timerLabel(evaluator.evaluate(instruction.label), instruction.label.span);
   const unit = instruction.unit;
   const range = instruction.repeat && isRange(duration) && unit !== null ? duration : null;
-  const zeroRoundFault = () =>
-    fault(
-      "TSR050",
-      range === null || unit === null
-        ? `A repeating timer needs every round to last longer than zero, but this round can be ${describeShownValue(duration)}. Use a duration of at least 1 second.`
-        : `A repeating timer needs every round to last longer than zero, but this range can draw ${formatDuration(range.start * DURATION_UNIT_MILLISECONDS[unit])}. Start the range at 1 or more.`,
-      instruction.duration.span,
-    );
   // A range that allows a zero-length round is rejected before its first round is drawn.
-  if (range !== null && range.start < 1) throw zeroRoundFault();
+  const zeroRange =
+    range === null
+      ? null
+      : rangeStartProblem("timer", true, range.start, unit!, `this range is ${rangeText(range)}`);
+  if (zeroRange !== null) throw fault("TSR050", zeroRange, instruction.duration.span);
   const roundDurationMs = timerDurationMs(
     evaluator,
     duration,
@@ -3562,7 +3564,12 @@ function startTimer(
     "timer",
     instruction.duration.span,
   );
-  if (instruction.repeat && roundDurationMs <= 0) throw zeroRoundFault();
+  if (instruction.repeat && roundDurationMs <= 0)
+    throw fault(
+      "TSR050",
+      `A repeating timer needs every round to last longer than zero, but this round can be ${describeShownValue(duration)}. Use a duration of at least 1 second.`,
+      instruction.duration.span,
+    );
   const deadlineMs = futureDeadline(
     snapshot,
     roundDurationMs,
@@ -3773,12 +3780,12 @@ function mediaMilliseconds(
   const milliseconds = isAnyDuration(value)
     ? exactDurationMilliseconds(value, subject, span)
     : Number.NaN;
-  if (!Number.isFinite(milliseconds) || milliseconds < 0) {
+  if (!isMediaPosition(milliseconds)) {
     throw fault(
       "TSR050",
       typeof value === "number"
         ? `A media position is a duration, but this is ${describeShownValue(value)}. ${durationFix(value, "30 s")}`
-        : `Media ${subject} must be a duration of at least ${formatDuration(0)}, but this is ${describeShownValue(value)}.`,
+        : mediaPositionMessage(subject, describeShownValue(value)),
       span,
     );
   }
@@ -3867,22 +3874,18 @@ function startMedia(
       : mediaMilliseconds(startAt, "startAt", instruction.startAt.span);
   const endAtMs =
     instruction.endAt === null ? null : mediaMilliseconds(endAt, "endAt", instruction.endAt.span);
-  if (instruction.endAt !== null && endAtMs !== null && endAtMs <= startAtMs) {
+  if (instruction.endAt !== null && endAtMs !== null && !isMediaRange(startAtMs, endAtMs)) {
     throw fault(
       "TSR050",
-      `Media endAt must be later than startAt, but endAt is ${describeShownValue(endAt)} and startAt is ${instruction.startAt === null ? formatDuration(0) : describeShownValue(startAt)}.`,
+      mediaRangeMessage(
+        describeShownValue(endAt),
+        instruction.startAt === null ? formatDuration(0) : describeShownValue(startAt),
+      ),
       instruction.endAt.span,
     );
   }
-  if (
-    instruction.volume !== null &&
-    (typeof volume !== "number" || !(volume >= 0 && volume <= 1))
-  ) {
-    throw fault(
-      "TSR050",
-      `Media volume must be a number from 0 through 1, but this is ${describeShownValue(volume)}.`,
-      instruction.volume.span,
-    );
+  if (instruction.volume !== null && !isMediaVolume(volume)) {
+    throw fault("TSR050", mediaVolumeMessage(describeShownValue(volume)), instruction.volume.span);
   }
   const cues = instruction.cues.map((cue, index) => ({
     kind: cue.kind,
@@ -4080,12 +4083,8 @@ function showPermanentButton(
 }
 
 export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan): DelayDisplay {
-  if (value === "visible" || value === "mystery" || value === "hidden") return value;
-  throw fault(
-    "TSR050",
-    `Timer display must be "visible", "mystery", or "hidden", but this is ${shownChoice(value)}.`,
-    span,
-  );
+  if (isTimerDisplay(value)) return value;
+  throw fault("TSR050", timerDisplayMessage(shownChoice(value)), span);
 }
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {

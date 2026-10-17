@@ -337,7 +337,7 @@ test("static handle hints do not leak from untaken paths, and a variable keeps i
     ]),
     [
       ["TSV041", "null"],
-      ["TSV043", "x"],
+      ["TSV034", "x"],
     ],
   );
 });
