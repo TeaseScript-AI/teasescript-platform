@@ -206,3 +206,20 @@ test("a property gives its contract's value, and a name without one has one text
     compiled[0]![1].replace("toys[", "d["),
   ]);
 });
+
+test("a method that only reads a dict the compiler knows gives a known value; one that changes it makes it unknown", () => {
+  const chance = 'say chance(d.get("a", default: 0))\nexit';
+  const percentage = "chance(...) needs a percentage from 0 through 100, not 101.";
+  assert.deepEqual(errors(`let d = dict{ a: 101 }\n${chance}`), [["TSV043", percentage]]);
+  assert.deepEqual(errors(`say chance(dict{ a: 101 }.get("b", default: 101))\nexit`), [
+    ["TSV043", percentage],
+  ]);
+  for (const name of NAMES.filter((name) => contract(name).changes !== undefined)) {
+    const source = `let d = dict{ a: 101 }\nd.${name}(${ARGUMENTS[name].has.replace('"collar"', '"b"')})\n${chance}`;
+    assert.deepEqual(errors(source), [], name);
+  }
+  // A store changes it too, and so the run decides.
+  const stored = `let d = dict{ a: 101 }\nd["b"] = 1\n${chance}`;
+  assert.deepEqual(errors(stored), []);
+  assert.deepEqual(failure(stored), ["TSR039", percentage]);
+});
