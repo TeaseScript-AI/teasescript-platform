@@ -95,26 +95,20 @@ import { recordValidationTestWork } from "../validation-testing.js";
 import { validateMediaState } from "./media-validation.js";
 import {
   cloneTimer,
-  TIMER_PROPERTIES,
   type RuntimeSettledTimerSnapshot,
   type RuntimeTimerHandlerInvocationSnapshot,
 } from "./timers.js";
 import {
   cloneMedia,
-  MEDIA_PROPERTIES,
   type RuntimeMediaCueInvocationSnapshot,
   type RuntimeSettledMediaSnapshot,
 } from "./media.js";
 import type { RuntimePermanentButtonInvocationSnapshot } from "./permanent-buttons.js";
 import { stringLength } from "../text-operations.js";
 import { calendarDurationProperty, temporalProperty } from "./temporal-operations.js";
-import {
-  isCalendarDuration,
-  isCameraView,
-  isMediaHandle,
-  isTemporal,
-  isTimerHandle,
-} from "./value-predicates.js";
+import { handleKindOf, isCalendarDuration, isTemporal } from "./value-predicates.js";
+import { isHandleProperty } from "../handle-members.js";
+import { isCameraPlacement } from "../handle-rules.js";
 import { validatePermanentButtonState } from "./permanent-button-validation.js";
 import {
   instructionKilledTemporaries,
@@ -2063,9 +2057,10 @@ function preparedReferencePathResolves(
 
 /**
  * A property that the runtime reads from a value that does not hold it (`Evaluator.#getProperty`): one derived from a
- * text, a calendar duration, or a date or time, or state of a timer, media, or camera handle; `undefined` when the
- * value has no such property. A handle's property depends on that state, so it stands as an empty text here: only a
- * text has a property of its own, `length`, which the runtime checks again when it resolves the reference.
+ * text, a calendar duration, or a date or time, or state of a timer, media, or camera handle (see `HANDLE_MEMBERS`);
+ * `undefined` when the value has no such property. A handle's property depends on that state, so it stands as an empty
+ * text here: only a text has a property of its own, `length`, which the runtime checks again when it resolves the
+ * reference. A reference detaches a message's text (`Evaluator.#runMachine`), so no path steps through it.
  */
 function derivedProperty(value: unknown, name: string): SerializableRuntimeValue | undefined {
   if (typeof value === "string") return name === "length" ? stringLength(value) : undefined;
@@ -2074,9 +2069,8 @@ function derivedProperty(value: unknown, name: string): SerializableRuntimeValue
   const runtimeValue = value as SerializableRuntimeValue;
   if (isCalendarDuration(runtimeValue)) return calendarDurationProperty(runtimeValue, name);
   if (isTemporal(runtimeValue)) return temporalProperty(runtimeValue, name);
-  return (isTimerHandle(runtimeValue) && TIMER_PROPERTIES.has(name)) ||
-    (isMediaHandle(runtimeValue) && MEDIA_PROPERTIES.has(name)) ||
-    (isCameraView(runtimeValue) && name === "placement")
+  const handle = handleKindOf(runtimeValue);
+  return handle !== null && handle !== "messageHandle" && isHandleProperty(handle, name)
     ? ""
     : undefined;
 }
@@ -2576,7 +2570,7 @@ function validateCameraView(
   if (
     !isPlainRecord(view) ||
     !hasExactKeys(view, ["placement", "shown"]) ||
-    !isOneOf(view.placement, ["window", "stage"]) ||
+    !isCameraPlacement(view.placement) ||
     typeof view.shown !== "boolean"
   ) {
     errors.push("Runtime cameraView is malformed.");

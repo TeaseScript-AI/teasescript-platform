@@ -1,3 +1,4 @@
+import { isTimerDisplay } from "../handle-rules.js";
 import type { InstructionPlan, StartTimerInstruction } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import { anchoredDeadlineMs } from "./timers.js";
@@ -188,7 +189,7 @@ function validSettledTimerRecord(timer: Record<string, unknown>, now: unknown): 
     hasExactKeys(timer, SETTLED_TIMER_KEYS) &&
     positiveSafeInteger(timer.timerId) &&
     (timer.state === "finished" || timer.state === "stopped") &&
-    (timer.display === "visible" || timer.display === "mystery" || timer.display === "hidden") &&
+    isTimerDisplay(timer.display) &&
     (timer.label === null || typeof timer.label === "string") &&
     typeof timer.persist === "boolean" &&
     (timer.repeatDurationMs === null ||
@@ -209,7 +210,7 @@ function validTimerRecord(
   if (
     !hasExactKeys(timer, TIMER_KEYS) ||
     !positiveSafeInteger(timer.timerId) ||
-    (timer.display !== "visible" && timer.display !== "mystery" && timer.display !== "hidden") ||
+    !isTimerDisplay(timer.display) ||
     (timer.label !== null && typeof timer.label !== "string") ||
     typeof timer.repeat !== "boolean" ||
     typeof timer.persist !== "boolean" ||

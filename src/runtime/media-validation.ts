@@ -1,3 +1,4 @@
+import { isMediaVolume } from "../handle-rules.js";
 import type { InstructionPlan, PlayMediaInstruction } from "../plan/model.js";
 import { sameCaptures } from "./capture-validation.js";
 import { rootFitsFunction, serializedRootFiles } from "./activation-validation.js";
@@ -107,9 +108,7 @@ function validSettledMediaRecord(media: Record<string, unknown>): boolean {
     positiveSafeInteger(media.mediaId) &&
     typeof media.source === "string" &&
     (media.state === "finished" || media.state === "stopped") &&
-    typeof media.volume === "number" &&
-    media.volume >= 0 &&
-    media.volume <= 1 &&
+    isMediaVolume(media.volume) &&
     validMilliseconds(media.positionMs) &&
     validMilliseconds(media.elapsedMs) &&
     (media.durationMs === null
@@ -133,8 +132,7 @@ function validMediaRecord(
     !validMilliseconds(media.startAtMs) ||
     (media.endAtMs !== null &&
       (!validMilliseconds(media.endAtMs) || media.endAtMs <= media.startAtMs)) ||
-    typeof media.volume !== "number" ||
-    !(media.volume >= 0 && media.volume <= 1) ||
+    !isMediaVolume(media.volume) ||
     !validRepeat(media.repeat) ||
     !validCues(media.cues, plan) ||
     !validHandlerId(media.finishFunctionId, plan, true) ||

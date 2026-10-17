@@ -22,6 +22,7 @@ import type {
   SerializableScriptReference,
   SerializableRegex,
 } from "./serializable-values.js";
+import type { HandleKind } from "../handle-members.js";
 
 export function isList(value: SerializableRuntimeValue): value is SerializableRuntimeList {
   return typeof value === "object" && value !== null && value.kind === "list";
@@ -94,6 +95,15 @@ export function isCameraView(
   value: SerializableRuntimeValue,
 ): value is SerializableCameraViewHandle {
   return typeof value === "object" && value !== null && value.kind === "cameraView";
+}
+
+/** The kind of handle a value is, as the compiler names it (see `HANDLE_MEMBERS`), or `null` for another value. */
+export function handleKindOf(value: SerializableRuntimeValue): HandleKind | null {
+  if (isTimerHandle(value)) return "timer";
+  if (isMediaHandle(value)) return "media";
+  if (isCameraView(value)) return "camera";
+  if (isMessageHandle(value)) return "messageHandle";
+  return isPermanentButton(value) ? "permanentButton" : null;
 }
 
 export function isScriptReference(

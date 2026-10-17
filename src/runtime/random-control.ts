@@ -5,6 +5,7 @@ import type {
   PlanSourceLocation,
 } from "../plan/model.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
+import { isAnyHandleMethod, kindsWithMethod, kindsWithProperty } from "../handle-members.js";
 import { RANDOM_FUNCTIONS } from "../language-facts.js";
 import { domainFailure, type NumericFailure } from "../numeric-functions.js";
 import { isRandomFunction, RANDOM_CONTRACTS } from "../random-functions.js";
@@ -468,14 +469,11 @@ function instructionExpressions(instruction: Instruction): readonly ExpressionPl
 
 /**
  * Whether a method call changes runtime state: a list or set method that changes its receiver (see `LIST_METHODS`), a
- * dict's, whose methods that change it have the names of such list methods, or a handle method.
+ * dict's, whose methods that change it have the names of such list methods, or a handle method (see `HandleMethod`).
  */
 function mutatingCall(name: string): boolean {
-  return listMethod(name)?.changes !== undefined || HANDLE_CHANGES.has(name);
+  return listMethod(name)?.changes !== undefined || isAnyHandleMethod(name);
 }
-
-/** The methods of timer and media handles, which change them. */
-const HANDLE_CHANGES: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);
 
 const changesBeforeDraw = new WeakMap<Instruction, boolean>();
 
@@ -496,11 +494,11 @@ function mayChangeBeforeDraw(instruction: Instruction): boolean {
 function analyseChangesBeforeDraw(instruction: Instruction): boolean {
   // A staged say or speaker changes only its stage, which a pause drops.
   if (instruction.kind === "say" || instruction.kind === "declareSpeaker") return false;
-  // `timer.remaining = …` changes the timer, then may end its round, which draws the next one.
+  // A write such as `timer.remaining = …` changes the timer, then may end its round, which draws the next one.
   if (
     instruction.kind === "assign" &&
     instruction.target.kind === "property" &&
-    instruction.target.name === "remaining"
+    kindsWithProperty(instruction.target.name, (property) => property.draws === true).length > 0
   )
     return true;
   const facts = instructionExpressions(instruction).map(analyseExpression);
@@ -554,8 +552,8 @@ function analyseExpression(root: ExpressionPlan): {
             : null;
       if (node.callee.kind === "property" && name !== null && mutatingCall(name)) {
         changes = true;
-        // `pause()` may end a round that is already due, which draws the next one after the change.
-        if (name === "pause") draw();
+        // A call such as `pause()` may end a round that is already due, which draws the next one after the change.
+        if (kindsWithMethod(name, (method) => method.draws === true).length > 0) draw();
       }
     }
   }
