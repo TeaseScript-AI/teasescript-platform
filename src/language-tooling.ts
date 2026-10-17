@@ -54,6 +54,7 @@ import {
   type ListMethod,
   type ListMethodName,
 } from "./list-methods.js";
+import { isDictMethod } from "./dict-operations.js";
 import {
   handleMethodSyntax,
   isAnyHandleMethod,
@@ -950,9 +951,13 @@ type ContractName =
   | ListMethodName
   | AnyHandleMethodName;
 
-/** Whether only lists and sets have a method `name` (see `ListMethod.shared`). */
+/**
+ * Whether only lists and sets have a method `name`: no text, dict, handle (see `TEXT_METHODS`, `DICT_METHODS`, and
+ * `HANDLE_MEMBERS`), or range (see `ListMethod.shared`) has one.
+ */
 function isListOnlyMethod(name: string): name is ListMethodName {
-  if (!isListMethod(name) || isTextMethod(name)) return false;
+  if (!isListMethod(name) || isTextMethod(name) || isDictMethod(name) || isAnyHandleMethod(name))
+    return false;
   const method: ListMethod = LIST_METHODS[name];
   return method.shared !== true;
 }
@@ -968,7 +973,8 @@ function isHandleOnlyMethod(name: string): name is AnyHandleMethodName {
     sharedHandleMethodSummary(name) !== undefined &&
     !isTextMethod(name) &&
     !isTemporalMethod(name) &&
-    !isListMethod(name)
+    !isListMethod(name) &&
+    !isDictMethod(name)
   );
 }
 

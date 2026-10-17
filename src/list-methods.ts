@@ -62,8 +62,8 @@ export interface ListMethod {
    */
   readonly decides?: "element" | "elements" | "default";
   /**
-   * Whether a dict, a range, a message, or a permanent button has a method of this name too, so that a call of it may be
-   * another value's; the methods of text are in `TEXT_METHODS`.
+   * Whether a range has a method of this name too, so that a call of it may be the range's; the methods of text, dicts,
+   * and handles are in `TEXT_METHODS`, `DICT_METHODS`, and `HANDLE_MEMBERS`.
    */
   readonly shared?: true;
   /** What the call does, for the editor's help. */
@@ -110,7 +110,6 @@ export const LIST_METHODS = byName({
   },
   remove: {
     name: "remove",
-    shared: true,
     receivers: BOTH,
     parameters: [value],
     result: "null",
@@ -145,7 +144,6 @@ export const LIST_METHODS = byName({
   },
   clear: {
     name: "clear",
-    shared: true,
     receivers: BOTH,
     parameters: [],
     result: "null",
@@ -184,7 +182,6 @@ export const LIST_METHODS = byName({
   },
   contains: {
     name: "contains",
-    shared: true,
     receivers: BOTH,
     parameters: [value],
     result: "boolean",
@@ -219,7 +216,6 @@ export const LIST_METHODS = byName({
   },
   get: {
     name: "get",
-    shared: true,
     receivers: LIST,
     notOnSet: "A set has no positions, so it has no 'get()'. Use 'contains(...)' instead.",
     parameters: [index],

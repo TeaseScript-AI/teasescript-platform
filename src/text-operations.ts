@@ -4,6 +4,7 @@
  */
 
 import { argumentCountMessage, argumentsTaken } from "./argument-rules.js";
+import { isDictMethod } from "./dict-operations.js";
 import { isAnyHandleMethod } from "./handle-members.js";
 import { isListMethod, LIST_METHODS } from "./list-methods.js";
 import { compileRegex, replacementParts } from "./regex.js";
@@ -341,12 +342,14 @@ export function isTextMember(name: string): boolean {
 }
 
 /**
- * Whether only text has a method `name`: no list, set, dict, or handle has one (`LIST_METHODS`, whose names every method
- * of a dict has too, and `HANDLE_MEMBERS`), and no date and time value has a method of a text method's name
- * (`TEMPORAL_METHODS`), so a call of it is a call of the text method.
+ * Whether only text has a method `name`: no list, set, dict, or handle has one (`LIST_METHODS`, `DICT_METHODS`, and
+ * `HANDLE_MEMBERS`), and no date and time value has a method of a text method's name (`TEMPORAL_METHODS`), so a call of
+ * it is a call of the text method.
  */
 export function isTextOnlyMethod(name: string): name is TextMethodName {
-  return isTextMethod(name) && !isListMethod(name) && !isAnyHandleMethod(name);
+  return (
+    isTextMethod(name) && !isListMethod(name) && !isDictMethod(name) && !isAnyHandleMethod(name)
+  );
 }
 
 /** Whether the method takes a regex, and then uses the regex work limit (see `TextMethod`). */

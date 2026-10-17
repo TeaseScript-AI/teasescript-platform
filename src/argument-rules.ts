@@ -232,21 +232,3 @@ export function getArgumentsProblem(
         : argumentCountMessage("get", `1 argument (${reads}) and a 'default:'`, received),
   };
 }
-
-/**
- * The first problem with the arguments of a dict method (V30 §16): `contains(key)` and `remove(key)` take a key,
- * `clear()` none, and `get(key, default: value)` a key and a `default:`; `named` are the names of the call.
- */
-export function dictArgumentsProblem(
-  method: string,
-  received: number,
-  named: readonly string[],
-): ArgumentProblem | undefined {
-  if (method === "get") return getArgumentsProblem("dict", received, named);
-  return argumentShapeProblem(
-    method,
-    positionalShape(method === "clear" ? [] : ["key"]),
-    received,
-    named,
-  );
-}

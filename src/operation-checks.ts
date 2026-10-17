@@ -66,6 +66,7 @@ import {
   missingDefaultMessage,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
+import { DICT_METHODS, dictMethod } from "./dict-operations.js";
 import { handleMethod, handleMethodNames, kindsWithMethod } from "./handle-members.js";
 import { isListFunction, minMaxValuesProblem, takesValues } from "./list-function-rules.js";
 import {
@@ -1071,21 +1072,22 @@ export function rootName(expression: Expression): string | null {
 }
 
 /**
- * The name of every method a value has: those of text (V30 §8), of lists, sets, and dicts (V30 §16), of handles (see
- * `HANDLE_MEMBERS`), and of date and time values (V30 §35). Other values, such as numbers, objects, and speakers, have
- * none. Every method of dicts has the name of a method of lists.
+ * The name of every method a value has: those of text (V30 §8), of lists and sets (V30 §16), of dicts (V30 §40), of
+ * handles (see `HANDLE_MEMBERS`), and of date and time values (V30 §35). Other values, such as numbers, objects, and
+ * speakers, have none.
  */
 const METHOD_NAMES: ReadonlySet<string> = new Set([
   ...Object.keys(TEXT_METHODS),
   ...Object.keys(LIST_METHODS),
+  ...Object.keys(DICT_METHODS),
   ...handleMethodNames(),
   ...Object.keys(TEMPORAL_METHODS),
 ]);
 
 /**
  * The method `name` as every receiver with it takes its arguments, all of them without a name: a method of lists and
- * sets but `get` and `join`. A dict, a range, text, a message, and a permanent button take as many with the methods
- * they share with lists, but a message and a permanent button take `remove()`.
+ * sets but `get` and `join`. A dict (see `DICT_METHODS`), a range, text, a message, and a permanent button take as many
+ * with the methods they share with lists, but a message and a permanent button take `remove()`.
  */
 function positionalMethod(name: string): MethodParameters | undefined {
   const method = listMethod(name);
@@ -1108,6 +1110,21 @@ export function positionalMethodProblems(
 ): OperationProblem[] {
   const method = positionalMethod(name);
   return method === undefined ? [] : methodShapeProblems(method, call, removable);
+}
+
+/**
+ * Argument names and the number of arguments of a dict's method `name` (see `DICT_METHODS`) but `get`, which takes them
+ * without names, as `positionalMethodProblems` checks those of lists, for a dict in a union.
+ */
+export function dictMethodProblems(
+  name: string,
+  call: CallExpression,
+  removable: boolean,
+): OperationProblem[] {
+  const method = dictMethod(name);
+  return method === undefined || method.named !== undefined
+    ? []
+    : methodShapeProblems(method, call, removable);
 }
 
 /** Argument names and the number of arguments of `method`, which may be `remove()` where the receiver is `removable`. */

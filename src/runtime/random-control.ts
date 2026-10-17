@@ -4,6 +4,7 @@ import type {
   InstructionPlan,
   PlanSourceLocation,
 } from "../plan/model.js";
+import { changesEntries } from "../dict-operations.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { isAnyHandleMethod, kindsWithMethod, kindsWithProperty } from "../handle-members.js";
 import { RANDOM_FUNCTIONS } from "../language-facts.js";
@@ -468,11 +469,11 @@ function instructionExpressions(instruction: Instruction): readonly ExpressionPl
 /* ---------------------------------------------------------------------------------------------------------------- */
 
 /**
- * Whether a method call changes runtime state: a list or set method that changes its receiver (see `LIST_METHODS`), a
- * dict's, whose methods that change it have the names of such list methods, or a handle method (see `HandleMethod`).
+ * Whether a method call changes runtime state: a list, set, or dict method that changes its receiver (see
+ * `LIST_METHODS` and `DICT_METHODS`), or a handle method (see `HandleMethod`).
  */
 function mutatingCall(name: string): boolean {
-  return listMethod(name)?.changes !== undefined || isAnyHandleMethod(name);
+  return listMethod(name)?.changes !== undefined || changesEntries(name) || isAnyHandleMethod(name);
 }
 
 const changesBeforeDraw = new WeakMap<Instruction, boolean>();

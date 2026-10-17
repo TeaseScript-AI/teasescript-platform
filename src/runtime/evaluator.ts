@@ -1,13 +1,23 @@
 import {
   argumentShapeProblem,
   callShapeProblem,
-  dictArgumentsProblem,
   FIXED_PARAMETERS,
   NO_ARGUMENTS,
   positionalShape,
   scriptArgumentCountMessage,
   unknownNamedArgumentMessage,
 } from "../argument-rules.js";
+import {
+  changesEntries,
+  DICT_ACCESS,
+  DICT_METHODS,
+  dictArgumentsProblem,
+  dictKeyMessage,
+  isDictMethod,
+  missingDictMethodMessage,
+  missingDictPropertyMessage,
+  missingKeyMessage,
+} from "../dict-operations.js";
 import { isListFunction } from "../list-function-rules.js";
 import {
   emptyListPropertyFailure,
@@ -179,6 +189,7 @@ import {
   findValue,
   rangeListLengthProblem,
   readCollection,
+  readDict,
   sortOrder,
 } from "./collection-operations.js";
 import {
@@ -824,7 +835,7 @@ export class Evaluator {
           }
           if (expression.kind !== "index") throw new TypeError("Invalid reference continuation.");
           if (isDict(frame.value)) {
-            const key = this.#dictKey(result.value, expression.index.span);
+            const key = this.#dictKey(result.value, expression.index);
             frame.descriptor!.path.push({ kind: "key", key });
             result = {
               value: this.#dictValue(frame.value, key, expression),
@@ -1006,7 +1017,7 @@ export class Evaluator {
         case "dict": {
           if (frame.stage === 1) {
             // The key was evaluated; its value follows.
-            frame.key = this.#dictKey(result.value, expression.entries[frame.index]!.key.span);
+            frame.key = this.#dictKey(result.value, expression.entries[frame.index]!.key);
             frame.stage = 2;
             pending.push(evaluationFrame(expression.entries[frame.index]!.value));
             continue;
@@ -1097,7 +1108,7 @@ export class Evaluator {
           if (isDict(frame.value)) {
             value = this.#dictValue(
               frame.value,
-              this.#dictKey(result.value, expression.index.span),
+              this.#dictKey(result.value, expression.index),
               expression,
             );
             break;
@@ -1340,12 +1351,13 @@ export class Evaluator {
             }
             value = called;
           }
-          // A dict's methods that change it have the names of list methods that do.
           if (
             trace !== null &&
             expression.callee.kind === "property" &&
-            listMethod(expression.callee.name)?.changes !== undefined &&
-            (isList(frame.value) || isSet(frame.value) || isDict(frame.value))
+            (isDict(frame.value)
+              ? changesEntries(expression.callee.name)
+              : (isList(frame.value) || isSet(frame.value)) &&
+                listMethod(expression.callee.name)?.changes !== undefined)
           )
             this.#traceMutation(frame.descriptor, expression.span);
           break;
@@ -1566,14 +1578,14 @@ export class Evaluator {
     if (isSet(object)) throw this.#notIndexable("TSR004", target.object, object, target.span);
     if (isDict(object)) {
       // A new key is added at the end; an existing key keeps its position.
-      const key = this.#dictKey(this.evaluate(target.index), target.index.span);
+      const key = this.#dictKey(this.evaluate(target.index), target.index);
       if (
         object.entries.length >= MAX_COLLECTION_LENGTH &&
         getSerializableDictEntry(object, key) === undefined
       )
         throw collectionTooLong(
           "dict",
-          "assigning to a new key",
+          DICT_ACCESS.store.grows,
           target.span,
           object.entries.length + 1,
         );
@@ -1752,7 +1764,7 @@ export class Evaluator {
     }
     if (isSet(object)) throw this.#notIndexable("TSR004", target.object, object, target.span);
     if (isDict(object)) {
-      this.#dictKey(this.evaluate(target.index), target.index.span);
+      this.#dictKey(this.evaluate(target.index), target.index);
       return;
     }
     if (!isList(object)) throw this.#notIndexable("TSR005", target.object, object, target.span);
@@ -1782,7 +1794,7 @@ export class Evaluator {
     }
     if (isRange(receiver) && method === "toList") return;
     if (isDict(receiver)) {
-      if (!DICT_METHODS.has(method)) throw fault("TSR016", noDictMethodMessage(method), span);
+      if (!isDictMethod(method)) throw fault("TSR016", missingDictMethodMessage(method), span);
       return;
     }
     if (!isList(receiver) && !isSet(receiver)) {
@@ -2714,7 +2726,7 @@ export class Evaluator {
     }
   }
 
-  /** `contains`, `remove`, `clear`, and `get` of a dict, each with a text key except `clear`. */
+  /** A method of a dict, with as many arguments as it takes (see `DICT_METHODS`), each a text key. */
   #callDict(
     receiver: SerializableRuntimeDict,
     expression: Extract<ExpressionPlan, { kind: "call" }>,
@@ -2726,8 +2738,8 @@ export class Evaluator {
     const callee = expression.callee as Extract<ExpressionPlan, { kind: "property" }>;
     const name = callee.name;
     const span = expression.span;
-    if (!DICT_METHODS.has(name)) throw fault("TSR016", noDictMethodMessage(name), span);
-    const problem = dictArgumentsProblem(name, positional.length, [
+    if (!isDictMethod(name)) throw fault("TSR016", missingDictMethodMessage(name), span);
+    const problem = dictArgumentsProblem(DICT_METHODS[name], positional.length, [
       ...Object.keys(named),
       ...(defaulted ? ["default"] : []),
     ]);
@@ -2739,21 +2751,23 @@ export class Evaluator {
       }
       return null;
     }
+    // Every other method takes one key.
     const keyPlan = expression.arguments[0]!.value;
-    const key = this.#dictKey(positional[0]!, keyPlan.span);
+    const key = this.#dictKey(positional[0]!, keyPlan);
     switch (name) {
       case "contains":
-        return getSerializableDictEntry(receiver, key) !== undefined;
       case "get": {
-        // A stored null is a value, so only a missing entry gives the default.
-        const entry = getSerializableDictEntry(receiver, key);
-        return entry === undefined ? USE_DEFAULT : entry.value;
+        const value = readDict(receiver, name, key);
+        return value === undefined ? USE_DEFAULT : value;
       }
-      default: {
+      case "remove":
         if (getSerializableDictEntry(receiver, key) === undefined)
-          throw missingKey(key, this.#receiverLabel(callee.object), keyPlan, span, this.plan);
+          throw this.#missingKey(key, callee.object, keyPlan, span);
         freezePreparedReferenceDescendants(this.snapshot, receiver, key);
         return removeSerializableDictEntry(receiver, key)!.value;
+      default: {
+        const unhandled: never = name;
+        throw new Error(`Dict method '${String(unhandled)}' has no implementation.`);
       }
     }
   }
@@ -3645,11 +3659,7 @@ export class Evaluator {
     if (isDict(value)) {
       const property = dictProperty(value, name);
       if (property === undefined)
-        throw fault(
-          "TSR017",
-          `Dicts have no property '${name}'. Use length, keys, or values. To read a value by its key, write '${this.#optionalLabel(object) ?? "dict"}[${JSON.stringify(name)}]'.`,
-          span,
-        );
+        throw fault("TSR017", missingDictPropertyMessage(name, this.#optionalLabel(object)), span);
       return property;
     }
     if (isCameraView(value)) {
@@ -3719,12 +3729,17 @@ export class Evaluator {
     if (!isList(value) && !isDict(value)) throw this.#notIndexable("TSR008", plan, value, span);
   }
 
-  #dictKey(value: SerializableRuntimeValue, span: SourceSpan): string {
+  /** The key that `keyPlan` gave as `value`, which is text (`dictKeyMessage`). */
+  #dictKey(value: SerializableRuntimeValue, keyPlan: ExpressionPlan): string {
     if (typeof value !== "string")
       throw fault(
         "TSR062",
-        `A dict key is text (string), but this is ${describeTypedValue(value)}.${typeof value === "number" ? ' Write a number key as text, as in "${id}".' : ""}`,
-        span,
+        dictKeyMessage(
+          describeTypedValue(value),
+          typeof value === "number",
+          planLabel(keyPlan, this.plan),
+        ),
+        keyPlan.span,
       );
     return value;
   }
@@ -3737,14 +3752,29 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     const entry = getSerializableDictEntry(dict, key);
     if (entry === undefined)
-      throw missingKey(
-        key,
-        this.#receiverLabel(expression.object),
-        expression.index,
-        expression.span,
-        this.plan,
-      );
+      throw this.#missingKey(key, expression.object, expression.index, expression.span);
     return entry.value;
+  }
+
+  /**
+   * The error for a key a dict does not have (`missingKeyMessage`), naming the dict and the key as the source spells
+   * them where the plan still shows them.
+   */
+  #missingKey(
+    key: string,
+    dictPlan: ExpressionPlan,
+    keyPlan: ExpressionPlan,
+    span: SourceSpan,
+  ): RuntimeFault {
+    return fault(
+      "TSR061",
+      missingKeyMessage(
+        quotedText(messageText(key)),
+        this.#receiverLabel(dictPlan),
+        planLabel(keyPlan, this.plan),
+      ),
+      span,
+    );
   }
 
   /** How the source spells the value `plan` gives, where there is a plan, or `null`. */
@@ -3929,8 +3959,6 @@ export class Evaluator {
   }
 }
 
-const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
-
 /*
  * A resolved draw has the kind of outcome its support admits: control checks every chosen outcome against the support
  * before it is used, and a natural one has its sampler's kind.
@@ -3961,26 +3989,6 @@ function outcomeOrder(outcome: RandomNatural): readonly number[] {
 
 const DICT_TEXT_MESSAGE =
   '"${...}" cannot show a dict. Select one value with dict[key], or show every value with dict.values.join().';
-
-/**
- * The error for a key a dict does not have, with the check that avoids it, such as `Check toys.contains(name) first.`
- * The key is named as the source spells it where the plan still shows it, and otherwise by its text.
- */
-function missingKey(
-  key: string,
-  owner: string | null,
-  keyPlan: ExpressionPlan,
-  span: SourceSpan,
-  program: InstructionPlan,
-): RuntimeFault {
-  const shown = quotedText(messageText(key));
-  const check = `contains(${planLabel(keyPlan, program) ?? shown})`;
-  return fault(
-    "TSR061",
-    `Dictionary has no key ${shown}. Check ${owner === null ? `it with ${check}` : `${owner}.${check}`} first.`,
-    span,
-  );
-}
 
 /**
  * How the source spells an arithmetic operand: a variable, a property path, or a number, or `null` for anything else. An
@@ -4261,13 +4269,6 @@ function invalidReturn(name: string, reason: string): string {
   return internalFault(
     `The built-in function '${name}' returned a value that a script cannot hold: ${reason.replace(/[.]$/u, "")}.`,
   );
-}
-
-/** A method a list, set, or dict does not have, in the compiler's wording. */
-function noDictMethodMessage(name: string): string {
-  return name === "add"
-    ? "Dicts have no method 'add'. Store a value by its key, as in dict[key] = value."
-    : `Dicts have no method '${name}'. Use contains, remove, clear, or get.`;
 }
 
 function elementProperty(name: string): ElementProperty | undefined {

@@ -1,3 +1,4 @@
+import { isDictProperty } from "../dict-operations.js";
 import { isOneOf } from "../plan/validation-support.js";
 import {
   cloneRandomControl,
@@ -2031,12 +2032,23 @@ function preparedReferencePathResolves(
     }
     if (isPlainRecord(current) && current.kind === "dict" && Array.isArray(current.entries)) {
       const entries = serializedDictEntryMap(current);
-      if (entries === null) return false;
-      // `keys` and `values` read new lists derived from the entries.
-      if (step.name === "length") current = entries.size;
-      else if (step.name === "keys") current = { kind: "list", items: [...entries.keys()] };
-      else if (step.name === "values") current = { kind: "list", items: [...entries.values()] };
-      else return false;
+      if (entries === null || !isDictProperty(step.name)) return false;
+      // `keys` and `values` read new lists derived from the entries (see `DICT_PROPERTIES`).
+      switch (step.name) {
+        case "length":
+          current = entries.size;
+          break;
+        case "keys":
+          current = { kind: "list", items: [...entries.keys()] };
+          break;
+        case "values":
+          current = { kind: "list", items: [...entries.values()] };
+          break;
+        default: {
+          const unhandled: never = step.name;
+          throw new Error(`Dict property '${String(unhandled)}' has no implementation.`);
+        }
+      }
       continue;
     }
     if (
