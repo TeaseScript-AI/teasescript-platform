@@ -32,8 +32,9 @@ import {
 import { regexFromText } from "./string-operations.js";
 import { combinedDateAndTime, temporalConverted } from "./temporal-operations.js";
 import { checkTextLength } from "./text-length.js";
-import { describeRuntimeValue, isAngle, isList, isRange, isSet } from "./value-predicates.js";
+import { isAngle, isList, isRange, isSet } from "./value-predicates.js";
 import { isVisibleScalar } from "./value-text.js";
+import { describeValue } from "../value-kinds.js";
 
 /**
  * Operations that only read their values and give a new one: `+` on text or lists, the numeric and angle functions, and
@@ -68,7 +69,7 @@ export function joinedValue(
   }
   throw fault(
     "TSR009",
-    `'+' joins two texts or two lists and adds numbers or durations, but these are ${describeRuntimeValue(left)} and ${describeRuntimeValue(right)}.${joinFix(left, right)}`,
+    `'+' joins two texts or two lists and adds numbers or durations, but these are ${describeValue(left)} and ${describeValue(right)}.${joinFix(left, right)}`,
     span,
   );
 }
@@ -133,7 +134,7 @@ export function callNumbers(
       numberArgumentMessage(
         name,
         signature,
-        describeRuntimeValue(value),
+        describeValue(value),
         typeof value === "number"
           ? "number"
           : typeof value === "string"
@@ -201,7 +202,7 @@ const CONVERSION_RUNS: {
     if (typeof text !== "string")
       throw fault(
         "TSR059",
-        `toBase64(...) ${CONVERSIONS.toBase64.does}, not ${describeRuntimeValue(text!)}.`,
+        `toBase64(...) ${CONVERSIONS.toBase64.does}, not ${describeValue(text!)}.`,
         run.span,
       );
     return base64Text(text, run.span);

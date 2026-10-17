@@ -20,7 +20,6 @@ import type { TraceStore } from "../debug-trace.js";
 import type { RandomControl } from "../random-control.js";
 import { cloneTransferDestination } from "../state.js";
 import { isScriptReference } from "../value-predicates.js";
-import { describeValue } from "../value-types.js";
 import type { InterpreterEvent } from "../events.js";
 import type { RuntimeTimerSnapshot } from "../timers.js";
 import type {
@@ -34,6 +33,7 @@ import {
   removePermanentButtons,
   type RuntimePermanentButtonSnapshot,
 } from "../permanent-buttons.js";
+import { describeValue } from "../../value-kinds.js";
 
 /*
  * Transfers (ADR 0022 §5). Each entry into a file is an activation with its own top-level variables, in a root scope.

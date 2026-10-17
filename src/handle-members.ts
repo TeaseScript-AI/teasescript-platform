@@ -16,6 +16,8 @@ import {
   mediaVolumeMessage,
   timerDisplayMessage,
 } from "./handle-rules.js";
+import type { SerializableRuntimeValue } from "./runtime/serializable-values.js";
+import { valueKindOf } from "./value-kinds.js";
 
 /** The kinds of handles, as the compiler names their types. */
 export const HANDLE_KINDS = Object.freeze([
@@ -30,6 +32,12 @@ export type HandleKind = (typeof HANDLE_KINDS)[number];
 
 export function isHandleKind(kind: string): kind is HandleKind {
   return HANDLE_KINDS.some((handle) => handle === kind);
+}
+
+/** The kind of handle a runtime value is, or `null` for another value. */
+export function handleKindOf(value: SerializableRuntimeValue): HandleKind | null {
+  const kind = valueKindOf(value);
+  return isHandleKind(kind) ? kind : null;
 }
 
 /** The type of a property's value. */

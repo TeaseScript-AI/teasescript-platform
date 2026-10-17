@@ -5,7 +5,6 @@ import {
   defaultDescription,
   FILE_TEXT_FUNCTIONS,
   isConversion,
-  unwritableJsonReason,
   WRITABLE_JSON_FIX,
   type CallShape,
   type Conversion,
@@ -53,8 +52,10 @@ import {
   typeName,
   union,
   ABSOLUTE_DATE_TIME_TYPE,
+  valueKindOfType,
   type StaticType,
 } from "./static-types.js";
+import { unwritableJsonReason, VALUE_KINDS, type ValueKind } from "./value-kinds.js";
 import {
   argumentCountMessage,
   argumentShapeProblem,
@@ -747,19 +748,17 @@ function neverTextProblems(
 /** A value that is or may hold one that `toJson` cannot write (V30 §13). */
 function unwritableJsonProblems(value: Expression, type: StaticType): OperationProblem[] {
   let unwritable: StaticType | undefined;
+  let unwritableKind: ValueKind | undefined;
   containsType(type, (part) => {
-    if (
-      !SESSION_HANDLE_KINDS.has(part.kind) &&
-      part.kind !== "range" &&
-      !isScalar(part, "calendarDuration", "script", "regex")
-    )
-      return false;
+    const kind = valueKindOfType(part);
+    if (kind === undefined || VALUE_KINDS[kind].json !== null) return false;
     unwritable = part;
+    unwritableKind = kind;
     return true;
   });
-  if (unwritable === undefined) return [];
+  if (unwritable === undefined || unwritableKind === undefined) return [];
   const kind = describeValue(unwritable);
-  const reason = unwritableJsonReason(SESSION_HANDLE_KINDS.has(unwritable.kind));
+  const reason = unwritableJsonReason(unwritableKind);
   return [
     {
       kind: "invalidOperand",
@@ -771,15 +770,6 @@ function unwritableJsonProblems(value: Expression, type: StaticType): OperationP
     },
   ];
 }
-
-/** The handles of what a script started or showed, which exist only in the current session. */
-const SESSION_HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
-  "timer",
-  "media",
-  "camera",
-  "permanentButton",
-  "messageHandle",
-]);
 
 /**
  * Problems with a function of numbers or angles, such as a numeric or angle function or `chance`: names it does not

@@ -33,7 +33,6 @@ import { checkTextArguments } from "./string-operations.js";
 import { compareTemporal } from "./temporal-operations.js";
 import { checkTextLength, groupedDigits } from "./text-length.js";
 import {
-  describeRuntimeValue,
   isAngle,
   isAnyDuration,
   isCalendarDuration,
@@ -43,6 +42,7 @@ import {
   isSet,
   isTemporal,
 } from "./value-predicates.js";
+import { describeValue } from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -71,7 +71,7 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
     if (itemKind === undefined)
       throw fault(
         "TSR060",
-        `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeRuntimeValue(item)}.`,
+        `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeValue(item)}.`,
         span,
       );
     if (kind !== undefined && itemKind !== kind)
@@ -275,7 +275,7 @@ export function readCollection(
       if (typeof count !== "number")
         throw fault(
           "TSR057",
-          listArgumentMessage(name, "count", describeRuntimeValue(count), "other"),
+          listArgumentMessage(name, "count", describeValue(count), "other"),
           span,
         );
       const problem = countProblem(name, count);
@@ -344,7 +344,7 @@ function setOperation(
       listArgumentMessage(
         name,
         "collection",
-        describeRuntimeValue(argument),
+        describeValue(argument),
         isRange(argument) ? "range" : "other",
       ),
       span,

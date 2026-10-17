@@ -34,9 +34,9 @@ import {
 import { interactionStringFits } from "../../interaction-limits.js";
 import { isSha256Hex } from "../sha256.js";
 import { checkTextLength, messageText } from "../text-length.js";
-import { describeRuntimeValue } from "../value-predicates.js";
 import type { CapturedMediaAdmission } from "./capture.js";
 import type { RuntimeFileStoreActionSnapshot, RuntimeFileToStore } from "./model.js";
+import { describeValue } from "../../value-kinds.js";
 
 // The calls that may use the Player's file store (V30 §13 and §33). A `fileStore` instruction first works out which files
 // to store, read, or hash. Without any it gives the result at once; otherwise it asks the Player and waits, and runs
@@ -331,7 +331,7 @@ function storedFileOperand(
     `${call}(...) ${call === "hashFile" ? "hashes" : "reads"} a stored file, ${
       typeof value === "string"
         ? `but ${JSON.stringify(messageText(value))} is not one`
-        : `not ${describeRuntimeValue(value)}`
+        : `not ${describeValue(value)}`
     }. Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or fromJson(...) gave for a file.`,
     copySpan(span),
   );
@@ -345,7 +345,7 @@ function filesOperand(
   if (typeof value === "boolean") return value;
   throw new RuntimeFault(
     "TSR059",
-    `${call}(...) takes true or false (boolean) for 'files:', not ${describeRuntimeValue(value)}.`,
+    `${call}(...) takes true or false (boolean) for 'files:', not ${describeValue(value)}.`,
     copySpan(span),
   );
 }

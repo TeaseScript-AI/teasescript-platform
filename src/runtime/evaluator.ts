@@ -183,6 +183,7 @@ import {
   type HandleKind,
   type HandleMethodName,
   type HandlePropertyName,
+  handleKindOf,
 } from "../handle-members.js";
 import { unmeasurableLengthMessage } from "../delay-rules.js";
 import {
@@ -262,7 +263,6 @@ import {
   MAX_RUNTIME_SESSION_TIME_MS,
 } from "./state.js";
 import {
-  describeRuntimeValue,
   isAngle,
   isAnyDuration,
   isCalendarDuration,
@@ -281,14 +281,12 @@ import {
   isMessageHandle,
   isCameraView,
   isPermanentButton,
-  handleKindOf,
 } from "./value-predicates.js";
 import {
   assertValueType,
   cannotConvert,
   describeShownValue,
   shownChoice,
-  describeValue as describeTypedValue,
   matchesValueType,
   storedValueMismatch,
 } from "./value-types.js";
@@ -346,6 +344,7 @@ import {
   type Conversion,
   type ValueConversion,
 } from "../conversions.js";
+import { describeValue } from "../value-kinds.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -2375,7 +2374,7 @@ export class Evaluator {
       // Handles and speaker references name records that only the runtime creates; a host cannot hand one out.
       const identity = findRuntimeIdentity(copied);
       if (identity !== null) {
-        const kind = describeRuntimeValue(identity);
+        const kind = describeValue(identity);
         throw fault(
           "TSR013",
           internalFault(
@@ -2628,7 +2627,7 @@ export class Evaluator {
             listArgumentMessage(
               name,
               "list",
-              describeRuntimeValue(other),
+              describeValue(other),
               isSet(other) ? "set" : isRange(other) ? "range" : "other",
             ),
             span,
@@ -3312,7 +3311,7 @@ export class Evaluator {
     if (typeof value !== "number" || !Number.isFinite(value)) {
       throw fault(
         "TSR080",
-        `A tag's number is compared with a number, but this is ${describeRuntimeValue(value)}.`,
+        `A tag's number is compared with a number, but this is ${describeValue(value)}.`,
         span,
       );
     }
@@ -3521,7 +3520,7 @@ export class Evaluator {
     if (pair !== undefined)
       throw fault(
         "TSR058",
-        `${name}(${pair.join(", ")}) combines a ${pair[0]} and a ${pair[1]}, not ${describeRuntimeValue(positional[0]!)} and ${describeRuntimeValue(positional[1]!)}.`,
+        `${name}(${pair.join(", ")}) combines a ${pair[0]} and a ${pair[1]}, not ${describeValue(positional[0]!)} and ${describeValue(positional[1]!)}.`,
         span,
       );
     throw fault(
@@ -3560,7 +3559,7 @@ export class Evaluator {
     if (typeof text !== "string")
       throw fault(
         "TSR059",
-        `escapeMarkup(...) needs text, not ${describeRuntimeValue(text)}.${text !== null && isVisibleScalar(text) ? " Convert it with toString(...) first." : isList(text) && text.items.every(isVisibleScalar) ? " Use .join() to combine its elements as text." : ""}`,
+        `escapeMarkup(...) needs text, not ${describeValue(text)}.${text !== null && isVisibleScalar(text) ? " Convert it with toString(...) first." : isList(text) && text.items.every(isVisibleScalar) ? " Use .join() to combine its elements as text." : ""}`,
         call.span,
       );
     // Escaping puts a backslash before some characters, so only a text that could get too long is measured first.
@@ -3735,7 +3734,7 @@ export class Evaluator {
       throw fault(
         "TSR062",
         dictKeyMessage(
-          describeTypedValue(value),
+          describeValue(value),
           typeof value === "number",
           planLabel(keyPlan, this.plan),
         ),
@@ -4116,11 +4115,7 @@ function hashedText(
   if (problem !== undefined) throw fault("TSR028", problem.message, span);
   const text = positional[0]!;
   if (typeof text !== "string")
-    throw fault(
-      "TSR059",
-      `hashText(...) hashes text (string), not ${describeRuntimeValue(text)}.`,
-      span,
-    );
+    throw fault("TSR059", `hashText(...) hashes text (string), not ${describeValue(text)}.`, span);
   return textSha256(text);
 }
 
@@ -4207,15 +4202,15 @@ function noArithmeticResult(
 /** An operand's kind, with the value of a number, duration, or angle, such as `a duration (1 s)`. */
 function kindAndValue(value: SerializableRuntimeValue): string {
   return typeof value === "number" || isAnyDuration(value) || isAngle(value)
-    ? `${describeRuntimeValue(value)} (${operandText(value)})`
-    : describeRuntimeValue(value);
+    ? `${describeValue(value)} (${operandText(value)})`
+    : describeValue(value);
 }
 
 /** A number, duration, or angle operand as a message shows it. */
 function operandText(value: SerializableRuntimeValue): string {
   if (typeof value === "number") return String(withoutNegativeZero(value));
   if (isAngle(value)) return formatAngle(value);
-  return isAnyDuration(value) ? formatDuration(value) : describeRuntimeValue(value);
+  return isAnyDuration(value) ? formatDuration(value) : describeValue(value);
 }
 
 function isZero(value: SerializableRuntimeValue): boolean {
@@ -4406,7 +4401,7 @@ function scriptReference(
     if (typeof value === "string") return value;
     throw fault(
       "TSR058",
-      `script(...) takes ${part} as text (string), not ${describeRuntimeValue(value)}.`,
+      `script(...) takes ${part} as text (string), not ${describeValue(value)}.`,
       span,
     );
   };
@@ -4721,7 +4716,7 @@ function tagNames(
   if (!isList(value) && !isSet(value)) {
     throw fault(
       "TSR081",
-      `'${option}:' takes a list of tag names, but this is ${describeRuntimeValue(value)}.`,
+      `'${option}:' takes a list of tag names, but this is ${describeValue(value)}.`,
       span,
     );
   }
@@ -4730,7 +4725,7 @@ function tagNames(
     if (name === null) {
       throw fault(
         "TSR081",
-        `'${option}:' takes tag names, which use lowercase letters a–z, digits, and hyphens, but it holds ${typeof item === "string" ? `'${item}'` : describeRuntimeValue(item)}.`,
+        `'${option}:' takes tag names, which use lowercase letters a–z, digits, and hyphens, but it holds ${typeof item === "string" ? `'${item}'` : describeValue(item)}.`,
         span,
       );
     }
@@ -4792,7 +4787,7 @@ export function acceptedDefault(
     if (description !== undefined && !fitsDefault(conversion, value))
       throw fault(
         "TSR058",
-        `${operation}(...) needs ${description} as its default:, not ${describeRuntimeValue(value)}.`,
+        `${operation}(...) needs ${description} as its default:, not ${describeValue(value)}.`,
         span,
       );
   }

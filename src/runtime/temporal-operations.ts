@@ -69,8 +69,8 @@ import {
   isTime,
   isAbsoluteDateTime,
 } from "./value-predicates.js";
-import { describeValue } from "./value-types.js";
 import { wallClockAt, type RuntimeTemporalCapture } from "./temporal-captures.js";
+import { describeValue } from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 

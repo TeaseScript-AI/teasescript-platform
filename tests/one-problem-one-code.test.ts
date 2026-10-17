@@ -8,7 +8,7 @@ import { run } from "../src/runtime/engine.js";
 import { RuntimeFault } from "../src/runtime/errors.js";
 import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
 import { temporalMethod, temporalNow } from "../src/runtime/temporal-operations.js";
-import { describeValue as describeRuntimeValue } from "../src/runtime/value-types.js";
+import { describeValue as describeRuntimeValue } from "../src/value-kinds.js";
 import { createSourcePosition, createSourceSpan } from "../src/source.js";
 import {
   BOOLEAN_TYPE,

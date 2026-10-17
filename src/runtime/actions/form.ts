@@ -40,7 +40,6 @@ import {
   type SerializableRuntimeValue,
 } from "../serializable-values.js";
 import {
-  describeRuntimeValue,
   isAnyDuration,
   isDate,
   isDateTime,
@@ -51,12 +50,7 @@ import {
 } from "../value-predicates.js";
 import { fieldText } from "../value-text.js";
 import { exactDurationMilliseconds } from "../temporal-operations.js";
-import {
-  describeShownValue,
-  describeType,
-  describeValue,
-  matchesValueType,
-} from "../value-types.js";
+import { describeShownValue, describeType, matchesValueType } from "../value-types.js";
 import { escapedMarkupLength, escapeMarkup } from "../../message-markup.js";
 import { checkTextLength, MAX_TEXT_LENGTH, messageText } from "../text-length.js";
 import {
@@ -70,6 +64,7 @@ import type {
   RuntimeFormStateSnapshot,
   RuntimeFormValue,
 } from "./model.js";
+import { describeValue } from "../../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -157,7 +152,7 @@ export function materializeForm(
       const start = defaults.items[index]!;
       if (typeof start !== "boolean")
         throw fault(
-          `askBooleans prefill ${index} (${JSON.stringify(messageText(fieldText(text, span, context)))}): takes true or false, not ${describeRuntimeValue(start)}.`,
+          `askBooleans prefill ${index} (${JSON.stringify(messageText(fieldText(text, span, context)))}): takes true or false, not ${describeValue(start)}.`,
           span,
         );
       add(
@@ -177,7 +172,7 @@ export function materializeForm(
           : undefined;
     if (written === undefined)
       throw fault(
-        `askForm fields: must be ${prepared.kind === "object" ? "an object" : prepared.kind === "dict" ? "a dict" : "an object or a dict"} of fields, not ${describeRuntimeValue(fieldsValue)}.`,
+        `askForm fields: must be ${prepared.kind === "object" ? "an object" : prepared.kind === "dict" ? "a dict" : "an object or a dict"} of fields, not ${describeValue(fieldsValue)}.`,
         span,
       );
     shape = isObject(fieldsValue) ? "object" : "dict";
@@ -370,7 +365,7 @@ function materializeField(
       throw problem(
         typeof typeValue === "string"
           ? unknownFormTypeMessage(typeValue)
-          : `type: must be text such as "integer", not ${describeRuntimeValue(typeValue)}.`,
+          : `type: must be text such as "integer", not ${describeValue(typeValue)}.`,
       );
     kind = typeValue;
   } else if (options !== undefined) kind = typeof start === "boolean" ? "boolean" : "cycle";
@@ -385,7 +380,7 @@ function materializeField(
   } else if (isDate(start)) kind = "date";
   else if (isTime(start)) kind = "time";
   else if (isDateTime(start)) kind = "datetime";
-  else throw problem(`a field cannot start as ${describeRuntimeValue(start)}.`);
+  else throw problem(`a field cannot start as ${describeValue(start)}.`);
 
   const textValue = read("text");
   const text = textValue === undefined ? id : fieldText(textValue, span, context);
@@ -417,7 +412,7 @@ function materializeField(
       throw problem("options: must be a list with at least one option.");
     if (kind === "boolean") {
       if (start !== undefined && typeof start !== "boolean")
-        throw problem(`a toggle starts true or false, not ${describeRuntimeValue(start)}.`);
+        throw problem(`a toggle starts true or false, not ${describeValue(start)}.`);
       if (
         buttons !== null &&
         !(
@@ -454,7 +449,7 @@ function materializeField(
     if (kind !== "integer" && kind !== "number")
       throw problem(`${name}: is for integer and number fields, not a ${kind}.`);
     if (typeof value !== "number" || !Number.isFinite(value))
-      throw problem(`${name}: must be a number, not ${describeRuntimeValue(value)}.`);
+      throw problem(`${name}: must be a number, not ${describeValue(value)}.`);
     if (kind === "integer" && !Number.isSafeInteger(value))
       throw problem(`${name}: must be a whole number for an integer field.`);
     return Object.is(value, -0) ? 0 : value;
@@ -476,7 +471,7 @@ function materializeField(
     throw problem(
       kind === "text" && typeof start === "string"
         ? `its text is longer than an answer may be (${MAX_INTERACTION_STRING_UTF8_BYTES} UTF-8 bytes).`
-        : `a ${kind} field cannot start as ${describeRuntimeValue(start!)}.`,
+        : `a ${kind} field cannot start as ${describeValue(start!)}.`,
     );
   if (typeof value === "number" && !withinBounds(field, value))
     throw problem(`its value ${numberAnswerText(value)} is outside ${boundsText(field)}.`);

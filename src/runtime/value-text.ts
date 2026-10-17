@@ -29,7 +29,6 @@ import type {
   SerializableTimerHandle,
 } from "./serializable-values.js";
 import {
-  describeRuntimeValue,
   isAngle,
   isAnyDuration,
   isDict,
@@ -47,6 +46,7 @@ import {
   isTemporal,
   isTimerHandle,
 } from "./value-predicates.js";
+import { describeValue } from "../value-kinds.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -113,7 +113,7 @@ function plainScalarText(value: SerializableRuntimeValue, span: SourceSpan): str
   if (isRegex(value)) return regexNotation(value, span);
   throw fault(
     "TSR021",
-    `${describeRuntimeValue(value).replace(/^a/u, "A")} cannot be shown as text here.${isObject(value) ? " Show one of its properties instead." : isSet(value) ? " Show its elements with toList().join() instead." : ""}`,
+    `${describeValue(value).replace(/^a/u, "A")} cannot be shown as text here.${isObject(value) ? " Show one of its properties instead." : isSet(value) ? " Show its elements with toList().join() instead." : ""}`,
     span,
   );
 }

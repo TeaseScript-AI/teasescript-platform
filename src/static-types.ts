@@ -11,6 +11,7 @@ import type {
 } from "./ast.js";
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import type { SourceSpan } from "./source.js";
+import { VALUE_KINDS, type PlainKind, type ValueKind } from "./value-kinds.js";
 
 /**
  * A compile-time value type (ADR 0021). `unknown` stands for values the compiler cannot know, such as untyped storage,
@@ -41,13 +42,11 @@ export type StaticType =
   | { readonly kind: "object"; readonly properties: PropertyTable | null }
   | { readonly kind: "union"; readonly members: readonly StaticType[] }
   /**
-   * `camera` is the handle of a camera view (`let view = showCamera`), and `permanentButton` the identifier of a
-   * permanent button; scripts cannot name either as a type. `messageHandle` is the handle of a shown message.
+   * A type of the kind's own without parts (`PlainKind`), such as `range` and `timer`. `camera` is the handle of a camera
+   * view (`let view = showCamera`), and `permanentButton` the identifier of a permanent button; scripts cannot name
+   * either as a type. `messageHandle` is the handle of a shown message.
    */
-  | {
-      readonly kind:
-        "range" | "timer" | "media" | "camera" | "permanentButton" | "messageHandle" | "speaker";
-    }
+  | { readonly kind: Exclude<PlainKind, "null"> }
   | OpenType;
 
 /** A list, set, or dict type. */
@@ -461,14 +460,31 @@ function namedType(name: TypeName): StaticType {
       return { kind: name, element: UNKNOWN_TYPE };
     case "object":
       return ANY_OBJECT_TYPE;
-    case "range":
-    case "speaker":
-    case "timer":
-    case "media":
-    case "messageHandle":
-      return { kind: name };
     default:
-      return scalar(name);
+      return isScalarKind(name) ? scalar(name) : { kind: name };
+  }
+}
+
+function isScalarKind(kind: ValueKind): kind is ScalarTypeName {
+  return VALUE_KINDS[kind].type === "scalar";
+}
+
+/**
+ * The kind of value a type holds (`VALUE_KINDS`), or `undefined` for a type of several kinds, a type the compiler does
+ * not know, and `never`.
+ */
+export function valueKindOfType(type: StaticType): ValueKind | undefined {
+  const value = resolved(type);
+  switch (value.kind) {
+    case "scalar":
+      return value.name;
+    case "unknown":
+    case "never":
+    case "open":
+    case "union":
+      return undefined;
+    default:
+      return value.kind;
   }
 }
 
@@ -1983,8 +1999,8 @@ export function elementStoreType(type: StaticType): StaticType | undefined {
 
 /**
  * Whether a type can be written as an annotation without losing what the compiler knows. Objects with known properties
- * cannot, because a property type has no written form, and neither can camera views or permanent buttons, whose types
- * have no name.
+ * cannot, because a property type has no written form, and neither can a kind without a written type, such as camera
+ * views and permanent buttons.
  */
 export function isAnnotatable(type: StaticType): boolean {
   return (
@@ -1994,11 +2010,16 @@ export function isAnnotatable(type: StaticType): boolean {
       (part) =>
         part.kind === "never" ||
         part.kind === "open" ||
-        part.kind === "camera" ||
-        part.kind === "permanentButton" ||
+        !isWritten(part) ||
         (part.kind === "object" && part.properties !== null),
     )
   );
+}
+
+/** Whether an annotation can name the kind a type without members holds (`written`). */
+export function isWritten(type: StaticType): boolean {
+  const kind = valueKindOfType(type);
+  return kind === undefined || VALUE_KINDS[kind].written;
 }
 
 /** The author-facing type name, as written in an annotation where one exists. */
@@ -2044,28 +2065,12 @@ function* typeNameTask(typeToName: StaticType): CompileTask<string> {
   }
 }
 
-const SCALAR_DESCRIPTIONS: Readonly<Record<ScalarTypeName, string>> = {
-  string: "text (string)",
-  integer: "a whole number (integer)",
-  number: "a number",
-  boolean: "true or false (boolean)",
-  duration: "a duration",
-  calendarDuration: "a calendar duration",
-  angle: "an angle",
-  date: "a date",
-  time: "a time",
-  datetime: "a date and time",
-  absoluteDateTime: "an absolute date and time",
-  script: "a script reference",
-  regex: "a regex",
-};
-
-/** A plain-language description of a value of `type` for diagnostics. */
+/** A plain-language description of a value of `type` for diagnostics, as the runtime describes one (`description`). */
 export function describeValue(type: StaticType): string {
   const value = canonical(type);
   switch (value.kind) {
     case "scalar":
-      return SCALAR_DESCRIPTIONS[value.name];
+      return VALUE_KINDS[value.name].description;
     case "list":
     case "set":
     case "dict": {
@@ -2074,27 +2079,13 @@ export function describeValue(type: StaticType): string {
     }
     case "union":
       return value.members.map(describeValue).join(" or ");
-    case "null":
-      return "null";
-    case "object":
-      return "an object";
     case "never":
       return "no value";
     case "unknown":
     case "open":
       return "a value";
-    case "timer":
-      return "a timer handle";
-    case "media":
-      return "a media handle";
-    case "camera":
-      return "a camera view";
-    case "permanentButton":
-      return "a permanent button";
-    case "messageHandle":
-      return "a message handle";
     default:
-      return `a ${value.kind}`;
+      return VALUE_KINDS[value.kind].description;
   }
 }
 
