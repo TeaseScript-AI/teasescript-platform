@@ -8,6 +8,7 @@ import { expressionPlanChildren } from "../plan/expression-children.js";
 import { RANDOM_FUNCTIONS } from "../language-facts.js";
 import { domainFailure, type NumericFailure } from "../numeric-functions.js";
 import { isRandomFunction, RANDOM_CONTRACTS } from "../random-functions.js";
+import { listDraw, listMethod } from "../list-methods.js";
 import type { SourceSpan } from "../source.js";
 import type { RuntimeDebugRandomOperation, TraceStore } from "./debug-trace.js";
 import type { InterpreterEvent } from "./events.js";
@@ -356,10 +357,10 @@ function drawKindOf(node: ExpressionPlan): RandomDrawKind | null {
   if (node.kind === "call") {
     if (node.callee.kind === "identifier" && isRandomFunction(node.callee.name))
       return node.callee.name;
-    if (node.callee.kind === "property" && node.callee.name === "shuffle") return "shuffle";
+    if (node.callee.kind === "property") return listDraw(node.callee.name, "method") ?? null;
     return null;
   }
-  if (node.kind === "property" && node.name === "random") return "collectionRandom";
+  if (node.kind === "property") return listDraw(node.name, "property") ?? null;
   if (node.kind === "tagQuery" && node.select === "random") return "tagQuery";
   return null;
 }
@@ -465,22 +466,16 @@ function instructionExpressions(instruction: Instruction): readonly ExpressionPl
 /* Which units need a state copy                                                                                    */
 /* ---------------------------------------------------------------------------------------------------------------- */
 
-/** Calls that change runtime state: collection and dict methods that change their receiver, and handle methods. */
-const MUTATING_CALLS: ReadonlySet<string> = new Set([
-  "add",
-  "addAll",
-  "remove",
-  "removeAt",
-  "removeFirst",
-  "removeLast",
-  "clear",
-  "sort",
-  "shuffle",
-  "reverse",
-  "pause",
-  "resume",
-  "stop",
-]);
+/**
+ * Whether a method call changes runtime state: a list or set method that changes its receiver (see `LIST_METHODS`), a
+ * dict's, whose methods that change it have the names of such list methods, or a handle method.
+ */
+function mutatingCall(name: string): boolean {
+  return listMethod(name)?.changes !== undefined || HANDLE_CHANGES.has(name);
+}
+
+/** The methods of timer and media handles, which change them. */
+const HANDLE_CHANGES: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);
 
 const changesBeforeDraw = new WeakMap<Instruction, boolean>();
 
@@ -557,7 +552,7 @@ function analyseExpression(root: ExpressionPlan): {
           : node.callee.kind === "identifier"
             ? node.callee.name
             : null;
-      if (node.callee.kind === "property" && name !== null && MUTATING_CALLS.has(name)) {
+      if (node.callee.kind === "property" && name !== null && mutatingCall(name)) {
         changes = true;
         // `pause()` may end a round that is already due, which draws the next one after the change.
         if (name === "pause") draw();

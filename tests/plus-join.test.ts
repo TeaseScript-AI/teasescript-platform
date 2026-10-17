@@ -210,10 +210,10 @@ test("+ does not convert: text or a list with another kind is a compile error th
     "'counts' holds a list (integer[]), so a whole number (integer) cannot be added to it. To add one element, use 'counts.add(2)'.",
   ]);
   assert.deepEqual(message("let counts = [1]\ncounts.addAll(2)"), [
-    "addAll() needs a list, but this is a whole number (integer).",
+    "addAll() needs a list, not a whole number (integer).",
   ]);
   assert.deepEqual(message("let counts = [1]\ncounts.addAll(set[2])"), [
-    "addAll() needs a list, but this is a set (integer set). Copy a set into a list with toList() first.",
+    "addAll() needs a list, not a set (integer set). Copy a set into a list with toList() first.",
   ]);
   assert.deepEqual(message("let seen = set[1]\nseen.addAll([2])"), [
     "Sets have no method 'addAll'.",

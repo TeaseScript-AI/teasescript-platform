@@ -110,8 +110,6 @@ import {
 import {
   builtinCallProblems,
   builtinShapeProblems,
-  COLLECTION_CHANGES,
-  COLLECTION_METHODS,
   noteSharing,
   rootName,
   type Sharing,
@@ -119,14 +117,24 @@ import {
   expressionLabel,
   fallbackFix,
   HANDLE_KINDS,
-  LIST_REORDERS,
-  LIST_SEARCHES,
   mayBeMessage,
   memberProblems,
   positionalMethodProblems,
-  RANGE_LIST_FIX,
   type OperationProblem,
 } from "./operation-checks.js";
+import {
+  changesElements,
+  isListMethod,
+  LIST_METHODS,
+  listArgumentMessage,
+  listDraw,
+  listMethod,
+  listProperty,
+  missingListMethodMessage,
+  missingListPropertyMessage,
+  type ListMethod,
+  type ListMethodName,
+} from "./list-methods.js";
 import {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
@@ -2351,7 +2359,7 @@ class TypeChecker {
       const expression = work.pop()!;
       if (
         expression.kind === "propertyAccessExpression" &&
-        expression.property.name === "random" &&
+        listDraw(expression.property.name, "property") !== undefined &&
         this.#mayBe(expression.object, isListOrSet)
       )
         this.#report(
@@ -3815,7 +3823,7 @@ class TypeChecker {
       if (node.kind === "indexExpression") steps.push("[]");
       else if (node.kind === "propertyAccessExpression") {
         const owner = members(nonNullType(this.#typeOf(node.object))).map(resolved);
-        const read = LIST_ELEMENT_READS.has(node.property.name);
+        const read = listProperty(node.property.name)?.gives === "element";
         // A set member is read as a copy, so what is stored in it is no part of the variable.
         if (read && owner.some((member) => member.kind === "set")) return undefined;
         steps.push(
@@ -3987,7 +3995,10 @@ class TypeChecker {
     let node = unwrap(expression);
     let property = false;
     while (node.kind === "propertyAccessExpression" || node.kind === "indexExpression") {
-      if (node.kind === "propertyAccessExpression" && !LIST_ELEMENT_READS.has(node.property.name))
+      if (
+        node.kind === "propertyAccessExpression" &&
+        listProperty(node.property.name)?.gives !== "element"
+      )
         property = true;
       node = unwrap(node.object);
     }
@@ -6847,16 +6858,15 @@ class TypeChecker {
     }
     const method = callee.property.name;
     if (method === "copyFrom") return yield* compileChild(this.#copyFromTask(expression, scope));
-    // A method that changes a list, set, or dict, or reorders a list, changes its receiver.
-    if (COLLECTION_CHANGES.has(method) || LIST_REORDERS.has(method))
-      this.#noteChanged(callee.object);
-    if (
-      (method === "add" || method === "addAll" || method === "get") &&
-      unwrap(callee.object).kind !== "identifier"
-    )
+    // A method that changes a list or set, or a dict, which has some of their names, changes its receiver.
+    const list = listMethod(method);
+    if (list?.changes !== undefined) this.#noteChanged(callee.object);
+    // A call that may decide the element type of a list that no value decided yet.
+    if (list?.decides !== undefined && unwrap(callee.object).kind !== "identifier")
       this.#relaxNarrowedRoot(callee.object, scope);
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
-    if (method === "add" || method === "addAll") this.#noteUncheckedStore(callee.object, scope);
+    if (list?.decides === "element" || list?.decides === "elements")
+      this.#noteUncheckedStore(callee.object, scope);
     // Text `reverse` gives a new text, so a receiver that cannot be a list is not changed and may take a fallback.
     if (method === "reverse" && !mayBe(receiver, "list")) this.#changed.delete(callee.object);
     const value = resolved(receiver);
@@ -7032,7 +7042,7 @@ class TypeChecker {
         const kept = resolved(member);
         return isListOrSet(kept) || kept.kind === "dict" || kept.kind === "range";
       });
-      if (textual || COLLECTION_METHODS.has(method) || collection) {
+      if (textual || isListMethod(method) || collection) {
         // Each member takes the arguments as the one receiver would (ADR 0021 rule 3.5), and the results join. A problem
         // that several members share at one place is reported once.
         const before = this.diagnostics.length;
@@ -7041,12 +7051,19 @@ class TypeChecker {
         const removable = mayBe(receiver, "messageHandle", "permanentButton");
         const memberResults = all.map((member, index) => {
           const kept = resolved(member);
-          // A list or set checks its own methods, also `indexOf`, `lastIndexOf`, and `count`, which take any value on a
-          // list.
-          if (isListOrSet(kept) && COLLECTION_METHODS.has(method))
-            return this.#collectionMethodType(method, kept, callee.property, expression, scope);
-          // Its other methods, a dict's in a union, and a range's `toList` take their arguments without names, in their
-          // number (V30 §16).
+          // A list or set checks its own methods (see `LIST_METHODS`), but `join`, whose separator is checked below as a
+          // text method checks text.
+          if (isListOrSet(kept) && isListMethod(method) && method !== "join")
+            return this.#collectionMethodType(
+              method,
+              kept,
+              callee.property,
+              expression,
+              scope,
+              removable,
+            );
+          // A dict's methods in a union, and a range's `toList`, take their arguments without names, in their number
+          // (V30 §16).
           if (isListOrSet(kept) || kept.kind === "dict" || kept.kind === "range")
             this.#reportProblems(positionalMethodProblems(method, expression, removable));
           if (textual)
@@ -7095,24 +7112,13 @@ class TypeChecker {
       );
     // Text operations and values without methods name what to write instead (V30 §8).
     else if (all.length === 1 && MEMBER_CHECKED_KINDS.has(failing.kind)) memberChecks();
-    // A set has no order to sort, shuffle, reverse, or take from, and no positions or repeated members to search for
-    // (V30 §16).
-    else if (
-      all.length === 1 &&
-      isListOrSet(failing) &&
-      failing.kind === "set" &&
-      COLLECTION_METHODS.has(method)
-    )
-      this.#reportProblems(
-        collectionMethodProblems(method, failing, callee.property, expression, (argument) =>
-          this.#typeOf(argument),
-        ),
-      );
     else
       this.#report(
         handleMemberCode(failing.kind),
+        // A set has no order to sort, shuffle, reverse, or take from, and no positions or repeated members to search
+        // for (V30 §16).
         failing.kind === "list" || failing.kind === "set"
-          ? `${failing.kind === "list" ? "Lists" : "Sets"} have no method '${method}'.`
+          ? missingListMethodMessage(failing.kind, method)
           : failing.kind === "dict"
             ? method === "add"
               ? "Dicts have no method 'add'. Store a value by its key, as in dict[key] = value."
@@ -7145,12 +7151,14 @@ class TypeChecker {
     scope: Scope,
   ): CompileTask<void> {
     const type = yield* compileChild(this.#expressionTask(argument, scope));
-    this.#reportUnless(type, isList, argument, "addAll() needs a list", () =>
-      members(type).some((member) => resolved(member).kind === "set")
-        ? " Copy a set into a list with toList() first."
-        : members(type).some((member) => resolved(member).kind === "range")
-          ? RANGE_LIST_FIX
-          : "",
+    const kinds = members(type).map((member) => resolved(member).kind);
+    this.#reportUnless(type, isList, argument, (given) =>
+      listArgumentMessage(
+        "addAll",
+        "list",
+        given,
+        kinds.includes("set") ? "set" : kinds.includes("range") ? "range" : "other",
+      ),
     );
     const list = isKnown(nonNullTypeForUse(type))
       ? members(type).every(isList)
@@ -7195,23 +7203,28 @@ class TypeChecker {
   }
 
   /**
-   * Checks `sort`, `shuffle`, `reverse`, `take`, `takeLast`, a search, `get`, or a set operation on one list or set, as
-   * evaluated, and gives its result (V30 §16).
+   * Checks a method of lists and sets on one list or set that has it, as evaluated, and gives its result (V30 §16): see
+   * `LIST_METHODS`. Where the receiver may be a message or a permanent button (`removable`), `remove()` may have no
+   * argument.
    */
   #collectionMethodType(
-    method: string,
+    method: ListMethodName,
     value: StaticType & { readonly kind: "list" | "set" },
     property: Identifier,
     expression: CallExpression,
     scope: Scope,
+    removable: boolean,
   ): StaticType {
     const typeOf = (argument: Expression): StaticType => this.#typeOf(argument);
-    const problems = collectionMethodProblems(method, value, property, expression, typeOf);
+    const problems = collectionMethodProblems(
+      method,
+      value,
+      property,
+      expression,
+      typeOf,
+      removable,
+    );
     this.#reportProblems(problems);
-    if (LIST_REORDERS.has(method)) return NULL_TYPE;
-    if (method === "take" || method === "takeLast")
-      return { kind: "list", element: copyType(value.element) };
-    if (LIST_SEARCHES.has(method)) return memberMethodType(value, method) ?? UNKNOWN_TYPE;
     // The element, or the default, which may be of another type, so their types join (#844). Where the default has a
     // part that no value decided yet, such as `[]`, they join as in a literal, so that part takes the element type, as
     // for a dict (#853). An element type that is still undecided, such as where a null default decided nothing, keeps
@@ -7227,6 +7240,9 @@ class TypeChecker {
         undecided(other) && !undecided(element) ? joinTypes([element, other]) : undefined;
       return joined ?? union([element, other]);
     }
+    const contract: ListMethod = LIST_METHODS[method];
+    if (contract.parameters[0]?.kind !== "collection")
+      return memberMethodType(value, method) ?? UNKNOWN_TYPE;
     // A set operation's argument that may be null needs a check first (owner decision on #504 Q1).
     const operand = expression.arguments[0]?.value;
     if (operand !== undefined && problems.length === 0) {
@@ -7842,7 +7858,7 @@ class TypeChecker {
     this.#report(
       handleMemberCode(value.kind),
       value.kind === "list" || value.kind === "set"
-        ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'. Use length, first, last, or random.`
+        ? missingListPropertyMessage(value.kind, name)
         : value.kind === "dict"
           ? `Dicts have no property '${name}'. Use length, keys, or values. To read a value by its key, write '${expressionLabel(expression.object) ?? "dict"}[${JSON.stringify(name)}]'.`
           : value.kind === "timer" ||
@@ -9109,14 +9125,15 @@ class TypeChecker {
   }
 
   /**
-   * Reports `rule` when a known value does not satisfy it. Every member of a union must satisfy it; when only some do,
-   * the message names the test the author needs (ADR 0021 rule 3.5).
+   * Reports `rule` when a known value does not satisfy it, or the message `rule` gives for the value's description. Every
+   * member of a union must satisfy it; when only some do, the message names the test the author needs (ADR 0021 rule
+   * 3.5).
    */
   #reportUnless(
     type: StaticType,
     accepts: (member: StaticType) => boolean,
     expression: Expression,
-    rule: string,
+    rule: string | ((given: string) => string),
     fix: () => string = () => "",
     code: TypeErrorCode = typeCode.invalidOperand,
   ): void {
@@ -9143,7 +9160,9 @@ class TypeChecker {
         : "";
     this.#report(
       code,
-      `${rule}, but this is ${describeValue(value)}.${reason}${fix()}`,
+      typeof rule === "string"
+        ? `${rule}, but this is ${describeValue(value)}.${reason}${fix()}`
+        : rule(describeValue(value)),
       expression.span,
     );
   }
@@ -9227,7 +9246,7 @@ class TypeChecker {
     const callee = unwrap(expression.callee);
     if (callee.kind !== "propertyAccessExpression") return;
     const method = callee.property.name;
-    if (!COLLECTION_CHANGES.has(method) && !LIST_REORDERS.has(method)) return;
+    if (listMethod(method)?.changes === undefined) return;
     // Only a list, set, or dict that has the method changes: text `reverse` gives a new text, and a method that a value
     // does not have is reported as such.
     const changes = members(this.#typeOf(callee.object)).some(
@@ -9691,10 +9710,7 @@ function programEffects(program: Program, file: number, dead: DeadCode): Program
         loop.suspends = true;
       // A method that changes a list or set changes the variable that holds it, also called in parentheses.
       const callee = expression.kind === "callExpression" ? unwrap(expression.callee) : null;
-      if (
-        callee?.kind === "propertyAccessExpression" &&
-        COLLECTION_CHANGES.has(callee.property.name)
-      ) {
+      if (callee?.kind === "propertyAccessExpression" && changesElements(callee.property.name)) {
         const root = rootName(callee.object);
         if (root !== null) write(root, "changes");
       }
@@ -10180,11 +10196,13 @@ function memberPropertyType(type: StaticType, name: string): StaticType | PlaceR
   const value = resolved(type);
   switch (value.kind) {
     case "list":
-    case "set":
-      if (name === "length") return INTEGER_TYPE;
-      if (!LIST_ELEMENT_READS.has(name)) return undefined;
-      // A set member is read as a copy (ADR 0014).
+    case "set": {
+      const property = listProperty(name);
+      if (property === undefined) return undefined;
+      if (property.gives === "length") return INTEGER_TYPE;
+      // A list's element is read from the list, and a set member as a copy (ADR 0014).
       return value.kind === "list" ? placeRead(value.element) : value.element;
+    }
     case "dict":
       // `keys` and `values` are new lists, in entry order.
       if (name === "length") return INTEGER_TYPE;
@@ -10245,52 +10263,30 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     return method === "remove" || method === "get" ? ownNull(copyType(value.element)) : undefined;
   }
   if (value.kind !== "list" && value.kind !== "set") return undefined;
-  switch (method) {
-    case "join":
-      return value.kind === "list" ? STRING_TYPE : undefined;
-    // A list reorders in place; a set keeps its insertion order (V30 §16).
-    case "sort":
-    case "shuffle":
-    case "reverse":
-      return value.kind === "list" ? NULL_TYPE : undefined;
-    // A part of a list is a new list.
-    case "take":
-    case "takeLast":
-      return value.kind === "list" ? { kind: "list", element: copyType(value.element) } : undefined;
-    // A set operation builds a new collection of the receiver's kind.
-    case "intersection":
-    case "union":
-    case "difference":
-      return { kind: value.kind, element: copyType(value.element) };
-    case "contains":
-      return BOOLEAN_TYPE;
-    // Only a list has positions; a value that no element equals has none (#840).
-    case "indexOf":
-    case "lastIndexOf":
-      return value.kind === "list" ? optional(INTEGER_TYPE) : undefined;
-    case "count":
-      return value.kind === "list" ? INTEGER_TYPE : undefined;
-    // An element is a copy for the place that keeps it; the default joins it where the call is checked (#844).
-    case "get":
-      return value.kind === "list" ? ownNull(copyType(value.element)) : undefined;
-    // A conversion builds a new collection, so its elements decide their type apart from the original's.
-    case "toSet":
-      return value.kind === "list" ? { kind: "set", element: copyType(value.element) } : undefined;
-    case "toList":
-      return value.kind === "set" ? { kind: "list", element: copyType(value.element) } : undefined;
-    case "add":
-    case "remove":
-    case "clear":
+  const contract = listMethod(method);
+  if (contract === undefined || !contract.receivers.includes(value.kind)) return undefined;
+  switch (contract.result) {
+    case "null":
       return NULL_TYPE;
-    case "addAll":
-      return value.kind === "list" ? NULL_TYPE : undefined;
-    case "removeAt":
-    case "removeFirst":
-    case "removeLast":
-      // The removed element leaves the list, so its type is a copy for the place that keeps it.
-      return value.kind === "list" ? ownNull(copyType(value.element)) : undefined;
-    default:
-      return undefined;
+    case "boolean":
+      return BOOLEAN_TYPE;
+    case "integer":
+      return INTEGER_TYPE;
+    // Only a list has positions; a value that no element equals has none (#840).
+    case "integer?":
+      return optional(INTEGER_TYPE);
+    case "string":
+      return STRING_TYPE;
+    // An element that leaves the list, or that `get` gives, is a copy for the place that keeps it; the default joins it
+    // where the call is checked (#844).
+    case "element":
+      return ownNull(copyType(value.element));
+    // A new collection's elements decide their type apart from the original's.
+    case "list":
+    case "set":
+      return { kind: contract.result, element: copyType(value.element) };
+    case "same":
+      return { kind: value.kind, element: copyType(value.element) };
   }
 }
 
@@ -10543,9 +10539,6 @@ function negatedValues(type: StaticType, operator: string): StaticType {
     type.values.map((value) => (typeof value === "number" ? -value : value)),
   );
 }
-
-/** List properties that read one of its elements. */
-const LIST_ELEMENT_READS: ReadonlySet<string> = new Set(["first", "last", "random"]);
 
 /** For a place whose type cannot be declared, such as a property: a union type has no written form there yet. */
 const ONE_TYPE_FIX = "give every button a value of one type";

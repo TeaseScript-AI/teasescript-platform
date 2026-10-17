@@ -64,12 +64,21 @@ import {
   callShapeProblem,
   FIXED_PARAMETERS,
   getArgumentsProblem,
-  LIST_ONLY_METHODS,
   missingDefaultMessage,
   POSITIONAL_METHODS,
   unknownNamedArgumentMessage,
 } from "./argument-rules.js";
 import { minMaxValuesProblem } from "./list-function-rules.js";
+import {
+  countProblem,
+  LIST_METHODS,
+  listArgumentMessage,
+  listMethod,
+  missingListMethodMessage,
+  type ListKind,
+  type ListMethod,
+  type ListParameterKind,
+} from "./list-methods.js";
 import {
   argumentFix,
   argumentTypeMessage,
@@ -104,9 +113,6 @@ export interface OperationProblem {
   readonly widened?: Expression;
   readonly fix?: string;
 }
-
-/** The fix for a range where a list is needed, as for a set (V30 §6). */
-export const RANGE_LIST_FIX = " Make a list of its numbers with toList() first.";
 
 /** The problem with calling `length`, which text, lists, sets, and dicts have as a property. */
 const LENGTH_PROPERTY = "'length' is a property, not a method. Write .length without parentheses.";
@@ -155,8 +161,7 @@ export function memberProblems(
   }
   if (type.kind === "unknown" || type.kind === "open") {
     // Only lists have `join`, and only text has the other text methods, so their arguments are checked even when the
-    // receiver is not known. Text, lists, and sets all have `contains` with one argument of any type for collections,
-    // and text and lists both have `reverse` without arguments.
+    // receiver is not known.
     if (call === null) return [];
     // A name that no value has as a method fails on every receiver; every value with `length` has it as a property.
     if (!METHOD_NAMES.has(name))
@@ -165,18 +170,14 @@ export function memberProblems(
           ? LENGTH_PROPERTY
           : `No value has a method '${name}'.${misspelledPropertyHint(name, [...METHOD_NAMES, "length"]) || " Check the name."}`,
       );
-    // Only lists have `take` and `takeLast`, so their count is checked on any receiver too.
-    if (name === "take" || name === "takeLast")
-      return takeProblems(name, undefined, property, call, typeOf);
-    // A list's `indexOf`, `lastIndexOf`, and `count` take any value, so only one argument without a name is checked.
-    if (LIST_SEARCHES.has(name)) return searchProblems(name, undefined, property, call);
-    // A list's `get` takes an index and a dict's a key, each with a `default:`.
-    if (name === "get") return getProblems(undefined, property, call);
+    // Every receiver with a method of lists and sets takes as many arguments, but a message or a permanent button may
+    // take `remove()` without any. Text takes text or a regex where a list takes any value, and only lists and sets take
+    // a count, a list, or a collection, so those arguments are checked on any receiver too.
+    const list = listMethod(name);
+    if (list !== undefined && name !== "join")
+      return listArgumentProblems(list, undefined, property, call, typeOf, true);
     const member = name === "join" ? LIST_JOIN : isTextMethod(name) ? TEXT_METHODS[name] : null;
-    if (member !== null)
-      return name === "contains"
-        ? shapeProblems(member, call)
-        : argumentProblems(member, call, typeOf, undefined);
+    if (member !== null) return argumentProblems(member, call, typeOf, undefined);
     // Only date and time values have their methods, which take no arguments.
     if (isTemporalMethod(name))
       return call.arguments.length === 0
@@ -188,8 +189,6 @@ export function memberProblems(
               span: property.span,
             },
           ];
-    // Every receiver with one of the other methods takes as many arguments, but a message or a permanent button may take
-    // `remove()` without any.
     return positionalMethodProblems(name, call, true);
   }
   if (type.kind !== "scalar" && type.kind !== "null" && type.kind !== "range") return [];
@@ -205,8 +204,8 @@ export function memberProblems(
 }
 
 /**
- * Argument names, which text operations, `join`, and the methods of `POSITIONAL_METHODS` never take, and the number of
- * arguments.
+ * Argument names, which text operations, `join`, and the methods of `POSITIONAL_METHODS` and of lists and sets but
+ * `get` never take, and the number of arguments.
  */
 function shapeProblems(member: MethodParameters, call: CallExpression): OperationProblem[] {
   const parameters = member.parameters!;
@@ -1007,17 +1006,6 @@ export function noteSharing<K>(writes: Map<K, Sharing>, name: K, how: Sharing): 
   if (writes.get(name) !== "assigns") writes.set(name, how);
 }
 
-/** The methods that change the list, set, or dict they are called on, and so the variable that holds it. */
-export const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
-  "add",
-  "addAll",
-  "remove",
-  "clear",
-  "removeAt",
-  "removeFirst",
-  "removeLast",
-]);
-
 /** The variable a place belongs to, such as `xs` for `xs[0].name`, or `null` for a place no variable holds. */
 export function rootName(expression: Expression): string | null {
   let node = expression;
@@ -1030,53 +1018,56 @@ export function rootName(expression: Expression): string | null {
   return node.kind === "identifier" ? node.name : null;
 }
 
-/** The list methods that search for a value: its first or last position, or how often it occurs (V30 §16). */
-export const LIST_SEARCHES: ReadonlySet<string> = new Set(["indexOf", "lastIndexOf", "count"]);
-
-/** The list methods that reorder a list in place, which a set, keeping its insertion order, does not have (V30 §16). */
-export const LIST_REORDERS: ReadonlySet<string> = new Set(["sort", "shuffle", "reverse"]);
-
-/**
- * The list methods that reorder a list in place, take part of it, search it, or read an element with a default, and
- * the set operations of lists and sets (V30 §16, ADR 0013).
- */
-export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
-  ...LIST_REORDERS,
-  "take",
-  "takeLast",
-  ...LIST_SEARCHES,
-  "get",
-  "intersection",
-  "union",
-  "difference",
-]);
-
 /**
  * The name of every method a value has: those of text (V30 §8), of lists, sets, and dicts (V30 §16), of timer and media
  * handles (V30 §22), of messages and permanent buttons, and of date and time values (V30 §35). Other values, such as
- * numbers, objects, and speakers, have none.
+ * numbers, objects, and speakers, have none. Every method of dicts, messages, and permanent buttons has the name of a
+ * method of lists.
  */
 const METHOD_NAMES: ReadonlySet<string> = new Set([
   ...Object.keys(TEXT_METHODS),
-  LIST_JOIN.name,
-  ...COLLECTION_METHODS,
+  ...Object.keys(LIST_METHODS),
   ...POSITIONAL_METHODS.keys(),
   ...Object.keys(TEMPORAL_METHODS),
 ]);
 
 /**
- * Argument names and the number of arguments of a method in `POSITIONAL_METHODS`, which every receiver with the method
- * rejects. Where the receiver may be a message or a permanent button (`removable`), `remove()` may have no argument.
+ * The method `name` as every receiver with it takes its arguments, all of them without a name: a method of
+ * `POSITIONAL_METHODS`, or of lists and sets but `get` and `join`. A dict, a range, text, a message, and a permanent
+ * button take as many with the methods they share with lists, but a message and a permanent button take `remove()`.
+ */
+function positionalMethod(name: string): MethodParameters | undefined {
+  const method = POSITIONAL_METHODS.get(name) ?? listMethod(name);
+  return method !== undefined &&
+    !("named" in method && method.named !== undefined) &&
+    method.parameters!.every((parameter) => parameter.optional !== true)
+    ? method
+    : undefined;
+}
+
+/**
+ * Argument names and the number of arguments of a method that takes them without names (see `positionalMethod`), which
+ * every receiver with the method rejects. Where the receiver may be a message or a permanent button (`removable`),
+ * `remove()` may have no argument.
  */
 export function positionalMethodProblems(
   name: string,
   call: CallExpression,
   removable: boolean,
 ): OperationProblem[] {
-  const method = POSITIONAL_METHODS.get(name);
-  if (method === undefined) return [];
+  const method = positionalMethod(name);
+  return method === undefined ? [] : methodShapeProblems(method, call, removable);
+}
+
+/** Argument names and the number of arguments of `method`, which may be `remove()` where the receiver is `removable`. */
+function methodShapeProblems(
+  method: MethodParameters,
+  call: CallExpression,
+  removable: boolean,
+): OperationProblem[] {
   const problems = shapeProblems(method, call);
-  if (!removable || name !== "remove" || problems[0]?.kind !== "argumentCount") return problems;
+  if (!removable || method.name !== "remove" || problems[0]?.kind !== "argumentCount")
+    return problems;
   if (call.arguments.length === 0) return [];
   return [
     {
@@ -1092,140 +1083,98 @@ export function positionalMethodProblems(
 }
 
 /**
- * Compile-time problems with `sort`, `shuffle`, `reverse`, `take`, `takeLast`, a search, `get`, `intersection`,
- * `union`, or `difference` on a list or set: argument names and count, reordering, taking from, searching, or reading a
- * position of a set, elements `sort` cannot order, and a set operation's argument that is neither a list nor a set.
+ * Compile-time problems with a call of a method of lists and sets (see `LIST_METHODS`) on a list or set of a known
+ * type: a method its kind does not have, then the problems of `listArgumentProblems`.
  */
 export function collectionMethodProblems(
   name: string,
-  receiverType: StaticType & { readonly kind: "list" | "set" },
+  receiverType: StaticType & { readonly kind: ListKind },
   property: Identifier,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
+  removable = false,
 ): OperationProblem[] {
-  if (LIST_SEARCHES.has(name)) return searchProblems(name, receiverType, property, call);
-  if (name === "get") return getProblems(receiverType, property, call);
-  if (name === "take" || name === "takeLast")
-    return takeProblems(name, receiverType, property, call, typeOf);
-  const reorders = LIST_REORDERS.has(name);
-  if (reorders && receiverType.kind === "set")
+  const method = listMethod(name);
+  if (method === undefined || !method.receivers.includes(receiverType.kind))
     return [
       {
         kind: "invalidOperand",
-        message: `A set keeps its insertion order, so it has no ${name}(). Copy it into a list with toList() first.`,
+        message: missingListMethodMessage(receiverType.kind, name),
         span: property.span,
       },
     ];
-  const shape = positionalMethodProblems(name, call, false);
+  return listArgumentProblems(method, receiverType, property, call, typeOf, removable);
+}
+
+/**
+ * Compile-time problems with the arguments of a method of lists and sets, on a list or set of `receiverType`, or on a
+ * receiver of any type (`undefined`): their names and number (`get` takes a `default:`, as a dict's does), a count that is
+ * not a whole number of at least 0, a list or collection argument that is another value, and on a list elements `sort`
+ * cannot order. A list's index is checked as for `list[index]`, and the elements that `add` and `addAll` store as the
+ * list's other elements, by the type check.
+ */
+function listArgumentProblems(
+  method: ListMethod,
+  receiverType: (StaticType & { readonly kind: ListKind }) | undefined,
+  property: Identifier,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+  removable: boolean,
+): OperationProblem[] {
+  if (method.named !== undefined) return getProblems(receiverType, call);
+  const shape = methodShapeProblems(method, call, removable);
   if (shape.length > 0) return shape;
-  if (name === "sort") {
-    const message = sortProblem(receiverType.element);
-    return message === undefined ? [] : [{ kind: "invalidOperand", message, span: property.span }];
-  }
-  if (reorders) return [];
-  const argument = call.arguments[0]!.value;
-  const type = forUse(typeOf(argument));
-  // Every member of a union argument must be a list or a set (ADR 0021 rule 3.5).
-  const collections = members(type).every((member) => {
-    const value = resolved(member);
-    return !isKnown(value) || value.kind === "list" || value.kind === "set";
-  });
-  if (!collections)
-    return [
-      {
-        kind: "invalidOperand",
-        message: `${name}() needs a list or a set, not ${describeValue(type)}.${members(type).some((member) => resolved(member).kind === "range") ? RANGE_LIST_FIX : ""}`,
-        span: argument.span,
-      },
-    ];
-  return [];
+  // The shape fits, so each argument has its parameter.
+  const problems = call.arguments.flatMap((argument, position) =>
+    argumentKindProblems(method, method.parameters[position]!.kind, argument.value, typeOf),
+  );
+  if (method.name !== "sort" || receiverType === undefined) return problems;
+  const message = sortProblem(receiverType.element);
+  return message === undefined
+    ? problems
+    : [{ kind: "invalidOperand", message, span: property.span }];
 }
 
-/** Problems with `take` or `takeLast`: a list method of one count, a whole number of at least 0 (V30 §16). */
-function takeProblems(
-  name: string,
-  receiverType: (StaticType & { readonly kind: "list" | "set" }) | undefined,
-  property: Identifier,
-  call: CallExpression,
+/** Problems with one argument of a list method for a parameter of `kind`: a count, a list, or a collection. */
+function argumentKindProblems(
+  method: ListMethod,
+  kind: ListParameterKind,
+  argument: Expression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
-  if (receiverType?.kind === "set")
-    return [
-      {
-        kind: "invalidOperand",
-        message: `A set has no ${name}(). Copy it into a list with toList() first.`,
-        span: property.span,
-      },
-    ];
-  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
-  if (named !== undefined)
-    return [
-      {
-        kind: "unknownNamedArgument",
-        message: unknownNamedArgumentMessage(name, named.name.name, []),
-        span: named.name.span,
-      },
-    ];
-  if (call.arguments.length !== 1)
-    return [
-      {
-        kind: "argumentCount",
-        message: methodArgumentCountMessage(LIST_ONLY_METHODS.get(name)!, call.arguments.length),
-        span: call.span,
-      },
-    ];
-  const count = call.arguments[0]!.value;
-  const type = typeOf(count);
-  const nullable = nullCheckProblem(count, type, INTEGER_TYPE);
-  if (nullable !== undefined) return [nullable];
-  const known = staticNumber(count);
-  // The first kind the count may be that is not a whole number, such as the number in `number?`.
-  const other = members(type).find((member) => !isAssignable(INTEGER_TYPE, member));
-  const message =
-    other !== undefined
-      ? `${name}() needs a whole number (integer), not ${describeValue(other)}.`
-      : known !== undefined && known < 0
-        ? `${name}() needs a whole number of at least 0, not ${known}.`
-        : undefined;
-  return message === undefined ? [] : [{ kind: "invalidOperand", message, span: count.span }];
-}
-
-/** Problems with `indexOf`, `lastIndexOf`, or `count`: a list method of one value of any type (V30 §16). */
-function searchProblems(
-  name: string,
-  receiverType: (StaticType & { readonly kind: "list" | "set" }) | undefined,
-  property: Identifier,
-  call: CallExpression,
-): OperationProblem[] {
-  if (receiverType?.kind === "set")
-    return [
-      {
-        kind: "invalidOperand",
-        message:
-          name === "count"
-            ? "A set holds each member once, so it has no count(). Use contains(...) instead."
-            : `A set has no positions, so it has no ${name}(). Copy it into a list with toList() first.`,
-        span: property.span,
-      },
-    ];
-  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
-  if (named !== undefined)
-    return [
-      {
-        kind: "unknownNamedArgument",
-        message: unknownNamedArgumentMessage(name, named.name.name, []),
-        span: named.name.span,
-      },
-    ];
-  if (call.arguments.length !== 1)
-    return [
-      {
-        kind: "argumentCount",
-        message: methodArgumentCountMessage(LIST_ONLY_METHODS.get(name)!, call.arguments.length),
-        span: call.span,
-      },
-    ];
-  return [];
+  const problem = (message: string): OperationProblem[] => [
+    { kind: "invalidOperand", message, span: argument.span },
+  ];
+  if (kind === "count") {
+    const type = typeOf(argument);
+    const nullable = nullCheckProblem(argument, type, INTEGER_TYPE);
+    if (nullable !== undefined) return [nullable];
+    // The first kind the count may be that is not a whole number, such as the number in `number?`.
+    const other = members(type).find((member) => !isAssignable(INTEGER_TYPE, member));
+    if (other !== undefined)
+      return problem(listArgumentMessage(method.name, "count", describeValue(other), "other"));
+    const known = staticNumber(argument);
+    const message = known === undefined ? undefined : countProblem(method.name, known);
+    return message === undefined ? [] : problem(message);
+  }
+  if (kind !== "list" && kind !== "collection") return [];
+  // Every member of a union argument must be a list, or a list or a set (ADR 0021 rule 3.5).
+  const type = forUse(typeOf(argument));
+  const kinds = members(type).map((member) => resolved(member));
+  const fits = kinds.every(
+    (member) =>
+      !isKnown(member) ||
+      member.kind === "list" ||
+      (kind === "collection" && member.kind === "set"),
+  );
+  if (fits) return [];
+  const other =
+    kind === "list" && kinds.some((member) => member.kind === "set")
+      ? "set"
+      : kinds.some((member) => member.kind === "range")
+        ? "range"
+        : "other";
+  return problem(listArgumentMessage(method.name, kind, describeValue(type), other));
 }
 
 /**
@@ -1234,18 +1183,9 @@ function searchProblems(
  * `list[index]`.
  */
 function getProblems(
-  receiverType: (StaticType & { readonly kind: "list" | "set" }) | undefined,
-  property: Identifier,
+  receiverType: (StaticType & { readonly kind: ListKind }) | undefined,
   call: CallExpression,
 ): OperationProblem[] {
-  if (receiverType?.kind === "set")
-    return [
-      {
-        kind: "invalidOperand",
-        message: "A set has no positions, so it has no 'get()'. Use 'contains(...)' instead.",
-        span: property.span,
-      },
-    ];
   const named = call.arguments.filter((argument) => argument.kind === "namedArgument");
   const problem = getArgumentsProblem(
     receiverType === undefined ? "either" : "list",

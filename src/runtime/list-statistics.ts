@@ -8,7 +8,7 @@ import { RANDOM_CONTRACTS } from "../random-functions.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { dateTimeMilliseconds, daysBetween } from "../temporal.js";
-import { RANGE_LIST_FIX } from "./collection-operations.js";
+import { RANGE_LIST_FIX } from "../list-methods.js";
 import { RuntimeFault } from "./errors.js";
 import {
   add,

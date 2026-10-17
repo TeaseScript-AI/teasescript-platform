@@ -4,14 +4,27 @@ import {
   dictArgumentsProblem,
   FIXED_PARAMETERS,
   getArgumentsProblem,
-  LIST_ONLY_METHODS,
   NO_ARGUMENTS,
-  POSITIONAL_METHODS,
   positionalShape,
   scriptArgumentCountMessage,
   unknownNamedArgumentMessage,
 } from "../argument-rules.js";
 import { LIST_FUNCTION_SHAPES, minMaxValuesProblem } from "../list-function-rules.js";
+import {
+  countProblem,
+  emptyListPropertyFailure,
+  hasListMethod,
+  LIST_METHODS,
+  listArgumentMessage,
+  listMethod,
+  listProperty,
+  missingListMethodMessage,
+  missingListPropertyMessage,
+  type ListKind,
+  type ListMethod,
+  type ElementProperty,
+  type MethodOf,
+} from "../list-methods.js";
 import { startValueMessage, type StartValueOwner } from "../start-value-rules.js";
 import type { DeveloperWarningCode, RuntimeErrorCode } from "../diagnostic-codes.js";
 import { temporalCaptureAt } from "./temporal-captures.js";
@@ -179,14 +192,7 @@ import {
   timerDisplayMessage,
 } from "../handle-rules.js";
 import { unmeasurableLengthMessage } from "../delay-rules.js";
-import {
-  RANGE_LIST_FIX,
-  rangeListLengthProblem,
-  SET_OPERATIONS,
-  setOperationArgumentMessage,
-  setOperationItems,
-  sortOrder,
-} from "./collection-operations.js";
+import { rangeListLengthProblem, setOperationItems, sortOrder } from "./collection-operations.js";
 import {
   addDurations,
   calendarDuration,
@@ -770,24 +776,17 @@ export class Evaluator {
                 : this.#resolveDescriptor(frame.descriptor, expression.object.span);
             if (expression.kind === "property") {
               const base = frame.value;
-              if (
-                (isList(base) || isSet(base)) &&
-                ["first", "last", "random"].includes(expression.name)
-              ) {
+              const element = elementProperty(expression.name);
+              if ((isList(base) || isSet(base)) && element !== undefined) {
                 if (base.items.length === 0)
                   throw emptyCollection(
-                    expression.name,
+                    element,
                     base,
                     this.#receiverLabel(expression.object),
                     expression.span,
                   );
-                const index =
-                  expression.name === "first"
-                    ? 0
-                    : expression.name === "last"
-                      ? base.items.length - 1
-                      : this.#drawIndex(expression.span, "collectionRandom", base.items);
-                if (expression.name === "random") trace?.randomResult(base.items[index]!);
+                const index = this.#elementIndex(element, base.items, expression.span);
+                if (element === "random") trace?.randomResult(base.items[index]!);
                 if (isSet(base)) {
                   // A set member is read as a copy: changing it must not change the set or its uniqueness.
                   const member = cloneCapturedSerializableValue(base.items[index]!);
@@ -1362,10 +1361,11 @@ export class Evaluator {
             }
             value = called;
           }
+          // A dict's methods that change it have the names of list methods that do.
           if (
             trace !== null &&
             expression.callee.kind === "property" &&
-            MUTATING_METHODS.has(expression.callee.name) &&
+            listMethod(expression.callee.name)?.changes !== undefined &&
             (isList(frame.value) || isSet(frame.value) || isDict(frame.value))
           )
             this.#traceMutation(frame.descriptor, expression.span);
@@ -1815,36 +1815,16 @@ export class Evaluator {
       return;
     }
     if (isRange(receiver) && method === "toList") return;
-    if (!isList(receiver) && !isSet(receiver) && !isDict(receiver)) {
+    if (isDict(receiver)) {
+      if (!DICT_METHODS.has(method)) throw fault("TSR016", noDictMethodMessage(method), span);
+      return;
+    }
+    if (!isList(receiver) && !isSet(receiver)) {
       throw fault("TSR016", missingMemberMessage(receiver, method, "method"), span);
     }
-    const supported = isDict(receiver)
-      ? DICT_METHODS
-      : isSet(receiver)
-        ? new Set(["add", "remove", "clear", "contains", "toList", ...SET_OPERATIONS])
-        : new Set([
-            ...SET_OPERATIONS,
-            "sort",
-            "shuffle",
-            "reverse",
-            "add",
-            "addAll",
-            "remove",
-            "removeAt",
-            "removeFirst",
-            "removeLast",
-            "clear",
-            "contains",
-            "indexOf",
-            "lastIndexOf",
-            "count",
-            "get",
-            "toSet",
-            "join",
-            "take",
-            "takeLast",
-          ]);
-    if (!supported.has(method)) throw fault("TSR016", noCollectionMethod(receiver, method), span);
+    const kind = isSet(receiver) ? "set" : "list";
+    if (!hasListMethod(kind, method))
+      throw fault("TSR016", missingListMethodMessage(kind, method), span);
   }
 
   #resolvePreparedReference(
@@ -2592,252 +2572,261 @@ export class Evaluator {
       throw fault("TSR016", missingMemberMessage(receiver, name, "method"), span);
     const namedArgument = Object.keys(named)[0];
     // Only a list's `get` takes a named argument, its `default:`; a set has no `get`.
-    if (namedArgument !== undefined && name !== "get")
+    if (namedArgument !== undefined && listMethod(name)?.named === undefined)
       throw fault("TSR015", unknownNamedArgumentMessage(name, namedArgument, []), span);
-    // The method's parameters as the compiler checks them for a list or a set.
-    const expect = (): void => {
-      const method = POSITIONAL_METHODS.get(name) ?? LIST_ONLY_METHODS.get(name)!;
-      if (positional.length !== method.parameters!.length)
+    // The method's parameters as the compiler checks them for a list or a set; `get` checks its own with its default.
+    const expect = (method: ListMethod): void => {
+      const required = method.parameters.filter((parameter) => !parameter.optional).length;
+      if (
+        method.named === undefined &&
+        (positional.length < required || positional.length > method.parameters.length)
+      )
         throw fault("TSR028", methodArgumentCountMessage(method, positional.length), span);
     };
     try {
       if (isSet(receiver)) {
-        switch (name) {
-          case "add":
-            expect();
-            if (added !== null) assertValueType(positional[0]!, added.check, added.span);
-            if (
-              receiver.items.length >= MAX_COLLECTION_LENGTH &&
-              !serializableSetContains(receiver, positional[0]!)
-            )
-              throw collectionTooLong("set", "add(...)", span, receiver.items.length + 1);
-            addSerializableSetValue(receiver, positional[0]!);
-            return null;
-          case "remove":
-            expect();
-            removeSerializableSetValue(receiver, positional[0]!);
-            return null;
-          case "clear":
-            expect();
-            clearSerializableSet(receiver);
-            return null;
-          case "contains":
-            expect();
-            return serializableSetContains(receiver, positional[0]!);
-          case "toList":
-            expect();
-            return createCapturedSerializableList(receiver.items);
-          case "intersection":
-          case "union":
-          case "difference": {
-            expect();
-            const argument = this.#setOperationArgument(name, positional[0]!, span);
-            const items = setOperationItems(name, receiver.items, argument);
-            checkCollectionLength(
-              "set",
-              items.length,
-              Math.max(receiver.items.length, argument.length),
-              `${name}(...)`,
-              span,
-            );
-            return createCapturedSerializableSet(items);
-          }
-          case "sort":
-          case "shuffle":
-          case "reverse":
-            throw fault(
-              "TSR016",
-              `A set keeps its insertion order, so it has no ${name}(). Copy it into a list with toList() first.`,
-              span,
-            );
-          default:
-            throw fault("TSR016", noCollectionMethod(receiver, name), span);
-        }
+        if (!hasListMethod("set", name))
+          throw fault("TSR016", missingListMethodMessage("set", name), span);
+        expect(LIST_METHODS[name]);
+        return this.#callSet(receiver, name, positional, span, added);
       }
-      switch (name) {
-        case "add":
-          expect();
-          if (added !== null) assertValueType(positional[0]!, added.check, added.span);
-          checkCollectionLength(
-            "list",
-            receiver.items.length + 1,
-            receiver.items.length,
-            "add(...)",
-            span,
-          );
-          receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
-          return null;
-        case "addAll": {
-          expect();
-          const other = positional[0]!;
-          if (!isList(other))
-            throw fault(
-              "TSR060",
-              `addAll() needs a list, not ${describeRuntimeValue(other)}.${isSet(other) ? " Copy a set into a list with toList() first." : isRange(other) ? RANGE_LIST_FIX : ""}`,
-              span,
-            );
-          // Every element is checked before any is added, and copies are taken first, so a list can add itself.
-          if (added !== null)
-            for (const item of other.items) assertValueType(item, added.check, added.span);
-          checkCollectionLength(
-            "list",
-            receiver.items.length + other.items.length,
-            Math.max(receiver.items.length, other.items.length),
-            "addAll(...)",
-            span,
-          );
-          const items = other.items.map((item) => cloneCapturedSerializableValue(item));
-          for (const item of items) receiver.items.push(item);
-          return null;
-        }
-        case "remove": {
-          expect();
-          const index = this.#findValue(receiver.items, positional[0]!);
-          if (index >= 0) this.#removeListItem(receiver, index);
-          else {
-            this.#warn(
-              "TSW002",
-              "remove(...) found no matching value, so the list is unchanged.",
-              span,
-            );
-          }
-          return null;
-        }
-        case "removeAt": {
-          expect();
-          const index = this.#listPosition(
-            receiver,
-            receiverPlan,
-            null,
-            positional[0]!,
-            "remove",
-            span,
-          );
-          return this.#removeListItem(receiver, index);
-        }
-        case "removeFirst":
-        case "removeLast":
-          expect();
-          if (receiver.items.length === 0)
-            throw fault(
-              "TSR018",
-              `Cannot call ${name}() on an empty list. Check that the list's length is above 0 first.`,
-              span,
-            );
-          return this.#removeListItem(
-            receiver,
-            name === "removeFirst" ? 0 : receiver.items.length - 1,
-          );
-        case "clear":
-          expect();
-          if (receiver.items.length > 0) {
-            freezePreparedReferenceDescendants(this.snapshot, receiver);
-            receiver.items.length = 0;
-          }
-          return null;
-        case "contains":
-          expect();
-          return this.#findValue(receiver.items, positional[0]!) >= 0;
-        // A value that no element equals has no position: null (#840).
-        case "indexOf":
-        case "lastIndexOf": {
-          expect();
-          const index = this.#findValue(receiver.items, positional[0]!, name === "lastIndexOf");
-          return index < 0 ? null : index;
-        }
-        case "count": {
-          expect();
-          let count = 0;
-          for (const item of receiver.items)
-            if (serializableEquals(item, positional[0]!)) count += 1;
-          return count;
-        }
-        // A value that is not a position of the list, such as a negative or fractional index, text, or null, gives the
-        // default (#844).
-        case "get": {
-          const problem = getArgumentsProblem("list", positional.length, [
-            ...Object.keys(named),
-            ...(defaulted ? ["default"] : []),
-          ]);
-          if (problem !== undefined) throw fault("TSR028", problem.message, span);
-          const index = positional[0]!;
-          return typeof index === "number" &&
-            Number.isInteger(index) &&
-            index >= 0 &&
-            index < receiver.items.length
-            ? receiver.items[index]!
-            : USE_DEFAULT;
-        }
-        case "toSet":
-          expect();
-          return createCapturedSerializableSet(receiver.items);
-        case "take":
-        case "takeLast": {
-          expect();
-          const count = positional[0]!;
-          if (typeof count !== "number" || !Number.isInteger(count) || count < 0)
-            throw fault(
-              "TSR057",
-              `${name}() needs a whole number of at least 0, not ${typeof count === "number" ? count : describeRuntimeValue(count)}.`,
-              span,
-            );
-          // A count beyond the length takes the whole list.
-          return createCapturedSerializableList(
-            name === "take"
-              ? receiver.items.slice(0, count)
-              : receiver.items.slice(Math.max(0, receiver.items.length - count)),
-          );
-        }
-        case "sort":
-        case "shuffle":
-          expect();
-          this.#reorderList(
-            receiver,
-            name === "sort" ? sortOrder(receiver.items, span) : this.#shuffleOrder(receiver, span),
-          );
-          return null;
-        // The last element first: the old indexes from the end.
-        case "reverse":
-          expect();
-          this.#reorderList(
-            receiver,
-            receiver.items.map((_, index) => receiver.items.length - 1 - index),
-          );
-          return null;
-        case "intersection":
-        case "union":
-        case "difference": {
-          expect();
-          const argument = this.#setOperationArgument(name, positional[0]!, span);
-          const items = setOperationItems(name, receiver.items, argument);
-          checkCollectionLength(
-            "list",
-            items.length,
-            Math.max(receiver.items.length, argument.length),
-            `${name}(...)`,
-            span,
-          );
-          return createCapturedSerializableList(items);
-        }
-        case "join": {
-          checkTextArguments(LIST_JOIN, positional, span);
-          // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
-          const separator = (positional[0] as string | undefined) ?? ", ";
-          let length = separator.length * Math.max(0, receiver.items.length - 1);
-          const texts = receiver.items.map((item) => {
-            const text = this.#joinedText(item, span);
-            length += text.length;
-            return text;
-          });
-          checkTextLength(length, "join", span);
-          return texts.join(separator);
-        }
-        default:
-          throw fault("TSR016", noCollectionMethod(receiver, name), span);
-      }
+      if (!hasListMethod("list", name))
+        throw fault("TSR016", missingListMethodMessage("list", name), span);
+      expect(LIST_METHODS[name]);
+      return this.#callList(
+        receiver,
+        receiverPlan,
+        name,
+        positional,
+        named,
+        defaulted,
+        span,
+        added,
+      );
     } catch (error) {
       if (error instanceof RuntimeFault) throw error;
       throw this.#translateValueError(error, span);
+    }
+  }
+
+  /** A method of a set, with as many arguments as it takes (see `LIST_METHODS`). */
+  #callSet(
+    receiver: SerializableRuntimeSet,
+    name: MethodOf<"set">,
+    positional: readonly SerializableRuntimeValue[],
+    span: SourceSpan,
+    added: { readonly check: TypeCheckPlan; readonly span: SourceSpan } | null,
+  ): SerializableRuntimeValue {
+    switch (name) {
+      case "add":
+        if (added !== null) assertValueType(positional[0]!, added.check, added.span);
+        if (
+          receiver.items.length >= MAX_COLLECTION_LENGTH &&
+          !serializableSetContains(receiver, positional[0]!)
+        )
+          throw collectionTooLong("set", "add(...)", span, receiver.items.length + 1);
+        addSerializableSetValue(receiver, positional[0]!);
+        return null;
+      case "remove":
+        removeSerializableSetValue(receiver, positional[0]!);
+        return null;
+      case "clear":
+        clearSerializableSet(receiver);
+        return null;
+      case "contains":
+        return serializableSetContains(receiver, positional[0]!);
+      case "toList":
+        return createCapturedSerializableList(receiver.items);
+      case "intersection":
+      case "union":
+      case "difference":
+        return createCapturedSerializableSet(
+          this.#setOperation("set", name, receiver.items, positional[0]!, span),
+        );
+      default: {
+        const unhandled: never = name;
+        throw new Error(`Set method '${String(unhandled)}' has no implementation.`);
+      }
+    }
+  }
+
+  /** A method of a list, with as many arguments as it takes, but `get` (see `LIST_METHODS`). */
+  #callList(
+    receiver: SerializableRuntimeList,
+    receiverPlan: ExpressionPlan,
+    name: MethodOf<"list">,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    defaulted: boolean,
+    span: SourceSpan,
+    added: { readonly check: TypeCheckPlan; readonly span: SourceSpan } | null,
+  ): SerializableRuntimeValue | typeof USE_DEFAULT {
+    switch (name) {
+      case "add":
+        if (added !== null) assertValueType(positional[0]!, added.check, added.span);
+        checkCollectionLength(
+          "list",
+          receiver.items.length + 1,
+          receiver.items.length,
+          "add(...)",
+          span,
+        );
+        receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
+        return null;
+      case "addAll": {
+        const other = positional[0]!;
+        if (!isList(other))
+          throw fault(
+            "TSR060",
+            listArgumentMessage(
+              name,
+              "list",
+              describeRuntimeValue(other),
+              isSet(other) ? "set" : isRange(other) ? "range" : "other",
+            ),
+            span,
+          );
+        // Every element is checked before any is added, and copies are taken first, so a list can add itself.
+        if (added !== null)
+          for (const item of other.items) assertValueType(item, added.check, added.span);
+        checkCollectionLength(
+          "list",
+          receiver.items.length + other.items.length,
+          Math.max(receiver.items.length, other.items.length),
+          "addAll(...)",
+          span,
+        );
+        const items = other.items.map((item) => cloneCapturedSerializableValue(item));
+        for (const item of items) receiver.items.push(item);
+        return null;
+      }
+      case "remove": {
+        const index = this.#findValue(receiver.items, positional[0]!);
+        if (index >= 0) this.#removeListItem(receiver, index);
+        else {
+          this.#warn(
+            "TSW002",
+            "remove(...) found no matching value, so the list is unchanged.",
+            span,
+          );
+        }
+        return null;
+      }
+      case "removeAt": {
+        const index = this.#listPosition(
+          receiver,
+          receiverPlan,
+          null,
+          positional[0]!,
+          "remove",
+          span,
+        );
+        return this.#removeListItem(receiver, index);
+      }
+      case "removeFirst":
+      case "removeLast":
+        if (receiver.items.length === 0)
+          throw fault(
+            "TSR018",
+            `Cannot call ${name}() on an empty list. Check that the list's length is above 0 first.`,
+            span,
+          );
+        return this.#removeListItem(
+          receiver,
+          name === "removeFirst" ? 0 : receiver.items.length - 1,
+        );
+      case "clear":
+        if (receiver.items.length > 0) {
+          freezePreparedReferenceDescendants(this.snapshot, receiver);
+          receiver.items.length = 0;
+        }
+        return null;
+      case "contains":
+        return this.#findValue(receiver.items, positional[0]!) >= 0;
+      // A value that no element equals has no position: null (#840).
+      case "indexOf":
+      case "lastIndexOf": {
+        const index = this.#findValue(receiver.items, positional[0]!, name === "lastIndexOf");
+        return index < 0 ? null : index;
+      }
+      case "count": {
+        let count = 0;
+        for (const item of receiver.items) if (serializableEquals(item, positional[0]!)) count += 1;
+        return count;
+      }
+      // A value that is not a position of the list, such as a negative or fractional index, text, or null, gives the
+      // default (#844).
+      case "get": {
+        const problem = getArgumentsProblem("list", positional.length, [
+          ...Object.keys(named),
+          ...(defaulted ? ["default"] : []),
+        ]);
+        if (problem !== undefined) throw fault("TSR028", problem.message, span);
+        const index = positional[0]!;
+        return typeof index === "number" &&
+          Number.isInteger(index) &&
+          index >= 0 &&
+          index < receiver.items.length
+          ? receiver.items[index]!
+          : USE_DEFAULT;
+      }
+      case "toSet":
+        return createCapturedSerializableSet(receiver.items);
+      case "take":
+      case "takeLast": {
+        const count = positional[0]!;
+        if (typeof count !== "number")
+          throw fault(
+            "TSR057",
+            listArgumentMessage(name, "count", describeRuntimeValue(count), "other"),
+            span,
+          );
+        const problem = countProblem(name, count);
+        if (problem !== undefined) throw fault("TSR057", problem, span);
+        // A count beyond the length takes the whole list.
+        return createCapturedSerializableList(
+          name === "take"
+            ? receiver.items.slice(0, count)
+            : receiver.items.slice(Math.max(0, receiver.items.length - count)),
+        );
+      }
+      case "sort":
+      case "shuffle":
+        this.#reorderList(
+          receiver,
+          name === "sort" ? sortOrder(receiver.items, span) : this.#shuffleOrder(receiver, span),
+        );
+        return null;
+      // The last element first: the old indexes from the end.
+      case "reverse":
+        this.#reorderList(
+          receiver,
+          receiver.items.map((_, index) => receiver.items.length - 1 - index),
+        );
+        return null;
+      case "intersection":
+      case "union":
+      case "difference":
+        return createCapturedSerializableList(
+          this.#setOperation("list", name, receiver.items, positional[0]!, span),
+        );
+      case "join": {
+        checkTextArguments(LIST_JOIN, positional, span);
+        // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
+        const separator = (positional[0] as string | undefined) ?? ", ";
+        let length = separator.length * Math.max(0, receiver.items.length - 1);
+        const texts = receiver.items.map((item) => {
+          const text = this.#joinedText(item, span);
+          length += text.length;
+          return text;
+        });
+        checkTextLength(length, "join", span);
+        return texts.join(separator);
+      }
+      default: {
+        const unhandled: never = name;
+        throw new Error(`List method '${String(unhandled)}' has no implementation.`);
+      }
     }
   }
 
@@ -2853,7 +2842,7 @@ export class Evaluator {
     const callee = expression.callee as Extract<ExpressionPlan, { kind: "property" }>;
     const name = callee.name;
     const span = expression.span;
-    if (!DICT_METHODS.has(name)) throw fault("TSR016", noCollectionMethod(receiver, name), span);
+    if (!DICT_METHODS.has(name)) throw fault("TSR016", noDictMethodMessage(name), span);
     const problem = dictArgumentsProblem(name, positional.length, [
       ...Object.keys(named),
       ...(defaulted ? ["default"] : []),
@@ -3256,17 +3245,34 @@ export class Evaluator {
     span: SourceSpan,
     collection: ExpressionPlan | null,
   ): SerializableRuntimeValue {
-    if (name === "length") return value.items.length;
-    if (value.items.length === 0 && (name === "first" || name === "last" || name === "random"))
-      throw emptyCollection(name, value, this.#optionalLabel(collection), span);
-    if (name === "first" || name === "last")
-      return value.items[name === "first" ? 0 : value.items.length - 1]!;
-    if (name === "random") return this.#randomItem(value.items, span, "collectionRandom");
-    throw fault(
-      "TSR017",
-      `${isList(value) ? "Lists" : "Sets"} have no property '${name}'. Use length, first, last, or random.`,
-      span,
-    );
+    if (listProperty(name)?.gives === "length") return value.items.length;
+    const element = elementProperty(name);
+    if (element === undefined)
+      throw fault("TSR017", missingListPropertyMessage(isList(value) ? "list" : "set", name), span);
+    if (value.items.length === 0)
+      throw emptyCollection(element, value, this.#optionalLabel(collection), span);
+    if (element === "random") return this.#randomItem(value.items, span, "collectionRandom");
+    return value.items[this.#elementIndex(element, value.items, span)]!;
+  }
+
+  /** The index of the element that `property` reads from `items`, which are not empty; `random` draws it. */
+  #elementIndex(
+    property: ElementProperty,
+    items: readonly SerializableRuntimeValue[],
+    span: SourceSpan,
+  ): number {
+    switch (property) {
+      case "first":
+        return 0;
+      case "last":
+        return items.length - 1;
+      case "random":
+        return this.#drawIndex(span, "collectionRandom", items);
+      default: {
+        const unhandled: never = property;
+        throw new Error(`List property '${String(unhandled)}' has no implementation.`);
+      }
+    }
   }
 
   #getSpeakerProperty(
@@ -3760,16 +3766,39 @@ export class Evaluator {
     if (problem !== undefined) throw fault("TSR028", problem.message, call.span);
   }
 
-  /** Removes one list element, rebasing or freezing prepared references into the list, and returns it. */
-  /** The items of a set operation's argument, which may be a list or a set whatever the receiver is. */
-  #setOperationArgument(
-    name: string,
+  /**
+   * The elements of `intersection`, `union`, or `difference` of the `items` of a list or set of `kind` and `argument`,
+   * which may be a list or a set whatever the receiver is.
+   */
+  #setOperation(
+    kind: ListKind,
+    name: "intersection" | "union" | "difference",
+    items: readonly SerializableRuntimeValue[],
     argument: SerializableRuntimeValue,
     span: SourceSpan,
-  ): readonly SerializableRuntimeValue[] {
+  ): SerializableRuntimeValue[] {
     if (!isList(argument) && !isSet(argument))
-      throw fault("TSR060", setOperationArgumentMessage(name, argument), span);
-    return argument.items;
+      throw fault(
+        "TSR060",
+        listArgumentMessage(
+          name,
+          "collection",
+          describeRuntimeValue(argument),
+          isRange(argument) ? "range" : "other",
+        ),
+        span,
+      );
+    const result = setOperationItems(name, items, argument.items);
+    const method: ListMethod = LIST_METHODS[name];
+    if (method.grows === true)
+      checkCollectionLength(
+        kind,
+        result.length,
+        Math.max(items.length, argument.items.length),
+        `${name}(...)`,
+        span,
+      );
+    return result;
   }
 
   /** A uniform random order of the list's items, as their old indexes; a trace records it as one record of its draws. */
@@ -4174,20 +4203,6 @@ function outcomeOrder(outcome: RandomNatural): readonly number[] {
   return outcome.order;
 }
 
-/** List, set, and dict methods that change their receiver in place. */
-const MUTATING_METHODS: ReadonlySet<string> = new Set([
-  "add",
-  "addAll",
-  "remove",
-  "removeAt",
-  "removeFirst",
-  "removeLast",
-  "clear",
-  "sort",
-  "shuffle",
-  "reverse",
-]);
-
 const DICT_TEXT_MESSAGE =
   '"${...}" cannot show a dict. Select one value with dict[key], or show every value with dict.values.join().';
 
@@ -4567,27 +4582,26 @@ function invalidReturn(name: string, reason: string): string {
 }
 
 /** A method a list, set, or dict does not have, in the compiler's wording. */
-function noCollectionMethod(receiver: SerializableRuntimeValue, name: string): string {
-  if (!isDict(receiver)) return `${isSet(receiver) ? "Sets" : "Lists"} have no method '${name}'.`;
+function noDictMethodMessage(name: string): string {
   return name === "add"
     ? "Dicts have no method 'add'. Store a value by its key, as in dict[key] = value."
     : `Dicts have no method '${name}'. Use contains, remove, clear, or get.`;
 }
 
-/** `TSR018` for `.first` or `.last`, or `TSR019` for `.random`, of an empty list or set the source may spell `label`. */
+function elementProperty(name: string): ElementProperty | undefined {
+  // EVIDENCE: invariant: the properties that give an element are the names of `ElementProperty`.
+  return listProperty(name)?.gives === "element" ? (name as ElementProperty) : undefined;
+}
+
+/** The failure of reading `property` from an empty list or set the source may spell `label` (see `LIST_PROPERTIES`). */
 function emptyCollection(
-  name: string,
+  property: ElementProperty,
   collection: SerializableRuntimeList | SerializableRuntimeSet,
   label: string | null,
   span: SourceSpan,
 ): RuntimeFault {
-  return fault(
-    name === "random" ? "TSR019" : "TSR018",
-    label === null
-      ? `Cannot read '.${name}' from an empty ${isSet(collection) ? "set" : "list"}. Check its length first.`
-      : `Cannot read '${label}.${name}': '${label}' is empty. Check '${label}.length' first.`,
-    span,
-  );
+  const failure = emptyListPropertyFailure(property, isSet(collection) ? "set" : "list", label)!;
+  return fault(failure.code, failure.message, span);
 }
 
 /**

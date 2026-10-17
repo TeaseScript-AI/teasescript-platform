@@ -55,13 +55,8 @@ import {
   timerOperands,
 } from "./expression-children.js";
 import { validateSwitchCases } from "./switch-cases.js";
-import {
-  COLLECTION_CHANGES,
-  LIST_REORDERS,
-  noteSharing,
-  rootName,
-  type Sharing,
-} from "./operation-checks.js";
+import { noteSharing, rootName, type Sharing } from "./operation-checks.js";
+import { changesElements, reordersList } from "./list-methods.js";
 import {
   globMatches,
   isPathGlob,
@@ -1670,16 +1665,13 @@ class SemanticValidator {
         if (
           method.kind === "propertyAccessExpression" &&
           rootName(method.object) === "account" &&
-          (COLLECTION_CHANGES.has(method.property.name) ||
-            (LIST_REORDERS.has(method.property.name) && isAccountList(method.object)))
+          (changesElements(method.property.name) ||
+            (reordersList(method.property.name) && isAccountList(method.object)))
         ) {
           this.#reportAccountChange(method.object, false);
           return;
         }
-        if (
-          method.kind === "propertyAccessExpression" &&
-          COLLECTION_CHANGES.has(method.property.name)
-        )
+        if (method.kind === "propertyAccessExpression" && changesElements(method.property.name))
           this.#recordSharedWrite(rootName(method.object), scope, "changes");
         if (expression.callee.kind === "identifier") {
           const name = expression.callee.name;

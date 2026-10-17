@@ -7,7 +7,8 @@ import { angleStatisticMessage } from "./angle.js";
 import type { CallExpression, Expression } from "./ast.js";
 import { LIST_FUNCTION_SHAPES } from "./list-function-rules.js";
 import { percentageFailure } from "./numeric-functions.js";
-import { RANGE_LIST_FIX, type OperationProblem } from "./operation-checks.js";
+import { RANGE_LIST_FIX } from "./list-methods.js";
+import type { OperationProblem } from "./operation-checks.js";
 import { RANDOM_CONTRACTS } from "./random-functions.js";
 import { staticChoiceValue, staticVisibleText } from "./static-evaluation.js";
 import {

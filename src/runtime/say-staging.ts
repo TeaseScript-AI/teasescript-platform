@@ -1,4 +1,5 @@
 import { isConversion } from "../conversions.js";
+import { onlyReadsList } from "../list-methods.js";
 import { isNumericFunction } from "../numeric-functions.js";
 import { isRandomFunction } from "../random-functions.js";
 import { isClockFunction, isTemporalMethod } from "../temporal-builtins.js";
@@ -28,31 +29,14 @@ const READING_FUNCTIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Methods that only read their receiver and arguments on every list, set, and dict that has a method of that name, and
- * on text when it has one too. A name that changes its receiver on any of them, such as `reverse`, which reverses a list
- * in place, is not listed, nor is any method of a timer, media, button, or message handle. Every method of text and of
- * date and time values only reads (see `TextMethod` and `TemporalMethod`), and no other value has a method of a date and
- * time value's name, so one that only text or only date and time values have is not listed either.
+ * Whether a call of the method `name` only reads its receiver and arguments, whatever value it is called on: every
+ * method of text and of date and time values does (see `TextMethod` and `TemporalMethod`), and no other value has a
+ * method of a date and time value's name; a method of lists and sets that only reads them (see `LIST_METHODS`) also
+ * only reads text, a dict, or a range that has a method of its name. No method of a timer, media, button, or message
+ * handle only reads.
  */
-const READING_METHODS: ReadonlySet<string> = new Set([
-  "contains",
-  "indexOf",
-  "lastIndexOf",
-  "count",
-  "get",
-  "toSet",
-  "toList",
-  "take",
-  "takeLast",
-  "intersection",
-  "union",
-  "difference",
-  "join",
-]);
-
-/** Whether a call of the method `name` only reads its receiver and arguments, whatever value it is called on. */
 export function isReadingMethod(name: string): boolean {
-  return READING_METHODS.has(name) || isTextOnlyMethod(name) || isTemporalMethod(name);
+  return isTextOnlyMethod(name) || isTemporalMethod(name) || onlyReadsList(name);
 }
 
 const selectiveSays = new WeakMap<SayInstruction, boolean>();

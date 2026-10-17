@@ -517,7 +517,7 @@ test("indexOf, lastIndexOf, and count find a value by ==, and a missing value ha
   for (const [source, expected] of cases) assert.deepEqual(diagnostics(source), expected, source);
   assert.deepEqual(failure(`${DYNAMIC}say dynamic(set[1]).indexOf(1)\nexit`), [
     "TSR016",
-    "Sets have no method 'indexOf'.",
+    "A set has no positions, so it has no indexOf(). Copy it into a list with toList() first.",
   ]);
 });
 
@@ -687,7 +687,7 @@ test("get gives the element at an index, or its default for an index the list do
   for (const [source, expected] of cases) assert.deepEqual(diagnostics(source), expected, source);
   assert.deepEqual(failure(`${DYNAMIC}say dynamic(set[1]).get(0, default: 3)\nexit`), [
     "TSR016",
-    "Sets have no method 'get'.",
+    "A set has no positions, so it has no 'get()'. Use 'contains(...)' instead.",
   ]);
 });
 
