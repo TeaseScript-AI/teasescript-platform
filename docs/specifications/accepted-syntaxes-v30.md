@@ -4226,8 +4226,8 @@ if passed {
 
 Static analysis should warn, but not necessarily fail compilation, when:
 
-- statements are unreachable;
-- an `exit` is declared but unreachable;
+- statements are unreachable (`TSV065`);
+- an `exit` is declared but unreachable (`TSV066`);
 - a `wait` or timer has a length written in days or weeks, which counts only time while the Player is open (`TSV061`,
   [§27](#time));
 - a loop has no way out once it starts (`TSV058`, on its `while` or `goto`): `while true`, with or without parentheses,
