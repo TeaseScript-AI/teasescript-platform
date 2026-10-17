@@ -139,6 +139,20 @@ describe("process cleanup", { concurrency: true }, () => {
           result.output,
         );
         if (reason === "failure") assert.match(result.output, /parallel failure diagnostic/);
+        // Only the step that failed on its own is a failure, printed with its output before a step stopped for it.
+        const failed = result.output.indexOf(
+          `[${reason === "failure" ? "failure" : "waiting"}] FAIL`,
+        );
+        const aborted = result.output.indexOf("[waiting] ABORTED");
+        if (reason === "parent-failure") assert.ok(failed >= 0 && aborted < 0, result.output);
+        else assert.ok(aborted >= 0 && !result.output.includes("[waiting] FAIL"), result.output);
+        if (reason === "failure")
+          assert.ok(
+            failed >= 0 &&
+              failed < result.output.indexOf("parallel failure diagnostic") &&
+              failed < aborted,
+            result.output,
+          );
         await waitFor(() => {
           try {
             process.kill(pid, 0);
