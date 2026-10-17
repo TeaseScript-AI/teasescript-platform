@@ -331,7 +331,7 @@ export function findVisibleOverflows(
       found.push({ span: expression.span, cause: "zero" });
       continue;
     }
-    const value = knownValue(expression, (operand) => known.known(operand));
+    const value = knownValue(expression, (operand) => known.quantity(operand));
     if (value === undefined || finite(value) !== undefined) continue;
     found.push({
       span: expression.span,
@@ -402,7 +402,7 @@ function knownValue(
 function dividesByKnownZero(expression: Expression, known: KnownValues): boolean {
   if (expression.kind !== "binaryExpression") return false;
   if (expression.operator !== "/" && expression.operator !== "%") return false;
-  const divisor = known.known(expression.right);
+  const divisor = known.quantity(expression.right);
   return (
     divisor === 0 ||
     (isStaticDuration(divisor) && durationFamily(durationParts(divisor)) === "zero") ||
@@ -419,9 +419,9 @@ export type KnownValue = SerializableRuntimeValue;
 
 /**
  * The most work the known values of one check may take together: the UTF-16 code units of the texts and the entries of
- * the lists, sets, and dicts that they build and that their calls read, and the work of their regex searches. Past it,
- * values are not known, so that no script makes the compiler build large values or compute for long; a run has far
- * higher limits.
+ * the lists, sets, and dicts that they build and that their calls and the checks read, and the work of their regex
+ * searches. Past it, values are not known, so that no script makes the compiler build large values or compute for long;
+ * a run has far higher limits.
  */
 export const KNOWN_VALUE_WORK = 10_000_000;
 
@@ -453,10 +453,28 @@ export class KnownValues {
   }
 
   /**
-   * The value `expression` is known to have, or `undefined`. Iterative, so a long chain of steps or variables does not
-   * deepen the native stack.
+   * The value `expression` is known to have, or `undefined`. A check reads it, which takes work as large as it is, so
+   * reading a long text or list at many places uses the work up too. Iterative, so a long chain of steps or variables does
+   * not deepen the native stack.
    */
   public known(expression: Expression): KnownValue | undefined {
+    const value = this.#known(expression);
+    if (value === undefined) return undefined;
+    const size = this.#size(value);
+    if (size === undefined || size > this.#work.remaining) return undefined;
+    this.#work.remaining -= size;
+    return value;
+  }
+
+  /** The number, duration, or angle `expression` is known to have, which takes no work to read, or `undefined`. */
+  public quantity(expression: Expression): number | AnyDuration | StoredAngle | undefined {
+    const value = this.#known(expression);
+    return typeof value === "number" || isStaticDuration(value) || isStaticAngle(value)
+      ? value
+      : undefined;
+  }
+
+  #known(expression: Expression): KnownValue | undefined {
     const pending: Expression[] = [expression];
     const entered = new Set<Expression>();
     while (pending.length > 0) {

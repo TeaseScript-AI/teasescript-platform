@@ -275,20 +275,25 @@ test("a value that needs more work than the compiler gives is not known, which i
     [],
   );
   // The texts that known values build share one bound: a text within the work left is known, and one past it is not,
-  // although alone it would be. The run still fails on both.
-  const text = `let t = "a".repeat(${Math.floor(KNOWN_VALUE_WORK * 0.3)})`;
-  assert.deepEqual(diagnostics(`${text}\nsay toNumber(t + "x")`).length, 1);
-  const shared = `${text}\nsay toNumber(t + t)\nsay toNumber(t + "x")`;
+  // although alone it would be.
+  // Slightly less than a fifth, which leaves room for the small values around it.
+  const text = `let t = "a".repeat(${KNOWN_VALUE_WORK / 5 - 100})`;
+  assert.equal(diagnostics(`${text}\nsay toNumber(t + "x")`).length, 1);
   assert.deepEqual(
-    diagnostics(shared).map((diagnostic) => diagnostic.split(" ").slice(0, 2).join(" ")),
+    diagnostics(`${text}\nsay toNumber(t + t)\nsay toNumber(t + "x")`).map((diagnostic) =>
+      diagnostic.split(" ").slice(0, 2).join(" "),
+    ),
     ["TSV043 2:14"],
   );
-  // A call takes work as large as what it reads, so calls that read one long text use the work up too.
-  const reads = `${text}\n${'say toNumber(t.substring(0, 1) + "x")\n'.repeat(3)}`;
-  assert.deepEqual(
-    diagnostics(reads).map((diagnostic) => diagnostic.split(" ").slice(0, 2).join(" ")),
-    ["TSV043 2:14", "TSV043 3:14"],
-  );
+  // So do the checks and the calls that read a long known value: at many places, only the first see it.
+  const reads = diagnostics(
+    `${text}\n${`say t.substring(${KNOWN_VALUE_WORK})\n`.repeat(10)}`,
+  ).length;
+  assert.ok(reads > 0 && reads < 10, `${reads} of 10 checks read the text`);
+  const list = `let xs = "a".repeat(${KNOWN_VALUE_WORK / 20}).split("")`;
+  const counts = diagnostics(`${list}\n${'say chance(xs.count("a"))\n'.repeat(20)}`).length;
+  assert.ok(counts > 0 && counts < 20, `${counts} of 20 calls read the list`);
+  // The run still fails on the value.
   assert.equal(
     failure(`${DYNAMIC}${text.replace('"a"', 'dynamic("a")')}\nsay toNumber(t + "x")`)?.[0],
     "TSR058",
