@@ -103,7 +103,4 @@ function card(main, n = 1) {
 }
 card(null)
 // TODO SX_OBJECT_THIS line 57: The legacy script object (this) cannot become a TeaseScript value.
-if false {
-  // | if (false) card(this, 0.5)
-}
 exit

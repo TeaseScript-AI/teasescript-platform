@@ -45,9 +45,7 @@ function sexscriptLegacyShowSwitch(command) {
 // The legacy online service becomes the package's storage, and isConnected() is always true.
 // NOTE SX_ONLINE_STORAGE line 2: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
 // NOTE SX_ONLINE_STORAGE line 2: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
-if true {
-  save 12 as "game.highscore"
-}
+save 12 as "game.highscore"
 // NOTE SX_ONLINE_STORAGE line 3: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
 let best = sexscriptLegacyReceiveInteger("game.highscore")
 // A sent image keeps its photo reference under the code sendImage() gives.

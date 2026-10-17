@@ -15,9 +15,7 @@ if randomInteger(0..2) == 0 {
 }
 // NOTE SX_CLOSURE_NOT_CALLED line 7: Dropped the bare reference to closure setImageImplement: without () Groovy did not call it, so it had no effect. Add setImageImplement() manually if a call was intended.
 // NOTE SX_CLOSURE_NOT_CALLED line 8: Groovy treated closure setImageImplement itself as true here because it was not called; kept as true. Use setImageImplement() if a call was intended.
-if true {
-  say prose "Always shown", instant
-}
+say prose "Always shown", instant
 startFast()
 // TODO SX_UNDEFINED_FUNCTION line 10: mistressInfo() is not defined in this script, its package helpers, or the SexScript API; SexScript failed here at runtime.
 // | mistressInfo()

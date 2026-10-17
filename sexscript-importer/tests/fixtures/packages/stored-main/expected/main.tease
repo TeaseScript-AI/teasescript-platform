@@ -109,7 +109,4 @@ function notesKey {
   return "club.notes"
 }
 sexscriptLegacySave(notesKey(), ["kneel", "wait"])
-if false {
-  sexscriptLegacySave("club", null)
-}
 goto "next.tease"

@@ -49,6 +49,7 @@ import { renameConflictingIdentifiers } from "./naming.ts";
 import { askedProfileKeys, keysRead, legacyProfilePrompt, profileCall } from "./profile.ts";
 import { withStorageDefaults } from "./storage-keys.ts";
 import { withProfileKeys } from "./profile-keys.ts";
+import { withoutDeadCode } from "./dead-code.ts";
 import { withNullDefaults } from "./null-defaults.ts";
 import { withNativeTime } from "./native-time.ts";
 import {
@@ -1375,12 +1376,14 @@ function withTimeModel(programs: readonly MigrationProgram[]): MigrationProgram[
 function withDefaults(program: MigrationProgram): MigrationProgram {
   return {
     ...program,
-    statements: withTypedBooleanTests(
-      withPlainNullTests(
-        withLoopConditions(
-          withNullDefaults(
-            program.statements,
-            (statement) => helperDefinitionOrder(statement) >= 0,
+    statements: withoutDeadCode(
+      withTypedBooleanTests(
+        withPlainNullTests(
+          withLoopConditions(
+            withNullDefaults(
+              program.statements,
+              (statement) => helperDefinitionOrder(statement) >= 0,
+            ),
           ),
         ),
       ),

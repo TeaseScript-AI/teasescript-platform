@@ -316,7 +316,6 @@ function playRound(score): (string | integer)[] {
   } else {
     return ["STAND", 1]
   }
-  say prose "never", instant
 }
 let shockTime = 0
 let outcome = playRound(21)
@@ -394,9 +393,6 @@ function recount: string | integer {
 say prose toInteger(recount()) + 1, instant
 // A typed declaration in another block is another variable, which does not type the binding the function returns.
 let weight = "before"
-if false {
-  let weightValue = "nested"
-}
 function reweigh {
   weight = "3"
   return weight

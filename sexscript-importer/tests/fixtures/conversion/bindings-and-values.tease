@@ -31,7 +31,6 @@ function pick(a, b) {
 say prose "Pick", instant
 say prose "Picked ${pick((askChoice 0: "A", 1: "B"), 3)}", instant
 say prose "hello", instant
-exit // final return
 // A declaration of several variables takes each from its position in the values, null past the end.
 function tilePosition(index) {
   return [index % 3, toInteger(index / 3)]

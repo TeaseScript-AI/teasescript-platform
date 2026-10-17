@@ -1,3 +1,4 @@
+import { isPure } from "./dead-code.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import { keysRead } from "./profile.ts";
 import { withNestedBlocks } from "./repeated-text.ts";
@@ -122,23 +123,4 @@ function savedKeys(statements: readonly IrStatement[]): Set<string> {
   };
   visit([...statements]);
   return keys;
-}
-
-/** A value that reading again gives again, with no effect: literals, variables, members, loads and tests of them. */
-function isPure(value: IrExpression): boolean {
-  switch (value.kind) {
-    case "literal":
-    case "variable":
-      return true;
-    case "property":
-      return value.name !== "random" && isPure(value.target);
-    case "load":
-      return isPure(value.key) && (value.defaultValue === undefined || isPure(value.defaultValue));
-    case "unary":
-      return isPure(value.value);
-    case "binary":
-      return isPure(value.left) && isPure(value.right);
-    default:
-      return false;
-  }
 }

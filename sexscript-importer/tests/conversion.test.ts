@@ -521,8 +521,10 @@ test(
       const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { files });
       const source = emitTease(program!);
       assert.match(source, /^let picture = "images\/Room\/bed\.jpg"$/mu);
-      assert.match(source, /^if true \{\n {2}say prose "Bed"/mu);
-      assert.match(source, /^if not false \{\n {2}say prose "No zapper"/mu);
+      // A test the package's files decide keeps only the branch that runs (dead-code.ts).
+      assert.match(source, /^say prose "Bed"/mu);
+      assert.match(source, /^say prose "No zapper"/mu);
+      assert.doesNotMatch(source, /^if (true|not false) \{/mu);
       assert.match(
         source,
         /\["images\/room\/chair2\.jpg"\]\.contains\(sexscriptLegacyPackagePath\("images\/Room\/chair\$\{n\}\.jpg"\)\)/u,
