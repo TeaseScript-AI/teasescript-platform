@@ -54,6 +54,7 @@ import {
   ABSOLUTE_DATE_TIME_TYPE,
   valueKindOfType,
   isIdentityType,
+  isShown,
   type StaticType,
 } from "./static-types.js";
 import {
@@ -390,14 +391,9 @@ function unshowableElement(
   return undefined;
 }
 
-/**
- * Whether a value of this type may be shown by `join`: text, a number, true or false, a duration, an angle, a date or
- * time value, or null; `join` checks the value.
- */
+/** Whether a value of this type may be shown by `join` (`isShown`); `join` checks the value. */
 function joinShowable(type: StaticType): boolean {
-  return members(type).some(
-    (member) => !isKnown(member) || ["scalar", "null"].includes(resolved(member).kind),
-  );
+  return members(type).some(isShown);
 }
 
 function capitalized(text: string): string {
@@ -924,7 +920,7 @@ function candidateConversionProblem(
   text: string | undefined,
 ): string | undefined {
   const { kinds, result } = conversion;
-  if (kinds === "shown" ? type.kind === "scalar" || type.kind === "null" : isScalar(type, ...kinds))
+  if (kinds === "shown" ? isShown(type) : isScalar(type, ...kinds))
     return undefined;
   if (isScalar(type, "string")) {
     // Text it can see converts as the runtime converts it, and does not convert with the runtime's text.
@@ -937,7 +933,7 @@ function candidateConversionProblem(
     if (type.kind === "list" || type.kind === "dict") {
       const unjoinable = members(type.element)
         .map(resolved)
-        .find((member) => isKnown(member) && member.kind !== "scalar" && member.kind !== "null");
+        .find((member) => isKnown(member) && !isShown(member));
       if (unjoinable !== undefined)
         return `${name}(...) cannot convert ${describeValue(type)}, and ${type.kind === "list" ? ".join() cannot combine its elements" : ".values.join() cannot combine its values"}, which hold ${describeValue(unjoinable)}. Show the whole ${type.kind} with say, or select a value inside it that ${name}(...) converts.`;
     }

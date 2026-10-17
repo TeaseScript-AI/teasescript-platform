@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { HANDLE_KINDS } from "../src/handle-members.js";
+import { escapeMarkup } from "../src/message-markup.js";
 import { compileSource, createFreshRuntimeSession } from "../src/index.js";
 import { TEASESCRIPT_PROTECTED_TYPE_NAMES } from "../src/language-facts.js";
 import {
@@ -23,8 +24,49 @@ import {
 } from "../src/value-kinds.js";
 
 // Each kind of value has one entry in `VALUE_KINDS` (IMPLEMENTATION-AND-REVIEW.md, "One home for each language rule").
-// These tests check that the compiler and the runtime do with a value of each kind what its entry says, so a new kind
-// needs its entry here and in `VALUE_KINDS`, and its implementation wherever an entry's fact is used.
+// These tests check what the compiler and the runtime do with a value of each kind against what V30 states, so a new
+// kind needs its expectations here, its entry in `VALUE_KINDS`, and its implementation wherever an entry's fact is used.
+
+/** What the language does with a value of a kind, as `EXPECTED` lists it. */
+type Fact = "shown" | "notation" | "json" | "choice" | "ordered" | "dictKey" | "saved" | "case";
+
+/**
+ * Each kind's description, and what V30 lets a script do with a value of it: show it with `${...}` and `join()` (§8),
+ * where `say` shows a script reference and a regex in their notation, write it with `toJson` (§13), give it to a button as its value (§26), order it with `<` (§5, §35), use it as a dict key
+ * (§40), save it (§25), and write it as a `case` value (§32).
+ */
+const EXPECTED: Readonly<Record<ValueKind, readonly [description: string, ...facts: Fact[]]>> = {
+  integer: ["a whole number (integer)", "shown", "json", "choice", "ordered", "saved", "case"],
+  number: ["a number", "shown", "json", "choice", "ordered", "saved", "case"],
+  string: ["text (string)", "shown", "json", "choice", "ordered", "dictKey", "saved", "case"],
+  boolean: ["true or false (boolean)", "shown", "json", "choice", "saved", "case"],
+  duration: ["a duration", "shown", "json", "choice", "ordered", "saved", "case"],
+  calendarDuration: ["a calendar duration", "shown", "choice", "ordered", "saved", "case"],
+  angle: ["an angle", "shown", "json", "choice", "ordered", "saved", "case"],
+  date: ["a date", "shown", "json", "choice", "ordered", "saved"],
+  time: ["a time", "shown", "json", "choice", "ordered", "saved"],
+  datetime: ["a date and time", "shown", "json", "choice", "ordered", "saved"],
+  absoluteDateTime: ["an absolute date and time", "shown", "json", "choice", "ordered", "saved"],
+  script: ["a script reference", "shown", "notation", "saved"],
+  regex: ["a regex", "shown", "notation", "saved"],
+  range: ["a range", "saved"],
+  list: ["a list", "json", "saved"],
+  set: ["a set", "json", "saved"],
+  dict: ["a dict", "json", "saved"],
+  object: ["an object", "json", "saved"],
+  speaker: ["a speaker", "json", "case"],
+  timer: ["a timer handle"],
+  media: ["a media handle"],
+  camera: ["a camera view"],
+  permanentButton: ["a permanent button"],
+  messageHandle: ["a message handle"],
+  null: ["null", "shown", "json", "choice", "saved", "case"],
+};
+
+function holds(kind: ValueKind, fact: Fact): boolean {
+  const [, ...facts] = EXPECTED[kind];
+  return facts.includes(fact);
+}
 
 /** A value of each kind as a snapshot holds it. */
 const VALUES: Readonly<Record<ValueKind, SerializableRuntimeValue>> = {
@@ -117,6 +159,8 @@ const SOURCES: Readonly<Record<ValueKind, string>> = {
 interface Outcome {
   /** The compile errors, or else the runtime failures, as code and text. */
   readonly problems: readonly (readonly [string, string])[];
+  /** Whether the problems are compile errors. */
+  readonly compiled: boolean;
   /** What the script said after `SETUP`. */
   readonly said: readonly string[];
   /** Whether the run stopped at an ask. */
@@ -128,7 +172,12 @@ function outcome(body: string): Outcome {
   const compiled = compileSource(`${SETUP}\n${body}\nexit`);
   const errors = compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (compiled.plan === null || errors.length > 0)
-    return { problems: errors.map(({ code, message }) => [code, message]), said: [], asked: false };
+    return {
+      problems: errors.map(({ code, message }) => [code, message]),
+      compiled: true,
+      said: [],
+      asked: false,
+    };
   const session = createFreshRuntimeSession(compiled.plan, {
     baseDelayMs: 0,
     delayPerWordMs: 0,
@@ -143,7 +192,7 @@ function outcome(body: string): Outcome {
     }
     const action = session.view().foregroundAction;
     if (action?.kind !== "mediaPlayback")
-      return { problems, said, asked: action?.kind === "interaction" };
+      return { problems, compiled: false, said, asked: action?.kind === "interaction" };
     session.reportMediaLoad(action.mediaId, { kind: "loaded", durationMs: 60_000 });
   }
 }
@@ -154,7 +203,7 @@ function outcomes(kind: ValueKind, body: string): readonly [Outcome, Outcome] {
   return [outcome(body.replaceAll("X", value)), outcome(body.replaceAll("X", `pick(${value})`))];
 }
 
-test("a value of each kind is of its kind, is stored as its entry says, and has its description", () => {
+test("a value of each kind is of its kind, is stored as its entry says, and has one description", () => {
   for (const kind of VALUE_KIND_NAMES) {
     const value = VALUES[kind];
     assert.equal(valueKindOf(value), kind);
@@ -169,8 +218,8 @@ test("a value of each kind is of its kind, is stored as its entry says, and has 
         `${kind} as ${other}`,
       );
     // The compiler describes the type as the runtime describes the value.
-    assert.equal(describeValue(value), VALUE_KINDS[kind].description, kind);
-    assert.equal(describeType(typeOf(kind)), VALUE_KINDS[kind].description, kind);
+    assert.equal(describeValue(value), EXPECTED[kind][0], kind);
+    assert.equal(describeType(typeOf(kind)), EXPECTED[kind][0], kind);
   }
 });
 
@@ -179,56 +228,72 @@ test("the compiler and the runtime name a value of each kind with one text", () 
     // `sum` takes a list, and names any other value.
     if (kind === "list") continue;
     const [known, unknown] = outcomes(kind, "say sum(X)");
-    const message = `sum(...) needs a list, not ${VALUE_KINDS[kind].description}.`;
+    const message = `sum(...) needs a list, not ${EXPECTED[kind][0]}.`;
     assert.equal(known.problems[0]?.[0], "TSV043", kind);
     assert.ok(known.problems[0]![1].startsWith(message), `${kind}: ${known.problems[0]![1]}`);
     assert.deepEqual(unknown.problems, [["TSR059", known.problems[0]![1]]], kind);
   }
 });
 
-test("each kind is shown, written as JSON, returned by a button, ordered, a dict key, and saved as its entry says", () => {
-  const facts: readonly (readonly [
-    fact: string,
+test("a value of each kind is shown, written as JSON, returned by a button, ordered, a dict key, and saved as V30 says", () => {
+  const checks: readonly (readonly [
+    fact: Fact | "equal",
     body: string,
-    holds: (kind: ValueKind) => boolean,
     shows: "said" | "asked",
   ])[] = [
-    ["shown", "say [X].join()", (kind) => VALUE_KINDS[kind].shown !== null, "said"],
-    ["JSON", "say toJson(X)", (kind) => VALUE_KINDS[kind].json !== null, "said"],
-    [
-      "choice",
-      'let c = askChoice [{ value: X, text: "pick" }]',
-      (kind) => VALUE_KINDS[kind].choice,
-      "asked",
-    ],
-    ["ordered", "say X < X", (kind) => VALUE_KINDS[kind].ordered, "said"],
-    ["equal", "say X == X", () => true, "said"],
-    [
-      "dict key",
-      "let d = dict{}\nd[X] = 1\nsay d.length",
-      (kind) => VALUE_KINDS[kind].dictKey,
-      "said",
-    ],
-    ["saved", 'save X as "k"\nsay "saved"', (kind) => !hasIdentity(kind), "said"],
+    ["shown", "say [X].join()", "said"],
+    ["json", "say toJson(X)", "said"],
+    ["choice", 'let c = askChoice [{ value: X, text: "pick" }]', "asked"],
+    ["ordered", "say X < X", "said"],
+    ["equal", "say X == X", "said"],
+    ["dictKey", "let d = dict{}\nd[X] = 1\nsay d.length", "said"],
+    ["saved", 'save X as "k"\nsay "saved"', "said"],
   ];
-  for (const [fact, body, holds, shows] of facts)
+  for (const [fact, body, shows] of checks)
     for (const kind of VALUE_KIND_NAMES)
       for (const [form, result] of outcomes(kind, body).entries()) {
         const where = `${fact} of ${kind}${form === 0 ? "" : " through pick"}`;
-        const expected = holds(kind);
+        const expected = fact === "equal" || holds(kind, fact);
         assert.equal(
           result.problems.length === 0,
           expected,
           `${where}: ${JSON.stringify(result.problems)}`,
         );
-        if (!expected) continue;
+        // The compiler rejects a value it knows, and the runtime one it does not know.
+        if (!expected) {
+          assert.equal(result.compiled, form === 0, where);
+          continue;
+        }
         if (shows === "asked") assert.ok(result.asked, where);
         else assert.equal(result.said.length, 1, where);
         if (fact === "equal") assert.deepEqual(result.said, ["true"], where);
       }
 });
 
-test("a case value is a literal of a kind whose entry says it may be one", () => {
+test("values of one family order, and values of two do not", () => {
+  const ordered = VALUE_KIND_NAMES.filter((kind) => holds(kind, "ordered"));
+  const numbers: readonly ValueKind[] = ["integer", "number"];
+  for (const left of ordered)
+    for (const right of ordered) {
+      const body = `say pick(${SOURCES[left]}) < pick(${SOURCES[right]})`;
+      const expected = left === right || (numbers.includes(left) && numbers.includes(right));
+      assert.equal(outcome(body).problems.length === 0, expected, body);
+    }
+});
+
+test("say shows a value in notation, escaped, where V30 says so, and any other shown value as its text", () => {
+  // A regex and text with a markup character; a script reference has none.
+  for (const [kind, source] of [
+    ["regex", "/a\\*/"],
+    ["string", '"a\\\\*"'],
+  ] as const) {
+    const { said } = outcome(`say pick(${source})\nsay "\${pick(${source})}"`);
+    assert.equal(said.length, 2, kind);
+    assert.equal(said[0], holds(kind, "notation") ? escapeMarkup(said[1]!) : said[1], kind);
+  }
+});
+
+test("a case value is a literal of a kind that V30 lets a case be", () => {
   // Each kind that a literal writes; after 'case', an object literal would be the block.
   const literals: readonly (readonly [ValueKind, string])[] = [
     ["integer", "5"],
@@ -251,7 +316,7 @@ test("a case value is a literal of a kind whose entry says it may be one", () =>
     );
     assert.equal(
       problems.some(([code]) => code === "TSV047"),
-      !VALUE_KINDS[kind].case,
+      !holds(kind, "case"),
       `${kind}: ${JSON.stringify(problems)}`,
     );
   }

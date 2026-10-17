@@ -402,6 +402,7 @@ import {
   valueKindOfType,
   isIdentityType,
   isScalarKind,
+  isShown,
   type StaticType,
 } from "./static-types.js";
 import { mayEqualKinds, ordersWith, VALUE_KIND_NAMES, VALUE_KINDS } from "./value-kinds.js";
@@ -5246,7 +5247,7 @@ class TypeChecker {
         if (unwrap(value).kind !== "objectLiteral")
           this.#reportUnless(
             type,
-            (member) => isShowable(member) || resolved(member).kind === "object",
+            (member) => isShown(member) || resolved(member).kind === "object",
             value,
             `'${name.name}:' takes text or a button object { text, background? }`,
           );
@@ -5553,7 +5554,7 @@ class TypeChecker {
         this.#reportUnless(
           type,
           (member) =>
-            member.kind === "list" && (!isKnown(member.element) || isShowable(member.element)),
+            member.kind === "list" && (!isKnown(member.element) || isShown(member.element)),
           argument.value,
           "'texts:' takes a list of texts",
         );
@@ -5571,7 +5572,7 @@ class TypeChecker {
         if (unwrap(argument.value).kind !== "objectLiteral")
           this.#reportUnless(
             type,
-            (member) => isShowable(member) || resolved(member).kind === "object",
+            (member) => isShown(member) || resolved(member).kind === "object",
             argument.value,
             "'cancel:' takes text or a button object { text, background? }",
           );
@@ -8213,7 +8214,7 @@ class TypeChecker {
             option.expression,
             type,
             (element) =>
-              (written === null ? isChoiceValue(element) : isShowable(element)) ||
+              (written === null ? isChoiceValue(element) : isShown(element)) ||
               resolved(element).kind === "object",
             () =>
               this.#report(
@@ -8307,7 +8308,7 @@ class TypeChecker {
     const accepted = (member: StaticType): boolean => {
       const kind = resolved(member).kind;
       return (
-        (returns ? isChoiceValue(member) : isShowable(member)) ||
+        (returns ? isChoiceValue(member) : isShown(member)) ||
         kind === "object" ||
         (!inList && (kind === "list" || kind === "set"))
       );
@@ -8389,7 +8390,7 @@ class TypeChecker {
     const text = table.get("text");
     if (text === undefined) return;
     const shown = (member: StaticType): boolean =>
-      !isKnown(member) || resolved(member).kind === "null" || isShowable(member);
+      !isKnown(member) || resolved(member).kind === "null" || isShown(member);
     if (!members(text).some(shown))
       this.#checkShownText(expression, text, "the text of a choice option");
   }
@@ -8403,7 +8404,7 @@ class TypeChecker {
       const reported = this.#checkMembers(
         expression,
         type,
-        (member) => isShowable(member) || resolved(member).kind === "list",
+        (member) => isShown(member) || resolved(member).kind === "list",
         (member) =>
           this.#report(
             typeCode.unshowableValue,
@@ -8414,7 +8415,7 @@ class TypeChecker {
           ),
       );
       if (!reported)
-        this.#checkElements(expression, type, isShowable, () =>
+        this.#checkElements(expression, type, isShown, () =>
           this.#report(
             typeCode.unshowableValue,
             "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.",
@@ -8430,7 +8431,7 @@ class TypeChecker {
         value.span,
       );
     for (const element of value.elements)
-      this.#checkMembers(element, this.#typeOf(element), isShowable, () =>
+      this.#checkMembers(element, this.#typeOf(element), isShown, () =>
         this.#report(
           typeCode.unshowableValue,
           "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.",
@@ -8590,7 +8591,7 @@ class TypeChecker {
 
   /** Only `${...}` selects from a list; a list in a text field is an error, at runtime when it is not known here. */
   #checkShownText(expression: Expression, type: StaticType, field: string): void {
-    this.#checkMembers(expression, type, isShowable, (member) =>
+    this.#checkMembers(expression, type, isShown, (member) =>
       member.kind === "list"
         ? this.#report(
             typeCode.listInText,
@@ -10729,12 +10730,6 @@ function describeLiterals(values: readonly PossibleValue[]): string {
     : `${written.slice(0, -1).join(", ")} or ${written.at(-1)!}`;
 }
 
-/** Whether `${...}` and text fields show a value of this member type as text (`shown`), or may. */
-function isShowable(member: StaticType): boolean {
-  const kind = valueKindOfType(member);
-  return kind === undefined || VALUE_KINDS[kind].shown !== null;
-}
-
 /** Why a button cannot return a value of this member type, which it shows, such as a script reference or a regex. */
 function unreturnableChoice(member: StaticType): string | undefined {
   const kind = valueKindOfType(member);
@@ -11136,7 +11131,7 @@ function joinMessage(
   }
   if (text(left) !== text(right) && (text(left) || !list(right))) {
     const other = text(left) ? right : left;
-    const fix = isShowable(other)
+    const fix = isShown(other)
       ? ` Put the value in the text instead, as in ${interpolationFix(expression)}.`
       : "";
     return `'+' joins text only with other text, not with ${describeValue(other)}.${fix}`;
@@ -11412,7 +11407,7 @@ function operandFix(operand: StaticType, type: StaticType, statement: Assignment
   const target = expressionLabel(statement.target);
   if (statement.operator !== "+=" || target === null) return "";
   const value = operandLabel(statement.value) ?? "value";
-  if (isScalar(operand, "string") && isShowable(type))
+  if (isScalar(operand, "string") && isShown(type))
     return ` Put the value in the text instead, as in '${target} += "\${${value}}"'.`;
   if (resolved(operand).kind === "list" && resolved(type).kind === "range")
     return ` To add the numbers of a range, use '${target} += ${rangeListText(statement.value)}'.`;

@@ -2033,6 +2033,15 @@ export function isIdentityType(type: StaticType): boolean {
   return kind !== undefined && hasIdentity(kind);
 }
 
+/**
+ * Whether `${...}` and text fields show a value of a type without members as text (`shown`), or may, as one of a type
+ * the compiler does not know.
+ */
+export function isShown(type: StaticType): boolean {
+  const kind = valueKindOfType(type);
+  return kind === undefined || VALUE_KINDS[kind].shown !== null;
+}
+
 /** Whether an annotation can name the kind a type without members holds (`written`). */
 function isWritten(type: StaticType): boolean {
   const kind = valueKindOfType(type);
