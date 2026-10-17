@@ -11,6 +11,7 @@ import {
 } from "../duration.js";
 import type { ListFunctionName } from "../language-facts.js";
 import {
+  fewestValuesProblem,
   isStatistic,
   LIST_FUNCTION_CONTRACTS,
   listFunctionShape,
@@ -241,16 +242,8 @@ export function statisticValues(
   span: SourceSpan,
 ): SerializableRuntimeValue[] {
   const values = listValues(name, list, by, span);
-  const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
-  const fewest = contract.takes === "values" ? contract.fewest : 0;
-  if (values.length < fewest)
-    throw fault(
-      "TSR018",
-      fewest === 1
-        ? `${name}(...) of an empty list has no result. Check that the list's length is above 0 first.`
-        : `${name}(...) needs at least ${fewest} values, but the list has ${values.length}.`,
-      span,
-    );
+  const problem = fewestValuesProblem(name, values.length);
+  if (problem !== undefined) throw fault("TSR018", problem, span);
   return values;
 }
 
@@ -366,13 +359,8 @@ export function linearRegression(
     named.y === undefined
       ? items
       : items.map((item) => propertyValue(name, item, "y", named.y!, span));
-  const { fewest } = LIST_FUNCTION_CONTRACTS[name];
-  if (ys.length < fewest)
-    throw fault(
-      "TSR018",
-      `${name}(...) needs at least ${fewest} points, but the list has ${ys.length}.`,
-      span,
-    );
+  const fewest = fewestValuesProblem(name, ys.length);
+  if (fewest !== undefined) throw fault("TSR018", fewest, span);
   const xs =
     named.x === undefined
       ? undefined

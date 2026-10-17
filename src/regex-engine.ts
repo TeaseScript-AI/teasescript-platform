@@ -36,6 +36,9 @@ export const MAX_REGEX_WORK = 5_000_000;
 
 let workLimit = MAX_REGEX_WORK;
 
+/** Work that the operations of `withRegexWorkPool` share, besides each one's own limit, or `null`. */
+let workPool: { remaining: number } | null = null;
+
 /** Thrown out of a regex operation that needs more work than its limit. */
 export const REGEX_WORK_EXCEEDED = new Error("A regex operation needed more work than it may use.");
 
@@ -45,6 +48,7 @@ export const REGEX_WORK_EXCEEDED = new Error("A regex operation needed more work
  */
 export class RegexWork {
   readonly #limit = workLimit;
+  readonly #pool = workPool;
   #used = 0;
   /** The numbers of capture offsets whose NFA setup this operation has charged; the engine keeps it. */
   readonly widths = new Set<number>();
@@ -56,6 +60,10 @@ export class RegexWork {
 
   charge(units: number): void {
     if (units > this.#limit - this.#used) throw REGEX_WORK_EXCEEDED;
+    if (this.#pool !== null) {
+      if (units > this.#pool.remaining) throw REGEX_WORK_EXCEEDED;
+      this.#pool.remaining -= units;
+    }
     this.#used += units;
   }
 }
@@ -68,6 +76,20 @@ export function withRegexWorkLimit<T>(limit: number, run: () => T): T {
     return run();
   } finally {
     workLimit = outer;
+  }
+}
+
+/**
+ * Runs `run` with the regex operations it starts also charging `pool`, so that together they use at most the work it
+ * has left. The compiler computes known values so (see `KnownValues`).
+ */
+export function withRegexWorkPool<T>(pool: { remaining: number }, run: () => T): T {
+  const outer = workPool;
+  workPool = pool;
+  try {
+    return run();
+  } finally {
+    workPool = outer;
   }
 }
 

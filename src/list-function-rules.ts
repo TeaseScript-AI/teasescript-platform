@@ -284,6 +284,20 @@ export function mixedListValuesMessage(
   return `${name}(...) needs ${x ? "x values" : "values"} of one kind: ${describeKinds(kinds)}.`;
 }
 
+/**
+ * Why the list function `name` cannot use a list of `count` values or points, fewer than its contract's `fewest`, from
+ * the compiler, for a list it knows, and the runtime (`TSR018`); `undefined` when it can.
+ */
+export function fewestValuesProblem(name: ListFunctionName, count: number): string | undefined {
+  const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
+  if (contract.takes === "line" || count >= contract.fewest) return undefined;
+  if (contract.takes === "points")
+    return `${name}(...) needs at least ${contract.fewest} points, but the list has ${count}.`;
+  return contract.fewest === 1
+    ? `${name}(...) of an empty list has no result. Check that the list's length is above 0 first.`
+    : `${name}(...) needs at least ${contract.fewest} values, but the list has ${count}.`;
+}
+
 /** What `min` and `max` take besides one list. */
 const MIN_MAX_TAKES = "2 or more arguments, or one list";
 

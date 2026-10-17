@@ -132,6 +132,7 @@ import {
 import { isReadingMethod } from "./say-staging.js";
 import {
   isVisibleScalar,
+  joinedText,
   quotedText,
   quotedTextWithin,
   valueNotation,
@@ -2098,13 +2099,7 @@ export class Evaluator {
 
   /** One element of `list.join()`: a scalar as visible text, without selecting from nested lists. */
   #joinedText(item: SerializableRuntimeValue, span: SourceSpan): string {
-    if (!isVisibleScalar(item))
-      throw fault(
-        "TSR021",
-        "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes. Select an element or a property first.",
-        span,
-      );
-    return visibleText(item, span, currentTemporalContext(this.snapshot));
+    return joinedText(item, span, currentTemporalContext(this.snapshot));
   }
 
   #binary(

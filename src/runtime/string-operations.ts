@@ -25,7 +25,7 @@ import {
 import { checkCollectionLength, MAX_COLLECTION_LENGTH } from "./collection-size.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
-import { caseMappedLength, checkTextLength, MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
+import { caseMappedLength, checkTextLength, textLengthLimit, textTooLong } from "./text-length.js";
 import { compileRegex, replacementParts, type ReplacementPart } from "../regex.js";
 import { REGEX_WORK_EXCEEDED, RegexWork, type RegexProgram } from "../regex-engine.js";
 import {
@@ -230,7 +230,7 @@ export function callStringMethod(
       const growth = texts[1]!.length - texts[0]!.length;
       if (
         growth > 0 &&
-        text.length + Math.floor(text.length / texts[0]!.length) * growth > MAX_TEXT_LENGTH
+        text.length + Math.floor(text.length / texts[0]!.length) * growth > textLengthLimit()
       ) {
         let matches = 0;
         for (const _match of literalMatches(text, texts[0]!, false)) matches += 1;
@@ -255,7 +255,7 @@ export function callStringMethod(
       const upper = name === "uppercase";
       // Case mapping can make a text longer, "ß" becoming "SS": at most three times in upper case and twice in lower
       // case. Only a text that could get too long is measured first.
-      if (text.length * (upper ? 3 : 2) > MAX_TEXT_LENGTH)
+      if (text.length * (upper ? 3 : 2) > textLengthLimit())
         checkTextLength(caseMappedLength(text, upper), name, span);
       return upper ? text.toUpperCase() : text.toLowerCase();
     }
@@ -288,7 +288,7 @@ export function callStringMethod(
         const missing = target - length;
         const rest = utf16Offset(fill, missing % fillLength);
         const units = result.length + Math.floor(missing / fillLength) * fill.length + rest;
-        if (units > MAX_TEXT_LENGTH) {
+        if (units > textLengthLimit()) {
           // This round is the last one, and its length the result's, unless a lone surrogate joins another between
           // repeated fills or at the text's edge.
           const end = fill.charCodeAt((rest > 0 ? rest : fill.length) - 1);

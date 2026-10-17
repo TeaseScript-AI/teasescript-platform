@@ -171,6 +171,21 @@ export function isVisibleScalar(value: SerializableRuntimeValue): boolean {
   );
 }
 
+/** An element as `join` shows it: a value `visibleText` shows, and otherwise a failure. */
+export function joinedText(
+  item: SerializableRuntimeValue,
+  span: SourceSpan,
+  context: TemporalContext,
+): string {
+  if (!isVisibleScalar(item))
+    throw fault(
+      "TSR021",
+      "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes. Select an element or a property first.",
+      span,
+    );
+  return visibleText(item, span, context);
+}
+
 /** Text of a field such as a button label or an input hint. Only `${...}` selects from a list. */
 export function fieldText(
   value: SerializableRuntimeValue,
