@@ -27,16 +27,24 @@ import { lex } from "./lexer.js";
 import {
   askOptionNames,
   parse,
+  requiredAskOptionNames,
   SHOW_BUTTON_OPTIONS,
   type ParseResult,
   type StatementRange,
 } from "./parser.js";
 import { compareProjectPaths } from "./project-paths.js";
 import {
+  COMMANDS,
+  commandFacts,
+  isAsk,
+  isCommand,
   TEASESCRIPT_GRAMMAR_KEYWORDS,
-  TEASESCRIPT_PROTECTED_ENGINE_NAMES,
   TEASESCRIPT_PROTECTED_NAMES,
   TEASESCRIPT_PROTECTED_TYPE_NAMES,
+  type AskCommand,
+  type RenamedCommand,
+  type StatementCommand,
+  type ValueCommand,
 } from "./language-facts.js";
 import {
   createSourcePosition,
@@ -129,30 +137,69 @@ export interface LanguageToken {
   readonly span: LanguageRange;
 }
 
-type CompactCommand = "showButton" | keyof typeof ASK_KINDS | "say";
-
-/** The asks that have editor help, with the kind of answer the parser gives each. */
-const ASK_KINDS = {
-  askText: "text",
-  askNumber: "number",
-  askInteger: "integer",
-  askDate: "date",
-  askTime: "time",
-  askDateTime: "datetime",
-  askPassword: "password",
-  askChoice: "choice",
-} as const satisfies Record<string, InteractionExpression["interactionKind"]>;
+/** The asks under their current names (see `COMMANDS`). */
+type Ask = Exclude<AskCommand, RenamedCommand>;
+/** The commands that have editor help: the compact interactions, and `say`. */
+type CompactCommand = "showButton" | Ask | "say";
+type GrammarKeyword = (typeof TEASESCRIPT_GRAMMAR_KEYWORDS)[number];
 
 /** What a named option takes, for a syntax line; a prefill is written per ask, as the answer it gives. */
 const OPTION_VALUES: Readonly<Record<string, string>> = {
   hint: "text",
   background: "colour",
   timeout: "duration",
+  message: "question",
+  yesText: "text",
+  noText: "text",
+  outro: "text",
+  texts: "list",
+  fields: "object",
+};
+
+/** The completion of each command that starts a statement (see `COMMANDS`), by what it does. */
+const STATEMENT_COMPLETIONS: Readonly<Record<Exclude<StatementCommand, GrammarKeyword>, string>> = {
+  showButton: "Compact foreground button interaction",
+  showPopup: "Show a popup message and wait until it is closed",
+  showImage: "Show an image on the Stage",
+  hideImage: "Hide the Stage image",
+  hideCamera: "Hide every camera view",
+  openUrl: "Offer a link to a web page",
+  exportText: "Offer text to copy or download",
+  stopAudio: "Stop every sound",
+  timer: "Start a timer",
+  showCamera: "Show the camera view in a window, or over the Stage with 'stage'",
+  showPermanentButton: "Show a button that stays until it is removed",
+  playAudio: "Play an audio file",
+  playVideo: "Play a video file",
+};
+
+/** The completion of each command that gives a value (see `COMMANDS`), by what it gives. */
+const VALUE_COMPLETIONS: Readonly<
+  Record<Exclude<ValueCommand, GrammarKeyword | RenamedCommand>, string>
+> = {
+  showButton: "Compact foreground button interaction",
+  showPopup: "Show a popup and give how long it was open",
+  timer: "Start a timer and give its handle",
+  showCamera: "Show the camera view and give its handle",
+  showPermanentButton: "Show a permanent button and give its handle",
+  playAudio: "Play an audio file; with 'async', give its handle",
+  playVideo: "Play a video file; with 'async', give its handle",
+  askText: "Compact text-input expression",
+  askNumber: "Compact numeric-input expression",
+  askInteger: "Compact whole-number input expression",
+  askDate: "Compact date input expression",
+  askTime: "Compact time input expression",
+  askDateTime: "Compact date and time input expression",
+  askPassword: "Compact password input expression",
+  askBoolean: "Compact yes-or-no expression",
+  askForm: "Compact form expression",
+  askBooleans: "Compact expression of several yes-or-no choices",
+  askChoice: "Compact choice expression",
 };
 
 const ASK_HEAD = "[as speaker] [bubble(options)|prose(options)] [question]";
 
-const HELP = Object.freeze({
+const HELP: Readonly<Record<CompactCommand, LanguageContextHelp>> = Object.freeze({
   showButton: help(
     "showButton",
     "Shows one foreground button and waits for activation. An optional timeout, such as 5 s or 500 ms, removes the button without a chat message when it runs out. As a value, it returns the elapsed waiting time as a duration, which equals the timeout when the timeout is reached.",
@@ -198,6 +245,23 @@ const HELP = Object.freeze({
     "askPassword",
     "Waits for a password in a masked field and returns the SHA-256 of what was typed, as hashText gives it, never the text itself. Written directly as 'password:' of an encrypt or decrypt call, the typed text locks or opens instead and never becomes a value.",
     ASK_HEAD,
+  ),
+  askBoolean: help(
+    "askBoolean",
+    "Waits for one of two buttons and returns true for the yesText button, by default Yes, or false for the noText button, by default No. The question may also be written as message. An optional prefill of true or false preselects that button, which the player still has to choose.",
+    ASK_HEAD,
+    "boolean",
+  ),
+  askForm: help(
+    "askForm",
+    "Asks for several values at once and returns them when the player submits. The fields option is an object or a dict of fields, each a starting value or a descriptor. The submit and cancel options give the texts of their buttons, and with cancel the form returns null when cancelled. An optional outro is said after the descriptions of the fields, and timeout with onTimeout gives the form a time limit.",
+    ASK_HEAD,
+  ),
+  askBooleans: help(
+    "askBooleans",
+    "Shows one toggle per text and returns their states in the same order. The texts and prefill lists have the same length, and with cancel it returns null when cancelled. The question may also be written as message.",
+    ASK_HEAD,
+    "booleans",
   ),
   askChoice: help(
     "askChoice",
@@ -281,25 +345,14 @@ export function languageCompletions(
 
   const statementStart = lineTokens.length === 0 || isStatementBoundary(last);
   if (statementStart) {
-    items.push(command("showButton", "Compact foreground button interaction"));
     items.push(command("say", "Emit chat text with optional speaker, skip policy, and pacing"));
-    items.push(
-      command("showCamera", "Show the camera view in a window, or over the Stage with 'stage'"),
-    );
-    items.push(command("hideCamera", "Hide every camera view"));
+    for (const [name, detail] of Object.entries(STATEMENT_COMPLETIONS))
+      items.push(command(name, detail));
   }
 
   if (isExpressionCompletionContext(last, lineTokens)) {
-    items.push(command("showButton", "Compact foreground button interaction"));
-    items.push(command("askText", "Compact text-input expression"));
-    items.push(command("askNumber", "Compact numeric-input expression"));
-    items.push(command("askInteger", "Compact whole-number input expression"));
-    items.push(command("askDate", "Compact date input expression"));
-    items.push(command("askTime", "Compact time input expression"));
-    items.push(command("askDateTime", "Compact date and time input expression"));
-    items.push(command("askPassword", "Compact password input expression"));
-    items.push(command("askChoice", "Compact choice expression"));
-    items.push(command("showCamera", "Show the camera view and give its handle"));
+    for (const [name, detail] of Object.entries(VALUE_COMPLETIONS))
+      items.push(command(name, detail));
     items.push(
       Object.freeze({
         label: "takePhoto",
@@ -443,9 +496,10 @@ export function applyLanguageTextEdits(
 /**
  * The class of every token of `text` and every comment, in source order, for an editor or a code view to colour. `text`
  * is lexed as `parsed`, its parse, read it, by default the parse editor help and formatting share, so a `/` the parser
- * read as a regex starts one (V30 §8). A word's class comes from the protected names (V30 §38): a grammar keyword is a
- * `keyword`, a protected type name a `type`, and a protected engine name, a command, built-in function, or engine
- * reference such as `player`, a `command`; a word in a written type is a `type`, a message mode, skip word, or `instant`
+ * read as a regex starts one (V30 §8). A word's class comes from the language facts: a grammar keyword (V30 §38) is a
+ * `keyword`, a protected type name a `type`, and a command or an ask that the parser reads by name (`COMMANDS`) a
+ * `command`; a built-in function or engine reference, such as `round`, `pi`, or `player`, is a `name`, as the themes
+ * have no colour of their own for it. A word in a written type is a `type`, a message mode, skip word, or `instant`
  * where the parse read it so a `keyword`, and a unit, a word after `.`, and a word before `:`, a key, a named
  * argument's label, or a declared name, are `name`s. A source with errors still has a class for every token the lexer
  * reads. Whitespace and line breaks have none.
@@ -455,7 +509,7 @@ export function classifyTokens(
   parsed: ParseResult = parseDocument(text),
 ): readonly LanguageToken[] {
   const { tokens, comments } = lex(text, parsed.regexStarts);
-  const { types, unitEnds, modifiers } = syntaxReadings(parsed.program);
+  const { types, modifiers } = syntaxReadings(parsed.program);
   const classified: LanguageToken[] = [];
   let comment = 0;
   // The written types that start at or before the token, and the furthest end among them.
@@ -471,7 +525,7 @@ export function classifyTokens(
       typeEnd = Math.max(typeEnd, types[type++]!.end.offset);
     const kind = modifiers.has(start)
       ? "keyword"
-      : tokenClass(token, tokens[index - 1], tokens[index + 1], start < typeEnd, unitEnds);
+      : tokenClass(token, tokens[index - 1], tokens[index + 1], start < typeEnd);
     if (kind !== null) classified.push(Object.freeze({ kind, span: token.span }));
   }
   return Object.freeze(classified);
@@ -479,7 +533,6 @@ export function classifyTokens(
 
 const GRAMMAR_KEYWORDS: ReadonlySet<string> = new Set(TEASESCRIPT_GRAMMAR_KEYWORDS);
 const TYPE_NAMES: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_TYPE_NAMES);
-const ENGINE_NAMES: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_ENGINE_NAMES);
 
 /** The symbols that group and separate; the other symbols are operators. */
 const PUNCTUATION: ReadonlySet<TokenKind> = new Set([
@@ -501,7 +554,6 @@ function tokenClass(
   previous: Token | undefined,
   next: Token | undefined,
   inType: boolean,
-  unitEnds: ReadonlySet<number>,
 ): LanguageTokenClass | null {
   // A property, a method, a key, or a label in `name:` is no protected name.
   const named = previous?.kind === TokenKind.Dot || next?.kind === TokenKind.Colon;
@@ -510,11 +562,10 @@ function tokenClass(
     case TokenKind.EndOfFile:
       return null;
     case TokenKind.Identifier: {
-      // A unit is none either.
-      if (named || unitEnds.has(token.span.end.offset)) return "name";
+      if (named) return "name";
       if (inType || TYPE_NAMES.has(token.lexeme)) return "type";
       if (GRAMMAR_KEYWORDS.has(token.lexeme)) return "keyword";
-      return ENGINE_NAMES.has(token.lexeme) ? "command" : "name";
+      return isCommand(token.lexeme) ? "command" : "name";
     }
     case TokenKind.NumberLiteral:
       return "number";
@@ -546,16 +597,14 @@ const TYPE_ANNOTATION_KINDS = {
 } satisfies Record<TypeAnnotation["kind"], true>;
 
 /**
- * Where the parse read words for what they are there: the written types, by start, the end of every unit, and the start
- * of every message mode, skip word, and `instant` it read as one.
+ * Where the parse read words for what they are there: the written types, by start, and the start of every message mode,
+ * skip word, and `instant` it read as one.
  */
 function syntaxReadings(program: Program): {
   readonly types: readonly SourceSpan[];
-  readonly unitEnds: ReadonlySet<number>;
   readonly modifiers: ReadonlySet<number>;
 } {
   const types: SourceSpan[] = [];
-  const unitEnds = new Set<number>();
   const modifiers = new Set<number>();
   // The tree is walked with a list rather than by recursion, as valid source may nest deeper than the call stack
   // reaches.
@@ -572,9 +621,6 @@ function syntaxReadings(program: Program): {
       readonly [key: string]: unknown;
       readonly kind?: unknown;
       readonly span?: SourceSpan;
-      readonly unit?: unknown;
-      readonly unitSpan?: SourceSpan;
-      readonly lengthSpan?: SourceSpan;
       readonly presentation?: { readonly span: SourceSpan } | null;
       readonly skipPolicySpan?: SourceSpan | null;
       readonly instantSpan?: SourceSpan | null;
@@ -587,10 +633,6 @@ function syntaxReadings(program: Program): {
       types.push(record.span);
       continue;
     }
-    if (record.unitSpan !== undefined) unitEnds.add(record.unitSpan.end.offset);
-    // A wait or a timer keeps the unit after its length apart; the length as written ends with it.
-    if (typeof record.unit === "string" && record.lengthSpan !== undefined)
-      unitEnds.add(record.lengthSpan.end.offset);
     // A presentation, of a `say` or an ask's question, starts with its mode word.
     for (const span of [record.presentation?.span, record.skipPolicySpan, record.instantSpan])
       if (span !== undefined && span !== null) modifiers.add(span.start.offset);
@@ -598,7 +640,7 @@ function syntaxReadings(program: Program): {
       if (key !== "span" && !key.endsWith("Span")) pending.push(record[key]);
   }
   types.sort((left, right) => left.start.offset - right.start.offset);
-  return { types, unitEnds, modifiers };
+  return { types, modifiers };
 }
 
 function command(label: string, detail: string): LanguageCompletionItem {
@@ -675,19 +717,21 @@ function compactCommandContext(
 function tokenToCompactCommand(token: Token): CompactCommand | null {
   if (token.kind === TokenKind.KeywordSay) return "say";
   if (token.kind !== TokenKind.Identifier) return null;
-  if (token.lexeme === "showButton" || isAskCommand(token.lexeme)) return token.lexeme;
+  if (token.lexeme === "showButton" || isCurrentAsk(token.lexeme)) return token.lexeme;
   return null;
 }
 
-function isAskCommand(name: string): name is keyof typeof ASK_KINDS {
-  return Object.hasOwn(ASK_KINDS, name);
+/** Whether `name` is an ask under its current name. */
+function isCurrentAsk(name: string): name is Ask {
+  return isAsk(name) && commandFacts(name)?.renamed === undefined;
 }
 
-/** The ask command of an interaction kind, or `null` for an ask without editor help, such as `askForm`. */
-function askCommand(kind: InteractionExpression["interactionKind"]): CompactCommand | null {
-  for (const command of Object.keys(ASK_KINDS))
-    if (isAskCommand(command) && ASK_KINDS[command] === kind) return command;
-  return null;
+/** The ask of an interaction kind. */
+function askCommand(kind: InteractionExpression["interactionKind"]): Ask {
+  // EVIDENCE: invariant: `COMMANDS` holds an ask under its current name for every interaction kind, which a test checks.
+  return Object.keys(COMMANDS).find(
+    (name) => isCurrentAsk(name) && COMMANDS[name].interaction === kind,
+  ) as Ask;
 }
 
 const protectedNames: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
@@ -717,8 +761,7 @@ function locateCompactCommand(
     },
     interaction(node) {
       if (!containsOffset(node.span, offset)) return;
-      const command = askCommand(node.interactionKind);
-      if (command !== null) best = { command, range: node.commandSpan };
+      best = { command: askCommand(node.interactionKind), range: node.commandSpan };
     },
     say(node) {
       if (!containsOffset(node.span, offset)) return;
@@ -860,19 +903,27 @@ function containsOffset(span: SourceSpan, offset: number): boolean {
 /** The named options of a command after its label, question, or options, as the parser accepts them. */
 function namedOptions(command: CompactCommand): readonly string[] {
   if (command === "say") return [];
-  return command === "showButton" ? SHOW_BUTTON_OPTIONS : askOptionNames(ASK_KINDS[command]);
+  return command === "showButton"
+    ? SHOW_BUTTON_OPTIONS
+    : askOptionNames(COMMANDS[command].interaction);
 }
 
-/** The help of a command whose syntax line ends with its named options; `prefill` names what an ask's prefill is. */
+/**
+ * The help of a command whose syntax line ends with its named options, in brackets where the command may leave one out;
+ * `prefill` names what an ask's prefill is.
+ */
 function help(
   command: Exclude<CompactCommand, "say">,
   summary: string,
   head: string,
   prefill = "value",
 ): LanguageContextHelp {
-  const options = namedOptions(command).map(
-    (name) => ` [, ${name}: ${name === "prefill" ? prefill : (OPTION_VALUES[name] ?? "value")}]`,
-  );
+  const required =
+    command === "showButton" ? [] : requiredAskOptionNames(COMMANDS[command].interaction);
+  const options = namedOptions(command).map((name) => {
+    const option = `, ${name}: ${name === "prefill" ? prefill : (OPTION_VALUES[name] ?? "value")}`;
+    return required.includes(name) ? option : ` [${option}]`;
+  });
   return Object.freeze({ command, summary, syntax: `${command} ${head}${options.join("")}` });
 }
 
