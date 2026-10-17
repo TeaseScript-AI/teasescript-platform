@@ -304,6 +304,6 @@ export function expressionParts(expression: Expression): readonly Expression[] {
   return expressionChildren(expression);
 }
 
-export function showButtonOperands(parts: ShowButtonParts): readonly Expression[] {
+function showButtonOperands(parts: ShowButtonParts): readonly Expression[] {
   return [parts.label, ...showButtonOptions(parts).map((option) => option.value)];
 }
