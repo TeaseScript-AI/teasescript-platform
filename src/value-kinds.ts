@@ -483,9 +483,6 @@ export type PlainKind = KindsWith<"type", "kind">;
 /** The kinds an annotation writes by name. */
 export type WrittenKind = KindsWith<"written", true>;
 
-/** The kinds `toJson` writes. */
-export type JsonKind = Exclude<ValueKind, KindsWith<"json", null>>;
-
 /** The families `<` orders, each named by its kind (`familyOf`). */
 export type OrderedFamily = Exclude<KindsWith<"ordered", true>, KindsWith<"family", "number">>;
 

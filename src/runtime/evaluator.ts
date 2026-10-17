@@ -4180,7 +4180,9 @@ function noArithmeticResult(
   );
 }
 
-/** An operand's kind, with the value of a duration or an angle, such as `a duration (1 s)`, or a number as `the number 5`. */
+/**
+ * An operand's kind, with the value of a duration or an angle, such as `a duration (1 s)`, or a number as `the number 5`.
+ */
 function kindAndValue(value: SerializableRuntimeValue): string {
   if (typeof value === "number") return `the number ${operandText(value)}`;
   return isAnyDuration(value) || isAngle(value)

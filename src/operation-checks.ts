@@ -920,8 +920,7 @@ function candidateConversionProblem(
   text: string | undefined,
 ): string | undefined {
   const { kinds, result } = conversion;
-  if (kinds === "shown" ? isShown(type) : isScalar(type, ...kinds))
-    return undefined;
+  if (kinds === "shown" ? isShown(type) : isScalar(type, ...kinds)) return undefined;
   if (isScalar(type, "string")) {
     // Text it can see converts as the runtime converts it, and does not convert with the runtime's text.
     return text === undefined || conversion.textProblem(text) === undefined
