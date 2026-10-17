@@ -11,6 +11,7 @@ import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import { Input } from "@/components/ui/input";
 import PasswordField from "./PasswordField.vue";
 import type { LockDialog, LockDialogInput } from "../../lock-service.js";
+import { invalidAnswerMessage } from "../../../src/interaction-answers.js";
 
 // The dialogs of a lock (V30 §13, PLAYER-UI "Foreground interaction presentation"), outside the chat like a popup's.
 // The lock dialog shows only the openers the player chooses: a time lock, suggested 7 days from now, which the player may
@@ -251,7 +252,7 @@ function heldKey(event: KeyboardEvent) {
             class="text-sm text-destructive"
             data-lock-moment-hint
           >
-            Choose a moment in the future.
+            {{ invalidAnswerMessage("pastTimeLock") }}
           </p>
         </div>
         <template v-if="choosesPassword">
@@ -268,7 +269,7 @@ function heldKey(event: KeyboardEvent) {
             v-model="repeated"
             label="Repeat password"
             :busy="busy"
-            :error="mismatch ? 'The passwords do not match' : null"
+            :error="mismatch ? invalidAnswerMessage('passwordMismatch') : null"
             data-lock-repeat
           />
         </template>
@@ -321,7 +322,7 @@ function heldKey(event: KeyboardEvent) {
           v-model="password"
           label="Password"
           :busy="busy"
-          :error="dialog.notice === 'wrongPassword' ? 'That password does not open it.' : null"
+          :error="dialog.notice === 'wrongPassword' ? invalidAnswerMessage('wrongPassword') : null"
           data-unlock-password
         />
         <p v-if="openingByItself" role="status" class="text-sm" data-unlock-opening>Opening…</p>
