@@ -201,6 +201,30 @@ test("formatting and help reach a say used as a value, which keeps its parenthes
   assert.ok(hover?.contents.some((line) => line.includes("messageHandle")));
 });
 
+test("formatting and help reach a command in a named timer's label and display and in an askChoice's parts", () => {
+  // The parts come from the shared order helpers: a named timer's label may come first, and an askChoice's prefill
+  // follows its options.
+  const source = [
+    'let t = timer(label: askText   "Label?", duration: 5 s, display: askText   "Display?", async: true)',
+    'let c = askChoice yes: askText   "Yes?", no: "No", prefill: askText   "Which?"',
+    "exit",
+  ].join("\n");
+  const document = createLanguageDocument("file:///main.tease", source);
+  assert.equal(formatLanguageDocument(document).text, source.replaceAll("   ", " "));
+  for (const question of ['"Label?"', '"Display?"', '"Yes?"', '"Which?"']) {
+    const offset = source.indexOf(question);
+    const command = source.lastIndexOf("askText", offset);
+    assert.deepEqual(
+      languageHover(document, languagePositionAt(document, offset + 1))?.range,
+      {
+        start: languagePositionAt(document, command),
+        end: languagePositionAt(document, command + "askText".length),
+      },
+      question,
+    );
+  }
+});
+
 const DEEP_SAY = 'say   "deep"  ,instant';
 
 /** The deepest `say` has irregular owned whitespace, so formatting that stops descending leaves it unchanged. */

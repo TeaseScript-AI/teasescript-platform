@@ -13,12 +13,13 @@ import type {
 } from "./ast.js";
 import { compileProject, compileSource, isNativeStackExhaustion } from "./compiler.js";
 import {
-  askOperands,
+  askParts,
   sayOperands,
   mediaHandlerBlocks,
   mediaOperands,
   showButtonOptions,
   tagQueryOperands,
+  timerOperands,
 } from "./expression-children.js";
 import type { Diagnostic } from "./diagnostics.js";
 import type { ProjectImageFile } from "./image-catalog.js";
@@ -1139,11 +1140,7 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
 }
 
 function visitTimer(timer: TimerParts, children: VisitItem[]): void {
-  if (typeof timer.display === "object" && timer.display !== null) {
-    children.push({ kind: "expression", node: timer.display });
-  }
-  children.push({ kind: "expression", node: timer.duration });
-  if (timer.label !== null) children.push({ kind: "expression", node: timer.label });
+  for (const operand of timerOperands(timer)) children.push({ kind: "expression", node: operand });
   for (const child of timer.handler?.statements ?? [])
     children.push({ kind: "statement", node: child });
 }
@@ -1181,10 +1178,8 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       return;
     case "interactionExpression":
       visitor.interaction(expression);
-      for (const operand of askOperands(expression))
+      for (const operand of askParts(expression))
         children.push({ kind: "expression", node: operand });
-      for (const option of expression.options)
-        children.push({ kind: "expression", node: option.expression });
       return;
     case "parenthesizedExpression":
       children.push({ kind: "expression", node: expression.expression });
