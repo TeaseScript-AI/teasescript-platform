@@ -175,7 +175,6 @@ import {
 } from "./operand-rules.js";
 import { withoutNegativeZero } from "./conversions.js";
 import {
-  buttonTimeoutMessage,
   isDelayLength,
   isRoundLength,
   isTimeoutLength,
@@ -183,6 +182,7 @@ import {
   pacingMessage,
   reachesSceneTime,
   sceneTimeMessage,
+  timeoutLengthMessage,
   timeoutSceneTimeMessage,
   zeroRoundMessage,
 } from "./delay-rules.js";
@@ -5116,6 +5116,7 @@ class TypeChecker {
         this.#reportNonDuration(value, type, "An askForm timeout is a duration", "30 s", () =>
           unitFix(value),
         );
+        this.#checkTimeoutLength("askForm", value);
       } else if (name.name === "onTimeout")
         this.#reportUnless(
           type,
@@ -8213,19 +8214,23 @@ class TypeChecker {
           "30 s",
           () => unitFix(option.value),
         );
-        const known = this.#knownLength(option.value);
-        const problem =
-          known === undefined
-            ? undefined
-            : !isTimeoutLength(known.milliseconds)
-              ? buttonTimeoutMessage(formatDuration(known))
-              : !reachesSceneTime(known.milliseconds)
-                ? timeoutSceneTimeMessage("showButton")
-                : undefined;
-        if (problem !== undefined)
-          this.#report(typeCode.invalidRepeatCount, problem, option.value.span);
+        this.#checkTimeoutLength("showButton", option.value);
       }
     }
+  }
+
+  /** Reports a known timeout of an interaction that cannot run: one of zero or less, or one beyond scene time. */
+  #checkTimeoutLength(command: "showButton" | "askForm", value: Expression): void {
+    const known = this.#knownLength(value);
+    const problem =
+      known === undefined
+        ? undefined
+        : !isTimeoutLength(known.milliseconds)
+          ? timeoutLengthMessage(command, formatDuration(known))
+          : !reachesSceneTime(known.milliseconds)
+            ? timeoutSceneTimeMessage(command)
+            : undefined;
+    if (problem !== undefined) this.#report(typeCode.invalidRepeatCount, problem, value.span);
   }
 
   #checkBackground(expression: Expression, type: StaticType): void {

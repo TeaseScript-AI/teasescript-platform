@@ -296,6 +296,8 @@ test("a range, handle member, or media position problem has one code and one tex
 test("a length, count, file, repeat, index, loop source, key, colour, or presentation problem has one code and one text in every form", () => {
   const playing = 'playAudio(file: "a.mp3", ';
   const timeout = "Remove 'timeout:' to wait for the click without a time limit.";
+  const form = 'let a = askForm "Q", fields: { rope: false }, ';
+  const formTimeout = "Remove 'timeout:' and 'onTimeout:' to wait without a time limit.";
   checkFamilies([
     [
       [
@@ -381,6 +383,29 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
         "TSR050",
         `A showButton timeout must be a duration greater than zero, but this is 0 seconds. ${timeout}`,
       ],
+    ],
+    [
+      [
+        [`${form}timeout: 0 s, onTimeout: "submit"`, "0 s"],
+        [`${form}timeout: (1 - 1) s, onTimeout: "cancel"`, "(1 - 1) s"],
+        [
+          'let a = askForm("Q", fields: { rope: false }, timeout: 0 ms, onTimeout: "submit")',
+          "0 ms",
+        ],
+      ],
+      "TSV011",
+      `An askForm timeout must be a duration greater than zero, but this is 0 seconds. ${formTimeout}`,
+      [
+        `let d = 0 s\n${form}timeout: d, onTimeout: "submit"`,
+        "TSR052",
+        `An askForm timeout must be a duration greater than zero, but this is 0 seconds. ${formTimeout}`,
+      ],
+    ],
+    [
+      [[`${form}timeout: 1e16 ms, onTimeout: "cancel"`, "1e16 ms"]],
+      "TSV011",
+      "This askForm timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' and 'onTimeout:' to wait without a time limit.",
+      null,
     ],
     [
       [

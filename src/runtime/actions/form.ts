@@ -1,5 +1,6 @@
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../../color.js";
 import { isInteractionChoiceValue } from "../../choice-values.js";
+import { isTimeoutLength, timeoutLengthMessage } from "../../delay-rules.js";
 import {
   formValueText,
   invalidAnswerMessage,
@@ -318,11 +319,11 @@ function formTimeout(
   const milliseconds = isAnyDuration(value)
     ? exactDurationMilliseconds(value, "An askForm timeout", span)
     : Number.NaN;
-  if (!(milliseconds > 0) || !Number.isFinite(milliseconds))
+  if (!isTimeoutLength(milliseconds))
     throw fault(
       typeof value === "number"
         ? `An askForm timeout is a duration, but this is ${describeShownValue(value)}. Give the number a unit, such as '${describeShownValue(value)} s'.`
-        : `An askForm timeout must be a duration greater than zero, but this is ${describeShownValue(value)}.`,
+        : timeoutLengthMessage("askForm", describeShownValue(value)),
       span,
     );
   return { milliseconds, onTimeout };

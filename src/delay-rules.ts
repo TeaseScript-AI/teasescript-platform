@@ -71,10 +71,12 @@ export function pacingMessage(shown: string): string {
   return `Say pacing must be a duration of at least ${formatDuration(0)}, but this is ${shown}.`;
 }
 
-export function buttonTimeoutMessage(shown: string): string {
-  return `A showButton timeout must be a duration greater than zero, but this is ${shown}. Remove 'timeout:' to wait for the click without a time limit.`;
+export function timeoutLengthMessage(command: "showButton" | "askForm", shown: string): string {
+  return command === "showButton"
+    ? `A showButton timeout must be a duration greater than zero, but this is ${shown}. Remove 'timeout:' to wait for the click without a time limit.`
+    : `An askForm timeout must be a duration greater than zero, but this is ${shown}. Remove 'timeout:' and 'onTimeout:' to wait without a time limit.`;
 }
 
 export function timeoutSceneTimeMessage(command: "showButton" | "askForm"): string {
-  return `This ${command} timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.`;
+  return `This ${command} timeout is too long for scene time to reach. Use a shorter timeout, or remove ${command === "askForm" ? "'timeout:' and 'onTimeout:'" : "'timeout:'"} to wait without a time limit.`;
 }

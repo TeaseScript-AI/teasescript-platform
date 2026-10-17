@@ -47,12 +47,12 @@ import { rangeLength, rangeStartProblem, rangeText } from "../range-checks.js";
 import { UNIT_AMOUNT_RULE, unitAmountFix } from "../operand-rules.js";
 import { buttonBackgroundMessage } from "../choice-rules.js";
 import {
-  buttonTimeoutMessage,
   isDelayLength,
   isRoundLength,
   negativeDelayMessage,
   pacingMessage,
   sceneTimeMessage,
+  timeoutLengthMessage,
   timeoutSceneTimeMessage,
   unmeasurableLengthMessage,
   zeroRoundMessage,
@@ -2907,7 +2907,7 @@ function buttonTimeoutMs(
       "TSR050",
       typeof value === "number"
         ? `A showButton timeout is a duration, but this is ${describeShownValue(value)}. ${durationFix(value, "30 s")}`
-        : buttonTimeoutMessage(describeShownValue(value)),
+        : timeoutLengthMessage("showButton", describeShownValue(value)),
       span,
     );
   }
