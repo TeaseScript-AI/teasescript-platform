@@ -131,8 +131,14 @@ import {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   type ConversionName,
+  type RandomFunctionName,
 } from "./language-facts.js";
-import { NUMERIC_FUNCTIONS, percentageFailure, type NumericArgument } from "./numeric-functions.js";
+import {
+  NUMERIC_FUNCTIONS,
+  type NumberSignature,
+  type NumericArgument,
+} from "./numeric-functions.js";
+import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "./random-functions.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
   ANGLE_FUNCTIONS,
@@ -141,7 +147,12 @@ import {
   formatAngle,
   type StoredAngle,
 } from "./angle.js";
-import { LIST_FUNCTIONS, listFunctionCheck } from "./list-function-checks.js";
+import {
+  LIST_FUNCTIONS,
+  listFunctionCheck,
+  weightedChoiceCheck,
+  type ListFunctionCheck,
+} from "./list-function-checks.js";
 import { rangeListLengthProblem } from "./runtime/collection-operations.js";
 import { describeShownValue, shownChoice } from "./runtime/value-types.js";
 import {
@@ -6246,6 +6257,12 @@ class TypeChecker {
     );
   }
 
+  /** The number `expression` is known to have at compile time (see `#known`). */
+  #knownNumber(expression: Expression): number | undefined {
+    const known = this.#known(expression);
+    return typeof known === "number" ? known : undefined;
+  }
+
   /**
    * The number, duration, or angle `expression` is known to have at compile time, folded once per expression from its
    * operands' known values. Iterative, so a long chain of steps does not deepen the native stack.
@@ -7273,6 +7290,33 @@ class TypeChecker {
     values: readonly StaticType[],
   ): StaticType {
     const numeric = NUMERIC_FUNCTIONS.get(name)!;
+    const { checked, inputs, named } = this.#numberArguments(name, numeric, expression, values);
+    if (checked && [...inputs, ...Object.values(named)].every((one) => one.known !== undefined)) {
+      const result = numeric.apply(
+        inputs.map((one) => one.known!),
+        Object.fromEntries(Object.entries(named).map(([key, one]) => [key, one.known!])),
+      );
+      if (typeof result !== "number")
+        this.#report(typeCode.invalidOperand, result.failure, expression.span);
+    }
+    const result = numeric.result(inputs, named);
+    return result === "integer" ? INTEGER_TYPE : result === "number" ? NUMBER_TYPE : UNKNOWN_TYPE;
+  }
+
+  /**
+   * Checks the arguments of a function whose every argument is a number, and gives what the compiler knows about them:
+   * the input of each positional parameter and of each named argument, and whether the call has no problem.
+   */
+  #numberArguments(
+    name: string,
+    signature: NumberSignature,
+    expression: CallExpression,
+    values: readonly StaticType[],
+  ): {
+    readonly checked: boolean;
+    readonly inputs: readonly NumericArgument[];
+    readonly named: Readonly<Record<string, NumericArgument>>;
+  } {
     const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
     const fitting = problems.every((problem) => problem.kind === "invalidOperand");
     // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5,
@@ -7301,32 +7345,94 @@ class TypeChecker {
       };
     };
     const positional = expression.arguments.filter((item) => item.kind === "positionalArgument");
-    const inputs = numeric.parameters.map((_, index) =>
+    const inputs = signature.parameters.map((_, index) =>
       input(positional[index], expression.arguments.indexOf(positional[index]!)),
     );
     const named: Record<string, NumericArgument> = {};
     expression.arguments.forEach((item, index) => {
       if (item.kind === "namedArgument") named[item.name.name] = input(item, index);
     });
-    const all = [...inputs, ...Object.values(named)];
-    if (problems.length === 0 && all.every((one) => one.known !== undefined)) {
-      const known = inputs.map((one) => one.known!);
-      // A random result is never computed here; only its arguments are checked.
-      const result =
-        numeric.random !== undefined
-          ? numeric.random(known)
-          : numeric.apply(
-              known,
-              Object.fromEntries(Object.entries(named).map(([key, one]) => [key, one.known!])),
-              () => {
-                throw new Error(`${name}(...) draws no random numbers.`);
-              },
-            );
-      if (result !== undefined && typeof result !== "number")
-        this.#report(typeCode.invalidOperand, result.failure, expression.span);
+    return { checked: problems.length === 0, inputs, named };
+  }
+
+  /**
+   * Checks a call of a random function and gives its result type (see `RANDOM_CONTRACTS`). A domain of its numbers is
+   * checked as the runtime checks it once the compiler can see the numbers it reads, whatever the call's other
+   * arguments are; a random result is never computed here.
+   */
+  #randomFunctionType(
+    name: RandomFunctionName,
+    expression: CallExpression,
+    values: readonly StaticType[],
+  ): StaticType {
+    const random: RandomFunction = RANDOM_CONTRACTS[name];
+    switch (random.takes) {
+      case "numbers": {
+        const { inputs } = this.#numberArguments(name, random, expression, values);
+        const positional = expression.arguments.filter(
+          (item) => item.kind === "positionalArgument",
+        );
+        // The first domain that fails, as at runtime; a domain of one number names it.
+        for (const domain of random.domains) {
+          const known = domain.reads.flatMap((position) => inputs[position]!.known ?? []);
+          if (known.length < domain.reads.length) continue;
+          const problem = domain.problem(known);
+          if (problem === undefined) continue;
+          const at = domain.reads.length === 1 ? positional[domain.reads[0]!]!.value : expression;
+          this.#report(typeCode.invalidOperand, problem, at.span);
+          break;
+        }
+        return random.result === "boolean" ? BOOLEAN_TYPE : NUMBER_TYPE;
+      }
+      case "range": {
+        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        this.#reportProblems(problems);
+        // A range's values are checked only when the call's shape is right.
+        if (problems.length === 0) {
+          const range = expression.arguments[0]!.value;
+          this.#reportUnless(
+            values[0]!,
+            (member) => member.kind === "range",
+            range,
+            `${name}(...) takes a range such as 1..=6`,
+          );
+          this.#checkDrawnRange(range, `${name}(range)`);
+        }
+        return INTEGER_TYPE;
+      }
+      case "choices":
+        return this.#listFunctionType(
+          expression,
+          values,
+          weightedChoiceCheck(
+            expression,
+            (item) => this.#typeOf(item),
+            (item) => this.#knownNumber(item),
+          ),
+        );
     }
-    const result = numeric.result(inputs, named);
-    return result === "integer" ? INTEGER_TYPE : result === "number" ? NUMBER_TYPE : UNKNOWN_TYPE;
+  }
+
+  /**
+   * Reports the problems of a call of a list function, after those of an argument that may be null, and gives its result
+   * type.
+   */
+  #listFunctionType(
+    expression: CallExpression,
+    values: readonly StaticType[],
+    check: ListFunctionCheck,
+  ): StaticType {
+    // An argument that may be null names the check first (ADR 0021 rule 1.9); the check uses its other members.
+    expression.arguments.forEach((item, index) => {
+      const all = members(values[index]!);
+      const passing = all.filter((member) => member.kind !== "null");
+      if (passing.length > 0 && passing.length < all.length)
+        this.#reportMayBe(item.value, NULL_TYPE, passing);
+    });
+    this.#reportProblems(check.problems);
+    for (const read of check.reads)
+      this.#noteMissingProperty(read.at, read.name, read.objects, read.at.span, read.message);
+    return check.type;
   }
 
   /**
@@ -7421,6 +7527,7 @@ class TypeChecker {
     expression: CallExpression,
     values: readonly StaticType[],
   ): StaticType {
+    if (isRandomFunction(name)) return this.#randomFunctionType(name, expression, values);
     if (NUMERIC_FUNCTIONS.has(name)) return this.#numericFunctionType(name, expression, values);
     if (ANGLE_FUNCTIONS.has(name)) return this.#angleFunctionType(name, expression, values);
     if (isConversion(name)) return this.#conversionType(name, expression, values);
@@ -7431,28 +7538,17 @@ class TypeChecker {
       members(nonNullTypeForUse(this.#typeOf(positional[0]!.value))).some(
         (member) => !isKnown(member) || resolved(member).kind === "list",
       );
-    if (LIST_FUNCTIONS.has(name) || (MIN_MAX_NAMES.has(name) && list)) {
-      // An argument that may be null names the check first (ADR 0021 rule 1.9); the checks below use its other members.
-      expression.arguments.forEach((item, index) => {
-        const all = members(values[index]!);
-        const passing = all.filter((member) => member.kind !== "null");
-        if (passing.length > 0 && passing.length < all.length)
-          this.#reportMayBe(item.value, NULL_TYPE, passing);
-      });
-      const check = listFunctionCheck(
-        name,
+    if (LIST_FUNCTIONS.has(name) || (MIN_MAX_NAMES.has(name) && list))
+      return this.#listFunctionType(
         expression,
-        (item) => this.#typeOf(item),
-        (item) => {
-          const known = this.#known(item);
-          return typeof known === "number" ? known : undefined;
-        },
+        values,
+        listFunctionCheck(
+          name,
+          expression,
+          (item) => this.#typeOf(item),
+          (item) => this.#knownNumber(item),
+        ),
       );
-      this.#reportProblems(check.problems);
-      for (const read of check.reads)
-        this.#noteMissingProperty(read.at, read.name, read.objects, read.at.span, read.message);
-      return check.type;
-    }
     const argument = expression.arguments[0];
     const value = values[0];
     // A built-in that takes fixed positional arguments checks their values only when their number is right.
@@ -7460,35 +7556,6 @@ class TypeChecker {
     this.#reportProblems(shape);
     if (shape.length > 0) return FIXED_RESULTS.get(name) ?? UNKNOWN_TYPE;
     switch (name) {
-      case "random":
-        return NUMBER_TYPE;
-      case "chance":
-        if (argument !== undefined && value !== undefined) {
-          this.#reportUnless(
-            value,
-            isNumeric,
-            argument.value,
-            "chance(...) takes a percentage number",
-          );
-          // A percentage the compiler can see is checked as the runtime checks it.
-          const known = this.#known(argument.value);
-          const failure = typeof known === "number" ? percentageFailure(name, known) : undefined;
-          if (failure !== undefined)
-            this.#report(typeCode.invalidOperand, failure, argument.value.span);
-        }
-        return BOOLEAN_TYPE;
-      case "randomInteger":
-        if (argument !== undefined && value !== undefined) {
-          this.#reportUnless(
-            value,
-            (member) => member.kind === "range",
-            argument.value,
-            "randomInteger(...) takes a range such as 1..=6",
-          );
-          if (argument.kind === "positionalArgument")
-            this.#checkDrawnRange(argument.value, "randomInteger(range)");
-        }
-        return INTEGER_TYPE;
       case "min":
       case "max": {
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
@@ -10650,12 +10717,7 @@ function isChoiceValue(member: StaticType): boolean {
 const MIN_MAX_NAMES: ReadonlySet<string> = new Set(["min", "max"]);
 
 /** The result types of the built-ins that take fixed positional arguments. */
-const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
-  ["random", NUMBER_TYPE],
-  ["chance", BOOLEAN_TYPE],
-  ["randomInteger", INTEGER_TYPE],
-  ["escapeMarkup", STRING_TYPE],
-]);
+const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([["escapeMarkup", STRING_TYPE]]);
 
 /** Speaker properties shown as text: the display name and the parts it is derived from. */
 const SPEAKER_TEXT_PROPERTIES: ReadonlySet<string> = new Set([

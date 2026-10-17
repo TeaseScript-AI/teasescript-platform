@@ -121,11 +121,22 @@ export const CONVERSION_FUNCTIONS = Object.freeze([
 
 export type ConversionName = (typeof CONVERSION_FUNCTIONS)[number];
 
+/** The random functions (V30 §4), whose contracts are in `random-functions.ts`. */
+export const RANDOM_FUNCTIONS = Object.freeze([
+  "random",
+  "chance",
+  "randomInteger",
+  "randomWeighted",
+  "randomNormal",
+  "randomBeta",
+  "randomPert",
+] as const);
+
+export type RandomFunctionName = (typeof RANDOM_FUNCTIONS)[number];
+
 const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "player",
-  "random",
-  "randomInteger",
-  "chance",
+  ...RANDOM_FUNCTIONS,
   "round",
   "floor",
   "ceil",
@@ -146,7 +157,6 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "stddev",
   "linearRegression",
   "predict",
-  "randomWeighted",
   "exp",
   "ln",
   "log10",
@@ -159,9 +169,6 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "atan2",
   "toDeg",
   "toRad",
-  "randomNormal",
-  "randomBeta",
-  "randomPert",
   ...CONVERSION_FUNCTIONS,
   "fileFromBase64",
   "fileToBase64",
@@ -238,9 +245,7 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
 ] as const);
 
 export const CORE_RUNTIME_BUILTINS = Object.freeze([
-  "random",
-  "chance",
-  "randomInteger",
+  ...RANDOM_FUNCTIONS,
   ...CONVERSION_FUNCTIONS,
   "round",
   "floor",
@@ -260,7 +265,6 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "stddev",
   "linearRegression",
   "predict",
-  "randomWeighted",
   "exp",
   "ln",
   "log10",
@@ -273,9 +277,6 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "atan2",
   "toDeg",
   "toRad",
-  "randomNormal",
-  "randomBeta",
-  "randomPert",
   "fileFromBase64",
   "fileToBase64",
   "hashText",

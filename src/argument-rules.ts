@@ -143,9 +143,6 @@ export function argumentShapeProblem(
 
 /** The parameters of the built-ins that take a fixed number of positional arguments and no names (V30 §7, §8). */
 export const FIXED_PARAMETERS: ReadonlyMap<string, readonly string[]> = new Map([
-  ["random", []],
-  ["chance", ["percent"]],
-  ["randomInteger", ["range"]],
   ["escapeMarkup", ["text"]],
 ]);
 

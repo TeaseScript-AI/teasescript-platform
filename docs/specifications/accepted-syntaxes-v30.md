@@ -443,8 +443,8 @@ let task = randomWeighted(tasks, weight: "chance")
 
 Weights are numbers of at least 0, and at least one is above 0; an element of weight 0 is never chosen. Each call makes
 one draw of the session RNG. An empty dict or list is runtime error `TSR018`, a negative weight or no weight above 0
-`TSR039`, and a weight that is not a number `TSR060`; a weight of another type or a missing property is a compile error
-when the compiler can see it.
+`TSR039`, and a weight that is not a number `TSR060`; a weight of another type, a missing property, a negative weight,
+or no weight above 0 is a compile error when the compiler can see it.
 
 ### Random distributions
 **Status:** Accepted (Owner decision, 2026-10-07)

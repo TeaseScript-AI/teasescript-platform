@@ -4,11 +4,13 @@ import {
   COMMANDS,
   commandFacts,
   CONVERSION_FUNCTIONS,
+  RANDOM_FUNCTIONS,
   CORE_RUNTIME_BUILTINS,
   TEASESCRIPT_GRAMMAR_KEYWORDS,
   TEASESCRIPT_PROTECTED_TYPE_NAMES,
 } from "../src/language-facts.js";
 import { CONVERSIONS } from "../src/conversions.js";
+import { RANDOM_CONTRACTS } from "../src/random-functions.js";
 import { askOptionNames, requiredAskOptionNames, SHOW_BUTTON_OPTIONS } from "../src/parser.js";
 import {
   classifyTokens,
@@ -235,6 +237,59 @@ test("a conversion call has help from its contract, also while it is being writt
   assert.equal(help("function toNumber(")[0], null);
   assert.equal(help("say toString(count) + ")[0], "say");
   assert.equal(help("sa", "y toString(count)\nexit")[0], "say");
+});
+
+test("a random function's call has help from its contract, also while it is being written", () => {
+  // The help at the end of `source`: its command, the signature's label, and its active parameter.
+  const help = (source: string, after = "") => {
+    const document = createLanguageDocument("file:///main.tease", source + after);
+    const position = languagePositionAt(document, source.length);
+    const signature = languageSignatureHelp(document, position);
+    return [
+      languageContextHelp(document, position)?.command ?? null,
+      signature?.label ?? null,
+      signature === null ? null : (signature.parameters[signature.activeParameter] ?? null),
+    ];
+  };
+  for (const name of RANDOM_FUNCTIONS) {
+    const document = createLanguageDocument("file:///main.tease", `say ${name}(`);
+    const position = languagePositionAt(document, document.text.length);
+    const context = languageContextHelp(document, position);
+    assert.deepEqual([context?.command, context?.summary], [name, RANDOM_CONTRACTS[name].summary]);
+    assert.deepEqual(languageHover(document, position)?.contents, [
+      `**${name}**`,
+      RANDOM_CONTRACTS[name].summary,
+      `Syntax: \`${context?.syntax}\``,
+    ]);
+  }
+  // The syntax is the call's shape (V30 §4), and the active parameter the argument being written.
+  assert.deepEqual(help("say random("), ["random", "random()", null]);
+  assert.deepEqual(help("if chance("), ["chance", "chance(percent)", "percent"]);
+  assert.deepEqual(help("let roll = randomInteger("), [
+    "randomInteger",
+    "randomInteger(range)",
+    "range",
+  ]);
+  assert.deepEqual(help("let pause = randomNormal(30, "), [
+    "randomNormal",
+    "randomNormal(mean, spread)",
+    "spread",
+  ]);
+  assert.deepEqual(help("let reps = round(randomPert(5, 10, "), [
+    "randomPert",
+    "randomPert(min, mostLikely, max)",
+    "max",
+  ]);
+  const weighted = "randomWeighted(dict)  or  randomWeighted(list, weight: text)";
+  assert.deepEqual(help("let task = randomWeighted("), ["randomWeighted", weighted, "dict"]);
+  assert.deepEqual(help("let task = randomWeighted(tasks, weight: "), [
+    "randomWeighted",
+    weighted,
+    "weight",
+  ]);
+  // A method of the same name, a declared name, and a property are no call of the function.
+  assert.equal(help("say items.random(", ")\nexit")[0], "say");
+  assert.equal(help("function chance(")[0], null);
 });
 
 test("askChoice help names set options and the prefill after the options (V30 §19)", () => {

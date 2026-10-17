@@ -1,14 +1,10 @@
 import type { RuntimeErrorCode } from "../diagnostic-codes.js";
 import { angleStatisticMessage, angleValue } from "../angle.js";
-import { argumentShapeProblem } from "../argument-rules.js";
+import { argumentShapeProblem, type ArgumentShape } from "../argument-rules.js";
 import { exactDuration } from "../duration.js";
-import {
-  DICT_WEIGHTS_MESSAGE,
-  LIST_FUNCTION_SHAPES,
-  LIST_WEIGHT_MESSAGE,
-  WEIGHTED_SOURCE_MESSAGE,
-} from "../list-function-rules.js";
+import { LIST_FUNCTION_SHAPES } from "../list-function-rules.js";
 import { percentageFailure } from "../numeric-functions.js";
+import { RANDOM_CONTRACTS } from "../random-functions.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { dateTimeMilliseconds, daysBetween } from "../temporal.js";
@@ -209,12 +205,8 @@ export function listStatistic(
   return amounts.kind === "numbers" ? (result === 0 ? 0 : result) : exactDuration(result);
 }
 
-/** A percentage from 0 through 100, as `percentile` and `chance` take it. */
-export function percentage(
-  name: string,
-  value: SerializableRuntimeValue,
-  span: SourceSpan,
-): number {
+/** A percentage from 0 through 100, as `percentile` takes it. */
+function percentage(name: string, value: SerializableRuntimeValue, span: SourceSpan): number {
   if (typeof value !== "number")
     throw fault(
       "TSR059",
@@ -512,7 +504,7 @@ export function predict(
 
 /**
  * The choices and weights of `randomWeighted` (V30 §4): the keys of a dict and its values, or the elements of a list
- * and the property `weight` of each. Weights are numbers of at least 0, and at least one is above 0.
+ * and the property `weight` of each. Weights are numbers, valid as its contract says (see `RANDOM_CONTRACTS`).
  */
 export function weightedChoices(
   positional: readonly SerializableRuntimeValue[],
@@ -520,14 +512,15 @@ export function weightedChoices(
   span: SourceSpan,
 ): { readonly choices: readonly SerializableRuntimeValue[]; readonly weights: readonly number[] } {
   const name = "randomWeighted";
-  checkArguments(name, positional, named, span);
+  const contract = RANDOM_CONTRACTS[name];
+  checkArguments(name, positional, named, span, contract.shape);
   const source = positional[0]!;
   const dict = isDict(source);
   // A dict has its weights, and anything else needs weight:, as the compiler checks them.
   if (dict ? named.weight !== undefined : named.weight === undefined)
     throw fault(
       "TSR028",
-      dict ? DICT_WEIGHTS_MESSAGE : isList(source) ? LIST_WEIGHT_MESSAGE : WEIGHTED_SOURCE_MESSAGE,
+      contract.sources[dict ? "dict" : isList(source) ? "list" : "other"],
       span,
     );
   const choices = dict
@@ -549,12 +542,12 @@ export function weightedChoices(
         `${name}(...) needs numbers as weights, not ${describeRuntimeValue(weight)}.`,
         span,
       );
-    if (weight < 0)
-      throw fault("TSR039", `${name}(...) needs weights of at least 0, not ${weight}.`, span);
+    const problem = contract.weightProblem(weight);
+    if (problem !== undefined) throw fault("TSR039", problem, span);
     return weight;
   });
-  if (!numbers.some((weight) => weight > 0))
-    throw fault("TSR039", `${name}(...) needs at least one weight above 0.`, span);
+  const problem = contract.weightsProblem(numbers);
+  if (problem !== undefined) throw fault("TSR039", problem, span);
   return { choices, weights: numbers };
 }
 
@@ -576,19 +569,18 @@ export function weightedIndex(weights: readonly number[], draw: number): number 
   return last;
 }
 
-/** Fails as the compiler reports the first problem with the names and the number of a list function's arguments. */
+/**
+ * Fails as the compiler reports the first problem with the names and the number of a list function's arguments, or of
+ * `randomWeighted`'s, which `shape` gives.
+ */
 function checkArguments(
   name: string,
   positional: readonly SerializableRuntimeValue[],
   named: Named,
   span: SourceSpan,
+  shape: ArgumentShape = LIST_FUNCTION_SHAPES.get(name)!,
 ): void {
-  const problem = argumentShapeProblem(
-    name,
-    LIST_FUNCTION_SHAPES.get(name)!,
-    positional.length,
-    Object.keys(named),
-  );
+  const problem = argumentShapeProblem(name, shape, positional.length, Object.keys(named));
   if (problem !== undefined) throw fault("TSR028", problem.message, span);
 }
 

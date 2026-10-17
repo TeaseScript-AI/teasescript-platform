@@ -13,7 +13,8 @@ import {
 } from "./conversions.js";
 import type { ConversionName } from "./language-facts.js";
 import { LOCK_CALLS } from "./capture-call.js";
-import { NUMERIC_FUNCTIONS } from "./numeric-functions.js";
+import { NUMERIC_FUNCTIONS, type NumberSignature } from "./numeric-functions.js";
+import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "./random-functions.js";
 import { ANGLE_FUNCTIONS, angleArgumentMessage } from "./angle.js";
 import { misspelledPropertyHint } from "./object-properties.js";
 import { parsePublicKey } from "./public-keys.js";
@@ -328,7 +329,15 @@ function capitalized(text: string): string {
 /** Argument names and the number of arguments of a built-in that takes fixed positional arguments. */
 export function builtinShapeProblems(name: string, call: CallExpression): OperationProblem[] {
   const parameters = FIXED_PARAMETERS.get(name);
-  if (parameters === undefined) return [];
+  return parameters === undefined ? [] : fixedShapeProblems(name, parameters, call);
+}
+
+/** Argument names and the number of arguments of a call that takes `parameters` without names. */
+function fixedShapeProblems(
+  name: string,
+  parameters: readonly string[],
+  call: CallExpression,
+): OperationProblem[] {
   const named = call.arguments.find((argument) => argument.kind === "namedArgument");
   if (named !== undefined)
     return [
@@ -349,9 +358,10 @@ export function builtinShapeProblems(name: string, call: CallExpression): Operat
 }
 
 /**
- * Compile-time problems with a call of a conversion (V30 §8, §13, §35), a numeric or angle function, `min`, `max`, a
- * file or hash function of text, or a lock call: its arguments, a value of a known type it cannot take, constant text
- * that cannot convert, and a `default:` it cannot give. Other callees give no problems.
+ * Compile-time problems with a call of a conversion (V30 §8, §13, §35), a numeric, random, or angle function, `min`,
+ * `max`, a file or hash function of text, or a lock call: its arguments, a value of a known type it cannot take,
+ * constant text that cannot convert, and a `default:` it cannot give. Other callees, and `randomWeighted`, whose checks
+ * are a list function's, give no problems.
  */
 export function builtinCallProblems(
   name: string,
@@ -359,7 +369,13 @@ export function builtinCallProblems(
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
   if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
-  if (NUMERIC_FUNCTIONS.has(name)) return numericFunctionProblems(name, call, typeOf);
+  if (NUMERIC_FUNCTIONS.has(name))
+    return numberArgumentProblems(name, NUMERIC_FUNCTIONS.get(name)!, call, typeOf);
+  if (isRandomFunction(name)) {
+    const random: RandomFunction = RANDOM_CONTRACTS[name];
+    if (random.takes === "numbers") return numberArgumentProblems(name, random, call, typeOf);
+    return random.takes === "range" ? fixedShapeProblems(name, random.parameters, call) : [];
+  }
   if (ANGLE_FUNCTIONS.has(name)) return angleFunctionProblems(name, call, typeOf);
   if (isConversion(name)) return conversionProblems(name, CONVERSIONS[name], call, typeOf);
   const shape = FILE_TEXT_FUNCTIONS.get(name);
@@ -719,15 +735,15 @@ const SESSION_HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
 ]);
 
 /**
- * Problems with a numeric function: names it does not take, its number of positional arguments, and arguments that are
- * not numbers.
+ * Problems with a function of numbers, such as a numeric function or `chance`: names it does not take, its number of
+ * positional arguments, and arguments that are not numbers.
  */
-function numericFunctionProblems(
+function numberArgumentProblems(
   name: string,
+  { parameters, named = [] }: NumberSignature,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
-  const { parameters, named = [] } = NUMERIC_FUNCTIONS.get(name)!;
   const problems: OperationProblem[] = [];
   const values: [Expression, string][] = [];
   let positional = 0;
@@ -740,7 +756,12 @@ function numericFunctionProblems(
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message: unknownNamedArgumentMessage(name, argument.name.name, named),
+        message: unknownNamedArgumentMessage(
+          name,
+          argument.name.name,
+          named,
+          parameters.length > 0,
+        ),
         span: argument.name.span,
       });
   }
