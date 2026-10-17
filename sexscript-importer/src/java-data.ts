@@ -257,6 +257,8 @@ const WRITING_MEMBERS = new Set([
   "withWriterAppend",
   "write",
 ]);
+/** The calls that give the file of a photo the script took, as photoVariables in lower.ts reads them. */
+const PHOTO_CALLS = new Set(["getImage", "getFile", "receiveImage"]);
 /** Folder members that hand out the folder's files, which code may then write. */
 const LISTING_FILE_MEMBERS = new Set([
   "absoluteFile",
@@ -1070,10 +1072,29 @@ function writtenPaths(tree: Tree): FileWrites {
     if (first === undefined || (first.kind === "constructorCall" && !fileValue(first))) continue;
     at(writes.direct, node, pathsOf(first, new Set()));
   }
+  /** Whether a variable holds a photo the script took: it is assigned getImage(), getFile(), or receiveImage(). */
+  const photo = (node: AstNode | undefined): boolean =>
+    (tree.assignments.get(variableName(node) ?? "") ?? []).some(
+      (value) =>
+        value?.kind === "methodCall" &&
+        value.implicitThis === true &&
+        PHOTO_CALLS.has(constantString(value.method) ?? ""),
+    );
   for (const call of tree.calls) {
     const method = constantString(call.method);
     const receiver = asNode(call.object);
     const args = argumentsOf(call);
+    // Deleting the file of a photo the script took clears the reference instead (SX_PHOTO_DELETE in lower.ts), so it
+    // changes no package file.
+    if (
+      method === "delete" &&
+      args.length === 0 &&
+      receiver?.kind === "constructorCall" &&
+      FILE_TYPES.has(String(receiver.type)) &&
+      argumentsOf(receiver).length === 1 &&
+      photo(argumentsOf(receiver)[0])
+    )
+      continue;
     if (method !== null && FILE_PRODUCING_CALLS.has(method))
       at(writes.escaped, call, [unknownPattern()]);
     const owner = dottedName(receiver);
@@ -1419,7 +1440,7 @@ export function javaDataStatements(state: JavaFileState): IrStatement[] {
   const statements: IrStatement[] = [];
   if (lines.size > 0)
     statements.push(
-      dataFunction(TEXT_LINES, lines, (items) => ({
+      dataFunction(FILE_LINES, lines, (items) => ({
         kind: "list",
         items: items.map((item) => ({ kind: "literal", value: item })),
       })),
@@ -1430,7 +1451,7 @@ export function javaDataStatements(state: JavaFileState): IrStatement[] {
   return statements;
 }
 
-const TEXT_LINES = "sexscriptLegacyTextLines";
+const FILE_LINES = "sexscriptLegacyFileLines";
 const PROPERTIES = "sexscriptLegacyProperties";
 const INI = "sexscriptLegacyIni";
 
@@ -1725,7 +1746,7 @@ function dataCall(
   host.helper("packagePath", [path]);
   return {
     kind: "call",
-    name: kind === "lines" ? TEXT_LINES : kind === "properties" ? PROPERTIES : INI,
+    name: kind === "lines" ? FILE_LINES : kind === "properties" ? PROPERTIES : INI,
     positional: [path],
     named: {},
     local: true,
@@ -2205,6 +2226,22 @@ function pathPattern(
   }
   if (node.kind === "methodCall" && constantString(node.method) === "getDataFolder")
     return whole("");
+  // A path whose backslashes the code turned into slashes, as `getDataFolder().replaceAll("\\\\", "/")`: package paths
+  // have slashes.
+  if (node.kind === "methodCall") {
+    const method = constantString(node.method);
+    const [from, to] = argumentsOf(node).map(constantString);
+    const target = asNode(node.object);
+    if (
+      target !== null &&
+      to === "/" &&
+      ((method === "replace" && from === "\\") || (method === "replaceAll" && from === "\\\\"))
+    ) {
+      const pattern = pathPattern(target, constants);
+      const slashes = (text: string): string => text.replaceAll("\\", "/");
+      return { ...pattern, prefix: slashes(pattern.prefix), suffix: slashes(pattern.suffix) };
+    }
+  }
   if (node.kind === "gstring") {
     const strings = Array.isArray(node.strings) ? node.strings.map(String) : [];
     const values = Array.isArray(node.values) ? node.values : [];

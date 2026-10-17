@@ -106,7 +106,7 @@ test("reads package text files that no script writes as converted", { skip }, as
     },
   );
   assert.match(source, /^readtext = "scripts\/Quiz\/world_q\.txt"$/mu);
-  assert.match(source, /^let questions = sexscriptLegacyTextLines\(readtext\)$/mu);
+  assert.match(source, /^let questions = sexscriptLegacyFileLines\(readtext\)$/mu);
   assert.match(source, /^ {2}return \["Capital of France\?", "Largest ocean\?"\]$/mu);
   assert.match(source, /^let props: string\? dict = dict\{\}$/mu);
   assert.match(source, /^props = sexscriptLegacyProperties\(reader\)$/mu);
@@ -419,6 +419,36 @@ test("keeps reads of files that any write of the package may change", { skip }, 
   );
 });
 
+// Deleting a photo the script took writes no package file, nor does a walk through an images folder whose path has
+// its backslashes turned into slashes, so a text file stays package lines; a file the script writes is stored text,
+// whose helper is another than the package lines' (theEdger, batch 39).
+test(
+  "keeps package lines apart from stored text, also beside a photo's delete and a folder walk",
+  { skip },
+  async () => {
+    const source = await convert(
+      [
+        'def snap = { -> def photo = getImage("Smile"); new File(photo).delete() }',
+        'def folder = getDataFolder().replaceAll("\\\\\\\\", "/") + "images/user/"',
+        "def names = []",
+        "new File(folder).eachFile { file -> names << file.getName() }",
+        // A write through a parameter may change any File the walk handed out, so the folder's path counts.
+        'def keep = { f -> f.write("x") }',
+        'def out = new File("scripts/log.txt")',
+        'out.write("")',
+        'def lines = new File("scripts/quiz.txt").readLines()',
+        'for (def k = 0; k < lines.size; k++) { out.append(lines[k] + "\\n") }',
+        'def logged = new File("scripts/log.txt").readLines()',
+        'show(logged.join(","))',
+      ],
+      { "quiz.txt": "first\nsecond\n", "log.txt": "old\n" },
+    );
+    assert.match(source, /^let lines = sexscriptLegacyFileLines\("scripts\/quiz\.txt"\)$/mu);
+    assert.match(source, /sexscriptLegacyTextLines\(load\("file:log\.txt"/u);
+    assert.deepEqual(run(source), ["first,second"]);
+  },
+);
+
 // A path from getDataFolder() names a file of the package root; a file the package lacks, a flag that a read may still
 // see as a File, an out-of-range Calendar.set(), and a key name alone stay manual or keep the lowering's own form.
 test(
@@ -444,7 +474,7 @@ test(
       ],
       { "quiz.txt": "first\n", "settings.ini": '[S]\nq="a"\nc=x ; n\nd=1\nd=2\n' },
     );
-    assert.match(source, /^let lines = sexscriptLegacyTextLines\("\/quiz\.txt"\)$/mu);
+    assert.match(source, /^let lines = sexscriptLegacyFileLines\("\/quiz\.txt"\)$/mu);
     assert.match(source, /TODO SX_PACKAGE_TEXT_MISSING line 2/u);
     assert.doesNotMatch(source, /^let pack = (?:true|false)$/mu);
     assert.match(source, /TODO SX_CALENDAR_SET_RANGE line 7/u);
