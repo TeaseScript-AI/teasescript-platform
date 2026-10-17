@@ -1,0 +1,22 @@
+--- a/scripts/HurrahForSchool.groovy
++++ b/scripts/HurrahForSchool.groovy
+@@ -1051,7 +1051,8 @@
+ 			save("Sch.Gym0", false)
+ 
+ 			show("<b>Kit inspection</b>\n\nYou'll have to swim naked!")
+-			show("Yes "+SchTitle[SchSex])
++			// SX_PLAYER_LINE: the player's own reply, a button (provisional).
++			showButton("Yes "+SchTitle[SchSex])
+ 
+ 			SchA4Mess3 = "Games report for "+SchPlayer+" on "+SchToday+"\n"+SchPronoun[SchSex]+
+ 				" forgot "+SchPossessive[SchSex]+" "+SchGym0[SchSex]+" and had to swim naked"
+@@ -1125,7 +1126,8 @@
+ 		else {
+ 			save("Sch.Gym2", false)
+ 			show("<b>Kit inspection</b>\n\nYou'll have to do sport naked!")
+-			show("Yes "+SchTitle[SchSex])
++			// SX_PLAYER_LINE: the player's own reply, a button (provisional).
++			showButton("Yes "+SchTitle[SchSex])
+ 
+ 			SchA4Mess3 = "Games report for "+SchPlayer+" on "+SchToday+"\n"+SchPronoun[SchSex]+
+ 				" forgot "+SchPossessive[SchSex]+" "+SchGym2[SchSex]+" and had to play sport naked"

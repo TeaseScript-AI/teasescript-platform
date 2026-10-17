@@ -1,0 +1,90 @@
+{
+  "reason": "One owner speaks to the bound player, mostly about herself or himself in the third person by title (\"Mistress will now release you....\") and sometimes in the first person (\"You are my toy and must obey!\"). The title is the variable owner_title: \"Mistress\" or \"Master\" as chosen in setup, or a title saved by a sibling selfbt script. The program's intro, setup questions, safety-check instructions, countdown and time read-outs have no character.",
+  "speakers": {
+    "owner": {
+      "title": "Mistress"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/Bondage_Fun.groovy:84",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:90",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:153",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:167",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:176",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:195",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:203",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:213",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:244",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:252",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:335",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:374",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:549",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:552",
+      "speaker": "owner"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:740",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Bondage_Fun.groovy:743",
+      "speaker": "owner"
+    }
+  ],
+  "names": [
+    {
+      "variable": "owner_title",
+      "files": [
+        "scripts/Bondage_Fun.groovy"
+      ],
+      "speaker": "owner",
+      "template": "{}",
+      "except": [
+        "scripts/Bondage_Fun.groovy:13",
+        "scripts/Bondage_Fun.groovy:86"
+      ]
+    }
+  ]
+}

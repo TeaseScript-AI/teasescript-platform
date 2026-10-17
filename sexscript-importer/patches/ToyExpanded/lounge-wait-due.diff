@@ -1,0 +1,11 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -599,7 +599,7 @@
+ 				else {
+ 					show("${dommeTitle()} ${dommeName()} will summon you when required.");
+ 				}
+-				final waitTime = Math.min(cycleTime, e.event.time - getTime());
++				final waitTime = Math.max(0, Math.min(cycleTime, e.event.time - getTime()));
+ 				final clickTime = showButtonG("Please, ${dommeTitle()}?", "please?", waitTime);
+ 				if (Math.round(clickTime*10)/10 < waitTime) {
+ 					if (hasUpdate()) {

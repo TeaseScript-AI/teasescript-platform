@@ -1,0 +1,31 @@
+--- a/scripts/HitOrZap.groovy
++++ b/scripts/HitOrZap.groovy
+@@ -951,20 +951,14 @@
+         }
+     }
+ 
+-    switch (menuExtraPun) {
+-        case 0:
+-            rounds += extraPunishments[extraPunishments.keySet()[menuExtraPun]]
+-            break
+-        case 1:
+-            painLevel += extraPunishments[extraPunishments.keySet()[menuExtraPun]]
+-            break
+-        case 2:
+-            shockTimeMulti += extraPunishments[extraPunishments.keySet()[menuExtraPun]]
+-            break
+-        case 3:
+-            timeTolerance += extraPunishments[extraPunishments.keySet()[menuExtraPun]]
+-            break
+-    }
++    // Legacy bug: the cases took the chosen position as if all four punishments were offered, so with one left out the
++    // choice changed another setting; "Time Tolerance" then lowered the shock time, below 0 in the end. Apply the chosen
++    // punishment by its name, as the rewards do (patch extra-punishment-choice).
++    String extraPun = extraPunishments.keySet()[menuExtraPun]
++    if (extraPun.contains("Round")) rounds += extraPunishments[extraPun]
++    if (extraPun.contains("Pain Level")) painLevel += extraPunishments[extraPun]
++    if (extraPun.contains("Shock Time")) shockTimeMulti += extraPunishments[extraPun]
++    if (extraPun.contains("Time Tolerance")) timeTolerance += extraPunishments[extraPun]
+ 
+     if (mistressChoose) {
+         show("This time I choose your extra punishment!")

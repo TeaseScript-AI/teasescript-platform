@@ -1,0 +1,11 @@
+--- a/scripts/DisciplineClinic/Punish.groovy
++++ b/scripts/DisciplineClinic/Punish.groovy
+@@ -889,7 +889,7 @@
+ def loyaltyWheelSpin = {
+ 	basePoints, randomPoints ->
+ 	
+-	def pointsBonus
++	def pointsBonus = 0
+ 	
+ 	show("Go ahead and spin the loyalty rewards bonus wheel.")
+ 	showButton("SPIN")

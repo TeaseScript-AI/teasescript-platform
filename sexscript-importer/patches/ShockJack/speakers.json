@@ -1,0 +1,77 @@
+{
+  "reason": "One named character, Alexis (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Alexis"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/ShockJack.groovy:401",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:474",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:533",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:568",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:635",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:725",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:841",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:847",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:874",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:965",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:969",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:979",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:1107",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:1338",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:1618",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ShockJack.groovy:1632",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

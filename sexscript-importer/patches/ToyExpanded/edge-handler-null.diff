@@ -1,0 +1,10 @@
+--- a/scripts/toy/tease.groovy
++++ b/scripts/toy/tease.groovy
+@@ -485,6 +485,6 @@
+ 	toy.addActivity("intTeaseCock", { toy.intTeaseCock() }, [[toy.nDRESSED, toy.TITS]], [toy.INT, toy.REWARD, toy.TEASE]);
+ 	toy.addActivity("intTeaseNipples", { toy.intTeaseNipples() }, [[toy.nDRESSED, toy.TITS]], [toy.INT, toy.REWARD, toy.TEASE]);
+ 	toy.addActivity('postSoften', { toy.postSoften() }, [[toy.DRESSED, toy.TEASE]]);
+-	toy.addTriggerHandler("toyEdged", { d=0 -> toy.addEdge(d) });
++	toy.addTriggerHandler("toyEdged", { d=null -> toy.addEdge(d) });
+ 	return null;
+ }

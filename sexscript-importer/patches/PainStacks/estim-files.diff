@@ -1,0 +1,65 @@
+--- a/scripts/PainStacks.groovy
++++ b/scripts/PainStacks.groovy
+@@ -215,40 +215,38 @@
+     List<String> fileNames = []
+     List<String> uniqueNames = []
+     File dir = new File("sounds/" + SOUNDSDIR)
+-    try {
+-        dir.traverse(type: groovy.io.FileType.FILES, maxDepth: 0) { file ->
++    // The package holds the sounds folder, which the conversion lists, so the try/catch for a missing one goes.
++    // The folder's own files, as traverse with maxDepth 0 went through them.
++    dir.eachFile { file ->
++        if (file.isFile()) {
+             if (file.name.endsWith(EXT)) fileNames.add(file.name)
+             String name = file.name.split('\\.')[0]
+ 
+-            List find = name.findAll('\\d+$')
+-            if (!find.isEmpty()) {
+-                if (find[0].isNumber()) {
+-                    String uName = name.replaceAll('\\d+$', '')
+-                    if (!(uName in uniqueNames)) uniqueNames.add(uName)
+-                }
++            // The name before the number it ends with, if it ends with one.
++            String uName = name
++            while (uName.length() > 0 && "0123456789".contains(uName.substring(uName.length() - 1)))
++                uName = uName.substring(0, uName.length() - 1)
++            if (uName != name) {
++                if (!(uName in uniqueNames)) uniqueNames.add(uName)
+             }
+         }
+-        List<String> missingNames = []
+-        uniqueNames.each { uName ->
+-            for (int lvl = PAINLEVELRANGELIMIT.min(); lvl <= PAINLEVELRANGELIMIT.max(); lvl++) {
+-                String name = uName + lvl + EXT
+-                if (!(name in fileNames)) {
+-                    if (!(uName in missingNames)) missingNames.add(name)
+-                }
++    }
++    List<String> missingNames = []
++    uniqueNames.each { uName ->
++        for (int lvl = PAINLEVELRANGELIMIT.min(); lvl <= PAINLEVELRANGELIMIT.max(); lvl++) {
++            String name = uName + lvl + EXT
++            if (!(name in fileNames)) {
++                if (!(uName in missingNames)) missingNames.add(name)
+             }
+         }
+-        if (!missingNames.isEmpty()) {
+-            show("ERROR! Missing sound files: " + missingNames)
+-            showButton("Quit")
+-            exit()
+-        }
+-        Collections.sort(uniqueNames)
+-        return uniqueNames
+-    } catch (Exception e) {
+-        show("ERROR! 'Shock Yourself' not installed?")
++    }
++    if (!missingNames.isEmpty()) {
++        show("ERROR! Missing sound files: " + missingNames)
+         showButton("Quit")
+         exit()
+     }
++    Collections.sort(uniqueNames)
++    return uniqueNames
+ 
+ }
+ 

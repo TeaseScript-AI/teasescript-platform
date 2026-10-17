@@ -1,0 +1,171 @@
+{
+  "reason": "One teacher at a time punishes the pupil: the detention teacher picked at random (variable teacher, shown as \"Miss <surname>\": Bowden by default, Jones, Walsh, Warner, Lockhart, Bailey, Pepezcu, King) or the principal Rutherford; a teacher may send the pupil on to the principal (teacherSet0 at line 2967), who then speaks. Door scenes are narrated; records, menus, settings, debug prompts, the lines counter and the install check are system text.",
+  "speakers": {
+    "teacher": {
+      "title": "Miss",
+      "lastName": "Bowden"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/fontconfiguration.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/Banjo/schoolpack.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/teachertrouble.groovy:sendPhoto",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:1725",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:1930",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/teachertrouble.groovy:1930",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2257",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/teachertrouble.groovy:2257",
+      "speaker": "teacher"
+    },
+    {
+      "function": "scripts/Banjo/teachertrouble.groovy:arrival",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2347",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2351",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2358",
+      "speaker": "teacher"
+    },
+    {
+      "function": "scripts/Banjo/teachertrouble.groovy:followup",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2528",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2532",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2539",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2623",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/teachertrouble.groovy:2623",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2657",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/teachertrouble.groovy:2657",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2662",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2667",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2674",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/teachertrouble.groovy:2711",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2721",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/teachertrouble.groovy:2721",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2739",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/teachertrouble.groovy:2739",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2771",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/teachertrouble.groovy:2771",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2776",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2780",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Banjo/teachertrouble.groovy:dismissal",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2952",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/teachertrouble.groovy:2952",
+      "speaker": "teacher"
+    },
+    {
+      "at": "scripts/Banjo/teachertrouble.groovy:2977",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Banjo/teachertrouble.groovy:2977",
+      "speaker": "teacher"
+    }
+  ],
+  "names": [
+    {
+      "variable": "teacher",
+      "files": [
+        "scripts/Banjo/teachertrouble.groovy"
+      ],
+      "speaker": "teacher",
+      "template": "Miss {}"
+    }
+  ]
+}

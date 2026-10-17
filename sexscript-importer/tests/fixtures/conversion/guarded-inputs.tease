@@ -1,0 +1,33 @@
+// A question that && or || guards is asked only where Groovy's short circuit reached it.
+let name = load "training.name", default: ""
+while true {
+  let answered = false
+  if name == "" {
+    answered = true
+  } else {
+    answered = not askBoolean prose() ("Is ${name} your name?")
+  }
+  if not answered {
+    break
+  }
+  name = askText prose() ("What is your name?", prefill: "slave").replace("\n", " ")
+}
+let conditional = name.length > 3
+if conditional {
+  conditional = askBoolean prose "May I shorten it?"
+}
+if conditional {
+  say prose "Hello, ${name.substring(0, 3)}", instant
+}
+let conditional2 = askBoolean prose() ("Do you remember the contract?") or true
+if conditional2 {
+  conditional2 = askBoolean prose "Did you read it?"
+}
+if conditional2 {
+  conditional2 = askBoolean prose "Will you take the consequences?"
+}
+if conditional2 {
+  say prose "Then we begin.", instant
+}
+say prose "Hello, ${name}", instant
+exit

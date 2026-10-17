@@ -1,0 +1,176 @@
+--- a/scripts/DCAfterDark/DCAfterDarkMain.groovy
++++ b/scripts/DCAfterDark/DCAfterDarkMain.groovy
+@@ -1235,7 +1235,7 @@
+ 	}
+ 	if (numRatings > 0) aveRating = totalRating/numRatings
+ 	else aveRating = 0
+-	return [aveRating, numRatings, hasLimits, recentScene, hasToys]
++	return [aveRating: aveRating, numRatings: numRatings, hasLimits: hasLimits, recentScene: recentScene, hasToys: hasToys]
+ }
+ 			
+ def showSessionOverview = {
+@@ -1250,7 +1250,6 @@
+ 	def nextToy = ""
+ 	def nextToyBool = false
+ 	def float aveRating = 0
+-	def returnArray = []
+ 
+ 	setMistressSession(FIRST_SESSION)		
+ 	while(nextChoice != 0) {
+@@ -1260,9 +1259,9 @@
+ 		setImage("DCAfterDark/"+mistress+"/scene"+whichSession+"/intro/1.jpg")
+ 		
+ 		dialog = "Potential Activities (Hard limits in <b>BOLD</b>)\n"
+-		returnArray = calculateSceneRating()
+-		aveRating = returnArray[0]
+-		numRatings = returnArray[1]
++		def sceneRating = calculateSceneRating()
++		aveRating = sceneRating.aveRating
++		numRatings = sceneRating.numRatings
+ //		aveRating.round(2)
+ 
+ 		if (numRatings < sessionActivitiesArray.size() - 2) dialog = dialog + "(Not enough activities rated to generate scene rating)\n"
+@@ -1357,7 +1356,6 @@
+ 
+ 	def x = 0
+ 	def y = 0
+-	def returnArray = []
+ 	def bestScene = ALL_SCENES_HARD_LIMITS
+ 	def sceneSelect = 0
+ 	def mistressSelect = 0
+@@ -1375,10 +1373,10 @@
+ 		setMistressSession(RANDOM_SESSION) //Just to get num scenes
+ 		for (y = 1; y <= numMistressSessions; y++) {
+ 			setMistressSession(y)
+-			returnArray = calculateSceneRating()
+-			hasLimits = returnArray[2]
+-			recentScene = returnArray[3]
+-			hasToys = returnArray[4]
++			def sceneRating = calculateSceneRating()
++			hasLimits = sceneRating.hasLimits
++			recentScene = sceneRating.recentScene
++			hasToys = sceneRating.hasToys
+ 			if (!hasLimits && hasToys) {
+ 				if (recentScene == false) availableNonRecentScenes.add(y)
+ 				else availableRecentScenes.add(y)
+@@ -1410,10 +1408,10 @@
+ 			//Build list of non-recent and available scenes
+ 			for (y = 1; y <= numMistressSessions; y++) {
+ 				setMistressSession(y)
+-				returnArray = calculateSceneRating()
+-				hasLimits = returnArray[2]
+-				recentScene = returnArray[3]
+-				hasToys = returnArray[4]
++				def sceneRating = calculateSceneRating()
++				hasLimits = sceneRating.hasLimits
++				recentScene = sceneRating.recentScene
++				hasToys = sceneRating.hasToys
+ 				if (!hasLimits && hasToys) {
+ 					if (recentScene == false) availableNonRecentScenes.add(y)
+ 				}
+@@ -1441,10 +1439,10 @@
+ 				//Build list of available recent scenes
+ 				for (y = 1; y <= numMistressSessions; y++) {
+ 					setMistressSession(y)
+-					returnArray = calculateSceneRating()
+-					hasLimits = returnArray[2]
+-					recentScene = returnArray[3]
+-					hasToys = returnArray[4]
++					def sceneRating = calculateSceneRating()
++					hasLimits = sceneRating.hasLimits
++					recentScene = sceneRating.recentScene
++					hasToys = sceneRating.hasToys
+ 					if (!hasLimits && hasToys) {
+ 						if (recentScene == true) availableRecentScenes.add(y)
+ 					}
+@@ -1472,10 +1470,10 @@
+ 				//Build list of non-recent available scenes
+ 				for (y = 1; y <= numMistressSessions; y++) {
+ 					setMistressSession(y)
+-					returnArray = calculateSceneRating()
+-					hasLimits = returnArray[2]
+-					recentScene = returnArray[3]
+-					hasToys = returnArray[4]
++					def sceneRating = calculateSceneRating()
++					hasLimits = sceneRating.hasLimits
++					recentScene = sceneRating.recentScene
++					hasToys = sceneRating.hasToys
+ 					if (!hasLimits && hasToys) {
+ 						if (recentScene == false) availableNonRecentScenes.add(y)
+ 					}
+@@ -1503,10 +1501,10 @@
+ 				//Build list of available recent scenes
+ 				for (y = 1; y <= numMistressSessions; y++) {
+ 					setMistressSession(y)
+-					returnArray = calculateSceneRating()
+-					hasLimits = returnArray[2]
+-					recentScene = returnArray[3]
+-					hasToys = returnArray[4]
++					def sceneRating = calculateSceneRating()
++					hasLimits = sceneRating.hasLimits
++					recentScene = sceneRating.recentScene
++					hasToys = sceneRating.hasToys
+ 					if (!hasLimits && hasToys) {
+ 						if (recentScene == true) availableRecentScenes.add(y)
+ 					}
+@@ -1529,7 +1527,6 @@
+ def selectBestSession = {
+ 	def x = 0
+ 	def y = 0
+-	def returnArray = []
+ 	def bestScene = ALL_SCENES_HARD_LIMITS
+ 	def bestMistress = ""
+ 	def float bestScore = -5.0
+@@ -1543,12 +1540,12 @@
+ 		setMistressSession(RANDOM_SESSION) //Just to get num scenes
+ 		for (y = 1; y <= numMistressSessions; y++) {
+ 			setMistressSession(y)
+-			returnArray = calculateSceneRating()
+-			sceneScore = returnArray[0]
+-			hasLimits = returnArray[2]
+-			recentScene = returnArray[3]
+-			hasToys = returnArray[4]
+-			if (testing) showButton(returnArray)
++			def sceneRating = calculateSceneRating()
++			sceneScore = sceneRating.aveRating
++			hasLimits = sceneRating.hasLimits
++			recentScene = sceneRating.recentScene
++			hasToys = sceneRating.hasToys
++			if (testing) showButton("[${sceneRating.aveRating}, ${sceneRating.numRatings}, ${sceneRating.hasLimits}, ${sceneRating.recentScene}, ${sceneRating.hasToys}]")
+ 			if (!hasLimits && hasToys) {
+ 				if (recentScene == true) sceneScore -= 3.0 //Reduce best score as this scene has been done recently
+ 				if (sceneScore > bestScore) {
+@@ -1566,11 +1563,11 @@
+ 				setMistressSession(RANDOM_SESSION) //Just to get num scenes
+ 				for (y = 1; y <= numMistressSessions; y++) {
+ 					setMistressSession(y)
+-					returnArray = calculateSceneRating()
+-					sceneScore = returnArray[0]
+-					hasLimits = returnArray[2]
+-					recentScene = returnArray[3]
+-					hasToys = returnArray[4]
++					def sceneRating = calculateSceneRating()
++					sceneScore = sceneRating.aveRating
++					hasLimits = sceneRating.hasLimits
++					recentScene = sceneRating.recentScene
++					hasToys = sceneRating.hasToys
+ 					if (!hasLimits && hasToys) {
+ 						if (recentScene == true) sceneScore -= 3.0 //Reduce best score as this scene has been done recently
+ 						if (sceneScore > bestScore) {
+@@ -1591,11 +1588,11 @@
+ 					setMistressSession(RANDOM_SESSION) //Just to get num scenes
+ 					for (y = 1; y <= numMistressSessions; y++) {
+ 						setMistressSession(y)
+-						returnArray = calculateSceneRating()
+-						sceneScore = returnArray[0]
+-						hasLimits = returnArray[2]
+-						recentScene = returnArray[3]
+-						hasToys = returnArray[4]
++						def sceneRating = calculateSceneRating()
++						sceneScore = sceneRating.aveRating
++						hasLimits = sceneRating.hasLimits
++						recentScene = sceneRating.recentScene
++						hasToys = sceneRating.hasToys
+ 						if (!hasLimits && hasToys) {
+ 							if (recentScene == true) sceneScore -= 3.0 //Reduce best score as this scene has been done recently
+ 							if (sceneScore > bestScore) {

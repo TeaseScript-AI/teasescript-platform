@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "english-default-texts",
+      "layer": "source",
+      "category": "b",
+      "reason": "local holds the texts of the game: the German ones for a German system, the English ones by default. It is declared without a value and set by the language switch, so TeaseScript sees a value that may be null in the functions that read it. The English texts move from the switch's default branch into the declaration, which the German case replaces as before; nothing else changes. The debug texts, shown only with debuginfo, show how many neighbours there are instead of the list of position pairs, which a TeaseScript text cannot show.",
+      "diff": "english-default-texts.diff"
+    }
+  ]
+}

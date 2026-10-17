@@ -1,0 +1,326 @@
+--- /dev/null
++++ b/scripts/toy/domme.groovy
+@@ -0,0 +1,67 @@
++{ toy ->
++	// The domme's session plans (formerly data in images/toy/domme.groovy) as methods, run by sessionPlay in
++	// toy/play.groovy. Each phase runs in order, one with a condition only when it holds; a phase takes one activity
++	// unless it says otherwise, and the session dresses for the activities of all of its phases first.
++
++	// The sessions available now, with their probabilities.
++	toy.metaClass.sessionChoices { int punishment ->
++		final sessions = [];
++		if (punishment < 50) sessions.add([theme: "stroking and edging", probability: 50]);
++		if (has("dildo")) sessions.add([theme: "blowjob training", probability: 5]);
++		sessions.add([theme: "reminder who's boss", probability: 5]);
++		if (punishment > 40) sessions.add([theme: "punishment", probability: 50]);
++		return sessions;
++	};
++
++	toy.metaClass.runSession { String theme, int punishment ->
++		switch (theme) {
++			case "stroking and edging": sessionStrokingAndEdging(punishment); break;
++			case "blowjob training": sessionBlowjobTraining(punishment); break;
++			case "reminder who's boss": sessionWhosBoss(punishment); break;
++			case "punishment": sessionPunishment(punishment); break;
++		}
++	};
++
++	toy.metaClass.sessionStrokingAndEdging { int punishment ->
++		final pre = sessionActivities(['*pre,!punish']);
++		final play = sessionActivities(['*play,tease']);
++		final intervals = sessionActivities([null, '*int']);
++		sessionDress([pre, play, intervals, ['postCum', 'postChastity'], ['postChastity'], ['postPermitCum']]);
++		sessionRepeat(randRange(1, 3), pre, []);
++		sessionRepeat(randRange(1, 3), play, intervals);
++		sessionTake(randRange(0, 2), ['postCum', 'postChastity'], []);
++		if (can("perm_chaste")) sessionTake(1, ['postChastity'], []);
++		if (!sessionAborted && !can("cum")) sessionTake(1, ['postPermitCum'], []);
++	};
++
++	toy.metaClass.sessionBlowjobTraining { int punishment ->
++		final pre = sessionActivities(['*pre,!reward,!ballgag']);
++		sessionDress([pre, ['playSuck']]);
++		sessionTake(randRange(1, 3), pre, []);
++		sessionTake(1, ['playSuck'], []);
++	};
++
++	// "reminder who's boss"
++	toy.metaClass.sessionWhosBoss { int punishment ->
++		final pre = sessionActivities(['*pre,!reward,!chaste']);
++		final play = sessionActivities(['*play,punish', '*play,humiliation']);
++		sessionDress([pre, play, ['postChastity']]);
++		sessionTake(randRange(1, 4), pre, [], 'punishMultiply');
++		sessionRepeat(randRange(2, 3), play, [], 'punishApply');
++		if (can("perm_chaste") || randRange(1, 2) == 1) sessionTake(1, ['postChastity'], []);
++	};
++
++	toy.metaClass.sessionPunishment { int punishment ->
++		final pre = sessionActivities(['*pre,!reward,!chaste']);
++		final play = sessionActivities(['*play,punish', '*play,humiliation']);
++		final intervals = sessionActivities([null, '*int']);
++		final punish = sessionActivities(['*!pre,!int,punish']);
++		sessionDress([['preChastity'], pre, play, intervals, punish, ['postChastity']]);
++		sessionTake(1, ['preChastity'], []);
++		sessionTake(randRange(1, 2 + (int)(punishment / 100)), pre, [], 'punishMultiply');
++		sessionRepeat(randRange(1, 2 + (int)(punishment / 100)), play, intervals, 'punishApply');
++		sessionTake(randRange(1, 2 + (int)(punishment / 100)), punish, [], 'punishApply');
++		sessionTake(1, ['postChastity'], []);
++	};
++	return null;
++}
+--- a/scripts/toy/play.groovy
++++ b/scripts/toy/play.groovy
+@@ -1,131 +1,132 @@
+ { toy ->
++	// The factor of the running session's punishMultiply phases, which its punishApply phases apply.
++	def sessionPunishMultiple = 1.0;
++
++	// The session plans are methods of toy/domme.groovy, which run their phases with the helpers below. A session
++	// reads the punishment as it was when the session started.
+ 	toy.metaClass.sessionPlay {
+ 		if (stateIs(CHASTE)) sessionToys[CHASTITY] = getTime();
+-		def playScope = [
+-			'randRange': { min, max -> randRange(min, max) },
+-			'currentPunishment': { getPunish() },
+-			'sessionAborted': { return sessionAborted },
+-			'can': { return can(it) },
+-			'has': { return has(it) },
+-			'is': { return stateIs(it) },
+-			'likes': { return likes(it) },
+-			'punishMultiple': (float)1.0,
+-			'prop': load('toy') ?: [:]
+-		];
+-		final apply = { activitity, use = null ->
+-			if (!activitity) return;
+-			def val = activitity.func();
+-			playBackgroundSound(null);
+-			if (use && val instanceof Number) {
+-				use(val);
+-			}
+-		};
+-		final interval = { activities ->
+-			if (activities) {
+-				apply(activities[getRandom(activities.size())], null);
+-			}
+-		};
+-		def funcMap = [
+-			'use': [
+-				'punishMultiply': { val ->
+-					if (val) {
+-						playScope.punishMultiple *= val;
+-					}
+-				},
+-				'punishApply': { val ->
+-					if (val) {
+-						adjustPunish(-val * playScope.punishMultiple);
++		final punishment = getPunish();
++		sessionPunishMultiple = 1.0;
++		final sessions = sessionChoices(punishment);
++		final probabilities = [];
++		for (int idx = 0; idx < sessions.size(); idx++) {
++			for (int n = 0; n < sessions[idx].probability; n++) probabilities.add(idx);
++		}
++		runSession(sessions[probabilities[getRandom(probabilities.size())]].theme, punishment);
++	};
++
++	// The activities of a phase: the named ones (null for none) in order, then those matching each wildcard
++	// '*tag,!tag' in order.
++	toy.metaClass.sessionActivities { List specs ->
++		final names = [];
++		for (spec in specs) {
++			if (spec == null || !spec.startsWith("*")) names.add(spec);
++		}
++		for (spec in specs) {
++			if (spec == null || !spec.startsWith("*")) continue;
++			final tags = spec.substring(1).split(",");
++			for (key in activityList.keySet()) {
++				final activity = activityList[key];
++				def match = true;
++				for (tag in tags) {
++					final found = tag.startsWith("!") ? activity.tags.contains(tag.substring(1)) : !activity.tags.contains(tag);
++					if (found) {
++						match = false;
++						break;
+ 					}
+ 				}
+-			],
+-			'select': [
+-				'repeat': { amount, activities, intervals, use = null ->
+-					amount.times {
+-						if (!sessionAborted) {
+-							apply(activities[getRandom(activities.size())], use);
+-							interval(intervals);
+-						}
+-					};
+-				},
+-				'take': { amount, activities, intervals, use = null ->
+-					Collections.shuffle(activities);
+-					activities.take(amount).each {
+-						if (!sessionAborted) {
+-							apply(it, use);
+-							interval(intervals);
+-						}
+-					};
+-				}
+-			],
+-			'activities': activityList
+-		];
+-		// Expand wildcards
+-		final expandWildcards = { list ->
+-			list
+-				.findAll { a -> a && a.startsWith("*") }
+-				.collect { a -> list.remove(a); return a.substring(1).split(",") }
+-				.collectMany { tags -> activityList.values().findAll(matchTags(tags))*.name }
+-				.forEach { a -> list.add(a) };
+-		}
+-		DOMME.sessions*.phases*.activities*.forEach { expandWildcards(it); }
+-		DOMME.sessions*.phases*.intervals*.forEach { expandWildcards(it); }
+-		final eval = { expr -> Eval.me('toy', playScope, expr.toString()) };
+-		if (stateIs("DEBUG")) {
+-			// Check everything in DOMME evaluates and resolves
+-			final checkIsFunc = { group, name, s = { f -> f } ->
+-				if (!name) return;
+-				show("checking $group:$name is a function");
+-				if (!(s(funcMap[group][name]) instanceof Closure)) {
+-					showPopup("$group:$name is not a function");
+-				}
++				if (match) names.add(activity.name);
+ 			}
+-			final checkEval = { expr ->
+-				show("checking $expr evaluates");
+-				eval(expr);
+-			};
+-			DOMME.sessions.forEach { session ->
+-				checkEval(session.require ?: true);
+-				checkEval(session.probability);
+-				session.phases.forEach { phase ->
+-					checkEval(phase.require ?: true);
+-					checkIsFunc("select", phase.select);
+-					checkEval(phase.number ?: 1);
+-					phase.activities.forEach { a ->
+-						checkIsFunc("activities", a, { f -> f.func });
+-					}
+-					(phase.intervals ?: []).forEach { i ->
+-						checkIsFunc("activities", i, { f -> f.func });
+-					}
+-					checkIsFunc("use", phase.use);
+-				};
+-			};
+-		}
+-		final sessions = DOMME.sessions.findAll { s -> eval(s.require ?: true) };
+-		final probabilities = sessions.withIndex().collect { s, idx -> [idx] * s.probability }.sum();
+-		final session = sessions[probabilities[getRandom(probabilities.size)]];
+-		// Change if required
+-		dress(session.phases
+-			.collect { phase -> phase.activities + phase.intervals }
+-			.flatten()
+-			.unique()
+-			.findAll { a -> a }
+-			.collectMany { a -> activityList[a].images }
+-			.unique(), {
+-				present(null, [
+-						[ "Wait there while I change..."]]);
+-				pause(5);
+-				showButtonG("Yes, ${dommeTitle()}", "ok");
+-				showImage(null);
+-				pause(randRange(40, 60));
+-			});
+-		session.phases.forEach { phase ->
+-			if (eval(phase.require ?: true)) {
+-				funcMap.select[phase.select ?: 'take'](eval(phase.number ?: 1),
+-						(phase.activities ?: []).collect { f -> funcMap.activities[f] },
+-						(phase.intervals ?: []).collect { f -> funcMap.activities[f] },
+-						funcMap.use[phase.use]);
++		}
++		return names;
++	};
++
++	// Changes, if needed, into an outfit with the images of every activity of the session's phases.
++	toy.metaClass.sessionDress { List phases ->
++		final names = [];
++		for (phase in phases) {
++			for (name in phase) {
++				if (name && !names.contains(name)) names.add(name);
++			}
++		}
++		final specs = [];
++		for (name in names) {
++			for (spec in activityList[name].images) {
++				if (!specs.contains(spec)) specs.add(spec);
+ 			}
+-		};
++		}
++		dress(specs, {
++			present(null, [
++					[ "Wait there while I change..."]]);
++			pause(5);
++			showButtonG("Yes, ${dommeTitle()}", "ok");
++			showImage(null);
++			pause(randRange(40, 60));
++		});
++	};
++
++	// Runs one activity (none for null); a number it returns is applied with the phase's use, 'punishMultiply' or
++	// 'punishApply'.
++	toy.metaClass.sessionApply { String name, String use ->
++		if (name == null) return;
++		final activity = activityList[name];
++		if (!activity) return;
++		final func = activity.func;
++		def val = func();
++		playBackgroundSound(null);
++		if (use && val instanceof Number) {
++			if (use == "punishMultiply") {
++				if (val) sessionPunishMultiple *= val;
++			}
++			else if (use == "punishApply") {
++				if (val) adjustPunish(-val * sessionPunishMultiple);
++			}
++		}
++	};
++
++	// After an activity: a random one of the interval activities, if there are any.
++	toy.metaClass.sessionInterval { List activities ->
++		if (activities) {
++			sessionApply(activities[getRandom(activities.size())], null);
++		}
++	};
++
++	// The list without its element at index i.
++	toy.metaClass.sessionWithoutAt { List activities, int i ->
++		final rest = [];
++		for (int n = 0; n < activities.size(); n++) {
++			if (n != i) rest.add(activities[n]);
++		}
++		return rest;
++	};
++
++	// A phase that takes amount different entries in random order, all drawn first, as shuffling and taking the
++	// first amount did; each is followed by an interval.
++	toy.metaClass.sessionTake { int amount, List activities, List intervals, String use = null ->
++		def left = activities;
++		final chosen = [];
++		while (chosen.size() < amount && left.size() > 0) {
++			final i = getRandom(left.size());
++			chosen.add(left[i]);
++			left = sessionWithoutAt(left, i);
++		}
++		for (act in chosen) {
++			if (!sessionAborted) {
++				sessionApply(act, use);
++				sessionInterval(intervals);
++			}
++		}
++	};
++
++	// A phase that runs a random activity amount times, each followed by an interval.
++	toy.metaClass.sessionRepeat { int amount, List activities, List intervals, String use = null ->
++		for (int n = 0; n < amount; n++) {
++			if (!sessionAborted) {
++				sessionApply(activities[getRandom(activities.size())], use);
++				sessionInterval(intervals);
++			}
++		}
+ 	};
+ 
+ 	toy.metaClass.sessionRelease { goodToy ->

@@ -1,0 +1,11 @@
+--- a/scripts/Domme3/spanking.groovy
++++ b/scripts/Domme3/spanking.groovy
+@@ -124,7 +124,7 @@
+ 	show("Now I want you to find the most tender spot on your upper right cheek,\n\n"+
+ 		"right across from your tail bone. ")
+ 	wait(7)
+-	setImage("Domme/Domme43.jpg")
++	setImage(imagePath+"Domme43.jpg")
+ 	Domme3.spank(this,"You going to smack there as hard as you can as I count.",1,5)
+ 	Domme3.spank(this,"What you’re going to do",1,5)
+ 	Domme3.spank(this,"Is make some promises",1,5)

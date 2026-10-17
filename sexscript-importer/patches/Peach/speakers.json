@@ -1,0 +1,202 @@
+{
+  "reason": "A comic retelling with three speaking characters and narration: Meryl (the mother), Peach (her child) and the bully, who carries the player's own name (loadString(\"intro.name\")). Bracketed lines are narration. Many lines carry a 'Name:' prefix; the unprefixed lines are attributed by per-line switches from their content and the comic panel shown.",
+  "speakers": {
+    "meryl": {
+      "firstName": "Meryl"
+    },
+    "peach": {
+      "firstName": "Peach"
+    }
+  },
+  "default": "narrator",
+  "prefixes": [
+    {
+      "text": "Peach",
+      "speaker": "peach"
+    },
+    {
+      "text": "Meryl",
+      "speaker": "meryl"
+    },
+    {
+      "expression": "loadString(\"intro.name\")",
+      "file": "scripts/Peach.groovy",
+      "speaker": "player"
+    }
+  ],
+  "switches": [
+    {
+      "at": "scripts/Peach.groovy:15",
+      "speaker": "meryl"
+    },
+    {
+      "at": "scripts/Peach.groovy:22",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:26",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Peach.groovy:33",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:42",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Peach.groovy:48",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:56",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:63",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Peach.groovy:70",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:73",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Peach.groovy:101",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:110",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Peach.groovy:132",
+      "speaker": "player"
+    },
+    {
+      "at": "scripts/Peach.groovy:136",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:140",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Peach.groovy:175",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:179",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Peach.groovy:183",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:194",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Peach.groovy:198",
+      "speaker": "player"
+    },
+    {
+      "at": "scripts/Peach.groovy:202",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:206",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Peach.groovy:235",
+      "speaker": "meryl"
+    },
+    {
+      "at": "scripts/Peach.groovy:239",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:243",
+      "speaker": "meryl"
+    },
+    {
+      "at": "scripts/Peach.groovy:247",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Peach.groovy:255",
+      "speaker": "player"
+    },
+    {
+      "at": "scripts/Peach.groovy:259",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Peach.groovy:269",
+      "speaker": "meryl"
+    },
+    {
+      "at": "scripts/Peach.groovy:273",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:277",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/Peach.groovy:284",
+      "speaker": "player"
+    },
+    {
+      "at": "scripts/Peach.groovy:288",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Peach.groovy:292",
+      "speaker": "meryl"
+    },
+    {
+      "at": "scripts/Peach.groovy:295",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:298",
+      "speaker": "meryl"
+    },
+    {
+      "at": "scripts/Peach.groovy:302",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:307",
+      "speaker": "meryl"
+    },
+    {
+      "at": "scripts/Peach.groovy:311",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/Peach.groovy:315",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:318",
+      "speaker": "meryl"
+    },
+    {
+      "at": "scripts/Peach.groovy:322",
+      "speaker": "peach"
+    },
+    {
+      "at": "scripts/Peach.groovy:334",
+      "speaker": "narrator"
+    }
+  ],
+  "names": []
+}

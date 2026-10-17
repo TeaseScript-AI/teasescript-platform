@@ -1,0 +1,11 @@
+--- a/scripts/Farkel.groovy
++++ b/scripts/Farkel.groovy
+@@ -502,7 +502,7 @@
+ 				punishmentSentence = " a ruined orgasm"
+ 				punishmentSuggestion = "ruined"
+ 				punishmentUpperLimit = 3 // just a place holder
+-				punishmentLowerLimit = 0  // just a place holder
++				punishmentLowerLimit = 1  // just a place holder
+ 			}
+ 		}
+ 

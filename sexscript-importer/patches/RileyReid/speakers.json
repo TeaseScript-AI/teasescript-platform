@@ -1,0 +1,53 @@
+{
+  "reason": "Miss Riley hosts (\"I am Miss Riley\") and hands the player to her friend Goddess Elle for ballbusting (pages 10-26) and to Anmel for ball stretching (pages 27-70); the final cum page is said by whichever of the three the player picks. Speakers are recognised by the page block (case) the converted Milovana tease is in; the closing feedback note and the converter's error text have no character.",
+  "speakers": {
+    "riley": {
+      "title": "Miss",
+      "firstName": "Riley"
+    },
+    "elle": {
+      "title": "Goddess",
+      "firstName": "Elle"
+    },
+    "anmel": {
+      "firstName": "Anmel"
+    }
+  },
+  "default": "riley",
+  "prefixes": [],
+  "switches": [
+    {
+      "at": "scripts/RileyReid.groovy:91",
+      "speaker": "riley"
+    },
+    {
+      "at": "scripts/RileyReid.groovy:105",
+      "speaker": "elle"
+    },
+    {
+      "at": "scripts/RileyReid.groovy:229",
+      "speaker": "anmel"
+    },
+    {
+      "at": "scripts/RileyReid.groovy:782",
+      "speaker": "riley"
+    },
+    {
+      "at": "scripts/RileyReid.groovy:789",
+      "speaker": "elle"
+    },
+    {
+      "at": "scripts/RileyReid.groovy:796",
+      "speaker": "anmel"
+    },
+    {
+      "at": "scripts/RileyReid.groovy:803",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/RileyReid.groovy:814",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

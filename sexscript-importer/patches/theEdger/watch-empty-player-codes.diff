@@ -1,0 +1,11 @@
+--- a/scripts/theEdger/theEdger-watch.groovy
++++ b/scripts/theEdger/theEdger-watch.groovy
+@@ -173,7 +173,7 @@
+ //Go through pictures on server
+ for (def i=0 ; i<PicCodeMax; i++) {
+ 	int s = PicNumCode[i] as Integer
+-	int t = PlCodeCode[i] as Integer
++	int t = PlCodeCode[i] ? (PlCodeCode[i] as Integer) : 0
+ 	if(PicKeyCode[i]==null) {PicNumCode[i] = "0"} //if key is null
+ 	if(s>1) {
+ 		PicNumber++

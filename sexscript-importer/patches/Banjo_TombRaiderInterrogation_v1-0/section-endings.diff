@@ -1,0 +1,271 @@
+--- a/scripts/Banjo/tomb_raider_interrogation.groovy
++++ b/scripts/Banjo/tomb_raider_interrogation.groovy
+@@ -80,6 +80,8 @@
+ def tiedovertable = false;
+ def chainedtowall = false;
+ def spankedthrice = false;
++// An ending in a section closure only left the closure; this flag ends the script there.
++def ended = false;
+ 
+ if(loadBoolean("tomb_raider_interrogation.punish_cock")!=null) {
+ 	punish_cock = (loadBoolean("tomb_raider_interrogation.punish_cock"));
+@@ -297,6 +299,7 @@
+ 	wait(1)
+ 	setImage(null)
+ 	show(null)
++	ended = true
+ 	if(loadBoolean("setting.reload")) {
+ 		return "intro"
+ 	}
+@@ -370,6 +373,7 @@
+ 	showButton("The End")
+ 	setImage(null)
+ 	show(null)
++	ended = true
+ 	if(loadBoolean("setting.reload")) {
+ 		return "intro"
+ 	}
+@@ -435,6 +439,7 @@
+ 			showButton("The End")
+ 			setImage(null)
+ 			show(null)
++			ended = true
+ 			if(loadBoolean("setting.reload")) {
+ 				return "intro"
+ 			}
+@@ -679,7 +684,7 @@
+ }
+ 
+ }
+-trcode_intro();
++if(!ended) trcode_intro();
+ def trcode_session1 = {
+ 
+ //SESSION - WAKE UP
+@@ -760,6 +765,7 @@
+ 	showButton("The End")
+ 	setImage(null)
+ 	show(null)
++	ended = true
+ 	if(loadBoolean("setting.reload")) {
+ 		return "intro"
+ 	}
+@@ -899,6 +905,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -949,6 +956,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -1025,6 +1033,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -1071,6 +1080,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -1110,6 +1120,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -1132,7 +1143,7 @@
+ }
+ 
+ }
+-trcode_session1();
++if(!ended) trcode_session1();
+ def trcode_session2 = {
+ 
+ //SESSION - PART 5 - WANKING
+@@ -1205,6 +1216,7 @@
+ 	showButton("The End")
+ 	setImage(null)
+ 	show(null)
++	ended = true
+ 	if(loadBoolean("setting.reload")) {
+ 		return "intro"
+ 	}
+@@ -1274,6 +1286,7 @@
+ 	showButton("The End")
+ 	setImage(null)
+ 	show(null)
++	ended = true
+ 	if(loadBoolean("setting.reload")) {
+ 		return "intro"
+ 	}
+@@ -1314,6 +1327,7 @@
+ 	showButton("The End")
+ 	setImage(null)
+ 	show(null)
++	ended = true
+ 	if(loadBoolean("setting.reload")) {
+ 		return "intro"
+ 	}
+@@ -1484,7 +1498,7 @@
+ showButton("(Continue)")
+ 
+ }
+-trcode_session2();
++if(!ended) trcode_session2();
+ def trcode_session3 = {
+ 
+ //SESSION PART 7 - LARA CHANGES OUTFITS
+@@ -1559,6 +1573,7 @@
+ 	showButton("The End")
+ 	setImage(null)
+ 	show(null)
++	ended = true
+ 	if(loadBoolean("setting.reload")) {
+ 		return "intro"
+ 	}
+@@ -1684,6 +1699,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -1724,6 +1740,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -1762,6 +1779,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -1886,6 +1904,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -1930,6 +1949,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -1971,7 +1991,7 @@
+ }
+ 
+ }
+-trcode_session3();
++if(!ended) trcode_session3();
+ def trcode_session4 = {
+ 
+ //SESSION PART 9 - LARA CHANGES AGAIN
+@@ -1988,6 +2008,7 @@
+ 	showButton("The End")
+ 	setImage(null)
+ 	show(null)
++	ended = true
+ 	if(loadBoolean("setting.reload")) {
+ 		return "intro"
+ 	}
+@@ -2034,6 +2055,7 @@
+ 	showButton("The End")
+ 	setImage(null)
+ 	show(null)
++	ended = true
+ 	if(loadBoolean("setting.reload")) {
+ 		return "intro"
+ 	}
+@@ -2144,6 +2166,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -2208,6 +2231,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -2251,6 +2275,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -2303,7 +2328,7 @@
+ }
+ 
+ }
+-trcode_session4();
++if(!ended) trcode_session4();
+ def trcode_session5 = {
+ 
+ //SESSION PART 11 - SET THIRD TORTURE METHOD
+@@ -2365,7 +2390,7 @@
+ }
+ 
+ }
+-trcode_session5();
++if(!ended) trcode_session5();
+ def trcode_session6 = {
+ 
+ //SESSION PART 12 - FINAL STAGE LECTURE
+@@ -2469,6 +2494,7 @@
+ 		showButton("The End")
+ 		setImage(null)
+ 		show(null)
++		ended = true
+ 		if(loadBoolean("setting.reload")) {
+ 			return "intro"
+ 		}
+@@ -2485,8 +2511,12 @@
+ }
+ 
+ }
+-trcode_session6();
++if(!ended) trcode_session6();
+ 
++if(ended) {
++	if(loadBoolean("setting.reload")) return "intro"
++	return null
++}
+ //SESSION ENDING
+ show(null);
+ setImage(null);

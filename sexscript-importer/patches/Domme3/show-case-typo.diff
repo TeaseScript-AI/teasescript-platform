@@ -1,0 +1,11 @@
+--- a/scripts/Domme3/punishment.groovy
++++ b/scripts/Domme3/punishment.groovy
+@@ -1510,7 +1510,7 @@
+ 		showButton("Thank you, Miss!")
+ 		break
+ 	case 5:
+-		Show("Nothing?\n\nYou report for punishment and then tell me you don't need any?")
++		show("Nothing?\n\nYou report for punishment and then tell me you don't need any?")
+ 		wait(10)
+ 		show("Think before you act!")
+ 		wait(10)

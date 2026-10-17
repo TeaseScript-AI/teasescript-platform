@@ -1,0 +1,32 @@
+--- a/scripts/TheSnowyOwl/Stay.groovy
++++ b/scripts/TheSnowyOwl/Stay.groovy
+@@ -646,7 +646,7 @@
+ def failed=", you have failed. "
+ def cntenh=[]
+ def cntenhout=0
+-def enhavail=[0]
++def enhavail=[0:""]
+ def object=""
+ def $wr1
+ def $wr2
+@@ -2015,9 +2015,9 @@
+ 
+ def initenh=
+ {
+-	cntenh=[]
++	cntenh=[0]*($n+1)
+ 	cntenhout=0
+-	enhavail=[0]
++	enhavail=[0:""]
+ 	for (def i=0 ; i<=$n ; i++)
+ 		enhanceinfo(i,1)
+ 	def icorner=0
+@@ -2365,7 +2365,7 @@
+ 		debmsg+="\ncornerlist "+cornerlist+" swapped "+kcornerswap
+ 		debmsg+="\nsaysnum "+saysnum
+ 		debmsg+="\nimp "+imp
+-		debmsg+="\nenhavail "+enhavail
++		debmsg+="\nenhavail "+enhavail.values().join(", ")
+ 		def mark={ k -> k == 0 ? "☠" : ""+cntenh[k] }
+ 		debmsg+="\n[wr1="+mark($wr1)+" wr2="+mark($wr2)+" wr3="+mark($wr3)
+ 		debmsg+=" pen="+mark($pen)+" ict="+mark($ict)+"+ icb="+mark($icb)+"+ ice="+mark($ice)

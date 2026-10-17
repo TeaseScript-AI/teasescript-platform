@@ -1,0 +1,44 @@
+--- a/scripts/ShockJack.groovy
++++ b/scripts/ShockJack.groovy
+@@ -409,8 +409,8 @@
+     def getPointCountShockGame = { List<String> cards ->
+         int count = 0
+         cards.each { c ->
+-            if (c[0] in ['A', 'T', 'J', 'Q', 'K']) count += 10
+-            else count += c[0].toInteger()
++            if (c.substring(0, 1) in ['A', 'T', 'J', 'Q', 'K']) count += 10
++            else count += c.substring(0, 1).toInteger()
+         }
+         return count
+     }
+@@ -1071,9 +1071,9 @@
+     int count = 0
+     int aceCount = 0
+     cards.each { c ->
+-        if (c[0] == 'A') aceCount++
+-        else if (c[0] in ['T', 'J', 'Q', 'K']) count += 10
+-        else count += c[0].toInteger()
++        if (c.substring(0, 1) == 'A') aceCount++
++        else if (c.substring(0, 1) in ['T', 'J', 'Q', 'K']) count += 10
++        else count += c.substring(0, 1).toInteger()
+     }
+ 
+     for (int i = 0; i < aceCount; i++) {
+@@ -1116,7 +1116,7 @@
+ def isQueenInDeck = { List de ->
+     boolean trip = false
+     de.each { c ->
+-        if (c[0] == "Q") {
++        if (c.substring(0, 1) == "Q") {
+             trip = true
+         }
+     }
+@@ -1199,7 +1199,7 @@
+                     // Dealer is very mean with the next queen!
+                     if (finalShockTime <= shocktimeBets.max() && !isQueenInDeck(playerHand + dealerHand)) {
+                         for (int i = 0; i < deck.size(); i++) {
+-                            if (deck[i][0] == 'Q') {
++                            if (deck[i].substring(0, 1) == 'Q') {
+                                 cheatCardIndex = i
+                                 break
+                             }

@@ -1,0 +1,15 @@
+--- a/scripts/Domme2/eat.groovy
++++ b/scripts/Domme2/eat.groovy
+@@ -2,6 +2,12 @@
+ if(loadBoolean("intro.female")) gender = "girl"
+ 
+ def knk = load("domme2.kinky")
++Integer chanceBenWaBalls = loadInteger("domme2.chanceBenWaBalls")
++if(chanceBenWaBalls == null) chanceBenWaBalls = 8
++if(chanceBenWaBalls<8){
++	chanceBenWaBalls = 8
++	save("domme2.chanceBenWaBalls",chanceBenWaBalls)
++}
+ 
+ def day = Calendar.getInstance().get(Calendar.DAY_OF_WEEK) 
+ def hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)

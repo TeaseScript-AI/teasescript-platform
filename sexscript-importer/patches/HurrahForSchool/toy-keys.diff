@@ -1,0 +1,12 @@
+--- a/scripts/HurrahForSchool.groovy
++++ b/scripts/HurrahForSchool.groovy
+@@ -1582,7 +1582,8 @@
+ 		"six slaps on the ass" ]
+ 		def SchGLNum1 = 3
+ 
+-		if(loadBoolean("toys.nippleclamps")) {
++		// Legacy bug: the toy chest saves the nipple clamps as toys.nipple_clamps (patch toy-keys).
++		if(loadBoolean("toys.nipple_clamps")) {
+ 		SchGLMess1 = SchGLMess1<<"put on nipple clamps"
+ 		SchGLNum1++
+ 		}

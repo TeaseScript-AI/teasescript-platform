@@ -1,0 +1,209 @@
+{
+  "reason": "Two packages. In the clinic, the receptionist Brianna speaks whenever her reception pictures are set (setImageReception/setImageReceptionBusy). The disciplinarian speaks whenever a mistress picture helper is set; her name follows the `mistress` variable, which changes at the handoffs. In the After Dark club, the AI assistant Tina speaks with setImageTina and the club mistress speaks in her scene file. The title kiosk, the rewards menus, narration and system screens have no speaker.",
+  "speakers": {
+    "brianna": {
+      "firstName": "Brianna",
+      "displayName": "Receptionist"
+    },
+    "mistress": {
+      "title": "Mistress"
+    },
+    "tina": {
+      "firstName": "Tina",
+      "displayName": "Club Assistant"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/DisciplineClinic/DisciplineClinicMain.groovy:setImageStart",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/DisciplineClinic/DisciplineClinicMain.groovy:setImageReception",
+      "speaker": "brianna"
+    },
+    {
+      "function": "scripts/DisciplineClinic/DisciplineClinicMain.groovy:setImageReceptionBusy",
+      "speaker": "brianna"
+    },
+    {
+      "function": "scripts/DisciplineClinic/DisciplineClinicMain.groovy:mistressInfo",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DisciplineClinic/DisciplineClinicMain.groovy:2272",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/DisciplineClinic/OffenseSelect.groovy:setImageReception",
+      "speaker": "brianna"
+    },
+    {
+      "function": "scripts/DisciplineClinic/OffenseSelect.groovy:setImageReceptionBusy",
+      "speaker": "brianna"
+    },
+    {
+      "function": "scripts/DisciplineClinic/WaitRoom.groovy:setImageReception",
+      "speaker": "brianna"
+    },
+    {
+      "function": "scripts/DisciplineClinic/WaitRoom.groovy:setImageReceptionBusy",
+      "speaker": "brianna"
+    },
+    {
+      "image": "DisciplinePack/WaitRoom/",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/DisciplineClinic/WaitRoom.groovy:205",
+      "speaker": "brianna"
+    },
+    {
+      "function": "scripts/DisciplineClinic/Punish.groovy:setImageReception",
+      "speaker": "brianna"
+    },
+    {
+      "function": "scripts/DisciplineClinic/Punish.groovy:setImageReceptionBusy",
+      "speaker": "brianna"
+    },
+    {
+      "function": "scripts/DisciplineClinic/Punish.groovy:setImageIntro",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DisciplineClinic/Punish.groovy:setImageOtkScold",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DisciplineClinic/Punish.groovy:setImageScold",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DisciplineClinic/Punish.groovy:setImageOtk",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DisciplineClinic/Punish.groovy:setImageImplement",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DisciplineClinic/Punish.groovy:setImageHand",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DisciplineClinic/Punish.groovy:setImageFinish",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/DisciplineClinic/Punish.groovy:discussManipulation",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DisciplineClinic/Punish.groovy:902",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DisciplineClinic/Punish.groovy:3299",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DisciplineClinic/Punish.groovy:7208",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/DisciplineClinic/Punish.groovy:10383",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DisciplineClinic/Punish.groovy:10396",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/DisciplineClinic/Exit.groovy:setImageReception",
+      "speaker": "brianna"
+    },
+    {
+      "function": "scripts/DisciplineClinic/Exit.groovy:setImageReceptionBusy",
+      "speaker": "brianna"
+    },
+    {
+      "entry": "scripts/DCAfterDark/DCAfterDarkMain.groovy",
+      "speaker": "tina"
+    },
+    {
+      "function": "scripts/DCAfterDark/DCAfterDarkMain.groovy:setImageTina",
+      "speaker": "tina"
+    },
+    {
+      "at": "scripts/DCAfterDark/DCAfterDarkMain.groovy:255",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/DCAfterDark/DCAfterDarkMain.groovy:1076",
+      "speaker": "mistress"
+    },
+    {
+      "entry": "scripts/DCAfterDark/Harmony.groovy",
+      "speaker": "mistress"
+    },
+    {
+      "entry": "scripts/DCAfterDark/Chanta.groovy",
+      "speaker": "mistress"
+    },
+    {
+      "entry": "scripts/DCAfterDark/Claire.groovy",
+      "speaker": "mistress"
+    },
+    {
+      "entry": "scripts/DCAfterDark/Madison.groovy",
+      "speaker": "mistress"
+    }
+  ],
+  "names": [
+    {
+      "variable": "mistress",
+      "files": "all",
+      "speaker": "mistress",
+      "values": {
+        "Alexis": "Alexis Grace",
+        "Allison": "Allison Tyler",
+        "Ashley": "Ashley Luvbug",
+        "Audrey": "Audrey Tate",
+        "Clare": "Clare Fonda",
+        "Emma": "Emma",
+        "Gigi": "Gigi Allens",
+        "Kordelia": "Kordelia Devonshire",
+        "Kym": "Kym Richards",
+        "Lane": "Lane",
+        "Sadie": "Sadie Holmes",
+        "Harmony": "Harmony",
+        "Madison": "Madison",
+        "Chanta": "Chanta",
+        "Claire": "Claire"
+      },
+      "otherwise": "Mistress"
+    },
+    {
+      "after": [
+        "scripts/DisciplineClinic/DisciplineClinicMain.groovy:2291"
+      ],
+      "files": [
+        "scripts/DisciplineClinic/DisciplineClinicMain.groovy"
+      ],
+      "speaker": "brianna",
+      "template": "Brianna"
+    },
+    {
+      "after": [
+        "scripts/DCAfterDark/DCAfterDarkMain.groovy:1790"
+      ],
+      "files": [
+        "scripts/DCAfterDark/DCAfterDarkMain.groovy"
+      ],
+      "speaker": "tina",
+      "template": "Tina"
+    }
+  ]
+}

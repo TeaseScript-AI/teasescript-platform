@@ -1,0 +1,14 @@
+--- a/scripts/DungeonTrials.groovy
++++ b/scripts/DungeonTrials.groovy
+@@ -7005,7 +7005,10 @@
+ 			timesVisitedArray[currentRoom]++
+ 			lastRoom = currentRoom
+ 		}
+-		else hasKey = false
++		else {
++			hasKey = (gameMode != "Dungeon")
++			gauntletMode = (gameMode != "Dungeon")
++		}
+ 	}
+ }
+ 				

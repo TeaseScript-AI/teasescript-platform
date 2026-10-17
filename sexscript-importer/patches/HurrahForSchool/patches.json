@@ -1,0 +1,32 @@
+{
+  "patches": [
+    {
+      "id": "picture-flag-question",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): after the player's school photo was uploaded, a line left over from testing, getBoolean(loadBoolean(\"Sch.SchoolPictureTaken\")) at the left margin, put the flag just saved (true) to the player as a yes/no question whose answer nothing used. Remove it.",
+      "diff": "picture-flag-question.diff"
+    },
+    {
+      "id": "kit-replies",
+      "layer": "source",
+      "category": "speakers",
+      "reason": "The player's own reply, shown as a message in legacy, is a button (owner 2026-10-15; provisional).",
+      "diff": "kit-replies.diff"
+    },
+    {
+      "id": "toy-keys",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): a task list reads toys.nippleclamps; the toy chest saves nipple clamps as toys.nipple_clamps, and nothing saves the other spelling, so \"put on nipple clamps\" never joined the list. Read toys.nipple_clamps.",
+      "diff": "toy-keys.diff"
+    },
+    {
+      "id": "ice-tray-key",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): two gym tasks read toys.ice; the toy chest and this script's own toy screen save the ice tray as toys.ice_tray, and nothing saves toys.ice, so the ice tasks never joined the lists. Read toys.ice_tray.",
+      "diff": "ice-tray-key.diff"
+    }
+  ]
+}

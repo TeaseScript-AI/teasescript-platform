@@ -1,0 +1,14 @@
+--- a/scripts/KeyholdingService.groovy
++++ b/scripts/KeyholdingService.groovy
+@@ -1249,9 +1249,9 @@
+ 			show("Häng in den och stäng kombinationslåset.")
+ 			showButton("Nycklen är nu inlåst " +loadString("intro.keyholder")+".")
+ 			setImage("KeyholdingService/11.jpg");
+-			show("Visst, men jag skall bara distrahera din hjärna lite,")+
++			show("Visst, men jag skall bara distrahera din hjärna lite,"+
+                  ("\ngenom att visa dig lite andra ${(ctype>1?"characters":"siffror")} så du glömmer koden.")+ 
+-				 ("\n\nKom ihåg dom.. Jag kommer fråga dig om dom!")
++				 ("\n\nKom ihåg dom.. Jag kommer fråga dig om dom!"))
+ 			showButton("Ohhhh min kuk reagerar redan på din din nakna kropp " +loadString("intro.keyholder")+". OK, Jag är klar")
+ 			//setNewImage()
+ 			setImage("KeyholdingService/10.jpg");

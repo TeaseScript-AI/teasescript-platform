@@ -1,0 +1,413 @@
+{
+  "reason": "One named character, Mandy (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "firstName": "Mandy"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/Mandy_review.groovy:24",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandy_review.groovy:29",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandy_review.groovy:45",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandy_review.groovy:53",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandy_review.groovy:61",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandy_review.groovy:80",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandy_review.groovy:86",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandy_review.groovy:94",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandy_review.groovy:102",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail.groovy:46",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail.groovy:404",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail.groovy:413",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail.groovy:425",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail.groovy:427",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail.groovy:531",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail.groovy:1421",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:281",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:294",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:296",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:298",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:300",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:302",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:449",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:475",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:530",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:604",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:742",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:825",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:899",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:1006",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:1030",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail2.groovy:1130",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:81",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:95",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:430",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:433",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:438",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:448",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:461",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:463",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:566",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:607",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:722",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:829",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:957",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:1044",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:1122",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:1231",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:1268",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext.groovy:1396",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:81",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:95",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:416",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:421",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:431",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:445",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:447",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:550",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:589",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:591",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:706",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:811",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:813",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:941",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:1028",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:1106",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:1215",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:1241",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/Mandys_blackmail_ext_pl.groovy:1369",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_has_fun.groovy:49",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_has_fun.groovy:62",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_has_fun.groovy:73",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_has_fun.groovy:92",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_has_fun.groovy:135",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_has_fun.groovy:149",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_has_fun.groovy:711",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_has_fun.groovy:750",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_review.groovy:24",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_review.groovy:29",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_review.groovy:45",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_review.groovy:53",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_review.groovy:61",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_review.groovy:80",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_review.groovy:86",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_review.groovy:94",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandy_review.groovy:102",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail.groovy:46",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail.groovy:404",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail.groovy:413",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail.groovy:425",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail.groovy:427",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail.groovy:531",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail.groovy:1421",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail_de.groovy:49",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail_de.groovy:407",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail_de.groovy:416",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail_de.groovy:428",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail_de.groovy:430",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail_de.groovy:534",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/mandys_blackmail_de.groovy:1423",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

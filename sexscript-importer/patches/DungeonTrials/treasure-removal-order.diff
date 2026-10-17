@@ -1,0 +1,24 @@
+--- a/scripts/DungeonTrials.groovy
++++ b/scripts/DungeonTrials.groovy
+@@ -6795,8 +6795,8 @@
+ 						dialog = dialogArray[getRandom(dialogArray.size)]
+ 						show(dialog)
+ 						showButton("Sweet!")
+-						backPackArray.remove(backPackArray[choice])
+ 						treasureArray.remove(backPackArray[choice])
++						backPackArray.remove(backPackArray[choice])
+ 						numPunishments--
+ 					}
+ 					else {
+--- a/scripts/DungeonTrialsTrailer.groovy
++++ b/scripts/DungeonTrialsTrailer.groovy
+@@ -6476,8 +6476,8 @@
+ 						setImageElaina(4)
+ 						show("\"That is a good find!  I'll need to take it off your hands.  It reduces your number of punishments by 1\"")
+ 						showButton("Sweet!")
+-						backPackArray.remove(backPackArray[choice])
+ 						treasureArray.remove(backPackArray[choice])
++						backPackArray.remove(backPackArray[choice])
+ 						numPunishments--
+ 					}
+ 					else {

@@ -1,0 +1,11 @@
+--- a/scripts/KeyholdingService.groovy
++++ b/scripts/KeyholdingService.groovy
+@@ -1477,7 +1477,7 @@
+ 			def cltime = showButton("Nu är min kuk ren", maxwait)
+ 			if (cltime == maxwait) {
+ 				playBackgroundSound("bell.wav")
+-				setNewImage()
++				setNewImage1()
+ 				show("Nu får du skynda dig. Bara en minut kvar!")
+ 				cltime += showButton("Nu är min kuk ren")
+ 			}

@@ -1,0 +1,15 @@
+--- a/scripts/DisciplineClinic/DisciplineClinicMain.groovy
++++ b/scripts/DisciplineClinic/DisciplineClinicMain.groovy
+@@ -357,10 +357,10 @@
+ 	wait(3)
+ 	show(null)
+ 	wait(5)
+-	dialog = "<font size='20'><b>"
++	dialog = ""
+ 	for (i=0; i<8; i++) {
+ 		dialog = dialog + "."
+-		show(dialog + "</b></font>")
++		show("<font size='20'><b>" + dialog + "</b></font>")
+ 		wait(1)
+ 	}
+ 	show(null)

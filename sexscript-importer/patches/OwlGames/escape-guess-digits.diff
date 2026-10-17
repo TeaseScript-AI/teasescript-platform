@@ -1,0 +1,25 @@
+--- a/scripts/TheSnowyOwl/Escape.groovy
++++ b/scripts/TheSnowyOwl/Escape.groovy
+@@ -855,11 +855,11 @@
+ 			def running=true
+ 			for (def iinp=0 ; iinp<cfgdigits & running ; iinp++)
+ 			{
+-				guess[iinp]=inp.substring(iinp,iinp+1) // https://www.tutorialspoint.com/groovy/groovy_substring.htm
++				def digit=inp.substring(iinp,iinp+1) // https://www.tutorialspoint.com/groovy/groovy_substring.htm
+ 				def iok=0
+ 				for (def inum=origin ; inum<(cfgbuts+origin) ; inum++)
+ 				{
+-					if (guess[iinp] == numbers[inum])
++					if (digit == numbers[inum])
+ 						iok=1
+ 				}
+ 				if (iok == 0)
+@@ -910,6 +910,8 @@
+ 		setImage(gethostfile(dungeon[yourdungeon]))
+ 		def guess=[]
+ 		def inp=getguess(tries,guess)
++		for (def idigit=0 ; idigit<cfgdigits ; idigit++)
++			guess << inp.substring(idigit,idigit+1)
+ 		def matchguess=[]
+ 		def matchans=[]
+ 		def kmatch=0

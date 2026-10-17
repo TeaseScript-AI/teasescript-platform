@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "episode2-disappointed-image",
+      "layer": "source",
+      "category": "b",
+      "reason": "Episode 2, in English and German, shows firstcuckold/disappointed.jpg when the player greets her with a complaint, but the picture exists only in firstcuckold2/, which the script's closing image list names and a later scene already uses. Use firstcuckold2/disappointed.jpg.",
+      "diff": "episode2-disappointed-image.diff"
+    },
+    {
+      "id": "hotwife-name",
+      "layer": "source",
+      "category": "speakers",
+      "reason": "The hotwife's first name, which the player types, lives only in storage (cuckold.hotwife): every script saves it straight from the question and reads it back inline. Keep it in a variable, hotwife, loaded where the script starts and after each save, so that her speaker takes the name (speakers.json); the texts keep reading the key as before.",
+      "diff": "hotwife-name.diff"
+    }
+  ]
+}

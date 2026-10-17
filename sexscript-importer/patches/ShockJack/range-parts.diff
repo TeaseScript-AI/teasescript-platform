@@ -1,0 +1,22 @@
+--- a/scripts/ShockJack.groovy
++++ b/scripts/ShockJack.groovy
+@@ -902,7 +902,8 @@
+             String strRange = getString(txt, rangeText)
+             if (strRange.indexOf('-') >= 0) {
+                 List range = strRange.split('-').collect()
+-                if (range.every { r -> return r.isInteger() }) {
++                // Legacy bug: split drops empty parts, so "-" or "5-" gave fewer than two numbers to read; ask again then.
++                if (range.size() >= 2 && range.every { r -> return r.isInteger() }) {
+                     int min = range[0].toInteger()
+                     int max = range[1].toInteger()
+                     if (min >= PAINLEVELRANGELIMIT[0] && min <= PAINLEVELRANGELIMIT[1] &&
+@@ -925,7 +926,8 @@
+             String strRange = getString(txt, rangeText)
+             if (strRange.indexOf('-') >= 0) {
+                 List range = strRange.split('-').collect()
+-                if (range.every { r -> return r.isInteger() }) {
++                // Legacy bug: split drops empty parts, so "-" or "5-" gave fewer than two numbers to read; ask again then.
++                if (range.size() >= 2 && range.every { r -> return r.isInteger() }) {
+                     int min = range[0].toInteger()
+                     int max = range[1].toInteger()
+                     if (min >= SHOCKTIMERANGELIMIT[0] && min <= SHOCKTIMERANGELIMIT[1] &&

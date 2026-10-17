@@ -1,0 +1,15 @@
+--- a/scripts/SMinder.groovy
++++ b/scripts/SMinder.groovy
+@@ -691,6 +691,7 @@
+ return null;
+ 
+ /*** End of the Script ***/
++/*
+ 
+ 
+ 
+@@ -2930,3 +2931,4 @@
+ wait(1)
+ showButton("Close")
+ show("")
++*/

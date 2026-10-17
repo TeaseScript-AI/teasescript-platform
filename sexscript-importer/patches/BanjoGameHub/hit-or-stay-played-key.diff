@@ -1,0 +1,14 @@
+--- a/scripts/Banjo/hitorstay_ee.groovy
++++ b/scripts/Banjo/hitorstay_ee.groovy
+@@ -569,9 +569,9 @@
+ 		opponent_met = false
+ 		save("Banjo.games.met_"+opponent+"",true)
+ 	} else opponent_met = true
+-	if(!loadBoolean("Banjo.fourheroes.played_"+opponent+"")) {
++	if(!loadBoolean("Banjo.hitorstay.played_"+opponent+"")) {
+ 		opponent_played = false
+-		save("Banjo.fourheroes.played_"+opponent+"",true)
++		save("Banjo.hitorstay.played_"+opponent+"",true)
+ 	} else opponent_played = true
+ 	if(!opponent_met) {
+ 		show(meet1+meet2)

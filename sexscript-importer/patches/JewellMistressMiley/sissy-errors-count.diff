@@ -1,0 +1,11 @@
+--- a/scripts/jewell/trainSissyLevelOne.groovy
++++ b/scripts/jewell/trainSissyLevelOne.groovy
+@@ -320,7 +320,7 @@
+ 
+ case "buttfuck":
+ 	if(loadFirstTrue("toys.buttplug", "toys.dildo")==null) {
+-		error+=1
++		errors+=1
+ 	} 
+ 	if(loadFirstTrue("toys.dildo", "toys.buttplug")=="toys.buttplug") 
+ 		show("Shove a plug up your ass. Get ready for a good buttfucking, my little sissy.")

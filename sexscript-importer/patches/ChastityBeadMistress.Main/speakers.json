@@ -1,0 +1,18 @@
+{
+  "reason": "One named character, Mistress Bryci (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress",
+      "firstName": "Bryci"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/ChastityBeadMistress/ChastityBeadMistress.Main.groovy:99",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

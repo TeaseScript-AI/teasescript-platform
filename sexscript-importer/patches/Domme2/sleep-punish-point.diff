@@ -1,0 +1,11 @@
+--- a/scripts/Domme2/sleep.groovy
++++ b/scripts/Domme2/sleep.groovy
+@@ -229,7 +229,7 @@
+ 								def i = getRandom(7)
+ 								show(messages2[i])
+ 								if (i==6)
+-									punish()
++									punish(1)
+ 								showButton(">")
+ 								block = "finish"
+ 								break

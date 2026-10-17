@@ -1,0 +1,123 @@
+{
+  "reason": "One Mistress at a time plays Farkel against the player; her name is the variable mistress (default Melanie, chosen in the options menu, replaced by each tournament opponent and by the reward unlocks), shown as \"Mistress <name>\". Ivy's memory challenge briefly loops mistress over the other Mistresses to show their pictures while Ivy keeps speaking, so those loops switch to a fixed Ivy speaker. Settings, version check, tournament announcements and unlock notices have no speaker.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress",
+      "firstName": "Melanie"
+    },
+    "ivy": {
+      "title": "Mistress",
+      "firstName": "Ivy"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/Farkel.groovy",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/FarkelResource.groovy",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/Farkel.groovy:introduction",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/Farkel.groovy:422",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Farkel.groovy:422",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/Farkel.groovy:523",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Farkel.groovy:523",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/Farkel.groovy:557",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Farkel.groovy:557",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/Farkel.groovy:mistressTaunt",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/Farkel.groovy:cheatMessage",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/Farkel.groovy:mistressRound",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/Farkel.groovy:victoryMistress",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/Farkel.groovy:1222",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/Farkel.groovy:1222",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/Farkel.groovy:2691",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Farkel.groovy:2765",
+      "speaker": "ivy"
+    },
+    {
+      "at": "scripts/Farkel.groovy:2778",
+      "speaker": "mistress"
+    },
+    {
+      "at": "scripts/Farkel.groovy:2880",
+      "speaker": "ivy"
+    },
+    {
+      "at": "scripts/Farkel.groovy:2887",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/Farkel.groovy:tournamentFunction",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Farkel.groovy:3140",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/Farkel.groovy:reward",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Farkel.groovy:3261",
+      "speaker": "mistress"
+    }
+  ],
+  "names": [
+    {
+      "variable": "mistress",
+      "files": [
+        "scripts/Farkel.groovy"
+      ],
+      "speaker": "mistress",
+      "template": "Mistress {}"
+    }
+  ]
+}

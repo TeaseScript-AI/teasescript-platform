@@ -1,0 +1,13 @@
+--- a/scripts/stripordie.groovy
++++ b/scripts/stripordie.groovy
+@@ -81,8 +81,9 @@
+     save("stripordie.blindCountdown",false)
+ if(loadBoolean("stripordie.audio_estim")==null || reset)
+     save("stripordie.audio_estim",true)
++// Legacy bug: this set audio_estim back to false on every start; it starts no_estim (patch no-estim-start).
+ if(loadBoolean("stripordie.no_estim")==null || reset)
+-    save("stripordie.audio_estim",false)
++    save("stripordie.no_estim",false)
+ if(loadString("stripordie.estim_start")==null || reset)
+     save("stripordie.estim_start","usbcontrol.exe start") // the command you use to control your device needs to be in the scripts folder
+ if(loadString("stripordie.estim_finish")==null || reset)
