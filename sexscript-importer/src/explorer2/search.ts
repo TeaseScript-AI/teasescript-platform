@@ -1273,6 +1273,8 @@ export function explore2(
       decision.step >= turnFrom;
     const check = runner.play(shortened, {
       extend: withPlaced(candidate.placed, goOn(guide)),
+      // Where its answers no longer fit (a changed answer asks something new first), the check goes on as the parent did.
+      refit: true,
       maxSteps: Math.min(options.maxSteps, target.step + grown + past),
       maxStepInstructions: options.maxStepInstructions,
       origins: false,

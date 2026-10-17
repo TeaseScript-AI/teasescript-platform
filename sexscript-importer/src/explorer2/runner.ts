@@ -339,6 +339,11 @@ export interface Resume {
 export interface PlayOptions {
   /** Go on after the path's inputs: at each interaction, the input `extend` picks, up to `maxSteps` steps in all. */
   readonly extend?: (interaction: Interaction, played: number) => ExplorerInput | null;
+  /**
+   * When an input of the path no longer fits (a changed answer or outcome asks something new first, or leads another
+   * way), go on with `extend` from there instead of ending the play as diverged.
+   */
+  readonly refit?: boolean;
   readonly maxSteps: number;
   /**
    * Instructions one step may run: without origins the run fails there with the runtime's step-limit error; with
@@ -1100,6 +1105,8 @@ export class Runner {
       Number(status.accountedBytes) >= TRACE_BYTES * 0.75;
     let stepInstructions = 0;
     let end: Played["end"] | null = null;
+    /** Whether the path stopped fitting and `extend` took over (see `refit`). */
+    let refitted = false;
     /** Per call under way (by call ID), the call it returns to and the temporary its result goes to there. */
     const returnsTo = new Map<number, { call: number; destination: number | null }>();
     /** A call just made, until its function's first instruction names the new call. */
@@ -1457,12 +1464,10 @@ export class Runner {
         break;
       }
       const tired = options.patience !== undefined && inputs.length - lastNew >= options.patience;
-      const given =
-        inputs.length < path.inputs.length
-          ? path.inputs[inputs.length]!
-          : tired
-            ? null
-            : (options.extend?.(interaction, inputs.length) ?? null);
+      const extended = () =>
+        tired ? null : (options.extend?.(interaction, inputs.length) ?? null);
+      let given =
+        inputs.length < path.inputs.length && !refitted ? path.inputs[inputs.length]! : extended();
       if (given === null) {
         end = "waiting";
         break;
@@ -1472,7 +1477,7 @@ export class Runner {
       // Continuing later or at another wall clock fits any interaction (a solver makes those for the clock).
       // A button pressed after another time than those offered fits where the same button is offered (a solver chose the
       // time; a press after the deadline does not go through).
-      const fits =
+      const fits = (given: ExplorerInput) =>
         given.kind === "later" || given.kind === "clock"
           ? true
           : given.kind === "form" || given.kind === "text"
@@ -1480,7 +1485,15 @@ export class Runner {
             : given.kind === "button" && given.afterMs !== undefined
               ? offered.some((option) => option.kind === "button" && option.label === given.label)
               : offered.some((option) => sameInput(option, given));
-      if (!fits) {
+      if (!fits(given) && options.refit === true && !refitted) {
+        refitted = true;
+        given = extended();
+        if (given === null) {
+          end = "waiting";
+          break;
+        }
+      }
+      if (!fits(given)) {
         end = "diverged";
         break;
       }
