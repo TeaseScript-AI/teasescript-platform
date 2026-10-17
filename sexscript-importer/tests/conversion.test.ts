@@ -1107,6 +1107,10 @@ test(
           code,
         );
       }
+      // A literal beside a side that gives true or false leaves that side: an `askBoolean` (NakedExercise).
+      const identity = await run(['if (getBoolean("Go?") && true) show("inside")']);
+      assert.match(identity.source, /^if askBoolean/mu);
+      assert.doesNotMatch(identity.source, /and true/u);
       const shortCircuit = await run(["def d = 0", 'if (false && (1 / d > 0)) show("inside")']);
       assert.doesNotMatch(shortCircuit.source, /inside/u);
       assert.equal(shortCircuit.status, "halted");

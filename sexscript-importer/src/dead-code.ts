@@ -88,9 +88,13 @@ function folded(value: IrExpression): IrExpression {
   return next;
 }
 
-/** Whether an expression gives true or false where it gives a value: a literal, a comparison, a test, or `not`. */
+/**
+ * Whether an expression gives true or false where it gives a value: a literal, a comparison, a test, `not`, or an
+ * `askBoolean`.
+ */
 function givesBoolean(value: IrExpression): boolean {
   if (isBoolean(value)) return true;
+  if (value.kind === "input") return value.input === "askBoolean";
   if (value.kind === "unary") return value.operator === "not";
   if (value.kind === "typeTest") return true;
   return (
