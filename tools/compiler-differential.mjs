@@ -21,10 +21,10 @@
 // src/type-checker.js). That result is encoded as JSON by site: an AST node becomes its file's index and its span's
 // offsets, a Map or Set is sorted by the encoded text, and an object of a class keeps its own properties and is
 // reported. With --out, a head build that exports `analyzeTypes` also records the facts of its analysis (`headFacts`).
-// Limits of the internal comparison, each reported when met: a node that no program of the case holds encodes without
-// a file (`unregistered site`), so two such nodes with equal spans compare equal; an object of a class compares by its
-// own properties only; a sorted Map or Set loses its insertion order, which no field of the result makes observable
-// today; and the mirror has no recovery from a native stack exhaustion, so a build that throws is an `error` (or
+// Limits of the internal comparison: a node that no program of the case holds encodes without a file (reported as an
+// `unregistered site`), so two such nodes with equal spans compare equal; an object of a class (reported) compares by
+// its own properties only; a sorted Map or Set loses its insertion order without a report, which no field of the
+// result makes observable today; and the mirror has no recovery from a native stack exhaustion, so a build that throws is an `error` (or
 // `threwInBoth` when both throw alike), not a compared result.
 // A case is identical or differs, first by error (one build threw), then diagnostics, plan, runs, or internal.
 // --time R measures: per case one warm-up compile per build, then R rounds of base and head in turn, and it prints each
