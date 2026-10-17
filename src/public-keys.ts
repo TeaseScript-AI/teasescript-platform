@@ -2,6 +2,12 @@
 // Ed25519 key, `ssh-ed25519 AAAA… comment`. Pure and synchronous, so the compiler checks a written key and the engine a
 // key the script computes; the Player reads the same bytes to lock with them.
 
+/**
+ * The most public keys a lock holds: their age file is one opener, whose body has at most 65,535 bytes, and each
+ * recipient's stanza takes at most 110 of them besides the file's own 147 (docs/ENCRYPTION.md).
+ */
+export const MAX_LOCK_PUBLIC_KEYS = 594;
+
 /** A public key a lock accepts, with the bytes the age stanza for it needs. */
 export type PublicKey =
   | { readonly kind: "x25519"; readonly key: Uint8Array }

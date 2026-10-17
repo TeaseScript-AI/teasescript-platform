@@ -1,6 +1,6 @@
 import type { LockCall, LockInstruction } from "../../plan/model.js";
 import { interactionStringFits } from "../../interaction-limits.js";
-import { parsePublicKey } from "../../public-keys.js";
+import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey } from "../../public-keys.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import { type Evaluator, USE_DEFAULT } from "../evaluator.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
@@ -47,12 +47,6 @@ const SUGGESTED_TIME_LOCK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** The openers of an encrypt call, in the order the lock dialog shows them. */
 const LOCK_CHOICES: readonly RuntimeLockChoice[] = ["timeLock", "password", "publicKey"];
-
-/**
- * The most public keys a lock holds: their age file is one opener, whose body has at most 65,535 bytes, and each
- * recipient's stanza takes at most 110 of them besides the file's own 147 (docs/ENCRYPTION.md).
- */
-export const MAX_LOCK_PUBLIC_KEYS = 594;
 
 /** The operands of a run: the text, Base64 lock, or stored file, and the written options. */
 interface LockOperands {

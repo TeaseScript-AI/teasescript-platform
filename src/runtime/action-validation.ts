@@ -71,8 +71,8 @@ import {
 } from "./stored-files.js";
 import { validPermanentButtonAction } from "./permanent-button-validation.js";
 import { isSha256Hex } from "./sha256.js";
-import { isLockNotice, isLockOutcome, MAX_LOCK_PUBLIC_KEYS } from "./actions/lock.js";
-import { parsePublicKey } from "../public-keys.js";
+import { isLockNotice, isLockOutcome } from "./actions/lock.js";
+import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey } from "../public-keys.js";
 import { validTimerAction } from "./timer-validation.js";
 import { validateScriptStorageEntries } from "./script-storage.js";
 import {

@@ -14,8 +14,7 @@ import PasswordField from "./PasswordField.vue";
 import PublicKeyHelp from "./PublicKeyHelp.vue";
 import type { LockDialog, LockDialogInput } from "../../lock-service.js";
 import { invalidAnswerMessage } from "../../../src/interaction-answers.js";
-import { parsePublicKey } from "../../../src/public-keys.js";
-import { MAX_LOCK_PUBLIC_KEYS } from "../../../src/runtime/actions/lock.js";
+import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey } from "../../../src/public-keys.js";
 
 // The dialogs of a lock (V30 §13, PLAYER-UI "Foreground interaction presentation"), outside the chat like a popup's.
 // The lock dialog shows only the openers the player chooses, each with a plain sentence: a time lock, suggested 7 days
@@ -426,9 +425,9 @@ function heldKey(event: KeyboardEvent) {
           >
             {{
               publicKeysChecked && badPublicKey
-                ? "That is not a public key."
+                ? invalidAnswerMessage("notPublicKey")
                 : tooManyKeys
-                  ? `A lock holds at most ${MAX_LOCK_PUBLIC_KEYS} public keys.`
+                  ? invalidAnswerMessage("tooManyPublicKeys")
                   : ""
             }}
           </p>
@@ -548,7 +547,7 @@ function heldKey(event: KeyboardEvent) {
               class="min-h-5 text-sm text-destructive"
               data-unlock-key-error
             >
-              {{ dialog.notice === "wrongKey" ? "That key does not open it." : "" }}
+              {{ dialog.notice === "wrongKey" ? invalidAnswerMessage("wrongKey") : "" }}
             </p>
           </div>
         </div>

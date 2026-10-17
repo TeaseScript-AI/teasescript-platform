@@ -7,8 +7,7 @@ import {
   type RuntimeLockNotice,
 } from "../src/index.js";
 import type { LockServices, ReadLock } from "./encryption/lock.js";
-import { parsePublicKey, type PublicKey } from "../src/public-keys.js";
-import { MAX_LOCK_PUBLIC_KEYS } from "../src/runtime/actions/lock.js";
+import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey, type PublicKey } from "../src/public-keys.js";
 import {
   activePlayerRuntimeLock,
   answerPlayerRuntimeLock,
