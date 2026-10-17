@@ -5,21 +5,11 @@ import type { RandomFunctionName } from "./language-facts.js";
 import {
   noResult,
   percentageFailure,
+  type NumberDomain,
   type NumberSignature,
   type NumericFailure,
 } from "./numeric-functions.js";
 import type { RandomSupport } from "./runtime/random-control.js";
-
-/**
- * A domain of a random function's numbers: the parameters it reads, by position, and why their values are invalid. The
- * runtime checks the domains in order before it draws, and fails with `TSR039` at the first that fails; the compiler
- * checks each domain whose numbers it can see, whatever the call's other arguments are.
- */
-export interface NumberDomain {
-  readonly reads: readonly number[];
-  /** Why the numbers it reads, in the order of `reads`, are invalid, or `undefined` when they are valid. */
-  readonly problem: (values: readonly number[]) => string | undefined;
-}
 
 /**
  * A random built-in (V30 §4): how it is called, what its arguments may be, what it gives, and its help. Every call
@@ -32,7 +22,7 @@ export type RandomFunction = {
   readonly summary: string;
 } & (
   | (NumberSignature & {
-      /** Numbers, each valid as the domains that read it say. */
+      /** Numbers, each valid as the domains that read it say, which a draw checks before it draws (`TSR039`). */
       readonly takes: "numbers";
       readonly result: "number" | "boolean";
       readonly domains: readonly NumberDomain[];
@@ -78,24 +68,23 @@ export type RandomFunction = {
 /** A random function of numbers, such as `chance` or `randomNormal`. */
 export type NumberRandomFunction = Extract<RandomFunction, { readonly takes: "numbers" }>;
 
-/** A parameter of `name` that must be above 0. */
-function aboveZero(name: string, parameter: string, position: number): NumberDomain {
+/** A parameter of `name` that must be above 0, which its text names as `described`, such as "an alpha". */
+function aboveZero(name: string, parameter: string, described: string): NumberDomain {
   return {
-    reads: [position],
+    reads: [parameter],
     problem: ([value]) =>
-      value! > 0 ? undefined : `${name}(...) needs ${parameter} above 0, not ${value}.`,
+      value! > 0 ? undefined : `${name}(...) needs ${described} above 0, not ${value}.`,
   };
 }
 
-/** Two parameters of `randomPert`, by position, of which the first is at most the second. */
-function pertOrder(low: number, high: number): NumberDomain {
-  const names = ["min", "mostLikely", "max"];
+/** Two parameters of `randomPert` of which the first is at most the second. */
+function pertOrder(low: string, high: string): NumberDomain {
   return {
     reads: [low, high],
     problem: ([first, second]) =>
       first! <= second!
         ? undefined
-        : `randomPert(...) needs min <= mostLikely <= max, but ${names[low]} ${first} is above ${names[high]} ${second}.`,
+        : `randomPert(...) needs min <= mostLikely <= max, but ${low} ${first} is above ${high} ${second}.`,
   };
 }
 
@@ -127,7 +116,9 @@ export const RANDOM_CONTRACTS = {
     takes: "numbers",
     parameters: ["percent"],
     result: "boolean",
-    domains: [{ reads: [0], problem: ([percent]) => percentageFailure("chance", percent!) }],
+    domains: [
+      { reads: ["percent"], problem: ([percent]) => percentageFailure("chance", percent!) },
+    ],
     // One draw, also at 0 and 100.
     sample: ([percent], draw) => draw() * 100 < percent!,
     support: ([percent]) => ({ kind: "chance", percent: percent! }),
@@ -165,7 +156,7 @@ export const RANDOM_CONTRACTS = {
     result: "number",
     domains: [
       {
-        reads: [1],
+        reads: ["spread"],
         problem: ([spread]) =>
           spread! < 0
             ? `randomNormal(...) needs a spread of at least 0, not ${spread}.`
@@ -182,7 +173,10 @@ export const RANDOM_CONTRACTS = {
     takes: "numbers",
     parameters: ["alpha", "beta"],
     result: "number",
-    domains: [aboveZero("randomBeta", "an alpha", 0), aboveZero("randomBeta", "a beta", 1)],
+    domains: [
+      aboveZero("randomBeta", "alpha", "an alpha"),
+      aboveZero("randomBeta", "beta", "a beta"),
+    ],
     sample: (values, draw) =>
       sampled("randomBeta", values, randomBeta(values[0]!, values[1]!, draw)),
     support: ([alpha, beta]) => ({ kind: "beta", alpha: alpha!, beta: beta! }),
@@ -194,7 +188,11 @@ export const RANDOM_CONTRACTS = {
     parameters: ["min", "mostLikely", "max"],
     result: "number",
     // Each pair, so that two numbers the compiler can see are checked whatever the third is.
-    domains: [pertOrder(0, 2), pertOrder(0, 1), pertOrder(1, 2)],
+    domains: [
+      pertOrder("min", "max"),
+      pertOrder("min", "mostLikely"),
+      pertOrder("mostLikely", "max"),
+    ],
     sample: (values, draw) =>
       sampled("randomPert", values, randomPert(values[0]!, values[1]!, values[2]!, draw)),
     support: ([min, mostLikely, max]) => ({
@@ -210,18 +208,6 @@ export const RANDOM_CONTRACTS = {
 
 export function isRandomFunction(name: string): name is RandomFunctionName {
   return Object.hasOwn(RANDOM_CONTRACTS, name);
-}
-
-/** Why `values` are invalid for `random`: the first of its domains that fails, as the runtime checks them. */
-export function numbersProblem(
-  random: NumberRandomFunction,
-  values: readonly number[],
-): string | undefined {
-  for (const domain of random.domains) {
-    const problem = domain.problem(domain.reads.map((position) => values[position]!));
-    if (problem !== undefined) return problem;
-  }
-  return undefined;
 }
 
 /**

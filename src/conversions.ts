@@ -403,17 +403,6 @@ export function booleanFromText(text: string): boolean | undefined {
   return trimmed === "true" ? true : trimmed === "false" ? false : undefined;
 }
 
-/** `round` (ties away from zero), `floor`, or `ceil` of a finite number. */
-export function rounded(name: string, value: number): number {
-  const whole =
-    name === "floor"
-      ? Math.floor(value)
-      : name === "ceil"
-        ? Math.ceil(value)
-        : Math.sign(value) * Math.round(Math.abs(value));
-  return withoutNegativeZero(whole);
-}
-
 export function withoutNegativeZero(value: number): number {
   return value === 0 ? 0 : value;
 }

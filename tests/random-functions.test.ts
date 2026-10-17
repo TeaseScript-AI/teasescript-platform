@@ -3,11 +3,8 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import { RANDOM_FUNCTIONS, type RandomFunctionName } from "../src/language-facts.js";
-import {
-  numbersProblem,
-  RANDOM_CONTRACTS,
-  type NumberRandomFunction,
-} from "../src/random-functions.js";
+import { domainFailure } from "../src/numeric-functions.js";
+import { RANDOM_CONTRACTS, type NumberRandomFunction } from "../src/random-functions.js";
 import { CheckpointError } from "../src/runtime/checkpoint.js";
 import { checkedOutcome, type RandomOutcome } from "../src/runtime/random-control.js";
 import { createFreshRuntimeSession, restoreRuntimeSession } from "../src/runtime/session.js";
@@ -68,12 +65,15 @@ test("a domain of a random function's numbers fails alike when the compiler can 
   const covered = new Set<string>();
   for (const { name, values } of INVALID) {
     const random = contract(name);
+    const positions = (reads: readonly string[]) =>
+      reads.map((parameter) => random.parameters.indexOf(parameter));
     const failing = random.domains.findIndex(
-      (domain) => domain.problem(domain.reads.map((position) => values[position]!)) !== undefined,
+      (domain) =>
+        domain.problem(positions(domain.reads).map((position) => values[position]!)) !== undefined,
     );
     covered.add(`${name} ${failing}`);
-    const { reads } = random.domains[failing]!;
-    const message = numbersProblem(random, values)!;
+    const reads = positions(random.domains[failing]!.reads);
+    const message = domainFailure(random, values)!.failure;
     const call = `${name}(${values.join(", ")})`;
     // The runtime checks the numbers it is given, before it draws.
     const parameters = values.map((_, position) => `p${position}`).join(", ");

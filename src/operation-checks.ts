@@ -14,9 +14,13 @@ import {
 } from "./conversions.js";
 import type { ConversionName } from "./language-facts.js";
 import { LOCK_CALLS } from "./capture-call.js";
-import { NUMERIC_FUNCTIONS, type NumberSignature } from "./numeric-functions.js";
+import {
+  isNumericFunction,
+  numberArgumentMessage,
+  NUMERIC_CONTRACTS,
+  type NumberSignature,
+} from "./numeric-functions.js";
 import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "./random-functions.js";
-import { ANGLE_FUNCTIONS, angleArgumentMessage } from "./angle.js";
 import { misspelledPropertyHint } from "./object-properties.js";
 import { parsePublicKey } from "./public-keys.js";
 import { cannotConvert } from "./runtime/value-types.js";
@@ -372,14 +376,13 @@ export function builtinCallProblems(
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
   if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
-  if (NUMERIC_FUNCTIONS.has(name))
-    return numberArgumentProblems(name, NUMERIC_FUNCTIONS.get(name)!, call, typeOf);
+  if (isNumericFunction(name))
+    return numberArgumentProblems(name, NUMERIC_CONTRACTS[name], call, typeOf);
   if (isRandomFunction(name)) {
     const random: RandomFunction = RANDOM_CONTRACTS[name];
     if (random.takes === "numbers") return numberArgumentProblems(name, random, call, typeOf);
     return random.takes === "range" ? fixedShapeProblems(name, random.parameters, call) : [];
   }
-  if (ANGLE_FUNCTIONS.has(name)) return angleFunctionProblems(name, call, typeOf);
   if (isConversion(name)) return conversionProblems(name, CONVERSIONS[name], call, typeOf);
   const shape = FILE_TEXT_FUNCTIONS.get(name);
   if (shape !== undefined) return fileTextProblems(name, shape, call, typeOf);
@@ -705,15 +708,16 @@ const SESSION_HANDLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
 ]);
 
 /**
- * Problems with a function of numbers, such as a numeric function or `chance`: names it does not take, its number of
- * positional arguments, and arguments that are not numbers.
+ * Problems with a function of numbers or angles, such as a numeric or angle function or `chance`: names it does not
+ * take, its number of positional arguments, and arguments that are not of the kind it takes.
  */
 function numberArgumentProblems(
   name: string,
-  { parameters, named = [] }: NumberSignature,
+  signature: NumberSignature & { readonly result: unknown },
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
+  const { parameters, named = [] } = signature;
   const problems: OperationProblem[] = [];
   const values: [Expression, string][] = [];
   let positional = 0;
@@ -742,66 +746,28 @@ function numberArgumentProblems(
       span: call.span,
     });
   if (problems.length > 0) return problems;
+  const accepted = signature.takes === "angles" ? ANGLE_TYPE : NUMBER_TYPE;
   for (const [value, place] of values) {
     const type = typeOf(value);
-    if (!isAssignable(NUMBER_TYPE, type))
-      problems.push({
-        kind: "invalidOperand",
-        message: `${name}(...) needs a number${place}, not ${describeValue(forUse(type))}.${numberFix(forUse(type))}`,
-        span: value.span,
-      });
-  }
-  return problems;
-}
-
-/** How to turn text or an angle into the number a numeric function needs, or nothing for other values. */
-function numberFix(type: StaticType): string {
-  if (isScalar(type, "string")) return " Convert text with toNumber(...) first.";
-  return isScalar(type, "angle") ? " Convert it to a number of degrees with toDeg(...) first." : "";
-}
-
-/**
- * Problems with an angle function (V30 §13): names, its number of arguments, and arguments that are not of the kind it
- * takes. A plain number where an angle is needed names the unit to write.
- */
-function angleFunctionProblems(
-  name: string,
-  call: CallExpression,
-  typeOf: (expression: Expression) => StaticType,
-): OperationProblem[] {
-  const { parameters, takes } = ANGLE_FUNCTIONS.get(name)!;
-  const problems: OperationProblem[] = [];
-  const values: Expression[] = [];
-  for (const argument of call.arguments) {
-    if (argument.kind === "positionalArgument") values.push(argument.value);
-    else
-      problems.push({
-        kind: "unknownNamedArgument",
-        message: unknownNamedArgumentMessage(name, argument.name.name, []),
-        span: argument.name.span,
-      });
-  }
-  if (values.length !== parameters.length)
+    if (isAssignable(accepted, type)) continue;
+    const shown = forUse(type);
     problems.push({
-      kind: "argumentCount",
-      message: argumentCountMessage(name, argumentsTaken(parameters), values.length),
-      span: call.span,
+      kind: "invalidOperand",
+      message: numberArgumentMessage(
+        name,
+        signature,
+        describeValue(shown),
+        isScalar(shown, "integer", "number")
+          ? "number"
+          : isScalar(shown, "string")
+            ? "string"
+            : isScalar(shown, "angle")
+              ? "angle"
+              : "other",
+        place,
+      ),
+      span: value.span,
     });
-  if (problems.length > 0) return problems;
-  const accepted = takes === "angle" ? ANGLE_TYPE : NUMBER_TYPE;
-  for (const value of values) {
-    const type = forUse(typeOf(value));
-    if (!isAssignable(accepted, typeOf(value)))
-      problems.push({
-        kind: "invalidOperand",
-        message: angleArgumentMessage(
-          name,
-          takes,
-          describeValue(type),
-          isScalar(type, "integer", "number") ? "number" : isScalar(type, "string") ? "string" : "",
-        ),
-        span: value.span,
-      });
   }
   return problems;
 }
