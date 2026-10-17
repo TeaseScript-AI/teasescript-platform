@@ -123,7 +123,8 @@ test("a member that a handle does not have or cannot assign fails with one text 
     assert.deepEqual(diagnostics(`${HANDLES[kind]}\nsay h.missing`), [[code, read, "missing"]]);
     assert.deepEqual(failure(`${PICK}${HANDLES[kind]}\nsay pick(h).missing`), ["TSR017", read]);
     // Where the compiler does not know the receiver, a method that no value has is an error of its own, so the runtime
-    // is asked for a list's, where the receiver is checked before an argument that waits.
+    // is asked for a method of another kind of handle, and for a list's, also where the receiver is checked before an
+    // argument that waits.
     const other = HANDLE_KINDS.flatMap((handle) => Object.keys(contract(handle).methods)).find(
       (name) => handleMethod(kind, name) === undefined,
     )!;
@@ -134,6 +135,11 @@ test("a member that a handle does not have or cannot assign fails with one text 
     ] as const) {
       const call = handleMemberMessage(kind, name, "call");
       assert.deepEqual(diagnostics(`${HANDLES[kind]}\nh.${name}${args}`), [[code, call, name]]);
+      if (name !== "missing")
+        assert.deepEqual(failure(`${PICK}${HANDLES[kind]}\npick(h).${name}${args}`), [
+          "TSR016",
+          call,
+        ]);
     }
     assert.deepEqual(failure(`${PICK}${HANDLES[kind]}\npick(h).contains(say("x", 1 s))`), [
       "TSR016",

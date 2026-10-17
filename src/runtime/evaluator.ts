@@ -2512,6 +2512,17 @@ export class Evaluator {
         expression.span,
       );
     }
+    if (expression.callee.kind === "property" && isCameraView(receiver)) {
+      const method = this.#handleMethod(
+        "camera",
+        expression.callee.name,
+        positional,
+        named,
+        expression.span,
+      );
+      const unhandled: never = method;
+      throw new Error(`Camera view method '${String(unhandled)}' has no implementation.`);
+    }
     if (expression.callee.kind === "property" && isDict(receiver)) {
       this.#referenceEpoch++;
       return this.#callDict(receiver, expression, positional, named, defaulted);
