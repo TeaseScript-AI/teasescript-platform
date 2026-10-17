@@ -13,6 +13,7 @@ import {
   type InstructionPlan,
   type RuntimeSnapshot,
 } from "../src/index.js";
+import { createPlayerRuntimeSession } from "../player/runtime-adapter.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -113,7 +114,7 @@ test("an arithmetic operand that is not a number names the operand, the value, a
     ],
     [
       "let last = pick(null)\nfor step in 1..last {\n}",
-      "'1..last' needs a number for 'last', but received null. Check that 'last' is not null before using it.",
+      "'1..last' needs a number for 'last', but this is null. Check that 'last' is not null before using it.",
       "last",
     ],
   ] as const) {
@@ -145,7 +146,7 @@ test("a condition, comparison, or loop value of the wrong kind names the value a
       // An operand beside a call is kept until the call returns, and checked there.
       "let level = pick(1)\nsay level or pick(2) > 1",
       "TSR026",
-      "'and' and 'or' need true or false (boolean) values, but 'level' is 1. Compare it instead, such as 'level > 0'.",
+      "'or' needs true or false (boolean) values, but 'level' is 1. Compare it instead, such as 'level > 0'.",
       "level",
     ],
     [
@@ -174,6 +175,106 @@ test("a condition, comparison, or loop value of the wrong kind names the value a
     ],
   ] as const) {
     assert.deepEqual(failure(`${PICK}${statements}\nexit`), [code, message, span], statements);
+  }
+});
+
+test("a runtime rule has one text whether its expression runs lazily or through instructions", () => {
+  // A call or an ask in an expression lowers it to instructions, which keep the operands before it in temporaries. The
+  // runtime still names the operand, and the operator of 'and' and 'or', as for the same failure without the call.
+  const values = 'let v = pick(5)\nlet s = pick("x")\nlet n = pick(null)\n';
+  const families: readonly (readonly [
+    code: string,
+    message: string,
+    subject: string | null,
+    forms: readonly string[],
+  ])[] = [
+    [
+      "TSR026",
+      "'and' needs true or false (boolean) values, but 'v' is 5. Compare it instead, such as 'v > 0'.",
+      "v",
+      [
+        "say true and v",
+        "say pick(true) and v",
+        "say v and pick(true)",
+        "say (pick(true) and v) or true",
+        "say pick(null) otherwise (pick(true) and v)",
+        "say [pick(true) and v]",
+        "if pick(true) and v {\n}",
+        "repeat 2 {\n    say pick(true) and v\n}",
+        "function check(ready = pick(true) and v) {\n}\ncheck()",
+      ],
+    ],
+    [
+      "TSR026",
+      "'or' needs true or false (boolean) values, but 'v' is 5. Compare it instead, such as 'v > 0'.",
+      "v",
+      [
+        "say false or v",
+        "say pick(false) or v",
+        "say v or pick(false)",
+        "say not (pick(false) or v)",
+        "say true and (pick(false) or v)",
+        "while pick(false) or v {\n}",
+      ],
+    ],
+    [
+      "TSR027",
+      `'-' needs a number for 's', but received text (string) "x". Use a number instead.`,
+      "s",
+      ["say s - (1 + 0)", "say s - pick(1)", "say pick(1) - s"],
+    ],
+    [
+      "TSR009",
+      "'<' compares two numbers, two texts, or two durations, but these are null and 1. Check that 'n' is not null first.",
+      null,
+      ["say n < (1 + 0)", "say n < pick(1)"],
+    ],
+    [
+      "TSR027",
+      `A range needs a number for 's', but this is text (string) "x". Use a number instead.`,
+      "s",
+      ["for i in s..(2 + 1) {\n}", "for i in s..pick(3) {\n}"],
+    ],
+  ];
+  for (const [code, message, subject, forms] of families) {
+    for (const form of forms) {
+      const source = `${PICK}${values}${form}\nexit`;
+      const [failedCode, failedMessage, span] = failure(source) ?? [];
+      assert.deepEqual([failedCode, failedMessage], [code, message], form);
+      if (subject !== null) assert.equal(span, subject, form);
+      // The Player runs the same plan through its session.
+      const session = createPlayerRuntimeSession(source);
+      assert.equal(session.state.status, "failed", form);
+      assert.deepEqual(
+        [session.state.failure?.code, session.state.failure?.message],
+        [code, message],
+        form,
+      );
+    }
+  }
+  // An ask lowers its expression the same way, and the check runs when the answer resumes the script.
+  for (const [form, message] of [
+    [
+      'say (askNumber "How many?") > 0 and v',
+      "'and' needs true or false (boolean) values, but 'v' is 5. Compare it instead, such as 'v > 0'.",
+    ],
+    [
+      'say (askNumber "How many?") < 0 or v',
+      "'or' needs true or false (boolean) values, but 'v' is 5. Compare it instead, such as 'v > 0'.",
+    ],
+  ] as const) {
+    const plan = compileValidPlan(`${PICK}${values}${form}\nexit`);
+    const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+    const action = waiting.foregroundAction;
+    assert.ok(action?.kind === "interaction", form);
+    const completed = completeAction(plan, waiting, {
+      actionId: action.actionId,
+      actionKind: "interaction",
+      interactionKind: "number",
+      payload: { kind: "submittedText", submittedText: "2" },
+    });
+    const fault = run(plan, completed.snapshot).snapshot.failure;
+    assert.deepEqual([fault?.code, fault?.message], ["TSR026", message], form);
   }
 });
 

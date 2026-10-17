@@ -1834,7 +1834,7 @@ restart, and report the failure with its debug export.
 | `TSR024` | A list index or text position that is not a whole number. | Round it with `floor(...)`, `round(...)`, or `ceil(...)`, or convert numeric text with `toInteger(...)`. |
 | `TSR025` | A list index or text position outside the valid range, a text end before its start, or a list element that a statement changes but that the same statement removed. | Check it against `length`, and an end against its start, first. |
 | `TSR026` | A condition or an `and`, `or`, or `not` operand that is not true or false. | Compare explicitly, as in `x != 0`. |
-| `TSR027` | An arithmetic operand or range bound that is not a number. | Check for null, or convert numeric text with `toNumber(...)`. |
+| `TSR027` | An arithmetic operand, range bound, or amount before a unit (also in a `wait` or timer) that is not a number. | Check for null, or convert numeric text with `toNumber(...)`. |
 | `TSR028` | Too many or too few arguments, or arguments in the wrong form. | Write the call as the message shows. |
 | `TSR030` | A speaker property shown in output that is not text. | Set the property to text. |
 | `TSR031` | A value from the host with a cycle or another shape a script value cannot have. | Report it to the host. |

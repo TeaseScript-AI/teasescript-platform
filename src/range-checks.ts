@@ -18,6 +18,20 @@ export function rangeText(range: RangeBounds): string {
   return `${withoutNegativeZero(range.start)}${range.inclusive ? "..=" : ".."}${withoutNegativeZero(range.end)}`;
 }
 
+/**
+ * A range bound is a number (runtime error `TSR027`), as a rule that names the range and the bound where the source
+ * spells both bounds, such as "'low..=3' needs a number for 'low'", and otherwise the bound's place.
+ */
+export function rangeBoundRule(
+  start: string | null,
+  end: string | null,
+  inclusive: boolean,
+  bound: "start" | "end",
+): string {
+  const label = bound === "start" ? start : end;
+  return `${start === null || end === null ? "A range" : `'${start}${inclusive ? "..=" : ".."}${end}'`} needs a number ${label === null ? `as its ${bound}` : `for '${label}'`}`;
+}
+
 /** How many whole numbers a range of whole numbers holds. */
 export function rangeLength(range: RangeBounds): number {
   return Math.max(0, range.end - range.start + (range.inclusive ? 1 : 0));

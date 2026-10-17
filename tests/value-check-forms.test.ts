@@ -70,11 +70,38 @@ test("a range, handle member, or media position problem has one code and one tex
     [
       [
         ['for i in "a"..3 {\n}', '"a"'],
-        ['let low = "a"\nsay randomInteger(low..=3)', "low"],
+        ['for i in ("a")..3 {\n}', '("a")'],
       ],
       "TSV010",
-      "A range bound is a number, but this is text (string).",
-      null,
+      "A range needs a number as its start, but this is text (string). Use a number instead.",
+      [
+        `${PICK}for i in pick("a")..3 {\n}`,
+        "TSR027",
+        `A range needs a number as its start, but this is text (string) "a". Use a number instead.`,
+      ],
+    ],
+    [
+      [['for i in "3"..5 {\n}', '"3"']],
+      "TSV010",
+      "A range needs a number as its start, but this is text (string). Convert the text with toNumber(...) first.",
+      [
+        `${PICK}for i in pick("3")..5 {\n}`,
+        "TSR027",
+        `A range needs a number as its start, but this is text (string) "3". Convert the text with toNumber(...) first.`,
+      ],
+    ],
+    [
+      [
+        ['let low = "a"\nsay randomInteger(low..=3)', "low"],
+        ['let low = "a"\nsay randomInteger((low)..=3)', "(low)"],
+      ],
+      "TSV010",
+      "'low..=3' needs a number for 'low', but this is text (string). Use a number instead.",
+      [
+        `${PICK}let low = pick("a")\nsay randomInteger(low..=3)`,
+        "TSR027",
+        `'low..=3' needs a number for 'low', but this is text (string) "a". Use a number instead.`,
+      ],
     ],
     [
       [
