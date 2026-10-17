@@ -408,10 +408,14 @@ type Owner =
   | { readonly kind: "default"; readonly statement: SwitchStatement }
   | { readonly kind: "body"; readonly statement: LoopStatement };
 
-/** Why a run of statements never runs, and what to do about it. */
+/**
+ * Why a run of statements never runs, and what to do about it; `after` when it follows a statement that never
+ * continues, rather than standing in a way that never runs.
+ */
 interface Reason {
   readonly because: string;
   readonly fix: string;
+  readonly after: boolean;
 }
 
 /**
@@ -464,14 +468,20 @@ class UnreachableCode {
         inRun = true;
         const reason = previous === null ? this.#branchReason(owner) : this.#afterReason(previous);
         if (reason === null) continue;
-        const exit = statement.kind === "exitStatement";
         this.diagnostics.push(
-          createDiagnostic(
-            DiagnosticSeverity.Warning,
-            exit ? "TSV066" : "TSV065",
-            `${exit ? "This exit" : "This code"} never runs, because ${reason.because}. ${reason.fix}`,
-            statement.span,
-          ),
+          statement.kind === "exitStatement"
+            ? createDiagnostic(
+                DiagnosticSeverity.Warning,
+                "TSV066",
+                `This exit never runs, because ${reason.because}. ${reason.after ? "Remove it, or move it to where the session should finish." : reason.fix}`,
+                statement.span,
+              )
+            : createDiagnostic(
+                DiagnosticSeverity.Warning,
+                "TSV065",
+                `This code never runs, because ${reason.because}. ${reason.fix}`,
+                statement.span,
+              ),
         );
       }
     }
@@ -497,13 +507,21 @@ class UnreachableCode {
       return {
         because: `the '${keyword}' on line ${line} always ${leaving} first`,
         fix: `Remove it, or move it before the '${keyword}'.`,
+        after: true,
+      };
+    if (keyword === undefined)
+      return {
+        because: `no way through line ${line} continues after it`,
+        fix: "Remove it.",
+        after: true,
       };
     return {
-      because:
-        keyword === undefined
-          ? `no way through line ${line} continues after it`
-          : `no way through the '${keyword}' on line ${line} continues after it`,
-      fix: "Remove it, or move it to where it can run.",
+      because: `no way through the '${keyword}' on line ${line} continues after it`,
+      fix:
+        previous.kind === "ifStatement" || previous.kind === "switchStatement"
+          ? `Remove it, or move it into the branch of the '${keyword}' that should run it.`
+          : "Remove it, or add a 'break' where the loop should end.",
+      after: true,
     };
   }
 
@@ -519,6 +537,7 @@ class UnreachableCode {
         return {
           because: `the condition on line ${condition.span.start.line + 1} is ${owner.kind === "then" ? "never true" : "always true"}`,
           fix: "Remove it, or change the condition.",
+          after: false,
         };
       }
       case "case": {
@@ -530,12 +549,14 @@ class UnreachableCode {
         return {
           because: `no value reaches the case on line ${values.start.line + 1}`,
           fix: "Remove it, or change the case.",
+          after: false,
         };
       }
       case "default":
         return {
           because: `the cases of the 'switch' on line ${owner.statement.span.start.line + 1} take every value`,
           fix: "Remove the 'default', or change the cases.",
+          after: false,
         };
       case "body": {
         const loop = owner.statement;
@@ -551,6 +572,7 @@ class UnreachableCode {
           return {
             because: `the condition on line ${line} is never true`,
             fix: "Remove it, or change the condition.",
+            after: false,
           };
         return {
           because: `the '${KEYWORDS[loop.kind]!}' on line ${line} runs its body no time`,
@@ -558,6 +580,7 @@ class UnreachableCode {
             loop.kind === "repeatStatement"
               ? "Remove it, or change the count."
               : "Remove it, or change what the loop goes through.",
+          after: false,
         };
       }
     }
