@@ -192,41 +192,14 @@ function positionalMethod(name: string, ...parameters: string[]): [string, Metho
 }
 
 /**
- * The parameters of the methods of lists and sets (V30 §16) and timers and media (V30 §22) that take only positional
- * arguments, besides `join`, the searches, `take`, and `takeLast`, which have their own checks. Every other receiver with
- * one of these methods takes as many: text for `contains` and `reverse`, and a dict for `contains`, `remove`, and
- * `clear`. Only a message and a permanent button take `remove()` without arguments (#836). The methods of date and time
- * values are in `TEMPORAL_METHODS`.
+ * The parameters of the methods of timers and media (V30 §22), which take only positional arguments. The methods of
+ * lists and sets are in `LIST_METHODS`, those of text in `TEXT_METHODS`, and those of date and time values in
+ * `TEMPORAL_METHODS`.
  */
 export const POSITIONAL_METHODS: ReadonlyMap<string, MethodParameters> = new Map([
-  positionalMethod("add", "value"),
-  positionalMethod("addAll", "other"),
-  positionalMethod("remove", "value"),
-  positionalMethod("removeAt", "index"),
-  positionalMethod("removeFirst"),
-  positionalMethod("removeLast"),
-  positionalMethod("clear"),
-  positionalMethod("contains", "value"),
-  positionalMethod("sort"),
-  positionalMethod("shuffle"),
-  positionalMethod("reverse"),
-  positionalMethod("intersection", "other"),
-  positionalMethod("union", "other"),
-  positionalMethod("difference", "other"),
-  positionalMethod("toSet"),
-  positionalMethod("toList"),
   positionalMethod("pause"),
   positionalMethod("resume"),
   positionalMethod("stop"),
-]);
-
-/** The parameter of `take`, `takeLast`, and the searches of a list (V30 §16), which a set does not have. */
-export const LIST_ONLY_METHODS: ReadonlyMap<string, MethodParameters> = new Map([
-  positionalMethod("take", "count"),
-  positionalMethod("takeLast", "count"),
-  positionalMethod("indexOf", "value"),
-  positionalMethod("lastIndexOf", "value"),
-  positionalMethod("count", "value"),
 ]);
 
 /** What `get` reads with a `default:`: an index of a list, a key of a dict, or either, where the compiler knows neither. */

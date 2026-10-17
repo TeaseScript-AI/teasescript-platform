@@ -34,11 +34,26 @@ import {
   type TemporalMethodName,
 } from "./temporal-builtins.js";
 import {
+  isTextMethod,
   isTextOnlyMethod,
   TEXT_METHODS,
   textMethodSyntax,
   type TextMethodName,
 } from "./text-operations.js";
+import {
+  isListFunction,
+  LIST_FUNCTION_CONTRACTS,
+  listFunctionSyntax,
+  takesValues,
+  type ListFunction,
+} from "./list-function-rules.js";
+import {
+  isListMethod,
+  LIST_METHODS,
+  listMethodSyntax,
+  type ListMethod,
+  type ListMethodName,
+} from "./list-methods.js";
 import {
   askParts,
   sayOperands,
@@ -81,6 +96,7 @@ import {
   type CommandName,
   type ClockFunctionName,
   type ConversionName,
+  type ListFunctionName,
   type NumericFunctionName,
   type RandomFunctionName,
   type RenamedCommand,
@@ -911,17 +927,27 @@ function declaredSpeakers(source: string): readonly string[] {
 
 /**
  * A built-in whose help comes from its contract: a conversion, a numeric or angle function, a random function, a clock
- * read, a method that only text has, or a method of date and time values (`CONVERSIONS`, `NUMERIC_CONTRACTS`,
- * `RANDOM_CONTRACTS`, `CLOCK_CONTRACTS`, `TEXT_METHODS`, `TEMPORAL_METHODS`). A method that other values have too, such
- * as `contains`, may be called on a value the editor does not know, so it has none.
+ * read, a list function, a method that only text has, a method of date and time values, or one that only lists and sets
+ * have (`CONVERSIONS`, `NUMERIC_CONTRACTS`, `RANDOM_CONTRACTS`, `CLOCK_CONTRACTS`, `LIST_FUNCTION_CONTRACTS`,
+ * `TEXT_METHODS`, `TEMPORAL_METHODS`, `LIST_METHODS`). A method that other values have too, such as `contains`, may be
+ * called on a value the editor does not know, so it has none.
  */
 type ContractName =
   | ConversionName
   | NumericFunctionName
   | RandomFunctionName
   | ClockFunctionName
+  | ListFunctionName
   | TextMethodName
-  | TemporalMethodName;
+  | TemporalMethodName
+  | ListMethodName;
+
+/** Whether only lists and sets have a method `name` (see `ListMethod.shared`). */
+function isListOnlyMethod(name: string): name is ListMethodName {
+  if (!isListMethod(name) || isTextMethod(name)) return false;
+  const method: ListMethod = LIST_METHODS[name];
+  return method.shared !== true;
+}
 
 /**
  * A call of a built-in with a contract in the source: its name, whether it is a method, where the name is, and where its
@@ -930,9 +956,14 @@ type ContractName =
 type ContractCall = { readonly range: LanguageRange; readonly opener: number } & (
   | {
       readonly method: false;
-      readonly name: ConversionName | NumericFunctionName | RandomFunctionName | ClockFunctionName;
+      readonly name:
+        | ConversionName
+        | NumericFunctionName
+        | RandomFunctionName
+        | ClockFunctionName
+        | ListFunctionName;
     }
-  | { readonly method: true; readonly name: TextMethodName | TemporalMethodName }
+  | { readonly method: true; readonly name: TextMethodName | TemporalMethodName | ListMethodName }
 );
 
 /**
@@ -1231,11 +1262,17 @@ function contractHelp(call: ContractCall): LanguageContextHelp {
           summary: TEMPORAL_METHODS[call.name].summary,
           syntax: temporalSyntax(call.name),
         }
-      : {
-          command: call.name,
-          summary: TEXT_METHODS[call.name].summary,
-          syntax: textMethodSyntax(call.name),
-        };
+      : isTextMethod(call.name)
+        ? {
+            command: call.name,
+            summary: TEXT_METHODS[call.name].summary,
+            syntax: textMethodSyntax(call.name),
+          }
+        : {
+            command: call.name,
+            summary: LIST_METHODS[call.name].summary,
+            syntax: listMethodSyntax(call.name),
+          };
   if (isConversion(call.name))
     return {
       command: call.name,
@@ -1253,6 +1290,12 @@ function contractHelp(call: ContractCall): LanguageContextHelp {
       command: call.name,
       summary: RANDOM_CONTRACTS[call.name].summary,
       syntax: randomSyntax(call.name),
+    };
+  if (isListFunction(call.name))
+    return {
+      command: call.name,
+      summary: LIST_FUNCTION_CONTRACTS[call.name].summary,
+      syntax: listFunctionSyntax(call.name),
     };
   return {
     command: call.name,
@@ -1278,16 +1321,16 @@ function locateContractCall(tokens: readonly Token[], offset: number): ContractC
   for (const [index, token] of tokens.entries()) {
     if (OPENING_DELIMITERS.has(token.kind)) {
       const name = tokens[index - 1];
-      // After a dot, a method that only text has, also `repeat`, which the lexer reads as a keyword, or a method of date
-      // and time values, also one of the same name as a function, such as a datetime's `toAbsoluteDateTime()`. A declared
-      // function is not a call of the built-in.
+      // After a dot, a method that only text has, also `repeat`, which the lexer reads as a keyword, a method of date
+      // and time values, also one of the same name as a function, such as a datetime's `toAbsoluteDateTime()`, or a
+      // method that only lists and sets have. A declared function is not a call of the built-in.
       const before = tokens[index - 2]?.kind;
       let call: ContractCall | null = null;
       if (token.kind === TokenKind.LeftParenthesis && name !== undefined) {
         const word = name.lexeme;
         const at = { range: name.span, opener: token.span.start.offset };
         if (before === TokenKind.Dot) {
-          if (isTextOnlyMethod(word) || isTemporalMethod(word))
+          if (isTextOnlyMethod(word) || isTemporalMethod(word) || isListOnlyMethod(word))
             call = { ...at, method: true, name: word };
         } else if (
           name.kind === TokenKind.Identifier &&
@@ -1295,7 +1338,8 @@ function locateContractCall(tokens: readonly Token[], offset: number): ContractC
           (isConversion(word) ||
             isNumericFunction(word) ||
             isRandomFunction(word) ||
-            isClockFunction(word))
+            isClockFunction(word) ||
+            isListFunction(word))
         )
           call = { ...at, method: false, name: word };
       }
@@ -1368,9 +1412,20 @@ function callParameters(
     const random: RandomFunction = RANDOM_CONTRACTS[call.name];
     form = random.takes === "choices" ? ["dict"] : random.parameters;
     parameters = Object.freeze([...form, ...(random.takes === "choices" ? ["weight"] : [])]);
-  } else if (call.method && !isTemporalMethod(call.name)) {
+  } else if (!call.method && isListFunction(call.name)) {
+    // `min` and `max` of values, once a second one is being written, take any number of them.
+    if (takesValues(call.name) && positional > 0 && named === null)
+      return { parameters: Object.freeze(["value"]), activeParameter: 0 };
+    const list: ListFunction = LIST_FUNCTION_CONTRACTS[call.name];
+    form = list.parameters;
+    parameters = Object.freeze([...form, ...list.named]);
+  } else if (call.method && isTextMethod(call.name)) {
     form = TEXT_METHODS[call.name].parameters.map((parameter) => parameter.name);
     parameters = Object.freeze(form);
+  } else if (call.method && isListMethod(call.name)) {
+    const method: ListMethod = LIST_METHODS[call.name];
+    form = method.parameters.map((parameter) => parameter.name);
+    parameters = Object.freeze([...form, ...(method.named ?? [])]);
   } else {
     // A clock read and a method of date and time values take no arguments.
     form = [];

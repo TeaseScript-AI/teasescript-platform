@@ -16,14 +16,10 @@ import {
   isAnyDuration,
   isCalendarDuration,
   isDuration,
-  isRange,
   isTemporal,
 } from "./value-predicates.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
-
-/** The set operations of lists and sets (V30 §16, ADR 0013). */
-export const SET_OPERATIONS: ReadonlySet<string> = new Set(["intersection", "union", "difference"]);
 
 /**
  * The ascending, stable order of sortable list items as their old indexes: numbers (integers and numbers together),
@@ -163,9 +159,6 @@ class ValueIndex {
   }
 }
 
-/** The fix for a range where a list is needed, as for a set (V30 §6). */
-export const RANGE_LIST_FIX = " Make a list of its numbers with toList() first.";
-
 /**
  * Whether `toList()` on the range of whole numbers from `start` to `end` gives more numbers than a list can hold
  * (`MAX_COLLECTION_LENGTH`, V30 §6), and so fails before it builds the list: the message, or `null`. The compiler and
@@ -180,11 +173,6 @@ export function rangeListLengthProblem(
   if (length <= MAX_COLLECTION_LENGTH) return null;
   const range = `${withoutNegativeZero(start)}${inclusive ? "..=" : ".."}${withoutNegativeZero(end)}`;
   return `toList() can make a list of at most ${groupedDigits(MAX_COLLECTION_LENGTH)} numbers, but ${range} holds ${groupedDigits(length)}. Use a smaller range.`;
-}
-
-/** A text for a set operation's argument that is neither a list nor a set. */
-export function setOperationArgumentMessage(name: string, value: SerializableRuntimeValue): string {
-  return `${name}() needs a list or a set, not ${describeRuntimeValue(value)}.${isRange(value) ? RANGE_LIST_FIX : ""}`;
 }
 
 function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {

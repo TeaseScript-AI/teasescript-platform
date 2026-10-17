@@ -466,7 +466,7 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
   // `contains` also belongs to lists and sets, which may contain any value, so only its shape is checked.
   assert.deepEqual(diagnostics("function has(value) { return value.contains(1) }\nexit"), []);
   assert.deepEqual(diagnostics("function has(value) { return value.contains(1, 2) }\nexit"), [
-    ["TSV020", "contains() takes 1 argument (part), received 2.", "value.contains(1, 2)"],
+    ["TSV020", "contains() takes 1 argument (value), received 2.", "value.contains(1, 2)"],
   ]);
 });
 

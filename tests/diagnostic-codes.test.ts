@@ -28,7 +28,7 @@ const OWNER_SOURCES: Readonly<Record<DiagnosticOwner, readonly string[]>> = {
   lowering: ["compiler/"],
   "plan analysis": ["reachability.ts", "speaker-flow.ts", "compiler.ts"],
   "plan validation": ["plan/"],
-  runtime: ["runtime/", "angle.ts", "numeric-functions.ts"],
+  runtime: ["runtime/", "angle.ts", "numeric-functions.ts", "list-methods.ts"],
   checkpoint: ["runtime/checkpoint.ts"],
 };
 

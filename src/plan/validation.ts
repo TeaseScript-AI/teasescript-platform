@@ -8,6 +8,7 @@ import { canonicalWebUrl } from "../web-url.js";
 import { LOCK_CALLS } from "../capture-call.js";
 import { conversionWaitsForFiles, isConversion, takesDefault, takesFiles } from "../conversions.js";
 import { ANGLE_UNITS, CALENDAR_DURATION_UNITS, DURATION_UNITS } from "../language-facts.js";
+import { listMethod } from "../list-methods.js";
 import { compileRegex, isCanonicalRegexFlags } from "../regex.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -2631,19 +2632,23 @@ function validateExpressionNode(
         );
       }
       validateOptionalTypeCheck(value, path, errors);
+      // A call that may decide a list's element type checks what it adds, or its default, as the compiler gave it (see
+      // `ListMethod.decides`); a dict's `get` checks its default as a list's does.
+      const decides =
+        isRecord(value.callee) && value.callee.kind === "property"
+          ? listMethod(String(value.callee.name))?.decides
+          : undefined;
       if (
         "typeCheck" in value &&
         !(
-          isRecord(value.callee) &&
-          value.callee.kind === "property" &&
+          decides !== undefined &&
           Array.isArray(value.arguments) &&
-          (((value.callee.name === "add" || value.callee.name === "addAll") &&
-            value.arguments.length === 1) ||
-            (value.callee.name === "get" &&
-              value.arguments.length === 2 &&
+          (decides === "default"
+            ? value.arguments.length === 2 &&
               isRecord(value.arguments[1]) &&
               value.arguments[1].kind === "named" &&
-              value.arguments[1].name === "default"))
+              value.arguments[1].name === "default"
+            : value.arguments.length === 1)
         )
       )
         errors.push(

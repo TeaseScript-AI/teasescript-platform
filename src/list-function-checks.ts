@@ -5,9 +5,17 @@ import {
 } from "./argument-rules.js";
 import { angleStatisticMessage } from "./angle.js";
 import type { CallExpression, Expression } from "./ast.js";
-import { LIST_FUNCTION_SHAPES } from "./list-function-rules.js";
-import { percentageFailure } from "./numeric-functions.js";
-import { RANGE_LIST_FIX, type OperationProblem } from "./operation-checks.js";
+import type { ListFunctionName } from "./language-facts.js";
+import {
+  LIST_FUNCTION_CONTRACTS,
+  listFunctionShape,
+  listValueMessage,
+  mixedListValuesMessage,
+  type ListFunction,
+  type ListValueKind,
+} from "./list-function-rules.js";
+import { RANGE_LIST_FIX } from "./list-methods.js";
+import type { OperationProblem } from "./operation-checks.js";
 import { RANDOM_CONTRACTS } from "./random-functions.js";
 import { staticChoiceValue, staticVisibleText } from "./static-evaluation.js";
 import {
@@ -28,17 +36,6 @@ import {
   UNKNOWN_TYPE,
   type StaticType,
 } from "./static-types.js";
-
-/** The built-ins of lists (V30 §16) whose arguments and result these checks know; `min` and `max` take one list too. */
-export const LIST_FUNCTIONS: ReadonlySet<string> = new Set([
-  "sum",
-  "average",
-  "median",
-  "percentile",
-  "stddev",
-  "linearRegression",
-  "predict",
-]);
 
 /** The problems with a call of a list function, the properties it reads by name, and its result type. */
 export interface ListFunctionCheck {
@@ -61,17 +58,8 @@ export interface ListPropertyRead {
   readonly message: string;
 }
 
-/** The kind of the values a list function reads, when the compiler knows it. */
-type ValueKind =
-  | "integer"
-  | "number"
-  | "duration"
-  | "calendarDuration"
-  | "angle"
-  | "date"
-  | "time"
-  | "datetime"
-  | "absoluteDateTime";
+/** The kind of the values a list function reads, when the compiler knows it: one it takes, or integers. */
+type ValueKind = ListValueKind | "integer";
 
 const TEMPORAL_KINDS: readonly ValueKind[] = ["date", "time", "datetime", "absoluteDateTime"];
 
@@ -88,22 +76,25 @@ interface Context {
 /** A number the compiler can see, such as a constant percentage or weight, or `undefined`. */
 type Known = (expression: Expression) => number | undefined;
 
-/** Checks a call of a list function, or of `min` or `max` with one list, and gives its result type. */
+/**
+ * Checks a call of a list function (see `LIST_FUNCTION_CONTRACTS`), `min` and `max` with one list, and gives its result
+ * type.
+ */
 export function listFunctionCheck(
-  name: string,
+  name: ListFunctionName,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
   known: Known,
 ): ListFunctionCheck {
   const context: Context = {
     name,
-    shape: LIST_FUNCTION_SHAPES.get(name)!,
+    shape: listFunctionShape(name),
     call,
     typeOf,
     problems: [],
     reads: [],
   };
-  const type = listFunctionType(context, known);
+  const type = listFunctionType(context, LIST_FUNCTION_CONTRACTS[name], known);
   return { problems: context.problems, reads: context.reads, type };
 }
 
@@ -122,10 +113,10 @@ export function weightedChoiceCheck(
   return { problems: context.problems, reads: context.reads, type };
 }
 
-function listFunctionType(context: Context, known: Known): StaticType {
+function listFunctionType(context: Context, contract: ListFunction, known: Known): StaticType {
   const { name, call } = context;
-  switch (name) {
-    case "linearRegression": {
+  switch (contract.takes) {
+    case "points": {
       if (!shape(context)) return UNKNOWN_TYPE;
       const list = positionalArguments(call)[0]!;
       const y = named(call, "y");
@@ -134,21 +125,11 @@ function listFunctionType(context: Context, known: Known): StaticType {
         problem(context, `${name}(...) needs y: with x:, the property that holds the values.`, x);
         return UNKNOWN_TYPE;
       }
-      const ys = valueKind(
-        context,
-        valuesType(context, list, y, "y"),
-        ["number", "duration"],
-        list,
-      );
+      const ys = valueKind(context, valuesType(context, list, y, "y"), contract.values, list);
       const xs =
         x === undefined
           ? "integer"
-          : valueKind(
-              context,
-              valuesType(context, list, x, "x"),
-              ["number", "date", "datetime", "absoluteDateTime"],
-              x,
-            );
+          : valueKind(context, valuesType(context, list, x, "x"), contract.positions, x, true);
       const amount =
         ys === undefined ? UNKNOWN_TYPE : ys === "duration" ? DURATION_TYPE : NUMBER_TYPE;
       return {
@@ -161,40 +142,42 @@ function listFunctionType(context: Context, known: Known): StaticType {
         ]),
       };
     }
-    case "predict":
-      return predictType(context);
-    default: {
-      // `sum`, `average`, `median`, `percentile`, `stddev`, and `min` or `max` of one list.
-      const percentile = name === "percentile";
+    case "line":
+      return predictType(context, contract.positions);
+    case "values": {
+      // A statistic, or `min` or `max` of one list.
       if (!shape(context)) return UNKNOWN_TYPE;
-      if (percentile) {
-        const share = positionalArguments(call)[1]!;
-        const value = known(share);
-        // A percentage that may be null has been reported already; its other members are checked here.
-        if (!isAssignable(NUMBER_TYPE, forUse(context.typeOf(share))))
-          problem(
-            context,
-            `${name}(...) needs a number as its percentage, not ${describeValue(forUse(context.typeOf(share)))}.`,
-            share,
-          );
-        else {
-          const failure = value === undefined ? undefined : percentageFailure(name, value);
-          if (failure !== undefined) problem(context, failure, share);
-        }
+      const positional = positionalArguments(call);
+      // Its other numbers, such as a percentage: one that may be null has been reported already, and its other members
+      // are checked here.
+      const numbers = contract.parameters.map((parameter, index) => {
+        const argument = positional[index]!;
+        if (index === 0) return undefined;
+        const type = forUse(context.typeOf(argument));
+        if (isAssignable(NUMBER_TYPE, type)) return known(argument);
+        problem(
+          context,
+          `${name}(...) needs a number as its ${parameter}, not ${describeValue(type)}.`,
+          argument,
+        );
+        return undefined;
+      });
+      for (const domain of contract.domains) {
+        const reads = domain.reads.map((parameter) => contract.parameters.indexOf(parameter));
+        const values = reads.flatMap((index) => numbers[index] ?? []);
+        const failure = values.length === reads.length ? domain.problem(values) : undefined;
+        // A domain of one number is reported at it.
+        if (failure !== undefined)
+          problem(context, failure, reads.length === 1 ? positional[reads[0]!]! : call);
       }
-      const list = positionalArguments(call)[0]!;
-      const minMax = name === "min" || name === "max";
+      const list = positional[0]!;
       const kind = valueKind(
         context,
         valuesType(context, list, named(call, "by"), "by"),
-        minMax
-          ? ["number", "duration", "calendarDuration", "angle", ...TEMPORAL_KINDS]
-          : name === "sum"
-            ? ["number", "duration", "angle"]
-            : ["number", "duration"],
+        contract.values,
         list,
       );
-      if (kind === "integer" && name !== "sum" && !minMax) return NUMBER_TYPE;
+      if (kind === "integer" && contract.integers === "number") return NUMBER_TYPE;
       return typeOfKind(kind);
     }
   }
@@ -312,8 +295,9 @@ function valuesType(
 function valueKind(
   context: Context,
   type: StaticType,
-  allowed: readonly ValueKind[],
+  allowed: readonly ListValueKind[],
   at: Expression,
+  x = false,
 ): ValueKind | undefined {
   const parts = members(type).map(resolved);
   if (parts.length === 0 || !parts.every(isKnown)) return undefined;
@@ -322,42 +306,21 @@ function valueKind(
     const kind = (
       ["integer", "number", "duration", "calendarDuration", "angle", ...TEMPORAL_KINDS] as const
     ).find((one) => isScalar(part, one));
-    if (kind === undefined || !allowed.includes(kind === "integer" ? "number" : kind)) {
-      // An angle wraps around at 360°, so only `sum`, `min`, and `max` take angles.
+    const listKind = kind === "integer" ? "number" : kind;
+    if (listKind === undefined || !allowed.includes(listKind)) {
       problem(
         context,
-        kind === "angle"
-          ? angleStatisticMessage(context.name)
-          : `${context.name}(...) needs ${describeKinds(allowed)}, not ${describeValue(part)}.`,
+        listValueMessage(context.name, allowed, describeValue(part), listKind, x),
         at,
       );
       return undefined;
     }
-    kinds.add(kind);
+    kinds.add(kind!);
   }
   if (kinds.size === 1) return [...kinds][0]!;
   if (kinds.size === 2 && kinds.has("integer") && kinds.has("number")) return "number";
-  problem(context, `${context.name}(...) needs values of one kind: ${describeKinds(allowed)}.`, at);
+  problem(context, mixedListValuesMessage(context.name, allowed, x), at);
   return undefined;
-}
-
-function describeKinds(kinds: readonly ValueKind[]): string {
-  const words = kinds.map((kind) =>
-    kind === "number"
-      ? "numbers"
-      : kind === "duration"
-        ? "durations"
-        : kind === "calendarDuration"
-          ? "calendar durations"
-          : kind === "datetime"
-            ? "datetimes"
-            : kind === "absoluteDateTime"
-              ? "absolute dates and times"
-              : `${kind}s`,
-  );
-  return words.length === 1
-    ? words[0]!
-    : `${words.slice(0, -1).join(", ")}${words.length > 2 ? "," : ""} or ${words.at(-1)!}`;
 }
 
 function typeOfKind(kind: ValueKind | undefined): StaticType {
@@ -367,8 +330,11 @@ function typeOfKind(kind: ValueKind | undefined): StaticType {
   return { kind: "scalar", name: kind };
 }
 
-/** `predict(line, x)`: a number or duration, as the line's intercept, at an x of the kind of the line's start. */
-function predictType(context: Context): StaticType {
+/**
+ * `predict(line, x)`: a number or duration, as the line's intercept, at an x of the kind of the line's start, one of
+ * `positions`.
+ */
+function predictType(context: Context, positions: readonly ListValueKind[]): StaticType {
   const { name, call, typeOf } = context;
   if (!shape(context)) return UNKNOWN_TYPE;
   const line = call.arguments[0]!.value;
@@ -379,8 +345,8 @@ function predictType(context: Context): StaticType {
     .find(
       (member) =>
         isKnown(member) &&
-        !(["integer", "number", "date", "datetime", "absoluteDateTime"] as const).some((kind) =>
-          isScalar(member, kind),
+        !positions.some(
+          (kind) => isScalar(member, kind) || (kind === "number" && isScalar(member, "integer")),
         ),
     );
   if (other !== undefined) {

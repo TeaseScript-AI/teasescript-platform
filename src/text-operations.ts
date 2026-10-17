@@ -3,12 +3,8 @@
  * per method, shared by the compiler, the runtime, and the editor. Lengths and positions count Unicode code points.
  */
 
-import {
-  argumentCountMessage,
-  argumentsTaken,
-  LIST_ONLY_METHODS,
-  POSITIONAL_METHODS,
-} from "./argument-rules.js";
+import { argumentCountMessage, argumentsTaken, POSITIONAL_METHODS } from "./argument-rules.js";
+import { isListMethod, LIST_METHODS } from "./list-methods.js";
 import { compileRegex, replacementParts } from "./regex.js";
 import type { SerializableRegex } from "./runtime/serializable-values.js";
 
@@ -344,12 +340,12 @@ export function isTextMember(name: string): boolean {
 }
 
 /**
- * Whether only text has a method `name`: no list, set, dict, or handle has one (`POSITIONAL_METHODS`, `LIST_ONLY_METHODS`,
- * and `get` and `join`, which text does not have), and no date and time value has a method of a text method's name
+ * Whether only text has a method `name`: no list, set, dict, or handle has one (`LIST_METHODS`, whose names every method
+ * of a dict has too, and `POSITIONAL_METHODS`), and no date and time value has a method of a text method's name
  * (`TEMPORAL_METHODS`), so a call of it is a call of the text method.
  */
 export function isTextOnlyMethod(name: string): name is TextMethodName {
-  return isTextMethod(name) && !POSITIONAL_METHODS.has(name) && !LIST_ONLY_METHODS.has(name);
+  return isTextMethod(name) && !isListMethod(name) && !POSITIONAL_METHODS.has(name);
 }
 
 /** Whether the method takes a regex, and then uses the regex work limit (see `TextMethod`). */
@@ -380,9 +376,10 @@ export function stringLength(text: string): number {
   return length;
 }
 
+/** List `join` (see `LIST_METHODS`), whose separator is checked as text. */
 export const LIST_JOIN: TextSignature = {
-  name: "join",
-  parameters: [{ name: "separator", kind: "text", optional: true }],
+  name: LIST_METHODS.join.name,
+  parameters: LIST_METHODS.join.parameters,
   domains: [],
 };
 

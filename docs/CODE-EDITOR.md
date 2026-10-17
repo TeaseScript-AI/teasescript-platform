@@ -20,10 +20,11 @@ closing read. The Player's palette (`player/theme/palette.ts`) holds the code co
 `syntax-keyword`, `syntax-name`, `syntax-string`, `syntax-number`, `syntax-comment`, and `syntax-operator`, which the
 [random draw picker](DEBUGGER.md#random-draws) applies to the same classes; the editor should adopt these roles later
 (owner direction, #512) instead of keeping colours of its own. Hover and signature help of a conversion, numeric,
-angle, random, or clock function call, such as `toNumber(...)`, `round(...)`, `sin(...)`, `chance(...)`, or
-`getDate()`, of a method that only text has, such as `name.trim()`, and of a method of date and time values, such as
-`started.toISO()`, come from its contract in `src/conversions.ts`, `src/numeric-functions.ts`,
-`src/random-functions.ts`, `src/text-operations.ts`, or `src/temporal-builtins.ts`, and those of a command cover its
+angle, random, clock, or list function call, such as `toNumber(...)`, `round(...)`, `sin(...)`, `chance(...)`,
+`getDate()`, or `sum(...)`, of a method that only text has, such as `name.trim()`, of a method of date and time values,
+such as `started.toISO()`, and of one that only lists and sets have, such as `items.shuffle()`, come from its contract
+in `src/conversions.ts`, `src/numeric-functions.ts`, `src/random-functions.ts`, `src/temporal-builtins.ts`,
+`src/list-function-rules.ts`, `src/text-operations.ts`, or `src/list-methods.ts`, and those of a command cover its
 arguments as the parser reads them and name the options of the parser's tables in `src/parser.ts`, which the parser and
 the name pass check.
 The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
