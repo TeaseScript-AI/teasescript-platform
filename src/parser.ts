@@ -99,6 +99,7 @@ import {
   KEYWORD_TOKENS,
   PROTECTED_NAME_CODE,
   protectedNameMessage,
+  startsCallForm,
   TEASESCRIPT_PROTECTED_NAMES,
   type StatementCommand,
   type ValueCommand,
@@ -126,6 +127,12 @@ export interface ParseResult {
    * inside of every statement block. Language tooling finds the statement at a position with them.
    */
   readonly statementRanges: readonly StatementRange[];
+  /**
+   * The arguments of every command besides the compact interactions whose arguments the parser read, also of one whose
+   * statement it could not read further, such as one without its block yet. Language tooling finds the command at a
+   * position with them.
+   */
+  readonly commandRanges: readonly CommandRange[];
 }
 
 /**
@@ -136,6 +143,17 @@ export interface StatementRange {
   readonly kind: "statement" | "block";
   readonly start: number;
   readonly end: number;
+}
+
+/**
+ * Source offsets of a command's arguments, from the start of its name to the end of its last argument, and of the `{`
+ * of its block of statements, when one follows them.
+ */
+export interface CommandRange {
+  readonly kind: "command";
+  readonly start: number;
+  readonly end: number;
+  readonly block: number | null;
 }
 
 const PROTECTED_NAMES: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
@@ -194,7 +212,8 @@ const parserDiagnosticCode = {
   protectedName: PROTECTED_NAME_CODE,
 } as const satisfies Record<string, OwnedDiagnosticCode<"parser", "error">>;
 
-const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
+/** The named arguments of the named form of `playAudio` and `playVideo`, which needs `file:` (V30 §22). */
+export const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
 
 /**
  * How a type continues (V30 §1): a statement type ends at a newline; inside `()`, a newline may also precede `|` or
@@ -239,7 +258,7 @@ interface ParsedSayValue {
   readonly diagnostics: readonly Diagnostic[];
   /** The offsets of the `/` where its parse expected a value (see `Parser.regexStarts`). */
   readonly regexStarts: readonly number[];
-  /** The statement ranges its parse recorded. */
+  /** The statement and command ranges its parse recorded. */
   readonly ranges: RangeSegment;
   readonly recovered: boolean;
 }
@@ -248,7 +267,7 @@ interface ParsedSayValue {
  * segment rather than a copy of its ranges, so a value nested in others is not copied into each of them.
  */
 interface RangeSegment {
-  readonly list: readonly (StatementRange | RangeSegment)[];
+  readonly list: readonly (StatementRange | CommandRange | RangeSegment)[];
   readonly from: number;
   readonly to: number;
 }
@@ -285,6 +304,25 @@ const CHOICE_OPTIONS: readonly string[] = ["prefill"];
 const PASSWORD_OPTIONS: readonly string[] = ["hint"];
 /** The named options of `showButton` after its label. */
 export const SHOW_BUTTON_OPTIONS: readonly string[] = ["background", "timeout"];
+/** The named arguments of `showPopup` besides its message, which it takes first or as `message:` (V30 §31). */
+export const SHOW_POPUP_OPTIONS: readonly string[] = ["buttonText"];
+/** The named arguments of `openUrl` after its web address (V30 §33). */
+export const OPEN_URL_OPTIONS: readonly string[] = ["buttonText", "alwaysButton"];
+/** The named arguments of `exportText` after its text (V30 §31). */
+export const EXPORT_TEXT_OPTIONS: readonly string[] = ["title", "fileName"];
+/** A timer's displays, written after `timer` in its short form and as `display:` in its named form (V30 §27). */
+export const TIMER_DISPLAYS = ["visible", "mystery", "hidden"] as const;
+/** The named arguments of the named timer form, which needs `duration:` (V30 §27). */
+export const TIMER_ARGUMENTS = [
+  "duration",
+  "async",
+  "display",
+  "label",
+  "repeat",
+  "persist",
+] as const;
+/** The named options of `showPermanentButton` after its text (V30 §28). */
+export const PERMANENT_BUTTON_OPTIONS: readonly string[] = ["persist"];
 
 /** The named arguments of an ask, such as `prefill:` and `hint:` of `askText`, as the parser accepts them. */
 export function askOptionNames(kind: InteractionExpression["interactionKind"]): readonly string[] {
@@ -352,12 +390,14 @@ export function parse(source: string): ParseResult {
       for (const offset of added) regexStarts.add(offset);
       continue;
     }
+    const { statements, commands } = parser.ranges();
     return Object.freeze({
       program,
       regexStarts,
       header: header.header,
       diagnostics: Object.freeze([...header.diagnostics, ...parser.diagnostics]),
-      statementRanges: Object.freeze(parser.statementRanges()),
+      statementRanges: Object.freeze(statements),
+      commandRanges: Object.freeze(commands),
     });
   }
 }
@@ -365,10 +405,10 @@ export function parse(source: string): ParseResult {
 class Parser {
   readonly #diagnostics: Diagnostic[] = [];
   /**
-   * A speculative parser keeps its own, so only the statements of the parse that counts are listed, also those of a
-   * `say` value it reuses.
+   * The statement and command ranges. A speculative parser keeps its own, so only those of the parse that counts are
+   * listed, also those of a `say` value it reuses.
    */
-  readonly #statementRanges: (StatementRange | RangeSegment)[] = [];
+  readonly #statementRanges: (StatementRange | CommandRange | RangeSegment)[] = [];
   /**
    * The offsets of each `/` where this parse expected a value, which a regex literal starts there; like its diagnostics,
    * a speculative parser keeps its own.
@@ -420,9 +460,13 @@ class Parser {
     return this.#regexStarts;
   }
 
-  /** The statement ranges, with those of each reused `say` value in its place, read once without recursion. */
-  public statementRanges(): readonly StatementRange[] {
-    const ranges: StatementRange[] = [];
+  /** The statement and command ranges, with those of each reused `say` value, read once without recursion. */
+  public ranges(): {
+    readonly statements: readonly StatementRange[];
+    readonly commands: readonly CommandRange[];
+  } {
+    const statements: StatementRange[] = [];
+    const commands: CommandRange[] = [];
     const pending: RangeSegment[] = [
       { list: this.#statementRanges, from: 0, to: this.#statementRanges.length },
     ];
@@ -430,10 +474,33 @@ class Parser {
       for (let index = segment.from; index < segment.to; index += 1) {
         const entry = segment.list[index]!;
         if ("list" in entry) pending.push(entry);
-        else ranges.push(entry);
+        else if (entry.kind === "command") commands.push(entry);
+        else statements.push(entry);
       }
     }
-    return ranges;
+    return { statements, commands };
+  }
+
+  /**
+   * Records the arguments of the command named by `command`, which end at `end`, and with `block` the `{` after them
+   * that starts its block (see `ParseResult.commandRanges`).
+   */
+  #recordCommand(command: Token, end: number, block: boolean): void {
+    this.#statementRanges.push(
+      Object.freeze({
+        kind: "command",
+        start: command.span.start.offset,
+        end,
+        block: block && this.#check(TokenKind.LeftBrace) ? this.#peek().span.start.offset : null,
+      }),
+    );
+  }
+
+  /** Where the last token read ends, before the line breaks read after it. */
+  #lastEnd(): number {
+    let index = this.#current - 1;
+    while (index > 0 && this.tokens[index]!.kind === TokenKind.Newline) index -= 1;
+    return this.tokens[index]!.span.end.offset;
   }
 
   public parseProgram(): Program {
@@ -586,10 +653,11 @@ class Parser {
    */
   *#parseShowPopupParts(): ParseTask<ShowPopupParts | null> {
     const command = this.#advance();
-    if (this.#check(TokenKind.LeftParenthesis)) {
+    if (startsCallForm(command, this.#peek())) {
       const call = yield* parseChild(
         this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
       );
+      this.#recordCommand(command, call.span.end.offset, false);
       return { arguments: call.arguments, span: copySpan(call.span) };
     }
     const message = yield* parseChild(this.#parseOr());
@@ -601,12 +669,13 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
+    this.#recordCommand(command, message.span.end.offset, false);
     const offset = this.#offsetAfterComma();
     const name = offset === null ? null : this.#peek(offset);
     if (
       offset !== null &&
       name?.kind === TokenKind.Identifier &&
-      (name.lexeme === "buttonText" || name.lexeme === "message") &&
+      (name.lexeme === "message" || SHOW_POPUP_OPTIONS.includes(name.lexeme)) &&
       this.#peek(offset + 1).kind === TokenKind.Colon
     ) {
       let comma = offset - 1;
@@ -638,7 +707,7 @@ class Parser {
   /** `openUrl(<url>)` (V30 §33), which has only the call form. */
   *#parseOpenUrlStatement(): ParseTask<OpenUrlStatement | null> {
     const command = this.#advance();
-    if (!this.#check(TokenKind.LeftParenthesis)) {
+    if (!startsCallForm(command, this.#peek())) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedDelimiter,
         "openUrl takes its web address in parentheses, as in 'openUrl(\"https://example.com\")'.",
@@ -649,6 +718,7 @@ class Parser {
     const call = yield* parseChild(
       this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
     );
+    this.#recordCommand(command, call.span.end.offset, false);
     return Object.freeze({
       kind: "openUrlStatement",
       arguments: call.arguments,
@@ -659,7 +729,7 @@ class Parser {
   /** `exportText(<text>, title: ..., fileName: ...)` (V30 §31), which has only the call form. */
   *#parseExportTextStatement(): ParseTask<ExportTextStatement | null> {
     const command = this.#advance();
-    if (!this.#check(TokenKind.LeftParenthesis)) {
+    if (!startsCallForm(command, this.#peek())) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedDelimiter,
         "exportText takes its text in parentheses, as in 'exportText(report)'.",
@@ -670,6 +740,7 @@ class Parser {
     const call = yield* parseChild(
       this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
     );
+    this.#recordCommand(command, call.span.end.offset, false);
     return Object.freeze({
       kind: "exportTextStatement",
       arguments: call.arguments,
@@ -1394,6 +1465,7 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
+    this.#recordCommand(keyword, duration.span.end.offset, false);
     const { duration: delay, unit } = this.#timerDuration(duration, "wait");
     return Object.freeze({
       kind: "waitStatement",
@@ -1415,16 +1487,13 @@ class Parser {
    */
   *#parseTimerParts(): ParseTask<TimerParts | null> {
     const command = this.#advance();
-    if (
-      this.#check(TokenKind.LeftParenthesis) &&
-      this.#peek().span.start.offset === command.span.end.offset
-    ) {
+    if (startsCallForm(command, this.#peek())) {
       return yield* parseChild(this.#withinDelimiters(this.#parseNamedTimer(command)));
     }
     const async = this.#checkIdentifier("async");
     if (async) this.#advance();
     let display: TimerDisplay | null = null;
-    for (const candidate of ["visible", "mystery", "hidden"] as const) {
+    for (const candidate of TIMER_DISPLAYS) {
       if (this.#checkIdentifier(candidate)) {
         this.#advance();
         display = candidate;
@@ -1448,6 +1517,7 @@ class Parser {
       if (label === null) return null;
       end = label.span;
     }
+    this.#recordCommand(command, end.end.offset, true);
     const handler = yield* parseChild(this.#parseTimerHandler());
     if (handler === false) return null;
     return {
@@ -1514,6 +1584,7 @@ class Parser {
 
   *#parseNamedTimer(command: Token): ParseTask<TimerParts | null> {
     const call = yield* parseChild(this.#finishCall(this.#identifier(command), this.#advance()));
+    this.#recordCommand(command, call.span.end.offset, true);
     let duration: Expression | null = null;
     let display: Expression | null = null;
     let label: Expression | null = null;
@@ -1541,7 +1612,8 @@ class Parser {
         continue;
       }
       seen.add(name);
-      switch (name) {
+      const known = TIMER_ARGUMENTS.find((candidate) => candidate === name);
+      switch (known) {
         case "duration":
           duration = argument.value;
           break;
@@ -1562,13 +1634,13 @@ class Parser {
             );
             valid = false;
           } else {
-            flags[name] = argument.value.value;
+            flags[known] = argument.value.value;
           }
           break;
-        default:
+        case undefined:
           this.#reportSpan(
             parserDiagnosticCode.invalidTimerForm,
-            `Unknown timer argument '${name}'. Use duration, async, display, label, repeat, or persist.`,
+            `Unknown timer argument '${name}'. Use ${TIMER_ARGUMENTS.slice(0, -1).join(", ")}, or ${TIMER_ARGUMENTS.at(-1)}.`,
             argument.name.span,
           );
           valid = false;
@@ -1631,6 +1703,7 @@ class Parser {
     const textEnd = this.#current;
     const options = text === null ? null : yield* parseChild(this.#parsePermanentButtonOptions());
     this.#blockEndsCompactInteraction = enclosing;
+    if (text !== null) this.#recordCommand(command, this.#lastEnd(), true);
     if (text === null) {
       // Text that reported its own error, as `"Stop" + {`, needs no second one.
       if (this.#diagnostics.length === diagnosticCount)
@@ -1698,7 +1771,7 @@ class Parser {
           name.span,
         );
         valid = false;
-      } else if (name.lexeme !== "persist") {
+      } else if (!PERMANENT_BUTTON_OPTIONS.includes(name.lexeme)) {
         this.#reportSpan(
           parserDiagnosticCode.invalidMediaForm,
           `Unknown showPermanentButton option '${name.lexeme}'. The only option is 'persist'.`,
@@ -1812,6 +1885,7 @@ class Parser {
       }
       return null;
     }
+    this.#recordCommand(command, image.span.end.offset, false);
     return Object.freeze({
       kind: "showImageStatement",
       image,
@@ -2078,7 +2152,7 @@ class Parser {
   *#parseLoadExpression(): ParseTask<LoadExpression | null> {
     const command = this.#advance();
     // Whitespace does not matter: `load ("k")` is the bounded form too, so its `)` ends the load.
-    if (this.#check(TokenKind.LeftParenthesis)) {
+    if (startsCallForm(command, this.#peek())) {
       const call = yield* parseChild(
         this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
       );
@@ -2208,9 +2282,12 @@ class Parser {
       )
     )
       return null;
-    if (!this.#checkIdentifier("stage"))
+    if (!this.#checkIdentifier("stage")) {
+      this.#recordCommand(command, command.span.end.offset, false);
       return { placement: "window", span: copySpan(command.span) };
+    }
     const word = this.#advance();
+    this.#recordCommand(command, word.span.end.offset, false);
     return { placement: "stage", span: spanFrom(command.span, word.span) };
   }
 
@@ -2220,6 +2297,7 @@ class Parser {
       this.#rejectAdjacentParenthesis(command, "hideCamera takes no arguments. Write 'hideCamera'.")
     )
       return null;
+    this.#recordCommand(command, command.span.end.offset, false);
     return Object.freeze({ kind: "hideCameraStatement", span: copySpan(command.span) });
   }
 
@@ -2229,6 +2307,7 @@ class Parser {
       this.#rejectAdjacentParenthesis(command, "hideImage takes no arguments. Write 'hideImage'.")
     )
       return null;
+    this.#recordCommand(command, command.span.end.offset, false);
     return Object.freeze({ kind: "hideImageStatement", span: copySpan(command.span) });
   }
 
@@ -2243,7 +2322,10 @@ class Parser {
       this.#check(TokenKind.Newline) ||
       this.#check(TokenKind.EndOfFile) ||
       (braces === 0 && this.#check(TokenKind.RightBrace));
-    if (atEnd()) return Object.freeze({ kind: "stopAudioStatement", span: copySpan(command.span) });
+    if (atEnd()) {
+      this.#recordCommand(command, command.span.end.offset, false);
+      return Object.freeze({ kind: "stopAudioStatement", span: copySpan(command.span) });
+    }
     const first = this.#peek();
     let last = first;
     while (!atEnd()) {
@@ -2292,10 +2374,7 @@ class Parser {
   *#parseMediaParts(): ParseTask<MediaParts | null> {
     const command = this.#advance();
     const media: MediaKind = command.lexeme === "playAudio" ? "audio" : "video";
-    if (
-      this.#check(TokenKind.LeftParenthesis) &&
-      this.#peek().span.start.offset === command.span.end.offset
-    ) {
+    if (startsCallForm(command, this.#peek())) {
       return yield* parseChild(this.#withinDelimiters(this.#parseNamedMedia(command, media)));
     }
     const async = this.#checkIdentifier("async");
@@ -2313,6 +2392,7 @@ class Parser {
       this.#synchronizeStatement(true);
       return null;
     }
+    this.#recordCommand(command, file.span.end.offset, true);
     const handlers = yield* parseChild(this.#parseMediaHandlers());
     if (handlers === false) return null;
     return {
@@ -2420,6 +2500,7 @@ class Parser {
       return null;
     }
     const right = this.#previous();
+    this.#recordCommand(command, right.span.end.offset, true);
     const file = values.file ?? null;
     if (file === null && valid) {
       this.#reportSpan(

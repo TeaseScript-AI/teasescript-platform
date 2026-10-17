@@ -21,7 +21,8 @@ closing read. The Player's palette (`player/theme/palette.ts`) holds the code co
 [random draw picker](DEBUGGER.md#random-draws) applies to the same classes; the editor should adopt these roles later
 (owner direction, #512) instead of keeping colours of its own. Hover and signature help of a conversion or random
 function call, such as `toNumber(...)` or `chance(...)`, come from its contract in `src/conversions.ts` or
-`src/random-functions.ts`.
+`src/random-functions.ts`, and those of a command cover its arguments as the parser reads them and name the options of
+the parser's tables in `src/parser.ts`, which the parser and the name pass check.
 The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
 textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
 validated checkpoint save/restore. Its Player panel provides the first Standard interaction and chat-pacing control POC
