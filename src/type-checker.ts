@@ -4330,7 +4330,7 @@ class TypeChecker {
   }
 
   /**
-   * A range written in a `toList()` call whose bounds the compiler knows gives at most `MAX_RANGE_LIST_LENGTH` numbers
+   * A range written in a `toList()` call whose bounds the compiler knows gives at most `MAX_COLLECTION_LENGTH` numbers
    * (V30 §6). Bounds that a number cannot hold exactly are left to the runtime, which names them.
    */
   #checkRangeListLength(expression: Expression): void {
