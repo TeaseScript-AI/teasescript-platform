@@ -9,6 +9,8 @@ import type { ListFunctionName } from "./language-facts.js";
 import {
   LIST_FUNCTION_CONTRACTS,
   listFunctionShape,
+  listValueMessage,
+  mixedListValuesMessage,
   type ListFunction,
   type ListValueKind,
 } from "./list-function-rules.js";
@@ -127,7 +129,7 @@ function listFunctionType(context: Context, contract: ListFunction, known: Known
       const xs =
         x === undefined
           ? "integer"
-          : valueKind(context, valuesType(context, list, x, "x"), contract.positions, x);
+          : valueKind(context, valuesType(context, list, x, "x"), contract.positions, x, true);
       const amount =
         ys === undefined ? UNKNOWN_TYPE : ys === "duration" ? DURATION_TYPE : NUMBER_TYPE;
       return {
@@ -293,8 +295,9 @@ function valuesType(
 function valueKind(
   context: Context,
   type: StaticType,
-  allowed: readonly ValueKind[],
+  allowed: readonly ListValueKind[],
   at: Expression,
+  x = false,
 ): ValueKind | undefined {
   const parts = members(type).map(resolved);
   if (parts.length === 0 || !parts.every(isKnown)) return undefined;
@@ -303,42 +306,21 @@ function valueKind(
     const kind = (
       ["integer", "number", "duration", "calendarDuration", "angle", ...TEMPORAL_KINDS] as const
     ).find((one) => isScalar(part, one));
-    if (kind === undefined || !allowed.includes(kind === "integer" ? "number" : kind)) {
-      // An angle wraps around at 360°, so only `sum`, `min`, and `max` take angles.
+    const listKind = kind === "integer" ? "number" : kind;
+    if (listKind === undefined || !allowed.includes(listKind)) {
       problem(
         context,
-        kind === "angle"
-          ? angleStatisticMessage(context.name)
-          : `${context.name}(...) needs ${describeKinds(allowed)}, not ${describeValue(part)}.`,
+        listValueMessage(context.name, allowed, describeValue(part), listKind, x),
         at,
       );
       return undefined;
     }
-    kinds.add(kind);
+    kinds.add(kind!);
   }
   if (kinds.size === 1) return [...kinds][0]!;
   if (kinds.size === 2 && kinds.has("integer") && kinds.has("number")) return "number";
-  problem(context, `${context.name}(...) needs values of one kind: ${describeKinds(allowed)}.`, at);
+  problem(context, mixedListValuesMessage(context.name, allowed, x), at);
   return undefined;
-}
-
-function describeKinds(kinds: readonly ValueKind[]): string {
-  const words = kinds.map((kind) =>
-    kind === "number"
-      ? "numbers"
-      : kind === "duration"
-        ? "durations"
-        : kind === "calendarDuration"
-          ? "calendar durations"
-          : kind === "datetime"
-            ? "datetimes"
-            : kind === "absoluteDateTime"
-              ? "absolute dates and times"
-              : `${kind}s`,
-  );
-  return words.length === 1
-    ? words[0]!
-    : `${words.slice(0, -1).join(", ")}${words.length > 2 ? "," : ""} or ${words.at(-1)!}`;
 }
 
 function typeOfKind(kind: ValueKind | undefined): StaticType {

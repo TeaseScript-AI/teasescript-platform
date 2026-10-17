@@ -147,7 +147,7 @@ test("statistics report empty lists, values they cannot read, and percentages ou
     [
       "average(dynamic([1, dynamic(2 s)]))",
       "TSR060",
-      "average(...) needs values of one kind: all numbers or all durations.",
+      "average(...) needs values of one kind: numbers or durations.",
     ],
     [
       "average(dynamic([1 calendar day, 2 calendar days]))",
@@ -157,7 +157,7 @@ test("statistics report empty lists, values they cannot read, and percentages ou
     [
       "sum([dynamic(2), dynamic(1 s)])",
       "TSR060",
-      "sum(...) needs values of one kind: all numbers, all durations, or all angles.",
+      "sum(...) needs values of one kind: numbers, durations, or angles.",
     ],
     [
       'sum(dynamic([{ n: 1 }]), by: "count")',
@@ -911,7 +911,7 @@ test("linearRegression and predict report too few points, one x, and values of t
       'say linearRegression([{ at: "a", n: 1 }, { at: "b", n: 2 }], x: "at", y: "n").slope\nexit',
     ).map(([, message]) => message),
     [
-      "linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times, not text (string).",
+      "linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times as x values, not text (string).",
     ],
   );
   assert.deepEqual(diagnostics('say linearRegression([{ day: 1 }], x: "day")\nexit'), [
@@ -1089,4 +1089,33 @@ test("a domain of a list function's numbers fails alike when the compiler can se
           assert.deepEqual(diagnostics(source), [["TSV043", message, String(value)]], source);
       }
   }
+});
+
+test("values of another kind, or of several kinds, fail alike when the compiler can see them and at runtime", () => {
+  const lists = [
+    'let xs: (integer | string)[] = [1, "a"]',
+    "let xs: (integer | duration)[] = [1, 2 s]",
+    "let xs: (calendarDuration | duration)[] = [1 calendar month, 2 s]",
+  ];
+  for (const name of LIST_FUNCTIONS) {
+    const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
+    if (contract.takes === "line") continue;
+    const rest = contract.parameters.length > 1 ? ", 50" : "";
+    for (const list of lists) {
+      const compiled = diagnostics(`${list}\nsay ${name}(xs${rest})\nexit`);
+      assert.equal(compiled.length, 1, `${name}: ${list}`);
+      assert.deepEqual(
+        failure(`${DYNAMIC}${list}\nsay ${name}(dynamic(xs)${rest})\nexit`),
+        ["TSR060", compiled[0]![1]],
+        `${name}: ${list}`,
+      );
+    }
+  }
+  // An x value of a line, which is a number or one kind of date and time value.
+  const points = 'let points = [{ x: toTime("12:00"), y: 1 }, { x: toTime("13:00"), y: 2 }]';
+  const compiled = diagnostics(`${points}\nsay linearRegression(points, y: "y", x: "x")\nexit`);
+  assert.deepEqual(
+    failure(`${DYNAMIC}${points}\nsay linearRegression(dynamic(points), y: "y", x: "x")\nexit`),
+    ["TSR060", compiled[0]?.[1]],
+  );
 });

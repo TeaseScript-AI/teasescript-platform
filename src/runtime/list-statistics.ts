@@ -6,7 +6,10 @@ import type { ListFunctionName } from "../language-facts.js";
 import {
   LIST_FUNCTION_CONTRACTS,
   listFunctionShape,
+  listValueMessage,
+  mixedListValuesMessage,
   type ListFunction,
+  type ListValueKind,
   type StatisticName,
 } from "../list-function-rules.js";
 import { RANDOM_CONTRACTS } from "../random-functions.js";
@@ -118,32 +121,53 @@ function amountsOf(
   values: readonly SerializableRuntimeValue[],
   span: SourceSpan,
 ): Amounts {
-  const numbers = values.filter((value) => typeof value === "number");
-  if (numbers.length === values.length) return { kind: "numbers", values: numbers };
   const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
-  const angles = contract.takes === "values" && contract.values.includes("angle");
-  if (!angles && values.some(isAngle)) throw fault("TSR060", angleStatisticMessage(name), span);
-  const other = values.find(
-    (value) => typeof value !== "number" && !isDuration(value) && !isAngle(value),
-  );
+  const kinds = contract.takes === "line" ? [] : contract.values;
+  switch (listValuesKind(name, values, kinds, span)) {
+    case "angle":
+      return { kind: "angles", values: values.filter(isAngle).map((value) => value.degrees) };
+    case "duration":
+      return {
+        kind: "durations",
+        values: values.filter(isDuration).map((value) => value.milliseconds),
+      };
+    default:
+      return { kind: "numbers", values: values.filter((value) => typeof value === "number") };
+  }
+}
+
+/** The kind of a value that a list function may read, or `undefined` for another value. */
+function kindOf(value: SerializableRuntimeValue): ListValueKind | undefined {
+  if (typeof value === "number") return "number";
+  if (isDuration(value)) return "duration";
+  if (isCalendarDuration(value)) return "calendarDuration";
+  if (isAngle(value)) return "angle";
+  return isTemporal(value) ? value.kind : undefined;
+}
+
+/**
+ * The one kind of `values`, each of one of `kinds`, or `undefined` for no values; otherwise it fails as the compiler
+ * reports the problem (`TSR060`): an angle where `kinds` has none first, then the first value of another kind, then
+ * values of several kinds. `x` is as for `listValueMessage`.
+ */
+export function listValuesKind(
+  name: string,
+  values: readonly SerializableRuntimeValue[],
+  kinds: readonly ListValueKind[],
+  span: SourceSpan,
+  x = false,
+): ListValueKind | undefined {
+  const angle = kinds.includes("angle") ? undefined : values.find(isAngle);
+  const other = angle ?? values.find((value) => !kinds.some((kind) => kind === kindOf(value)));
   if (other !== undefined)
     throw fault(
       "TSR060",
-      `${name}(...) needs numbers${angles ? ", durations, or angles" : " or durations"}, not ${describeRuntimeValue(other)}.${isCalendarDuration(other) ? " A calendar day or month has no fixed length." : ""}`,
+      listValueMessage(name, kinds, describeRuntimeValue(other), kindOf(other), x),
       span,
     );
-  if (values.every(isAngle))
-    return { kind: "angles", values: values.filter(isAngle).map((value) => value.degrees) };
-  if (!values.every(isDuration))
-    throw fault(
-      "TSR060",
-      `${name}(...) needs values of one kind: all numbers${angles ? ", all durations, or all angles" : " or all durations"}.`,
-      span,
-    );
-  return {
-    kind: "durations",
-    values: values.filter(isDuration).map((value) => value.milliseconds),
-  };
+  const found = new Set(values.map(kindOf));
+  if (found.size > 1) throw fault("TSR060", mixedListValuesMessage(name, kinds, x), span);
+  return values.length === 0 ? undefined : kindOf(values[0]!);
 }
 
 /**
@@ -411,8 +435,9 @@ function positionsOf(
       offsets: Array.from({ length: count }, (_, index) => whole(index)),
       perDay: 1n,
     };
-  const numbers = xs.filter((x) => typeof x === "number");
-  if (numbers.length === xs.length) {
+  const { positions } = LIST_FUNCTION_CONTRACTS.linearRegression;
+  if (listValuesKind("linearRegression", xs, positions, span, true) === "number") {
+    const numbers = xs.filter((x) => typeof x === "number");
     const start = exact(numbers[0]!);
     return {
       kind: "steps",
@@ -421,26 +446,9 @@ function positionsOf(
       perDay: 1n,
     };
   }
-  const first = xs[0]!;
-  const temporals = xs.filter(
-    (x): x is SerializableRuntimeTemporal =>
-      isTemporal(x) && isTemporal(first) && x.kind === first.kind && x.kind !== "time",
-  );
-  const start = temporals[0];
-  if (start === undefined || temporals.length !== xs.length) {
-    const other =
-      xs.find((x) => typeof x !== "number" && !isTemporal(x)) ??
-      xs.find((x) => isTemporal(x) && x.kind === "time");
-    if (other !== undefined && isAngle(other))
-      throw fault("TSR060", angleStatisticMessage("linearRegression"), span);
-    throw fault(
-      "TSR060",
-      other === undefined
-        ? "linearRegression(...) needs x values of one kind: numbers, dates, datetimes, or absolute dates and times."
-        : `linearRegression(...) needs numbers, dates, datetimes, or absolute dates and times as x values, not ${describeRuntimeValue(other)}.`,
-      span,
-    );
-  }
+  // Dates, datetimes, or absolute dates and times, all of one kind.
+  const temporals = xs.filter(isTemporal);
+  const start = temporals[0]!;
   return {
     kind: "days",
     start,
@@ -485,12 +493,11 @@ export function predict(
   const slopeAmount = amount(slope);
   const interceptAmount = amount(intercept);
   const durations = slope !== undefined && isDuration(slope);
+  const kind = start === undefined ? undefined : kindOf(start);
   const startKind =
-    typeof start === "number"
-      ? "number"
-      : start !== undefined && isTemporal(start) && start.kind !== "time"
-        ? start.kind
-        : undefined;
+    kind !== undefined && LIST_FUNCTION_CONTRACTS.predict.positions.includes(kind)
+      ? kind
+      : undefined;
   if (
     slopeAmount === undefined ||
     interceptAmount === undefined ||

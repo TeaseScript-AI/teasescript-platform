@@ -12,6 +12,7 @@ import {
 import {
   isListFunction,
   isStatistic,
+  LIST_FUNCTION_CONTRACTS,
   listFunctionShape,
   minMaxValuesProblem,
   takesValues,
@@ -109,6 +110,7 @@ import { accountFieldValue } from "./account.js";
 import {
   linearRegression,
   listStatistic,
+  listValuesKind,
   statisticValues,
   predict,
   weightedChoices,
@@ -3658,7 +3660,11 @@ export class Evaluator {
         ? argumentShapeProblem(name, listFunctionShape(name), 1, names)
         : minMaxValuesProblem(name, positional.length, names);
     if (problem !== undefined) throw fault("TSR028", problem.message, span);
-    if (one) positional = statisticValues(name, positional[0]!, named.by, span);
+    // The values of one list are of one kind it reads, as the compiler checks them (`TSR060`).
+    if (one) {
+      positional = statisticValues(name, positional[0]!, named.by, span);
+      listValuesKind(name, positional, LIST_FUNCTION_CONTRACTS[name].values, span);
+    }
     const numbers = positional.every((value) => typeof value === "number");
     const first = positional[0]!;
     const temporals = positional.filter(

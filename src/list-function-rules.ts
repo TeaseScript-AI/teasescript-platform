@@ -5,6 +5,7 @@ import {
   type ArgumentProblem,
   type ArgumentShape,
 } from "./argument-rules.js";
+import { angleStatisticMessage } from "./angle.js";
 import type { ListFunctionName } from "./language-facts.js";
 import { percentageFailure, type NumberDomain } from "./numeric-functions.js";
 
@@ -235,6 +236,52 @@ export function listFunctionSyntax(name: ListFunctionName): string {
   const contract: ListFunction = LIST_FUNCTION_CONTRACTS[name];
   const call = `${name}(${contract.parameters.join(", ")}${contract.named.map((parameter) => ` [, ${parameter}: text]`).join("")})`;
   return takesValues(name) ? `${name}(value, value, ...)  or  ${call}` : call;
+}
+
+/** The kinds as a message names them, such as `numbers or durations`. */
+function describeKinds(kinds: readonly ListValueKind[]): string {
+  const words = kinds.map((kind) =>
+    kind === "number"
+      ? "numbers"
+      : kind === "duration"
+        ? "durations"
+        : kind === "calendarDuration"
+          ? "calendar durations"
+          : kind === "datetime"
+            ? "datetimes"
+            : kind === "absoluteDateTime"
+              ? "absolute dates and times"
+              : `${kind}s`,
+  );
+  return words.length === 1
+    ? words[0]!
+    : `${words.slice(0, -1).join(", ")}${words.length > 2 ? "," : ""} or ${words.at(-1)!}`;
+}
+
+/**
+ * Why the list function `name` cannot read a value described as `given`, of `kind` (`undefined` for a value of no kind
+ * a list function reads), where it reads `kinds`: from the compiler (`TSV043`) and the runtime (`TSR060`). `x` says
+ * whether it is an x value of `linearRegression`. An angle wraps around at 360°, and a calendar day or month has no
+ * fixed length.
+ */
+export function listValueMessage(
+  name: string,
+  kinds: readonly ListValueKind[],
+  given: string,
+  kind: ListValueKind | undefined,
+  x = false,
+): string {
+  if (kind === "angle") return angleStatisticMessage(name);
+  return `${name}(...) needs ${describeKinds(kinds)}${x ? " as x values" : ""}, not ${given}.${kind === "calendarDuration" ? " A calendar day or month has no fixed length." : ""}`;
+}
+
+/** Why `name` cannot read values of several of `kinds` together, from the compiler and the runtime (`TSR060`). */
+export function mixedListValuesMessage(
+  name: string,
+  kinds: readonly ListValueKind[],
+  x = false,
+): string {
+  return `${name}(...) needs ${x ? "x values" : "values"} of one kind: ${describeKinds(kinds)}.`;
 }
 
 /** What `min` and `max` take besides one list. */
