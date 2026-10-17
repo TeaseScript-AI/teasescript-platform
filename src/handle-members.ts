@@ -284,6 +284,9 @@ export type HandlePropertyName<Kind extends HandleKind> = keyof Members[Kind]["p
 
 export type HandleMethodName<Kind extends HandleKind> = keyof Members[Kind]["methods"] & string;
 
+/** The name of a method of any kind of handle. */
+export type AnyHandleMethodName = { [Kind in HandleKind]: HandleMethodName<Kind> }[HandleKind];
+
 /** The properties of `Kind` that a script can assign. */
 export type AssignableHandleProperty<Kind extends HandleKind> = {
   [Name in HandlePropertyName<Kind>]: Members[Kind]["properties"][Name] extends {
@@ -363,6 +366,20 @@ export function handleMethodNames(): readonly string[] {
 /** Whether a handle of some kind has a method `name`. Every handle method changes its handle (see `HandleMethod`). */
 export function isAnyHandleMethod(name: string): boolean {
   return kindsWithMethod(name).length > 0;
+}
+
+/**
+ * The help of a method that every handle with a method `name` shares, as timers and media share `pause()`, or
+ * `undefined`. A message's and a permanent button's `remove()` differ.
+ */
+export function sharedHandleMethodSummary(name: string): string | undefined {
+  const summaries = new Set(kindsWithMethod(name).map((kind) => handleMethod(kind, name)!.summary));
+  return summaries.size === 1 ? [...summaries][0] : undefined;
+}
+
+/** A call of a handle method as the editor's help writes it, such as `handle.pause()`: none takes arguments. */
+export function handleMethodSyntax(name: AnyHandleMethodName): string {
+  return `handle.${name}()`;
 }
 
 /**

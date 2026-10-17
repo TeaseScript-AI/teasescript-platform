@@ -55,6 +55,12 @@ import {
   type ListMethodName,
 } from "./list-methods.js";
 import {
+  handleMethodSyntax,
+  isAnyHandleMethod,
+  sharedHandleMethodSummary,
+  type AnyHandleMethodName,
+} from "./handle-members.js";
+import {
   askParts,
   sayOperands,
   mediaHandlerBlocks,
@@ -927,10 +933,11 @@ function declaredSpeakers(source: string): readonly string[] {
 
 /**
  * A built-in whose help comes from its contract: a conversion, a numeric or angle function, a random function, a clock
- * read, a list function, a method that only text has, a method of date and time values, or one that only lists and sets
- * have (`CONVERSIONS`, `NUMERIC_CONTRACTS`, `RANDOM_CONTRACTS`, `CLOCK_CONTRACTS`, `LIST_FUNCTION_CONTRACTS`,
- * `TEXT_METHODS`, `TEMPORAL_METHODS`, `LIST_METHODS`). A method that other values have too, such as `contains`, may be
- * called on a value the editor does not know, so it has none.
+ * read, a list function, a method that only text has, a method of date and time values, one that only lists and sets
+ * have, or one that only handles have, with the same help on each (`CONVERSIONS`, `NUMERIC_CONTRACTS`,
+ * `RANDOM_CONTRACTS`, `CLOCK_CONTRACTS`, `LIST_FUNCTION_CONTRACTS`, `TEXT_METHODS`, `TEMPORAL_METHODS`, `LIST_METHODS`,
+ * `HANDLE_MEMBERS`). A method that other values have too, such as `contains`, may be called on a value the editor does
+ * not know, so it has none.
  */
 type ContractName =
   | ConversionName
@@ -940,13 +947,29 @@ type ContractName =
   | ListFunctionName
   | TextMethodName
   | TemporalMethodName
-  | ListMethodName;
+  | ListMethodName
+  | AnyHandleMethodName;
 
 /** Whether only lists and sets have a method `name` (see `ListMethod.shared`). */
 function isListOnlyMethod(name: string): name is ListMethodName {
   if (!isListMethod(name) || isTextMethod(name)) return false;
   const method: ListMethod = LIST_METHODS[name];
   return method.shared !== true;
+}
+
+/**
+ * Whether only handles have a method `name`, all with the same help (`sharedHandleMethodSummary`), such as `pause`: no
+ * text, list, set, dict, or date and time value has one. `remove` is not one: lists, sets, and dicts have one too, and a
+ * message's and a permanent button's differ.
+ */
+function isHandleOnlyMethod(name: string): name is AnyHandleMethodName {
+  return (
+    isAnyHandleMethod(name) &&
+    sharedHandleMethodSummary(name) !== undefined &&
+    !isTextMethod(name) &&
+    !isTemporalMethod(name) &&
+    !isListMethod(name)
+  );
 }
 
 /**
@@ -963,7 +986,10 @@ type ContractCall = { readonly range: LanguageRange; readonly opener: number } &
         | ClockFunctionName
         | ListFunctionName;
     }
-  | { readonly method: true; readonly name: TextMethodName | TemporalMethodName | ListMethodName }
+  | {
+      readonly method: true;
+      readonly name: TextMethodName | TemporalMethodName | ListMethodName | AnyHandleMethodName;
+    }
 );
 
 /**
@@ -1262,17 +1288,23 @@ function contractHelp(call: ContractCall): LanguageContextHelp {
           summary: TEMPORAL_METHODS[call.name].summary,
           syntax: temporalSyntax(call.name),
         }
-      : isTextMethod(call.name)
+      : isHandleOnlyMethod(call.name)
         ? {
             command: call.name,
-            summary: TEXT_METHODS[call.name].summary,
-            syntax: textMethodSyntax(call.name),
+            summary: sharedHandleMethodSummary(call.name)!,
+            syntax: handleMethodSyntax(call.name),
           }
-        : {
-            command: call.name,
-            summary: LIST_METHODS[call.name].summary,
-            syntax: listMethodSyntax(call.name),
-          };
+        : isTextMethod(call.name)
+          ? {
+              command: call.name,
+              summary: TEXT_METHODS[call.name].summary,
+              syntax: textMethodSyntax(call.name),
+            }
+          : {
+              command: call.name,
+              summary: LIST_METHODS[call.name].summary,
+              syntax: listMethodSyntax(call.name),
+            };
   if (isConversion(call.name))
     return {
       command: call.name,
@@ -1323,14 +1355,19 @@ function locateContractCall(tokens: readonly Token[], offset: number): ContractC
       const name = tokens[index - 1];
       // After a dot, a method that only text has, also `repeat`, which the lexer reads as a keyword, a method of date
       // and time values, also one of the same name as a function, such as a datetime's `toAbsoluteDateTime()`, or a
-      // method that only lists and sets have. A declared function is not a call of the built-in.
+      // method that only lists and sets, or only handles, have. A declared function is not a call of the built-in.
       const before = tokens[index - 2]?.kind;
       let call: ContractCall | null = null;
       if (token.kind === TokenKind.LeftParenthesis && name !== undefined) {
         const word = name.lexeme;
         const at = { range: name.span, opener: token.span.start.offset };
         if (before === TokenKind.Dot) {
-          if (isTextOnlyMethod(word) || isTemporalMethod(word) || isListOnlyMethod(word))
+          if (
+            isTextOnlyMethod(word) ||
+            isTemporalMethod(word) ||
+            isListOnlyMethod(word) ||
+            isHandleOnlyMethod(word)
+          )
             call = { ...at, method: true, name: word };
         } else if (
           name.kind === TokenKind.Identifier &&
@@ -1427,7 +1464,7 @@ function callParameters(
     form = method.parameters.map((parameter) => parameter.name);
     parameters = Object.freeze([...form, ...(method.named ?? [])]);
   } else {
-    // A clock read and a method of date and time values take no arguments.
+    // A clock read, a method of date and time values, and a handle method take no arguments.
     form = [];
     parameters = Object.freeze(form);
   }
