@@ -137,7 +137,7 @@ test("an askBoolean prefill known only at runtime is true or false, null or blan
       [snapshot.failure?.code, snapshot.failure?.message],
       [
         "TSR052",
-        `The prefill of askBoolean must be true or false, not ${value === 5 ? "a number" : "text (string)"}.`,
+        `The prefill of askBoolean must be true or false, not ${value === 5 ? "a whole number (integer)" : "text (string)"}.`,
       ],
       String(value),
     );
