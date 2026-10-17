@@ -15,6 +15,7 @@ import type {
   TypeAnnotation,
 } from "../ast.js";
 import { isAskImageCall, isTakePhotoCall } from "../capture-call.js";
+import { compileChild, runCompileTask, type CompileTask } from "../compiler/continuation.js";
 import { isConversion } from "../conversions.js";
 import { changesEntries } from "../dict-operations.js";
 import {
@@ -31,6 +32,7 @@ import {
   unwrap,
 } from "../expression-children.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "../language-facts.js";
+import { lazyDefaultArgument } from "../lazy-defaults.js";
 import { isListFunction } from "../list-function-rules.js";
 import { listMethod } from "../list-methods.js";
 import { isNumericFunction } from "../numeric-functions.js";
@@ -199,9 +201,15 @@ class Collector {
       this.#outer = this.#project;
       this.#body = this.#project;
       this.#region = { kind: "start" };
-      if (declaration.kind === "globalStatement") this.#let(declaration, this.#project);
+      if (declaration.kind === "globalStatement")
+        runCompileTask(this.#let(declaration, this.#project));
       else
-        this.#speaker(declaration, copy === undefined ? undefined : { call: copy, file: copyFile });
+        runCompileTask(
+          this.#speaker(
+            declaration,
+            copy === undefined ? undefined : { call: copy, file: copyFile },
+          ),
+        );
     }
     for (const [file, program] of programs.entries()) {
       this.#file = file;
@@ -213,16 +221,20 @@ class Collector {
           functions.set(statement, this.#declareFunction(statement, file, root));
       this.#body = program;
       this.#region = { kind: "file", file };
-      this.#statements(
-        program.statements.filter((statement) => statement.kind !== "functionDeclaration"),
-        root,
+      runCompileTask(
+        this.#statements(
+          program.statements.filter((statement) => statement.kind !== "functionDeclaration"),
+          root,
+        ),
       );
       for (const statement of program.statements)
         if (statement.kind === "functionDeclaration")
-          this.#functionBody(
-            statement,
-            functions.get(statement)!,
-            statement.global ? this.#project : root,
+          runCompileTask(
+            this.#functionBody(
+              statement,
+              functions.get(statement)!,
+              statement.global ? this.#project : root,
+            ),
           );
       for (let index = 0; index < this.#handlers.length; index += 1) {
         const handler = this.#handlers[index]!;
@@ -230,7 +242,8 @@ class Collector {
         this.#region = { kind: "handler", handler: handler.id };
         const scope = new Scope(handler.scope);
         if (handler.selfHandle !== null) {
-          const place = this.#place(handler.block, handler.selfHandle, {
+          // A block's own handle has no declaration of its own: it is the `let` that holds the media, seen from inside.
+          const place = this.#place(null, handler.selfHandle, {
             kind: "binding",
             declared: "let",
             name: handler.selfHandle,
@@ -242,7 +255,7 @@ class Collector {
         this.#function = null;
         this.#outer = handler.scope.parent ?? this.#project;
         this.#body = handler;
-        this.#statements(handler.block.statements, scope);
+        runCompileTask(this.#statements(handler.block.statements, scope));
       }
       this.#handlers.length = 0;
     }
@@ -391,7 +404,11 @@ class Collector {
   }
 
   /** Walks a function's parameter defaults and body, every function once, called or not. */
-  #functionBody(declaration: FunctionDeclaration, id: FunctionId, outer: Scope): void {
+  *#functionBody(
+    declaration: FunctionDeclaration,
+    id: FunctionId,
+    outer: Scope,
+  ): CompileTask<void> {
     const signature = this.#functions[id]!;
     const scope = new Scope(outer);
     const outerBody = this.#body;
@@ -405,7 +422,7 @@ class Collector {
       const place = signature.parameters[index]!;
       // A default runs when the function is called, with the parameters before it in view.
       if (parameter.defaultValue !== null) {
-        const value = this.#expression(parameter.defaultValue, scope);
+        const value = yield* compileChild(this.#expression(parameter.defaultValue, scope));
         this.#store(value, place, "parameter default", parameter.defaultValue, "parameter default");
       }
       scope.declare(parameter.name.name, {
@@ -416,7 +433,7 @@ class Collector {
       });
     }
     this.#function = id;
-    this.#statements(declaration.body.statements, scope);
+    yield* compileChild(this.#statements(declaration.body.statements, scope));
     // The end of the body: whether it is reached, so that the function completes without a value, is the solver's.
     this.#add({ ...this.#origin(declaration.body, "return"), kind: "exit", fn: id });
     this.#function = outerFunction;
@@ -425,13 +442,13 @@ class Collector {
     this.#region = outerRegion;
   }
 
-  #let(statement: LetStatement | GlobalStatement, scope: Scope): void {
+  *#let(statement: LetStatement | GlobalStatement, scope: Scope): CompileTask<void> {
     const name = statement.name.name;
     const global = statement.kind === "globalStatement";
     const written = global ? statement.initial : statement.initializer;
     const receiver = statement.typeAnnotation === null ? null : typeTerm(statement.typeAnnotation);
     this.#selfHandle = unwrap(written).kind === "playMediaExpression" ? name : null;
-    const value = this.#expression(written, scope, receiver);
+    const value = yield* compileChild(this.#expression(written, scope, receiver));
     this.#selfHandle = null;
     const place = this.#place(statement, name, {
       kind: "binding",
@@ -452,10 +469,10 @@ class Collector {
     });
   }
 
-  #speaker(
+  *#speaker(
     declaration: SpeakerDeclaration,
     copy: { readonly call: CallExpression; readonly file: number } | undefined,
-  ): void {
+  ): CompileTask<void> {
     const name = declaration.name.name;
     this.#project.declare(name, { kind: "speaker", name });
     // A copy of the account anywhere gives the player each person field from the start, with its terms and name
@@ -468,7 +485,7 @@ class Collector {
       this.#file = file;
     }
     for (const property of declaration.properties) {
-      const value = this.#expression(property.value, this.#project);
+      const value = yield* compileChild(this.#expression(property.value, this.#project));
       this.#add({
         ...this.#origin(property.value, "start value"),
         kind: "speakerStore",
@@ -503,22 +520,23 @@ class Collector {
 
   // Statements ------------------------------------------------------------------------------------------------------
 
-  #statements(statements: readonly Statement[], scope: Scope): void {
-    for (const statement of statements) this.#statement(statement, scope);
+  *#statements(statements: readonly Statement[], scope: Scope): CompileTask<void> {
+    for (const statement of statements) yield* compileChild(this.#statement(statement, scope));
   }
 
-  #block(block: Block, scope: Scope): void {
-    this.#statements(block.statements, new Scope(scope));
+  *#block(block: Block, scope: Scope): CompileTask<void> {
+    yield* compileChild(this.#statements(block.statements, new Scope(scope)));
   }
 
-  #statement(statement: Statement, scope: Scope): void {
+  *#statement(statement: Statement, scope: Scope): CompileTask<void> {
     switch (statement.kind) {
       case "letStatement":
-        this.#let(statement, scope);
+        yield* compileChild(this.#let(statement, scope));
         return;
       case "globalStatement":
         // The start value was walked with the session's declarations; `default:` assigns where the statement stands.
-        if (statement.assignment !== null) this.#assignment(statement.assignment, scope);
+        if (statement.assignment !== null)
+          yield* compileChild(this.#assignment(statement.assignment, scope));
         return;
       case "speakerDeclaration":
       case "speakerSetterStatement":
@@ -530,31 +548,32 @@ class Collector {
       case "endStatement":
         return;
       case "assignmentStatement":
-        this.#assignment(statement, scope);
+        yield* compileChild(this.#assignment(statement, scope));
         return;
       case "expressionStatement":
-        this.#expression(statement.expression, scope);
+        yield* compileChild(this.#expression(statement.expression, scope));
         return;
       case "ifStatement":
-        this.#expression(statement.condition, scope);
-        this.#block(statement.thenBlock, scope);
+        yield* compileChild(this.#expression(statement.condition, scope));
+        yield* compileChild(this.#block(statement.thenBlock, scope));
         if (statement.elseBlock === null) return;
-        if (statement.elseBlock.kind === "ifStatement") this.#statement(statement.elseBlock, scope);
-        else this.#block(statement.elseBlock, scope);
+        if (statement.elseBlock.kind === "ifStatement")
+          yield* compileChild(this.#statement(statement.elseBlock, scope));
+        else yield* compileChild(this.#block(statement.elseBlock, scope));
         return;
       case "whileStatement":
-        this.#expression(statement.condition, scope);
-        this.#block(statement.body, scope);
+        yield* compileChild(this.#expression(statement.condition, scope));
+        yield* compileChild(this.#block(statement.body, scope));
         return;
       case "repeatStatement":
-        this.#expression(statement.count, scope);
-        this.#block(statement.body, scope);
+        yield* compileChild(this.#expression(statement.count, scope));
+        yield* compileChild(this.#block(statement.body, scope));
         return;
       case "forStatement":
-        this.#loop(statement, scope);
+        yield* compileChild(this.#loop(statement, scope));
         return;
       case "switchStatement": {
-        const subject = this.#expression(statement.subject, scope);
+        const subject = yield* compileChild(this.#expression(statement.subject, scope));
         const tested = this.#plainVariable(statement.subject, scope);
         for (const switchCase of statement.cases) {
           if (switchCase.typeTest !== null && tested !== undefined)
@@ -570,7 +589,7 @@ class Collector {
               point: { site: this.#site(switchCase.typeTest) },
             });
           for (const value of switchCase.values) {
-            const place = this.#expression(value, scope);
+            const place = yield* compileChild(this.#expression(value, scope));
             // The case's comparison has a result of its own; the case value stays an operand.
             const matched = this.#place(value, `@${value.span.start.offset}`, {
               kind: "value",
@@ -586,13 +605,17 @@ class Collector {
               result: matched,
             });
           }
-          this.#block(switchCase.body, scope);
+          yield* compileChild(this.#block(switchCase.body, scope));
         }
-        if (statement.defaultBlock !== null) this.#block(statement.defaultBlock, scope);
+        if (statement.defaultBlock !== null)
+          yield* compileChild(this.#block(statement.defaultBlock, scope));
         return;
       }
       case "returnStatement": {
-        const value = statement.value === null ? null : this.#expression(statement.value, scope);
+        const value =
+          statement.value === null
+            ? null
+            : yield* compileChild(this.#expression(statement.value, scope));
         if (this.#function !== null)
           this.#add({
             ...this.#origin(statement, "return"),
@@ -603,8 +626,8 @@ class Collector {
         return;
       }
       case "saveStatement": {
-        const value = this.#expression(statement.value, scope);
-        this.#expression(statement.key, scope);
+        const value = yield* compileChild(this.#expression(statement.value, scope));
+        yield* compileChild(this.#expression(statement.key, scope));
         this.#add({
           ...this.#origin(statement.value, "saved value"),
           kind: "save",
@@ -614,17 +637,18 @@ class Collector {
         return;
       }
       case "deleteStatement":
-        this.#expression(statement.key, scope);
+        yield* compileChild(this.#expression(statement.key, scope));
         return;
       case "gotoStatement":
       case "callFileStatement":
       case "fallbackStatement":
         if (statement.target?.kind === "scriptTarget")
-          this.#expression(statement.target.expression, scope);
+          yield* compileChild(this.#expression(statement.target.expression, scope));
         return;
       default:
         // A command: its operands are evaluated in order, and its blocks run later with the names visible here.
-        for (const operand of statementExpressions(statement)) this.#expression(operand, scope);
+        for (const operand of statementExpressions(statement))
+          yield* compileChild(this.#expression(operand, scope));
         this.#pendHandlers(statement, scope);
         return;
     }
@@ -648,8 +672,8 @@ class Collector {
     }
   }
 
-  #loop(statement: ForStatement, scope: Scope): void {
-    const iterable = this.#expression(statement.iterable, scope);
+  *#loop(statement: ForStatement, scope: Scope): CompileTask<void> {
+    const iterable = yield* compileChild(this.#expression(statement.iterable, scope));
     const loopScope = new Scope(scope);
     // The first variable's declaration is the `for` statement, a pair loop's value variable its own name.
     const binding = (name: Identifier, declaration: Spanned): PlaceId => {
@@ -682,10 +706,10 @@ class Collector {
       const value = binding(statement.valueVariable, statement.valueVariable);
       this.#store(target, value, "loop variable", statement.iterable, "loop variable");
     }
-    this.#statements(statement.body.statements, loopScope);
+    yield* compileChild(this.#statements(statement.body.statements, loopScope));
   }
 
-  #assignment(statement: AssignmentStatement, scope: Scope): void {
+  *#assignment(statement: AssignmentStatement, scope: Scope): CompileTask<void> {
     const target = statement.target;
     const compound = statement.operator !== "=";
     const role: Role = compound ? "compound assignment" : "assignment";
@@ -699,9 +723,9 @@ class Collector {
       if (compound) {
         // The current value is read before the written one is evaluated.
         const current = this.#read(target, scope);
-        const operand = this.#expression(statement.value, scope);
+        const operand = yield* compileChild(this.#expression(statement.value, scope));
         value = this.#compound(current, operand, statement);
-      } else value = this.#expression(statement.value, scope, receiver);
+      } else value = yield* compileChild(this.#expression(statement.value, scope, receiver));
       if (binding === undefined) return;
       this.#store(value, binding, compound ? "compound" : "assignment", statement.value, role);
       this.#add({
@@ -715,7 +739,7 @@ class Collector {
     }
     const speaker = this.#speakerName(target.object, scope);
     if (target.kind === "propertyAccessExpression" && speaker !== undefined) {
-      this.#expression(target.object, scope);
+      yield* compileChild(this.#expression(target.object, scope));
       let value: PlaceId;
       if (compound) {
         const current = this.#value(target, "target");
@@ -726,9 +750,9 @@ class Collector {
           property: target.property.name,
           occurrence: current,
         });
-        const operand = this.#expression(statement.value, scope);
+        const operand = yield* compileChild(this.#expression(statement.value, scope));
         value = this.#compound(current, operand, statement);
-      } else value = this.#expression(statement.value, scope);
+      } else value = yield* compileChild(this.#expression(statement.value, scope));
       this.#add({
         ...this.#origin(statement.value, role),
         kind: "speakerStore",
@@ -739,17 +763,18 @@ class Collector {
       return;
     }
     // A store through an element or property reaches the place in its owner, and changes the root variable in place.
-    const owner = this.#expression(target.object, scope);
+    const owner = yield* compileChild(this.#expression(target.object, scope));
     const step: ProjectionStep =
       target.kind === "indexExpression" ? "index" : { property: target.property.name };
-    if (target.kind === "indexExpression") this.#expression(target.index, scope);
+    if (target.kind === "indexExpression")
+      yield* compileChild(this.#expression(target.index, scope));
     const into = this.#value(target, "target");
     this.#projection(owner, step, into, target, role);
     let value: PlaceId;
     if (compound) {
-      const operand = this.#expression(statement.value, scope);
+      const operand = yield* compileChild(this.#expression(statement.value, scope));
       value = this.#compound(into, operand, statement);
-    } else value = this.#expression(statement.value, scope);
+    } else value = yield* compileChild(this.#expression(statement.value, scope));
     this.#store(
       value,
       into,
@@ -803,7 +828,11 @@ class Collector {
    * Walks an expression and returns its value place. `receiver` is the written type of the variable a load starts or
    * is assigned to, which declares the load's key (ADR 0021 §6.2); it reaches only a load that is the value itself.
    */
-  #expression(expression: Expression, scope: Scope, receiver: TypeTerm | null = null): PlaceId {
+  *#expression(
+    expression: Expression,
+    scope: Scope,
+    receiver: TypeTerm | null = null,
+  ): CompileTask<PlaceId> {
     switch (expression.kind) {
       case "booleanLiteral":
         return this.#literal(expression, "boolean");
@@ -822,7 +851,7 @@ class Collector {
         const place = this.#value(expression);
         for (const part of expression.parts)
           if (part.kind === "stringInterpolation") {
-            const shown = this.#expression(part.expression, scope);
+            const shown = yield* compileChild(this.#expression(part.expression, scope));
             this.#add({
               ...this.#origin(part.expression, "operand"),
               kind: "operation",
@@ -837,7 +866,7 @@ class Collector {
         return place;
       }
       case "parenthesizedExpression": {
-        const inner = this.#expression(expression.expression, scope, receiver);
+        const inner = yield* compileChild(this.#expression(expression.expression, scope, receiver));
         this.#values.set(expression, inner);
         return inner;
       }
@@ -854,7 +883,7 @@ class Collector {
         });
         this.#has(place, { kind, element: { kind: "ref", place: cell } }, expression, "operand");
         for (const element of expression.elements) {
-          const value = this.#expression(element, scope);
+          const value = yield* compileChild(this.#expression(element, scope));
           this.#store(value, cell, "element", element, "element");
         }
         return place;
@@ -873,8 +902,8 @@ class Collector {
           "operand",
         );
         for (const entry of expression.entries) {
-          this.#expression(entry.key, scope);
-          const value = this.#expression(entry.value, scope);
+          yield* compileChild(this.#expression(entry.key, scope));
+          const value = yield* compileChild(this.#expression(entry.value, scope));
           this.#store(value, cell, "entry", entry.value, "entry");
         }
         return place;
@@ -883,7 +912,7 @@ class Collector {
         const place = this.#value(expression);
         const properties: { readonly name: string; readonly type: TypeTerm }[] = [];
         for (const property of expression.properties) {
-          const value = this.#expression(property.value, scope);
+          const value = yield* compileChild(this.#expression(property.value, scope));
           const cell = this.#place(
             property,
             `@${expression.span.start.offset}.${property.name.name}`,
@@ -899,7 +928,7 @@ class Collector {
         const name = expression.property.name;
         const speaker = this.#speakerName(expression.object, scope);
         if (speaker !== undefined) {
-          this.#expression(expression.object, scope);
+          yield* compileChild(this.#expression(expression.object, scope));
           const place = this.#value(expression, "target");
           this.#add({
             ...this.#origin(expression, "read"),
@@ -924,22 +953,22 @@ class Collector {
             expression,
             "read",
           );
-        const owner = this.#expression(expression.object, scope);
+        const owner = yield* compileChild(this.#expression(expression.object, scope));
         const place = this.#value(expression, "target");
         this.#projection(owner, { property: name }, place, expression, "read");
         return place;
       }
       case "indexExpression": {
-        const owner = this.#expression(expression.object, scope);
-        this.#expression(expression.index, scope);
+        const owner = yield* compileChild(this.#expression(expression.object, scope));
+        yield* compileChild(this.#expression(expression.index, scope));
         const place = this.#value(expression, "target");
         this.#projection(owner, "index", place, expression, "read");
         return place;
       }
       case "callExpression":
-        return this.#call(expression, scope);
+        return yield* compileChild(this.#call(expression, scope));
       case "unaryExpression": {
-        const operand = this.#expression(expression.operand, scope);
+        const operand = yield* compileChild(this.#expression(expression.operand, scope));
         return this.#operation(
           { family: expression.operator === "not" ? "logic" : "unary", name: expression.operator },
           null,
@@ -949,9 +978,9 @@ class Collector {
         );
       }
       case "binaryExpression":
-        return this.#binary(expression, scope);
+        return yield* compileChild(this.#binary(expression, scope));
       case "typeTestExpression": {
-        const value = this.#expression(expression.value, scope);
+        const value = yield* compileChild(this.#expression(expression.value, scope));
         const tested = this.#plainVariable(expression.value, scope);
         if (tested !== undefined)
           this.#add({
@@ -970,8 +999,8 @@ class Collector {
         );
       }
       case "rangeExpression": {
-        const start = this.#expression(expression.start, scope);
-        const end = this.#expression(expression.end, scope);
+        const start = yield* compileChild(this.#expression(expression.start, scope));
+        const end = yield* compileChild(this.#expression(expression.end, scope));
         return this.#operation(
           { family: "range", name: expression.inclusive ? "..=" : ".." },
           null,
@@ -981,7 +1010,7 @@ class Collector {
         );
       }
       case "unitExpression": {
-        const operand = this.#expression(expression.operand, scope);
+        const operand = yield* compileChild(this.#expression(expression.operand, scope));
         return this.#operation(
           { family: "unit", name: `${expression.calendar ? "calendar " : ""}${expression.unit}` },
           null,
@@ -991,7 +1020,7 @@ class Collector {
         );
       }
       case "angleExpression": {
-        const operand = this.#expression(expression.operand, scope);
+        const operand = yield* compileChild(this.#expression(expression.operand, scope));
         return this.#operation(
           { family: "angle", name: expression.unit },
           null,
@@ -1001,12 +1030,12 @@ class Collector {
         );
       }
       case "loadExpression": {
-        this.#expression(expression.key, scope);
+        yield* compileChild(this.#expression(expression.key, scope));
         const key = staticText(expression.key) ?? null;
         const fallback =
           expression.defaultValue === null
             ? null
-            : this.#expression(expression.defaultValue, scope);
+            : yield* compileChild(this.#expression(expression.defaultValue, scope));
         const view = this.#place(expression, `load@${expression.span.start.offset}`, {
           kind: "loadView",
           key,
@@ -1024,11 +1053,11 @@ class Collector {
         return result;
       }
       case "interactionExpression":
-        return this.#interaction(expression, scope);
+        return yield* compileChild(this.#interaction(expression, scope));
       case "tagQueryExpression": {
-        const operands = expressionChildren(expression).map((operand) =>
-          this.#expression(operand, scope),
-        );
+        const operands: PlaceId[] = [];
+        for (const operand of expressionChildren(expression))
+          operands.push(yield* compileChild(this.#expression(operand, scope)));
         return this.#operation(
           { family: "tagQuery", name: `${expression.catalog}.${expression.select}` },
           null,
@@ -1040,15 +1069,19 @@ class Collector {
         );
       }
       case "sayExpression": {
-        const operands = sayOperands(expression).map((operand) => this.#expression(operand, scope));
+        const operands: PlaceId[] = [];
+        for (const operand of sayOperands(expression))
+          operands.push(yield* compileChild(this.#expression(operand, scope)));
         return this.#operation({ family: "say", name: "say" }, null, operands, [], expression);
       }
       case "showButtonExpression": {
-        const label = this.#expression(expression.label, scope);
-        const named = showButtonOptions(expression).map((option) => ({
-          name: option.name,
-          value: this.#expression(option.value, scope),
-        }));
+        const label = yield* compileChild(this.#expression(expression.label, scope));
+        const named: NamedPlace[] = [];
+        for (const option of showButtonOptions(expression))
+          named.push({
+            name: option.name,
+            value: yield* compileChild(this.#expression(option.value, scope)),
+          });
         return this.#operation(
           { family: "showButton", name: "showButton" },
           null,
@@ -1058,16 +1091,18 @@ class Collector {
         );
       }
       case "showPopupExpression": {
-        const named = expression.arguments.map((argument) => ({
-          name: argument.kind === "namedArgument" ? argument.name.name : "",
-          value: this.#expression(argument.value, scope),
-        }));
+        const named: NamedPlace[] = [];
+        for (const argument of expression.arguments)
+          named.push({
+            name: argument.kind === "namedArgument" ? argument.name.name : "",
+            value: yield* compileChild(this.#expression(argument.value, scope)),
+          });
         return this.#operation({ family: "popup", name: "showPopup" }, null, [], named, expression);
       }
       case "timerExpression": {
-        const operands = timerOperands(expression).map((operand) =>
-          this.#expression(operand, scope),
-        );
+        const operands: PlaceId[] = [];
+        for (const operand of timerOperands(expression))
+          operands.push(yield* compileChild(this.#expression(operand, scope)));
         this.#pendHandlers(expression, scope);
         return this.#operation(
           { family: "timer", name: expression.form },
@@ -1080,9 +1115,9 @@ class Collector {
         );
       }
       case "playMediaExpression": {
-        const operands = mediaOperands(expression).map((operand) =>
-          this.#expression(operand, scope),
-        );
+        const operands: PlaceId[] = [];
+        for (const operand of mediaOperands(expression))
+          operands.push(yield* compileChild(this.#expression(operand, scope)));
         this.#pendHandlers(expression, scope, this.#selfHandle);
         return this.#operation(
           { family: "media", name: expression.media },
@@ -1097,7 +1132,7 @@ class Collector {
       case "showCameraExpression":
         return this.#operation({ family: "camera", name: "showCamera" }, null, [], [], expression);
       case "showPermanentButtonExpression": {
-        const text = this.#expression(expression.text, scope);
+        const text = yield* compileChild(this.#expression(expression.text, scope));
         this.#pendHandlers(expression, scope);
         return this.#operation(
           { family: "showButton", name: "showPermanentButton" },
@@ -1150,16 +1185,19 @@ class Collector {
     return place;
   }
 
-  #binary(expression: Extract<Expression, { kind: "binaryExpression" }>, scope: Scope): PlaceId {
+  *#binary(
+    expression: Extract<Expression, { kind: "binaryExpression" }>,
+    scope: Scope,
+  ): CompileTask<PlaceId> {
     if (expression.operator === "otherwise") {
-      const left = this.#expression(expression.left, scope);
-      const right = this.#expression(expression.right, scope);
+      const left = yield* compileChild(this.#expression(expression.left, scope));
+      const right = yield* compileChild(this.#expression(expression.right, scope));
       const result = this.#value(expression);
       this.#add({ ...this.#origin(expression, "operand"), kind: "fallback", left, right, result });
       return result;
     }
-    const left = this.#expression(expression.left, scope);
-    const right = this.#expression(expression.right, scope);
+    const left = yield* compileChild(this.#expression(expression.left, scope));
+    const right = yield* compileChild(this.#expression(expression.right, scope));
     const logic = expression.operator === "and" || expression.operator === "or";
     const comparison = ["==", "!=", "<", "<=", ">", ">="].includes(expression.operator);
     if (expression.operator === "==" || expression.operator === "!=") {
@@ -1192,10 +1230,10 @@ class Collector {
     );
   }
 
-  #call(expression: CallExpression, scope: Scope): PlaceId {
+  *#call(expression: CallExpression, scope: Scope): CompileTask<PlaceId> {
     const callee = unwrap(expression.callee);
     if (isTakePhotoCall(expression)) {
-      const args = this.#arguments(expression, scope);
+      const args = yield* compileChild(this.#arguments(expression, scope));
       return this.#operation(
         { family: "capture", name: "takePhoto" },
         null,
@@ -1209,8 +1247,13 @@ class Collector {
       const presentation: NamedPlace[] =
         expression.presentation === undefined
           ? []
-          : [{ name: "presentation", value: this.#expression(expression.presentation, scope) }];
-      const args = this.#arguments(expression, scope);
+          : [
+              {
+                name: "presentation",
+                value: yield* compileChild(this.#expression(expression.presentation, scope)),
+              },
+            ];
+      const args = yield* compileChild(this.#arguments(expression, scope));
       const allowSkip = expression.arguments.find(
         (argument) => argument.kind === "namedArgument" && argument.name.name === "allowSkip",
       );
@@ -1236,7 +1279,7 @@ class Collector {
     if (callee.kind === "identifier") {
       const entry = scope.resolve(callee.name);
       if (entry?.kind === "function") {
-        const args = this.#arguments(expression, scope);
+        const args = yield* compileChild(this.#arguments(expression, scope));
         const result = this.#value(expression);
         this.#add({
           ...this.#origin(expression, "call"),
@@ -1248,7 +1291,7 @@ class Collector {
         });
         return result;
       }
-      const args = this.#arguments(expression, scope);
+      const args = yield* compileChild(this.#arguments(expression, scope));
       if (entry === undefined && this.#builtins.has(callee.name))
         return this.#operation(
           { family: builtinFamily(callee.name), name: callee.name },
@@ -1262,8 +1305,8 @@ class Collector {
       return place;
     }
     if (callee.kind !== "propertyAccessExpression") {
-      this.#expression(callee, scope);
-      this.#arguments(expression, scope);
+      yield* compileChild(this.#expression(callee, scope));
+      yield* compileChild(this.#arguments(expression, scope));
       const place = this.#value(expression);
       this.#has(place, { kind: "dynamic", why: "unknown callee" }, expression, "call");
       return place;
@@ -1272,14 +1315,14 @@ class Collector {
     const speaker = this.#speakerName(callee.object, scope);
     if (method === "copyFrom" && speaker === PLAYER) {
       // `player.copyFrom(account)` stores each person field into the player, as `#speaker` seeds them at the start.
-      this.#expression(callee.object, scope);
-      this.#arguments(expression, scope);
+      yield* compileChild(this.#expression(callee.object, scope));
+      yield* compileChild(this.#arguments(expression, scope));
       const result = this.#value(expression);
       this.#has(result, { kind: "atom", name: "null" }, expression, "call");
       this.#accountFields(expression, "assignment");
       return result;
     }
-    const receiver = this.#expression(callee.object, scope);
+    const receiver = yield* compileChild(this.#expression(callee.object, scope));
     const positional = expression.arguments.filter(
       (argument) => argument.kind === "positionalArgument",
     );
@@ -1292,7 +1335,7 @@ class Collector {
       expression.arguments.length === 1
     ) {
       // The element, or each element of the list, is stored into the receiver's elements, in place.
-      const value = this.#expression(positional[0]!.value, scope);
+      const value = yield* compileChild(this.#expression(positional[0]!.value, scope));
       const target = this.#place(expression, `${label(callee.object)}[]`, {
         kind: "target",
         node: "callExpression",
@@ -1312,8 +1355,8 @@ class Collector {
       expression.arguments.length === 2
     ) {
       // The default runs last, only when the call needs it; the result joins the element with it (Q2).
-      const key = this.#expression(positional[0]!.value, scope);
-      const fallback = this.#expression(defaultArgument.value, scope);
+      const key = yield* compileChild(this.#expression(positional[0]!.value, scope));
+      const fallback = yield* compileChild(this.#expression(defaultArgument.value, scope));
       const result = this.#value(expression);
       this.#add({
         ...this.#origin(expression, "default"),
@@ -1325,7 +1368,7 @@ class Collector {
       });
       return result;
     }
-    const args = this.#arguments(expression, scope);
+    const args = yield* compileChild(this.#arguments(expression, scope));
     if (listMethod(method)?.changes !== undefined || changesEntries(method))
       this.#mutate(callee.object, scope, expression);
     return this.#operation(
@@ -1338,32 +1381,38 @@ class Collector {
   }
 
   /** The arguments of a call as they are evaluated: positional and named in written order; a lazy `default:` last. */
-  #arguments(
+  *#arguments(
     expression: CallExpression,
     scope: Scope,
-  ): { readonly positional: PlaceId[]; readonly named: NamedPlace[] } {
+  ): CompileTask<{ readonly positional: PlaceId[]; readonly named: NamedPlace[] }> {
     const positional: PlaceId[] = [];
     const named: NamedPlace[] = [];
-    const ordered = [...expression.arguments];
-    const lazy = ordered.findIndex(
-      (argument) => argument.kind === "namedArgument" && argument.name.name === "default",
-    );
-    if (lazy !== -1) ordered.push(...ordered.splice(lazy, 1));
+    // Only a `default:` that runs when the call needs it comes last (see `lazy-defaults.ts`).
+    const lazy = lazyDefaultArgument(expression)?.argument;
+    const ordered = [
+      ...expression.arguments.filter((argument) => argument !== lazy),
+      ...(lazy === undefined ? [] : [lazy]),
+    ];
     for (const argument of ordered) {
-      const value = this.#expression(argument.value, scope);
+      const value = yield* compileChild(this.#expression(argument.value, scope));
       if (argument.kind === "positionalArgument") positional.push(value);
       else named.push({ name: argument.name.name, value });
     }
     return { positional, named };
   }
 
-  #interaction(expression: InteractionExpression, scope: Scope): PlaceId {
+  *#interaction(expression: InteractionExpression, scope: Scope): CompileTask<PlaceId> {
     // The options of the question's mode are evaluated first, as for `say`; then the options of `askChoice`, each
     // the value of its expression (a label written before `:` is evidence, not source); then the other operands.
     const named: NamedPlace[] = [];
     if (expression.presentation !== null)
-      named.push({ name: "presentation", value: this.#expression(expression.presentation, scope) });
-    const options = expression.options.map((option) => this.#expression(option.expression, scope));
+      named.push({
+        name: "presentation",
+        value: yield* compileChild(this.#expression(expression.presentation, scope)),
+      });
+    const options: PlaceId[] = [];
+    for (const option of expression.options)
+      options.push(yield* compileChild(this.#expression(option.expression, scope)));
     for (const operand of askOperands(expression)) {
       if (operand === expression.presentation) continue;
       const argument = namedAskArguments(expression).find(
@@ -1379,7 +1428,7 @@ class Collector {
               : operand === expression.prefill
                 ? "prefill"
                 : "operand"),
-        value: this.#expression(operand, scope),
+        value: yield* compileChild(this.#expression(operand, scope)),
       });
     }
     return this.#operation(

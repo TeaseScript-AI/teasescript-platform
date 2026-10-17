@@ -21,9 +21,10 @@ import { registryView } from "../src/type-inference/registry-view.js";
 function request(
   files: readonly { readonly path: string; readonly source: string }[],
   globals: readonly string[] = [],
+  builtins: readonly string[] = [],
 ): TypeAnalysisRequest | null {
   const parsed = files.map((file) => ({ path: file.path, program: parse(file.source).program }));
-  const options = { builtins: CORE_RUNTIME_BUILTINS, globals };
+  const options = { builtins: [...CORE_RUNTIME_BUILTINS, ...builtins], globals };
   const names = validateProjectSemantics(parsed, options);
   if (
     names.some((result) => result.diagnostics.some((diagnostic) => diagnostic.severity === "error"))
@@ -255,6 +256,16 @@ test("asks carry the evidence their result rules read, and handlers are regions 
   expectLine(lines, /^has m#\d+ media @0:\d+-\d+ initializer in handler#1$/);
   expectLine(lines, /^read m#\d+ -> @\d+#\d+ at 0:\d+-\d+ @0:\d+-\d+ read in handler#1$/);
   expectLine(lines, /^project @\d+#\d+\.volume -> @\d+#\d+ @0:\d+-\d+ read in handler#1$/);
+  // That read resolves to the block's own handle, which has no declaration site, not to the outer `let m`.
+  const reads = graph.constraints.filter((constraint) => constraint.kind === "read");
+  const inside = reads.find((constraint) => constraint.region.kind === "handler");
+  assert.ok(inside !== undefined && inside.kind === "read");
+  const self = graph.places[inside.binding]!;
+  const outer = graph.places.find(
+    (place) => place.kind.kind === "binding" && place.kind.name === "m" && place.site !== null,
+  );
+  assert.equal(self.kind.kind === "binding" && self.kind.name === "m" && self.site, null);
+  assert.ok(outer !== undefined && outer.id !== self.id);
 });
 
 test("form evidence keeps each written field and option element with its place", () => {
@@ -328,6 +339,59 @@ test("reads of unwritten variables link to their initializers; host globals and 
   expectLine(lines, /^read unknownHost#\d+ -> @\d+#\d+ /);
 });
 
+test("a long operator chain and deep nesting collect without native recursion", () => {
+  const chain = `let x = ${Array.from({ length: 4000 }, () => "1").join(" + ")}\nexit`;
+  const operators = collect(chain).graph.constraints.filter(
+    (constraint) => constraint.kind === "operation" && constraint.contract.family === "operator",
+  );
+  assert.equal(operators.length, 3999);
+  const nested = `let y = ${"[".repeat(2000)}1${"]".repeat(2000)}\nexit`;
+  const cells = collect(nested).graph.places.filter((place) => place.kind.kind === "cell");
+  assert.equal(cells.length, 2000);
+});
+
+test("only a default that runs when it is needed moves last; other named arguments keep their written order", () => {
+  const made = request(
+    [
+      {
+        path: "main.tease",
+        source: [
+          'let t = "t"',
+          "let a = 1",
+          "let b = 2",
+          "let k = 0",
+          "let xs = [1]",
+          "hostFn(default: a, other: b)",
+          "let opened = decryptText(t, default: a, key: b)",
+          "let got = xs.get(k, default: a)",
+          "exit",
+        ].join("\n"),
+      },
+    ],
+    [],
+    ["hostFn"],
+  );
+  assert.notEqual(made, null);
+  const graph = collectGraph(made!);
+  const reads = graph.constraints
+    .filter((constraint) => constraint.kind === "read")
+    .map((constraint) => {
+      const binding = graph.places[constraint.binding]!.kind;
+      return binding.kind === "binding" ? binding.name : "?";
+    });
+  // `hostFn` takes its arguments as written; `decryptText` runs its `default:` after `key:`; `get` after the key.
+  assert.deepEqual(reads, ["a", "b", "t", "b", "a", "xs", "k", "a"]);
+  const names = graph.constraints
+    .filter((constraint) => constraint.kind === "operation" && constraint.named.length > 0)
+    .map((constraint) =>
+      constraint.kind === "operation" ? constraint.named.map((entry) => entry.name) : [],
+    );
+  assert.deepEqual(names, [
+    ["default", "other"],
+    ["key", "default"],
+  ]);
+});
+
 test("the dump of a small source is deterministic and complete", () => {
   const source = "let x = 1\nx = x + 1\nexit";
   const first = collect(source);
@@ -386,9 +450,94 @@ function repositorySources(): readonly {
   return found;
 }
 
+/** Sources beside the repository's for constructs the fixtures and examples lack. */
+const EXTRA_SOURCES: readonly {
+  readonly id: string;
+  readonly files: readonly { readonly path: string; readonly source: string }[];
+}[] = [
+  {
+    id: "a media block's own handle",
+    files: [
+      {
+        path: "main.tease",
+        source: 'let m = playAudio async "a.mp3" { say m.volume }\nsay m.volume\nexit',
+      },
+    ],
+  },
+  {
+    id: "compound targets in loops",
+    files: [{ path: "main.tease", source: "let n = 1\nn += 1\nfor i in 1..3 { n += i }\nexit" }],
+  },
+];
+
+/** Whether every place and function a constraint names is in the graph. */
+function referencesExist(graph: ConstraintGraph): boolean {
+  const place = (id: number): boolean => id >= 0 && id < graph.places.length;
+  const fn = (id: number): boolean => id >= 0 && id < graph.functions.length;
+  const named = (entries: readonly { readonly value: number }[]): boolean =>
+    entries.every((entry) => place(entry.value));
+  return graph.constraints.every((constraint) => {
+    switch (constraint.kind) {
+      case "has":
+        return place(constraint.place);
+      case "store":
+        return place(constraint.value) && place(constraint.into);
+      case "project":
+        return place(constraint.owner) && place(constraint.into);
+      case "read":
+        return place(constraint.binding) && place(constraint.occurrence);
+      case "assign":
+        return place(constraint.binding) && place(constraint.value);
+      case "mutate":
+        return place(constraint.binding);
+      case "test":
+        return place(constraint.subject);
+      case "operation":
+        return (
+          (constraint.receiver === null || place(constraint.receiver)) &&
+          constraint.arguments.every(place) &&
+          named(constraint.named) &&
+          place(constraint.result)
+        );
+      case "get":
+        return (
+          place(constraint.receiver) &&
+          (constraint.key === null || place(constraint.key)) &&
+          place(constraint.fallback) &&
+          place(constraint.result)
+        );
+      case "fallback":
+        return place(constraint.left) && place(constraint.right) && place(constraint.result);
+      case "call":
+        return (
+          fn(constraint.fn) &&
+          constraint.arguments.every(place) &&
+          named(constraint.named) &&
+          place(constraint.result)
+        );
+      case "return":
+        return fn(constraint.fn) && (constraint.value === null || place(constraint.value));
+      case "exit":
+        return fn(constraint.fn);
+      case "load":
+        return (
+          place(constraint.view) &&
+          (constraint.fallback === null || place(constraint.fallback)) &&
+          place(constraint.result)
+        );
+      case "save":
+      case "speakerStore":
+        return place(constraint.value);
+      case "speakerRead":
+      case "knownValue":
+        return place(constraint.occurrence);
+    }
+  });
+}
+
 test("the collector resolves every read as the legacy check does, on every repository source", () => {
   let compared = 0;
-  for (const { id, files } of repositorySources()) {
+  for (const { id, files } of [...repositorySources(), ...EXTRA_SOURCES]) {
     const made = request(files);
     if (made === null) continue;
     const graph = collectGraph(made);
@@ -408,14 +557,8 @@ test("the collector resolves every read as the legacy check does, on every repos
     for (const read of facts.reads)
       legacy.set(site(read.site), read.binding === null ? null : site(read.binding));
     assert.deepEqual([...collected].sort(), [...legacy].sort(), `the reads of ${id}`);
-    // Structure: every referenced place exists, and collecting again gives the same graph.
-    for (const constraint of graph.constraints)
-      for (const value of Object.values(constraint))
-        if (typeof value === "number" && "place" in constraint === false)
-          assert.ok(
-            value < graph.places.length || value < graph.functions.length,
-            `an id of ${id}`,
-          );
+    // Structure: every place and function a constraint names exists, and collecting again gives the same graph.
+    assert.ok(referencesExist(graph), `the references of ${id}`);
     assert.equal(
       graphText(collectGraph(made)),
       graphText(graph),
