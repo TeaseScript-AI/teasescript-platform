@@ -243,7 +243,6 @@ import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
 import {
   missingPropertyMessage,
   duplicateEntryMessage,
-  missingSpeakerFieldMessage,
   missingSpeakerPropertyMessage,
   misspelledPropertyHint,
 } from "./object-properties.js";
@@ -2110,11 +2109,8 @@ class TypeChecker {
         // A store that the compiler cannot check may give any speaker a property too.
         const custom = [...new Set([...properties, ...this.#unchecked])];
         return missingSpeakerPropertyMessage(
-          speaker ?? this.#onlySpeaker(),
-          name,
-          custom,
-          [...custom, ...SPEAKER_FIELDS],
-          example,
+          { speaker: speaker ?? this.#onlySpeaker(), name, sources: [], example },
+          { kind: "never", properties: custom, names: [...custom, ...SPEAKER_FIELDS] },
         );
       },
     );
@@ -6559,11 +6555,14 @@ class TypeChecker {
           const before = this.diagnostics.length;
           this.#report(
             typeCode.invalidOperand,
-            missingSpeakerFieldMessage(
-              check.speaker ?? this.#onlySpeaker(),
-              check.name,
-              fieldSources(check.name),
-              check.speaker ?? this.#exampleSpeaker(),
+            missingSpeakerPropertyMessage(
+              {
+                speaker: check.speaker ?? this.#onlySpeaker(),
+                name: check.name,
+                sources: fieldSources(check.name),
+                example: check.speaker ?? this.#exampleSpeaker(),
+              },
+              { kind: "never", properties: [], names: [] },
             ),
             check.span,
           );

@@ -162,17 +162,17 @@ test("the player and the account have compile errors that name the form that exi
       ["TSV043", "The account has no field 'firstname'. Did you mean 'firstName'?", "firstname"],
       [
         "TSV043",
-        "Speaker 'player' has no 'lastName': no assignment or copy of the account gives it one. Copy the account with 'player.copyFrom(account)', or assign 'player.lastName' before reading it.",
+        "Speaker 'player' has no 'lastName': no assignment or copy of the account gives it one. Copy the account before this line, as in 'player.copyFrom(account)' at the start of the script, or assign 'player.lastName' first.",
         "lastName",
       ],
       [
         "TSV043",
-        "Speaker 'player' has no 'heShe': no assignment or copy of the account gives it 'heShe' or 'gender'. Copy the account with 'player.copyFrom(account)', or assign 'player.gender' or 'player.heShe' before reading it.",
+        "Speaker 'player' has no 'heShe': no assignment or copy of the account gives it 'heShe' or 'gender'. Copy the account before this line, as in 'player.copyFrom(account)' at the start of the script, or assign 'player.gender' or 'player.heShe' first.",
         "heShe",
       ],
       [
         "TSV043",
-        "Speaker 'player' has no custom properties, so it has no 'mood'. Assign it before reading it, as in 'player.mood = ...'.",
+        "Speaker 'player' has no custom properties, so it has no 'mood'. Assign it before this line, as in 'player.mood = ...'.",
         "mood",
       ],
     ],
@@ -181,7 +181,7 @@ test("the player and the account have compile errors that name the form that exi
   assert.deepEqual(mismatches("let current = player\nsay current.firstName\nexit"), [
     [
       "TSV043",
-      "Speaker 'player' has no 'firstName': no assignment or copy of the account gives it one. Copy the account with 'player.copyFrom(account)', or assign 'player.firstName' before reading it.",
+      "Speaker 'player' has no 'firstName': no assignment or copy of the account gives it one. Copy the account before this line, as in 'player.copyFrom(account)' at the start of the script, or assign 'player.firstName' first.",
       "firstName",
     ],
   ]);

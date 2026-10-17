@@ -1404,17 +1404,17 @@ test("reading a custom property that no declaration or assignment gives a speake
     [
       [
         "TSV043",
-        "Speaker 'vera' has no property 'mood'. Its only custom property is 'level'. Give the property a start value, as in 'speaker vera { mood: ... }', or assign it before reading it.",
+        "Speaker 'vera' has no property 'mood'. Its only custom property is 'level'. Give it a start value, as in 'speaker vera { mood: ... }', or assign it before this line.",
         "mood",
       ],
       [
         "TSV043",
-        "Speaker 'vera' has no property 'score'. Its only custom property is 'level'. Give the property a start value, as in 'speaker vera { score: ... }', or assign it before reading it.",
+        "Speaker 'vera' has no property 'score'. Its only custom property is 'level'. Give it a start value, as in 'speaker vera { score: ... }', or assign it before this line.",
         "score",
       ],
       [
         "TSV043",
-        "Speaker 'vera' has no property 'items'. Its only custom property is 'level'. Give the property a start value, as in 'speaker vera { items: ... }', or assign it before reading it.",
+        "Speaker 'vera' has no property 'items'. Its only custom property is 'level'. Give it a start value, as in 'speaker vera { items: ... }', or assign it before this line.",
         "items",
       ],
       [
@@ -1432,7 +1432,7 @@ test("reading a custom property that no declaration or assignment gives a speake
   assert.deepEqual(mismatches("speaker vera {}\nsay vera.mood\nexit"), [
     [
       "TSV043",
-      "Speaker 'vera' has no custom properties, so it has no 'mood'. Give the property a start value, as in 'speaker vera { mood: ... }', or assign it before reading it.",
+      "Speaker 'vera' has no custom properties, so it has no 'mood'. Give it a start value, as in 'speaker vera { mood: ... }', or assign it before this line.",
       "mood",
     ],
   ]);
@@ -1465,7 +1465,7 @@ test("reading a custom property that no declaration or assignment gives a speake
   // Through a speaker the compiler cannot tell apart: an alias, a parameter, an element, or the default speaker, when
   // no speaker has the property.
   const none =
-    "No speaker has a property 'mood'. The custom property of speakers is 'level'. Give the property a start value, as in 'speaker vera { mood: ... }', or assign it before reading it.";
+    "No speaker has a property 'mood'. The custom property of speakers is 'level'. Give it a start value, as in 'speaker vera { mood: ... }', or assign it before this line.";
   assert.deepEqual(
     mismatches(
       [

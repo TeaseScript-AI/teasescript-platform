@@ -224,9 +224,9 @@ which each need a code of their own.
 - `TSV022` (one problem, same text)
   - name pass: calls of the script's functions and of the commands it knows by name (`unknownNamedArgumentMessage`)
   - type checker: the same rule with the same text for method calls, `script(...)`, and the other built-ins
-- `TSV043` (one problem, different texts)
-  - type checker: every operation that its operands do not support, among them a speaker property that no declaration or assignment gives a speaker the read may reach
-  - plan analysis: a speaker property that a way to the read misses (V30 §37)
+- `TSV043` (one problem, same text)
+  - type checker: every operation that its operands do not support, among them a speaker property that no declaration or assignment gives a speaker the read may reach (`missingSpeakerPropertyMessage`)
+  - plan analysis: the same rule with the same text for a speaker property that a way to the read misses (V30 §37)
 - `TSV055` (one problem, same text)
   - name pass: a start value that says, asks, waits, plays media, calls a function, or uses a local or a later global (`startValueMessage`)
   - type checker: the same rule with the same text for a start value that selects at random, with `.random` or a list in `${...}`, which needs the value's type

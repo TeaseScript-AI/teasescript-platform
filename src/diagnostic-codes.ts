@@ -253,11 +253,13 @@ export const DIAGNOSTIC_CODES = {
     ),
     shared: {
       problems: "one",
-      texts: "different",
+      texts: "same",
       parts: [
         "every operation that its operands do not support, among them a speaker property that " +
-          "no declaration or assignment gives a speaker the read may reach",
-        "a speaker property that a way to the read misses (V30 §37)",
+          "no declaration or assignment gives a speaker the read may reach " +
+          "(`missingSpeakerPropertyMessage`)",
+        "the same rule with the same text for a speaker property that a way to the read " +
+          "misses (V30 §37)",
       ],
     },
   },
