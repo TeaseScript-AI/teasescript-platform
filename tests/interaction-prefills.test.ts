@@ -358,9 +358,9 @@ test("an open field without a prefill restores without one", () => {
 test("a computed prefill keeps its runtime arithmetic errors whether or not the hint is constant", () => {
   for (const hint of ['"N"', "hint"]) {
     for (const source of [
-      // A variable keeps the overflow a runtime error; a visible one is a compile error.
-      `let big = 1e308\nlet answer = askNumber ${hint}, prefill: 1 / (big * 10)\nexit`,
-      `let big = 1e308\nlet answer = askText ${hint}, prefill: "\${1 / (big * 10)}"\nexit`,
+      // A value that a function gives keeps the overflow a runtime error; a visible one is a compile error.
+      `function dynamic(value) {\n    return value\n}\nlet big = dynamic(1e308)\nlet answer = askNumber ${hint}, prefill: 1 / (big * 10)\nexit`,
+      `function dynamic(value) {\n    return value\n}\nlet big = dynamic(1e308)\nlet answer = askText ${hint}, prefill: "\${1 / (big * 10)}"\nexit`,
     ]) {
       const plan = compileValidPlan(source, { globals: ["hint"] });
       const failed = run(plan, createFreshRuntimeSnapshot(plan, { globals: { hint: "N" } }));

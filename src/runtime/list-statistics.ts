@@ -164,7 +164,7 @@ function kindOf(value: SerializableRuntimeValue): ListValueKind | undefined {
  * reports the problem (`TSR060`): an angle where `kinds` has none first, then the first value of another kind, then
  * values of several kinds. `x` is as for `listValueMessage`.
  */
-export function listValuesKind(
+function listValuesKind(
   name: string,
   values: readonly SerializableRuntimeValue[],
   kinds: readonly ListValueKind[],
@@ -188,7 +188,7 @@ export function listValuesKind(
  * `sum`, `average`, `median`, `percentile`, or `stddev` of a list of numbers or durations, or the `sum` of angles
  * (V30 §16).
  */
-export function listStatistic(
+function listStatistic(
   name: StatisticName,
   positional: readonly SerializableRuntimeValue[],
   named: Named,
@@ -235,7 +235,7 @@ export function listStatistic(
  * The values a statistic, or `min` or `max` of one list, reads from `list`, as `listValues` gives them, of which there
  * are as many as it needs (see `ListFunction`): fewer is `TSR018`.
  */
-export function statisticValues(
+function statisticValues(
   name: ListFunctionName,
   list: SerializableRuntimeValue,
   by: SerializableRuntimeValue | undefined,
@@ -341,7 +341,7 @@ type Positions =
  * `intercept` the line's value at the first point, `r2` how much of the variation the line explains, and `start` the
  * first point's x, from which `predict` measures.
  */
-export function linearRegression(
+function linearRegression(
   positional: readonly SerializableRuntimeValue[],
   named: Named,
   span: SourceSpan,
@@ -471,7 +471,7 @@ function unitsFrom(start: SerializableRuntimeTemporal, value: SerializableRuntim
 }
 
 /** The value a line from `linearRegression` expects at `x` (V30 §16). */
-export function predict(
+function predict(
   positional: readonly SerializableRuntimeValue[],
   named: Named,
   span: SourceSpan,

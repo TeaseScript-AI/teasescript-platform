@@ -257,7 +257,9 @@ test("rejects unsafe source positions and out-of-range nested identities", () =>
     "call-frame ID beyond its allocator",
   );
 
-  const failedPlan = plan("let value = []\nsay value.first\nexit");
+  const failedPlan = plan(
+    "function dynamic(hidden) {\n    return hidden\n}\nlet value = dynamic([])\nsay value.first\nexit",
+  );
   const failed = run(failedPlan, createFreshRuntimeSnapshot(failedPlan)).snapshot;
   assert.equal(failed.status, "failed");
   assert.equal(validateRuntimeSnapshot(failed, failedPlan).valid, true);

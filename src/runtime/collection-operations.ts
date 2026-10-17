@@ -142,7 +142,7 @@ function compareCodePoints(left: string, right: string): number {
  * The elements of `intersection`, `union`, or `difference`, each once, in the receiver's order; `union` then adds the
  * argument's new elements in its order. Elements compare with the language's `==`.
  */
-export function setOperationItems(
+function setOperationItems(
   name: string,
   receiver: readonly SerializableRuntimeValue[],
   argument: readonly SerializableRuntimeValue[],

@@ -238,7 +238,8 @@ test("retains earlier argument RNG progress when a later argument faults", () =>
     [
       "function take(first, second) { return first }",
       // A bound the compiler cannot know, so the empty range fails when the call runs.
-      "let one = 1",
+      "function dynamic(value) {\n    return value\n}",
+      "let one = dynamic(1)",
       "take(random(), randomInteger(1..one))",
       "exit",
     ].join("\n"),
@@ -442,7 +443,8 @@ test("fails an invalid prepared receiver before evaluating a user-call argument"
 test("fails an earlier ordinary expression before a later user-call side effect", () => {
   const source = [
     "let order = []",
-    "let one = 1",
+    "function dynamic(value) {\n    return value\n}",
+    "let one = dynamic(1)",
     'function later { order.add("later")\nreturn 1 }',
     "let values = [randomInteger(1..one), later()]",
     "exit",
