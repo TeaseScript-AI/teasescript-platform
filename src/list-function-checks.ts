@@ -450,8 +450,7 @@ function weightedType(context: Context, known: Known): StaticType {
   if (!shape(context)) return UNKNOWN_TYPE;
   const source = call.arguments.find((argument) => argument.kind === "positionalArgument")!.value;
   // A dict or list written in the call, whose weights the compiler may see.
-  let written = source;
-  while (written.kind === "parenthesizedExpression") written = written.expression;
+  const written = withoutParentheses(source);
   const weight = named(call, "weight");
   const type = forUse(typeOf(source));
   if (!isKnown(type)) {
@@ -494,9 +493,10 @@ function weightedType(context: Context, known: Known): StaticType {
           context,
           source,
           written.elements.map((element) => {
+            const object = withoutParentheses(element);
             const property =
-              element.kind === "objectLiteral"
-                ? element.properties.find((one) => one.name.name === key)
+              object.kind === "objectLiteral"
+                ? object.properties.find((one) => one.name.name === key)
                 : undefined;
             return {
               at: property?.value ?? element,
@@ -510,6 +510,11 @@ function weightedType(context: Context, known: Known): StaticType {
   }
   problem(context, WEIGHTED_SOURCE_MESSAGE, source);
   return UNKNOWN_TYPE;
+}
+
+function withoutParentheses(expression: Expression): Expression {
+  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
+  return expression;
 }
 
 /** A weight written in a call of `randomWeighted`, and whether the dict that holds it keeps it. */

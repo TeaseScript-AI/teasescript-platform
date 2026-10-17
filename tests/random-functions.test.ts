@@ -113,8 +113,8 @@ test("randomWeighted's weights fail alike when the compiler can see them", () =>
     ['dict{ "a": -1, "b": 1 }', "", "-1"],
     ["(dict{ a: 1, b: 1 - 3 })", "", "1 - 3"],
     ['dict{ "a": 0, "b": 0 }', "", 'dict{ "a": 0, "b": 0 }'],
-    ['[{ name: "a", w: 2 }, { name: "b", w: -0.5 }]', ', weight: "w"', "-0.5"],
-    ['[{ name: "a", w: 0 }]', ', weight: "w"', '[{ name: "a", w: 0 }]'],
+    ['[{ name: "a", w: 2 }, ({ name: "b", w: -0.5 })]', ', weight: "w"', "-0.5"],
+    ['[({ name: "a", w: 0 })]', ', weight: "w"', '[({ name: "a", w: 0 })]'],
   ] as const;
   for (const [choices, weight, at] of invalid) {
     const [code, message] = failure(
