@@ -1,4 +1,4 @@
-import { PropertyTable, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
+import { PropertyTable, union, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
 import type { ValueKind } from "../../value-kinds.js";
 import { memberOf } from "../adapters/members.js";
 import type {
@@ -55,11 +55,15 @@ export interface Alternative {
   readonly choice: Choice | null;
 }
 
-/** The chosen part alternatives, with every part cell the merged items hold them in (a dynamic walk reads each). */
+/**
+ * The chosen part alternatives, with every part cell the merged items hold them in (a dynamic walk reads each): a
+ * collection's one chosen element; an object's alternatives per property, all of them (no product across the
+ * properties: the orchestrator's decision on r11-B6, work note §3.5), in a canonical order.
+ */
 export type Choice =
   | { readonly element: Alternative; readonly cells: readonly CellId[]; readonly props?: undefined }
   | {
-      readonly props: ReadonlyMap<string, Alternative>;
+      readonly props: ReadonlyMap<string, readonly Alternative[]>;
       readonly cells: ReadonlyMap<string, readonly CellId[]>;
       readonly element?: undefined;
     };
@@ -74,9 +78,31 @@ const unionOf = (left: readonly CellId[], right: readonly CellId[]): readonly Ce
  */
 function roleOf(a: Alternative): string {
   const own = `${a.tag}|${a.group ?? ""}|${a.why ?? ""}`;
-  if (a.choice === null) return own;
-  if (a.choice.element !== undefined) return `${own}[${roleOf(a.choice.element)}]`;
-  return `${own}{${[...a.choice.props].map(([name, p]) => `${name}:${roleOf(p)}`).join(",")}}`;
+  // an object alternative's identity is its own role: its property lists keep every role of their alternatives and
+  // grow as evidence arrives, so naming them would make a merge depend on a transient state
+  return a.choice === null || a.choice.element === undefined
+    ? own
+    : `${own}[${roleOf(a.choice.element)}]`;
+}
+
+const keyOf = (a: Alternative): string => `${a.type}|${roleOf(a)}`;
+
+/** A list of alternatives in a canonical order (by key), so no order of enumeration shows in a choice. */
+function sortedAlternatives(list: readonly Alternative[]): readonly Alternative[] {
+  return [...list].sort((x, y) => (keyOf(x) < keyOf(y) ? -1 : keyOf(x) > keyOf(y) ? 1 : 0));
+}
+
+/** Two lists of alternatives as one: the same key merged, in the canonical order. */
+function mergedLists(
+  left: readonly Alternative[],
+  right: readonly Alternative[],
+): readonly Alternative[] {
+  const out = new Map<string, Alternative>();
+  for (const a of [...left, ...right]) {
+    const prior = out.get(keyOf(a));
+    out.set(keyOf(a), prior === undefined ? a : merged(prior, a));
+  }
+  return sortedAlternatives([...out.values()]);
 }
 
 /** A dynamic item met along a projection of the dynamic view. */
@@ -109,7 +135,7 @@ function alternatives(
   for (const item of cells.items(cell)) {
     if (item.tag === "d" || item.tag === "e") continue;
     for (const alternative of itemAlternatives(cells, item, cell, path)) {
-      const key = `${alternative.type}|${roleOf(alternative)}`;
+      const key = keyOf(alternative);
       const prior = out.get(key);
       if (prior === undefined) out.set(key, alternative);
       else out.set(key, merged(prior, alternative));
@@ -135,9 +161,9 @@ function merged(prior: Alternative, other: Alternative): Alternative {
       };
     else if (prior.choice.props !== undefined && other.choice.props !== undefined) {
       const props = new Map(prior.choice.props);
-      for (const [name, alternative] of other.choice.props) {
+      for (const [name, theirs] of other.choice.props) {
         const mine = props.get(name);
-        if (mine !== undefined) props.set(name, merged(mine, alternative));
+        props.set(name, mine === undefined ? theirs : mergedLists(mine, theirs));
       }
       const partCells = new Map(prior.choice.cells);
       for (const [name, theirs] of other.choice.cells)
@@ -217,28 +243,42 @@ export function itemAlternatives(
           choice: { props: new Map(), cells: propCells },
         },
       ];
-    let combos: (readonly [string, Alternative])[][] = [[]];
+    // An object item is one alternative whose property types are the union of each property's alternatives, the
+    // alternatives themselves kept per property for the projections (no product across the properties, work note
+    // §3.5); per property whose slot may be missing (empty by construction beside its evidence) one more
+    // alternative, the object without it, so a read of it stays a runtime check.
+    const props = new Map<string, readonly Alternative[]>();
+    const types: (readonly [string, StaticType])[] = [];
+    const missing: string[] = [];
     for (const [name, part] of [...item.parts.props].sort(byName)) {
-      // an empty slot: the property absent; beside evidence, both
-      const parts = partAlternatives(part).filter((a) => table.node(a.type).kind !== "never");
+      const parts = sortedAlternatives(
+        partAlternatives(part).filter((a) => table.node(a.type).kind !== "never"),
+      );
       const absent = cells.items(part).some((it) => it.tag === "e");
       // a property without evidence yet: the object contributes nothing yet
       if (parts.length === 0 && !absent) return [];
-      combos = combos.flatMap((combo) => [
-        ...(absent ? [combo] : []),
-        ...parts.map((a) => [...combo, [name, a] as const]),
+      if (parts.length === 0) continue;
+      props.set(name, parts);
+      types.push([
+        name,
+        parts.length === 1
+          ? table.toStatic(parts[0]!.type)
+          : union(parts.map((a) => table.toStatic(a.type))),
       ]);
+      if (absent) missing.push(name);
     }
-    return combos.map((combo) =>
-      compose(
-        {
-          kind: "object",
-          properties: new PropertyTable(combo.map(([name, a]) => [name, table.toStatic(a.type)])),
-        },
-        combo.map(([, a]) => a),
-        { props: new Map(combo), cells: propCells },
-      ),
-    );
+    const objectOf = (without: string | null): Alternative => ({
+      ...base,
+      type: table.intern({
+        kind: "object",
+        properties: new PropertyTable(types.filter(([name]) => name !== without)),
+      }),
+      choice: {
+        props: without === null ? props : new Map([...props].filter(([name]) => name !== without)),
+        cells: propCells,
+      },
+    });
+    return [objectOf(null), ...missing.map(objectOf)];
   }
   const element = item.parts.element;
   const ctor: Exclude<Constructor, "object"> = item.ctor === "object" ? "list" : item.ctor;
@@ -291,7 +331,7 @@ function stepOf(
     if (a.choice.props !== undefined) {
       if (typeof step !== "object") return [];
       const part = a.choice.props.get(step.property);
-      return part === undefined ? [] : [part, ...marks(a.choice.cells.get(step.property))];
+      return part === undefined ? [] : [...part, ...marks(a.choice.cells.get(step.property))];
     }
     if (typeof step === "object") return [];
     if (node.kind === "dict" && step === "iteration") return [text()];
