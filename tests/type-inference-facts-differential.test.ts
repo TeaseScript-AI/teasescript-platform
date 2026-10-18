@@ -9,6 +9,7 @@ import {
   mechanicalGroup,
   readLedger,
   type CaseSource,
+  type LedgerRecord,
   recordKey,
   summarize,
   verdicts,
@@ -167,5 +168,45 @@ test("a changed fact is rejected at an accepted site, a deferred site, a pinned 
       bindings: facts.bindings.map((b) => (b.site.file === 1 ? { ...b, type: "integer!" } : b)),
     })),
     ["accepted", "unrecorded"],
+  );
+  // a restricted string value holding type punctuation (PR review r5-B7): the quoted text is one token to the
+  // normalization, so a changed value is not hidden behind a record of the clean texts
+  const quoted = 'let x = askChoice "a}|x|y|z", 1\nexit';
+  const clean = differential(quoted)!;
+  const local = {
+    groups: ledger.groups,
+    records: new Map<string, LedgerRecord>([
+      ...ledger.records,
+      ...clean.differences.map((d): [string, LedgerRecord] => [
+        recordKey("quoted", d),
+        {
+          case: "quoted",
+          what: d.what,
+          name: d.name,
+          site: `${d.site.file}:${d.site.start}:${d.site.end}`,
+          legacy: d.legacy,
+          candidate: d.candidate,
+          status: "accepted",
+          kind: "design",
+          reason: "the clean texts, pinned so that only the mutation below is unrecorded",
+        },
+      ]),
+    ]),
+  };
+  const swapped = differential(quoted, (facts) => ({
+    ...facts,
+    values: facts.values.map((v) =>
+      v.kind === "interactionExpression" ? { ...v, type: v.type.replace("|x|y|", "|y|x|") } : v,
+    ),
+  }))!;
+  assert.ok(
+    swapped.candidate.values.some((v) => v.type.includes('"a}|y|x|z"')),
+    "the mutation changed the restricted string value",
+  );
+  assert.ok(
+    verdicts(local, "quoted", swapped).some(
+      (v) => v.outcome === "unrecorded" || v.outcome === "changed",
+    ),
+    "a changed restricted string value is reported",
   );
 });

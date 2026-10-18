@@ -22,16 +22,10 @@ function groupText(
   if (items.length > 0 && items.every((item) => item.tag === "e")) return "never";
   const view = solution.viewOf(group);
   const inner = new Set([...path, ...group]);
-  const texts = (members: readonly Member[]): string[] => {
-    const t = [...new Set(members.map((member) => memberText(solution, member, inner)))].sort();
-    return t.filter(
-      (x) =>
-        !(
-          x.endsWith("<never>") &&
-          t.some((y) => y !== x && y.startsWith(x.slice(0, x.indexOf("<") + 1)))
-        ),
-    );
-  };
+  // the view's members as they are: the interpretation already drops a witness collection over an empty part beside
+  // another member of its constructor, and a permitted or bound member stays its own (r5-S1, Sol r5-S2)
+  const texts = (members: readonly Member[]): string[] =>
+    [...new Set(members.map((member) => memberText(solution, member, inner)))].sort();
   switch (view.kind) {
     case "never":
       return "never";

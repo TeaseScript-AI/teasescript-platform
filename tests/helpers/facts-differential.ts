@@ -120,13 +120,24 @@ function isStraightLine(graph: ConstraintGraph): boolean {
 
 // ---------- the normalization: a union's members as a set ----------
 
+/**
+ * The top-level parts of a type text around a separator. A quoted string (a restricted text value, a property name)
+ * is one token whatever it contains: its braces and bars are not type syntax (r5-B7).
+ */
 function topLevel(text: string, separator: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;
+  let quoted = false;
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i]!;
-    if (ch === "(" || ch === "<" || ch === "{") depth += 1;
+    if (quoted) {
+      if (ch === "\\") i += 1;
+      else if (ch === '"') quoted = false;
+      continue;
+    }
+    if (ch === '"') quoted = true;
+    else if (ch === "(" || ch === "<" || ch === "{") depth += 1;
     else if (ch === ")" || ch === ">" || ch === "}") depth -= 1;
     else if (ch === separator && depth === 0) {
       parts.push(text.slice(start, i));
