@@ -78,6 +78,8 @@ function sameEvidence(cells: Cells, a: Item, b: Item): boolean {
 function order(cells: Cells, cell: CellId, visiting: ReadonlySet<CellId>): readonly Item[] {
   const items = cells.items(cell).filter(isKnown);
   const inner = new Set([...visiting, cell]);
+  // an item without a source (a store's own value, an operation's closed answer) is its own first evidence at its
+  // position: rank 0, so the secondary site decides between it and an item first in its source (r10-B3)
   const sourceRank = (item: Item): number => {
     let best = NONE;
     for (const source of item.from) {
@@ -87,13 +89,15 @@ function order(cells: Cells, cell: CellId, visiting: ReadonlySet<CellId>): reado
       );
       if (index >= 0 && index < best) best = index;
     }
-    return best;
+    return best === NONE ? 0 : best;
   };
+  // the source's own order before the secondary site: a copied value keeps its source's working kind (its
+  // declaration's priority included) through any number of copies and projections (r10-B3)
   const rank = (item: Item): readonly [number, number, number, number, number, string, string] => [
     item.decl ? 0 : 1,
     item.pos[0],
-    item.pos[1],
     sourceRank(item),
+    item.pos[1],
     item.tag === "m" ? 0 : 1,
     item.tag === "m" ? (item.group ?? "") : "",
     familyOf(cells, item),
@@ -163,20 +167,11 @@ export function interpret(cells: Cells, cell: CellId): CellView {
       (item.tag === "b" && item.type !== undefined && table.node(item.type).kind === "null"),
   );
   const bound = items.filter((item) => item.tag === "b");
-  if (bound.length > 0)
-    return {
-      kind: "bound",
-      members: bound.map(memberOf),
-      families: [],
-      optional,
-      held: items.some((item) => item.tag === "d" || item.tag === "p"),
-    };
-  const w = working(cells, cell);
-  // held: a value the compiler cannot know, or a possibility no witness or member covers (every alternative of it
-  // is an alternative of a known item)
+  // held: a value the compiler cannot know, or a possibility no witness, member or bound covers (every alternative
+  // of it is an alternative of a known item); the same rule under a written bound (r10-B4)
   const covered = new Set(
     items
-      .filter(isKnown)
+      .filter((item) => isKnown(item) || item.tag === "b")
       .flatMap((item) => itemAlternatives(cells, item, cell, new Set()).map((a) => a.type)),
   );
   const held = items.some(
@@ -185,6 +180,9 @@ export function interpret(cells: Cells, cell: CellId): CellView {
       (item.tag === "p" &&
         !itemAlternatives(cells, item, cell, new Set()).every((a) => covered.has(a.type))),
   );
+  if (bound.length > 0)
+    return { kind: "bound", members: bound.map(memberOf), families: [], optional, held };
+  const w = working(cells, cell);
   if (w === null)
     return {
       kind: held ? "unknown" : optional ? "nullOnly" : "never",

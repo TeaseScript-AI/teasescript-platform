@@ -21,14 +21,17 @@ import type { TypeId } from "./types.js";
 // legacy writes `null`; a cell of values the compiler cannot know only is `unknown`, a held cell is its text followed
 // by `!` whatever its kind, a cell that holds nothing is `never`. A structural cycle (`a.add(a)`: the element cell
 // holds a list over itself) is cut where the walk meets a cell it is still exporting, which exports as the legacy's
-// undecided slot `?` with the type `unknown`, so `a.add(a)` exports `list<list<?>>` as the legacy does. The walk
-// starts from the places in id order and follows the members in their order, so the cut, and with it every export, is
-// the same whichever cell is asked for first.
+// undecided slot `?` with the type `unknown`, so `a.add(a)` exports `list<list<?>>` as the legacy does. The cut is
+// relative to the place being exported, as the model renders it: a part with no cycle under it is exported once and
+// shared by every place that holds it; a part a cut was made in holds for the walk it was made in only, and is made
+// again along the path of every other place that reaches it (r10-B5).
 
 /** What a cell exports: its type, whose parts are the exports of the cells that hold them, and its text. */
 export interface ExportedType {
   readonly type: StaticType;
   readonly text: TypeText;
+  /** Whether a structural cycle was cut inside it: such an export holds for the place it was made for only. */
+  readonly cut: boolean;
 }
 
 /** The export of every cell of a solution (see the module comment). */
@@ -163,17 +166,22 @@ function declarationOf(
   }
 }
 
-/** A cell whose export the walk is making, with the part cells it has not taken yet. */
+/** A cell whose export the walk is making, with the part cells it has not taken yet and the parts made under it. */
 interface Frame {
   readonly cell: CellId;
   readonly view: CellView;
   readonly parts: CellId[];
+  /** The exports of the parts made under this frame that a cut was made in (valid along this path only). */
+  readonly done: Map<CellId, ExportedType>;
 }
 
-/** The export of the cells of one solution, each made once (see the module comment). */
+/** The export of the cells of one solution (see the module comment). */
 class Exporter {
   readonly #solution: Solution;
+  /** The exports no cut was made in: shared by every place that holds them. */
   readonly #exports = new Map<CellId, ExportedType>();
+  /** The exports of the places asked for whose walk made a cut: relative to that place. */
+  readonly #roots = new Map<CellId, ExportedType>();
   /** The cells whose export the walk is making, on the path from its root. */
   readonly #active = new Set<CellId>();
   readonly #types = new Map<TypeId, ExportedType>();
@@ -195,8 +203,8 @@ class Exporter {
     // Any reason is the table's `unknown`: the provenance is the cell's, not the type's.
     this.#unknown = leaf({ kind: "dynamic", why: "host" });
     this.#null = leaf({ kind: "atom", name: "null" });
-    this.#nullOnly = { type: this.#null.type, text: "(?|null)" };
-    this.#cut = { type: this.#unknown.type, text: "?" };
+    this.#nullOnly = { type: this.#null.type, text: "(?|null)", cut: false };
+    this.#cut = { type: this.#unknown.type, text: "?", cut: true };
     for (const place of solution.graph.places) this.of(place.id);
   }
 
@@ -210,41 +218,50 @@ class Exporter {
   }
 
   of(cell: CellId): ExportedType {
-    let exported = this.#exports.get(cell);
-    if (exported === undefined) {
-      this.#walk(cell);
-      // EVIDENCE: invariant: `#walk` exports its root.
-      exported = this.#exports.get(cell)!;
-    }
+    const known = this.#exports.get(cell) ?? this.#roots.get(cell);
+    if (known !== undefined) return known;
+    const exported = this.#walk(cell);
+    if (exported.cut) this.#roots.set(cell, exported);
     return exported;
   }
 
-  /** Exports a cell and every part cell under it not exported yet, depth first, parts before their holders. */
-  #walk(root: CellId): void {
+  /**
+   * Exports a cell and every part cell under it, depth first, parts before their holders: a part made before with no
+   * cut in it is taken as made; a part on the walk's path is cut; any other part is made along this path.
+   */
+  #walk(root: CellId): ExportedType {
     const stack: Frame[] = [];
     const enter = (cell: CellId): void => {
       const view = this.#solution.view(cell);
       this.#active.add(cell);
       // Reversed, so the parts are taken from the end in member order.
-      stack.push({ cell, view, parts: view.members.flatMap(partsOf).reverse() });
+      stack.push({ cell, view, parts: view.members.flatMap(partsOf).reverse(), done: new Map() });
     };
     enter(root);
+    let exported = this.#cut;
     while (stack.length > 0) {
       // EVIDENCE: invariant: the loop runs while the stack is not empty.
       const top = stack.at(-1)!;
       const part = top.parts.pop();
       if (part !== undefined) {
-        if (!this.#exports.has(part) && !this.#active.has(part)) enter(part);
+        if (!this.#exports.has(part) && !top.done.has(part) && !this.#active.has(part)) enter(part);
         continue;
       }
       stack.pop();
       this.#active.delete(top.cell);
-      this.#exports.set(top.cell, this.#cell(top.view));
+      exported = this.#cell(
+        top.view,
+        (cell) => this.#exports.get(cell) ?? top.done.get(cell) ?? this.#cut,
+      );
+      if (!exported.cut) this.#exports.set(top.cell, exported);
+      const holder = stack.at(-1);
+      if (holder !== undefined) holder.done.set(top.cell, exported);
     }
+    return exported;
   }
 
-  /** The export of a cell whose parts are exported, or are on the walk's path and cut there. */
-  #cell(view: CellView): ExportedType {
+  /** The export of a cell whose parts are exported (`part`), or are on the walk's path and cut there. */
+  #cell(view: CellView, part: (cell: CellId) => ExportedType): ExportedType {
     switch (view.kind) {
       case "never":
         return this.#never;
@@ -253,31 +270,35 @@ class Exporter {
       case "nullOnly":
         return this.#nullOnly;
       default: {
-        const members = view.members.map((member) => this.#member(member));
+        const members = view.members.map((member) => this.#member(member, part));
         if (view.optional && view.kind !== "bound") members.push(this.#null);
         const type = union(members.map((member) => member.type));
+        const cut = members.some((member) => member.cut);
         if (members.length === 1 && !view.held) return members[0]!;
-        // `union` keeps the members it is given or merges scalars, which `typeKey` writes; two members of one type
-        // whose texts differ (a held mark inside one of them) both keep their text.
-        const texts = new Map<StaticType, Set<TypeText>>();
+        // `union` keeps the members it is given or merges them, which `typeKey` writes; the texts are the members'
+        // own, by structure (two members of one structure whose texts differ, a held mark inside one of them, both
+        // keep their text), and a member the union merged away keeps its text when it says more than its type
+        // (r9-B6, r10-B2).
+        const key = (member: StaticType): TypeText => typeKey(member, true, true);
+        const texts = new Map<TypeText, Set<TypeText>>();
         for (const member of members) {
-          const known = texts.get(member.type);
-          if (known === undefined) texts.set(member.type, new Set([member.text]));
+          const known = texts.get(key(member.type));
+          if (known === undefined) texts.set(key(member.type), new Set([member.text]));
           else known.add(member.text);
         }
-        const text = (member: StaticType): readonly TypeText[] => [
-          ...(texts.get(member) ?? [typeKey(member, true, true)]),
-        ];
-        const all = [
-          ...new Set((type.kind === "union" ? type.members : [type]).flatMap(text)),
-        ].sort();
-        const written = all.length === 1 ? all[0]! : `(${all.join("|")})`;
-        return { type, text: view.held ? `${written}!` : written };
+        const kept = new Set((type.kind === "union" ? type.members : [type]).map(key));
+        const all = new Set<TypeText>();
+        for (const k of kept) for (const text of texts.get(k) ?? [k]) all.add(text);
+        for (const member of members)
+          if (!kept.has(key(member.type)) && member.text !== key(member.type)) all.add(member.text);
+        const sorted = [...all].sort();
+        const written = sorted.length === 1 ? sorted[0]! : `(${sorted.join("|")})`;
+        return { type, text: view.held ? `${written}!` : written, cut };
       }
     }
   }
 
-  #member(member: Member): ExportedType {
+  #member(member: Member, part: (cell: CellId) => ExportedType): ExportedType {
     switch (member.kind) {
       case "type": {
         let exported = this.#types.get(member.type);
@@ -288,7 +309,7 @@ class Exporter {
         return exported;
       }
       case "collection": {
-        const element = this.#part(member.element);
+        const element = part(member.element);
         let byElement = this.#collections.get(member.ctor);
         if (byElement === undefined) {
           byElement = new WeakMap();
@@ -299,6 +320,7 @@ class Exporter {
           exported = {
             type: Object.freeze({ kind: member.ctor, element: element.type }),
             text: `${member.ctor}<${element.text}>`,
+            cut: element.cut,
           };
           byElement.set(element, exported);
         }
@@ -312,35 +334,30 @@ class Exporter {
         // a slot no store reached (empty by construction) is not a property of this object
         const entries = [...member.props]
           .filter(([, cell]) => !this.#solution.cells.items(cell).every((item) => item.tag === "e"))
-          .map(([name, cell]): readonly [string, ExportedType] => [name, this.#part(cell)])
+          .map(([name, cell]): readonly [string, ExportedType] => [name, part(cell)])
           .sort(([left], [right]) => compareText(left, right));
         const exported: ExportedType = {
           type: Object.freeze({
             kind: "object",
             properties: Object.freeze(
-              new PropertyTable(entries.map(([name, part]) => [name, part.type])),
+              new PropertyTable(entries.map(([name, value]) => [name, value.type])),
             ),
           }),
           text: `{${entries
-            .map(([name, part]) => `${JSON.stringify(name)}:${part.text}`)
+            .map(([name, value]) => `${JSON.stringify(name)}:${value.text}`)
             .sort()
             .join(",")}}`,
+          cut: entries.some(([, value]) => value.cut),
         };
-        // An object with a cut property is the export of the one cell being made, not of its properties.
-        if (entries.every(([, part]) => part !== this.#cut))
-          this.#objects.set(member.props, exported);
+        // An object a cut was made in is the export along one path, not of its properties.
+        if (!exported.cut) this.#objects.set(member.props, exported);
         return exported;
       }
     }
   }
 
-  /** The export of a part cell: made already, or on the walk's path and cut. */
-  #part(cell: CellId): ExportedType {
-    return this.#exports.get(cell) ?? this.#cut;
-  }
-
   #leaf(type: StaticType): ExportedType {
-    return { type, text: typeKey(type, true, true) };
+    return { type, text: typeKey(type, true, true), cut: false };
   }
 }
 

@@ -55,13 +55,17 @@ export interface Alternative {
   readonly choice: Choice | null;
 }
 
+/** The chosen part alternatives, with every part cell the merged items hold them in (a dynamic walk reads each). */
 export type Choice =
-  | { readonly element: Alternative; readonly cell: CellId; readonly props?: undefined }
+  | { readonly element: Alternative; readonly cells: readonly CellId[]; readonly props?: undefined }
   | {
       readonly props: ReadonlyMap<string, Alternative>;
-      readonly cells: ReadonlyMap<string, CellId>;
+      readonly cells: ReadonlyMap<string, readonly CellId[]>;
       readonly element?: undefined;
     };
+
+const unionOf = (left: readonly CellId[], right: readonly CellId[]): readonly CellId[] =>
+  [...new Set([...left, ...right])].sort((a, b) => a - b);
 
 /** A dynamic item met along a projection of the dynamic view. */
 interface DynamicMark {
@@ -108,14 +112,14 @@ function alternatives(
  * on which item was enumerated first.
  */
 function merged(prior: Alternative, other: Alternative): Alternative {
-  const cells = [...new Set([...prior.cells, ...other.cells])].sort((a, b) => a - b);
+  const cells = unionOf(prior.cells, other.cells);
   const items = [...prior.items, ...other.items.filter((item) => !prior.items.includes(item))];
   let choice = prior.choice;
   if (prior.choice !== null && other.choice !== null) {
     if (prior.choice.element !== undefined && other.choice.element !== undefined)
       choice = {
         element: merged(prior.choice.element, other.choice.element),
-        cell: prior.choice.cell,
+        cells: unionOf(prior.choice.cells, other.choice.cells),
       };
     else if (prior.choice.props !== undefined && other.choice.props !== undefined) {
       const props = new Map(prior.choice.props);
@@ -123,7 +127,10 @@ function merged(prior: Alternative, other: Alternative): Alternative {
         const mine = props.get(name);
         if (mine !== undefined) props.set(name, merged(mine, alternative));
       }
-      choice = { props, cells: prior.choice.cells };
+      const partCells = new Map(prior.choice.cells);
+      for (const [name, theirs] of other.choice.cells)
+        partCells.set(name, unionOf(partCells.get(name) ?? [], theirs));
+      choice = { props, cells: partCells };
     }
   }
   return { ...prior, cells, items, choice };
@@ -187,7 +194,9 @@ export function itemAlternatives(
     };
   };
   if (item.parts.props !== undefined) {
-    const propCells: ReadonlyMap<string, CellId> = item.parts.props;
+    const propCells: ReadonlyMap<string, readonly CellId[]> = new Map(
+      [...item.parts.props].map(([name, part]) => [name, [part]]),
+    );
     if (item.parts.open === true)
       return [
         {
@@ -222,7 +231,7 @@ export function itemAlternatives(
   const element = item.parts.element;
   const ctor: Exclude<Constructor, "object"> = item.ctor === "object" ? "list" : item.ctor;
   return partAlternatives(element).map((a) =>
-    compose({ kind: ctor, element: table.toStatic(a.type) }, [a], { element: a, cell: element }),
+    compose({ kind: ctor, element: table.toStatic(a.type) }, [a], { element: a, cells: [element] }),
   );
 }
 
@@ -257,12 +266,15 @@ function stepOf(
     choice: null,
   });
   if (a.choice !== null) {
-    const marks = (part: CellId | undefined): DynamicMark[] =>
-      withDynamic && part !== undefined
-        ? cells
-            .items(part)
-            .filter((it) => it.tag === "d" && it.why !== undefined)
-            .map((it) => ({ tag: "d", why: it.why! }))
+    // the marks of every part cell the merged items hold the chosen part in
+    const marks = (parts: readonly CellId[] | undefined): DynamicMark[] =>
+      withDynamic && parts !== undefined
+        ? parts.flatMap((part) =>
+            cells
+              .items(part)
+              .filter((it) => it.tag === "d" && it.why !== undefined)
+              .map((it) => ({ tag: "d", why: it.why! })),
+          )
         : [];
     if (a.choice.props !== undefined) {
       if (typeof step !== "object") return [];
@@ -271,7 +283,7 @@ function stepOf(
     }
     if (typeof step === "object") return [];
     if (node.kind === "dict" && step === "iteration") return [text()];
-    return [a.choice.element, ...marks(a.choice.cell)];
+    return [a.choice.element, ...marks(a.choice.cells)];
   }
   if (typeof step === "object") {
     if (node.kind !== "object" || node.properties === null) return [];

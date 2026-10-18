@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   INTEGER_TYPE,
+  joinTypes,
   NULL_TYPE,
   NUMBER_TYPE,
   optional,
@@ -10,8 +11,10 @@ import {
   union,
   type StaticType,
 } from "../src/static-types.js";
+import { typeKey } from "../src/storage-types.js";
 import { operationRelations } from "../src/type-inference/adapters/index.js";
 import type { OperandView, OperationRelation } from "../src/type-inference/adapters/relation.js";
+import { viewMembers } from "../src/type-inference/adapters/views.js";
 import type { ContractFamily } from "../src/type-inference/graph.js";
 import {
   assertCase,
@@ -166,13 +169,50 @@ function assertOracle(
   const fact = outcome.type!;
   // A fact with an open slot (an element nothing was stored into, copied) is the solver's case, not a relation's.
   if (fact !== "unknown" && !isClosedFact(fact)) return;
+  // Q3.7's scope (work note §3.8): a collection whose elements mix is built from both operands' elements, the
+  // report (TSV044, or an arity or name report that pre-empts it) staying at the construction; the legacy recovered
+  // unknown elements. The rows that mix are the relation's own condition read from the inputs: the first written
+  // argument is collections only (no null, no other kind), no element is unknown, and the elements of some receiver
+  // member do not join with the argument's; the declared realization is the join over all those elements.
+  const mixed = /^(list|set)<unknown>$/.exec(fact);
+  const first = inputs.arguments[0] ?? inputs.named.values().next().value;
+  const elementsOf = (view: OperandView | null | undefined): StaticType[] | null => {
+    if (view === null || view === undefined || view.alternatives === null || view.dynamic !== null)
+      return null;
+    const members = viewMembers(view);
+    const collections = members.filter((m) => m.kind === "list" || m.kind === "set");
+    if (collections.length === 0 || collections.length < members.length) return null;
+    return collections.flatMap((m) => (m.kind === "list" || m.kind === "set" ? [m.element] : []));
+  };
+  const owns = elementsOf(inputs.receiver) ?? [];
+  const others = elementsOf(first);
+  const known = (elements: readonly StaticType[]): boolean =>
+    elements.every((e) => e.kind !== "unknown");
+  const mixes =
+    mixed !== null &&
+    others !== null &&
+    known(owns) &&
+    known(others) &&
+    owns.some((own) => {
+      const parts = [own, ...others].filter((e) => e.kind !== "never");
+      return parts.length > 0 && joinTypes(parts) === undefined;
+    });
+  const decided = mixes
+    ? {
+        realized: `${mixed![1]}<${typeKey(
+          union([...owns, ...others!].filter((e) => e.kind !== "never")),
+          true,
+          true,
+        )}>`,
+      }
+    : null;
   try {
     assertCase(
       relation,
       inputs,
       outcome,
       { fact, errors: outcome.errorsAtOperation, elsewhere: outcome.errorsElsewhere },
-      fact === "unknown" ? "unknown" : "fact",
+      decided ?? (fact === "unknown" ? "unknown" : "fact"),
     );
   } catch (error) {
     throw new Error(

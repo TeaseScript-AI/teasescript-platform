@@ -16,6 +16,7 @@ import { analyzeTypes } from "../src/type-inference/index.js";
 import { exportFacts, exportTypes } from "../src/type-inference/solver/export.js";
 import type { CellView } from "../src/type-inference/solver/interpret.js";
 import { solve, type Solution } from "../src/type-inference/solver/solve.js";
+import { solutionSummary } from "./helpers/solver-text.js";
 import { request } from "./helpers/type-inference-graph.js";
 
 /**
@@ -222,7 +223,41 @@ const FORMS: readonly Form[] = [
     source: "let a = []\nlet b = [a]\na.add(b)\nexit",
     fact: { binding: "b" },
     view: "known",
-    exported: "list<list<?>>",
+    exported: "list<list<list<?>>>",
+    legacy: {
+      text: "list<list<?>>",
+      why: "the cut is relative to the place exported, as the model renders it (r10-B5); the legacy widens at its own back edge",
+    },
+  },
+  {
+    form: "a nested held mark beside a member of the same structure",
+    source: 'let xs = [[1], [fromJson("1"), 1]]\nexit',
+    fact: { binding: "xs" },
+    view: "known",
+    exported: "list<(list<integer!>|list<integer>)>",
+    legacy: {
+      text: "list<list<unknown>>",
+      why: "a known value beside a value the compiler cannot know decides the part and marks it held (Q3.2c); both members keep their text (r9-B6, r10-B2)",
+    },
+  },
+  {
+    form: "a nested held mark beside a member the union merges it into",
+    source: 'let xs = [[2.5], [fromJson("1"), 1]]\nexit',
+    fact: { binding: "xs" },
+    view: "known",
+    exported: "list<(list<integer!>|list<number>)>",
+    legacy: {
+      text: "list<list<unknown>>",
+      why: "a member the legacy's union merges away keeps its text when it says more than its type (r10-B2)",
+    },
+  },
+  {
+    form: "a nested held mark two levels down",
+    source: 'let xs = [[[1]], [[fromJson("1"),1]]]\nexit',
+    fact: { binding: "xs" },
+    view: "known",
+    exported: "list<(list<list<integer!>>|list<list<integer>>)>",
+    legacy: { text: "list<list<list<unknown>>>", why: "as above, at depth" },
   },
   {
     form: "a cell that holds nothing",
@@ -372,6 +407,20 @@ test("a cycle exports a finite type, the cut cell as the legacy's undecided slot
     facts.values.filter((fact) => fact.kind !== "callExpression").map((fact) => fact.type);
   assert.deepEqual(texts(analysis.facts), ["list<list<?>>", "list<list<?>>", "list<list<?>>"]);
   assert.deepEqual(texts(analysis.facts), texts(analysis.legacy));
+});
+
+test("a cycle through several places is cut relative to each place, as the model renders it", () => {
+  // Each place's export is the model's rendering from that place (r10-B5): a part a cut was made in is made again
+  // along the path of every other place that reaches it; a sibling's known evidence beside the cut stays.
+  for (const source of [
+    "let a = []\nlet b = []\na.add(b)\nb.add(a)\nexit",
+    "let a = {}\nlet b = {}\na.x = b\nb.x = a\nexit",
+    'let a = {value: 1}\nlet b = {value: "s"}\na.x = b\nb.x = a\nlet c = b.x.value\nexit',
+  ]) {
+    const analysis = analyzed([source]);
+    const exported = analysis.facts.bindings.map((fact) => `${fact.name}=${fact.type}`).join(" ");
+    assert.equal(exported, solutionSummary(analysis.solution), source);
+  }
 });
 
 test("a cell is exported once, and every place that holds it shares its type", () => {
