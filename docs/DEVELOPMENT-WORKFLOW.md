@@ -206,7 +206,13 @@ A review is not converging when successive substantive findings come from the
 same invariant or problem family and each repair addresses only one newly found
 sibling without reducing uncertainty about the remaining supported behavior
 space. No fixed review count triggers this rule. Both the implementer and the
-reviewer are responsible for recognizing and reporting the pattern.
+reviewer are responsible for recognizing and reporting the pattern without
+waiting to be asked: from the second review round on, every review report and
+every repair report states, for each substantive finding, whether it belongs to
+a problem family an earlier round already found, and if so whether the review
+is converging and why. Whoever coordinates the work compares those answers
+across rounds and brings a non-converging pattern to the owner with a proposal;
+without a separate coordinator, the implementer does this.
 
 Relevant signals include:
 
