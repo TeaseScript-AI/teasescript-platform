@@ -44,6 +44,7 @@ import {
   createCheckpoint,
   DEFAULT_TEMPORAL_CONTEXT,
   observeTime,
+  type MediaLoadReport,
   type MediaProgressReport,
 } from "../src/index.js";
 import type { RandomDecision } from "../src/runtime/random-control.js";
@@ -796,6 +797,40 @@ test("a debugging tool's storage edit is recorded, so a replay applies it again"
     ["run", "applyExternalStorageEdit", "completeAction", "run"],
   );
   assert.equal((await replay(recorder)).kind, "reproduced");
+});
+
+test("an argument is recorded as captured, the plain data the engine reads, also when reading it again differs", async () => {
+  const recorder = new DebugRecorder();
+  const session = createPlayerRuntimeSession(
+    'let music = playAudio async "music.mp3"\nwait 5 s\nexit',
+    { recorder },
+  );
+  // A proxy whose reads disagree with its property descriptors, which a capture reads, as the engine's does.
+  let reads = 0;
+  const report = new Proxy(
+    { kind: "loaded", durationMs: 10_000 },
+    {
+      get: (target, key) =>
+        key === "durationMs"
+          ? [1_000, 2_000, 3_000][Math.min(reads++, 2)]
+          : key === "kind"
+            ? target.kind
+            : undefined,
+    },
+  );
+  // EVIDENCE: test: a proxy over a plain media load report stands in for a host object that reads inconsistently.
+  const loaded = reportPlayerRuntimeMediaLoad(session, 1, report as MediaLoadReport);
+  assert.equal(loaded.outcome.kind, "accepted");
+  const media = playerRuntimeSnapshot(loaded.session).backgroundActions.find(
+    (action) => action.kind === "media",
+  );
+  assert.ok(media?.kind === "media");
+  assert.equal(media.media.durationMs, 10_000);
+  const recorded = recorder
+    .recording()!
+    .operations.find((operation) => operation.kind === "reportMediaLoad");
+  assert.deepEqual(recorded?.args, [1, { kind: "loaded", durationMs: 10_000 }]);
+  assert.equal(await replay(recorder).then((result) => result.kind), "reproduced");
 });
 
 test("an argument JSON cannot copy exactly leaves the recording incomplete instead of recording another call", async () => {
