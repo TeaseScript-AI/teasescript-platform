@@ -226,7 +226,15 @@ export type SyntaxEvidence =
       readonly select: "random" | "list";
     }
   | { readonly kind: "timer"; readonly form: "short" | "named"; readonly async: boolean }
-  | { readonly kind: "media"; readonly media: string; readonly async: boolean };
+  | { readonly kind: "media"; readonly media: string; readonly async: boolean }
+  /**
+   * The selectors of a list function or of `randomWeighted` (`by:`, `x:`, `y:`, `weight:`) as the result rule reads
+   * them: the text each is written as, or `null` for one that is not written as text (a variable, even a known one).
+   */
+  | {
+      readonly kind: "selectors";
+      readonly written: readonly { readonly name: string; readonly text: string | null }[];
+    };
 
 /** A written form field: its name, the place of its descriptor, and the descriptor's written shape. */
 export interface FormFieldEvidence {
