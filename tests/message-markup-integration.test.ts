@@ -5,12 +5,16 @@ import {
   compileSource,
   completeAction,
   createCheckpoint,
+  createFreshRuntimeSession,
   createFreshRuntimeSnapshot,
   deserializeCheckpoint,
   isMessageMarkup,
+  parseMessageMarkup,
   run,
   serializeCheckpoint,
   stepToEvent,
+  type InstructionPlan,
+  type InterpreterEvent,
 } from "../src/index.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
@@ -191,5 +195,94 @@ test("preserves message markup through every instruction checkpoint boundary", (
   if (output?.kind === "say") {
     assert.equal(output.text, "Heading\nReusable format and **dynamic**");
     assert.equal(isMessageMarkup(output.content), true);
+  }
+});
+
+test("a repeated say shows each text's own markup and parses an unchanged text once", () => {
+  // One say shows these in turn: a repeat, changed text, empty, escaped and malformed markup, an earlier text again.
+  const texts = [
+    "**bold** start",
+    "**bold** start",
+    "plain words",
+    "",
+    "\\*escaped\\* stays",
+    "[u]unclosed **mark",
+    "**bold** start",
+    "# Head\n- item",
+  ];
+  const source = `speaker vera {
+    displayName: "Vera"
+}
+speaker anna {
+    displayName: "Anna"
+}
+let texts = ${JSON.stringify(texts)}
+let colors = ["white", "red", "white", "red", "white", "red", "white", "red"]
+let paces = [0 s, 1 s, 0 s, 2 s, 0 s, 0 s, 1 s, 0 s]
+let lines = []
+let step = 0
+for text in texts {
+    if step % 2 == 0 {
+        speaker vera
+    } else {
+        speaker anna
+    }
+    let line = say bubble(color: colors[step]) text, paces[step]
+    lines.add(line)
+    step += 1
+}
+lines[2].text = "changed *now*"
+exit
+`;
+  const play = (plan: InstructionPlan) => {
+    const session = createFreshRuntimeSession(plan, {
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    });
+    const events: InterpreterEvent[] = [];
+    for (;;) {
+      events.push(...session.run().events);
+      const gate = session.view().foregroundAction;
+      if (gate?.kind !== "chatPacingGate") break;
+      events.push(...session.observeTime(gate.deadlineMs).events);
+    }
+    assert.equal(session.view().status, "halted");
+    return { events, snapshot: session.exportSnapshot() };
+  };
+  const plan = compileValidPlan(source);
+  const first = play(plan);
+  const says = first.events.flatMap((event) => (event.kind === "say" ? [event] : []));
+  assert.deepEqual(
+    says.map((event) => event.content),
+    texts.map((text) => parseMessageMarkup(text)),
+  );
+  for (const event of says) assert.equal(event.text, event.content.visibleText);
+  // Speaker, presentation, reading time, and the message handle still come from every say.
+  assert.deepEqual(
+    says.map((event) => [event.speaker?.identifier, event.presentation]),
+    says.map((_, index) => [index % 2 === 0 ? "vera" : "anna", says[index % 2]!.presentation]),
+  );
+  assert.notDeepEqual(says[0]!.presentation, says[1]!.presentation);
+  assert.equal(
+    first.events.filter(
+      (event) => event.kind === "actionRequested" && event.action.kind === "chatPacingGate",
+    ).length,
+    3,
+  );
+  assert.deepEqual(
+    first.events.flatMap((event) => (event.kind === "messageUpdated" ? [event.content] : [])),
+    [parseMessageMarkup("changed *now*")],
+  );
+  assert.deepEqual(
+    first.snapshot.liveMessages.map((message) => [message.messageId, message.sourceText]),
+    says.map((event, index) => [event.sequence, index === 2 ? "changed *now*" : texts[index]]),
+  );
+  // Scoped oracle for the parse cache: the repeated text is parsed once.
+  assert.equal(says[1]!.content, says[0]!.content);
+  // Another session of the same plan reuses the parses, and a newly compiled plan parses afresh, with the same result.
+  for (const again of [play(plan), play(compileValidPlan(source))]) {
+    assert.deepEqual(again.events, first.events);
+    assert.deepEqual(again.snapshot, first.snapshot);
   }
 });

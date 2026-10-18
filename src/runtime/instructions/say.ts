@@ -370,7 +370,7 @@ function executeSay(
     );
   }
   const textCauses = outer === null ? null : evaluator.trace!.pop(outer);
-  const content = parseMessageMarkup(authoredText);
+  const content = sayMarkup(instruction, authoredText);
   const text = content.visibleText;
   const pacingValue =
     typeof instruction.pacing === "object"
@@ -495,6 +495,27 @@ function effectiveSaySkippable(
     throw fault("TSR050", notSkippableFlag(configured.value), span);
   }
   return configured.value;
+}
+
+/**
+ * The markup of each say's most recent text, keyed by its plan instruction: a say that shows the same text again, as
+ * in a loop or another session of the plan, parses it once. Each say keeps one entry, replaced when its text changes;
+ * the markup is deeply frozen and holds nothing of a session.
+ */
+const lastSayMarkup = new WeakMap<
+  object,
+  { readonly text: string; readonly markup: MessageMarkup }
+>();
+
+function sayMarkup(
+  instruction: Extract<Instruction, { kind: "say" }>,
+  text: string,
+): MessageMarkup {
+  const last = lastSayMarkup.get(instruction);
+  if (last !== undefined && last.text === text) return last.markup;
+  const markup = parseMessageMarkup(text);
+  lastSayMarkup.set(instruction, { text, markup });
+  return markup;
 }
 
 export function emitSay(
