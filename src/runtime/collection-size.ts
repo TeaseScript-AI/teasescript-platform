@@ -1,8 +1,8 @@
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
-import { copySpan } from "./operations/support.js";
 import { groupedDigits } from "./text-length.js";
+import { copySpan } from "../plan/source-location.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 

@@ -22,7 +22,6 @@ import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { checkCollectionLength } from "./collection-size.js";
 import { internalFault, RuntimeFault } from "./errors.js";
 import { base64Text, jsonText, textFromBase64, valueFromJson } from "./json-base64.js";
-import { copySpan } from "./operations/support.js";
 import {
   createCapturedSerializableList,
   type SerializableRuntimeProperty,
@@ -35,6 +34,7 @@ import { checkTextLength } from "./text-length.js";
 import { isAngle, isList, isRange, isSet } from "./value-predicates.js";
 import { isVisibleScalar } from "./value-text.js";
 import { describeValue } from "../value-kinds.js";
+import { copySpan } from "../plan/source-location.js";
 
 /**
  * Operations that only read their values and give a new one: `+` on text or lists, the numeric and angle functions, and

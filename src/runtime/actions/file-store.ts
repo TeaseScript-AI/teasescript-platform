@@ -1,13 +1,11 @@
 import type { FileStoreInstruction } from "../../plan/model.js";
 import { internalFault, RuntimeFault } from "../errors.js";
-import { type Evaluator, USE_DEFAULT } from "../evaluator.js";
+import type { Evaluator } from "../evaluator.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
 import { jsonText, valueFromJson } from "../json-base64.js";
 import { emitDeveloperWarning } from "../operations/media-lifecycle.js";
 import {
   assertEventSequenceCapacity,
-  copySpan,
-  isPlainRecord,
   requiredFutureActionCompletionEvents,
   setCapturedTemporary,
   takeSequence,
@@ -37,6 +35,9 @@ import { checkTextLength, messageText } from "../text-length.js";
 import type { CapturedMediaAdmission } from "./capture.js";
 import type { RuntimeFileStoreActionSnapshot, RuntimeFileToStore } from "./model.js";
 import { describeValue } from "../../value-kinds.js";
+import { copySpan } from "../../plan/source-location.js";
+import { isPlainRecord } from "../plain-data.js";
+import { USE_DEFAULT } from "../evaluation/support.js";
 
 // The calls that may use the Player's file store (V30 §13 and §33). A `fileStore` instruction first works out which files
 // to store, read, or hash. Without any it gives the result at once; otherwise it asks the Player and waits, and runs

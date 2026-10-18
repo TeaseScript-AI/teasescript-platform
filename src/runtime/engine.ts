@@ -38,11 +38,8 @@ import {
 import {
   type Evaluator,
   acceptedDefault,
-  notBoolean,
-  notLogicalOperand,
   RuntimeExecutionContext,
   type RuntimeCapabilities,
-  USE_DEFAULT,
 } from "./evaluator.js";
 export type {
   RuntimeBuiltinFunction,
@@ -55,8 +52,6 @@ import { textTooLong } from "./text-length.js";
 import {
   assertCounterCanAdvance,
   captureExecutableData,
-  copySpan,
-  isPlainRecord,
   pendingResult,
   result,
   RuntimeDataError,
@@ -65,7 +60,7 @@ import {
 } from "./operations/support.js";
 import type { PendingActionOperationResult, RuntimeOperationResult } from "./operations/model.js";
 import { captureExternalData } from "../external-data-capture.js";
-import { copyPlainData } from "./plain-data.js";
+import { copyPlainData, isPlainRecord } from "./plain-data.js";
 import {
   compileRandomPolicy,
   RandomControl,
@@ -105,6 +100,9 @@ import type { RuntimeSnapshot } from "./state.js";
 import { snapshotValidationAnalysis } from "./snapshot-validation-analysis.js";
 import { startTimerHandler, timerHandlerDispatchable } from "./operations/timer-handlers.js";
 import { stopAllTimersForSessionEnd } from "./operations/timer-lifecycle.js";
+import { copySpan } from "../plan/source-location.js";
+import { notBoolean, notLogicalOperand } from "./evaluation/operators.js";
+import { USE_DEFAULT } from "./evaluation/support.js";
 import { stopAllMediaForSessionEnd } from "./operations/media-lifecycle.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
 import { assertValueType } from "./value-types.js";

@@ -1,5 +1,4 @@
 import type { DeveloperWarningCode } from "../../diagnostic-codes.js";
-import { randomDrawPending } from "./observe-time.js";
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
 import { interruptFrame } from "../activations.js";
 import { messageText } from "../text-length.js";
@@ -53,13 +52,14 @@ import {
   captureExecutableData,
   type CapturedExecutableData,
   cloneSettlement,
-  copySpan,
-  isPlainRecord,
   pendingResult,
   positiveSafeInteger,
   setTemporary,
   takeSequence,
 } from "./support.js";
+import { copySpan } from "../../plan/source-location.js";
+import { isPlainRecord } from "../plain-data.js";
+import { randomDrawPending } from "./model.js";
 
 export interface ActionCompletionOptions {
   /**

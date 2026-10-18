@@ -8,7 +8,7 @@ import {
   repeatCountFix,
   repeatCountMessage,
 } from "../../loop-rules.js";
-import { type Evaluator, assertIntegerRange, notBoolean, planLabel } from "../evaluator.js";
+import type { Evaluator } from "../evaluator.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import { assertCounterCanAdvance } from "../operations/support.js";
 import { loopKey } from "../debug-trace.js";
@@ -30,6 +30,8 @@ import { describeShownValue } from "../value-types.js";
 import { numberFromText } from "../../conversions.js";
 import { isDict, isList, isRange, isSet } from "../value-predicates.js";
 import { advance, currentCallFrameId, currentFrame, fault } from "./support.js";
+import { notBoolean } from "../evaluation/operators.js";
+import { assertIntegerRange, planLabel } from "../evaluation/support.js";
 
 export function executeLoopStart(
   plan: InstructionPlan,

@@ -44,7 +44,6 @@ import {
   whole,
   type Exact,
 } from "./exact-numbers.js";
-import { copySpan } from "./operations/support.js";
 import {
   cloneSerializableValue,
   createSerializableObject,
@@ -64,6 +63,7 @@ import {
 } from "./value-predicates.js";
 import { describeValue, familyOf, VALUE_KINDS, valueKindOf } from "../value-kinds.js";
 import { isTemporalKind } from "../temporal-builtins.js";
+import { copySpan } from "../plan/source-location.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 

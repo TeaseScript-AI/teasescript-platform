@@ -1,5 +1,4 @@
 import type { RandomDrawPendingOutcome } from "../random-control.js";
-import { randomDrawPending } from "./observe-time.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import { interruptFrame } from "../activations.js";
 import type { InstructionPlan } from "../../plan/model.js";
@@ -16,13 +15,10 @@ import {
   type RuntimeTemporalCapture,
 } from "../temporal-captures.js";
 import type { PendingActionOperationResult } from "./model.js";
-import {
-  captureExecutableData,
-  type CapturedExecutableData,
-  isPlainRecord,
-  pendingResult,
-} from "./support.js";
+import { captureExecutableData, type CapturedExecutableData, pendingResult } from "./support.js";
 import { withDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
+import { isPlainRecord } from "../plain-data.js";
+import { randomDrawPending } from "./model.js";
 
 export type ContinueCaptureOutcome =
   | { readonly kind: "recorded"; readonly boundaryMs: number }

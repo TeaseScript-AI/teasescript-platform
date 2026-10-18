@@ -50,3 +50,11 @@ export type ActionCompletionOutcome =
    */
   | { readonly kind: "executionPending"; readonly actionId: number }
   | RandomDrawPendingOutcome;
+
+/** The refusal of a host operation while a draw is paused: it changes nothing until the host resolves the draw. */
+export function randomDrawPending(current: RuntimeSnapshot): RandomDrawPendingOutcome | null {
+  const pending = current.randomControl?.pending ?? null;
+  return pending === null
+    ? null
+    : Object.freeze({ kind: "randomDrawPending", drawId: pending.draw.drawId } as const);
+}

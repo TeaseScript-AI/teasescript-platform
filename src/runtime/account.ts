@@ -1,6 +1,6 @@
 import { PERSON_FIELDS, SPEAKER_NAME_LISTS, speakerPropertyValue } from "../speaker-terms.js";
 import type { SerializableRuntimeList } from "./serializable-values.js";
-import { isPlainRecord } from "./operations/support.js";
+import { isPlainRecord } from "./plain-data.js";
 
 /**
  * A person field of the account (V30 §37): text, or for a name list a list of at least one text. The account holds

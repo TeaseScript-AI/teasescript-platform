@@ -24,13 +24,13 @@ import {
 } from "../text-operations.js";
 import { checkCollectionLength, MAX_COLLECTION_LENGTH } from "./collection-size.js";
 import { RuntimeFault } from "./errors.js";
-import { copySpan } from "./operations/support.js";
 import { caseMappedLength, checkTextLength, textLengthLimit, textTooLong } from "./text-length.js";
 import { compileRegex, replacementParts, type ReplacementPart } from "../regex.js";
 import { REGEX_WORK_EXCEEDED, RegexWork, type RegexProgram } from "../regex-engine.js";
 import { isAngle, isAnyDuration, isDuration, isRegex } from "./value-predicates.js";
 import type { SerializableRegex, SerializableRuntimeValue } from "./serializable-values.js";
 import { describeValue } from "../value-kinds.js";
+import { copySpan } from "../plan/source-location.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 

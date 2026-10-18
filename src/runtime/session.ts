@@ -32,7 +32,6 @@ import {
 } from "./random-control.js";
 import {
   admittedBuiltinRecord,
-  bindingScopeId,
   type RuntimeBuiltinFunction,
   type RuntimeCapabilities,
 } from "./evaluator.js";
@@ -97,6 +96,7 @@ import {
   type RuntimeSnapshot,
   type RuntimeStatus,
 } from "./state.js";
+import { bindingScopeId } from "./evaluation/bindings.js";
 
 /** What every operation of a session, and of the sessions forked from it, may call. */
 export interface RuntimeSessionOptions {

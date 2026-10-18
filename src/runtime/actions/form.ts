@@ -32,7 +32,6 @@ import type { SourceSpan as RichSourceSpan } from "../../source.js";
 import type { TemporalContext } from "../../temporal.js";
 import { expandChoiceOptions } from "../choice-options.js";
 import { internalFault, RuntimeFault } from "../errors.js";
-import { copySpan } from "../operations/support.js";
 import {
   getSerializableProperty,
   serializableEquals,
@@ -65,6 +64,7 @@ import type {
   RuntimeFormValue,
 } from "./model.js";
 import { describeValue } from "../../value-kinds.js";
+import { copySpan } from "../../plan/source-location.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 

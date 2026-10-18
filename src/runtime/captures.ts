@@ -1,8 +1,8 @@
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
 import { internalFault, RuntimeFault } from "./errors.js";
-import { copySpan } from "./operations/support.js";
 import type { RuntimeScopeFrameSnapshot, RuntimeSnapshot } from "./state.js";
+import { copySpan } from "../plan/source-location.js";
 
 /*
  * Shared variables of blocks (V30 §14). A timer expiry block, media block, or permanent button block uses the

@@ -50,7 +50,6 @@ import {
   type TimeFields,
 } from "../temporal.js";
 import { RuntimeFault } from "./errors.js";
-import { copySpan } from "./operations/support.js";
 import type {
   SerializableRuntimeCalendarDuration,
   SerializableRuntimeDate,
@@ -71,6 +70,7 @@ import {
 } from "./value-predicates.js";
 import { wallClockAt, type RuntimeTemporalCapture } from "./temporal-captures.js";
 import { describeValue } from "../value-kinds.js";
+import { copySpan } from "../plan/source-location.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 

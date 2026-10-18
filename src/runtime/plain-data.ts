@@ -40,3 +40,9 @@ export function copyPlainData<T>(value: T, use: "publish" | "fork" | "export"): 
   // EVIDENCE: invariant: the copy has the same JSON-safe structure as `value`.
   return root as T;
 }
+
+export function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}

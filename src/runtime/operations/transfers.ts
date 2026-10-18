@@ -27,13 +27,14 @@ import type {
   RuntimeScopeFrameSnapshot,
   RuntimeSnapshot,
 } from "../state.js";
-import { assertCounterCanAdvance, assertEventSequenceCapacity, copySpan } from "./support.js";
+import { assertCounterCanAdvance, assertEventSequenceCapacity } from "./support.js";
 import { stopTimerAction } from "./timer-lifecycle.js";
 import {
   removePermanentButtons,
   type RuntimePermanentButtonSnapshot,
 } from "../permanent-buttons.js";
 import { describeValue } from "../../value-kinds.js";
+import { copySpan } from "../../plan/source-location.js";
 
 /*
  * Transfers (ADR 0022 §5). Each entry into a file is an activation with its own top-level variables, in a root scope.

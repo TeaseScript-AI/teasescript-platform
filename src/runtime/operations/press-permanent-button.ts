@@ -1,5 +1,4 @@
 import type { RandomDrawPendingOutcome } from "../random-control.js";
-import { randomDrawPending } from "./observe-time.js";
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
 import { cloneCaptures } from "../captures.js";
 import type { PermanentButtonPressedEvent } from "../events.js";
@@ -10,12 +9,13 @@ import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import {
   captureExecutableData,
   type CapturedExecutableData,
-  copySpan,
   pendingResult,
   positiveSafeInteger,
   takeSequence,
 } from "./support.js";
 import { withDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
+import { copySpan } from "../../plan/source-location.js";
+import { randomDrawPending } from "./model.js";
 
 export type PermanentButtonPressOutcome =
   | RandomDrawPendingOutcome

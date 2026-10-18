@@ -11,7 +11,8 @@ import { processDueWork } from "./observe-time.js";
 import { reportBlockOverrun, timerHandlerDispatchable } from "./timer-lifecycle.js";
 
 export { timerHandlerDispatchable };
-import { assertCounterCanAdvance, copySpan } from "./support.js";
+import { assertCounterCanAdvance } from "./support.js";
+import { copySpan } from "../../plan/source-location.js";
 import type { TraceStore } from "../debug-trace.js";
 
 /**

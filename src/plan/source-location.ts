@@ -20,3 +20,8 @@ export function planLocationToSourceSpan(location: PlanSourceLocation): SourceSp
     createSourcePosition(location.eo, location.el, location.ec),
   );
 }
+
+export function copySpan(span: SourceSpan | PlanSourceLocation): SourceSpan {
+  if ("so" in span) return planLocationToSourceSpan(span);
+  return createSourceSpan(span.start, span.end);
+}

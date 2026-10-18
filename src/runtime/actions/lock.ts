@@ -2,12 +2,10 @@ import type { LockCall, LockInstruction } from "../../plan/model.js";
 import { interactionStringFits } from "../../interaction-limits.js";
 import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey } from "../../public-keys.js";
 import { internalFault, RuntimeFault } from "../errors.js";
-import { type Evaluator, USE_DEFAULT } from "../evaluator.js";
+import type { Evaluator } from "../evaluator.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
 import {
   assertEventSequenceCapacity,
-  copySpan,
-  isPlainRecord,
   requiredFutureActionCompletionEvents,
   setCapturedTemporary,
   takeSequence,
@@ -34,6 +32,10 @@ import type {
   RuntimeLockOutcome,
 } from "./model.js";
 import { describeValue } from "../../value-kinds.js";
+import { copySpan } from "../../plan/source-location.js";
+import { isPlainRecord } from "../plain-data.js";
+import { isLockNotice, isLockOutcome } from "./model.js";
+import { USE_DEFAULT } from "../evaluation/support.js";
 
 // The calls that lock and open text and stored files (V30 §13). A `lock` instruction asks the Player and waits, and runs
 // again with each answer, which the completion hands off: in its `work` phase the Player locks or opens with what it has;
@@ -603,27 +605,6 @@ function isAbsoluteDateTime(
   value: SerializableRuntimeValue,
 ): value is { readonly kind: "absoluteDateTime"; readonly epochMilliseconds: number } {
   return value !== null && typeof value === "object" && value.kind === "absoluteDateTime";
-}
-
-const LOCK_NOTICES: readonly RuntimeLockNotice[] = ["wrongPassword", "wrongKey", "unreachable"];
-
-export function isLockNotice(value: unknown): value is RuntimeLockNotice {
-  return LOCK_NOTICES.some((notice) => notice === value);
-}
-
-const LOCK_OUTCOMES: readonly RuntimeLockOutcome[] = [
-  "locked",
-  "opened",
-  "notOpened",
-  "unreadable",
-  "failed",
-  "ask",
-  "submitted",
-  "cancelled",
-];
-
-export function isLockOutcome(value: unknown): value is RuntimeLockOutcome {
-  return LOCK_OUTCOMES.some((outcome) => outcome === value);
 }
 
 /** A lock completion the engine accepts: how the step ended, and the text, file, or notice it carries. */

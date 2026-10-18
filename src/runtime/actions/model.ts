@@ -602,3 +602,24 @@ export type RuntimeActionSettlementSnapshot =
   | RuntimeCaptureActionSettlementSnapshot
   | RuntimeFileStoreActionSettlementSnapshot
   | RuntimeLockActionSettlementSnapshot;
+
+const LOCK_NOTICES: readonly RuntimeLockNotice[] = ["wrongPassword", "wrongKey", "unreachable"];
+
+export function isLockNotice(value: unknown): value is RuntimeLockNotice {
+  return LOCK_NOTICES.some((notice) => notice === value);
+}
+
+const LOCK_OUTCOMES: readonly RuntimeLockOutcome[] = [
+  "locked",
+  "opened",
+  "notOpened",
+  "unreadable",
+  "failed",
+  "ask",
+  "submitted",
+  "cancelled",
+];
+
+export function isLockOutcome(value: unknown): value is RuntimeLockOutcome {
+  return LOCK_OUTCOMES.some((outcome) => outcome === value);
+}

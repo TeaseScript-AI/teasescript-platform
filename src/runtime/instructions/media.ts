@@ -21,7 +21,6 @@ import { internalFault } from "../errors.js";
 import {
   assertCounterCanAdvance,
   assertEventSequenceCapacity,
-  copySpan,
   requiredFutureActionCompletionEvents,
   setCapturedTemporary,
   takeSequence,
@@ -46,6 +45,7 @@ import { describeShownValue } from "../value-types.js";
 import { isAnyDuration } from "../value-predicates.js";
 import { formatDuration } from "../../duration.js";
 import { advance, durationFix, fault, type SourceSpan } from "./support.js";
+import { copySpan } from "../../plan/source-location.js";
 
 // Stage images, audio, and video.
 

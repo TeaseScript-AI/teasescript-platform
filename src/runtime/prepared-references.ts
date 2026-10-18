@@ -7,7 +7,6 @@ import {
   type SourceSpan as RichSourceSpan,
 } from "../source.js";
 import { internalFault, RuntimeFault } from "./errors.js";
-import { copySpan } from "./operations/support.js";
 import {
   cloneCapturedSerializableValue,
   createCapturedSerializableList,
@@ -26,6 +25,7 @@ import type { RuntimeBindingSnapshot, RuntimeSnapshot, RuntimeTemporarySnapshot 
 import { speakerPropertyValue } from "../speaker-terms.js";
 import { isDict, isList, isObject, isSet, isSpeakerReference } from "./value-predicates.js";
 import { listProperty } from "../list-methods.js";
+import { copySpan } from "../plan/source-location.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 

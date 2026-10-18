@@ -33,7 +33,6 @@ import type { Evaluator } from "../evaluator.js";
 import { internalFault } from "../errors.js";
 import {
   assertEventSequenceCapacity,
-  copySpan,
   setCapturedTemporary,
   takeSequence,
 } from "../operations/support.js";
@@ -90,6 +89,7 @@ import { cloneInteractionChoiceValue } from "../../choice-values.js";
 import { describeValue } from "../../value-kinds.js";
 import { advance, durationFix, fault, readTemporary, type SourceSpan } from "./support.js";
 import { emitSay } from "./say.js";
+import { copySpan } from "../../plan/source-location.js";
 
 // Interactions: the speaker of an ask or button, and the request that opens it with its UI and time limit.
 

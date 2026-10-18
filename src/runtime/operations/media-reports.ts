@@ -12,17 +12,12 @@ import {
   warnUnreachableCues,
 } from "./media-lifecycle.js";
 import type { PendingActionOperationResult } from "./model.js";
-import {
-  catchUp,
-  catchUpPolicy,
-  catchUpResult,
-  randomDrawPending,
-  type CatchUpOptions,
-} from "./observe-time.js";
+import { catchUp, catchUpPolicy, catchUpResult, type CatchUpOptions } from "./observe-time.js";
 import type { RandomDrawPendingOutcome, RandomPolicy } from "../random-control.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { captureExecutableData, type CapturedExecutableData, pendingResult } from "./support.js";
 import { withDebugTrace, type TraceStore } from "../debug-trace.js";
+import { randomDrawPending } from "./model.js";
 
 /** The Player's load result for one media ID. */
 export type MediaLoadReport =
