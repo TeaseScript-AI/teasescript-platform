@@ -826,13 +826,13 @@ test("a recursive call inside a loop runs its own instance of the loop (#587)", 
 test("a call keeps its caller's live temporaries through waits, defaults, prepared references, and every checkpoint", () => {
   // Each object field before a call stays a live temporary of its caller while the call, a call in its default, or a
   // prepared assignment target's call waits; the earlier field keeps the list as it was before the call changed it.
+  // The list is a literal, so that resuming from each boundary does not build it again.
+  const items = Array.from(
+    { length: 300 },
+    (_, index) => `{ n: ${index + 1}, label: "item ${index + 1}" }`,
+  );
   const result = assertRuntimeResumeEquivalent(
-    `let big = []
-let step = 1
-while step <= 300 {
-    big.add({ n: step, label: "item \${step}" })
-    step += 1
-}
+    `let big = [${items.join(", ")}]
 function pausing(n) {
     wait 1 s
     return n
