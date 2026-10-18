@@ -9,6 +9,7 @@ import {
 import {
   DURATION_TYPE,
   INTEGER_TYPE,
+  isNumeric,
   isScalar,
   members,
   NUMBER_TYPE,
@@ -34,6 +35,7 @@ import {
   isBottom,
   typeResult,
   UNCONSTRAINED,
+  viewMembers,
   writtenSelector,
 } from "./views.js";
 
@@ -48,32 +50,62 @@ import {
 type ReadKind = ListValueKind | "integer";
 type ListFunctionName = keyof typeof LIST_FUNCTION_CONTRACTS;
 
-/** The values a statistic reads: the list's elements, or the selected property of each, as a closed type or not. */
+/** The members of a view for use: without null, which the check reports (rule 1.9) and leaves out (`forUse`). */
+function useOf(view: OperandView): readonly StaticType[] {
+  return viewMembers(view).filter((member) => member.kind !== "null");
+}
+
+/** A type of no known kind: what the legacy cannot know, or a slot not decided yet. */
+function unknownPart(type: StaticType): boolean {
+  return type.kind === "unknown" || type.kind === "open";
+}
+
+/**
+ * The values a statistic or a regression reads, as `valuesType` of the legacy check gives them: the list's elements,
+ * or the property a selector names in each. The selector's name is checked whatever the list is, then the list, then
+ * the elements; a value the legacy cannot know is `dynamic` of its provenance, and one it reports is `invalid`.
+ */
 function valuesOf(
   list: OperandView,
   inputs: OperationInputs,
   selector: string,
 ): { readonly type: StaticType } | { readonly result: OperationResult } {
-  if (isBottom(list)) return { result: UNCONSTRAINED };
-  const closed = closedType(list);
-  if (closed === null) return { result: dynamicFrom(list, "unknown member") };
-  const parts = members(closed).map(resolved);
-  if (parts.some((part) => part.kind !== "list")) return { result: INVALID };
-  const element = union(parts.map((part) => (part.kind === "list" ? part.element : UNKNOWN_TYPE)));
-  if (!inputs.named.has(selector)) return { type: element };
-  const key = writtenSelector(inputs.evidence, selector);
-  const elements = members(element).map(resolved);
-  // Every element must be an object; the property's type is what the objects give it, or not known.
-  if (elements.some((member) => member.kind !== "object")) return { result: INVALID };
-  // A selector the legacy cannot see, or a property the objects do not show: values of no known kind.
-  if (key === null) return { type: UNKNOWN_TYPE };
+  const named = inputs.named.get(selector);
+  if (isBottom(list) || (named !== undefined && isBottom(named))) return { result: UNCONSTRAINED };
+  let key: string | null | undefined;
+  if (named !== undefined) {
+    // A selector that is no text is reported; one the legacy cannot see, or cannot know, names no property.
+    if (named.dynamic === null && !useOf(named).every((member) => isScalar(member, "string")))
+      return { result: INVALID };
+    key = named.dynamic === null ? writtenSelector(inputs.evidence, selector) : undefined;
+  }
+  const lists = useOf(list);
+  if (list.dynamic === null && lists.some((member) => member.kind !== "list"))
+    return { result: INVALID };
+  const element =
+    list.dynamic === null
+      ? union(lists.map((member) => (member.kind === "list" ? member.element : UNKNOWN_TYPE)))
+      : UNKNOWN_TYPE;
+  if (named === undefined)
+    return list.dynamic === null ? { type: element } : { result: dynamicFrom(list, "unknown member") };
+  const parts = members(element).map(resolved);
+  // Every element the legacy knows must be an object, also when the property's type stays unknown.
+  if (parts.some((member) => !unknownPart(member) && member.kind !== "object"))
+    return { result: INVALID };
+  if (key === undefined) return { result: dynamicFrom(named, "unknown member") };
+  if (key === null) return { result: dynamicResult("unknown member") };
+  if (list.dynamic !== null) return { result: dynamicFrom(list, "unknown member") };
   const found: StaticType[] = [];
-  for (const member of elements) {
-    const value = member.kind === "object" ? member.properties?.get(key) : undefined;
-    if (value === undefined) return { type: UNKNOWN_TYPE };
+  for (const member of parts) {
+    if (member.kind !== "object") return { result: dynamicResult("unknown member") };
+    // The objects have the property, or the legacy reports at the end that they never can; ones whose properties
+    // it does not know may still gain it.
+    if (member.properties === null) return { result: dynamicResult("unknown member") };
+    const value = member.properties.get(key);
+    if (value === undefined) return { result: INVALID };
     found.push(value);
   }
-  return { type: found.length === 0 ? UNKNOWN_TYPE : union(found) };
+  return found.length === 0 ? { result: dynamicResult("unknown member") } : { type: union(found) };
 }
 
 /** The one kind of the values, as `valueKind` of the legacy check decides it, or why there is none. */
@@ -82,7 +114,7 @@ function kindOfValues(
   allowed: readonly ListValueKind[],
 ): { readonly kind: ReadKind } | { readonly result: OperationResult } {
   const parts = members(type).map(resolved);
-  if (parts.some((part) => part.kind === "unknown" || part.kind === "open"))
+  if (parts.length === 0 || parts.some(unknownPart))
     return { result: dynamicResult("unknown member") };
   const kinds = new Set<ReadKind>();
   for (const part of parts) {
@@ -108,6 +140,8 @@ function statistic(
 ): OperationResult {
   const list = inputs.arguments[0];
   if (list === undefined) return INVALID;
+  // Its other numbers, such as a percentage, are the visitor's check: one that is no number is reported and the
+  // statistic still has its kind.
   const values = valuesOf(list, inputs, "by");
   if ("result" in values) return values.result;
   const kind = kindOfValues(values.type, contract.values);
@@ -116,7 +150,10 @@ function statistic(
   return typeResult(typeOfKind(kind.kind));
 }
 
-/** The amount kind of regression values, or `undefined` when the legacy reports and carries on with unknown fields. */
+/**
+ * The amount kind of regression values, or `undefined` where the legacy carries on with unknown fields: a value it
+ * reports, or one it cannot know. A bottom input waits.
+ */
 function amountOf(
   list: OperandView,
   inputs: OperationInputs,
@@ -124,14 +161,13 @@ function amountOf(
   allowed: readonly ListValueKind[],
 ): { readonly kind: ReadKind | undefined } | { readonly result: OperationResult } {
   const values = valuesOf(list, inputs, selector);
-  // A list that is no list, or elements that are no objects: the legacy reports and keeps unknown fields.
   if ("result" in values)
-    return values.result.kind === "invalid" ? { kind: undefined } : { result: values.result };
+    return values.result.kind === "unconstrained" ? { result: values.result } : { kind: undefined };
   const kind = kindOfValues(values.type, allowed);
   return "result" in kind ? { kind: undefined } : { kind: kind.kind };
 }
 
-/** `linearRegression`: the object of the line; a value or selection the check rejects leaves its fields unknown. */
+/** `linearRegression`: the object of the line; a value or selection the check rejects, or cannot know, leaves its fields unknown. */
 function regression(
   contract: ListFunction & { readonly takes: "points" },
   inputs: OperationInputs,
@@ -161,26 +197,51 @@ function regression(
   });
 }
 
-function prediction(inputs: OperationInputs): OperationResult {
+/** `predict`, in the order `predictType` of the legacy check decides: the x, then the line, then the intercept's kind. */
+function prediction(
+  contract: ListFunction & { readonly takes: "line" },
+  inputs: OperationInputs,
+): OperationResult {
   const line = inputs.arguments[0];
-  if (line === undefined || inputs.arguments[1] === undefined) return INVALID;
-  if (isBottom(line)) return UNCONSTRAINED;
-  const closed = closedType(line);
-  if (closed === null) return dynamicFrom(line, "unknown member");
-  const object = resolved(closed);
-  if (object.kind !== "object") return INVALID;
-  if (object.properties === null) return dynamicResult("unwritten parts");
-  const intercept = object.properties.get("intercept");
-  if (intercept === undefined || !object.properties.has("slope") || !object.properties.has("start"))
+  const x = inputs.arguments[1];
+  if (line === undefined || x === undefined) return INVALID;
+  if (isBottom(line) || isBottom(x)) return UNCONSTRAINED;
+  // Whatever the line, each kind the x may be is a number or a date and time value; null alone is no x.
+  const xs = useOf(x);
+  if (x.dynamic === null && xs.length === 0) return INVALID;
+  if (
+    xs.some(
+      (member) =>
+        !unknownPart(member) &&
+        !contract.positions.some(
+          (kind) => isScalar(member, kind) || (kind === "number" && isScalar(member, "integer")),
+        ),
+    )
+  )
     return INVALID;
-  const amount = resolved(intercept);
-  if (isScalar(amount, "duration")) return typeResult(DURATION_TYPE);
-  if (isScalar(amount, "integer", "number")) return typeResult(NUMBER_TYPE);
-  // An intercept of no known kind, as a regression over an unseen selector gives: no known result. An intercept of
-  // another kind is a line that predicts nothing: the legacy gives unknown without a report, the candidate no value.
-  return amount.kind === "unknown" || amount.kind === "open"
-    ? dynamicResult("unknown member")
-    : INVALID;
+  if (line.dynamic !== null) return dynamicFrom(line, "unknown member");
+  const object = resolved(union(useOf(line)));
+  if (unknownPart(object)) return dynamicResult("unknown member");
+  const property = (key: string): StaticType | undefined =>
+    object.kind === "object" ? object.properties?.get(key) : undefined;
+  const intercept = property("intercept");
+  const start = property("start");
+  const fields = [property("slope"), intercept, start];
+  // A line whose slope, intercept or start may be null is reported.
+  if (fields.some((field) => field !== undefined && members(field).some((one) => one.kind === "null")))
+    return INVALID;
+  if (
+    object.kind !== "object" ||
+    (object.properties !== null &&
+      (intercept === undefined || property("slope") === undefined || start === undefined))
+  )
+    return INVALID;
+  // An x that does not fit the line's start is reported, and the prediction still has the intercept's kind.
+  const amount = intercept === undefined ? undefined : resolved(intercept);
+  if (amount !== undefined && isScalar(amount, "duration")) return typeResult(DURATION_TYPE);
+  if (amount !== undefined && isNumeric(amount)) return typeResult(NUMBER_TYPE);
+  // An intercept the legacy cannot know, or of a kind that predicts nothing: unknown without a report.
+  return dynamicResult("unknown member");
 }
 
 function relation(name: ListFunctionName, contract: ListFunction): OperationRelation {
@@ -201,7 +262,7 @@ function relation(name: ListFunctionName, contract: ListFunction): OperationRela
         case "points":
           return regression(contract, inputs);
         case "line":
-          return prediction(inputs);
+          return prediction(contract, inputs);
       }
     },
   };

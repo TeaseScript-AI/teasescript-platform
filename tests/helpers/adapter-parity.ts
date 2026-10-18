@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import type { Expression } from "../../src/ast.js";
+import type { Block, Expression, LetStatement, Statement } from "../../src/ast.js";
 import {
   INTEGER_TYPE,
   joinTypes,
@@ -18,6 +18,7 @@ import type {
   ProjectionStep,
   SyntaxEvidence,
 } from "../../src/type-inference/graph.js";
+import type { TypeAnalysisRequest } from "../../src/type-inference/backend.js";
 import { analyzeTypes } from "../../src/type-inference/index.js";
 import type {
   OperandPath,
@@ -44,6 +45,8 @@ const PARITY_GLOBALS: readonly string[] = [
 ];
 
 export interface LegacyOutcome {
+  /** The request the check was made of, for collecting its graph. */
+  readonly request: TypeAnalysisRequest;
   /** The expression the binding holds, as written. */
   readonly node: Expression;
   /** The fact's type text, or `null` when the check typed no such node. */
@@ -51,8 +54,42 @@ export interface LegacyOutcome {
   /** The error codes reported inside the operation's span, and those reported anywhere else. */
   readonly errorsAtOperation: readonly string[];
   readonly errorsElsewhere: readonly string[];
+  /** The errors inside the operation's span with their offsets, for telling an operand's own errors apart. */
+  readonly errorSpans: readonly { readonly code: string; readonly start: number; readonly end: number }[];
   /** The type text of a top-level binding of the source, for asserting an operand's closed type. */
   bindingType(name: string): string | undefined;
+  /** The type texts the check gave the expressions at a site: one for a typed site, none for an untyped one. */
+  factsAt(site: { readonly start: number; readonly end: number }): readonly string[];
+}
+
+/** The first `let <name>` of the statements, looking into function bodies and blocks too. */
+function findLet(statements: readonly Statement[], name: string): LetStatement | undefined {
+  for (const statement of statements) {
+    if (statement.kind === "letStatement" && statement.name.name === name) return statement;
+    for (const part of Object.values(statement)) {
+      const blocks: Block[] = Array.isArray(part)
+        ? part.filter((item): item is Block => isBlock(item))
+        : isBlock(part)
+          ? [part]
+          : [];
+      for (const block of blocks) {
+        const found = findLet(block.statements, name);
+        if (found !== undefined) return found;
+      }
+    }
+  }
+  return undefined;
+}
+
+function isBlock(value: unknown): value is Block {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === "block" &&
+    "statements" in value &&
+    Array.isArray(value.statements)
+  );
 }
 
 /** The legacy check of `source`, read at the initializer of the top-level `let <binding>`. */
@@ -71,10 +108,8 @@ export function legacyOperation(
     options.builtins ?? [],
   );
   assert.notEqual(made, null, `the source parses and its names resolve:\n${source}`);
-  const statement = made!.files[0]!.program.statements.find(
-    (candidate) => candidate.kind === "letStatement" && candidate.name.name === binding,
-  );
-  assert.ok(statement !== undefined && statement.kind === "letStatement", `a let ${binding}`);
+  const statement = findLet(made!.files[0]!.program.statements, binding);
+  assert.ok(statement !== undefined, `a let ${binding}`);
   const node = statement.initializer;
   const outcome = analyzeTypes(made!);
   const facts = outcome.facts();
@@ -95,11 +130,29 @@ export function legacyOperation(
     readonly end: { readonly offset: number };
   }) => span.start.offset >= start && span.end.offset <= end;
   return {
+    request: made!,
     node,
     type: fact?.type ?? null,
     errorsAtOperation: errors.filter((error) => inside(error.span)).map((error) => error.code),
+    errorSpans: errors
+      .filter((error) => inside(error.span))
+      .map((error) => ({
+        code: error.code,
+        start: error.span.start.offset,
+        end: error.span.end.offset,
+      })),
     errorsElsewhere: errors.filter((error) => !inside(error.span)).map((error) => error.code),
     bindingType: (name) => facts.bindings.find((entry) => entry.name === name)?.type,
+    factsAt: (site) => [
+      ...new Set(
+        facts.values
+          .filter(
+            (value) =>
+              value.site.file === 0 && value.site.start === site.start && value.site.end === site.end,
+          )
+          .map((value) => value.type),
+      ),
+    ],
   };
 }
 

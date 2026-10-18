@@ -39,11 +39,9 @@ const FREE_STANDING: ReadonlyMap<
   ["showButton", interactions.RELATIONS],
   ["popup", interactions.RELATIONS],
   ["timer", interactions.RELATIONS],
-  ["media", interactions.RELATIONS],
   ["camera", interactions.RELATIONS],
   ["capture", interactions.RELATIONS],
   ["tagQuery", interactions.RELATIONS],
-  ["speakerField", interactions.RELATIONS],
 ]);
 
 /** An injected host builtin: the compiler knows nothing of its result (the legacy's `UNKNOWN_TYPE`). */
@@ -57,6 +55,9 @@ const RELATIONS: OperationRelations = Object.freeze({
     if (contract.family === "unit") return operators.unitRelation(contract.name);
     if (contract.family === "builtin" && !conversions.RELATIONS.has(contract.name))
       return hostBuiltin(contract.name);
+    // A media handle whatever the media, and a speaker field by its name.
+    if (contract.family === "media" || contract.family === "speakerField")
+      return interactions.relationOf(contract.family, contract.name);
     const family = FREE_STANDING.get(contract.family);
     // A module that serves several families keys by `<family>.<name>`; one that serves one by the name; a family
     // whose names are open, such as `angle.<unit>` or `speakerField.account.<name>`, by `<family>.*`.
