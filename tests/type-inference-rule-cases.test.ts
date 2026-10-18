@@ -5,7 +5,8 @@ import test from "node:test";
 import { operationRelations } from "../src/type-inference/adapters/index.js";
 import { collectGraph } from "../src/type-inference/collector.js";
 import { exportFacts } from "../src/type-inference/solver/export.js";
-import { solve } from "../src/type-inference/solver/solve.js";
+import type { CellId } from "../src/type-inference/solver/cells.js";
+import { solve, type Solution } from "../src/type-inference/solver/solve.js";
 import { request } from "./helpers/type-inference-graph.js";
 
 /**
@@ -27,6 +28,12 @@ interface RuleCase {
   readonly expect: Readonly<Record<string, string>>;
   /** The operation statuses the rule gives (`<family>.<name>@<site>:none|partial(i/n)`), when the rule is about validity. */
   readonly statuses?: readonly string[];
+  /**
+   * The bindings the rule puts in conflict, each with the families of the conflicting evidence in rank order, the
+   * working one first (`{"x": ["string", "integer"]}`); a binding is in conflict when its cell or a part of its
+   * structure is. Every other binding must be free of conflict, so a positive case asserts absence by omission.
+   */
+  readonly conflicts?: Readonly<Record<string, readonly string[]>>;
   readonly why: string;
 }
 
@@ -39,6 +46,42 @@ const cases: readonly RuleCase[] = readFileSync(FIXTURE, "utf8")
     return parsed;
   });
 
+/**
+ * The bindings in conflict, by name, with the families of the first conflicting cell found walking the binding's
+ * structure (the cell itself, then a collection's element cells and an object's property cells), working first. This
+ * is the evidence the exported text hides: a conflict exports its working kind, so a lost conflict flag would leave
+ * every exported type unchanged.
+ */
+function conflictsOf(solution: Solution): Record<string, readonly string[]> {
+  const out: Record<string, readonly string[]> = {};
+  for (const place of solution.graph.places) {
+    if (place.kind.kind !== "binding" || place.kind.declared === "host" || place.site === null)
+      continue;
+    const seen = new Set<string>();
+    const walk = (group: readonly CellId[]): readonly string[] | null => {
+      const key = group.join("+");
+      if (seen.has(key)) return null;
+      seen.add(key);
+      const view = solution.viewOf(group);
+      if (view.kind === "conflict") return view.families;
+      for (const member of view.members) {
+        if (member.kind === "collection") {
+          const found = walk(member.element);
+          if (found !== null) return found;
+        } else if (member.kind === "object")
+          for (const cells of member.props.values()) {
+            const found = walk(cells);
+            if (found !== null) return found;
+          }
+      }
+      return null;
+    };
+    const families = walk([place.id]);
+    if (families !== null) out[place.kind.name] = families;
+  }
+  return out;
+}
+
 test("every rule-derived case exports the facts the decided rule gives", () => {
   const relations = operationRelations();
   const failures: string[] = [];
@@ -47,6 +90,12 @@ test("every rule-derived case exports the facts the decided rule gives", () => {
     assert.notEqual(made, null, `${c.name} parses and resolves`);
     const solution = solve(collectGraph(made!), { relations, verify: true });
     const facts = exportFacts(solution);
+    const conflicts = conflictsOf(solution);
+    const expectedConflicts = JSON.stringify(c.conflicts ?? {});
+    if (JSON.stringify(conflicts) !== expectedConflicts)
+      failures.push(
+        `${c.name} (${c.rule}): conflicts ${JSON.stringify(conflicts)}, the rule gives ${expectedConflicts}: ${c.why}`,
+      );
     if (c.statuses !== undefined && solution.statuses.join(",") !== c.statuses.join(","))
       failures.push(
         `${c.name} (${c.rule}): statuses ${solution.statuses.join(",") || "(none)"}, the rule gives ${c.statuses.join(",") || "(none)"}: ${c.why}`,
