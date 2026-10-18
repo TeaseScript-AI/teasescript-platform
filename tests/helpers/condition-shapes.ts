@@ -61,6 +61,12 @@ export interface ConditionRow {
     readonly end: number;
     readonly message: string;
   }[];
+  /**
+   * The statements the check found unreachable (`checked.unreachable`), by site in source order: the branch a literal
+   * or an exhaustive test rules out, the code after an exit. The compiler reports them after lowering (TSV065), which
+   * the differential compares on the rows' variants; the check's own set is pinned here.
+   */
+  readonly unreachable: readonly Site[];
   /** The collector's `test` constraints, as the graph dump writes them, in emission order. */
   readonly tests: readonly string[];
 }
@@ -557,6 +563,12 @@ export function generateConditionTable(): GeneratedRow[] {
           end: diagnostic.span.end.offset,
           message: diagnostic.message,
         })),
+      unreachable: [...outcome.checked.unreachable]
+        .map((statement) => ({
+          start: statement.span.start.offset,
+          end: statement.span.end.offset,
+        }))
+        .sort((a, b) => a.start - b.start || a.end - b.end),
       tests: graphText(collectGraph(made))
         .split("\n")
         .filter((line) => line.startsWith("test ")),
