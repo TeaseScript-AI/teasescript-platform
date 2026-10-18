@@ -260,15 +260,14 @@ function setOperation(
   // A new collection over the receiver's elements (`intersection`, `difference`) or over both operands' elements
   // (`union`): the parts shared, not the element types echoed, so that an object element's view, one level deep and
   // widening while solving, never becomes evidence (PR 3a review r1-B1). The null and dynamic paths of `union` keep
-  // the legacy's recovery above, its shape problems below.
+  // the legacy's recovery above.
   if (contract.name !== "union") return joinOf(kind, pathOf(RECEIVER, "element"));
   // the recoveries that leave the elements unknown stay closed answers; the others are the receiver's elements
-  // (no argument written) or both operands' elements, parts shared
+  // (no argument written) or both operands' elements, parts shared, also under a shape or arity report (the report
+  // stays; the elements are the real parts, PR 3a review r3-S1)
   if (perMember.some((type) => type.kind === kind && resolved(type.element).kind === "unknown"))
     return typeResult(joined);
   if (first === undefined) return joinOf(kind, pathOf(RECEIVER, "element"));
-  // a call with a shape or arity problem keeps the legacy's recovery, the elements as the check saw them
-  if (problems) return typeResult(joined);
   return joinOf(kind, pathOf(RECEIVER, "element"), pathOf(argument, "element"));
 }
 

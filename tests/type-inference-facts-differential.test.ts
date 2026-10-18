@@ -153,6 +153,19 @@ const R2: readonly SolverCase[] = [
   },
 ];
 
+const R3: readonly SolverCase[] = [
+  {
+    name: "r3-union-extra-nested",
+    source:
+      "let leaf = {y: 1}\nlet branch = {}\nbranch.x = leaf\nlet a = {}\na.z = branch\nlet c = [a].union([],[])\nlet n = c.first.z.x.y\nexit",
+  },
+  {
+    name: "r3-union-named-nested",
+    source:
+      "let leaf = {y: 1}\nlet branch = {}\nbranch.x = leaf\nlet a = {}\na.z = branch\nlet c = [a].union(foo: [])\nlet n = c.first.z.x.y\nexit",
+  },
+];
+
 const describe = (d: Difference): string =>
   `${d.what} ${d.name} @${d.site.start}: legacy ${d.legacy ?? "(none)"} | candidate ${d.candidate ?? "(none)"} | class ${d.class}: ${d.evidence}`;
 
@@ -164,7 +177,7 @@ test("every difference on the straight-line sources is a decided rule, a replace
     classes: [0, 0, 0, 0, 0],
   };
   const defects: string[] = [];
-  for (const c of [...readCases(), ...HAND, ...R10, ...R11, ...R2]) {
+  for (const c of [...readCases(), ...HAND, ...R10, ...R11, ...R2, ...R3]) {
     const result = differential(c.source);
     if (result === null) continue;
     counts.sources += 1;
@@ -399,6 +412,21 @@ test("Astra's r2 cases take their classes, and an injected fact at each is rejec
   // PR review r2-B1 (Astra): a consumer of a nested shape reads it through one store boundary (work note §3.5)
   for (const name of ["r2-random-nested-object", "r2-form-0", "r2-form-3", "r2-missing-union"])
     assert.deepEqual(classes(name), [], name);
+});
+
+test("Astra's r3 cases take their classes", () => {
+  // PR review r3-S1 (Astra): a `union()` call with an arity or name report still builds the collection from the real
+  // parts, so a nested property read through it reaches its type. (An injected fact at `n` is not asserted here: the
+  // store `branch.x = leaf` marks `leaf` as a copied value changed in place, the exemption's breadth under review
+  // with r3-B3.)
+  for (const c of R3)
+    assert.deepEqual(
+      differential(c.source)!
+        .differences.filter((d) => d.what === "binding")
+        .map((d) => d.class),
+      [],
+      c.name,
+    );
 });
 
 test("the classifier rejects a changed fact at an arbitrary site, a class-1 site and a class-2 site", () => {
