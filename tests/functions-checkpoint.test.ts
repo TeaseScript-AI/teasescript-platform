@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import { compileSource } from "../src/compiler.js";
 import type { Instruction, InstructionPlan } from "../src/plan/model.js";
@@ -311,7 +312,8 @@ test("restores between nested calls, around say events, and after parameter reas
         snapshot.status === "running",
     ),
   );
-  // The stored argument stays the supplied value while the body's binding changes, and both remain valid state.
+  // The bound parameter owns the supplied value, so the stored argument keeps only that it was supplied while the
+  // body's binding changes.
   assert.ok(
     observations.some((snapshot) => {
       const frame = functionFrames(snapshot).at(-1);
@@ -322,7 +324,7 @@ test("restores between nested calls, around say events, and after parameter reas
         frame?.functionName === "bump" &&
         frame.parameterState.phase === "body" &&
         frame.arguments[0]?.supplied === true &&
-        frame.arguments[0].value === 1 &&
+        !("value" in frame.arguments[0]) &&
         binding?.value === 2
       );
     }),
@@ -330,6 +332,61 @@ test("restores between nested calls, around say events, and after parameter reas
   assert.deepEqual(
     events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
     ["first", "second", "3", "2", "2"],
+  );
+});
+
+test("bound parameters own their argument copies through checkpoints between bindings and in a waiting default", () => {
+  const source = [
+    "let numbers = [1, 2]",
+    "let table = dict{ a: [1] }",
+    "let record = { inner: { values: [1] } }",
+    "function later { wait 1 ms\nreturn 5 }",
+    "function change(items, entries, nested, again, extra = later()) {",
+    "  items.add(extra)",
+    '  entries["a"].add(extra)',
+    '  entries["b"] = [extra]',
+    "  nested.inner.values[0] = extra",
+    "  again.add(0)",
+    '  return "${items.join(",")}|${entries["a"].join(",")}|${entries.contains("b")}|${nested.inner.values.join(",")}|${again.join(",")}"',
+    "}",
+    "say change(numbers, table, record, numbers)",
+    'say "${numbers.join(",")}|${table["a"].join(",")}|${table.contains("b")}|${record.inner.values.join(",")}"',
+    "exit",
+  ].join("\n");
+  const { boundaries, events } = assertRuntimeResumeEquivalent(source);
+
+  // The callee changed its own copies, of the list passed twice too, and the caller's values stayed as they were.
+  assert.deepEqual(
+    events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["1,2,5|1,5|true|5|1,2,0", "1,2|1|false|1"],
+  );
+  // Between two bindings, the first parameter holds its value and its argument no longer does.
+  assert.ok(
+    boundaries.some((snapshot) => {
+      const frame = functionFrames(snapshot).at(-1);
+      const bindings = snapshot.frames[frame?.scopeBaseDepth ?? -1]?.bindings;
+      return (
+        frame?.functionName === "change" &&
+        frame.parameterState.phase === "supplied" &&
+        frame.parameterState.parameterIndex === 1 &&
+        !("value" in frame.arguments[0]!) &&
+        frame.arguments.slice(1, 4).every((argument) => "value" in argument) &&
+        isDeepStrictEqual(bindings, [{ name: "items", value: { kind: "list", items: [1, 2] } }])
+      );
+    }),
+  );
+  // While the default's call waits, no argument holds a value.
+  assert.ok(
+    boundaries.some((snapshot) => {
+      const frame = functionFrames(snapshot).find(
+        (candidate) => candidate.functionName === "change",
+      );
+      return (
+        snapshot.status === "waiting" &&
+        frame?.parameterState.phase === "defaults" &&
+        frame.arguments.every((argument) => !("value" in argument))
+      );
+    }),
   );
 });
 
@@ -540,6 +597,24 @@ test("rejects inconsistent argument supply and parameter bindings", () => {
   const missingBinding = mutableCheckpoint(createCheckpoint(compiled, bound));
   missingBinding.snapshot.frames[1]!.bindings = [];
   assertCheckpointRejected(missingBinding, "TSK002");
+
+  // A supplied argument holds its value until its parameter is bound, and only until then.
+  const unboundWithoutValue = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  delete unboundWithoutValue.snapshot.callFrames[0]!.arguments[0]!.value;
+  assert.ok(
+    validateRuntimeSnapshot(unboundWithoutValue.snapshot, compiled).errors.includes(
+      "Supplied runtime argument is missing its value.",
+    ),
+  );
+  assertCheckpointRejected(unboundWithoutValue, "TSK002");
+  const boundWithValue = mutableCheckpoint(createCheckpoint(compiled, bound));
+  boundWithValue.snapshot.callFrames[0]!.arguments[0]!.value = 1;
+  assert.ok(
+    validateRuntimeSnapshot(boundWithValue.snapshot, compiled).errors.includes(
+      "A bound runtime argument must not keep its value.",
+    ),
+  );
+  assertCheckpointRejected(boundWithValue, "TSK002");
 });
 
 test("rejects a missing temporary required by the next instruction", () => {
