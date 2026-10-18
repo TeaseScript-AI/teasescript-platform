@@ -2,7 +2,7 @@ import type { RandomDrawPendingOutcome } from "../random-control.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import type { ScriptStorageEditedEvent } from "../events.js";
-import { validateScriptStorageEntries, writeScriptStorage } from "../script-storage.js";
+import { validateScriptStorageEntries, writeOwnedScriptStorage } from "../script-storage.js";
 import type { SerializableRuntimeValue } from "../serializable-values.js";
 import type { RuntimeSnapshot } from "../state.js";
 import type { PendingActionOperationResult } from "./model.js";
@@ -92,7 +92,8 @@ function applyCapturedStorageEdit(
   });
   // EVIDENCE: validation: validateScriptStorageEntries accepted a non-null value above; null removes the key.
   const stored = value as SerializableRuntimeValue;
-  writeScriptStorage(current, key, stored);
+  // The edit was captured from the host's request, so storage takes the captured value.
+  writeOwnedScriptStorage(current, key, stored);
   // A later load reads the edit, which no statement caused.
   trace?.at(null, current.currentSessionTimeMs);
   trace?.storage(key, stored, true);

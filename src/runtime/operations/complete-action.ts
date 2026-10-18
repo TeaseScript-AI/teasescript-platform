@@ -26,7 +26,7 @@ import type {
   InterpreterEvent,
   PlayerTranscriptEvent,
 } from "../events.js";
-import { writeScriptStorage } from "../script-storage.js";
+import { writeOwnedScriptStorage } from "../script-storage.js";
 import {
   captureUnavailableMessage,
   resolveCaptureCompletion,
@@ -292,7 +292,8 @@ function completeStorageWrite(
   trace?.at(action.owningInstruction, current.currentSessionTimeMs);
   trace?.storageSettled(action.actionId, outcome === "stored");
   if (outcome === "stored") {
-    writeScriptStorage(current, action.key, action.value);
+    // The action holds the value copied when the save ran, and is dropped below, so storage takes that copy.
+    writeOwnedScriptStorage(current, action.key, action.value);
   } else {
     events.push(
       Object.freeze({

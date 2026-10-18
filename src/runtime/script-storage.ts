@@ -76,8 +76,11 @@ export function storageKeyPlace(key: string): string {
   return `storage key ${JSON.stringify(key)}`;
 }
 
-/** Stores a copy of a persistable value, or removes the key when the value is `null`. */
-export function writeScriptStorage(
+/**
+ * Stores a persistable value that no other value shares, as it is, or removes the key when the value is `null`: a
+ * saved value copied before its key ran, an acknowledged write's value, or a captured and validated edit.
+ */
+export function writeOwnedScriptStorage(
   view: ScriptStorageView,
   key: string,
   value: SerializableRuntimeValue,
@@ -89,9 +92,8 @@ export function writeScriptStorage(
     if (present) entries.splice(position, 1);
     return;
   }
-  const stored = cloneCapturedSerializableValue(value);
-  if (present) entries[position]!.value = stored;
-  else entries.splice(position, 0, { key, value: stored });
+  if (present) entries[position]!.value = value;
+  else entries.splice(position, 0, { key, value });
 }
 
 /** Host-supplied entries in the view's key order; the entries were validated to have unique keys. */
