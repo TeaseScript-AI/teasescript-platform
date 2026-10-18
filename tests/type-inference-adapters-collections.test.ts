@@ -380,8 +380,10 @@ test("set operations per member of the receiver, an empty collection adding noth
     { fact: "list<unknown>", errors: ["TSV044"] },
     { realized: "list<(integer|string)>" },
   );
-  // An intersection is a new collection over the receiver's elements (parts shared): one list over the elements of
-  // both members, where the legacy echoed a list per member.
+  // An intersection is a new collection over the receiver's elements (parts shared). The helper realizes the join over
+  // the one closed union view it is given, one list over both members' elements; the solver asks per member and keeps
+  // the members apart (§3.5; the rule-derived case `b1-rebuilt-collection-keeps-the-members-apart`), where the legacy
+  // echoed a list per member.
   assertCase(
     method("intersection"),
     inputsOf({ receiver: lists, arguments: [dynamicView("host")] }),
