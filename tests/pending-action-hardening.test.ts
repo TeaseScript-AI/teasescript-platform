@@ -12,8 +12,14 @@ import {
 } from "../src/runtime/checkpoint.js";
 import { executeInstruction, run, RuntimeDataError, stepToEvent } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { reportMediaLoad } from "../src/runtime/operations/media-reports.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import type { RuntimeDelayActionSnapshot } from "../src/runtime/actions/model.js";
+import type {
+  RuntimeDelayActionSnapshot,
+  RuntimePendingActionSnapshot,
+} from "../src/runtime/actions/model.js";
+import type { InterpreterEvent } from "../src/runtime/events.js";
+import type { InstructionPlan } from "../src/plan/model.js";
 import {
   MAX_RUNTIME_SESSION_TIME_MS,
   createFreshRuntimeSnapshot,
@@ -414,3 +420,146 @@ test("the final safe action identity is allocated, and the next allocation fails
 function checkpointError(error: unknown): boolean {
   return error instanceof CheckpointError && error.info.code === "TSK002";
 }
+
+/**
+ * For each kind of pending action, a script whose next instruction starts one, and how the host or the script then
+ * settles it with the most events it can publish: an answered question its transcript entry and completion, a failed
+ * write or an unavailable camera a warning and the completion, a source that cannot load a warning and the completions of
+ * its media and of the wait for it, and any other action its completion. Keyed by kind, so a new kind needs its row.
+ */
+const FULLEST_SETTLEMENTS: {
+  readonly [K in RuntimePendingActionSnapshot["kind"]]: {
+    readonly source: string;
+    readonly settle: (
+      compiled: InstructionPlan,
+      snapshot: RuntimeSnapshot,
+      actionId: number,
+    ) => { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] };
+  };
+} = {
+  delay: { source: "wait 1 s\nexit", settle: (compiled, s) => observeTime(compiled, s, 1_000) },
+  chatPacingGate: {
+    source: 'say "Read this.", 1 s\nexit',
+    settle: (compiled, s) => observeTime(compiled, s, 1_000),
+  },
+  interaction: {
+    source: 'let name = askText "Name?"\nexit',
+    settle: (compiled, s, actionId) =>
+      completeAction(compiled, s, {
+        actionId,
+        actionKind: "interaction",
+        interactionKind: "text",
+        payload: { kind: "submittedText", submittedText: "Ada" },
+      }),
+  },
+  mediaPlayback: {
+    source: 'playAudio "sounds/bell.mp3"\nexit',
+    settle: (compiled, s) => reportMediaLoad(compiled, s, 1, { kind: "failed" }),
+  },
+  media: {
+    source: 'playAudio "sounds/bell.mp3"\nexit',
+    settle: (compiled, s) => reportMediaLoad(compiled, s, 1, { kind: "failed" }),
+  },
+  storageWrite: {
+    source: 'save 2 as "k"\nexit',
+    settle: (compiled, s, actionId) =>
+      completeAction(compiled, s, {
+        actionId,
+        actionKind: "storageWrite",
+        payload: { kind: "failed" },
+      }),
+  },
+  capture: {
+    source: "let photo = takePhoto()\nexit",
+    settle: (compiled, s, actionId) =>
+      completeAction(compiled, s, {
+        actionId,
+        actionKind: "capture",
+        payload: { kind: "unavailable", reason: "denied" },
+      }),
+  },
+  fileStore: {
+    source: 'let file = fileFromBase64("YWJj", default: null)\nexit',
+    settle: (compiled, s, actionId) =>
+      completeAction(compiled, s, {
+        actionId,
+        actionKind: "fileStore",
+        payload: { kind: "failed" },
+      }),
+  },
+  lock: {
+    source: 'let locked = encryptText("x", password: "p", publicKey: false, timeLock: false)\nexit',
+    settle: (compiled, s, actionId) =>
+      completeAction(compiled, s, {
+        actionId,
+        actionKind: "lock",
+        payload: { kind: "locked", text: "AAAA" },
+      }),
+  },
+  timer: {
+    source: "let t = timer async 1 s\nt.stop()\nexit",
+    settle: (compiled, s, actionId) => stepUntilSettled(compiled, s, actionId),
+  },
+  permanentButton: {
+    source: 'let b = showPermanentButton "Hint" {\n  wait 1 s\n}\nb.remove()\nexit',
+    settle: (compiled, s, actionId) => stepUntilSettled(compiled, s, actionId),
+  },
+};
+
+/** Runs the script's next instructions until one settles the action. */
+function stepUntilSettled(compiled: InstructionPlan, snapshot: RuntimeSnapshot, actionId: number) {
+  const events: InterpreterEvent[] = [];
+  for (let steps = 0; !settles(events, actionId); steps += 1) {
+    assert.ok(steps < 5 && snapshot.status === "running");
+    const step = executeInstruction(compiled, snapshot);
+    events.push(...step.events);
+    snapshot = step.snapshot;
+  }
+  return { snapshot, events };
+}
+
+function settles(events: readonly InterpreterEvent[], actionId: number): boolean {
+  return events.some(
+    (event) => event.kind === "actionCompleted" && event.settlement.actionId === actionId,
+  );
+}
+
+function activeAction(
+  snapshot: RuntimeSnapshot,
+  kind: string,
+): RuntimePendingActionSnapshot | undefined {
+  return [snapshot.foregroundAction, ...snapshot.backgroundActions].find(
+    (action): action is RuntimePendingActionSnapshot => action?.kind === kind,
+  );
+}
+
+test("the instruction that starts an action of each kind leaves room for its fullest settlement", () => {
+  for (const [kind, { source, settle }] of Object.entries(FULLEST_SETTLEMENTS)) {
+    const compiled = plan(source);
+    let before = createFreshRuntimeSnapshot(compiled, {
+      persistentScriptStorage: true,
+      wallClockMs: Date.UTC(2026, 9, 14, 12, 0, 0),
+    });
+    for (let steps = 0; ; steps += 1) {
+      const next = executeInstruction(compiled, before).snapshot;
+      if (activeAction(next, kind) !== undefined) break;
+      assert.ok(steps < 10 && next.status === "running", kind);
+      before = next;
+    }
+    // The fewest event numbers left that the instruction starts the action with; with fewer, it fails cleanly, which
+    // takes one number for its failure.
+    let started: RuntimeSnapshot | undefined;
+    for (let left = 1; started === undefined; left += 1) {
+      assert.ok(left <= 8, kind);
+      const crowded = structuredClone(before);
+      crowded.nextEventSequence = Number.MAX_SAFE_INTEGER - left;
+      const next = executeInstruction(compiled, crowded).snapshot;
+      if (activeAction(next, kind) !== undefined) started = next;
+      else assert.equal(next.failure?.code, "TSR051", kind);
+    }
+    const { actionId } = activeAction(started, kind)!;
+    const settled = settle(compiled, started, actionId);
+    assert.ok(settles(settled.events, actionId), kind);
+    assert.deepEqual(validateRuntimeSnapshot(settled.snapshot, compiled).errors, [], kind);
+  }
+});
