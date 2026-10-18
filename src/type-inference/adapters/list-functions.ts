@@ -23,16 +23,19 @@ import {
 } from "../../static-types.js";
 import { minMaxOfValues } from "./numeric.js";
 import type {
+  OperandRef,
   OperandView,
   OperationInputs,
   OperationRelation,
   OperationResult,
 } from "./relation.js";
 import {
+  closedType,
   dynamicFrom,
   dynamicResult,
   INVALID,
   isBottom,
+  pathOf,
   typeResult,
   UNCONSTRAINED,
   viewMembers,
@@ -83,6 +86,7 @@ function misshapen(contract: ListFunction, inputs: OperationInputs): boolean {
  */
 function valuesOf(
   list: OperandView,
+  ref: OperandRef,
   inputs: OperationInputs,
   selector: string,
 ): { readonly type: StaticType } | { readonly result: OperationResult } {
@@ -115,17 +119,19 @@ function valuesOf(
   if (key === undefined) return { result: dynamicFrom(named, "unknown member") };
   if (key === null) return { result: dynamicResult("unknown member") };
   if (list.dynamic !== null) return { result: dynamicFrom(list, "unknown member") };
-  const found: StaticType[] = [];
   for (const member of parts) {
     if (member.kind !== "object") return { result: dynamicResult("unknown member") };
-    // The objects have the property, or the legacy reports at the end that they never can; ones whose properties
-    // it does not know may still gain it.
+    // ones whose properties the legacy does not know may still gain the property
     if (member.properties === null) return { result: dynamicResult("unknown member") };
-    const value = member.properties.get(key);
-    if (value === undefined) return { result: INVALID };
-    found.push(value);
   }
-  return found.length === 0 ? { result: dynamicResult("unknown member") } : { type: union(found) };
+  if (parts.length === 0) return { result: dynamicResult("unknown member") };
+  // The property is read as a leaf of the elements, one alternative per ask; the objects have it, or the legacy
+  // reports at the end that they never can.
+  const leaf = inputs.leaf(pathOf(ref, "element", { property: key }));
+  if (leaf === null) return { result: INVALID };
+  if (isBottom(leaf)) return { result: UNCONSTRAINED };
+  if (leaf.dynamic !== null) return { result: dynamicFrom(leaf, "unknown member") };
+  return { type: closedType(leaf)! };
 }
 
 /** The one kind of the values, as `valueKind` of the legacy check decides it, or why there is none. */
@@ -162,7 +168,7 @@ function statistic(
   const list = inputs.arguments[0]!;
   // Its other numbers, such as a percentage, are the visitor's check: one that is no number is reported and the
   // statistic still has its kind.
-  const values = valuesOf(list, inputs, "by");
+  const values = valuesOf(list, { argument: 0 }, inputs, "by");
   if ("result" in values) return values.result;
   // A list known to be too short is reported (`checkFewest`), and the statistic still has its kind.
   const kind = kindOfValues(values.type, contract.values);
@@ -181,7 +187,7 @@ function amountOf(
   selector: string,
   allowed: readonly ListValueKind[],
 ): { readonly kind: ReadKind | undefined } | { readonly result: OperationResult } {
-  const values = valuesOf(list, inputs, selector);
+  const values = valuesOf(list, { argument: 0 }, inputs, selector);
   if ("result" in values)
     return values.result.kind === "unconstrained" ? { result: values.result } : { kind: undefined };
   const kind = kindOfValues(values.type, allowed);
@@ -246,11 +252,21 @@ function prediction(
   if (line.dynamic !== null) return dynamicFrom(line, "unknown member");
   const object = resolved(union(useOf(line)));
   if (unknownPart(object)) return dynamicResult("unknown member");
-  const property = (key: string): StaticType | undefined =>
-    object.kind === "object" ? object.properties?.get(key) : undefined;
-  const intercept = property("intercept");
-  const start = property("start");
-  const fields = [property("slope"), intercept, start];
+  // the line's parts are read as leaves of it, one alternative per ask; a part it does not have is absent
+  const leaves = ["slope", "intercept", "start"].map((key) =>
+    object.kind === "object" ? inputs.leaf(pathOf({ argument: 0 }, { property: key })) : null,
+  );
+  if (leaves.some((leaf) => leaf !== null && isBottom(leaf))) return UNCONSTRAINED;
+  const dynamicLeaf = leaves.find((leaf) => leaf !== null && leaf.dynamic !== null);
+  if (dynamicLeaf !== undefined && dynamicLeaf !== null)
+    return dynamicFrom(dynamicLeaf, "unknown member");
+  const property = (index: number): StaticType | undefined => {
+    const leaf = leaves[index]!;
+    return leaf === null ? undefined : closedType(leaf)!;
+  };
+  const intercept = property(1);
+  const start = property(2);
+  const fields = [property(0), intercept, start];
   // A line whose slope, intercept or start may be null is reported.
   if (
     fields.some((field) => field !== undefined && members(field).some((one) => one.kind === "null"))
@@ -259,7 +275,7 @@ function prediction(
   if (
     object.kind !== "object" ||
     (object.properties !== null &&
-      (intercept === undefined || property("slope") === undefined || start === undefined))
+      (intercept === undefined || property(0) === undefined || start === undefined))
   )
     return INVALID;
   // An x that does not fit the line's start is reported, and the prediction still has the intercept's kind.

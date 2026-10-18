@@ -18,7 +18,6 @@ import {
   NUMBER_TYPE,
   optional,
   plainType,
-  PropertyTable,
   resolved,
   STRING_TYPE,
   TIME_TYPE,
@@ -37,15 +36,26 @@ import type {
   DynamicWhy,
   FormDescriptorEvidence,
   PlaceId,
+  ProjectionStep,
   SyntaxEvidence,
   WrittenLiteral,
 } from "../graph.js";
-import type { OperationInputs, OperationRelation, OperationResult } from "./relation.js";
+import type {
+  OperandPath,
+  OperationInputs,
+  OperationRelation,
+  OperationResult,
+} from "./relation.js";
 import {
   closedType,
+  dynamicFrom,
   dynamicResult,
   INVALID,
   isBottom,
+  named,
+  pathOf,
+  placeRef,
+  structureOf,
   typeResult,
   UNCONSTRAINED,
 } from "./views.js";
@@ -99,6 +109,21 @@ class Places {
     const view = this.inputs.view(place);
     if (isBottom(view)) throw new Unconstrained();
     // A value that may also be one the compiler cannot know is, as the legacy holds it, not known at all.
+    if (view.dynamic !== null) {
+      this.whys.push(view.dynamic);
+      return UNKNOWN_TYPE;
+    }
+    return closedType(view)!;
+  }
+
+  /**
+   * The type at a part of an operand along a path, read as the operands are (one alternative per ask); `undefined`
+   * where the part is absent (a property the object does not have).
+   */
+  leaf(path: OperandPath): StaticType | undefined {
+    const view = this.inputs.leaf(path);
+    if (view === null) return undefined;
+    if (isBottom(view)) throw new Unconstrained();
     if (view.dynamic !== null) {
       this.whys.push(view.dynamic);
       return UNKNOWN_TYPE;
@@ -335,11 +360,17 @@ function formAnswerType(kind: Exclude<FormFieldKind, "boolean" | "cycle">): Stat
   return FORM_ANSWER_TYPES[kind];
 }
 
+/** One step further along a path. */
+const step = (at: OperandPath, along: ProjectionStep): OperandPath => ({
+  of: at.of,
+  path: [...at.path, along],
+});
+
 /** The answer of a kind: a toggle, a cycle of its options (read only then), or the kind's value. */
 function fieldAnswer(
   places: Places,
   kind: FormFieldKind,
-  options: () => StaticType | undefined,
+  options: OperandPath | undefined,
   elements: readonly ChoiceElementEvidence[] | undefined,
 ): StaticType {
   return kind === "cycle"
@@ -351,35 +382,43 @@ function fieldAnswer(
 
 /**
  * `#cycleAnswerType`: each option's value, or the text of a choice object without one. Written choice objects are
- * read one by one; for a computed one, whether it has a `value` is not known, so either may be returned.
+ * read one by one; a computed option is read as a leaf of the options (its `value` and `text` likewise), one
+ * alternative per ask, so a choice object's parts are never read from an object view.
  */
 function cycleAnswer(
   places: Places,
-  options: () => StaticType | undefined,
+  options: OperandPath | undefined,
   elements: readonly ChoiceElementEvidence[] | undefined,
 ): StaticType {
-  const computedOption = (member: StaticType): StaticType => {
+  const computedOption = (member: StaticType, at: OperandPath): StaticType => {
     const option = resolved(member);
     if (option.kind !== "object") return plainType(option);
-    const returned = [option.properties?.get("value"), option.properties?.get("text")].filter(
-      (part): part is StaticType => part !== undefined,
-    );
+    const returned = [
+      places.leaf(step(at, { property: "value" })),
+      places.leaf(step(at, { property: "text" })),
+    ].filter((part): part is StaticType => part !== undefined);
     return returned.length === 0 ? UNKNOWN_TYPE : union(returned.map(plainType));
   };
   if (elements !== undefined)
     return union(
       elements.map((element) => {
-        if (element.object === null)
-          return union(members(places.type(element.place)).map(computedOption));
+        if (element.object === null) {
+          const at = pathOf(placeRef(element.place));
+          return union(members(places.type(element.place)).map((m) => computedOption(m, at)));
+        }
         const returned = element.object.value ?? element.object.text;
         return returned === null ? UNKNOWN_TYPE : plainType(places.type(returned));
       }),
     );
   // The options' type is read only here, for a cycle whose options are not written one by one.
-  const type = options();
+  if (options === undefined) return UNKNOWN_TYPE;
+  const type = places.leaf(options);
   const list = type === undefined ? undefined : resolved(nonNullType(type));
   if (list?.kind !== "list") return UNKNOWN_TYPE;
-  return union(members(resolved(list.element)).map(computedOption));
+  const at = step(options, "element");
+  const element = places.leaf(at);
+  if (element === undefined) return UNKNOWN_TYPE;
+  return union(members(resolved(element)).map((m) => computedOption(m, at)));
 }
 
 /** `#writtenFormField`: a descriptor written where the form is asked has exactly the written properties. */
@@ -409,32 +448,28 @@ function writtenField(
   const result = fieldAnswer(
     places,
     kind,
-    () => (descriptor.options === null ? undefined : typeOf(descriptor.options.place)),
+    descriptor.options === null ? undefined : pathOf(placeRef(descriptor.options.place)),
     descriptor.options?.elements ?? undefined,
   );
   return !required && kind !== "boolean" && kind !== "cycle" ? optional(result) : result;
 }
 
 /**
- * `#computedFormField`: a descriptor's type merges every value it may hold, so it gives one kind only without `type:`,
- * and with `options:` only when no `value:` other than a toggle's beside it can make some fields typed.
+ * `#computedFormField`: a descriptor's parts are read as leaves of the descriptor (`value`, `options`, `type`,
+ * `optional`), one alternative per ask; a part absent from the descriptor is `undefined`. It gives one kind only
+ * without `type:`, and with `options:` only when no `value:` other than a toggle's beside it can make some fields typed.
  */
-function computedField(
-  places: Places,
-  descriptor: Extract<StaticType, { kind: "object" }>,
-): StaticType {
-  const properties = descriptor.properties;
-  if (properties === null) return optional(GENERIC_FORM_ANSWER_TYPE);
+function computedField(places: Places, at: OperandPath): StaticType {
   const part = (key: string): StaticType | undefined => {
-    const found = properties.get(key);
+    const found = places.leaf(step(at, { property: key }));
     return found === undefined ? undefined : resolved(nonNullType(found));
   };
   const valueType = part("value");
-  const options = part("options");
+  const hasOptions = part("options") !== undefined;
   let result: StaticType | null;
-  if (properties.has("type")) result = null;
-  else if (options !== undefined) {
-    const cycle = cycleAnswer(places, () => options, undefined);
+  if (part("type") !== undefined) result = null;
+  else if (hasOptions) {
+    const cycle = cycleAnswer(places, step(at, { property: "options" }), undefined);
     result =
       valueType === undefined
         ? cycle
@@ -448,75 +483,107 @@ function computedField(
         ? null
         : kind === "boolean"
           ? BOOLEAN_TYPE
-          : properties.has("optional")
+          : part("optional") !== undefined
             ? optional(formAnswerType(kind))
             : formAnswerType(kind);
   }
   return result ?? optional(GENERIC_FORM_ANSWER_TYPE);
 }
 
-/** `#formField`: the answer of one field from its type and, where it is written, its descriptor. */
+/** `#formField`: the answer of one field from its descriptor's type at `at` and, where it is written, its descriptor. */
 function field(
   places: Places,
+  at: OperandPath,
   type: StaticType,
   written: FormDescriptorEvidence | undefined,
 ): StaticType {
   const value = resolved(nonNullType(type));
   if (value.kind === "object")
-    return written?.kind === "object"
-      ? writtenField(places, written)
-      : computedField(places, value);
+    return value.properties === null
+      ? optional(GENERIC_FORM_ANSWER_TYPE)
+      : written?.kind === "object"
+        ? writtenField(places, written)
+        : computedField(places, at);
   const kind = formKindOfStart(value);
   if (kind === null) return optional(GENERIC_FORM_ANSWER_TYPE);
-  return fieldAnswer(
-    places,
-    kind,
-    () => value,
-    written?.kind === "list" ? written.elements : undefined,
-  );
+  return fieldAnswer(places, kind, at, written?.kind === "list" ? written.elements : undefined);
 }
 
+/**
+ * `askForm`: a structure built field by field. Each field's answer is computed on its own from the leaves it reads
+ * (its descriptor's parts, or the written descriptor's places), so no field's evidence depends on another's and a
+ * growing start value adds its answer beside the earlier one (PR 3a review r3-B1).
+ */
 function form(inputs: OperationInputs): OperationResult {
   const evidence = inputs.evidence;
   if (evidence?.kind !== "form") return INVALID;
   const fields = inputs.named.get("fields");
   if (fields === undefined) return INVALID;
-  return answer(evidence, inputs, (places) => {
-    if (isBottom(fields)) throw new Unconstrained();
-    const cancellable =
-      evidence.cancel || (evidence.onTimeout !== null && evidence.onTimeout !== "submit");
-    if (fields.dynamic !== null) return dynamicResult(fields.dynamic);
-    const container = resolved(nonNullType(closedType(fields)!));
-    const written = evidence.fields === "computed" ? undefined : evidence.fields;
-    let answers: StaticType;
-    if (container.kind === "dict") {
-      if (written?.shape === "dict" && written.entries.length > 0)
-        // A written dict shows every field, so its answers are typed field by field.
-        answers = {
-          kind: "dict",
-          element: union(
-            written.entries.map((entry) => field(places, places.type(entry.place), entry.written)),
-          ),
-        };
-      else answers = { kind: "dict", element: field(places, container.element, undefined) };
-    } else if (container.kind !== "object") {
-      // Fields of another kind are reported; fields the compiler cannot know take the shape of the value when the
-      // form opens.
-      return isKnown(container) ? INVALID : places.dynamic();
-    } else {
-      if (container.properties === null) return dynamicResult("unknown member");
-      const descriptors = new Map(
-        written?.shape === "object"
-          ? written.entries.map((entry) => [entry.name, entry.written])
-          : [],
+  if (isBottom(fields)) return UNCONSTRAINED;
+  const cancellable =
+    evidence.cancel || (evidence.onTimeout !== null && evidence.onTimeout !== "submit");
+  if (fields.dynamic !== null) return dynamicResult(fields.dynamic);
+  const container = resolved(nonNullType(closedType(fields)!));
+  const written = evidence.fields === "computed" ? undefined : evidence.fields;
+  const FIELDS = named("fields");
+  const partOf =
+    (at: OperandPath, descriptor: FormDescriptorEvidence | undefined) =>
+    (part: OperationInputs): OperationResult =>
+      answer(evidence, part, (places) => {
+        const type = places.leaf(at);
+        // a slot the fields object does not have: no such field
+        if (type === undefined) return UNCONSTRAINED;
+        return typeResult(field(places, at, type, descriptor));
+      });
+  if (container.kind === "dict") {
+    if (written?.shape === "dict" && written.entries.length > 0) {
+      // A written dict shows every field, so its answers are typed field by field.
+      const entries = written.entries;
+      return structureOf(
+        "dict",
+        new Map([
+          [
+            "element",
+            (part: OperationInputs): OperationResult =>
+              answer(evidence, part, (places) =>
+                typeResult(
+                  union(
+                    entries.map((entry) =>
+                      field(
+                        places,
+                        pathOf(placeRef(entry.place)),
+                        places.type(entry.place),
+                        entry.written,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ]),
+        cancellable,
       );
-      const result = new PropertyTable();
-      for (const [name, type] of container.properties)
-        result.set(name, field(places, type, descriptors.get(name)));
-      answers = { kind: "object", properties: result };
     }
-    return typeResult(cancellable && isKnown(answers) ? optional(answers) : answers);
-  });
+    return structureOf(
+      "dict",
+      new Map([["element", partOf(pathOf(FIELDS, "element"), undefined)]]),
+      cancellable,
+    );
+  }
+  // Fields of another kind are reported; fields the compiler cannot know take the shape of the value when the form
+  // opens.
+  if (container.kind !== "object")
+    return isKnown(container) ? INVALID : dynamicFrom(fields, "unknown member");
+  if (container.properties === null) return dynamicResult("unknown member");
+  const descriptors = new Map(
+    written?.shape === "object"
+      ? written.entries.map((entry) => [entry.name, entry.written] as const)
+      : [],
+  );
+  const parts = new Map<string, (part: OperationInputs) => OperationResult>();
+  for (const name of container.properties.keys())
+    parts.set(name, partOf(pathOf(FIELDS, { property: name }), descriptors.get(name)));
+  return structureOf("object", parts, cancellable);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

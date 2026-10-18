@@ -5,6 +5,8 @@ import {
   INTEGER_TYPE,
   joinTypes,
   members,
+  optional,
+  PropertyTable,
   resolved,
   STRING_TYPE,
   union,
@@ -209,6 +211,51 @@ export function inputsOf(parts: {
       assert.ok(found !== undefined, `a view of place ${place}`);
       return found;
     },
+    leaf(path) {
+      return leafOf(this, path);
+    },
+  };
+}
+
+/**
+ * A leaf of closed inputs: the operand's (or the place's) alternatives stepped along the path, as the solver reads a
+ * part one alternative at a time; `null` where some object along the way lacks the property (the legacy reports a
+ * selector none of the objects has).
+ */
+function leafOf(inputs: OperationInputs, path: OperandPath): OperandView | null {
+  const start = operandOf(inputs, path.of);
+  if (start.alternatives === null) return start;
+  let types: StaticType[] = start.alternatives.flatMap((alternative) =>
+    members(resolved(alternative)).map(resolved),
+  );
+  for (const along of path.path) {
+    const next: StaticType[] = [];
+    for (const type of types) {
+      if (typeof along === "object") {
+        if (type.kind !== "object") continue;
+        if (type.properties === null)
+          return { alternatives: null, dynamic: "unknown member", known: undefined };
+        const found = type.properties.get(along.property);
+        if (found === undefined) return null;
+        next.push(...members(resolved(found)).map(resolved));
+        continue;
+      }
+      // a collection's element (never for an empty one, which is still the element's type), a dict's keys, a
+      // range's integers; a member without the part contributes nothing
+      if (type.kind === "list" || type.kind === "set" || type.kind === "dict")
+        next.push(
+          ...members(
+            resolved(along === "iteration" && type.kind === "dict" ? STRING_TYPE : type.element),
+          ).map(resolved),
+        );
+      else if (type.kind === "range" && along === "iteration") next.push(INTEGER_TYPE);
+    }
+    types = next;
+  }
+  return {
+    alternatives: types.length === 0 ? null : types,
+    dynamic: start.dynamic,
+    known: undefined,
   };
 }
 
@@ -228,9 +275,12 @@ function operandOf(inputs: OperationInputs, ref: OperandRef): OperandView {
     assert.ok(view !== undefined, `argument ${ref.argument}`);
     return view;
   }
-  const view = inputs.named.get(ref.named);
-  assert.ok(view !== undefined, `named argument ${ref.named}`);
-  return view;
+  if ("named" in ref) {
+    const view = inputs.named.get(ref.named);
+    assert.ok(view !== undefined, `named argument ${ref.named}`);
+    return view;
+  }
+  return inputs.view(ref.place);
 }
 
 /**
@@ -296,6 +346,23 @@ function realize(result: OperationResult, inputs: OperationInputs): Realized {
       });
       return types.length === 0 ? { kind: "invalid" } : { kind: "type", type: union(types) };
     }
+    case "structure": {
+      // each part realized on the same inputs; a part without a value (an absent field) is left out
+      const parts: (readonly [string, StaticType])[] = [];
+      for (const [name, part] of result.parts) {
+        const realized = realize(part(inputs), inputs);
+        if (realized.kind === "type") parts.push([name, realized.type]);
+        else if (realized.kind === "invalid") parts.push([name, UNKNOWN_TYPE]);
+      }
+      const built: StaticType =
+        result.constructor === "object"
+          ? { kind: "object", properties: new PropertyTable(parts) }
+          : {
+              kind: "dict",
+              element: parts.find(([name]) => name === "element")?.[1] ?? UNKNOWN_TYPE,
+            };
+      return { kind: "type", type: result.nullable ? optional(built) : built };
+    }
     case "byReceiver": {
       // The cases' types union, as the legacy unions the members' results; a case without a value takes the value
       // away from the whole, as the legacy's unknown member result does.
@@ -305,6 +372,7 @@ function realize(result: OperationResult, inputs: OperationInputs): Realized {
           ...inputs,
           receiver: restrictedTo(inputs.receiver!, entry.receiver),
           view: inputs.view,
+          leaf: inputs.leaf,
         }),
       );
       if (parts.some((part) => part.kind === "invalid")) return { kind: "invalid" };

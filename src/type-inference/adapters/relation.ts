@@ -9,9 +9,15 @@ import type { ContractRef, DynamicWhy, PlaceId, ProjectionStep, SyntaxEvidence }
 // never reads a contract itself. Nothing here is implemented in stage 2a: the types are the frozen surface that the
 // adapters of stage 2b fill in and that stage 3 consumes.
 
-/** A reference to one operand of an operation: its receiver, a positional argument, or a named one. */
+/**
+ * A reference to one operand of an operation: its receiver, a positional argument, a named one, or a place the
+ * evidence names (a written descriptor's part), which the solver reads like an operand.
+ */
 export type OperandRef =
-  { readonly receiver: true } | { readonly argument: number } | { readonly named: string };
+  | { readonly receiver: true }
+  | { readonly argument: number }
+  | { readonly named: string }
+  | { readonly place: PlaceId };
 
 /**
  * What the solver knows of an operand so far. `alternatives` lists the types the operand may have, as the solver has
@@ -31,8 +37,17 @@ export interface OperationInputs {
   readonly named: ReadonlyMap<string, OperandView>;
   /** What the source says beyond the operands' types (see `SyntaxEvidence`). */
   readonly evidence: SyntaxEvidence | undefined;
-  /** The view of a place the evidence names, such as a written choice object's `value`. */
+  /**
+   * The view of a place the evidence names, such as a written choice object's `value`. The solver selects one
+   * alternative of the place per ask, as it does for the operands.
+   */
   view(place: PlaceId): OperandView;
+  /**
+   * The view of a part of an operand along a path (a property of an object element, a descriptor's `value`): the
+   * solver selects one alternative of that part per ask; `null` where the part is absent (a property the object does
+   * not have). A relation reads a property's type here, never from an object view, whose properties are shapes only.
+   */
+  leaf(path: OperandPath): OperandView | null;
 }
 
 /** A part of an operand that a result is made of: the operand itself, or a path into it. */
@@ -74,6 +89,17 @@ export type OperationResult =
   | {
       readonly kind: "byReceiver";
       readonly cases: readonly { readonly receiver: ValueKind; readonly result: OperationResult }[];
+    }
+  /**
+   * A structure the operation builds: an object with one result per property (`askForm`'s answers, field by field) or
+   * a dict with one `element` result. Each part is computed from the inputs it reads alone, so the solver asks each
+   * part on its own; `nullable` adds null beside the structure (a form that can be cancelled).
+   */
+  | {
+      readonly kind: "structure";
+      readonly constructor: "object" | "dict";
+      readonly parts: ReadonlyMap<string, (inputs: OperationInputs) => OperationResult>;
+      readonly nullable: boolean;
     };
 
 export interface OperationRelation {

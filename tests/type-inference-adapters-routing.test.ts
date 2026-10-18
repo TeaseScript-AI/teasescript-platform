@@ -113,6 +113,7 @@ test("every emitted operation of an implemented family has a relation", () => {
           named: new Map(),
           evidence: undefined,
           view: () => assert.fail("no place"),
+          leaf: () => null,
         }),
         { kind: "dynamic", why: "unknown callee" },
         "an injected builtin's result cannot be known",

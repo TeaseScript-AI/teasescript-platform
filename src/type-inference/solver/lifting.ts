@@ -1,4 +1,4 @@
-import { PropertyTable, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
+import { NULL_TYPE, PropertyTable, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
 import type { ValueKind } from "../../value-kinds.js";
 import { memberOf } from "../adapters/members.js";
 import type {
@@ -456,6 +456,17 @@ type Outcome =
     }
   | { readonly kind: "dynamic"; readonly why: Provenance }
   | {
+      /** A structure the operation builds: its parts' outcomes go to the result's part cells (one per name). */
+      readonly kind: "structure";
+      readonly tag: "w" | "m" | "p";
+      readonly ctor: "object" | "dict";
+      readonly parts: ReadonlyMap<string, readonly Outcome[]>;
+      readonly nullable: boolean;
+      readonly group: string | undefined;
+      readonly why: Provenance | undefined;
+      readonly whys: readonly Provenance[];
+    }
+  | {
       readonly kind: "collection";
       readonly tag: "w" | "m" | "p";
       readonly ctor: Exclude<Constructor, "object">;
@@ -480,7 +491,9 @@ const sameRef = (a: OperandRef, b: OperandRef): boolean =>
     ? "receiver" in b
     : "argument" in a
       ? "argument" in b && a.argument === b.argument
-      : "named" in b && a.named === b.named;
+      : "named" in a
+        ? "named" in b && a.named === b.named
+        : "place" in b && a.place === b.place;
 
 const dynamicWhy = (why: Provenance): Exclude<Provenance, "unknown"> =>
   why === "unknown" ? "unknown callee" : why;
@@ -580,7 +593,7 @@ export function lift(
         ),
       ),
     ].sort();
-    const reading = readAnswer(cells, relation.result(inputs), combo, operands, {
+    const reading = readAnswer(cells, relation.result(inputs), inputs, combo, operands, {
       base,
       site,
       whys,
@@ -606,7 +619,7 @@ function inputsOf(
     const view = combo[index]!.view;
     if ("receiver" in operand.ref) receiver = view;
     else if ("argument" in operand.ref) args[operand.ref.argument] = view;
-    else named.set(operand.ref.named, view);
+    else if ("named" in operand.ref) named.set(operand.ref.named, view);
   });
   const table = cells.table;
   return {
@@ -625,6 +638,53 @@ function inputsOf(
         known: undefined,
       };
     },
+    leaf(path) {
+      // along the combination's chosen alternative of the operand (every alternative and dynamic item of the cell
+      // for a dynamic view, or for a place the evidence names), one step at a time
+      let found: readonly (Alternative | DynamicMark)[];
+      let dynamicWalk: boolean;
+      const marks = (cell: CellId): DynamicMark[] =>
+        cells
+          .items(cell)
+          .filter((it) => it.tag === "d" && it.why !== undefined)
+          .map((it): DynamicMark => ({ tag: "d", why: it.why! }));
+      if ("place" in path.of) {
+        found = [...alternatives(cells, path.of.place), ...marks(path.of.place)];
+        dynamicWalk = true;
+      } else {
+        const index = operands.findIndex((operand) => sameRef(operand.ref, path.of));
+        if (index < 0) return BOTTOM_VIEW;
+        const pick = combo[index]!;
+        if (pick.kind === "bottom") return BOTTOM_VIEW;
+        dynamicWalk = pick.kind === "dynamic";
+        found =
+          pick.kind === "dynamic"
+            ? [...alternatives(cells, operands[index]!.cell), ...marks(operands[index]!.cell)]
+            : [pick.alt];
+      }
+      for (const along of path.path) {
+        if (found.length === 0) break;
+        // a property no object alternative along the way has: the part is absent
+        if (
+          typeof along === "object" &&
+          found.every(
+            (a) =>
+              a.tag !== "d" && a.choice?.props !== undefined && !a.choice.props.has(along.property),
+          )
+        )
+          return null;
+        found = found.flatMap((a) => stepOf(cells, a, along, dynamicWalk));
+      }
+      const alts = found
+        .filter((a): a is Alternative => a.tag !== "d" && a.tag !== "p")
+        .map((a) => table.toStatic(a.type));
+      const why = found.find((a): a is DynamicMark => a.tag === "d")?.why;
+      return {
+        alternatives: alts.length === 0 ? null : alts,
+        dynamic: why === undefined ? null : dynamicWhy(why),
+        known: undefined,
+      };
+    },
   };
 }
 
@@ -632,6 +692,7 @@ function inputsOf(
 function readAnswer(
   cells: Cells,
   answer: OperationResult,
+  inputs: OperationInputs,
   combo: readonly Pick[],
   operands: readonly Operand[],
   reading: Reading,
@@ -721,6 +782,27 @@ function readAnswer(
         for (const c of a.cases) if (c.receiver === kind) walk(c.result, member, possible);
         break;
       }
+      case "structure": {
+        // each part is asked on its own, over the same operand combination; an invalid part leaves its cell alone
+        const tag = own(member, possible);
+        const parts = new Map<string, readonly Outcome[]>();
+        for (const [name, part] of a.parts)
+          parts.set(
+            name,
+            readAnswer(cells, part(inputs), inputs, combo, operands, reading).outcomes,
+          );
+        outcomes.push({
+          kind: "structure",
+          tag,
+          ctor: a.constructor,
+          parts,
+          nullable: a.nullable,
+          group: tag === "m" ? reading.site : undefined,
+          why: undefined,
+          whys: reading.whys,
+        });
+        break;
+      }
     }
   };
   walk(answer, false, reading.mode === "possible");
@@ -790,7 +872,9 @@ function project(
 function emit(cells: Cells, result: CellId, outcome: Outcome, at: Position): boolean {
   if (outcome.kind === "dynamic") return cells.add(result, { tag: "d", why: outcome.why, pos: at });
   const pos: Position =
-    outcome.kind !== "collection" && outcome.site !== undefined ? [at[0], outcome.site] : at;
+    outcome.kind !== "collection" && outcome.kind !== "structure" && outcome.site !== undefined
+      ? [at[0], outcome.site]
+      : at;
   const whys: readonly (Provenance | undefined)[] =
     outcome.tag === "p" && outcome.why === undefined ? outcome.whys : [outcome.why];
   let changed = false;
@@ -844,6 +928,48 @@ function emit(cells: Cells, result: CellId, outcome: Outcome, at: Position): boo
         )
           changed = true;
         break;
+      case "structure": {
+        if (outcome.ctor === "object") {
+          const props = new Map<string, CellId>();
+          for (const [name, parts] of outcome.parts) {
+            const cell = cells.derived(result, name);
+            for (const part of parts) if (emit(cells, cell, part, pos)) changed = true;
+            props.set(name, cell);
+          }
+          if (
+            cells.add(result, {
+              tag: outcome.tag,
+              ctor: "object",
+              parts: { props: cells.objectParts(props, result, pos), open: false },
+              group: outcome.group,
+              why,
+              pos,
+            })
+          )
+            changed = true;
+        } else {
+          const element = cells.derived(result, "element");
+          for (const part of outcome.parts.get("element") ?? [])
+            if (emit(cells, element, part, pos)) changed = true;
+          if (
+            cells.add(result, {
+              tag: outcome.tag,
+              ctor: "dict",
+              parts: { element },
+              group: outcome.group,
+              why,
+              pos,
+            })
+          )
+            changed = true;
+        }
+        if (
+          outcome.nullable &&
+          cells.add(result, { tag: "w", type: cells.table.intern(NULL_TYPE), pos })
+        )
+          changed = true;
+        break;
+      }
     }
   }
   return changed;

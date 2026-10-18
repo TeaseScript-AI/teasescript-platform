@@ -1,6 +1,6 @@
 import { members, resolved, union, valueKindOfType, type StaticType } from "../../static-types.js";
 import type { ValueKind } from "../../value-kinds.js";
-import type { DynamicWhy, ProjectionStep, SyntaxEvidence } from "../graph.js";
+import type { DynamicWhy, PlaceId, ProjectionStep, SyntaxEvidence } from "../graph.js";
 import type {
   OperandPath,
   OperandRef,
@@ -96,6 +96,14 @@ export function joinOf(
   return { kind: "join", constructor, parts };
 }
 
+export function structureOf(
+  constructor: "object" | "dict",
+  parts: ReadonlyMap<string, (inputs: OperationInputs) => OperationResult>,
+  nullable: boolean,
+): OperationResult {
+  return { kind: "structure", constructor, parts, nullable };
+}
+
 export function alternativesOf(...results: readonly OperationResult[]): OperationResult {
   return results.length === 1 ? results[0]! : { kind: "alternatives", results };
 }
@@ -107,6 +115,10 @@ export function byReceiver(
 }
 
 export const RECEIVER: OperandRef = Object.freeze({ receiver: true });
+
+export function placeRef(place: PlaceId): OperandRef {
+  return { place };
+}
 
 export function named(name: string): OperandRef {
   return { named: name };
