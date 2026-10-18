@@ -205,11 +205,10 @@ function choiceEntry(
   if (rejects(type, accepted)) return { type: UNKNOWN_TYPE, rejected: true };
   if (object === null)
     return { type: value.kind === "object" ? UNKNOWN_TYPE : type, rejected: false };
-  // A written choice object without `text` is reported, and without `value` too it returns nothing known.
+  // A written choice object without `text` is reported (the visitor's check); without `value` too, what its button
+  // returns is not known.
   const returned = object.value ?? object.text;
-  return returned === null
-    ? { type: UNKNOWN_TYPE, rejected: true }
-    : { type: places.type(returned), rejected: false };
+  return { type: returned === null ? UNKNOWN_TYPE : places.type(returned), rejected: false };
 }
 
 function choice(inputs: OperationInputs): OperationResult {

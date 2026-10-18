@@ -58,9 +58,10 @@ export interface LegacyOutcome {
   /** The error codes reported inside the operation's span, and those reported anywhere else. */
   readonly errorsAtOperation: readonly string[];
   readonly errorsElsewhere: readonly string[];
-  /** The errors inside the operation's span with their offsets, for telling an operand's own errors apart. */
+  /** The errors inside the operation's span with their offsets and messages, for telling the legacy's branches apart. */
   readonly errorSpans: readonly {
     readonly code: string;
+    readonly message: string;
     readonly start: number;
     readonly end: number;
   }[];
@@ -148,6 +149,7 @@ export function legacyOperation(
       .filter((error) => inside(error.span))
       .map((error) => ({
         code: error.code,
+        message: error.message,
         start: error.span.start.offset,
         end: error.span.end.offset,
       })),
@@ -333,9 +335,12 @@ export type AdapterExpectation =
   /** A declared recovery: the realized text the adapter's answer gives, where the legacy recovered otherwise. */
   | { readonly realized: string };
 
-/** A fact's text with its quoted values (property names, restricted texts) emptied, so that markers are structural. */
+/**
+ * A fact's text with its quoted values (property names, restricted texts) emptied and its numbers (restricted values,
+ * whose exponents write `+`) made `0`, so that the markers `?`, `!` and `+` are structural.
+ */
 export function structureOf(fact: string): string {
-  return fact.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  return fact.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi, "0");
 }
 
 /** Whether a fact text is a closed type: no open slot, held-unknown or open-shape marker outside a quoted value. */

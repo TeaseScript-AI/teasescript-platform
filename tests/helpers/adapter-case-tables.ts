@@ -1,6 +1,11 @@
 import type { Expression } from "../../src/ast.js";
 import { PERSON_FIELDS } from "../../src/speaker-terms.js";
-import type { ContractRef, DynamicWhy } from "../../src/type-inference/graph.js";
+import type {
+  ChoiceElementEvidence,
+  ChoiceObjectEvidence,
+  DynamicWhy,
+  PlaceId,
+} from "../../src/type-inference/graph.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../src/value-kinds.js";
 import { caseInputs, type CaseInputs } from "./adapter-case-inputs.js";
 import { isClosedFact, legacyOperation, type LegacyOutcome } from "./adapter-parity.js";
@@ -55,8 +60,8 @@ export interface CaseRow {
   readonly adapter: AdapterCell;
   /** Why an operand the legacy cannot type is dynamic: the view the adapter is given for it. */
   readonly why: DynamicWhy | null;
-  /** Error codes the branch declares checking-only: reported, the value kept. */
-  readonly checking?: readonly string[];
+  /** The messages of the operation's own errors, in order, by which the invalidating reports (§6.6) are told apart. */
+  readonly messages: readonly string[];
   readonly stage5?: "Q1" | "Q2";
   readonly note?: string;
 }
@@ -76,16 +81,6 @@ interface Variant {
   readonly why: DynamicWhy | null;
   /** The operation is written in a function whose untyped parameter `p` is called with this argument. */
   readonly call?: string;
-  /**
-   * Error codes the legacy reports at this operation that do not take its value away (the check continues with the
-   * answers it computed): declared by the branch, so that an error beside an unknown result is not read as `invalid`.
-   */
-  readonly checking?: readonly string[];
-  /**
-   * The provenance of an unknown result without an error, where `resultFromDynamic` would read it from a dynamic
-   * place that is not the cause (declared by the branch).
-   */
-  readonly cause?: DynamicWhy;
   readonly stage5?: "Q1" | "Q2";
   readonly note?: string;
 }
@@ -191,7 +186,7 @@ function variant(
   prelude: readonly string[],
   operation: string,
   why: DynamicWhy | null = null,
-  more: Partial<Pick<Variant, "call" | "checking" | "cause" | "stage5" | "note">> = {},
+  more: Partial<Pick<Variant, "call" | "stage5" | "note">> = {},
 ): Variant {
   return { id, prelude, operation, why, ...more };
 }
@@ -380,28 +375,40 @@ const CHOICE_TEMPLATES: readonly Template[] = [
       yield variant("folded-text", [], 'askChoice "a" + "b", "c"');
       yield variant("labelled-object-with-value", [], 'askChoice one: { value: 1, text: "A" }');
       yield variant("labelled-object-text", [], 'askChoice one: { text: "A" }');
-      yield variant("computed-object-bad-text", ["let o = { text: [1] }"], "askChoice o", null, {
-        checking: ["TSV040"],
-      });
-      yield variant(
-        "computed-object-bad-text-element",
-        ["let o = { text: [1] }"],
-        "askChoice [o]",
-        null,
-        { checking: ["TSV040"] },
-      );
-      yield variant(
-        "computed-objects-bad-text",
-        ["let xs = [{ text: [1] }]"],
-        "askChoice xs",
-        null,
-        { checking: ["TSV040"] },
-      );
+      yield variant("computed-object-bad-text", ["let o = { text: [1] }"], "askChoice o");
+      yield variant("computed-object-bad-text-element", ["let o = { text: [1] }"], "askChoice [o]");
+      yield variant("computed-objects-bad-text", ["let xs = [{ text: [1] }]"], "askChoice xs");
       yield variant(
         "computed-object-prefill-host",
         ['let o = { text: "A", value: 1 }'],
         "askChoice o, prefill: hostValue",
         "host",
+      );
+      yield variant("object-value-host-no-text", [], "askChoice { value: hostValue }", "host");
+      yield variant(
+        "object-text-host-and-computed",
+        ['let o = { text: "A" }'],
+        "askChoice { text: hostText, value: 1 }, o",
+        "host",
+      );
+      yield variant(
+        "elements-text-host-and-computed",
+        ['let o = { text: "A" }'],
+        "askChoice [{ text: hostText, value: 1 }, o]",
+        "host",
+      );
+      yield variant("exponent-numbers", [], "askChoice 1e21, 2e21");
+      yield variant("exponent-numbers-variable", ["let v = askChoice 1e21, 2e21"], "askChoice v");
+      yield variant("union-of-kinds", ["let v: integer | timer = hostValue"], "askChoice v");
+      yield variant(
+        "union-of-kinds-element",
+        ["let v: integer | timer = hostValue"],
+        "askChoice [v]",
+      );
+      yield variant(
+        "computed-object-unshown-text",
+        ["let v: timer = hostValue", "let o = { text: v }"],
+        "askChoice o",
       );
     },
   },
@@ -489,9 +496,7 @@ const FORM_TEMPLATES: readonly Template[] = [
         form("{ n: 1 }", ', cancel: "Back", timeout: 5 s, onTimeout: "submit"'),
       );
       yield variant("cancel-host-container", [], form("hostValue", ', cancel: "Back"'), "host");
-      yield variant("host-dict-timeout-alone", [], form("hostDict", ", timeout: 1 s"), "host", {
-        checking: ["TSV043"],
-      });
+      yield variant("host-dict-timeout-alone", [], form("hostDict", ", timeout: 1 s"), "host");
       yield variant(
         "object-annotated-hint-host",
         ["let f: object = hostValue"],
@@ -499,6 +504,14 @@ const FORM_TEMPLATES: readonly Template[] = [
         "host",
       );
       yield variant("host-and-hint-host", [], form("hostValue", ", hint: hostText"), "host");
+      yield variant(
+        "host-dict-timeout-number",
+        [],
+        form("hostDict", ', timeout: 5, onTimeout: "submit"'),
+        "host",
+      );
+      yield variant("host-dict-hint-list", [], form("hostDict", ", hint: [1]"), "host");
+      yield variant("host-cancel-number", [], form("hostValue", ", cancel: 5"), "host");
     },
   },
   {
@@ -735,7 +748,7 @@ const VALUES_TEMPLATES: readonly Template[] = [
         yield variant(`${name}.one`, [], statistic(name, "[1]"));
         // An empty list is reported from its known value (`checkFewest`); the result is unknown from the element
         // nothing was stored into.
-        yield variant(`${name}.empty`, [], statistic(name, "[]"), null, { checking: ["TSV043"] });
+        yield variant(`${name}.empty`, [], statistic(name, "[]"));
         yield variant(`${name}.mixed-numbers`, [], statistic(name, "[1, 2.5]"));
         yield variant(`${name}.host-list`, [], statistic(name, "hostList"), "host");
         yield variant(`${name}.host-element`, [], statistic(name, "[hostValue]"), "host");
@@ -755,6 +768,13 @@ const VALUES_TEMPLATES: readonly Template[] = [
       yield variant("percentile.host-percent", [], "percentile([1, 2], hostValue)", "host");
       yield variant("percentile.text-percent", [], 'percentile([1, 2], "x")');
       yield variant("percentile.negative-percent", [], "percentile([1, 2], -1)");
+      yield variant("percentile.host-list-text-percent", [], 'percentile(hostList, "x")', "host");
+      yield variant(
+        "percentile.host-element-negative-percent",
+        [],
+        "percentile([hostValue], -1)",
+        "host",
+      );
       yield variant(
         "percentile.host-list-and-percent",
         [],
@@ -819,14 +839,11 @@ const VALUES_TEMPLATES: readonly Template[] = [
       );
       yield variant("bare-objects", ["let xs: object[] = hostValue"], 'sum(xs, by: "p")');
       yield variant("null-selector", [], "sum([{ null: 1 }], by: null)");
+      yield variant("host-list-variable-selector", ['let k = "p"'], "sum(hostList, by: k)", "host");
+      yield variant("host-list-host-selector", [], "sum(hostList, by: hostText)", "host");
+      yield variant("host-list-number-selector", [], "sum(hostList, by: 1)", "host");
       yield variant("null-selector-plain", [], "sum([{ p: 1 }], by: null)");
-      yield variant(
-        "nullable-selector",
-        ["let k: string? = hostValue"],
-        "sum([{ p: 1 }], by: k)",
-        null,
-        { checking: ["TSV043"] },
-      );
+      yield variant("nullable-selector", ["let k: string? = hostValue"], "sum([{ p: 1 }], by: k)");
       yield variant("empty-list", [], 'sum([], by: "p")');
       yield variant("null-elements", [], 'sum([null], by: "p")');
       yield variant("extra-named", [], 'sum([{ p: 1 }], by: "p", extra: 1)');
@@ -870,10 +887,11 @@ const REGRESSION_TEMPLATES: readonly Template[] = [
       yield variant("variable", [`let ps = ${POINTS}`], "linearRegression(ps)");
       yield variant("annotated", ["let ps: object[] = hostValue"], "linearRegression(ps)");
       yield variant(
-        "nullable",
+        "narrowed",
         [`let ps = ${POINTS}`, "let qs: object[]? = ps"],
         "linearRegression(qs)",
       );
+      yield variant("nullable", ["let ps: object[]? = hostValue"], "linearRegression(ps)");
       yield variant("extra-named", [], "linearRegression([1, 2], extra: 1)");
       yield variant("extra-positional", [], "linearRegression([1, 2], 3)");
       yield variant("no-arguments", [], "linearRegression()");
@@ -1007,9 +1025,22 @@ const PREDICTION_TEMPLATES: readonly Template[] = [
       );
       yield variant("null-x", [], `predict(${line("1", "2", "0")}, null)`);
       yield variant(
-        "nullable-line",
+        "narrowed-line",
         [`let l = ${line("1", "2", "0")}`, "let m: object? = l"],
         "predict(m, 1)",
+      );
+      yield variant("nullable-line", ["let m: object? = hostValue"], "predict(m, 1)");
+      yield variant(
+        "host-intercept-date-start",
+        ["let d: date = hostValue"],
+        `predict(${line("1", "hostValue", "d")}, 1)`,
+        "host",
+      );
+      yield variant(
+        "object-line-host-x",
+        ["let l: object = hostValue"],
+        "predict(l, hostValue)",
+        "host",
       );
       yield parameterVariant("parameter", "predict(p, 1)", line("1", "2", "0"));
     },
@@ -1215,8 +1246,11 @@ function splitErrors(
   variant: Variant,
   source: string,
   outcome: LegacyOutcome,
-): { readonly errors: string[]; readonly operandErrors: string[] } {
-  const errors: string[] = [];
+): {
+  readonly errors: { readonly code: string; readonly message: string }[];
+  readonly operandErrors: string[];
+} {
+  const errors: { readonly code: string; readonly message: string }[] = [];
   const operandErrors: string[] = [];
   const operands = operandNodes(outcome).map((operand) => ({
     start: operand.span.start.offset,
@@ -1231,46 +1265,159 @@ function splitErrors(
       operand === undefined
         ? undefined
         : `${error.code}@${error.start - operand.start}-${error.end - operand.start}`;
-    (key !== undefined && operand!.own.has(key) ? operandErrors : errors).push(error.code);
+    if (key !== undefined && operand!.own.has(key)) operandErrors.push(error.code);
+    else errors.push({ code: error.code, message: error.message });
   }
   return { errors, operandErrors };
 }
 
 /**
- * The places a contract's result is read from, by the legacy's rules: a dynamic place elsewhere (a hint, a prefill,
- * a percentage, a cancel button) leaves the result's provenance to the sources. Declared per contract, reviewed
- * with the tables.
+ * The reports of the legacy routines that take the operation's value away (the branch returns `UNKNOWN_TYPE` with
+ * them), by routine, matched on the code or the message: every other report at the operation is the check's own and
+ * leaves the answer it computed (work note §6.6). The sites, for review: `shape` (`list-function-checks.ts`, codes
+ * TSV020 and TSV022); `valuesType` ("needs a list, not", "needs a list of objects for", "needs the name of a
+ * property as its"); `valueKind` for the statistics ("needs <kinds>, not", "needs values of one kind", the angle
+ * message) and the missing-property note of `#listFunctionType`; `listFunctionType` for points ("needs y: with
+ * x:"); `predictType` (the x's kind, the angle message, "never null", "needs a line from linearRegression(...),
+ * with"); `#choiceEntry` and the computed collection of `#interactionTask` (`#checkMembers` and `#checkElements`:
+ * "A button cannot return", "A choice option must be a value", "A choice list element must be", the may-be report)
+ * and the empty choice; `#formAnswersTask` ("'fields:' takes an object or dict of fields"); the account field read
+ * ("The account has no field"). A regression keeps its object with unknown amounts after a rejected value, so
+ * `valueKind`'s reports are not invalidating there.
  */
-function resultFromDynamic(contract: ContractRef, dynamic: CaseInputs["dynamic"]): boolean {
-  const named = (...names: string[]) => dynamic.named.some((name) => names.includes(name));
-  const positional = (...indexes: number[]) =>
-    dynamic.positional.some((index) => indexes.includes(index));
+const INVALIDATING: Readonly<Record<RoutineName, readonly RegExp[]>> = {
+  choice: [
+    /^A button cannot return /,
+    /^A choice option must be a value/,
+    /^A choice list element must be/,
+    / may be .*[Cc]heck it first/,
+    /^A choice needs at least one button/,
+  ],
+  form: [/^'fields:' takes an object or dict of fields/],
+  values: [
+    /^TSV020$/,
+    /^TSV022$/,
+    / needs a list, not /,
+    / needs a list of objects for /,
+    / needs the name of a property as its /,
+    /\(\.\.\.\) needs (?!a number as its |a percentage from ).*, not /,
+    / needs values of one kind: /,
+    / does not take angles/,
+    /: the objects in this list have no property /,
+  ],
+  regression: [
+    /^TSV020$/,
+    /^TSV022$/,
+    / needs y: with x:/,
+    / needs a list, not /,
+    / needs a list of objects for /,
+    / needs the name of a property as its /,
+  ],
+  prediction: [
+    /^TSV020$/,
+    /^TSV022$/,
+    / needs a number, date, datetime, or absolute date and time as its x, not /,
+    / does not take angles/,
+    / are never null\.$/,
+    / needs a line from linearRegression\(\.\.\.\), with slope, intercept, and start, not /,
+  ],
+  commands: [/^The account has no field /],
+};
+
+function invalidating(
+  routine: RoutineName,
+  error: { readonly code: string; readonly message: string },
+): boolean {
+  return INVALIDATING[routine].some(
+    (pattern) => pattern.test(error.code) || pattern.test(error.message),
+  );
+}
+
+/**
+ * The provenance of a result the legacy leaves unknown without an invalidating report: the first dynamic place
+ * among the places the contract's result is read from, in the order the routine reads them, else `unknown member`,
+ * the legacy's own limit on closed operands. Declared per contract from the evidence, as the adapters walk it (work
+ * note §6.6): a choice's options and written elements by what the button returns (a written object's `value`, else
+ * its `text`); a form's `fields`, then the descriptors' `value` and `options`; a statistic's `by:` (a selector the
+ * legacy cannot see leaves the property unknown before the list is read), then its list; a regression's `y:` and
+ * `x:` likewise, then its list; a prediction's line (the x only validates).
+ */
+function provenance(inputs: CaseInputs, why: DynamicWhy | null): DynamicWhy {
+  const { contract, operation, dynamicPlaces } = inputs;
+  const dynamic = (place: PlaceId | null | undefined): boolean =>
+    place !== null && place !== undefined && dynamicPlaces.has(place);
+  const named = (name: string) => operation.named.find((entry) => entry.name === name)?.value;
+  const first = (places: readonly (PlaceId | null | undefined)[]): DynamicWhy | undefined =>
+    places.some(dynamic) ? (why ?? undefined) : undefined;
+  const evidence = operation.evidence;
+  const returned = (object: ChoiceObjectEvidence | null, place: PlaceId): PlaceId | null =>
+    object === null ? place : (object.value ?? object.text);
+  const elements = (list: readonly ChoiceElementEvidence[]): (PlaceId | null)[] =>
+    list.map((element) => returned(element.object, element.place));
+  /** A selector that is not visible text leaves the property unknown before the list is read. */
+  const selector = (name: string): DynamicWhy | undefined => {
+    const place = named(name);
+    if (place === undefined) return undefined;
+    if (dynamic(place)) return why ?? undefined;
+    const written =
+      evidence?.kind === "selectors"
+        ? evidence.written.find((entry) => entry.name === name)
+        : undefined;
+    return written === undefined || written.text === null ? "unknown member" : undefined;
+  };
   switch (`${contract.family}.${contract.name}`) {
-    case "interaction.choice":
-      return dynamic.positional.length > 0 || dynamic.evidence;
-    case "interaction.form":
-      return named("fields") || dynamic.evidence;
+    case "interaction.choice": {
+      if (evidence?.kind !== "choice") return "unknown member";
+      const places = evidence.options.flatMap((option) =>
+        option.content.kind === "list" || option.content.kind === "set"
+          ? elements(option.content.elements)
+          : option.content.kind === "object"
+            ? [returned(option.content.object, option.place)]
+            : [option.place],
+      );
+      return first(places) ?? "unknown member";
+    }
+    case "interaction.form": {
+      if (dynamic(named("fields"))) return why ?? "unknown member";
+      if (evidence?.kind !== "form" || evidence.fields === "computed") return "unknown member";
+      const places = evidence.fields.entries.flatMap((entry) =>
+        entry.written.kind === "object"
+          ? [
+              entry.written.value,
+              entry.written.options?.place,
+              ...(entry.written.options?.elements == null
+                ? []
+                : elements(entry.written.options.elements)),
+            ]
+          : entry.written.kind === "list"
+            ? elements(entry.written.elements)
+            : [],
+      );
+      return first(places) ?? "unknown member";
+    }
     case "listFunction.linearRegression":
-      return positional(0) || named("x", "y");
+      return selector("y") ?? selector("x") ?? first([operation.arguments[0]]) ?? "unknown member";
     case "listFunction.predict":
-      return positional(0, 1);
+      return first([operation.arguments[0]]) ?? "unknown member";
     default:
-      return contract.family === "listFunction" ? positional(0) || named("by") : false;
+      if (contract.family === "listFunction")
+        return selector("by") ?? first([operation.arguments[0]]) ?? "unknown member";
+      return "unknown member";
   }
 }
 
 /**
- * The class of a row, from what the oracle says and what the variant declares (work note §6.1): a closed fact without
- * an error is `fact`; with an error, `recovery`; an error the branch does not declare checking-only, without a fact,
- * is `invalid`; no fact and no error (or only checking-only errors) is `dynamic`, of the declared cause, else of the
- * operand's provenance when a source place of the contract is dynamic, else of `unknown member`, the legacy's own
- * limit on closed operands; a `stage5` variant is `legacy`, and a row with an undecided null slot is `open`: neither
- * asserts an adapter answer.
+ * The class of a row, from what the oracle says and the routine's declared invalidating reports (work note §6.1 and
+ * §6.6): a closed fact is `fact`, or `recovery` with an error; no fact with an invalidating report is `invalid`; no
+ * fact without one (no report, or the check's own reports beside the answer) is `dynamic` of the result's
+ * provenance; a `stage5` variant is `legacy`, and a row with an undecided null slot is `open`: neither asserts an
+ * adapter answer.
  */
 function classify(
+  routine: RoutineName,
   variant: Variant,
   fact: string,
-  errors: readonly string[],
+  errors: readonly { readonly code: string; readonly message: string }[],
   inputs: CaseInputs,
 ): { readonly class: CaseClass; readonly adapter: AdapterCell } {
   if (variant.stage5 !== undefined) return { class: "legacy", adapter: null };
@@ -1278,18 +1425,10 @@ function classify(
   const closed = fact !== "unknown" && isClosedFact(fact);
   if (fact !== "unknown" && !closed)
     throw new Error(`the fact ${fact} of ${variant.id} is not closed`);
-  const checking = variant.checking ?? [];
-  const checkingOnly = errors.length > 0 && errors.every((code) => checking.includes(code));
-  if (errors.length > 0 && !checkingOnly)
-    return closed
-      ? { class: "recovery", adapter: "fact" }
-      : { class: "invalid", adapter: "invalid" };
   if (closed) return { class: errors.length > 0 ? "recovery" : "fact", adapter: "fact" };
-  const fromSource = resultFromDynamic(inputs.contract, inputs.dynamic);
-  if (fromSource && variant.why === null)
-    throw new Error(`${variant.id} has a dynamic source without a declared provenance`);
-  const why = variant.cause ?? (fromSource ? variant.why! : "unknown member");
-  return { class: "dynamic", adapter: { dynamic: why } };
+  if (errors.some((error) => invalidating(routine, error)))
+    return { class: "invalid", adapter: "invalid" };
+  return { class: "dynamic", adapter: { dynamic: provenance(inputs, variant.why) } };
 }
 
 /** Every row of a routine's table, generated from its templates and pinned by the legacy oracle. */
@@ -1310,12 +1449,13 @@ export function generateTable(routine: RoutineName): GeneratedRow[] {
       const fact = outcome.type;
       const inputs = caseInputs(outcome, variant.why);
       const { errors, operandErrors } = splitErrors(variant, source, outcome);
-      const { class: cls, adapter } = classify(variant, fact, errors, inputs);
+      const { class: cls, adapter } = classify(routine, variant, fact, errors, inputs);
       const row: CaseRow = {
         id,
         source,
         fact,
-        errors,
+        errors: errors.map((error) => error.code),
+        messages: errors.map((error) => error.message),
         operandErrors,
         elsewhere: outcome.errorsElsewhere,
         operands: operandFacts(outcome),
@@ -1324,7 +1464,6 @@ export function generateTable(routine: RoutineName): GeneratedRow[] {
         why: variant.why,
         ...(outcome.factFrom === "binding" ? { factFrom: "binding" as const } : {}),
         ...(variant.stage5 === undefined ? {} : { stage5: variant.stage5 }),
-        ...(variant.checking === undefined ? {} : { checking: variant.checking }),
         ...(variant.note === undefined ? {} : { note: variant.note }),
       };
       rows.push({ row, outcome, inputs });

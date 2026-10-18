@@ -7,6 +7,7 @@ import type {
   ContractRef,
   DynamicWhy,
   FormDescriptorEvidence,
+  NamedPlace,
   PlaceId,
   SyntaxEvidence,
 } from "../../src/type-inference/graph.js";
@@ -30,12 +31,14 @@ export interface CaseInputs {
   readonly contract: ContractRef;
   /** The inputs, or none when an operand holds a slot the legacy has not decided (`open`). */
   readonly inputs: OperationInputs | null;
-  /** The places the relation is given that are dynamic, by their role, for the result's provenance rule. */
-  readonly dynamic: {
-    readonly positional: readonly number[];
-    readonly named: readonly string[];
-    readonly evidence: boolean;
+  /** The operation as collected: its operand places and evidence, for the result's provenance rule. */
+  readonly operation: {
+    readonly arguments: readonly PlaceId[];
+    readonly named: readonly NamedPlace[];
+    readonly evidence: SyntaxEvidence | undefined;
   };
+  /** The places the relation is given whose fact the legacy does not know. */
+  readonly dynamicPlaces: ReadonlySet<PlaceId>;
   /**
    * Whether a place holds a slot that saw only null (`?null`): the legacy leaves what reads it unknown until the slot
    * is decided, which is the solver's to represent, not a relation's; no inputs are built.
@@ -74,15 +77,14 @@ export function caseInputs(outcome: LegacyOutcome, why: DynamicWhy | null): Case
   const facts = new Map(referenced.map((place) => [place, factOf(place)]));
   // A slot that saw only null is written `?null`, or `?` beside `null` in a union (markers outside quoted values).
   const open = [...facts.values()].some((fact) => /\?null|\(\?\||\|\?[|)]/.test(structureOf(fact)));
-  const isDynamic = (place: PlaceId): boolean => facts.get(place) === "unknown";
-  const evidenceDynamic =
-    operation.evidence !== undefined && evidencePlaces(operation.evidence).some(isDynamic);
-  const dynamic = {
-    positional: operation.arguments.flatMap((place, index) => (isDynamic(place) ? [index] : [])),
-    named: operation.named.filter((entry) => isDynamic(entry.value)).map((entry) => entry.name),
-    evidence: evidenceDynamic,
+  const dynamicPlaces = new Set(referenced.filter((place) => facts.get(place) === "unknown"));
+  const shape = {
+    arguments: operation.arguments,
+    named: operation.named,
+    evidence: operation.evidence,
   };
-  if (open) return { contract: operation.contract, inputs: null, dynamic, open };
+  if (open)
+    return { contract: operation.contract, inputs: null, operation: shape, dynamicPlaces, open };
   const places = new Map<PlaceId, OperandView>();
   const view = (place: PlaceId): OperandView => {
     const kept = places.get(place);
@@ -108,7 +110,8 @@ export function caseInputs(outcome: LegacyOutcome, why: DynamicWhy | null): Case
   for (const place of referenced) view(place);
   return {
     contract: operation.contract,
-    dynamic,
+    operation: shape,
+    dynamicPlaces,
     open,
     inputs: inputsOf({
       ...(operation.receiver === null ? {} : { receiver: view(operation.receiver) }),
