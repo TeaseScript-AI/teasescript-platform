@@ -18,7 +18,7 @@ import { stateKey } from "../debug-trace.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
 import type { SerializableRuntimeValue } from "../serializable-values.js";
 import type { RuntimeSnapshot } from "../state.js";
-import type { RuntimeCaptureActionSnapshot } from "../actions/model.js";
+import { ACTION_COMPLETION_EVENTS, type RuntimeCaptureActionSnapshot } from "../actions/model.js";
 import { isList, isSet } from "../value-predicates.js";
 import { describeValue } from "../../value-kinds.js";
 import { advance, fault, type SourceSpan } from "./support.js";
@@ -92,7 +92,7 @@ export function executeCapture(
   // The request, a possible unavailable-camera warning, and the completion, besides what active actions reserve.
   assertEventSequenceCapacity(
     snapshot,
-    3 + requiredFutureActionCompletionEvents(snapshot),
+    1 + ACTION_COMPLETION_EVENTS.capture + requiredFutureActionCompletionEvents(snapshot),
     instruction.span,
   );
   const sequence = takeSequence(snapshot);

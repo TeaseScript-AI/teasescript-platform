@@ -25,7 +25,7 @@ import { contextRootId } from "../activations.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
 import type { SerializableRuntimeValue } from "../serializable-values.js";
 import { type RuntimeSnapshot, MAX_RUNTIME_SESSION_TIME_MS } from "../state.js";
-import type { RuntimeTimerActionSnapshot } from "../actions/model.js";
+import { ACTION_COMPLETION_EVENTS, type RuntimeTimerActionSnapshot } from "../actions/model.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import { expireTimerAction } from "../operations/timer-lifecycle.js";
 import { cloneTimer } from "../timers.js";
@@ -80,7 +80,7 @@ export function executeWait(
     );
   }
   // The wait's request and its completion.
-  assertEventSequenceCapacity(snapshot, 2, instruction.span);
+  assertEventSequenceCapacity(snapshot, 1 + ACTION_COMPLETION_EVENTS.delay, instruction.span);
   const sequence = takeSequence(snapshot);
   const action = Object.freeze({
     kind: "delay" as const,
@@ -283,7 +283,7 @@ export function startTimer(
   // The request, its eventual settlement, and the other active actions' completions must stay representable.
   assertEventSequenceCapacity(
     snapshot,
-    2 + requiredFutureActionCompletionEvents(snapshot),
+    1 + ACTION_COMPLETION_EVENTS.timer + requiredFutureActionCompletionEvents(snapshot),
     instruction.span,
   );
   const timerId = snapshot.nextTimerId;

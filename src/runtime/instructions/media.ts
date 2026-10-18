@@ -30,9 +30,10 @@ import { stateKey } from "../debug-trace.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
 import type { SerializableRuntimeValue } from "../serializable-values.js";
 import type { RuntimeSnapshot } from "../state.js";
-import type {
-  RuntimeMediaActionSnapshot,
-  RuntimeMediaPlaybackActionSnapshot,
+import {
+  ACTION_COMPLETION_EVENTS,
+  type RuntimeMediaActionSnapshot,
+  type RuntimeMediaPlaybackActionSnapshot,
 } from "../actions/model.js";
 import {
   emitDeveloperWarning,
@@ -235,7 +236,11 @@ export function startMedia(
   // Two requests, their eventual completions, a possible warning, and the other active actions' completions.
   assertEventSequenceCapacity(
     snapshot,
-    5 + requiredFutureActionCompletionEvents(snapshot),
+    2 +
+      ACTION_COMPLETION_EVENTS.media +
+      ACTION_COMPLETION_EVENTS.mediaPlayback +
+      1 +
+      requiredFutureActionCompletionEvents(snapshot),
     instruction.span,
   );
   const captures = resolveCaptures(snapshot, instruction.captures, instruction.span);

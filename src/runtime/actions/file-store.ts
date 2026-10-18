@@ -33,7 +33,11 @@ import { interactionStringFits } from "../../interaction-limits.js";
 import { isSha256Hex } from "../sha256.js";
 import { checkTextLength, messageText } from "../text-length.js";
 import type { CapturedMediaAdmission } from "./capture.js";
-import type { RuntimeFileStoreActionSnapshot, RuntimeFileToStore } from "./model.js";
+import {
+  ACTION_COMPLETION_EVENTS,
+  type RuntimeFileStoreActionSnapshot,
+  type RuntimeFileToStore,
+} from "./model.js";
 import { describeValue } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
 import { isPlainRecord } from "../plain-data.js";
@@ -289,7 +293,11 @@ function requestFileStore(
       copySpan(span),
     );
   // The request and the completion, besides what active actions reserve.
-  assertEventSequenceCapacity(snapshot, 2 + requiredFutureActionCompletionEvents(snapshot), span);
+  assertEventSequenceCapacity(
+    snapshot,
+    1 + ACTION_COMPLETION_EVENTS.fileStore + requiredFutureActionCompletionEvents(snapshot),
+    span,
+  );
   const sequence = takeSequence(snapshot);
   const action: RuntimeFileStoreActionSnapshot = Object.freeze({
     kind: "fileStore",

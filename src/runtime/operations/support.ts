@@ -23,6 +23,7 @@ import {
 import {
   requiredActionCompletionEvents,
   type RuntimeActionSettlementSnapshot,
+  type RuntimePendingActionSnapshot,
 } from "../actions/model.js";
 import type { PendingActionOperationResult, RuntimeOperationResult } from "./model.js";
 
@@ -172,6 +173,14 @@ export function takeSequence(
   const sequence = snapshot.nextEventSequence;
   snapshot.nextEventSequence += 1;
   return sequence;
+}
+
+/** Allocate one event of `action`'s settlement, which discharges the completion events the action reserves. */
+export function takeSettlementSequence(
+  snapshot: RuntimeSnapshot,
+  action: RuntimePendingActionSnapshot,
+): number {
+  return takeSequence(snapshot, requiredActionCompletionEvents(action));
 }
 
 export function captureExecutableData(

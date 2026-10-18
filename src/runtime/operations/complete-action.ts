@@ -19,6 +19,7 @@ import type {
   RuntimeStorageWriteActionSnapshot,
 } from "../actions/model.js";
 import { interactionStartMs } from "../actions/model.js";
+import { holdsCatchUp } from "../actions/interrupts.js";
 import type {
   ActionCompletedEvent,
   DeveloperWarningEvent,
@@ -55,7 +56,7 @@ import {
   pendingResult,
   positiveSafeInteger,
   setTemporary,
-  takeSequence,
+  takeSettlementSequence,
 } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
 import { isPlainRecord } from "../plain-data.js";
@@ -175,16 +176,17 @@ function completeCapturedAction(
       message: "The session has failed and accepts no further input.",
     });
   }
-  // A storage write settles at the current scene time: catch-up may hold behind it for a queued block.
-  if (active.kind === "storageWrite") {
-    return completeStorageWrite(captured.plan, current, active, value, trace);
-  }
-  // Host input happens at the observed time: scene time must have caught up, and a due expiry block runs first.
+  // Host input happens at the observed time: scene time must have caught up, and a due expiry block runs first. An action
+  // that holds catch-up for a queued block settles at the current scene time instead, before the block runs.
   if (
-    current.currentSessionTimeMs < current.observedSessionTimeMs ||
-    timerHandlerDispatchable(current)
+    !holdsCatchUp(active) &&
+    (current.currentSessionTimeMs < current.observedSessionTimeMs ||
+      timerHandlerDispatchable(current))
   ) {
     return pendingResult(current, [], { kind: "executionPending", actionId });
+  }
+  if (active.kind === "storageWrite") {
+    return completeStorageWrite(captured.plan, current, active, value, trace);
   }
   trace?.at(active.owningInstruction, current.currentSessionTimeMs);
   if (active.kind === "interaction") {
@@ -221,7 +223,7 @@ function completePacingGate(
     });
   }
   assertEventSequenceCapacity(current, 1);
-  const completionEventSequence = takeSequence(current, 1);
+  const completionEventSequence = takeSettlementSequence(current, action);
   const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
     actionId: action.actionId,
     actionKind: "chatPacingGate",
@@ -295,7 +297,7 @@ function completeStorageWrite(
     events.push(
       Object.freeze({
         kind: "developerWarning",
-        sequence: takeSequence(current, 2),
+        sequence: takeSettlementSequence(current, action),
         severity: "warning",
         code: "TSW014" satisfies DeveloperWarningCode,
         message: `${action.value === null ? "delete" : "save"} could not persist ${JSON.stringify(
@@ -314,7 +316,7 @@ function completeStorageWrite(
     owningInstruction: action.owningInstruction,
     continuationInstruction: action.continuationInstruction,
     requestEventSequence: action.requestEventSequence,
-    completionEventSequence: takeSequence(current, 2),
+    completionEventSequence: takeSettlementSequence(current, action),
     completedAtMs: current.currentSessionTimeMs,
   });
   current.foregroundAction = null;
@@ -392,7 +394,7 @@ function completeCapture(
   const events: InterpreterEvent[] = [];
   let warningSequence: number | null = null;
   if (resolved.unavailableReason !== null) {
-    warningSequence = takeSequence(current, 2);
+    warningSequence = takeSettlementSequence(current, action);
     events.push(
       Object.freeze({
         kind: "developerWarning",
@@ -404,7 +406,7 @@ function completeCapture(
       } satisfies DeveloperWarningEvent),
     );
   }
-  const completionSequence = takeSequence(current, 2);
+  const completionSequence = takeSettlementSequence(current, action);
   const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
     actionId: action.actionId,
     actionKind: "capture",
@@ -464,7 +466,7 @@ function completeFileStore(
   assertEventSequenceCapacity(current, 1);
   const stored = resolved.outcome === "stored" ? (resolved.answer ?? []) : [];
   addStoredFiles(current.storedFiles, stored);
-  const completionSequence = takeSequence(current, 1);
+  const completionSequence = takeSettlementSequence(current, action);
   const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
     actionId: action.actionId,
     actionKind: "fileStore",
@@ -522,7 +524,7 @@ function completeLock(
   }
   assertEventSequenceCapacity(current, 1);
   if (resolved.stored !== null) addStoredFile(current.storedFiles, resolved.stored);
-  const completionSequence = takeSequence(current, 1);
+  const completionSequence = takeSettlementSequence(current, action);
   const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
     actionId: action.actionId,
     actionKind: "lock",
@@ -607,8 +609,9 @@ function completeInteraction(
   // A popup, an `openUrl`, or an `exportText` adds nothing to the transcript, so only its completion takes a sequence.
   const transcriptText = resolved.transcriptText;
   assertEventSequenceCapacity(current, transcriptText === null ? 1 : 2);
-  const transcriptSequence = transcriptText === null ? null : takeSequence(current, 2);
-  const completionSequence = takeSequence(current, 2);
+  const transcriptSequence =
+    transcriptText === null ? null : takeSettlementSequence(current, action);
+  const completionSequence = takeSettlementSequence(current, action);
   // A button or popup used as a value yields the scene time it waited; it never exceeds a button's timeout.
   const result =
     action.expectedResult === "duration"
@@ -674,7 +677,7 @@ export function timeOutButton(
   trace: TraceStore | null = null,
 ): void {
   if (action.timeoutMs === null) throw new Error("Only a button with a timeout can time out.");
-  const completionSequence = takeSequence(current, 2);
+  const completionSequence = takeSettlementSequence(current, action);
   // A form returns its answers as they stand, with the options its cycles show, or `null`.
   const form =
     action.ui.kind === "form" && action.form !== undefined

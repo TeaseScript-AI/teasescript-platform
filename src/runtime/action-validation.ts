@@ -50,7 +50,7 @@ import {
   isLockOutcome,
 } from "./actions/model.js";
 import { buttonTimeoutMilliseconds, imageRequestValue } from "./actions/interaction.js";
-import { interruptibleActionRecord } from "./actions/interrupts.js";
+import { holdsCatchUpRecord, interruptibleActionRecord } from "./actions/interrupts.js";
 import {
   formAnswerMismatch,
   formRequestValue,
@@ -704,8 +704,8 @@ export function validForegroundActionState(
 
 /**
  * Mirrors the engine's pause of catch-up toward the observed time: the script or a queued expiry block can execute,
- * or a queued block waits for a pending storage write. Only then may scene time stand behind the observed time, and
- * timed work due exactly now wait for that execution.
+ * or a queued block waits for a host step that holds catch-up, a storage write. Only then may scene time stand behind
+ * the observed time, and timed work due exactly now wait for that execution.
  */
 export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
   if (snapshot.status === "ready" || snapshot.status === "running") return true;
@@ -721,7 +721,7 @@ export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
   if (
     snapshot.status === "waiting" &&
     isPlainRecord(snapshot.foregroundAction) &&
-    snapshot.foregroundAction.kind === "storageWrite" &&
+    holdsCatchUpRecord(snapshot.foregroundAction) &&
     Array.isArray(snapshot.pendingTimerHandlers) &&
     snapshot.pendingTimerHandlers.length > 0
   )

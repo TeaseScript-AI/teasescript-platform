@@ -6,7 +6,7 @@ import type {
   RuntimePermanentButtonSettlementSnapshot,
 } from "./actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "./events.js";
-import { assertEventSequenceCapacity, takeSequence } from "./operations/support.js";
+import { assertEventSequenceCapacity, takeSettlementSequence } from "./operations/support.js";
 import type { RuntimeSnapshot } from "./state.js";
 import { sweepRetainedScopes, type RuntimeCaptureSnapshot } from "./captures.js";
 import { copySpan } from "../plan/source-location.js";
@@ -86,7 +86,7 @@ export function removePermanentButtons(
     }
   }
   for (const action of removed) {
-    const completionEventSequence = takeSequence(snapshot, 1);
+    const completionEventSequence = takeSettlementSequence(snapshot, action);
     snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(action), 1);
     const settlement: RuntimePermanentButtonSettlementSnapshot = Object.freeze({
       actionId: action.actionId,

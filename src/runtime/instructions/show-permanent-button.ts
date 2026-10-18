@@ -12,7 +12,10 @@ import {
 import { contextRootId } from "../activations.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
 import { type RuntimeSnapshot, currentTemporalContext } from "../state.js";
-import type { RuntimePermanentButtonActionSnapshot } from "../actions/model.js";
+import {
+  ACTION_COMPLETION_EVENTS,
+  type RuntimePermanentButtonActionSnapshot,
+} from "../actions/model.js";
 import { fieldText } from "../value-text.js";
 import { advance, fault } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
@@ -47,7 +50,7 @@ export function showPermanentButton(
   // The request, its eventual removal, and the other active actions' completions must stay representable.
   assertEventSequenceCapacity(
     snapshot,
-    2 + requiredFutureActionCompletionEvents(snapshot),
+    1 + ACTION_COMPLETION_EVENTS.permanentButton + requiredFutureActionCompletionEvents(snapshot),
     instruction.span,
   );
   const captures = resolveCaptures(snapshot, instruction.captures, instruction.span);

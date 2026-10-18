@@ -10,6 +10,7 @@ import {
   type RuntimeInteractionActionSnapshot,
   type RuntimeTimerActionSnapshot,
   type RuntimeMediaActionSnapshot,
+  type RuntimePendingActionSnapshot,
 } from "../actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import { isValidSessionTime } from "../actions/delay.js";
@@ -27,13 +28,13 @@ import {
 import { applyMediaEvent, mediaSpan } from "./media-lifecycle.js";
 import {
   expireTimerAction,
-  timerHandlerAwaitsStorageWrite,
+  timerHandlerHoldsCatchUp,
   timerHandlerDispatchable,
   timerSpan,
 } from "./timer-lifecycle.js";
 import { timeOutButton } from "./complete-action.js";
 import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "../debug-trace.js";
-import { captureExecutableData, pendingResult, takeSequence } from "./support.js";
+import { captureExecutableData, pendingResult, takeSettlementSequence } from "./support.js";
 import type { RuntimeSessionView } from "../session.js";
 import { randomControlFor } from "../random-control.js";
 import {
@@ -228,7 +229,7 @@ export function processDueWork(
   // A failed session is terminal: later observations record time but settle nothing.
   if (current.status === "failed") return;
   for (;;) {
-    if (executionRunnable(current) || timerHandlerAwaitsStorageWrite(current)) return;
+    if (executionRunnable(current) || timerHandlerHoldsCatchUp(current)) return;
     const due = nextDueWork(current);
     if (due === null) {
       current.currentSessionTimeMs = current.observedSessionTimeMs;
@@ -446,50 +447,62 @@ function timedWorkOf(
   noQueuedBlockFirst: boolean,
 ): DueWork[] {
   const candidates: DueWork[] = [];
-  const foreground = state.foregroundAction;
-  if (
-    (foreground?.kind === "delay" || foreground?.kind === "chatPacingGate") &&
-    noQueuedBlockFirst
-  ) {
-    candidates.push({
-      kind: "action",
-      action: foreground,
-      deadlineMs: foreground.deadlineMs,
-      actionId: foreground.actionId,
-    });
-  }
-  const buttonDeadlineMs =
-    foreground?.kind === "interaction" ? interactionDeadlineMs(foreground) : null;
-  if (foreground?.kind === "interaction" && buttonDeadlineMs !== null && noQueuedBlockFirst) {
-    candidates.push({
-      kind: "action",
-      action: foreground,
-      deadlineMs: buttonDeadlineMs,
-      actionId: foreground.actionId,
-    });
-  }
+  const foreground =
+    state.foregroundAction === null ? null : dueWorkOf(state.foregroundAction, noQueuedBlockFirst);
+  if (foreground !== null) candidates.push(foreground);
   for (const action of state.backgroundActions) {
-    if (action.kind === "timer" && action.timer.deadlineMs !== null) {
-      candidates.push({
+    const work = dueWorkOf(action, noQueuedBlockFirst);
+    if (work !== null) candidates.push(work);
+  }
+  return candidates;
+}
+
+/**
+ * The timed work of an active action, or `null` when no deadline settles it. A wait or reading time is due at its
+ * deadline, an interaction at a button's timeout or a form's time limit, a timer at the end of its round, and media at
+ * its next timeline event that reported playback covers. A media wait ends with its media, a permanent button waits for
+ * clicks, and the host answers its steps. A foreground action stands still while a queued block goes first. Every kind
+ * has its case, so a new kind must decide.
+ */
+function dueWorkOf(
+  action: RuntimePendingActionSnapshot,
+  noQueuedBlockFirst: boolean,
+): DueWork | null {
+  switch (action.kind) {
+    case "delay":
+    case "chatPacingGate":
+      if (!noQueuedBlockFirst) return null;
+      return { kind: "action", action, deadlineMs: action.deadlineMs, actionId: action.actionId };
+    case "interaction": {
+      const deadlineMs = interactionDeadlineMs(action);
+      if (deadlineMs === null || !noQueuedBlockFirst) return null;
+      return { kind: "action", action, deadlineMs, actionId: action.actionId };
+    }
+    case "timer":
+      if (action.timer.deadlineMs === null) return null;
+      return {
         kind: "timer",
         action,
         deadlineMs: action.timer.deadlineMs,
         actionId: action.actionId,
-      });
-    } else if (action.kind === "media") {
+      };
+    case "media": {
       const event = nextMediaEvent(action.media);
-      if (event?.dueAtMs !== null && event?.dueAtMs !== undefined) {
-        candidates.push({
-          kind: "media",
-          action,
-          event,
-          deadlineMs: event.dueAtMs,
-          actionId: action.actionId,
-        });
-      }
+      if (event?.dueAtMs === null || event?.dueAtMs === undefined) return null;
+      return { kind: "media", action, event, deadlineMs: event.dueAtMs, actionId: action.actionId };
+    }
+    case "mediaPlayback":
+    case "permanentButton":
+    case "storageWrite":
+    case "capture":
+    case "fileStore":
+    case "lock":
+      return null;
+    default: {
+      const unhandled: never = action;
+      throw new Error("An active action has no timing.", { cause: unhandled });
     }
   }
-  return candidates;
 }
 
 function settleForegroundTimedAction(
@@ -498,7 +511,7 @@ function settleForegroundTimedAction(
   action: RuntimeDelayActionSnapshot | RuntimeChatPacingGateActionSnapshot,
   events: InterpreterEvent[],
 ): RuntimeActionSettlementSnapshot {
-  const completionEventSequence = takeSequence(snapshot, 1);
+  const completionEventSequence = takeSettlementSequence(snapshot, action);
   const settlement =
     action.kind === "delay"
       ? createDelaySettlement(action, completionEventSequence, snapshot.currentSessionTimeMs)

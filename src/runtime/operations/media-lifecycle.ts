@@ -24,7 +24,7 @@ import {
   type RuntimeMediaSnapshot,
 } from "../media.js";
 import type { RuntimeSnapshot } from "../state.js";
-import { assertEventSequenceCapacity, takeSequence } from "./support.js";
+import { assertEventSequenceCapacity, takeSequence, takeSettlementSequence } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
 
 export type MediaWaitOutcome = RuntimeMediaPlaybackSettlementSnapshot["outcome"];
@@ -205,7 +205,7 @@ function settleMediaAction(
     throw new Error("Only finished or stopped media can settle.");
   }
   assertEventSequenceCapacity(snapshot, 1);
-  const completionEventSequence = takeSequence(snapshot, 1);
+  const completionEventSequence = takeSettlementSequence(snapshot, action);
   snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(action), 1);
   snapshot.settledMedia.push(settledMediaRecord(action.media));
   sweepRetainedScopes(snapshot, false);
@@ -297,7 +297,7 @@ function mediaWaitSettlement(
     owningInstruction: action.owningInstruction,
     continuationInstruction: action.continuationInstruction,
     requestEventSequence: action.requestEventSequence,
-    completionEventSequence: takeSequence(snapshot, 1),
+    completionEventSequence: takeSettlementSequence(snapshot, action),
     completedAtMs: snapshot.currentSessionTimeMs,
   });
 }
