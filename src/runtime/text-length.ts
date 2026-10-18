@@ -1,8 +1,8 @@
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
-import { RUNTIME_DEBUG_TRACE_LIMITS } from "./debug-trace.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "../plan/source-location.js";
+import { RUNTIME_DEBUG_TRACE_LIMITS } from "./debug-trace-limits.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 

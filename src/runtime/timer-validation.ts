@@ -3,7 +3,6 @@ import type { InstructionPlan, StartTimerInstruction } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import { anchoredDeadlineMs } from "./timers.js";
 import { sameCaptures } from "./capture-validation.js";
-import { catchUpPaused } from "./action-validation.js";
 import {
   fileOfInstruction,
   inGlobalCode,
@@ -12,6 +11,7 @@ import {
   serializedScopes,
 } from "./activation-validation.js";
 import { isPlainRecord } from "./plain-data.js";
+import { holdsCatchUpRecord, interruptibleActionRecord } from "./actions/interrupts.js";
 
 /** Restore validation for asynchronous timers, their handles, and queued expiry blocks. */
 
@@ -571,4 +571,45 @@ function hasExactKeys(value: Record<string, unknown>, expected: readonly string[
 
 function isCanonicalJsonArray(value: unknown): value is unknown[] {
   return Array.isArray(value) && Object.keys(value).length === value.length;
+}
+
+/**
+ * Mirrors the engine's pause of catch-up toward the observed time: the script or a queued expiry block can execute,
+ * or a queued block waits for a host step that holds catch-up, a storage write. Only then may scene time stand behind
+ * the observed time, and timed work due exactly now wait for that execution.
+ */
+export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
+  if (snapshot.status === "ready" || snapshot.status === "running") return true;
+  // A random draw paused during catch-up leaves the rest of the catch-up to resuming it.
+  const control = snapshot.randomControl;
+  if (
+    isPlainRecord(control) &&
+    isPlainRecord(control.pending) &&
+    control.pending.unit === "dueWork" &&
+    snapshot.status === "waiting"
+  )
+    return true;
+  if (
+    snapshot.status === "waiting" &&
+    isPlainRecord(snapshot.foregroundAction) &&
+    holdsCatchUpRecord(snapshot.foregroundAction) &&
+    Array.isArray(snapshot.pendingTimerHandlers) &&
+    snapshot.pendingTimerHandlers.length > 0
+  )
+    return true;
+  if (
+    snapshot.status !== "waiting" ||
+    !Array.isArray(snapshot.callFrames) ||
+    !Array.isArray(snapshot.pendingTimerHandlers) ||
+    snapshot.pendingTimerHandlers.length === 0 ||
+    snapshot.callFrames.some(
+      (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
+    ) ||
+    snapshot.interactionResultHandoff !== null
+  )
+    return false;
+  const foreground = snapshot.foregroundAction;
+  return (
+    foreground === null || (isPlainRecord(foreground) && interruptibleActionRecord(foreground))
+  );
 }

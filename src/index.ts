@@ -228,7 +228,6 @@ export {
   type RuntimeTimedWork,
 } from "./runtime/operations/observe-time.js";
 export {
-  RUNTIME_DEBUG_TRACE_LIMITS,
   RuntimeDebugContext,
   runtimeDebugPreview,
   type RuntimeDebugDependency,
@@ -242,6 +241,7 @@ export {
   type RuntimeDebugTraceStatus,
   type RuntimeDebugUnrecordedReason,
 } from "./runtime/debug-trace.js";
+export { RUNTIME_DEBUG_TRACE_LIMITS } from "./runtime/debug-trace-limits.js";
 export {
   recordContinueCapture,
   type ContinueCaptureOutcome,
