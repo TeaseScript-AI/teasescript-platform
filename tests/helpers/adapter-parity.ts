@@ -333,9 +333,14 @@ export type AdapterExpectation =
   /** A declared recovery: the realized text the adapter's answer gives, where the legacy recovered otherwise. */
   | { readonly realized: string };
 
-/** Whether a fact text is a closed type: no open slot, held-unknown or open-shape marker. */
+/** A fact's text with its quoted values (property names, restricted texts) emptied, so that markers are structural. */
+export function structureOf(fact: string): string {
+  return fact.replace(/"(?:[^"\\]|\\.)*"/g, '""');
+}
+
+/** Whether a fact text is a closed type: no open slot, held-unknown or open-shape marker outside a quoted value. */
 export function isClosedFact(fact: string): boolean {
-  return !/[?!+]/.test(fact.replaceAll('"', ""));
+  return !/[?!+]/.test(structureOf(fact));
 }
 
 /**

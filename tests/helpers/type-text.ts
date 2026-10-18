@@ -9,6 +9,7 @@ import {
 } from "../../src/static-types.js";
 import { typeKey } from "../../src/storage-types.js";
 import { VALUE_KIND_NAMES, type ValueKind } from "../../src/value-kinds.js";
+import { structureOf } from "./adapter-parity.js";
 
 /**
  * The type a fact's text stands for (`typeKey(type, true, true)`), for building a closed operand view from the legacy
@@ -21,7 +22,7 @@ import { VALUE_KIND_NAMES, type ValueKind } from "../../src/value-kinds.js";
 export function parseTypeText(text: string): StaticType {
   const type = read(text);
   const written = typeKey(type, true, true);
-  const expected = text.includes("?") ? typeKey(read(written), true, true) : text;
+  const expected = structureOf(text).includes("?") ? typeKey(read(written), true, true) : text;
   if (written !== expected) throw new Error(`the type text ${text} reads back as ${written}`);
   return type;
 }

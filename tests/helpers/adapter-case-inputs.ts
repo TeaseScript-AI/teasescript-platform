@@ -11,7 +11,13 @@ import type {
   SyntaxEvidence,
 } from "../../src/type-inference/graph.js";
 import type { OperandView } from "../../src/type-inference/adapters/relation.js";
-import { closedView, dynamicView, inputsOf, type LegacyOutcome } from "./adapter-parity.js";
+import {
+  closedView,
+  dynamicView,
+  inputsOf,
+  structureOf,
+  type LegacyOutcome,
+} from "./adapter-parity.js";
 import { parseTypeText } from "./type-text.js";
 
 /**
@@ -24,8 +30,12 @@ export interface CaseInputs {
   readonly contract: ContractRef;
   /** The inputs, or none when an operand holds a slot the legacy has not decided (`open`). */
   readonly inputs: OperationInputs | null;
-  /** Whether a place the relation is given is dynamic, so that the result's provenance is the operand's. */
-  readonly dynamic: boolean;
+  /** The places the relation is given that are dynamic, by their role, for the result's provenance rule. */
+  readonly dynamic: {
+    readonly positional: readonly number[];
+    readonly named: readonly string[];
+    readonly evidence: boolean;
+  };
   /**
    * Whether a place holds a slot that saw only null (`?null`): the legacy leaves what reads it unknown until the slot
    * is decided, which is the solver's to represent, not a relation's; no inputs are built.
@@ -62,21 +72,31 @@ export function caseInputs(outcome: LegacyOutcome, why: DynamicWhy | null): Case
     return facts[0]!;
   };
   const facts = new Map(referenced.map((place) => [place, factOf(place)]));
-  // A slot that saw only null is written `?null`, or `?` beside `null` in a union.
-  const open = [...facts.values()].some((fact) => /\?null|\(\?\||\|\?[|)]/.test(fact));
-  const dynamic = [...facts.values()].some((fact) => fact === "unknown");
+  // A slot that saw only null is written `?null`, or `?` beside `null` in a union (markers outside quoted values).
+  const open = [...facts.values()].some((fact) => /\?null|\(\?\||\|\?[|)]/.test(structureOf(fact)));
+  const isDynamic = (place: PlaceId): boolean => facts.get(place) === "unknown";
+  const evidenceDynamic =
+    operation.evidence !== undefined && evidencePlaces(operation.evidence).some(isDynamic);
+  const dynamic = {
+    positional: operation.arguments.flatMap((place, index) => (isDynamic(place) ? [index] : [])),
+    named: operation.named.filter((entry) => isDynamic(entry.value)).map((entry) => entry.name),
+    evidence: evidenceDynamic,
+  };
   if (open) return { contract: operation.contract, inputs: null, dynamic, open };
   const places = new Map<PlaceId, OperandView>();
   const view = (place: PlaceId): OperandView => {
-    const known = places.get(place);
-    if (known !== undefined) return known;
+    const kept = places.get(place);
+    if (kept !== undefined) return kept;
     const fact = facts.get(place)!;
     let made: OperandView;
     if (fact === "unknown") {
       assert.ok(why !== null, `a declared provenance for the unknown operand at place ${place}`);
       made = dynamicView(why);
     } else {
-      assert.ok(!/[!+]/.test(fact), `no held unknown or open shape at place ${place}: ${fact}`);
+      assert.ok(
+        !/[!+]/.test(structureOf(fact)),
+        `no held unknown or open shape at place ${place}: ${fact}`,
+      );
       made = closedView(parseTypeText(fact));
     }
     places.set(place, made);

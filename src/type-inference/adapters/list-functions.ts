@@ -9,6 +9,7 @@ import {
 import {
   DURATION_TYPE,
   INTEGER_TYPE,
+  isKnown,
   isNumeric,
   isScalar,
   members,
@@ -50,14 +51,30 @@ import {
 type ReadKind = ListValueKind | "integer";
 type ListFunctionName = keyof typeof LIST_FUNCTION_CONTRACTS;
 
-/** The members of a view for use: without null, which the check reports (rule 1.9) and leaves out (`forUse`). */
+/**
+ * The members of a view for use (the legacy's `forUse`): without null, which the check reports (rule 1.9) and leaves
+ * out, unless null is all there is, which the check then sees.
+ */
 function useOf(view: OperandView): readonly StaticType[] {
-  return viewMembers(view).filter((member) => member.kind !== "null");
+  const all = viewMembers(view);
+  const kept = all.filter((member) => member.kind !== "null");
+  return kept.length === 0 ? all : kept;
 }
 
-/** A type of no known kind: what the legacy cannot know, or a slot not decided yet. */
+/** A type of no known kind: what the legacy cannot know, a slot not decided yet, or one nothing was stored into. */
 function unknownPart(type: StaticType): boolean {
-  return type.kind === "unknown" || type.kind === "open";
+  return !isKnown(type);
+}
+
+/**
+ * The legacy's `shape`: a named argument the contract does not take, or a positional count it does not take, is
+ * reported and the call has no value.
+ */
+function misshapen(contract: ListFunction, inputs: OperationInputs): boolean {
+  return (
+    [...inputs.named.keys()].some((name) => !contract.named.includes(name)) ||
+    inputs.arguments.length !== contract.parameters.length
+  );
 }
 
 /**
@@ -140,12 +157,13 @@ function statistic(
   contract: ListFunction & { readonly takes: "values" },
   inputs: OperationInputs,
 ): OperationResult {
-  const list = inputs.arguments[0];
-  if (list === undefined) return INVALID;
+  if (misshapen(contract, inputs)) return INVALID;
+  const list = inputs.arguments[0]!;
   // Its other numbers, such as a percentage, are the visitor's check: one that is no number is reported and the
   // statistic still has its kind.
   const values = valuesOf(list, inputs, "by");
   if ("result" in values) return values.result;
+  // A list known to be too short is reported (`checkFewest`), and the statistic still has its kind.
   const kind = kindOfValues(values.type, contract.values);
   if ("result" in kind) return kind.result;
   if (kind.kind === "integer" && contract.integers === "number") return typeResult(NUMBER_TYPE);
@@ -174,8 +192,8 @@ function regression(
   contract: ListFunction & { readonly takes: "points" },
   inputs: OperationInputs,
 ): OperationResult {
-  const list = inputs.arguments[0];
-  if (list === undefined) return INVALID;
+  if (misshapen(contract, inputs)) return INVALID;
+  const list = inputs.arguments[0]!;
   // `x:` without `y:` is a malformed call (the legacy reports and gives unknown).
   if (inputs.named.has("x") && !inputs.named.has("y")) return INVALID;
   const ys = amountOf(list, inputs, "y", contract.values);
@@ -204,9 +222,9 @@ function prediction(
   contract: ListFunction & { readonly takes: "line" },
   inputs: OperationInputs,
 ): OperationResult {
-  const line = inputs.arguments[0];
-  const x = inputs.arguments[1];
-  if (line === undefined || x === undefined) return INVALID;
+  if (misshapen(contract, inputs)) return INVALID;
+  const line = inputs.arguments[0]!;
+  const x = inputs.arguments[1]!;
   if (isBottom(line) || isBottom(x)) return UNCONSTRAINED;
   // Whatever the line, each kind the x may be is a number or a date and time value; null alone is no x.
   const xs = useOf(x);

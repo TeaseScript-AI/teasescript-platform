@@ -1,6 +1,6 @@
 import type { Expression } from "../../src/ast.js";
 import { PERSON_FIELDS } from "../../src/speaker-terms.js";
-import type { DynamicWhy } from "../../src/type-inference/graph.js";
+import type { ContractRef, DynamicWhy } from "../../src/type-inference/graph.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../src/value-kinds.js";
 import { caseInputs, type CaseInputs } from "./adapter-case-inputs.js";
 import { isClosedFact, legacyOperation, type LegacyOutcome } from "./adapter-parity.js";
@@ -28,8 +28,6 @@ export type CaseClass =
   | "invalid"
   /** No fact and no error: the compiler cannot know, from an operand's provenance or the legacy's own limit. */
   | "dynamic"
-  /** No fact and no error where the inputs are known and outside the contract: a declared candidate refinement. */
-  | "candidate"
   /** A legacy fact that stage 5 changes on purpose (owner decisions Q1 and Q2): pinned, not required. */
   | "legacy"
   /** An operand holds a slot that saw only null, which the legacy has not decided: the solver's case, not a relation's. */
@@ -57,6 +55,8 @@ export interface CaseRow {
   readonly adapter: AdapterCell;
   /** Why an operand the legacy cannot type is dynamic: the view the adapter is given for it. */
   readonly why: DynamicWhy | null;
+  /** Error codes the branch declares checking-only: reported, the value kept. */
+  readonly checking?: readonly string[];
   readonly stage5?: "Q1" | "Q2";
   readonly note?: string;
 }
@@ -76,8 +76,16 @@ interface Variant {
   readonly why: DynamicWhy | null;
   /** The operation is written in a function whose untyped parameter `p` is called with this argument. */
   readonly call?: string;
-  /** A fact the legacy gives without an error, where the inputs are known and outside the contract. */
-  readonly candidate?: string;
+  /**
+   * Error codes the legacy reports at this operation that do not take its value away (the check continues with the
+   * answers it computed): declared by the branch, so that an error beside an unknown result is not read as `invalid`.
+   */
+  readonly checking?: readonly string[];
+  /**
+   * The provenance of an unknown result without an error, where `resultFromDynamic` would read it from a dynamic
+   * place that is not the cause (declared by the branch).
+   */
+  readonly cause?: DynamicWhy;
   readonly stage5?: "Q1" | "Q2";
   readonly note?: string;
 }
@@ -114,6 +122,7 @@ const MADE: ReadonlyMap<ValueKind, string> = new Map([
   ["media", 'playAudio async "a.mp3"'],
   ["messageHandle", 'say "hi"'],
   ["camera", "showCamera"],
+  ["permanentButton", 'showPermanentButton "Stop" { exit }'],
 ]);
 
 const SPEAKER = 'speaker guide {\n displayName: "Guide"\n}';
@@ -131,7 +140,6 @@ export const MADE_KINDS: ReadonlyMap<ValueKind, string> = new Map([
  */
 export const UNMADE_KINDS: ReadonlyMap<ValueKind, string> = new Map([
   ["script", "a script handle comes only from a catalog query; its annotation covers the kind"],
-  ["permanentButton", "no annotation names it and no expression of these tables makes one"],
   ["date", "no literal; the annotation covers the kind"],
   ["time", "no literal; the annotation covers the kind"],
   ["datetime", "no literal; the annotation covers the kind"],
@@ -183,7 +191,7 @@ function variant(
   prelude: readonly string[],
   operation: string,
   why: DynamicWhy | null = null,
-  more: Partial<Pick<Variant, "call" | "candidate" | "stage5" | "note">> = {},
+  more: Partial<Pick<Variant, "call" | "checking" | "cause" | "stage5" | "note">> = {},
 ): Variant {
   return { id, prelude, operation, why, ...more };
 }
@@ -367,6 +375,34 @@ const CHOICE_TEMPLATES: readonly Template[] = [
         ["let v: integer = hostValue"],
         'askChoice "a", v',
       );
+      yield variant("marker-texts", [], 'askChoice "?", "!", "+"');
+      yield variant("folded-literals", [], "askChoice -1, 1 + 1");
+      yield variant("folded-text", [], 'askChoice "a" + "b", "c"');
+      yield variant("labelled-object-with-value", [], 'askChoice one: { value: 1, text: "A" }');
+      yield variant("labelled-object-text", [], 'askChoice one: { text: "A" }');
+      yield variant("computed-object-bad-text", ["let o = { text: [1] }"], "askChoice o", null, {
+        checking: ["TSV040"],
+      });
+      yield variant(
+        "computed-object-bad-text-element",
+        ["let o = { text: [1] }"],
+        "askChoice [o]",
+        null,
+        { checking: ["TSV040"] },
+      );
+      yield variant(
+        "computed-objects-bad-text",
+        ["let xs = [{ text: [1] }]"],
+        "askChoice xs",
+        null,
+        { checking: ["TSV040"] },
+      );
+      yield variant(
+        "computed-object-prefill-host",
+        ['let o = { text: "A", value: 1 }'],
+        "askChoice o, prefill: hostValue",
+        "host",
+      );
     },
   },
 ];
@@ -396,6 +432,7 @@ const DICT_DESCRIPTORS: readonly (readonly [string, string])[] = [
   ["value-number", "{ value: 1.5 }"],
   ["cycle", "[1, 2]"],
   ["null", "null"],
+  ["typed-text", '{ type: "text" }'],
 ];
 
 function form(fields: string, more = ""): string {
@@ -452,6 +489,16 @@ const FORM_TEMPLATES: readonly Template[] = [
         form("{ n: 1 }", ', cancel: "Back", timeout: 5 s, onTimeout: "submit"'),
       );
       yield variant("cancel-host-container", [], form("hostValue", ', cancel: "Back"'), "host");
+      yield variant("host-dict-timeout-alone", [], form("hostDict", ", timeout: 1 s"), "host", {
+        checking: ["TSV043"],
+      });
+      yield variant(
+        "object-annotated-hint-host",
+        ["let f: object = hostValue"],
+        form("f", ", hint: hostText"),
+        "host",
+      );
+      yield variant("host-and-hint-host", [], form("hostValue", ", hint: hostText"), "host");
     },
   },
   {
@@ -550,6 +597,36 @@ const FORM_TEMPLATES: readonly Template[] = [
         "two-fields-one-typed",
         [],
         form('{ n: { type: "integer" }, s: { value: "a", optional: true } }'),
+      );
+      yield variant(
+        "type.cycle-with-options",
+        [],
+        form('{ n: { type: "cycle", options: [1, 2] } }'),
+      );
+      yield variant(
+        "type.cycle-with-text-options",
+        [],
+        form('{ n: { type: "cycle", options: ["a", "b"] } }'),
+      );
+      yield variant(
+        "options.nullable-value-object",
+        ["let v: integer? = hostValue"],
+        form('{ n: { options: [{ value: v, text: "One" }] } }'),
+      );
+      yield variant(
+        "options.nullable-value-computed-object",
+        ["let v: integer? = hostValue", 'let option = { value: v, text: "One" }'],
+        form("{ n: { options: [option] } }"),
+      );
+      yield variant(
+        "options.nullable-text-object",
+        ["let v: string? = hostValue"],
+        form("{ n: { options: [{ text: v }] } }"),
+      );
+      yield variant(
+        "options.null-value-object",
+        [],
+        form('{ n: { options: [{ value: null, text: "One" }] } }'),
       );
     },
   },
@@ -656,7 +733,9 @@ const VALUES_TEMPLATES: readonly Template[] = [
             statistic(name, `[${literal(kind)}, ${literal(kind, true)}]`),
           );
         yield variant(`${name}.one`, [], statistic(name, "[1]"));
-        yield variant(`${name}.empty`, [], statistic(name, "[]"));
+        // An empty list is reported from its known value (`checkFewest`); the result is unknown from the element
+        // nothing was stored into.
+        yield variant(`${name}.empty`, [], statistic(name, "[]"), null, { checking: ["TSV043"] });
         yield variant(`${name}.mixed-numbers`, [], statistic(name, "[1, 2.5]"));
         yield variant(`${name}.host-list`, [], statistic(name, "hostList"), "host");
         yield variant(`${name}.host-element`, [], statistic(name, "[hostValue]"), "host");
@@ -675,6 +754,39 @@ const VALUES_TEMPLATES: readonly Template[] = [
       yield parameterVariant("sum.parameter", "sum(p)", "[1, 2]");
       yield variant("percentile.host-percent", [], "percentile([1, 2], hostValue)", "host");
       yield variant("percentile.text-percent", [], 'percentile([1, 2], "x")');
+      yield variant("percentile.negative-percent", [], "percentile([1, 2], -1)");
+      yield variant(
+        "percentile.host-list-and-percent",
+        [],
+        "percentile([hostValue], hostValue)",
+        "host",
+      );
+      yield variant("percentile.no-percent", [], "percentile([1, 2])");
+      yield variant("percentile.extra-positional", [], "percentile([1, 2], 50, 3)");
+      yield variant("sum.extra-named", [], "sum([1], extra: 1)");
+      yield variant("sum.extra-positional", [], "sum([1], 2)");
+      yield variant("sum.no-arguments", [], "sum()");
+      yield variant("min.extra-named-list", [], "min([1, 2], extra: 1)");
+      yield variant(
+        "sum.mixed-allowed-kinds",
+        ["let xs: (integer | duration)[] = hostValue"],
+        "sum(xs)",
+      );
+      yield variant(
+        "sum.text-or-null-elements",
+        ["let xs: (string | null)[] = hostValue"],
+        "sum(xs)",
+      );
+      yield variant("sum.null-elements", [], "sum([null])");
+      yield variant("sum.null-list", [], "sum(null)");
+      for (const name of STATISTICS)
+        for (const kind of WRITTEN_KINDS)
+          if (name !== "sum")
+            yield variant(
+              `${name}.${kind}.annotated`,
+              [`let xs: ${kind}[] = hostValue`],
+              `${name}(xs)`,
+            );
     },
   },
   {
@@ -706,6 +818,18 @@ const VALUES_TEMPLATES: readonly Template[] = [
         'sum([{ p: v }], by: "p")',
       );
       yield variant("bare-objects", ["let xs: object[] = hostValue"], 'sum(xs, by: "p")');
+      yield variant("null-selector", [], "sum([{ null: 1 }], by: null)");
+      yield variant("null-selector-plain", [], "sum([{ p: 1 }], by: null)");
+      yield variant(
+        "nullable-selector",
+        ["let k: string? = hostValue"],
+        "sum([{ p: 1 }], by: k)",
+        null,
+        { checking: ["TSV043"] },
+      );
+      yield variant("empty-list", [], 'sum([], by: "p")');
+      yield variant("null-elements", [], 'sum([null], by: "p")');
+      yield variant("extra-named", [], 'sum([{ p: 1 }], by: "p", extra: 1)');
       yield parameterVariant("parameter", 'sum(p, by: "p")', "[{ p: 1 }]");
     },
   },
@@ -749,6 +873,53 @@ const REGRESSION_TEMPLATES: readonly Template[] = [
         "nullable",
         [`let ps = ${POINTS}`, "let qs: object[]? = ps"],
         "linearRegression(qs)",
+      );
+      yield variant("extra-named", [], "linearRegression([1, 2], extra: 1)");
+      yield variant("extra-positional", [], "linearRegression([1, 2], 3)");
+      yield variant("no-arguments", [], "linearRegression()");
+      yield variant("durations", [], "linearRegression([1 s, 2 s])");
+      yield variant("decimals", [], "linearRegression([1.5, 2.5])");
+      yield variant("one-number", [], "linearRegression([1])");
+      yield variant("empty-selected", [], 'linearRegression([], x: "x", y: "y")');
+      for (const kind of LITERAL_KINDS) {
+        yield variant(
+          `x.${kind}`,
+          [],
+          `linearRegression([{ x: ${literal(kind)}, y: 2 }, { x: ${literal(kind, true)}, y: 3 }], x: "x", y: "y")`,
+        );
+        yield variant(
+          `y.${kind}`,
+          [],
+          `linearRegression([{ x: 1, y: ${literal(kind)} }, { x: 2, y: ${literal(kind, true)} }], x: "x", y: "y")`,
+        );
+      }
+      for (const kind of WRITTEN_KINDS) {
+        yield variant(
+          `x.${kind}.annotated`,
+          [`let v: ${kind} = hostValue`],
+          'linearRegression([{ x: v, y: 1 }, { x: v, y: 2 }], x: "x", y: "y")',
+        );
+        yield variant(
+          `y.${kind}.annotated`,
+          [`let v: ${kind} = hostValue`],
+          'linearRegression([{ x: 1, y: v }, { x: 2, y: v }], x: "x", y: "y")',
+        );
+      }
+      yield variant(
+        "x.nullable",
+        ["let v: integer? = hostValue"],
+        'linearRegression([{ x: v, y: 1 }], x: "x", y: "y")',
+      );
+      yield variant(
+        "y.nullable",
+        ["let v: integer? = hostValue"],
+        'linearRegression([{ x: 1, y: v }], x: "x", y: "y")',
+      );
+      yield variant(
+        "x.host-values",
+        [],
+        'linearRegression([{ x: hostValue, y: 1 }], x: "x", y: "y")',
+        "host",
       );
       yield parameterVariant("parameter", "linearRegression(p)", POINTS);
     },
@@ -815,6 +986,31 @@ const PREDICTION_TEMPLATES: readonly Template[] = [
       yield variant("text", [], 'predict("a", 1)');
       yield variant("list", [], "predict([1], 1)");
       yield variant("no-x", [], `predict(${line("1", "2", "0")})`);
+      yield variant("extra-named", [], `predict(${line("1", "2", "0")}, 1, extra: 1)`);
+      yield variant("extra-positional", [], `predict(${line("1", "2", "0")}, 1, 2)`);
+      yield variant("no-arguments", [], "predict()");
+      yield variant(
+        "date-x-and-start",
+        ["let d: date = hostValue"],
+        `predict(${line("1", "2", "d")}, d)`,
+      );
+      yield variant(
+        "date-start-number-x",
+        ["let d: date = hostValue"],
+        `predict(${line("1", "2", "d")}, 1)`,
+      );
+      yield variant("duration-x-and-start", [], `predict(${line("1", "2 s", "1 s")}, 3 s)`);
+      yield variant(
+        "nullable-x",
+        ["let n: integer? = hostValue"],
+        `predict(${line("1", "2", "0")}, n)`,
+      );
+      yield variant("null-x", [], `predict(${line("1", "2", "0")}, null)`);
+      yield variant(
+        "nullable-line",
+        [`let l = ${line("1", "2", "0")}`, "let m: object? = l"],
+        "predict(m, 1)",
+      );
       yield parameterVariant("parameter", "predict(p, 1)", line("1", "2", "0"));
     },
   },
@@ -1041,11 +1237,35 @@ function splitErrors(
 }
 
 /**
+ * The places a contract's result is read from, by the legacy's rules: a dynamic place elsewhere (a hint, a prefill,
+ * a percentage, a cancel button) leaves the result's provenance to the sources. Declared per contract, reviewed
+ * with the tables.
+ */
+function resultFromDynamic(contract: ContractRef, dynamic: CaseInputs["dynamic"]): boolean {
+  const named = (...names: string[]) => dynamic.named.some((name) => names.includes(name));
+  const positional = (...indexes: number[]) =>
+    dynamic.positional.some((index) => indexes.includes(index));
+  switch (`${contract.family}.${contract.name}`) {
+    case "interaction.choice":
+      return dynamic.positional.length > 0 || dynamic.evidence;
+    case "interaction.form":
+      return named("fields") || dynamic.evidence;
+    case "listFunction.linearRegression":
+      return positional(0) || named("x", "y");
+    case "listFunction.predict":
+      return positional(0, 1);
+    default:
+      return contract.family === "listFunction" ? positional(0) || named("by") : false;
+  }
+}
+
+/**
  * The class of a row, from what the oracle says and what the variant declares (work note §6.1): a closed fact without
- * an error is `fact`; with an error, `recovery`; an error without a fact is `invalid`; no fact and no error is
- * `dynamic`, of the operand's provenance when a place the relation is given is dynamic, else of `unknown member`,
- * the legacy's own limit on closed operands; a variant with a `candidate` note is that; a `stage5` variant is
- * `legacy`, and a row with an undecided null slot is `open`: neither asserts an adapter answer.
+ * an error is `fact`; with an error, `recovery`; an error the branch does not declare checking-only, without a fact,
+ * is `invalid`; no fact and no error (or only checking-only errors) is `dynamic`, of the declared cause, else of the
+ * operand's provenance when a source place of the contract is dynamic, else of `unknown member`, the legacy's own
+ * limit on closed operands; a `stage5` variant is `legacy`, and a row with an undecided null slot is `open`: neither
+ * asserts an adapter answer.
  */
 function classify(
   variant: Variant,
@@ -1058,18 +1278,18 @@ function classify(
   const closed = fact !== "unknown" && isClosedFact(fact);
   if (fact !== "unknown" && !closed)
     throw new Error(`the fact ${fact} of ${variant.id} is not closed`);
-  if (errors.length > 0)
+  const checking = variant.checking ?? [];
+  const checkingOnly = errors.length > 0 && errors.every((code) => checking.includes(code));
+  if (errors.length > 0 && !checkingOnly)
     return closed
       ? { class: "recovery", adapter: "fact" }
       : { class: "invalid", adapter: "invalid" };
-  if (closed) return { class: "fact", adapter: "fact" };
-  if (variant.candidate !== undefined) return { class: "candidate", adapter: "invalid" };
-  if (inputs.dynamic && variant.why === null)
-    throw new Error(`${variant.id} has a dynamic operand without a declared provenance`);
-  return {
-    class: "dynamic",
-    adapter: { dynamic: inputs.dynamic ? variant.why! : "unknown member" },
-  };
+  if (closed) return { class: errors.length > 0 ? "recovery" : "fact", adapter: "fact" };
+  const fromSource = resultFromDynamic(inputs.contract, inputs.dynamic);
+  if (fromSource && variant.why === null)
+    throw new Error(`${variant.id} has a dynamic source without a declared provenance`);
+  const why = variant.cause ?? (fromSource ? variant.why! : "unknown member");
+  return { class: "dynamic", adapter: { dynamic: why } };
 }
 
 /** Every row of a routine's table, generated from its templates and pinned by the legacy oracle. */
@@ -1104,9 +1324,8 @@ export function generateTable(routine: RoutineName): GeneratedRow[] {
         why: variant.why,
         ...(outcome.factFrom === "binding" ? { factFrom: "binding" as const } : {}),
         ...(variant.stage5 === undefined ? {} : { stage5: variant.stage5 }),
-        ...(variant.note === undefined && variant.candidate === undefined
-          ? {}
-          : { note: variant.note ?? variant.candidate }),
+        ...(variant.checking === undefined ? {} : { checking: variant.checking }),
+        ...(variant.note === undefined ? {} : { note: variant.note }),
       };
       rows.push({ row, outcome, inputs });
     }
