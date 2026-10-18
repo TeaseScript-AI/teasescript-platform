@@ -80,7 +80,11 @@ export function methodRelation(name: string): OperationRelation {
         receiver: answer.kind,
         result: answer.result ?? UNKNOWN_MEMBER,
       }));
-      const composed = byReceiver(cases);
+      // Beside data the compiler cannot know, the cases stay a `byReceiver` also for one kind: the solver reads an
+      // answer under a dynamic receiver as conditional on the kind, and a later kind must not change an earlier
+      // answer's reading (O4 stage 3a, the lifting's contract).
+      const composed: OperationResult =
+        receiver.dynamic === null ? byReceiver(cases) : { kind: "byReceiver", cases };
       return receiver.dynamic === null
         ? composed
         : alternativesOf(composed, dynamicResult(receiver.dynamic));

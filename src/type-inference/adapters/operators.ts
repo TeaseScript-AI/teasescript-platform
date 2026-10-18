@@ -8,13 +8,13 @@ import {
   isScalar,
   isScalarKind,
   resolved,
+  sameType,
   STRING_TYPE,
   union,
   UNKNOWN_TYPE,
   withValues,
   type StaticType,
 } from "../../static-types.js";
-import { typeKey } from "../../storage-types.js";
 import { VALUE_KIND_NAMES } from "../../value-kinds.js";
 import type { ContractFamily } from "../graph.js";
 import type {
@@ -88,7 +88,7 @@ function combine(
   for (const pair of pairs) {
     const type = result(...pair);
     if (type === undefined) failed = true;
-    else if (!results.some((known) => typeKey(known) === typeKey(type))) results.push(type);
+    else if (!results.some((known) => sameType(known, type))) results.push(type);
   }
   if (dynamic === undefined)
     return failed || results.length === 0 ? INVALID : typeResult(union(results));

@@ -291,7 +291,11 @@ test("a relation answers from its inputs alone: bottom waits, a dynamic remainde
   assert.deepEqual(pause.result(inputsOf({ receiver: dynamicView("host", [{ kind: "media" }]) })), {
     kind: "alternatives",
     results: [
-      { kind: "type", type: NULL_TYPE },
+      // beside data the compiler cannot know the case stays a `byReceiver`, read as conditional on the kind
+      {
+        kind: "byReceiver",
+        cases: [{ receiver: "media", result: { kind: "type", type: NULL_TYPE } }],
+      },
       { kind: "dynamic", why: "host" },
     ],
   });

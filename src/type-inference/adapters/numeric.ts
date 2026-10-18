@@ -15,9 +15,9 @@ import {
   nonNullType,
   NUMBER_TYPE,
   resolved,
+  sameType,
   type StaticType,
 } from "../../static-types.js";
-import { typeKey } from "../../storage-types.js";
 import { TEMPORAL_KINDS } from "../../temporal-builtins.js";
 import type { OperandView, OperationRelation, OperationResult } from "./relation.js";
 import {
@@ -204,7 +204,7 @@ export function minMaxOfValues(views: readonly OperandView[]): OperationResult {
     for (const left of results)
       for (const right of candidates) {
         const result = ordered(left, right);
-        if (result !== undefined && !next.some((known) => typeKey(known) === typeKey(result)))
+        if (result !== undefined && !next.some((known) => sameType(known, result)))
           next.push(result);
       }
     results = next;

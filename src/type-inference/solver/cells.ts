@@ -10,10 +10,13 @@ import type { TypeId, TypeTable } from "./types.js";
 // item with part cells: a literal's own cells, or the derived part cells of the cell that holds a relation's
 // structural answer, so that an element or a property is reached in place wherever the value is. An item carries the
 // earliest position of its evidence, a pair (the site in this cell, the site in the source it was copied from)
-// compared lexicographically, and the declaration mark of Q3.1r. The same evidence from two sites is one item whose
-// position is the earliest and whose mark is either's; both merges are changes, as a new item is, and `drain` reports
-// every changed cell together with every cell that holds an item whose part changed, so the scheduler's readers of a
-// place see a change anywhere under it.
+// compared lexicographically, the cells it was copied or projected from at that position (`from`, which the
+// interpretation follows where positions tie), and the declaration mark of Q3.1r. The same evidence from two sites
+// is one item whose position is the earliest and whose mark is either's; both merges are changes, as a new item is,
+// and `drain` reports every changed cell together with every cell that holds an item whose part changed, so the
+// scheduler's readers of a place see a change anywhere under it. Every object item carries a slot for every property
+// name a store in the program gives any object, empty by construction until a store reaches it (`e`), so a property
+// store through a projected target reaches the object in place; a written bare `object` is an open object item.
 
 export type CellId = number;
 export type Tag = "w" | "m" | "b" | "n" | "p" | "d" | "e";
@@ -21,8 +24,12 @@ export type Constructor = "list" | "set" | "dict" | "object";
 /** The site in this cell, then the site in the source the evidence was copied from. */
 export type Position = readonly [number, number];
 export type Parts =
-  | { readonly element: CellId; readonly props?: undefined }
-  | { readonly props: ReadonlyMap<string, CellId>; readonly element?: undefined };
+  | { readonly element: CellId; readonly props?: undefined; readonly open?: undefined }
+  | {
+      readonly props: ReadonlyMap<string, CellId>;
+      readonly open: boolean;
+      readonly element?: undefined;
+    };
 /** The provenance of a `d` or `p` item: the graph's reasons, or the legacy's `unknown` type met in an answer. */
 export type Provenance = DynamicWhy | "unknown";
 
@@ -36,6 +43,7 @@ export interface Item {
   readonly why: Provenance | undefined;
   pos: Position;
   decl: boolean;
+  from: Set<CellId>;
 }
 
 /** What a transfer adds: the fields of an item, a `type` of any kind (normalized by `add`), position and mark. */
@@ -48,6 +56,7 @@ export interface Contribution {
   readonly why?: Provenance | undefined;
   readonly pos: Position;
   readonly decl?: boolean | undefined;
+  readonly from?: readonly CellId[] | undefined;
 }
 
 export const positionAt = (site: number): Position => [site, site];
@@ -67,9 +76,12 @@ export class Cells {
   readonly #touched = new Set<CellId>();
   #next: CellId;
 
-  constructor(table: TypeTable, places: number) {
+  readonly #propertyNames: readonly string[];
+
+  constructor(table: TypeTable, places: number, propertyNames: readonly string[] = []) {
     this.#table = table;
     this.#next = places;
+    this.#propertyNames = propertyNames;
     for (let id = 0; id < places; id += 1) this.#cells.set(id, new Map());
   }
 
@@ -115,6 +127,22 @@ export class Cells {
     return item.parts.props === undefined ? [item.parts.element] : [...item.parts.props.values()];
   }
 
+  /** The property cells of an object with every stored name's slot, the missing ones empty by construction. */
+  objectParts(
+    props: ReadonlyMap<string, CellId>,
+    owner: CellId,
+    pos: Position,
+  ): Map<string, CellId> {
+    const out = new Map(props);
+    for (const name of this.#propertyNames)
+      if (!out.has(name)) {
+        const slot = this.derived(owner, name);
+        this.add(slot, { tag: "e", pos });
+        out.set(name, slot);
+      }
+    return out;
+  }
+
   /**
    * Adds one contribution to a cell and tells whether the cell changed. A type is normalized first: a union's members
    * are members of a permitted union (the contribution's identity, or a fresh one at its site), null is `n`, never is
@@ -149,14 +177,23 @@ export class Cells {
         case "set":
         case "dict": {
           const element = this.derived(cell, "element");
-          const changedPart = this.add(element, { ...contribution, type: node.element });
+          // a never element: the part is empty by construction
+          const changedPart =
+            this.#table.node(node.element).kind === "never"
+              ? this.add(element, { tag: "e", pos: contribution.pos })
+              : this.add(element, { ...contribution, type: node.element });
           const { type: _, ...rest } = contribution;
           const changed = this.#put(cell, { ...rest, ctor: node.kind, parts: { element } });
           return changed || changedPart;
         }
         case "object": {
+          const { type: _, ...rest } = contribution;
           if (node.properties === null)
-            return this.add(cell, { tag: "d", why: "unwritten parts", pos: contribution.pos });
+            return this.#put(cell, {
+              ...rest,
+              ctor: "object",
+              parts: { props: this.objectParts(new Map(), cell, contribution.pos), open: true },
+            });
           let changedPart = false;
           const props = new Map<string, CellId>();
           for (const property of node.properties) {
@@ -164,8 +201,11 @@ export class Cells {
             if (this.add(part, { ...contribution, type: property.type })) changedPart = true;
             props.set(property.name, part);
           }
-          const { type: _, ...rest } = contribution;
-          const changed = this.#put(cell, { ...rest, ctor: "object", parts: { props } });
+          const changed = this.#put(cell, {
+            ...rest,
+            ctor: "object",
+            parts: { props: this.objectParts(props, cell, contribution.pos), open: false },
+          });
           return changed || changedPart;
         }
         case "atom":
@@ -203,7 +243,7 @@ export class Cells {
         : item.ctor === undefined
           ? ""
           : item.ctor === "object"
-            ? `o{${[...item.parts!.props!]
+            ? `o${item.parts!.open === true ? "*" : ""}{${[...item.parts!.props!]
                 .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
                 .map(([name, cell]) => `${name}:${cell}`)
                 .join(",")}}`
@@ -232,6 +272,7 @@ export class Cells {
       why: contribution.tag === "p" || contribution.tag === "d" ? contribution.why : undefined,
       pos: contribution.pos,
       decl: contribution.decl === true,
+      from: new Set(contribution.from ?? []),
     };
     const map = this.#cell(cell);
     const key = this.key(item);
@@ -242,10 +283,12 @@ export class Cells {
         prior.decl = true;
         changed = true;
       }
-      if (comparePositions(item.pos, prior.pos) < 0) {
+      const order = comparePositions(item.pos, prior.pos);
+      if (order < 0) {
         prior.pos = item.pos;
+        prior.from = new Set(item.from);
         changed = true;
-      }
+      } else if (order === 0) for (const source of item.from) prior.from.add(source);
       if (changed) this.#touched.add(cell);
       return changed;
     }

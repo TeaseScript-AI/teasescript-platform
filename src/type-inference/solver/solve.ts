@@ -70,13 +70,26 @@ class Solver {
   readonly #functions: ReadonlyMap<number, FunctionSignature>;
   readonly #returns: ReadonlySet<number>;
   readonly #context: LiftContext & { nonWorking: ReadonlySet<string> | null };
+  /** The targets a store reaches: a projection into one is a store path, whose value flows back into the part. */
+  readonly #stored: ReadonlySet<PlaceId>;
   readonly #views = new Map<CellId, CellView>();
 
   constructor(graph: ConstraintGraph, options: SolveOptions) {
     this.#graph = graph;
     this.#relations = options.relations;
     this.table = options.table ?? new TypeTable();
-    this.cells = new Cells(this.table, graph.places.length);
+    this.#stored = new Set(graph.constraints.flatMap((c) => (c.kind === "store" ? [c.into] : [])));
+    // every object carries a slot for every property name a store in the program gives any object
+    const propertyNames = [
+      ...new Set(
+        graph.constraints.flatMap((c) =>
+          c.kind === "project" && typeof c.step === "object" && this.#stored.has(c.into)
+            ? [c.step.property]
+            : [],
+        ),
+      ),
+    ].sort();
+    this.cells = new Cells(this.table, graph.places.length, propertyNames);
     this.#functions = new Map(graph.functions.map((fn) => [fn.id, fn]));
     this.#returns = new Set(graph.constraints.filter((c) => c.kind === "return").map((c) => c.fn));
     this.#context = { cells: this.cells, nonWorking: null, asks: 0 };
@@ -101,9 +114,8 @@ class Solver {
           this.cells.add(place.id, item);
     }
     // a literal's part cell that no store reaches is empty by construction
-    const stored = new Set(graph.constraints.flatMap((c) => (c.kind === "store" ? [c.into] : [])));
     for (const place of graph.places)
-      if (place.kind.kind === "cell" && !stored.has(place.id))
+      if (place.kind.kind === "cell" && !this.#stored.has(place.id))
         this.cells.add(place.id, { tag: "e", pos: positionAt(place.site?.start ?? 0) });
     this.cells.drain(); // the seeds are the initial state, not a change of the first node evaluated
   }
@@ -141,7 +153,7 @@ class Solver {
           c.result,
         ];
       case "get":
-        return [c.receiver, c.fallback, c.result];
+        return [c.receiver, ...(c.key === null ? [] : [c.key]), c.fallback, c.result];
       case "fallback":
         return [c.left, c.right, c.result];
       case "call": {
@@ -192,7 +204,16 @@ class Solver {
         return [{ tag, ctor: term.kind, parts: { element }, group, pos }];
       }
       case "object": {
-        if (term.properties === null) return [{ tag: "d", why: "unwritten parts", pos }];
+        if (term.properties === null)
+          return [
+            {
+              tag,
+              ctor: "object",
+              parts: { props: this.cells.objectParts(new Map(), owner, pos), open: true },
+              group,
+              pos,
+            },
+          ];
         const props = new Map<string, CellId>();
         for (const property of term.properties) {
           const part =
@@ -204,14 +225,22 @@ class Solver {
               this.cells.add(part, item);
           props.set(property.name, part);
         }
-        return [{ tag, ctor: "object", parts: { props }, group, pos }];
+        return [
+          {
+            tag,
+            ctor: "object",
+            parts: { props: this.cells.objectParts(props, owner, pos), open: false },
+            group,
+            pos,
+          },
+        ];
       }
       case "union":
         return term.members.flatMap((member) =>
           this.termItems(member, tag === "b" ? "b" : "m", group, owner, pos),
         );
       case "ref":
-        return this.cells.items(term.place).map((item) => ({ ...item }));
+        return this.cells.items(term.place).map((item) => ({ ...item, from: [...item.from] }));
     }
   }
 
@@ -243,6 +272,7 @@ class Solver {
         why: item.why,
         decl: decl === "set" ? true : decl === "mirror" ? item.decl : false,
         pos: stamp === null ? item.pos : [stamp, item.pos[0]],
+        from: [from],
       };
       if (this.cells.add(to, contribution)) changed = true;
     }
@@ -283,12 +313,27 @@ class Solver {
         const decl =
           c.kind === "store" &&
           (DECL_STORES.includes(c.how) || intoKind === "cell" || intoKind === "property");
+        if (c.kind === "store" && c.how === "elements") {
+          // a store of a collection's elements (`addAll`): the parts' items
+          let changed = false;
+          for (const item of this.cells.items(c.value)) {
+            if (item.tag === "d" || item.tag === "p") {
+              if (this.cells.add(into, { tag: "d", why: item.why, pos })) changed = true;
+            } else if (
+              item.parts?.element !== undefined &&
+              this.copy(item.parts.element, into, decl ? "set" : "strip", site)
+            )
+              changed = true;
+          }
+          return changed;
+        }
         return this.copy(c.value, into, decl ? "set" : "strip", site);
       }
       case "read":
         return this.copy(c.binding, c.occurrence, "mirror");
       case "project": {
         let changed = false;
+        const storePath = this.#stored.has(c.into);
         for (const item of this.cells.items(c.owner)) {
           if (item.tag === "d") {
             if (this.cells.add(c.into, { tag: "d", why: item.why, pos: item.pos })) changed = true;
@@ -305,6 +350,7 @@ class Solver {
                 group: item.group,
                 pos: item.pos,
                 decl: item.decl,
+                from: [c.owner],
               })
             )
               changed = true;
@@ -312,8 +358,8 @@ class Solver {
           }
           if (part.cell === c.into) continue;
           if (this.copy(part.cell, c.into, "mirror")) changed = true;
-          // a store into the projected target reaches the part in place
-          if (this.copy(c.into, part.cell, "mirror")) changed = true;
+          // a store into the projected target reaches the part in place, on a store path only
+          if (storePath && this.copy(c.into, part.cell, "mirror")) changed = true;
         }
         if (typeof c.step === "object") {
           const read = this.memberRead(c.owner, c.step.property, c.into, site);
@@ -322,7 +368,8 @@ class Solver {
         return changed;
       }
       case "get": {
-        if (!this.cells.has(c.receiver)) return false;
+        // strict in its receiver and key; the element and the fallback are the members of the union it defines
+        if (!this.cells.has(c.receiver) || (c.key !== null && !this.cells.has(c.key))) return false;
         const union = `get@${site}`;
         let changed = false;
         for (const item of this.cells.items(c.receiver)) {
@@ -363,7 +410,7 @@ class Solver {
           if (parameter !== undefined && this.copy(argument, parameter, "strip", site))
             changed = true;
         });
-        if (this.copy(fn.result, c.result, "strip")) changed = true; // the call's value mirrors the result's positions
+        if (this.copy(fn.result, c.result, "mirror")) changed = true; // the call's value mirrors the result
         return changed;
       }
       case "return": {

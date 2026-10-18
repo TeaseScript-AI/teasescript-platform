@@ -8,10 +8,21 @@ import type { Solution } from "../../src/type-inference/solver/solve.js";
  * that the solver's regression fixture compares as data: `never`, `unknown`, `(?|null)`, a bound, the working members
  * (`(a|b)`, with `|null` inside when optional, `!` when held), or `CONFLICT{families}~working`.
  */
-function cellText(solution: Solution, cell: CellId, depth = 0): string {
+function cellText(solution: Solution, cell: CellId, path: ReadonlySet<CellId> = new Set()): string {
+  const items = solution.cells.items(cell);
+  if (items.length > 0 && items.every((item) => item.tag === "e")) return "never";
   const view = solution.view(cell);
-  const texts = (members: readonly Member[]): string[] =>
-    [...new Set(members.map((member) => memberText(solution, member, depth)))].sort();
+  const inner = new Set([...path, cell]);
+  const texts = (members: readonly Member[]): string[] => {
+    const t = [...new Set(members.map((member) => memberText(solution, member, inner)))].sort();
+    return t.filter(
+      (x) =>
+        !(
+          x.endsWith("<never>") &&
+          t.some((y) => y !== x && y.startsWith(x.slice(0, x.indexOf("<") + 1)))
+        ),
+    );
+  };
   switch (view.kind) {
     case "never":
       return "never";
@@ -35,14 +46,19 @@ function cellText(solution: Solution, cell: CellId, depth = 0): string {
   }
 }
 
-function memberText(solution: Solution, member: Member, depth: number): string {
+/** A structural cycle (a part on the way back to its owner) renders as the legacy's back-edge widening, `?`. */
+function memberText(solution: Solution, member: Member, path: ReadonlySet<CellId>): string {
   if (member.kind === "type") return typeKey(solution.table.toStatic(member.type), true, true);
-  if (depth > 3) return "…";
   if (member.kind === "collection")
-    return `${member.ctor}<${cellText(solution, member.element, depth + 1)}>`;
+    return `${member.ctor}<${path.has(member.element) ? "?" : cellText(solution, member.element, path)}>`;
+  if (member.open) return "object";
   return `{${[...member.props]
+    .filter(([, cell]) => !solution.cells.items(cell).every((item) => item.tag === "e"))
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([name, cell]) => `${JSON.stringify(name)}:${cellText(solution, cell, depth + 1)}`)
+    .map(
+      ([name, cell]) =>
+        `${JSON.stringify(name)}:${path.has(cell) ? "?" : cellText(solution, cell, path)}`,
+    )
     .join(",")}}`;
 }
 

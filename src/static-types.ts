@@ -1641,6 +1641,62 @@ function* containsTask(
 }
 
 /**
+ * Whether two types are the same structure: the same kind, scalar name and values, element, properties and union
+ * members as sets, after resolving open slots. The adapters deduplicate result alternatives with it (O4 stage 3a
+ * replaced a comparison of rendered texts; no solving path renders a type).
+ */
+export function sameType(left: StaticType, right: StaticType): boolean {
+  return runCompileTask(sameTask(left, right));
+}
+
+function* sameTask(leftType: StaticType, rightType: StaticType): CompileTask<boolean> {
+  const left = resolved(leftType);
+  const right = resolved(rightType);
+  if (left === right) return true;
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "scalar" && right.kind === "scalar")
+    return left.name === right.name && sameValues(left.values, right.values);
+  if (isCollection(left) && isCollection(right))
+    return yield* compileChild(sameTask(left.element, right.element));
+  if (left.kind === "object" && right.kind === "object") {
+    if (left.properties === null || right.properties === null)
+      return left.properties === right.properties;
+    if (left.properties.size !== right.properties.size) return false;
+    for (const [name, value] of left.properties) {
+      const other = right.properties.get(name);
+      if (other === undefined || !(yield* compileChild(sameTask(value, other)))) return false;
+    }
+    return true;
+  }
+  if (left.kind === "union" && right.kind === "union") {
+    if (left.members.length !== right.members.length) return false;
+    for (const member of left.members) {
+      let found = false;
+      for (const other of right.members)
+        if (yield* compileChild(sameTask(member, other))) {
+          found = true;
+          break;
+        }
+      if (!found) return false;
+    }
+    return true;
+  }
+  return true;
+}
+
+function sameValues(
+  left: readonly ScalarValue[] | undefined,
+  right: readonly ScalarValue[] | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  if (left.length !== right.length) return false;
+  const sorted = (values: readonly ScalarValue[]): string[] => values.map(String).sort();
+  const a = sorted(left);
+  const b = sorted(right);
+  return a.every((value, index) => value === b[index]);
+}
+
+/**
  * The one type of values that must share a type, such as the elements of a list literal or the values a function
  * returns, or `undefined` when they mix types (ADR 0021 rule 1.3). Integers and numbers together are numbers, `null`
  * makes the type optional, objects merge their properties, and an unknown value makes the result unknown. The compiler
