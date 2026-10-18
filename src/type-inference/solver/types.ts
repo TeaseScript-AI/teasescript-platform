@@ -31,6 +31,15 @@ import type { TypeTerm } from "../graph.js";
 // they keep), the interned union holds the one id. A native transfer is a later performance item (work note §10), only
 // if the measurement asks for it.
 //
+// Admissible inputs are canonical types: those the legacy's constructors and transfers, the annotations and the adapters
+// produce, in which every union is the legacy's `union` of its members. `intern` canonicalizes a union it meets through
+// that same `union`, so an unnormalized input (`(integer|number)` written by hand, a member another member includes)
+// gets the one id of the type it denotes, and no transfer depends on what was interned before; on such an input the
+// legacy's own transfer may spell its answer by the input's first member, and the agreement claimed below is about
+// canonical inputs. What `toStatic` returns is a borrowed immutable value: a property table's entries stay mutable in
+// the legacy's representation, and a consumer that mutates one changes later static views while the nodes and the
+// remembered transfers keep their answers; the solver and the export build their own tables for mutable state.
+//
 // A node does not hold the numeric lineage of a scalar (`origins`), which the export records with the cell, nor the
 // legacy's property-table lineage (`PropertyTable.sources`), which the cell model replaces; interning drops both. An
 // undecided slot (`open`) and an open property table (`PropertyTable.open`) are facts of a place, not of a type: the
@@ -372,8 +381,16 @@ export class TypeTable {
           properties.push({ name, type: this.#idOf(value) });
         return this.#object(properties);
       }
-      case "union":
-        return this.#union(type.members.map((member) => this.#idOf(member)));
+      case "union": {
+        // The canonical form is the legacy's own: `union` of the members, each already interned and so canonical, drops
+        // a member another includes and makes `integer | number` a number. An unnormalized input (a union a producer
+        // built by hand) therefore interns as the type it denotes, one id with its normalized spelling, whatever was
+        // interned before; the legacy's answer for such an input keeps its first spelling instead, which is outside the
+        // admissible inputs (see the module comment).
+        const canonical = union(type.members.map((member) => this.toStatic(this.#idOf(member))));
+        if (canonical.kind !== "union") return this.intern(canonical);
+        return this.#union(canonical.members.map((member) => this.intern(member)));
+      }
       case "open":
         throw new Error("The solver never interns an undecided slot.");
       default:

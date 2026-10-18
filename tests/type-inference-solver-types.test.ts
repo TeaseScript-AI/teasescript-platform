@@ -12,6 +12,7 @@ import {
   members,
   narrowTo,
   nonNullType,
+  NULL_TYPE,
   openType,
   optional,
   PropertyTable,
@@ -36,6 +37,11 @@ interface Entry {
 }
 
 const COLLECTION_KINDS: readonly ("list" | "set" | "dict")[] = ["list", "set", "dict"];
+
+/** The rendering of a type in the legacy's canonical form: `union` of one member normalizes what it holds. */
+function canonicalKey(type: StaticType): string {
+  return key(union([type]));
+}
 
 const key = (type: StaticType): string => typeKey(type, true, true);
 
@@ -228,14 +234,16 @@ test("interning is structural and converts back to the same type", () => {
     assert.equal(table.intern(second[index]!.type), id, `${name}: a separately built equal type`);
     assert.equal(table.toStatic(id), table.toStatic(id), `${name}: one object per id`);
     assert.equal(table.intern(table.toStatic(id)), id, `${name}: back from its StaticType`);
-    assert.equal(key(table.toStatic(id)), key(type), `${name}: the structure it renders`);
+    // The table interns a union in the legacy's canonical form (its own `union` of the members), so an entry written
+    // unnormalized renders as the type it denotes; `canonicalKey` renders the catalog entry the same way.
+    assert.equal(key(table.toStatic(id)), canonicalKey(type), `${name}: the structure it renders`);
   });
   // Equal ids exactly for equal structure (no catalog union has two members that render alike).
   for (let left = 0; left < first.length; left += 1)
     for (let right = 0; right < first.length; right += 1)
       assert.equal(
         ids[left] === ids[right],
-        key(first[left]!.type) === key(first[right]!.type),
+        canonicalKey(first[left]!.type) === canonicalKey(first[right]!.type),
         `${first[left]!.name} and ${first[right]!.name}`,
       );
   const list = table.toStatic(table.intern({ kind: "list", element: scalar("integer") }));
@@ -258,7 +266,7 @@ test("every transfer gives the legacy's answer", () => {
   const mismatches: string[] = [];
   const compare = (what: string, id: TypeId, expected: StaticType): void => {
     const actual = key(table.toStatic(id));
-    const wanted = key(collapsed(expected));
+    const wanted = canonicalKey(collapsed(expected));
     if (actual !== wanted)
       mismatches.push(`${what}: the table gives ${actual}, the legacy ${wanted}`);
   };
@@ -410,4 +418,71 @@ test("the type table renders no text", () => {
   );
   assert.equal(source.includes("typeKey"), false);
   assert.equal(source.includes("JSON.stringify"), false);
+});
+
+test("an unnormalized union interns as the type it denotes, whatever was interned before", () => {
+  // Astra's review r1 of the type table: `list<number>` and `list<(integer|number)>` denote one type; the legacy's
+  // `union` keeps the first spelling it is given, the table keeps one id and the canonical spelling.
+  const a: StaticType = { kind: "list", element: { kind: "scalar", name: "number" } };
+  const inner: StaticType = {
+    kind: "union",
+    members: [
+      { kind: "scalar", name: "integer" },
+      { kind: "scalar", name: "number" },
+    ],
+  };
+  const b: StaticType = { kind: "list", element: inner };
+  for (const first of ["a", "b"] as const)
+    for (const order of [
+      [a, b],
+      [b, a],
+    ]) {
+      const table = new TypeTable();
+      table.intern(first === "a" ? a : b);
+      const u: StaticType = { kind: "union", members: order };
+      const id = table.intern(u);
+      assert.equal(table.intern(a), table.intern(b), `${first} first: one id for both spellings`);
+      assert.equal(
+        id,
+        table.intern(a),
+        `${first} first: the union of two spellings of one type is that type`,
+      );
+      for (const transfer of [
+        table.nonNull(id),
+        table.optional(table.nonNull(id)),
+        table.narrow(id, id),
+        table.assigned(id, id),
+      ])
+        assert.equal(
+          typeKey(table.toStatic(table.nonNull(transfer)), true, true),
+          "list<number>",
+          `${first} first, order ${order[0] === a ? "a,b" : "b,a"}: the canonical spelling`,
+        );
+    }
+});
+
+test("the producers the solver interns from give canonical types", () => {
+  // The legacy's `union` and `optional` normalize what they build: interning their result and interning the result
+  // of interning it agree, and a nested union they build is already the table's canonical form.
+  const table = new TypeTable();
+  const integer: StaticType = { kind: "scalar", name: "integer" };
+  const number: StaticType = { kind: "scalar", name: "number" };
+  const built: StaticType[] = [
+    union([integer, number]),
+    optional(
+      union([
+        { kind: "list", element: number },
+        { kind: "list", element: union([integer, number]) },
+      ]),
+    ),
+    union([
+      { kind: "set", element: union([integer, NULL_TYPE]) },
+      { kind: "set", element: optional(integer) },
+    ]),
+  ];
+  for (const type of built) {
+    const id = table.intern(type);
+    assert.equal(table.intern(table.toStatic(id)), id);
+    assert.equal(typeKey(table.toStatic(id), true, true), typeKey(type, true, true));
+  }
 });
