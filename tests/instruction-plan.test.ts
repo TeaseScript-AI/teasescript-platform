@@ -3,9 +3,9 @@ import test from "node:test";
 
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { run } from "../src/runtime/engine.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
 
 test("compiles if and else so that only the selected branch runs", () => {
   const branchSource = (condition: string) =>

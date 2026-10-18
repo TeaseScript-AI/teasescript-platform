@@ -15,9 +15,10 @@ import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, deserializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
-import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { AMSTERDAM } from "./helpers/temporal-fixtures.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 function start(source: string): PlayerRuntimeSession {
   return createPlayerRuntimeSession(source, { temporalContext: AMSTERDAM });

@@ -13,12 +13,10 @@ import {
 } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import {
-  createFreshRuntimeSnapshot,
-  validateRuntimeSnapshot,
-  type RuntimeSnapshot,
-} from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 function compiledPlan(files: readonly ProjectSourceFile[]): InstructionPlan {
   const result = compileProject(files);

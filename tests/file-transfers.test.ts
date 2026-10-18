@@ -14,10 +14,11 @@ import {
 import { executeInstruction, run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
-import { validateRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import { createXorShift32State, nextXorShift32 } from "../src/runtime/random.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 function project(main: string, others: Record<string, string> = {}): ProjectSourceFile[] {
   return [

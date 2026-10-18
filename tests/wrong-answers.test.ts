@@ -11,8 +11,8 @@ import { MAX_INTERACTION_STRING_UTF8_BYTES } from "../src/interaction-limits.js"
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { updateInteraction } from "../src/runtime/operations/update-interaction.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
 
 // V30 §20 "Invalid input handling" gives the defaults; `askText` has its own for blank text.
 const NUMBER = "That is wrong. I asked for a number.";

@@ -20,14 +20,11 @@ import type {
 } from "../src/runtime/actions/model.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import type { InstructionPlan } from "../src/plan/model.js";
-import {
-  MAX_RUNTIME_SESSION_TIME_MS,
-  createFreshRuntimeSnapshot,
-  validateRuntimeSnapshot,
-  type RuntimeSnapshot,
-} from "../src/runtime/state.js";
+import { MAX_RUNTIME_SESSION_TIME_MS, type RuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 function delayAction(snapshot: RuntimeSnapshot): RuntimeDelayActionSnapshot {
   assert.ok(snapshot.foregroundAction?.kind === "delay");

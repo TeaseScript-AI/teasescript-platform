@@ -1,18 +1,20 @@
 import type { OwnedDiagnosticCode } from "../diagnostic-codes.js";
 import { createCapturedArray } from "../external-data-capture.js";
 import { MAX_TEXT_LENGTH } from "./text-length.js";
-import { type InstructionPlan } from "../plan/model.js";
+import type { InstructionPlan } from "../plan/model.js";
 import { captureOrReuseInstructionPlan } from "../plan/capture.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
 import { markValidatedImmutableInstructionPlan } from "../plan/validated-immutable.js";
 import { validateCapturedInstructionPlan } from "../plan/validation.js";
 import {
-  captureRuntimeSnapshotWithValidatedPlan,
-  classifyCapturedRuntimeSnapshot,
   withFrozenTemporalCaptures,
   type RuntimeSnapshotValidationFailureKind,
   type RuntimeSnapshot,
 } from "./state.js";
+import {
+  captureRuntimeSnapshotWithValidatedPlan,
+  classifyCapturedRuntimeSnapshot,
+} from "./snapshot-validation.js";
 
 export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
 export const CHECKPOINT_VERSION = 124;

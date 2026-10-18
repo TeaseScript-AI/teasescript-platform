@@ -16,11 +16,7 @@ import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { nextXorShift32 } from "../src/runtime/random.js";
-import {
-  createFreshRuntimeSnapshot,
-  validateRuntimeSnapshot,
-  type RuntimeSnapshot,
-} from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { playerStateOf } from "./helpers/player-state.js";
@@ -29,6 +25,8 @@ import {
   activePlayerRuntimePacingGate,
   playerRuntimeDeadlines,
 } from "../player/runtime-adapter.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 function playerRuntimeDeadlinesDue(plan: InstructionPlan, snapshot: RuntimeSnapshot): boolean {
   return playerRuntimeDeadlines(playerStateOf(plan, snapshot)).some(

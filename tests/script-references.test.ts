@@ -7,12 +7,13 @@ import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, deserializeCheckpoint, serializeCheckpoint } from "../src/index.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
-import { validateRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import {
   assertRuntimeResumeEquivalent,
   type RuntimeResumeEquivalenceOptions,
 } from "./helpers/runtime-equivalence.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 function project(main: string, others: Record<string, string> = {}): ProjectSourceFile[] {
   return [

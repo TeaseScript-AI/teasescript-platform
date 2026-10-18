@@ -16,8 +16,9 @@ import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, deserializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
-import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 /** The open buttons, a preselected one marked with `*`. */
 function buttons(session: PlayerRuntimeSession): readonly string[] {

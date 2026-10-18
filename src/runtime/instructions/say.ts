@@ -24,7 +24,6 @@ import {
   type SerializableRuntimeValue,
 } from "../serializable-values.js";
 import {
-  cloneCapturedRuntimeSnapshot,
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
   type RuntimeTemporarySnapshot,
@@ -51,6 +50,7 @@ import {
   type SourceSpan,
 } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
+import { cloneCapturedRuntimeSnapshot } from "../snapshot-construction.js";
 
 // Say and its speakers: declaring a speaker, and preparing, showing, and pacing a message.
 

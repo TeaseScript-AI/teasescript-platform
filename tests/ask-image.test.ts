@@ -15,13 +15,11 @@ import type { SerializableRuntimeValue } from "../src/runtime/serializable-value
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { pressPermanentButton } from "../src/runtime/operations/press-permanent-button.js";
-import {
-  createFreshRuntimeSnapshot,
-  validateRuntimeSnapshot,
-  type RuntimeSnapshot,
-} from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 const IMAGE = "captured-media:chosen:1";
 // The trusted Player store vouches for exactly the images it stored.

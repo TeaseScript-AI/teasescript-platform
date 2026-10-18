@@ -12,19 +12,16 @@ import {
   cloneCapturedSerializableValue,
   type SerializableRuntimeValue,
 } from "../serializable-values.js";
-import {
-  captureRuntimeSnapshotWithValidatedPlan,
-  cloneInteractionUi,
-  dropUnreachableRecords,
-  type RuntimeSnapshot,
-  type RuntimeTemporarySnapshot,
-} from "../state.js";
+import type { RuntimeSnapshot, RuntimeTemporarySnapshot } from "../state.js";
 import {
   requiredActionCompletionEvents,
   type RuntimeActionSettlementSnapshot,
   type RuntimePendingActionSnapshot,
 } from "../actions/model.js";
 import type { PendingActionOperationResult, RuntimeOperationResult } from "./model.js";
+import { captureRuntimeSnapshotWithValidatedPlan } from "../snapshot-validation.js";
+import { cloneInteractionUi } from "../snapshot-construction.js";
+import { dropUnreachableRecords } from "../record-collection.js";
 
 export class RuntimeDataError extends Error {
   public constructor(

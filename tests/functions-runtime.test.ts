@@ -10,10 +10,8 @@ import type {
   SerializableRuntimeValue,
 } from "../src/runtime/serializable-values.js";
 import {
-  createFreshRuntimeSnapshot,
   DEFAULT_MAX_CALL_DEPTH,
   MAX_SUPPORTED_CALL_DEPTH,
-  validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -23,6 +21,8 @@ import { runValidSourceUntilExit } from "./helpers/run-until-exit.js";
 import { createFreshRuntimeSession } from "../src/index.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { sayTexts } from "./helpers/runtime-events.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 test("executes positional and named function calls with returned values", () => {
   const result = runValidSourceUntilExit(

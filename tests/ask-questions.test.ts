@@ -12,12 +12,13 @@ import { executeInstruction, run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { AMSTERDAM } from "./helpers/temporal-fixtures.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
 
 const SPEAKERS = 'speaker mistress {\n  displayName: "Mistress"\n}\nspeaker guide {}\n';
 

@@ -19,9 +19,10 @@ import {
   createSerializableList,
   createSerializableObject,
 } from "../src/runtime/serializable-values.js";
-import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 function compiled(source: string, options: Parameters<typeof compileSource>[1] = {}) {
   const plan = compileValidPlan(source, options);

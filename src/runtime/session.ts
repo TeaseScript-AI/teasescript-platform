@@ -82,7 +82,6 @@ import { hasSnapshotTag, snapshotTag } from "./snapshot-tag.js";
 import type { PresentationSettings } from "../temporal.js";
 import type { SourceSpan } from "../source.js";
 import {
-  createFreshRuntimeSnapshotWithValidatedPlan,
   currentTemporalContext,
   withFrozenTemporalCaptures,
   type FreshRuntimeOptions,
@@ -97,6 +96,7 @@ import {
 } from "./state.js";
 import type { RuntimeInterruptibleActionSnapshot } from "./actions/interrupts.js";
 import { bindingScopeId } from "./evaluation/bindings.js";
+import { createFreshRuntimeSnapshotWithValidatedPlan } from "./snapshot-construction.js";
 
 /** What every operation of a session, and of the sessions forked from it, may call. */
 export interface RuntimeSessionOptions {

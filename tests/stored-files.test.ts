@@ -16,15 +16,12 @@ import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
-import {
-  validateRuntimeSnapshot,
-  type FreshRuntimeOptions,
-  type RuntimeSnapshot,
-} from "../src/runtime/state.js";
+import type { FreshRuntimeOptions, RuntimeSnapshot } from "../src/runtime/state.js";
 import { fileType, storedFileKind, type StoredFileKind } from "../src/runtime/stored-files.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import type { PlayerFileStoreAnswer } from "../player/runtime-adapter.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 /*
  * fileFromBase64, fileToBase64, hashFile, and toJson and fromJson with files (V30 §13 and §33), from source through the

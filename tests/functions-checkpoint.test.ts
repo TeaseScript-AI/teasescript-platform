@@ -23,16 +23,16 @@ import type {
 } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSession, createRuntimeSession } from "../src/runtime/session.js";
 import {
-  createFreshRuntimeSnapshot,
   DEFAULT_MAX_CALL_DEPTH,
   MAX_SUPPORTED_CALL_DEPTH,
-  validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent, functionFrames } from "./helpers/runtime-equivalence.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 test("restores every instruction boundary during defaults and nested calls", () => {
   const { boundaries: observations } = assertRuntimeResumeEquivalent(

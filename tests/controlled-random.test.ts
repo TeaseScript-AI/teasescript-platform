@@ -35,11 +35,12 @@ import {
   RuntimeSessionError,
   type RuntimeSession,
 } from "../src/runtime/session.js";
-import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { withDeepSayStaging } from "./helpers/deep-say-staging.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
 
 /*
  * Controlled randomness (docs/RUNTIME.md#controlled-randomness). The central invariant: a pause undoes its unit and

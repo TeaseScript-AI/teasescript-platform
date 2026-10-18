@@ -8,12 +8,9 @@ import { reportMediaLoad } from "../../src/runtime/operations/media-reports.js";
 import { observeTime } from "../../src/runtime/operations/observe-time.js";
 import { pressPermanentButton } from "../../src/runtime/operations/press-permanent-button.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/serializable-values.js";
-import {
-  createFreshRuntimeSnapshot,
-  type FreshRuntimeOptions,
-  type RuntimeSnapshot,
-} from "../../src/runtime/state.js";
+import type { FreshRuntimeOptions, RuntimeSnapshot } from "../../src/runtime/state.js";
 import { compileValidPlan } from "./compile-valid-plan.js";
+import { createFreshRuntimeSnapshot } from "../../src/runtime/snapshot-construction.js";
 
 /** A session at the default reading speed, driven by time observations, skips, and permanent-button clicks. */
 export class Story {

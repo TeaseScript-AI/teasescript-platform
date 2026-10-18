@@ -13,13 +13,11 @@ import {
 import { executeInstruction, run } from "../src/runtime/engine.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
-import {
-  createFreshRuntimeSnapshot,
-  validateRuntimeSnapshot,
-  type RuntimeSnapshot,
-} from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 /** The plan of a project with no diagnostics but the warnings `warnings` names, by code in compiler order. */
 function compiledPlan(

@@ -4,7 +4,6 @@ import { isMessagePresentation } from "../src/message-presentation.js";
 import { compileSource } from "../src/compiler.js";
 import { normalizeColor, isNormalizedColor } from "../src/color.js";
 import { run } from "../src/runtime/engine.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import {
   createCheckpoint,
   serializeCheckpoint,
@@ -13,6 +12,7 @@ import {
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
 
 test("accepts concrete CSS colour notations and preserves out-of-gamut coordinates", () => {
   for (const color of [
