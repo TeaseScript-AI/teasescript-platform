@@ -123,8 +123,9 @@ module owns pending-action, settlement, pacing-gate, and handoff validation.
 keeps private ([`RUNTIME.md`](RUNTIME.md#runtime-sessions)).
 `src/runtime/engine.ts` owns execution orchestration and the exhaustive instruction dispatch, which hands instruction
 families such as function calls, loops, say, interactions, and timers to their modules in `src/runtime/instructions/`;
-`src/runtime/evaluator.ts` owns expression evaluation, builtin calls, and the binding and speaker operations used while
-evaluating; handle members, collection methods, and random draws are its families in `src/runtime/evaluation/`.
+`src/runtime/evaluator.ts` owns expression evaluation, its order, and builtin calls; its families, such as property
+access, assignment, speakers, operators, handle members, collection methods, and random draws, are in
+`src/runtime/evaluation/`.
 The internal `src/runtime/prepared-references.ts` module owns prepared-reference encoding,
 resolution, detachment, and list-mutation rebasing, while
 `src/runtime/value-predicates.ts` supplies the small shared value-narrowing seam.
