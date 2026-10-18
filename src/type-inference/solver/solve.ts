@@ -15,8 +15,9 @@ import {
   type Item,
   type Position,
   type Tag,
+  offsetOf,
 } from "./cells.js";
-import { interpret, nonWorking, type CellView } from "./interpret.js";
+import { interpret, interpretCells, nonWorking, type CellView } from "./interpret.js";
 import { lift, memberRelation, type LiftContext, type Operation } from "./lifting.js";
 import { run, type RunReport } from "./schedule.js";
 import { TypeTable } from "./types.js";
@@ -51,6 +52,8 @@ export interface Solution {
   /** The operations with an invalid counted combination: `<family>.<name>@<site>:none` or `:partial(i/n)`, sorted. */
   readonly statuses: readonly string[];
   view(cell: CellId): CellView;
+  /** The view of several part cells read together: a merged property or element (O1). */
+  viewOf(group: readonly CellId[]): CellView;
 }
 
 const DECL_STORES: readonly string[] = [
@@ -73,6 +76,7 @@ class Solver {
   /** The targets a store reaches: a projection into one is a store path, whose value flows back into the part. */
   readonly #stored: ReadonlySet<PlaceId>;
   readonly #views = new Map<CellId, CellView>();
+  readonly #groupViews = new Map<string, CellView>();
 
   constructor(graph: ConstraintGraph, options: SolveOptions) {
     this.#graph = graph;
@@ -94,7 +98,7 @@ class Solver {
     this.#returns = new Set(graph.constraints.filter((c) => c.kind === "return").map((c) => c.fn));
     this.#context = { cells: this.cells, nonWorking: null, asks: 0 };
     for (const place of graph.places) {
-      const site = place.site?.start ?? 0;
+      const site = place.site === null ? 0 : offsetOf(place.site);
       if (place.kind.kind === "binding" && place.kind.declared === "host")
         this.cells.add(place.id, { tag: "d", why: "host", pos: positionAt(0) });
       const written =
@@ -116,7 +120,10 @@ class Solver {
     // a literal's part cell that no store reaches is empty by construction
     for (const place of graph.places)
       if (place.kind.kind === "cell" && !this.#stored.has(place.id))
-        this.cells.add(place.id, { tag: "e", pos: positionAt(place.site?.start ?? 0) });
+        this.cells.add(place.id, {
+          tag: "e",
+          pos: positionAt(place.site === null ? 0 : offsetOf(place.site)),
+        });
     this.cells.drain(); // the seeds are the initial state, not a change of the first node evaluated
   }
 
@@ -236,8 +243,16 @@ class Solver {
         ];
       }
       case "union":
-        return term.members.flatMap((member) =>
-          this.termItems(member, tag === "b" ? "b" : "m", group, owner, pos),
+        // each member's structure is its own: a written `integer[] | string set` is two collections with two element
+        // cells, not one element shared (PR 3a, Dropje97's B1)
+        return term.members.flatMap((member, index) =>
+          this.termItems(
+            member,
+            tag === "b" ? "b" : "m",
+            group,
+            index === 0 ? owner : this.cells.derived(owner, `${index}`),
+            pos,
+          ),
         );
       case "ref":
         return this.cells.items(term.place).map((item) => ({ ...item, from: [...item.from] }));
@@ -287,7 +302,7 @@ class Solver {
 
   /** A store's value into a cell: the parts' items for a store of elements (`addAll`), else the value's items. */
   #storeInto(s: Extract<Constraint, { kind: "store" }>, into: CellId, decl: boolean): boolean {
-    const site = s.site.start;
+    const site = offsetOf(s.site);
     if (s.how === "elements") {
       let changed = false;
       for (const item of this.cells.items(s.value)) {
@@ -322,7 +337,7 @@ class Solver {
   }
 
   evaluate(c: Constraint): boolean {
-    const site = c.site.start;
+    const site = offsetOf(c.site);
     const pos = positionAt(site);
     switch (c.kind) {
       case "has": {
@@ -469,7 +484,7 @@ class Solver {
       arguments: c.arguments,
       named: c.named,
       result: c.result,
-      site: c.site.start,
+      site: offsetOf(c.site),
       evidence: c.evidence,
     };
   }
@@ -494,7 +509,7 @@ class Solver {
       let operation: Operation;
       if (c.kind === "operation") operation = this.operation(c);
       else if (c.kind === "project" && typeof c.step === "object")
-        operation = this.memberRead(c.owner, c.step.property, c.into, c.site.start);
+        operation = this.memberRead(c.owner, c.step.property, c.into, offsetOf(c.site));
       else continue;
       const relation =
         operation.contract.family === "member"
@@ -518,6 +533,18 @@ class Solver {
     if (view === undefined) {
       view = interpret(this.cells, cell);
       this.#views.set(cell, view);
+    }
+    return view;
+  }
+
+  /** The view of several part cells read together (a merged property or element, O1). */
+  viewOf(group: readonly CellId[]): CellView {
+    if (group.length === 1) return this.view(group[0]!);
+    const key = [...group].sort((a, b) => a - b).join("+");
+    let view = this.#groupViews.get(key);
+    if (view === undefined) {
+      view = interpretCells(this.cells, group);
+      this.#groupViews.set(key, view);
     }
     return view;
   }
@@ -553,5 +580,6 @@ export function solve(graph: ConstraintGraph, options: SolveOptions): Solution {
     asks: solver.asks,
     statuses,
     view: (cell) => solver.view(cell),
+    viewOf: (group) => solver.viewOf(group),
   };
 }

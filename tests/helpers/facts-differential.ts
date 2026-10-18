@@ -41,12 +41,16 @@ const RELATIONS = operationRelations();
 
 const siteKey = (site: FactSite): string => `${site.file}:${site.start}:${site.end}`;
 
-/** Collects, solves, exports and compares one source; `null` when it does not parse or resolve. */
+/** A case's program: one source (`main.tease`), or its files in project order. */
+export type CaseSource = string | readonly { readonly path: string; readonly source: string }[];
+
+/** Collects, solves, exports and compares one program; `null` when it does not parse or resolve. */
 export function differential(
-  source: string,
+  source: CaseSource,
   mutate: (facts: SolvedTypeFacts) => SolvedTypeFacts = (facts) => facts,
 ): Differential | null {
-  const made = request([{ path: "main.tease", source }], GLOBALS, []);
+  const files = typeof source === "string" ? [{ path: "main.tease", source }] : [...source];
+  const made = request(files, GLOBALS, []);
   if (made === null) return null;
   const legacy = analyzeTypes(made).facts();
   const graph = collectGraph(made);
@@ -136,8 +140,16 @@ function topLevel(text: string, separator: string): string[] {
 function normalized(text: string): string {
   const body = text.endsWith("!") ? text.slice(0, -1) : text;
   const mark = text.endsWith("!") ? "!" : "";
-  if (body.startsWith("(") && body.endsWith(")"))
-    return `(${[...new Set(topLevel(body.slice(1, -1), "|").map(normalized))].sort().join("|")})${mark}`;
+  if (body.startsWith("(") && body.endsWith(")")) {
+    // a union's members are a set, a union inside a union its members (the legacy writes `((a|b)|null)`)
+    const members = topLevel(body.slice(1, -1), "|").flatMap((member) => {
+      const inner = normalized(member);
+      return inner.startsWith("(") && inner.endsWith(")")
+        ? topLevel(inner.slice(1, -1), "|")
+        : [inner];
+    });
+    return `(${[...new Set(members)].sort().join("|")})${mark}`;
+  }
   for (const ctor of ["list", "set", "dict"] as const)
     if (body.startsWith(`${ctor}<`) && body.endsWith(">"))
       return `${ctor}<${normalized(body.slice(ctor.length + 1, -1))}>${mark}`;

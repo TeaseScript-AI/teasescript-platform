@@ -234,10 +234,10 @@ const FORMS: readonly Form[] = [
     source: 'let xs = [[1], [fromJson("1"), 1]]\nexit',
     fact: { binding: "xs" },
     view: "known",
-    exported: "list<(list<integer!>|list<integer>)>",
+    exported: "list<list<integer!>>",
     legacy: {
       text: "list<list<unknown>>",
-      why: "a known value beside a value the compiler cannot know decides the part and marks it held (Q3.2c); both members keep their text (r9-B6, r10-B2)",
+      why: "two literals of one collection are one schema (option B, O1): the inner lists' elements are read together, the known value beside the value the compiler cannot know decides the part and marks it held (Q3.2c)",
     },
   },
   {
@@ -245,10 +245,10 @@ const FORMS: readonly Form[] = [
     source: 'let xs = [[2.5], [fromJson("1"), 1]]\nexit',
     fact: { binding: "xs" },
     view: "known",
-    exported: "list<(list<integer!>|list<number>)>",
+    exported: "list<list<number!>>",
     legacy: {
       text: "list<list<unknown>>",
-      why: "a member the legacy's union merges away keeps its text when it says more than its type (r10-B2)",
+      why: "one schema over both inner lists (option B, O1): integer beside number widens to number, the held mark kept",
     },
   },
   {
@@ -256,7 +256,7 @@ const FORMS: readonly Form[] = [
     source: 'let xs = [[[1]], [[fromJson("1"),1]]]\nexit',
     fact: { binding: "xs" },
     view: "known",
-    exported: "list<(list<list<integer!>>|list<list<integer>>)>",
+    exported: "list<list<list<integer!>>>",
     legacy: { text: "list<list<list<unknown>>>", why: "as above, at depth" },
   },
   {
@@ -400,8 +400,8 @@ test("a cycle exports a finite type, the cut cell as the legacy's undecided slot
   assert.equal(outer.element.element.kind, "unknown");
   // The element cell holds a list over itself: its own export is cut one level down.
   const member = analysis.solution.view(binding.place).members[0];
-  assert.ok(member?.kind === "collection");
-  assert.equal(types(member.element).text, "list<?>");
+  assert.ok(member?.kind === "collection" && member.element.length === 1);
+  assert.equal(types(member.element[0]!).text, "list<?>");
   // The literal and both reads hold the same cells and export the same text as the legacy.
   const texts = (facts: SolvedTypeFacts): readonly string[] =>
     facts.values.filter((fact) => fact.kind !== "callExpression").map((fact) => fact.type);
@@ -438,9 +438,9 @@ test("a cell is exported once, and every place that holds it shares its type", (
   assert.equal(types(literal.place).type, outer);
   assert.equal(types(read.place).type, outer);
   const member = analysis.solution.view(binding.place).members[0];
-  assert.ok(member?.kind === "collection");
+  assert.ok(member?.kind === "collection" && member.element.length === 1);
   assert.ok(outer.kind === "list");
-  assert.equal(outer.element, types(member.element).type);
+  assert.equal(outer.element, types(member.element[0]!).type);
   assert.equal(binding.text, "list<list<integer>>");
   assert.equal(read.text, binding.text);
 });

@@ -1,4 +1,4 @@
-import type { DynamicWhy } from "../graph.js";
+import type { DynamicWhy, SourceSite } from "../graph.js";
 import type { TypeId, TypeTable } from "./types.js";
 
 // The cells of the solver (O4 stage 3a, work note §3.2; the executable reference model `model/solver-model.mjs` of
@@ -60,6 +60,12 @@ export interface Contribution {
 }
 
 export const positionAt = (site: number): Position => [site, site];
+
+/**
+ * A site as one number ordered by the project's file order, then the offset: positions and the identities of defining
+ * sites (`get@`, `fallback@`, `op@`) use it, so two files' offsets never collide or outrank each other.
+ */
+export const offsetOf = (site: SourceSite): number => site.file * 2 ** 32 + site.start;
 
 function comparePositions(a: Position, b: Position): number {
   return a[0] !== b[0] ? a[0] - b[0] : a[1] - b[1];

@@ -166,27 +166,36 @@ function declarationOf(
   }
 }
 
+/**
+ * A part the walk exports: one cell, or several part cells read together (a merged property or element, O1), keyed by
+ * their sorted ids joined with `+`.
+ */
+type PartKey = CellId | string;
+
+const keyOf = (group: readonly CellId[]): PartKey =>
+  group.length === 1 ? group[0]! : [...group].sort((a, b) => a - b).join("+");
+
 /** A cell whose export the walk is making, with the part cells it has not taken yet and the parts made under it. */
 interface Frame {
-  readonly cell: CellId;
+  readonly cell: PartKey;
   readonly view: CellView;
-  readonly parts: CellId[];
+  readonly parts: PartKey[];
   /** The exports of the parts made under this frame that a cut was made in (valid along this path only). */
-  readonly done: Map<CellId, ExportedType>;
+  readonly done: Map<PartKey, ExportedType>;
 }
 
 /** The export of the cells of one solution (see the module comment). */
 class Exporter {
   readonly #solution: Solution;
   /** The exports no cut was made in: shared by every place that holds them. */
-  readonly #exports = new Map<CellId, ExportedType>();
+  readonly #exports = new Map<PartKey, ExportedType>();
   /** The exports of the places asked for whose walk made a cut: relative to that place. */
-  readonly #roots = new Map<CellId, ExportedType>();
+  readonly #roots = new Map<PartKey, ExportedType>();
   /** The cells whose export the walk is making, on the path from its root. */
-  readonly #active = new Set<CellId>();
+  readonly #active = new Set<PartKey>();
   readonly #types = new Map<TypeId, ExportedType>();
   readonly #collections = new Map<string, WeakMap<ExportedType, ExportedType>>();
-  readonly #objects = new WeakMap<ReadonlyMap<string, CellId>, ExportedType>();
+  readonly #objects = new WeakMap<ReadonlyMap<string, readonly CellId[]>, ExportedType>();
   readonly #never: ExportedType;
   readonly #unknown: ExportedType;
   readonly #null: ExportedType;
@@ -231,8 +240,11 @@ class Exporter {
    */
   #walk(root: CellId): ExportedType {
     const stack: Frame[] = [];
-    const enter = (cell: CellId): void => {
-      const view = this.#solution.view(cell);
+    const enter = (cell: PartKey): void => {
+      const view =
+        typeof cell === "number"
+          ? this.#solution.view(cell)
+          : this.#solution.viewOf(cell.split("+").map(Number));
       this.#active.add(cell);
       // Reversed, so the parts are taken from the end in member order.
       stack.push({ cell, view, parts: view.members.flatMap(partsOf).reverse(), done: new Map() });
@@ -261,7 +273,7 @@ class Exporter {
   }
 
   /** The export of a cell whose parts are exported (`part`), or are on the walk's path and cut there. */
-  #cell(view: CellView, part: (cell: CellId) => ExportedType): ExportedType {
+  #cell(view: CellView, part: (cell: PartKey) => ExportedType): ExportedType {
     switch (view.kind) {
       case "never":
         return this.#never;
@@ -298,7 +310,7 @@ class Exporter {
     }
   }
 
-  #member(member: Member, part: (cell: CellId) => ExportedType): ExportedType {
+  #member(member: Member, part: (cell: PartKey) => ExportedType): ExportedType {
     switch (member.kind) {
       case "type": {
         let exported = this.#types.get(member.type);
@@ -309,7 +321,7 @@ class Exporter {
         return exported;
       }
       case "collection": {
-        const element = part(member.element);
+        const element = part(keyOf(member.element));
         let byElement = this.#collections.get(member.ctor);
         if (byElement === undefined) {
           byElement = new WeakMap();
@@ -333,8 +345,13 @@ class Exporter {
         if (known !== undefined) return known;
         // a slot no store reached (empty by construction) is not a property of this object
         const entries = [...member.props]
-          .filter(([, cell]) => !this.#solution.cells.items(cell).every((item) => item.tag === "e"))
-          .map(([name, cell]): readonly [string, ExportedType] => [name, part(cell)])
+          .filter(
+            ([, group]) =>
+              !group.every((cell) =>
+                this.#solution.cells.items(cell).every((item) => item.tag === "e"),
+              ),
+          )
+          .map(([name, group]): readonly [string, ExportedType] => [name, part(keyOf(group))])
           .sort(([left], [right]) => compareText(left, right));
         const exported: ExportedType = {
           type: Object.freeze({
@@ -361,14 +378,14 @@ class Exporter {
   }
 }
 
-function partsOf(member: Member): readonly CellId[] {
+function partsOf(member: Member): readonly PartKey[] {
   switch (member.kind) {
     case "type":
       return [];
     case "collection":
-      return [member.element];
+      return [keyOf(member.element)];
     case "object":
-      return [...member.props.values()];
+      return [...member.props.values()].map(keyOf);
   }
 }
 

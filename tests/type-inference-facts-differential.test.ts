@@ -8,6 +8,7 @@ import {
   differential,
   mechanicalGroup,
   readLedger,
+  type CaseSource,
   recordKey,
   summarize,
   verdicts,
@@ -27,8 +28,11 @@ const FIXTURE = new URL("../../tests/fixtures/type-inference/solver-cases.jsonl"
 
 interface SolverCase {
   readonly name: string;
-  readonly source: string;
+  readonly source?: string;
+  readonly files?: readonly { readonly path: string; readonly source: string }[];
 }
+
+const programOf = (c: SolverCase): CaseSource => c.files ?? c.source ?? "";
 
 function readCases(): readonly SolverCase[] {
   return readFileSync(FIXTURE, "utf8")
@@ -52,7 +56,7 @@ function allVerdicts(): {
   const seen = new Set<string>();
   let compared = 0;
   for (const c of readCases()) {
-    const result = differential(c.source);
+    const result = differential(programOf(c));
     if (result === null) continue;
     compared += result.compared;
     for (const v of verdicts(ledger, c.name, result)) {
@@ -63,10 +67,10 @@ function allVerdicts(): {
   return { verdicts: out, seen, compared };
 }
 
-const sourceOf = (name: string): string => {
+const sourceOf = (name: string): CaseSource => {
   const found = readCases().find((c) => c.name === name);
   assert.ok(found !== undefined, `the accumulated set has ${name}`);
-  return found.source;
+  return programOf(found);
 };
 
 test("every difference on the accumulated cases is recorded in the ledger with its exact texts", () => {

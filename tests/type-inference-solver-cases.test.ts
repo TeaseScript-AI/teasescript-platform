@@ -21,7 +21,9 @@ const GLOBALS = ["hostValue", "hostFlag", "hostText", "hostList", "hostDict"];
 
 interface SolverCase {
   readonly name: string;
-  readonly source: string;
+  readonly source?: string;
+  /** The files of a multi-file case, in project order. */
+  readonly files?: readonly { readonly path: string; readonly source: string }[];
   readonly model: { readonly summary: string; readonly operations: string };
 }
 
@@ -42,7 +44,7 @@ test("the solver reaches the reference model's interpretation on every case", ()
   const relations = operationRelations();
   const failures: string[] = [];
   for (const c of cases) {
-    const made = request([{ path: "main.tease", source: c.source }], GLOBALS, []);
+    const made = request(c.files ?? [{ path: "main.tease", source: c.source ?? "" }], GLOBALS, []);
     assert.notEqual(made, null, `${c.name} parses and resolves`);
     const solution = solve(collectGraph(made!), { relations, verify: true });
     const summary = solutionSummary(solution);

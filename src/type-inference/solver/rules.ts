@@ -27,8 +27,11 @@ export interface CellRule {
   readonly parts?: Readonly<Record<string, readonly RuleItem[]>> | undefined;
   readonly expect: {
     readonly kind: CellView["kind"];
-    /** The names of the items whose forms the view exports (one form per distinct type or structure). */
-    readonly members: readonly string[];
+    /**
+     * The names of the items whose forms the view exports (one form per distinct type or structure); a group of
+     * names is one member made of those items together (the witnesses of one constructor, O1 and option B).
+     */
+    readonly members: readonly (string | readonly string[])[];
     readonly families?: readonly string[] | undefined;
     readonly optional?: boolean | undefined;
     readonly held?: boolean | undefined;
@@ -205,16 +208,16 @@ export const CELL_RULES: readonly CellRule[] = [
     expect: { kind: "known", members: ["a"] },
   },
   {
-    name: "a list empty by construction is covered by a list with members",
+    name: "a list empty by construction and a list with members are one member over both element cells",
     items: [list("a", "E1", 5), list("b", "E2", 9)],
     parts: { E1: [e("x", 5)], E2: [w("y", "integer", 10)] },
-    expect: { kind: "known", members: ["b"] },
+    expect: { kind: "known", members: [["a", "b"]] },
   },
   {
-    name: "two object literals are two alternatives of one family",
+    name: "two object literals of one place are one schema over both property cells (option B)",
     items: [object("a", { x: "P1" }, 5), object("b", { x: "P2" }, 9)],
     parts: { P1: [w("x", "integer", 6, true)], P2: [w("y", "string", 10, true)] },
-    expect: { kind: "known", members: ["a", "b"] },
+    expect: { kind: "known", members: [["a", "b"]] },
   },
   {
     name: "a list beside a scalar is a conflict",

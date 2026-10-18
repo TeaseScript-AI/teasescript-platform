@@ -22,22 +22,29 @@ import {
 import type { TypeId, TypeNode } from "./types.js";
 
 // The lifting of a relation's answers into cells (O4 stage 3a, work note §3.5; the executable reference model is the
-// contract). An operand's alternatives are one per flat item and one per combination of the parts' alternatives of a
-// structural item, so they only grow: a part empty by construction is `never` (an object's empty slot: the property
-// absent), a part with dynamic evidence is also the legacy's `unknown`, a part already on the path (a structural
-// cycle) is `unknown`, all permanently; a part without evidence contributes nothing yet. The relation is asked when
+// contract). An operand's alternatives are one per flat item, one per alternative of the element of a collection item
+// (nesting one part at a time: a part empty by construction is `never`, a part with dynamic evidence is also the
+// legacy's `unknown`, a part already on the path, a structural cycle, is `unknown`, all permanently; a part without
+// evidence contributes nothing yet), and **one** per object item: its shape, every slot with the placeholder `never`,
+// which no relation reads (a property's type is read as a leaf, O1). The sets only grow. The relation is asked when
 // every strict operand has evidence, over one product of choices: each operand chooses a closed alternative, a
-// possibility, a dynamic view (one per provenance: its alternatives and possibilities beside the provenance), or,
-// when lazy (a `default:`, the right side of `and` and `or`), nothing; the lists only grow, so no combination asked
-// earlier is lost. A combination with a possibility is asked for possibilities, one with a dynamic view for the
-// dynamic reading (an unconditional `type` answer is a witness), the rest for witnesses and members. An answer is
-// read per the carrier: `type` the combination's result (a member with the operation's site as identity when a
-// chosen alternative is a member), an `alternatives` answer with two value-bearing results a permitted union the
-// contract defines, a projection the chosen alternative's part along the graph's path with its own tag and, for a
-// structural part, the item itself (parts shared), a join the collection built over the projected parts into the
-// result's derived part cell, `byReceiver` the case of the chosen receiver kind (under a dynamic receiver every
-// applicable case's answers are possibilities), `possible` possibilities, `dynamic` a dynamic item, `invalid` an
-// invalid combination. Property reads on a receiver go through the member rules composed over the receiver's kinds.
+// possibility, a dynamic view (one per provenance: its alternatives and possibilities beside the provenance), or, when
+// lazy (a `default:`, the right side of `and` and `or`), nothing. Beyond the operands, the dimensions a relation reads
+// are selected lazily: a leaf of an operand along a path (`inputs.leaf`), a place the evidence names (`inputs.view`),
+// a structural step inside a path (the chosen item), and the presence of a property a projection reads (present or
+// absent where its slot is empty by construction beside evidence); a read of a dimension not yet selected records it,
+// the ask is discarded and repeated once per choice of that dimension. The lists only grow and every choice is an
+// alternative that never changes, so no combination asked earlier is lost. A combination with a possibility is asked
+// for possibilities, one with a dynamic view for the dynamic reading (an unconditional `type` answer is a witness),
+// the rest for witnesses and members. An answer is read per the carrier: `type` the combination's result (a member
+// with the operation's site as identity when a chosen alternative is a member), an `alternatives` answer with two
+// value-bearing results a permitted union the contract defines, a projection the chosen alternative's part along the
+// graph's path with its own tag and, for a structural part, the item itself (parts shared), a join the collection
+// built over the projected parts into the result's derived part cell, a `structure` the object or dict built part by
+// part into the result's part cells (each part asked on its own), `byReceiver` the case of the chosen receiver kind
+// (under a dynamic receiver every applicable case's answers are possibilities), `possible` possibilities, `dynamic` a
+// dynamic item, `invalid` an invalid combination. Property reads on a receiver go through the member rules composed
+// over the receiver's kinds.
 
 const RECEIVER: OperandRef = { receiver: true };
 
@@ -51,22 +58,19 @@ export interface Alternative {
   readonly cells: readonly CellId[];
   /** The structural items it materializes, carried as themselves by a projection; none for a flat type or a synthetic part. */
   readonly items: readonly Item[];
-  /** The chosen part alternatives of a structural item, for projections; `null` for a flat type. */
+  /** The chosen part of a structural item, for projections; `null` for a flat type. */
   readonly choice: Choice | null;
-  /** An object below another object's alternative: `object` in the view, its property lists for the projections. */
-  readonly opaque?: true;
 }
 
 /**
- * The chosen part alternatives, with every part cell the merged items hold them in (a dynamic walk reads each): a
- * collection's one chosen element; an object's one chosen alternative per property (the product over its
- * properties), or, for an opaque object beyond the view's depth, every alternative of each property in a canonical
- * order, for the projections (work note §3.5). Two alternatives of one key merge their lists.
+ * The chosen part of a structural alternative: a collection's one chosen element alternative with every element cell
+ * the merged items hold it in (a dynamic walk reads each); an object's part cells per property, over all the merged
+ * items of its shape (a property is read from them on demand, O1).
  */
 export type Choice =
   | { readonly element: Alternative; readonly cells: readonly CellId[]; readonly props?: undefined }
   | {
-      readonly props: ReadonlyMap<string, readonly Alternative[]>;
+      readonly props: ReadonlyMap<string, readonly CellId[]>;
       readonly cells: ReadonlyMap<string, readonly CellId[]>;
       readonly element?: undefined;
     };
@@ -75,26 +79,18 @@ const unionOf = (left: readonly CellId[], right: readonly CellId[]): readonly Ce
   [...new Set([...left, ...right])].sort((a, b) => a - b);
 
 /**
- * The roles of an alternative and of its chosen parts (tag, identity, provenance), down through the choices: two
- * alternatives of one type are one only when every chosen part has the same role, else a projection through the
- * merged choice would take the role of whichever was enumerated first (r11-B1).
+ * The roles of an alternative and of a collection's chosen element (tag, identity, provenance): two alternatives of
+ * one type are one only when the chosen part has the same role, else a projection through the merged choice would
+ * take the role of whichever was enumerated first (r11-B1). An object alternative is its shape, so its role is its own:
+ * its properties are read as leaves, never chosen.
  */
 function roleOf(a: Alternative): string {
   const own = `${a.tag}|${a.group ?? ""}|${a.why ?? ""}`;
-  if (a.choice === null) return own;
-  if (a.choice.element !== undefined) return `${own}[${roleOf(a.choice.element)}]`;
-  // an opaque object's identity is its own role: its property lists grow as evidence arrives, so naming them would
-  // make a merge depend on a transient state; a product alternative names its chosen parts, which never change
-  if (a.opaque === true) return own;
-  return `${own}{${[...a.choice.props]
-    .map(([name, list]) => `${name}:${list.map(roleOf).sort().join("/")}`)
-    .join(",")}}`;
+  if (a.choice === null || a.choice.element === undefined) return own;
+  return `${own}[${roleOf(a.choice.element)}]`;
 }
 
 const keyOf = (a: Alternative): string => `${a.type}|${roleOf(a)}`;
-
-/** The origin of a cell: the place or literal whose derived part it is (the first segment of a derived cell's name). */
-const originOf = (cells: Cells, cell: CellId): string => cells.name(cell).split("/")[0]!;
 
 /** A list of alternatives in a canonical order (by key), so no order of enumeration shows in a choice. */
 function sortedAlternatives(list: readonly Alternative[]): readonly Alternative[] {
@@ -139,20 +135,11 @@ function alternatives(
   cells: Cells,
   cell: CellId,
   path: ReadonlySet<CellId> = new Set(),
-  depth = 0,
 ): readonly Alternative[] {
   const out = new Map<string, Alternative>();
-  const derived = cells.name(cell).includes("/");
-  const origin = originOf(cells, cell);
   for (const item of cells.items(cell)) {
     if (item.tag === "d" || item.tag === "e") continue;
-    // an item written in the same literal as the part that holds it keeps the depth; one that arrived through a
-    // store (another literal's, an answer's) is one store boundary deeper
-    const d =
-      derived && item.ctor !== undefined && originOf(cells, cells.partsOf(item)[0]!) !== origin
-        ? depth + 1
-        : depth;
-    for (const alternative of itemAlternatives(cells, item, cell, path, d)) {
+    for (const alternative of itemAlternatives(cells, item, cell, path)) {
       const key = keyOf(alternative);
       const prior = out.get(key);
       if (prior === undefined) out.set(key, alternative);
@@ -178,15 +165,11 @@ function merged(prior: Alternative, other: Alternative): Alternative {
         cells: unionOf(prior.choice.cells, other.choice.cells),
       };
     else if (prior.choice.props !== undefined && other.choice.props !== undefined) {
+      // two object items of one shape: their part cells per property, so a projection reads both (parts shared)
       const props = new Map(prior.choice.props);
-      for (const [name, theirs] of other.choice.props) {
-        const mine = props.get(name);
-        props.set(name, mine === undefined ? theirs : mergedLists(mine, theirs));
-      }
-      const partCells = new Map(prior.choice.cells);
-      for (const [name, theirs] of other.choice.cells)
-        partCells.set(name, unionOf(partCells.get(name) ?? [], theirs));
-      choice = { props, cells: partCells };
+      for (const [name, theirs] of other.choice.props)
+        props.set(name, unionOf(props.get(name) ?? [], theirs));
+      choice = { props, cells: props };
     }
   }
   return { ...prior, cells, items, choice };
@@ -197,7 +180,6 @@ export function itemAlternatives(
   item: Item,
   cell: CellId,
   path: ReadonlySet<CellId>,
-  depth = 0,
 ): readonly Alternative[] {
   const table = cells.table;
   const tag: Alternative["tag"] =
@@ -223,9 +205,9 @@ export function itemAlternatives(
     items: [],
     choice: null,
   });
-  const partAlternatives = (part: CellId, nextDepth = depth): Alternative[] => {
+  const partAlternatives = (part: CellId): Alternative[] => {
     if (path.has(part) || part === cell) return [synthetic(UNKNOWN_TYPE, part)];
-    const out = [...alternatives(cells, part, inner, nextDepth)];
+    const out = [...alternatives(cells, part, inner)];
     const items = cells.items(part);
     if (items.some((it) => it.tag === "e")) out.push(synthetic({ kind: "never" }, part));
     if (items.some((it) => it.tag === "d" || it.tag === "p"))
@@ -251,64 +233,30 @@ export function itemAlternatives(
     };
   };
   if (item.parts.props !== undefined) {
-    const propCells: ReadonlyMap<string, readonly CellId[]> = new Map(
-      [...item.parts.props].map(([name, part]) => [name, [part]]),
+    // one alternative: the shape, every slot with the placeholder `never` that no relation reads (a property's type
+    // is read as a leaf, one alternative per ask); the shape of an item never changes, so the set only grows and two
+    // items of one shape are one alternative whose part cells are read together
+    const props: ReadonlyMap<string, readonly CellId[]> = new Map(
+      [...item.parts.props].sort(byName).map(([name, part]) => [name, [part]]),
     );
     if (item.parts.open === true)
       return [
         {
           ...base,
           type: table.intern({ kind: "object", properties: null }),
-          choice: { props: new Map(), cells: propCells },
+          choice: { props, cells: props },
         },
       ];
-    // Views reach one store boundary deep (the orchestrator's decision on r11-B6, revised after PR reviews r1-B1
-    // and r2-B1): the product over an object's properties continues through the objects written inline in the same
-    // literal and through the objects that arrived through one store (a descriptor composed from variables); an
-    // object beyond the second store boundary is opaque in the view, an `object` whose property lists still serve
-    // the projections. Each alternative is a combination of part alternatives that never change (monotone), and a
-    // cyclic or deep structure is cut at the second boundary (bounded).
-    if (depth >= 2) {
-      const props = new Map<string, readonly Alternative[]>();
-      for (const [name, part] of [...item.parts.props].sort(byName)) {
-        const parts = sortedAlternatives(
-          partAlternatives(part, depth).filter((a) => table.node(a.type).kind !== "never"),
-        );
-        if (parts.length > 0) props.set(name, parts);
-      }
-      return [
-        {
-          ...base,
-          type: table.intern({ kind: "object", properties: null }),
-          choice: { props, cells: propCells },
-          opaque: true,
-        },
-      ];
-    }
-    let combos: (readonly [string, Alternative])[][] = [[]];
-    for (const [name, part] of [...item.parts.props].sort(byName)) {
-      // an empty slot: the property absent; beside evidence, both
-      const parts = sortedAlternatives(
-        partAlternatives(part, depth).filter((a) => table.node(a.type).kind !== "never"),
-      );
-      const absent = cells.items(part).some((it) => it.tag === "e");
-      // a property without evidence yet: the object contributes nothing yet
-      if (parts.length === 0 && !absent) return [];
-      combos = combos.flatMap((combo) => [
-        ...(absent ? [combo] : []),
-        ...parts.map((a) => [...combo, [name, a] as const]),
-      ]);
-    }
-    return combos.map((combo) =>
-      compose(
-        {
+    return [
+      {
+        ...base,
+        type: table.intern({
           kind: "object",
-          properties: new PropertyTable(combo.map(([name, a]) => [name, table.toStatic(a.type)])),
-        },
-        combo.map(([, a]) => a),
-        { props: new Map(combo.map(([name, a]) => [name, [a]])), cells: propCells },
-      ),
-    );
+          properties: new PropertyTable([...props.keys()].map((name) => [name, { kind: "never" }])),
+        }),
+        choice: { props, cells: props },
+      },
+    ];
   }
   const element = item.parts.element;
   const ctor: Exclude<Constructor, "object"> = item.ctor === "object" ? "list" : item.ctor;
@@ -360,8 +308,16 @@ function stepOf(
         : [];
     if (a.choice.props !== undefined) {
       if (typeof step !== "object") return [];
-      const part = a.choice.props.get(step.property);
-      return part === undefined ? [] : [...part, ...marks(a.choice.cells.get(step.property))];
+      // the property's alternatives from the part cells of the merged items, enumerated here afresh
+      const parts = a.choice.props.get(step.property);
+      if (parts === undefined) return [];
+      return [
+        ...mergedLists(
+          parts.flatMap((part) => alternatives(cells, part)),
+          [],
+        ),
+        ...marks(parts),
+      ];
     }
     if (typeof step === "object") return [];
     if (node.kind === "dict" && step === "iteration") return [text()];
@@ -404,6 +360,7 @@ export interface Tally {
   readonly invalid: number;
 }
 
+/** One choice of a dimension: an operand's, a leaf's, a place's, or the presence of a property a projection reads. */
 type Pick =
   | {
       readonly kind: "closed" | "possible";
@@ -411,18 +368,28 @@ type Pick =
       readonly view: OperandView;
       readonly tag: Alternative["tag"];
       readonly why: Provenance | undefined;
+      readonly cells: readonly CellId[];
     }
   | {
       readonly kind: "bottom";
       readonly view: OperandView;
       readonly tag: "w";
       readonly why: undefined;
+      readonly cells: readonly CellId[];
     }
   | {
       readonly kind: "dynamic";
       readonly view: OperandView;
       readonly tag: "d";
       readonly why: Provenance;
+      readonly cells: readonly CellId[];
+    }
+  | {
+      readonly kind: "absent" | "present";
+      readonly view: null;
+      readonly tag: "w";
+      readonly why: undefined;
+      readonly cells: readonly CellId[];
     };
 
 interface Operand {
@@ -484,6 +451,10 @@ interface Reading {
   readonly mode: "closed" | "dynamic" | "possible";
 }
 
+/** The dimensions selected for one ask, by key, and the recorder of a dimension read before its selection. */
+type Selection = ReadonlyMap<string, Pick>;
+type Want = (key: string, picks: () => readonly Pick[]) => void;
+
 const BOTTOM_VIEW: OperandView = { alternatives: null, dynamic: null, known: undefined };
 
 const sameRef = (a: OperandRef, b: OperandRef): boolean =>
@@ -498,6 +469,118 @@ const sameRef = (a: OperandRef, b: OperandRef): boolean =>
 const dynamicWhy = (why: Provenance): Exclude<Provenance, "unknown"> =>
   why === "unknown" ? "unknown callee" : why;
 
+/** The dynamic items of a cell, as marks a dynamic walk carries. */
+function marksOf(cells: Cells, cell: CellId): DynamicMark[] {
+  return cells
+    .items(cell)
+    .filter((it) => it.tag === "d" && it.why !== undefined)
+    .map((it): DynamicMark => ({ tag: "d", why: it.why! }));
+}
+
+/** The choices of an operand or a place: its closed alternatives, its possibilities, one dynamic view per provenance, and, when lazy, nothing. */
+function picksOf(cells: Cells, cell: CellId, lazy: boolean): Pick[] {
+  const table = cells.table;
+  const all = alternatives(cells, cell);
+  const list: Pick[] = all.map((alt) => ({
+    kind: alt.tag === "p" ? "possible" : "closed",
+    alt,
+    view: { alternatives: [table.toStatic(alt.type)], dynamic: null, known: undefined },
+    tag: alt.tag,
+    why: alt.why,
+    cells: alt.cells,
+  }));
+  const types = all.map((alt) => table.toStatic(alt.type));
+  for (const why of provenances(cells, cell))
+    list.push({
+      kind: "dynamic",
+      view: {
+        alternatives: types.length === 0 ? null : types,
+        dynamic: dynamicWhy(why),
+        known: undefined,
+      },
+      tag: "d",
+      why,
+      cells: [cell],
+    });
+  if (lazy) list.push({ kind: "bottom", view: BOTTOM_VIEW, tag: "w", why: undefined, cells: [] });
+  return list;
+}
+
+/**
+ * The choices of a dimension a step reached: one per closed alternative and possibility, one dynamic view per
+ * provenance, `absent` where the part may be absent, a single bottom where there is nothing yet (the relation decides
+ * whether to wait).
+ */
+function picksFrom(
+  cells: Cells,
+  found: readonly (Alternative | DynamicMark)[],
+  absence: boolean,
+): Pick[] {
+  const table = cells.table;
+  const alts = found.filter((x): x is Alternative => x.tag !== "d");
+  const list: Pick[] = alts.map((alt) => ({
+    kind: alt.tag === "p" ? "possible" : "closed",
+    alt,
+    view: { alternatives: [table.toStatic(alt.type)], dynamic: null, known: undefined },
+    tag: alt.tag,
+    why: alt.why,
+    cells: alt.cells,
+  }));
+  const whys = [...new Set(found.flatMap((x) => (x.tag === "d" ? [x.why] : [])))].sort();
+  const types = alts.map((alt) => table.toStatic(alt.type));
+  for (const why of whys)
+    list.push({
+      kind: "dynamic",
+      view: {
+        alternatives: types.length === 0 ? null : types,
+        dynamic: dynamicWhy(why),
+        known: undefined,
+      },
+      tag: "d",
+      why,
+      cells: [],
+    });
+  if (absence) list.push({ kind: "absent", view: null, tag: "w", why: undefined, cells: [] });
+  if (list.length === 0)
+    list.push({ kind: "bottom", view: BOTTOM_VIEW, tag: "w", why: undefined, cells: [] });
+  return list;
+}
+
+/** The pick of a dimension: the selected one, or none, recorded as wanted, when it is not selected yet. */
+function select(
+  key: string,
+  picks: () => readonly Pick[],
+  selection: Selection,
+  want: Want,
+): Pick | null {
+  const pick = selection.get(key);
+  if (pick !== undefined) return pick;
+  want(key, picks);
+  return null;
+}
+
+/** The reading of a combination with its selected dimensions: the mode, the base tag and the provenances. */
+function readingOf(combo: readonly Pick[], selection: Selection, site: string): Reading {
+  const picks = [...combo, ...selection.values()];
+  const mode: Reading["mode"] = picks.some((pick) => pick.kind === "possible")
+    ? "possible"
+    : picks.some((pick) => pick.kind === "dynamic")
+      ? "dynamic"
+      : "closed";
+  const base: Reading["base"] =
+    mode === "possible" ? "p" : picks.some((pick) => pick.tag === "m") ? "m" : "w";
+  const whys = [
+    ...new Set(
+      picks.flatMap((pick) =>
+        (pick.kind === "dynamic" || pick.kind === "possible") && pick.why !== undefined
+          ? [pick.why]
+          : [],
+      ),
+    ),
+  ].sort();
+  return { base, site, whys, mode };
+}
+
 /**
  * Asks the relation for one operation over the cells' current alternatives and adds every answer to the result cell.
  * Returns whether the result changed and the tally of counted combinations (`null` when the relation was not asked).
@@ -508,7 +591,6 @@ export function lift(
   relation: OperationRelation | undefined,
 ): { readonly changed: boolean; readonly tally: Tally | null } {
   const { cells } = context;
-  const table = cells.table;
   const pos = positionAt(operation.site);
   if (relation === undefined)
     return {
@@ -533,30 +615,7 @@ export function lift(
   for (const operand of operands)
     if (!operand.lazy && !cells.has(operand.cell)) return { changed: false, tally: null };
   const site = `op@${operation.site}`;
-  const choices: Pick[][] = operands.map((operand) => {
-    const all = alternatives(cells, operand.cell);
-    const list: Pick[] = all.map((alt) => ({
-      kind: alt.tag === "p" ? "possible" : "closed",
-      alt,
-      view: { alternatives: [table.toStatic(alt.type)], dynamic: null, known: undefined },
-      tag: alt.tag,
-      why: alt.why,
-    }));
-    const types = all.map((alt) => table.toStatic(alt.type));
-    for (const why of provenances(cells, operand.cell))
-      list.push({
-        kind: "dynamic",
-        view: {
-          alternatives: types.length === 0 ? null : types,
-          dynamic: dynamicWhy(why),
-          known: undefined,
-        },
-        tag: "d",
-        why,
-      });
-    if (operand.lazy) list.push({ kind: "bottom", view: BOTTOM_VIEW, tag: "w", why: undefined });
-    return list;
-  });
+  const choices = operands.map((operand) => picksOf(cells, operand.cell, operand.lazy));
   if (choices.some((list) => list.length === 0)) return { changed: false, tally: null };
   const product = (lists: readonly (readonly Pick[])[]): Pick[][] =>
     lists.reduce<Pick[][]>(
@@ -567,135 +626,220 @@ export function lift(
   let asked = 0;
   let invalid = 0;
   for (const combo of product(choices)) {
-    const mode: Reading["mode"] = combo.some((pick) => pick.kind === "possible")
-      ? "possible"
-      : combo.some((pick) => pick.kind === "dynamic")
-        ? "dynamic"
-        : "closed";
-    const inputs = inputsOf(cells, operands, combo, operation.evidence);
-    const cascade =
-      context.nonWorking !== null &&
-      combo.some(
-        (pick, index) =>
-          pick.kind === "closed" &&
-          context.nonWorking!.has(`${operands[index]!.cell}:${pick.alt.type}`),
-      );
-    context.asks += 1;
-    if (!cascade) asked += 1; // a cascade combination is not counted at all; its valid evidence still stands
-    const base: Reading["base"] =
-      mode === "possible" ? "p" : combo.some((pick) => pick.tag === "m") ? "m" : "w";
-    const whys = [
-      ...new Set(
-        combo.flatMap((pick) =>
-          (pick.kind === "dynamic" || pick.kind === "possible") && pick.why !== undefined
-            ? [pick.why]
-            : [],
-        ),
-      ),
-    ].sort();
-    const reading = readAnswer(cells, relation.result(inputs), inputs, combo, operands, {
-      base,
+    const asks = askLazy(
+      cells,
+      (inputs) => relation.result(inputs),
+      operands,
+      combo,
+      operation,
       site,
-      whys,
-      mode,
-    });
-    if (reading.invalid && !cascade) invalid += 1;
-    for (const outcome of reading.outcomes)
-      if (emit(cells, operation.result, outcome, pos)) changed = true;
+      new Map(),
+    );
+    for (const { reading, selection } of asks) {
+      const from = [
+        ...combo.flatMap((pick, index) =>
+          pick.kind === "closed" ? [`${operands[index]!.cell}:${pick.alt.type}`] : [],
+        ),
+        ...[...selection.values()].flatMap((pick) =>
+          pick.kind === "closed" ? pick.cells.map((cell) => `${cell}:${pick.alt.type}`) : [],
+        ),
+      ];
+      const cascade =
+        context.nonWorking !== null && from.some((key) => context.nonWorking!.has(key));
+      context.asks += 1;
+      if (!cascade) asked += 1; // a cascade combination is not counted at all; its valid evidence still stands
+      if (reading.invalid && !cascade) invalid += 1;
+      for (const outcome of reading.outcomes)
+        if (emit(cells, operation.result, outcome, pos)) changed = true;
+    }
   }
   return { changed, tally: { asked, invalid } };
 }
 
+interface Ask {
+  readonly reading: { readonly outcomes: readonly Outcome[]; readonly invalid: boolean };
+  readonly selection: Selection;
+}
+
+/**
+ * Asks a result function over one operand combination, selecting the dimensions it reads lazily, depth first: every
+ * completed ask with its selection.
+ */
+function askLazy(
+  cells: Cells,
+  fn: (inputs: OperationInputs) => OperationResult,
+  operands: readonly Operand[],
+  combo: readonly Pick[],
+  operation: Operation,
+  site: string,
+  selection: Selection,
+): Ask[] {
+  const asks: Ask[] = [];
+  const run = (selected: Selection): void => {
+    // the first dimension read before its selection, recorded by the closures below
+    const wanted: { current: { readonly key: string; readonly picks: readonly Pick[] } | null } = {
+      current: null,
+    };
+    const want: Want = (key, picks) => {
+      if (wanted.current === null) wanted.current = { key, picks: picks() };
+    };
+    const inputs = inputsOf(cells, operands, combo, operation, selected, want);
+    const answer = fn(inputs);
+    let reading: Ask["reading"] | null = null;
+    if (wanted.current === null)
+      reading = readAnswer(
+        cells,
+        answer,
+        combo,
+        operands,
+        readingOf(combo, selected, site),
+        operation,
+        site,
+        selected,
+        want,
+      );
+    if (wanted.current !== null) {
+      const { key, picks } = wanted.current;
+      for (const pick of picks) run(new Map([...selected, [key, pick]]));
+      return;
+    }
+    asks.push({ reading: reading!, selection: selected });
+  };
+  run(selection);
+  return asks;
+}
+
+/** The inputs of one ask: the operands' views, and the dimensions read through them, selected or recorded. */
 function inputsOf(
   cells: Cells,
   operands: readonly Operand[],
   combo: readonly Pick[],
-  evidence: SyntaxEvidence | undefined,
+  operation: Operation,
+  selection: Selection,
+  want: Want,
 ): OperationInputs {
   let receiver: OperandView | null = null;
   const args: OperandView[] = [];
   const named = new Map<string, OperandView>();
   operands.forEach((operand, index) => {
-    const view = combo[index]!.view;
+    const view = combo[index]!.view ?? BOTTOM_VIEW;
     if ("receiver" in operand.ref) receiver = view;
     else if ("argument" in operand.ref) args[operand.ref.argument] = view;
     else if ("named" in operand.ref) named.set(operand.ref.named, view);
   });
   const table = cells.table;
+  const placePick = (place: PlaceId): Pick | null =>
+    select(`p:${place}`, () => picksOf(cells, place, false), selection, want);
+  // the view of a whole cell under a dynamic walk: every alternative beside the provenance
+  const dynamicViewOf = (found: readonly (Alternative | DynamicMark)[]): OperandView => {
+    const alts = [
+      ...new Map(
+        found
+          .filter((a): a is Alternative => a.tag !== "d" && a.tag !== "p")
+          .map((a) => [a.type, table.toStatic(a.type)] as const),
+      ).values(),
+    ];
+    const mark = found.find((a): a is DynamicMark => a.tag === "d");
+    return {
+      alternatives: alts.length === 0 ? null : alts,
+      dynamic: mark === undefined ? null : dynamicWhy(mark.why),
+      known: undefined,
+    };
+  };
   return {
     receiver,
     arguments: args,
     named,
-    evidence,
+    evidence: operation.evidence,
     view(place) {
-      const alts = alternatives(cells, place)
-        .filter((a) => a.tag !== "p")
-        .map((a) => table.toStatic(a.type));
-      const why = provenances(cells, place)[0];
-      return {
-        alternatives: alts.length === 0 ? null : alts,
-        dynamic: why === undefined ? null : dynamicWhy(why),
-        known: undefined,
-      };
+      const pick = placePick(place);
+      return pick === null ? BOTTOM_VIEW : (pick.view ?? BOTTOM_VIEW);
     },
     leaf(path) {
-      // along the combination's chosen alternative of the operand (every alternative and dynamic item of the cell
-      // for a dynamic view, or for a place the evidence names), one step at a time
+      let key: string;
+      let dynamicWalk = false;
       let found: readonly (Alternative | DynamicMark)[];
-      let dynamicWalk: boolean;
-      const marks = (cell: CellId): DynamicMark[] =>
-        cells
-          .items(cell)
-          .filter((it) => it.tag === "d" && it.why !== undefined)
-          .map((it): DynamicMark => ({ tag: "d", why: it.why! }));
       if ("place" in path.of) {
-        found = [...alternatives(cells, path.of.place), ...marks(path.of.place)];
-        dynamicWalk = true;
+        const pick = placePick(path.of.place);
+        if (
+          pick === null ||
+          pick.kind === "bottom" ||
+          pick.kind === "absent" ||
+          pick.kind === "present"
+        )
+          return BOTTOM_VIEW;
+        if (pick.kind === "dynamic") {
+          dynamicWalk = true;
+          found = [...alternatives(cells, path.of.place), ...marksOf(cells, path.of.place)];
+        } else if (pick.kind === "closed" || pick.kind === "possible") found = [pick.alt];
+        else return BOTTOM_VIEW;
+        key = `p:${path.of.place}`;
       } else {
         const index = operands.findIndex((operand) => sameRef(operand.ref, path.of));
         if (index < 0) return BOTTOM_VIEW;
         const pick = combo[index]!;
-        if (pick.kind === "bottom") return BOTTOM_VIEW;
-        dynamicWalk = pick.kind === "dynamic";
-        found =
-          pick.kind === "dynamic"
-            ? [...alternatives(cells, operands[index]!.cell), ...marks(operands[index]!.cell)]
-            : [pick.alt];
+        if (pick.kind === "bottom" || pick.kind === "absent" || pick.kind === "present")
+          return BOTTOM_VIEW;
+        if (pick.kind === "dynamic") {
+          dynamicWalk = true;
+          const cell = operands[index]!.cell;
+          found = [...alternatives(cells, cell), ...marksOf(cells, cell)];
+        } else if (pick.kind === "closed" || pick.kind === "possible") found = [pick.alt];
+        else return BOTTOM_VIEW;
+        key = `o:${index}`;
       }
       for (const along of path.path) {
-        if (found.length === 0) break;
-        // a property no object alternative along the way has: the part is absent
-        if (
-          typeof along === "object" &&
-          found.every(
-            (a) =>
-              a.tag !== "d" && a.choice?.props !== undefined && !a.choice.props.has(along.property),
-          )
-        )
-          return null;
-        found = found.flatMap((a) => stepOf(cells, a, along, dynamicWalk));
+        key += typeof along === "object" ? `.${along.property}` : `.${along}`;
+        if (dynamicWalk) {
+          found = found.flatMap((a) => stepOf(cells, a, along, true));
+          continue;
+        }
+        let absence = false;
+        if (typeof along === "object") {
+          // a property step: absent where no alternative's shape has the slot; maybe absent where a slot is empty
+          // by construction beside evidence
+          const parts = found.flatMap((a) =>
+            a.tag !== "d" && a.choice?.props !== undefined
+              ? (a.choice.props.get(along.property) ?? [])
+              : [],
+          );
+          if (found.every((a) => a.tag !== "d") && parts.length === 0) return null;
+          absence = parts.some((part) => cells.items(part).some((it) => it.tag === "e"));
+        }
+        const stepped = found.flatMap((a) => stepOf(cells, a, along, true));
+        const pick = select(key, () => picksFrom(cells, stepped, absence), selection, want);
+        if (pick === null || pick.kind === "bottom") return BOTTOM_VIEW;
+        if (pick.kind === "absent") return null;
+        if (pick.kind === "present") {
+          found = stepped;
+          continue;
+        }
+        if (pick.kind === "dynamic") {
+          dynamicWalk = true;
+          found = stepped;
+          continue;
+        }
+        if (pick.kind === "closed" || pick.kind === "possible") found = [pick.alt];
       }
-      const alts = found
-        .filter((a): a is Alternative => a.tag !== "d" && a.tag !== "p")
-        .map((a) => table.toStatic(a.type));
-      const why = found.find((a): a is DynamicMark => a.tag === "d")?.why;
-      return {
-        alternatives: alts.length === 0 ? null : alts,
-        dynamic: why === undefined ? null : dynamicWhy(why),
-        known: undefined,
-      };
+      if (dynamicWalk) return dynamicViewOf(found);
+      const a = found.find((x): x is Alternative => x.tag !== "d");
+      return a === undefined
+        ? BOTTOM_VIEW
+        : { alternatives: [table.toStatic(a.type)], dynamic: null, known: undefined };
     },
   };
 }
 
-/** Reads an answer for one combination into outcomes; see the module comment for the tag of each answer kind. */
 function readAnswer(
   cells: Cells,
   answer: OperationResult,
-  inputs: OperationInputs,
   combo: readonly Pick[],
   operands: readonly Operand[],
   reading: Reading,
+  operation: Operation,
+  site: string,
+  selection: Selection,
+  want: Want,
 ): { readonly outcomes: readonly Outcome[]; readonly invalid: boolean } {
   const table = cells.table;
   const outcomes: Outcome[] = [];
@@ -739,18 +883,48 @@ function readAnswer(
         break;
       case "unconstrained":
         break;
-      case "projection":
-        outcomes.push(...project(cells, a.source, combo, operands, reading, member, possible));
+      case "projection": {
+        const projected = project(
+          cells,
+          a.source,
+          combo,
+          operands,
+          reading,
+          member,
+          possible,
+          selection,
+          want,
+        );
+        if (projected === null) invalid = true;
+        else outcomes.push(...projected);
         break;
+      }
       case "join": {
         const tag = own(member, possible);
+        const elements: Outcome[] = [];
+        for (const part of a.parts) {
+          const projected = project(
+            cells,
+            part,
+            combo,
+            operands,
+            reading,
+            member,
+            possible,
+            selection,
+            want,
+          );
+          if (projected === null) {
+            invalid = true;
+            return;
+          }
+          elements.push(...projected);
+        }
         outcomes.push({
           kind: "collection",
           tag,
           ctor: a.constructor,
-          elements: a.parts.flatMap((part) =>
-            project(cells, part, combo, operands, reading, member, possible),
-          ),
+          elements,
           group: tag === "m" ? reading.site : undefined,
           why: undefined,
           whys: reading.whys,
@@ -768,7 +942,7 @@ function readAnswer(
         const index = operands.findIndex((operand) => "receiver" in operand.ref);
         if (index < 0) break;
         const pick = combo[index]!;
-        if (pick.kind === "bottom") break;
+        if (pick.kind !== "closed" && pick.kind !== "possible" && pick.kind !== "dynamic") break;
         if (pick.kind === "dynamic") {
           // under a dynamic receiver every applicable case is conditional on the kind: possibilities
           const kinds = (pick.view.alternatives ?? []).map((type) =>
@@ -778,19 +952,22 @@ function readAnswer(
             if (kinds.length === 0 || kinds.includes(c.receiver)) walk(c.result, member, true);
           break;
         }
+        if (pick.kind !== "closed" && pick.kind !== "possible") break;
         const kind = kindOf(table.node(pick.alt.type));
         for (const c of a.cases) if (c.receiver === kind) walk(c.result, member, possible);
         break;
       }
       case "structure": {
-        // each part is asked on its own, over the same operand combination; an invalid part leaves its cell alone
+        // each part is asked on its own over the same operand combination and selection, its dimensions selected
+        // lazily; its outcomes go to the result's part cell
         const tag = own(member, possible);
         const parts = new Map<string, readonly Outcome[]>();
-        for (const [name, part] of a.parts)
-          parts.set(
-            name,
-            readAnswer(cells, part(inputs), inputs, combo, operands, reading).outcomes,
-          );
+        for (const [name, part] of a.parts) {
+          const collected: Outcome[] = [];
+          for (const ask of askLazy(cells, part, operands, combo, operation, site, selection))
+            collected.push(...ask.reading.outcomes);
+          parts.set(name, collected);
+        }
         outcomes.push({
           kind: "structure",
           tag,
@@ -811,8 +988,11 @@ function readAnswer(
 
 /**
  * A projection: through the combination's chosen alternative of the operand (nothing for an unevaluated lazy
- * operand); for the dynamic view, through every alternative and dynamic item of the operand's cell. A structural
- * alternative reached is carried as its item, parts shared; the alternative's cell is the contribution's source.
+ * operand); for the dynamic view, through every alternative and dynamic item of the operand's cell. A property step
+ * whose slot is empty by construction beside evidence is a dimension (present or absent): the absent reading is an
+ * invalid combination (`null`), the runtime check of a property that may be missing; a slot certainly empty is absent
+ * alone. A structural alternative reached is carried as its item, parts shared; the alternative's cell is the
+ * contribution's source.
  */
 function project(
   cells: Cells,
@@ -822,22 +1002,42 @@ function project(
   reading: Reading,
   member: boolean,
   possible: boolean,
-): readonly Outcome[] {
+  selection: Selection,
+  want: Want,
+): readonly Outcome[] | null {
   const index = operands.findIndex((operand) => sameRef(operand.ref, source.of));
   if (index < 0) return [];
   const pick = combo[index]!;
-  if (pick.kind === "bottom") return [];
+  if (pick.kind !== "closed" && pick.kind !== "possible" && pick.kind !== "dynamic") return [];
   const dynamicWalk = pick.kind === "dynamic";
-  let found: readonly (Alternative | DynamicMark)[] = dynamicWalk
-    ? [
-        ...alternatives(cells, operands[index]!.cell),
-        ...cells
-          .items(operands[index]!.cell)
-          .filter((it) => it.tag === "d" && it.why !== undefined)
-          .map((it): DynamicMark => ({ tag: "d", why: it.why! })),
-      ]
-    : [pick.alt];
-  for (const step of source.path) found = found.flatMap((a) => stepOf(cells, a, step, dynamicWalk));
+  const cell = operands[index]!.cell;
+  let found: readonly (Alternative | DynamicMark)[] =
+    pick.kind === "dynamic" ? [...alternatives(cells, cell), ...marksOf(cells, cell)] : [pick.alt];
+  let key = `o:${index}`;
+  for (const step of source.path) {
+    key += typeof step === "object" ? `.${step.property}` : `.${step}`;
+    if (typeof step === "object" && !dynamicWalk) {
+      const parts = found.flatMap((a) =>
+        a.tag !== "d" && a.choice?.props !== undefined
+          ? (a.choice.props.get(step.property) ?? [])
+          : [],
+      );
+      const present = parts.some((part) => cells.items(part).some((it) => it.tag !== "e"));
+      const absent = parts.some((part) => cells.items(part).some((it) => it.tag === "e"));
+      if (absent) {
+        const picks = (): Pick[] => [
+          ...(present
+            ? [{ kind: "present", view: null, tag: "w", why: undefined, cells: [] } as const]
+            : []),
+          { kind: "absent", view: null, tag: "w", why: undefined, cells: [] } as const,
+        ];
+        const chosen = select(`${key}?`, picks, selection, want);
+        if (chosen === null) return [];
+        if (chosen.kind === "absent") return null;
+      }
+    }
+    found = found.flatMap((a) => stepOf(cells, a, step, dynamicWalk));
+  }
   return found.flatMap((a): Outcome[] => {
     if (a.tag === "d") return [{ kind: "dynamic", why: a.why }];
     const tag: "w" | "m" | "p" = a.tag === "p" || possible ? "p" : member ? "m" : a.tag;

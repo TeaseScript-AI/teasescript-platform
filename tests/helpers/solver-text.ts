@@ -9,10 +9,19 @@ import type { Solution } from "../../src/type-inference/solver/solve.js";
  * (`(a|b)`, with `|null` inside when optional, `!` when held), or `CONFLICT{families}~working`.
  */
 function cellText(solution: Solution, cell: CellId, path: ReadonlySet<CellId> = new Set()): string {
-  const items = solution.cells.items(cell);
+  return groupText(solution, [cell], path);
+}
+
+/** The text of several part cells read together: a merged property or element (O1). */
+function groupText(
+  solution: Solution,
+  group: readonly CellId[],
+  path: ReadonlySet<CellId>,
+): string {
+  const items = group.flatMap((cell) => solution.cells.items(cell));
   if (items.length > 0 && items.every((item) => item.tag === "e")) return "never";
-  const view = solution.view(cell);
-  const inner = new Set([...path, cell]);
+  const view = solution.viewOf(group);
+  const inner = new Set([...path, ...group]);
   const texts = (members: readonly Member[]): string[] => {
     const t = [...new Set(members.map((member) => memberText(solution, member, inner)))].sort();
     return t.filter(
@@ -49,15 +58,19 @@ function cellText(solution: Solution, cell: CellId, path: ReadonlySet<CellId> = 
 /** A structural cycle (a part on the way back to its owner) renders as the legacy's back-edge widening, `?`. */
 function memberText(solution: Solution, member: Member, path: ReadonlySet<CellId>): string {
   if (member.kind === "type") return typeKey(solution.table.toStatic(member.type), true, true);
+  const onPath = (group: readonly CellId[]): boolean => group.some((cell) => path.has(cell));
   if (member.kind === "collection")
-    return `${member.ctor}<${path.has(member.element) ? "?" : cellText(solution, member.element, path)}>`;
+    return `${member.ctor}<${onPath(member.element) ? "?" : groupText(solution, member.element, path)}>`;
   if (member.open) return "object";
   return `{${[...member.props]
-    .filter(([, cell]) => !solution.cells.items(cell).every((item) => item.tag === "e"))
+    .filter(
+      ([, group]) =>
+        !group.every((cell) => solution.cells.items(cell).every((item) => item.tag === "e")),
+    )
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(
-      ([name, cell]) =>
-        `${JSON.stringify(name)}:${path.has(cell) ? "?" : cellText(solution, cell, path)}`,
+      ([name, group]) =>
+        `${JSON.stringify(name)}:${onPath(group) ? "?" : groupText(solution, group, path)}`,
     )
     .join(",")}}`;
 }

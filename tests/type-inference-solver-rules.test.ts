@@ -59,7 +59,7 @@ test("every row of the cell table interprets as the row says", () => {
       const name = item.type as ValueKind;
       return { ...base, type: table.internTerm({ kind: "atom", name }) };
     };
-    const forms = new Map<string, string>();
+    const forms = new Map<string, Member>();
     for (const [part, items] of Object.entries(rule.parts ?? {}))
       for (const item of items) cells.add(partOf(part), contribution(item));
     for (const item of rule.items) {
@@ -67,17 +67,47 @@ test("every row of the cell table interprets as the row says", () => {
       cells.add(0, c);
       const member: Member =
         c.ctor === "object"
-          ? { kind: "object", props: c.parts!.props!, open: false }
+          ? {
+              kind: "object",
+              props: new Map([...c.parts!.props!].map(([name, cell]) => [name, [cell]])),
+              open: false,
+            }
           : c.ctor !== undefined
-            ? { kind: "collection", ctor: c.ctor, element: c.parts!.element! }
+            ? { kind: "collection", ctor: c.ctor, element: [c.parts!.element!] }
             : { kind: "type", type: c.type! };
-      forms.set(item.name, memberKey(member));
+      forms.set(item.name, member);
     }
+    // a group of names is one member: the collections' element cells together, the objects' property cells by name
+    const merged = (names: readonly string[]): Member => {
+      const parts = names.map((name) => forms.get(name)!);
+      const first = parts[0]!;
+      if (first.kind === "collection")
+        return {
+          kind: "collection",
+          ctor: first.ctor,
+          element: parts.flatMap((part) => (part.kind === "collection" ? part.element : [])),
+        };
+      if (first.kind === "object") {
+        const props = new Map<string, CellId[]>();
+        for (const part of parts)
+          if (part.kind === "object")
+            for (const [name, group] of part.props)
+              props.set(name, [...(props.get(name) ?? []), ...group]);
+        return { kind: "object", props, open: false };
+      }
+      return first;
+    };
     const view = interpret(cells, 0);
     assert.equal(view.kind, rule.expect.kind, `${rule.name}: kind`);
     assert.deepEqual(
       [...new Set(view.members.map(memberKey))].sort(),
-      [...new Set(rule.expect.members.map((name) => forms.get(name)!))].sort(),
+      [
+        ...new Set(
+          rule.expect.members.map((entry) =>
+            memberKey(typeof entry === "string" ? forms.get(entry)! : merged(entry)),
+          ),
+        ),
+      ].sort(),
       `${rule.name}: exported forms`,
     );
     assert.deepEqual(view.families, rule.expect.families ?? [], `${rule.name}: families`);

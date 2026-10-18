@@ -23,16 +23,22 @@ export interface CellView {
   readonly held: boolean;
 }
 
+/**
+ * A member of a cell's view. The structural items of one constructor are **one member** (O1, option B): the
+ * collections over their element cells together, the objects as one schema over the union of their property names,
+ * each property over the items' part cells for that name together (a conflicting kind is a conflict with the
+ * earliest working; a slot no store reached in any item is omitted).
+ */
 export type Member =
   | { readonly kind: "type"; readonly type: TypeId }
   | {
       readonly kind: "collection";
       readonly ctor: "list" | "set" | "dict";
-      readonly element: CellId;
+      readonly element: readonly CellId[];
     }
   | {
       readonly kind: "object";
-      readonly props: ReadonlyMap<string, CellId>;
+      readonly props: ReadonlyMap<string, readonly CellId[]>;
       readonly open: boolean;
     };
 
@@ -76,8 +82,16 @@ function sameEvidence(cells: Cells, a: Item, b: Item): boolean {
 
 /** The known items of a cell in rank order (see the module comment). */
 function order(cells: Cells, cell: CellId, visiting: ReadonlySet<CellId>): readonly Item[] {
-  const items = cells.items(cell).filter(isKnown);
-  const inner = new Set([...visiting, cell]);
+  return orderItems(cells, cells.items(cell), new Set([...visiting, cell]));
+}
+
+/** The known items among `all` in rank order; `inner` the cells on the way, not consulted again as sources. */
+function orderItems(
+  cells: Cells,
+  all: readonly Item[],
+  inner: ReadonlySet<CellId>,
+): readonly Item[] {
+  const items = all.filter(isKnown);
   // an item without a source (a store's own value, an operation's closed answer) is its own first evidence at its
   // position: rank 0, so the secondary site decides between it and an item first in its source (r10-B3)
   const sourceRank = (item: Item): number => {
@@ -117,7 +131,15 @@ function order(cells: Cells, cell: CellId, visiting: ReadonlySet<CellId>): reado
 
 /** The working kind of a cell, or `null` without a known item. */
 function working(cells: Cells, cell: CellId): Working | null {
-  const known = order(cells, cell, new Set());
+  return workingItems(cells, cells.items(cell), new Set([cell]));
+}
+
+function workingItems(
+  cells: Cells,
+  all: readonly Item[],
+  inner: ReadonlySet<CellId>,
+): Working | null {
+  const known = orderItems(cells, all, inner);
   if (known.length === 0) return null;
   const first = known[0]!;
   const admitted = new Set(
@@ -145,12 +167,55 @@ export function nonWorking(cells: Cells): ReadonlySet<string> {
   return out;
 }
 
-function memberOf(item: Item): Member {
-  if (item.type !== undefined) return { kind: "type", type: item.type };
-  if (item.parts?.props !== undefined)
-    return { kind: "object", props: item.parts.props, open: item.parts.open === true };
-  const ctor = item.ctor === "object" || item.ctor === undefined ? "list" : item.ctor;
-  return { kind: "collection", ctor, element: item.parts!.element };
+/**
+ * The members of the items: each flat type once; the witnesses of one constructor as one member (two literals of one
+ * place are one schema, option B); a written bound's or a permitted union's structural member as its own (the author
+ * wrote `integer[] | string set`, two collections).
+ */
+function membersOf(cells: Cells, items: readonly Item[]): readonly Member[] {
+  const out: Member[] = [];
+  const seen = new Set<string>();
+  const byCtor = new Map<string, Item[]>();
+  for (const item of items) {
+    if (item.type !== undefined) {
+      const key = `t${item.type}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push({ kind: "type", type: item.type });
+      }
+      continue;
+    }
+    if (item.ctor === undefined || item.parts === undefined) continue;
+    if (item.tag === "w") {
+      byCtor.set(item.ctor, [...(byCtor.get(item.ctor) ?? []), item]);
+      continue;
+    }
+    const key = cells.key({ ...item, tag: "w", group: undefined });
+    if (seen.has(key)) continue;
+    seen.add(key);
+    byCtor.set(key, [item]);
+  }
+  for (const [, group] of byCtor) {
+    const ctor = group[0]!.ctor!;
+    if (ctor === "object") {
+      if (group.some((item) => item.parts?.open === true)) {
+        out.push({ kind: "object", props: new Map(), open: true });
+        continue;
+      }
+      const props = new Map<string, CellId[]>();
+      for (const item of group)
+        for (const [name, part] of item.parts!.props!)
+          props.set(name, [...new Set([...(props.get(name) ?? []), part])]);
+      // a slot no store reached in any item is not a property of the schema
+      for (const [name, parts] of [...props])
+        if (parts.every((part) => emptyPart(cells, part))) props.delete(name);
+      out.push({ kind: "object", props, open: false });
+      continue;
+    }
+    const element = [...new Set(group.map((item) => item.parts!.element!))];
+    out.push({ kind: "collection", ctor, element });
+  }
+  return out;
 }
 
 /** Whether a part cell holds nothing, or nothing but the empty-by-construction mark. */
@@ -196,8 +261,21 @@ function partCovers(cells: Cells, known: CellId, possible: CellId, visiting: Set
 }
 
 export function interpret(cells: Cells, cell: CellId): CellView {
-  const items = cells.items(cell);
+  return interpretItems(cells, cells.items(cell), [cell]);
+}
+
+/** The view of the items of several cells read together (the merged part cells of a structure's property or element). */
+export function interpretCells(cells: Cells, group: readonly CellId[]): CellView {
+  return interpretItems(
+    cells,
+    group.flatMap((cell) => cells.items(cell)),
+    group,
+  );
+}
+
+function interpretItems(cells: Cells, items: readonly Item[], group: readonly CellId[]): CellView {
   const table = cells.table;
+  const inner = new Set(group);
   const optional = items.some(
     (item) =>
       item.tag === "n" ||
@@ -205,8 +283,8 @@ export function interpret(cells: Cells, cell: CellId): CellView {
   );
   const bound = items.filter((item) => item.tag === "b");
   // held: a value the compiler cannot know, or a possibility no witness, member or bound covers: the same type, or
-  // the same constructor with every item of each part covered by an item of the known item's part (views are one
-  // level deep, so coverage reads the cells); the same rule under a written bound (r10-B4)
+  // the same constructor with every item of each part covered by an item of the known item's part (coverage reads
+  // the cells); the same rule under a written bound (r10-B4)
   const known = items.filter((item) => isKnown(item) || item.tag === "b");
   const held = items.some(
     (item) =>
@@ -214,8 +292,8 @@ export function interpret(cells: Cells, cell: CellId): CellView {
       (item.tag === "p" && !known.some((k) => covers(cells, k, item, new Set()))),
   );
   if (bound.length > 0)
-    return { kind: "bound", members: bound.map(memberOf), families: [], optional, held };
-  const w = working(cells, cell);
+    return { kind: "bound", members: membersOf(cells, bound), families: [], optional, held };
+  const w = workingItems(cells, items, inner);
   if (w === null)
     return {
       kind: held ? "unknown" : optional ? "nullOnly" : "never",
@@ -228,8 +306,7 @@ export function interpret(cells: Cells, cell: CellId): CellView {
     w.conflicting.length > 0
       ? w.known.filter((item) => w.admitted.has(familyOf(cells, item)))
       : w.known;
-  // numeric widening: integer beside number is number; a collection over a part empty by construction is covered by
-  // another item of the same constructor
+  // numeric widening: integer beside number is number
   const isNumber = (item: Item): boolean =>
     item.type !== undefined &&
     (() => {
@@ -246,42 +323,11 @@ export function interpret(cells: Cells, cell: CellId): CellView {
     exported.some(isNumber) && exported.some(isInteger)
       ? exported.filter((item) => !isInteger(item))
       : exported;
-  const pruned = widened.filter(
-    (item) =>
-      !(
-        item.ctor !== undefined &&
-        item.ctor !== "object" &&
-        cells.partsOf(item).every((part) => emptyPart(cells, part)) &&
-        widened.some(
-          (other) =>
-            other !== item &&
-            other.ctor === item.ctor &&
-            !cells.partsOf(other).every((part) => emptyPart(cells, part)),
-        )
-      ),
-  );
   return {
     kind: w.conflicting.length > 0 ? "conflict" : "known",
-    members: dedupe(pruned.map(memberOf)),
+    members: membersOf(cells, widened),
     families: w.conflicting.length > 0 ? w.order : [],
     optional,
     held,
   };
-}
-
-function dedupe(members: readonly Member[]): readonly Member[] {
-  const seen = new Set<string>();
-  const out: Member[] = [];
-  for (const member of members) {
-    const key =
-      member.kind === "type"
-        ? `t${member.type}`
-        : member.kind === "collection"
-          ? `${member.ctor}${member.element}`
-          : `o${member.open ? "*" : ""}${[...member.props].map(([name, part]) => `${name}:${part}`).join(",")}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(member);
-  }
-  return out;
 }

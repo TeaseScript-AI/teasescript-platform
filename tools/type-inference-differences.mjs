@@ -49,7 +49,7 @@ const ledger = readLedger();
 const all = [];
 const pins = [];
 for (const c of cases) {
-  const result = differential(c.source);
+  const result = differential(c.files ?? c.source);
   if (result === null) continue;
   for (const v of verdicts(ledger, c.name, result)) {
     const group = mechanicalGroup(result.straightLine, v.difference);
