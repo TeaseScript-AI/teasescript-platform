@@ -301,7 +301,7 @@ async function desktopScenario(cdp) {
   await typeAndSubmit(cdp, "   ");
   await waitFor(
     cdp,
-    `document.querySelector('#interaction-feedback')?.textContent.includes('non-whitespace')`,
+    `document.querySelector('#interaction-feedback')?.textContent.includes('I asked for some text.')`,
   );
   assertEqual(
     await value(cdp, `document.querySelector('#composer-input').getAttribute('aria-invalid')`),
@@ -316,7 +316,7 @@ async function desktopScenario(cdp) {
   await typeAndSubmit(cdp, "not a number");
   await waitFor(
     cdp,
-    `document.querySelector('#interaction-feedback')?.textContent.includes('decimal')`,
+    `document.querySelector('#interaction-feedback')?.textContent.includes('I asked for a number.')`,
   );
   await typeAndSubmit(cdp, "12.5");
   await waitFor(

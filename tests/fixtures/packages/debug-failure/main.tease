@@ -6,6 +6,9 @@ let picture: string = askImage(hint: "A picture")
 save name as "name"
 save picture as "picture"
 say "Thanks, ${name}."
-let zero = 0
+let zero = dynamic(0)
 let result = 1 / zero
 exit
+function dynamic(value) {
+    return value
+}
