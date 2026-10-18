@@ -69,6 +69,7 @@ import type {
   FormDescriptorEvidence,
   WrittenLiteral,
 } from "./graph.js";
+import { conditionShape } from "./narrowing-shapes.js";
 
 // The collector of the constraint graph (O4 stage 2): one walk over the project's programs, which emits the places
 // and constraints of `graph.ts` and decides nothing. Its order is the legacy check's, except that it walks every
@@ -981,7 +982,9 @@ class Collector {
         return yield* compileChild(this.#binary(expression, scope));
       case "typeTestExpression": {
         const value = yield* compileChild(this.#expression(expression.value, scope));
-        const tested = this.#plainVariable(expression.value, scope);
+        // A type test is always the `type` shape; the shape names what it tests, as the visitor reads it.
+        const shape = conditionShape(expression);
+        const tested = shape.kind === "type" ? this.#plainVariable(shape.tested, scope) : undefined;
         if (tested !== undefined)
           this.#add({
             ...this.#origin(expression, "condition"),
@@ -1200,21 +1203,16 @@ class Collector {
     const right = yield* compileChild(this.#expression(expression.right, scope));
     const logic = expression.operator === "and" || expression.operator === "or";
     const comparison = ["==", "!=", "<", "<=", ">", ">="].includes(expression.operator);
-    if (expression.operator === "==" || expression.operator === "!=") {
+    const shape = conditionShape(expression);
+    if (shape.kind === "null") {
       // `x == null` and `x != null` narrow a plain variable.
-      const leftNull = unwrap(expression.left).kind === "nullLiteral";
-      const rightNull = unwrap(expression.right).kind === "nullLiteral";
-      const tested = leftNull
-        ? this.#plainVariable(expression.right, scope)
-        : rightNull
-          ? this.#plainVariable(expression.left, scope)
-          : undefined;
+      const tested = this.#plainVariable(shape.tested, scope);
       if (tested !== undefined)
         this.#add({
           ...this.#origin(expression, "condition"),
           kind: "test",
           subject: tested,
-          shape: { kind: "null", negated: expression.operator === "!=" },
+          shape: { kind: "null", negated: shape.negated },
           point: { site: this.#site(expression) },
         });
     }

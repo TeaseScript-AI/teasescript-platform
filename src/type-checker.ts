@@ -326,6 +326,7 @@ import {
   type UncheckedProperties,
   type Widened,
 } from "./type-inference/legacy-state.js";
+import { conditionShape } from "./type-inference/narrowing-shapes.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -5262,93 +5263,86 @@ export class TypeChecker {
   }
 
   *#branchKindTask(expression: Expression, scope: Scope, start: FlowState): CompileTask<Branches> {
-    const node = unwrap(expression);
-    switch (node.kind) {
-      case "booleanLiteral": {
+    const shape = conditionShape(expression);
+    switch (shape.kind) {
+      case "literal": {
         const changes = this.#flow.since(start);
-        return node.value
+        return shape.node.value
           ? { type: BOOLEAN_TYPE, whenTrue: changes, whenFalse: null }
           : { type: BOOLEAN_TYPE, whenTrue: null, whenFalse: changes };
       }
-      case "unaryExpression": {
-        if (node.operator !== "not") break;
-        const operand = yield* compileChild(this.#branchTask(node.operand, scope));
-        this.#requireBoolean(operand.type, node.operand, "'not' needs true or false (boolean)");
+      case "not": {
+        const operand = yield* compileChild(this.#branchTask(shape.operand, scope));
+        this.#requireBoolean(operand.type, shape.operand, "'not' needs true or false (boolean)");
         return negatedBranches(operand);
       }
-      case "binaryExpression": {
-        if (node.operator === "and" || node.operator === "or") {
-          const rule = logicalOperandRule(node.operator);
-          const left = yield* compileChild(this.#branchTask(node.left, scope));
-          this.#requireBoolean(left.type, node.left, rule);
-          // The right operand runs only when the left one did not decide the result. When no value lets it run, it is
-          // still checked like an `if` branch that is never taken, without what the left operand rules out.
-          const runsRight = node.operator === "and" ? left.whenTrue : left.whenFalse;
-          this.#noteOperand(node, [
-            runsRight !== null,
-            (node.operator === "and" ? left.whenFalse : left.whenTrue) !== null,
-          ]);
-          this.#flow.apply(
-            runsRight ??
-              (node.operator === "and" ? left.unreachedTrue : left.unreachedFalse) ??
-              null,
-          );
-          const right = yield* compileChild(this.#branchTask(node.right, scope));
-          this.#requireBoolean(right.type, node.right, rule);
-          const reached = runsRight !== null;
-          const rightTrue =
-            reached && right.whenTrue !== null ? this.#flow.since(start, right.whenTrue) : null;
-          const rightFalse =
-            reached && right.whenFalse !== null ? this.#flow.since(start, right.whenFalse) : null;
-          // The outcome that only the right operand gives is not reached when either operand rules it out.
-          const unreached = (
-            leftOutcome: Changes | undefined,
-            rightOutcome: Changes | undefined,
-          ): Changes | undefined =>
-            !reached
-              ? leftOutcome
-              : rightOutcome === undefined
-                ? undefined
-                : this.#flow.since(start, rightOutcome);
-          const unreachedTrue = unreached(left.unreachedTrue, right.unreachedTrue);
-          const unreachedFalse = unreached(left.unreachedFalse, right.unreachedFalse);
-          this.#flow.undo(start);
-          return node.operator === "and"
-            ? {
-                type: BOOLEAN_TYPE,
-                whenTrue: rightTrue,
-                whenFalse: this.#flow.join([left.whenFalse, rightFalse]),
-                ...(rightTrue === null && unreachedTrue !== undefined ? { unreachedTrue } : {}),
-              }
-            : {
-                type: BOOLEAN_TYPE,
-                whenTrue: this.#flow.join([left.whenTrue, rightTrue]),
-                whenFalse: rightFalse,
-                ...(rightFalse === null && unreachedFalse !== undefined ? { unreachedFalse } : {}),
-              };
-        }
-        if (node.operator !== "==" && node.operator !== "!=") break;
-        const nullTest =
-          unwrap(node.right).kind === "nullLiteral"
-            ? node.left
-            : unwrap(node.left).kind === "nullLiteral"
-              ? node.right
-              : null;
-        if (nullTest === null) break;
+      case "and":
+      case "or": {
+        const { node } = shape;
+        const rule = logicalOperandRule(shape.kind);
+        const left = yield* compileChild(this.#branchTask(node.left, scope));
+        this.#requireBoolean(left.type, node.left, rule);
+        // The right operand runs only when the left one did not decide the result. When no value lets it run, it is
+        // still checked like an `if` branch that is never taken, without what the left operand rules out.
+        const runsRight = node.operator === "and" ? left.whenTrue : left.whenFalse;
+        this.#noteOperand(node, [
+          runsRight !== null,
+          (node.operator === "and" ? left.whenFalse : left.whenTrue) !== null,
+        ]);
+        this.#flow.apply(
+          runsRight ?? (node.operator === "and" ? left.unreachedTrue : left.unreachedFalse) ?? null,
+        );
+        const right = yield* compileChild(this.#branchTask(node.right, scope));
+        this.#requireBoolean(right.type, node.right, rule);
+        const reached = runsRight !== null;
+        const rightTrue =
+          reached && right.whenTrue !== null ? this.#flow.since(start, right.whenTrue) : null;
+        const rightFalse =
+          reached && right.whenFalse !== null ? this.#flow.since(start, right.whenFalse) : null;
+        // The outcome that only the right operand gives is not reached when either operand rules it out.
+        const unreached = (
+          leftOutcome: Changes | undefined,
+          rightOutcome: Changes | undefined,
+        ): Changes | undefined =>
+          !reached
+            ? leftOutcome
+            : rightOutcome === undefined
+              ? undefined
+              : this.#flow.since(start, rightOutcome);
+        const unreachedTrue = unreached(left.unreachedTrue, right.unreachedTrue);
+        const unreachedFalse = unreached(left.unreachedFalse, right.unreachedFalse);
+        this.#flow.undo(start);
+        return node.operator === "and"
+          ? {
+              type: BOOLEAN_TYPE,
+              whenTrue: rightTrue,
+              whenFalse: this.#flow.join([left.whenFalse, rightFalse]),
+              ...(rightTrue === null && unreachedTrue !== undefined ? { unreachedTrue } : {}),
+            }
+          : {
+              type: BOOLEAN_TYPE,
+              whenTrue: this.#flow.join([left.whenTrue, rightTrue]),
+              whenFalse: rightFalse,
+              ...(rightFalse === null && unreachedFalse !== undefined ? { unreachedFalse } : {}),
+            };
+      }
+      case "null": {
+        const { node } = shape;
         const left = yield* compileChild(this.#expressionTask(node.left, scope));
         const right = yield* compileChild(this.#expressionTask(node.right, scope));
         this.#warnImpossibleComparison(node, left, right);
-        const tested = this.#narrowTest(nullTest, scope, NULL_TYPE, start);
-        return node.operator === "==" ? tested : negatedBranches(tested);
+        const tested = this.#narrowTest(shape.tested, scope, NULL_TYPE, start);
+        return shape.negated ? negatedBranches(tested) : tested;
       }
-      case "typeTestExpression": {
+      case "type": {
+        const { node } = shape;
         const value = yield* compileChild(this.#expressionTask(node.value, scope));
         const test = this.#annotationType(node.type);
         this.#warnConstantTest(node, value, test);
-        const tested = this.#narrowTest(node.value, scope, test, start);
-        return node.negated ? negatedBranches(tested) : tested;
+        const tested = this.#narrowTest(shape.tested, scope, test, start);
+        return shape.negated ? negatedBranches(tested) : tested;
       }
-      default:
+      case "other":
         break;
     }
     const type = yield* compileChild(this.#expressionTask(expression, scope));
