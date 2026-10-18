@@ -41,7 +41,10 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
   const parserUrl = new URL("../src/parser.js", import.meta.url).href;
   const semanticUrl = new URL("../src/semantic.js", import.meta.url).href;
   const compilerLoweringUrl = new URL("../src/compiler/compile-program.js", import.meta.url).href;
-  const runtimeStateUrl = new URL("../src/runtime/state.js", import.meta.url).href;
+  const snapshotConstructionUrl = new URL(
+    "../src/runtime/snapshot-construction.js",
+    import.meta.url,
+  ).href;
   const checkpointUrl = new URL("../src/runtime/checkpoint.js", import.meta.url).href;
   const runtimeEngineUrl = new URL("../src/runtime/engine.js", import.meta.url).href;
   const script = `
@@ -57,7 +60,7 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
       import(${JSON.stringify(parserUrl)}),
       import(${JSON.stringify(semanticUrl)}),
       import(${JSON.stringify(compilerLoweringUrl)}),
-      import(${JSON.stringify(runtimeStateUrl)}),
+      import(${JSON.stringify(snapshotConstructionUrl)}),
       import(${JSON.stringify(runtimeEngineUrl)}),
     ]);
     const source = process.env.TEASESCRIPT_STACK_SOURCE;
