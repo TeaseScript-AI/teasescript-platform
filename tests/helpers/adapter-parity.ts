@@ -332,8 +332,8 @@ export type AdapterExpectation =
   | "invalid"
   | "unconstrained"
   /**
-   * The answer realizes to the legacy's unknown: `invalid`, `dynamic`, or a part the adapter cannot know; which, and
-   * the provenance, is stage 4's to test where it becomes observable (the case tables of work note §6.6).
+   * The answer realizes to the legacy's unknown: `invalid`, `dynamic`, a part the adapter cannot know, or a bounded
+   * `possible`; which, and the provenance, is stage 4's to test where it becomes observable (work note §6.6).
    */
   | "unknown"
   | { readonly dynamic: DynamicWhy }
@@ -382,8 +382,10 @@ export function assertCase(
     assert.equal(realizedText(realized), legacy.fact, "the realized result is the legacy's type");
   } else if (adapter === "unknown") {
     assert.equal(legacy.fact, "unknown", "the legacy's unknown");
+    // A bounded answer (`possible`) is the design's answer for a legacy unknown the kinds of a dynamic operand bound.
     assert.ok(
       result.kind === "invalid" ||
+        result.kind === "possible" ||
         realized.kind === "invalid" ||
         realizedText(realized) === "unknown",
       `the adapter's answer realizes to unknown, not ${realizedText(realized)}`,

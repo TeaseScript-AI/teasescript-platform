@@ -74,6 +74,8 @@ export function methodRelation(name: string): OperationRelation {
         if (answers.some((answer) => answer.kind !== "speaker" && answer.result === undefined))
           return INVALID;
       }
+      // A kind's rule that still waits for an operand it reads makes the whole wait (the read-order rule, §3).
+      if (answers.some((answer) => answer.result?.kind === "unconstrained")) return UNCONSTRAINED;
       const cases = answers.map((answer) => ({
         receiver: answer.kind,
         result: answer.result ?? UNKNOWN_MEMBER,

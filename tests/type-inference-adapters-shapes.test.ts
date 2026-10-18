@@ -30,9 +30,11 @@ import {
  * alone, a union of collections of one kind, an empty collection, a value the compiler cannot know, one that may
  * also be such a value, and bottom) and its call shapes (as written, an extra positional argument, an extra named
  * argument, a named-only argument). A shape the source can write is pinned by the oracle: a closed fact is realized,
- * an unknown one answered by an answer that realizes to unknown. A bottom operand follows the carrier's rule (work
- * note §3): the relation waits for it exactly when the operand decides the answer, which the table establishes by
- * probing the same inputs with the operand of several kinds.
+ * an unknown one answered by an answer that realizes to unknown. A bottom operand follows the carrier's read-order
+ * rule (work note §3, the orchestrator's decision of 2026-10-18): the relation waits for it where the legacy's
+ * branch reads the operand's type before deciding, and waiting longer than strictly necessary is the safe
+ * direction. The table checks the unsafe direction: where the same inputs with the operand of several kinds give
+ * different answers, the relation must wait; where they agree, the common answer or a wait is accepted.
  */
 interface Shape {
   readonly label: string;
@@ -86,6 +88,21 @@ const COLLECTION_RECEIVERS: readonly Shape[] = [
     union([list(INTEGER_TYPE), list(STRING_TYPE)]),
   ),
   shape("empty", "let $ = []", list({ kind: "never" })),
+  shape("unknown elements", "let $: list = hostValue", list({ kind: "unknown" })),
+  shape("unknown set elements", "let $: set = hostValue", set({ kind: "unknown" })),
+  shape("nullable list", "let $: integer[]? = hostValue", optional(list(INTEGER_TYPE))),
+  shape(
+    "list or dict",
+    "let $: integer[] | integer dict = hostValue",
+    union([list(INTEGER_TYPE), dict(INTEGER_TYPE)]),
+  ),
+  shape(
+    "list or text",
+    "let $: integer[] | string = hostValue",
+    union([list(INTEGER_TYPE), STRING_TYPE]),
+  ),
+  HOST,
+  REMAINDER,
 ];
 
 /** The call shapes: the first argument as written, with an extra positional or named argument, or named only. */
@@ -118,8 +135,9 @@ const PROBES: readonly OperandView[] = [
 ];
 
 /**
- * The carrier's rule for a bottom operand: the relation waits for it exactly when it decides the answer. The slot is
- * probed with several kinds; one answer for all of them is the answer the relation must give at bottom too.
+ * The unsafe direction of the read-order rule: a relation must not answer at bottom what the operand, once known,
+ * could change. The slot is probed with several kinds; different answers demand a wait, one answer accepts it or a
+ * wait (a finite set of probes cannot establish independence: `min(⊥, extra: 1 s)` is a duration for a duration).
  */
 function assertBottomRule(
   relation: OperationRelation,
@@ -129,10 +147,9 @@ function assertBottomRule(
   const answers = PROBES.map((probe) => JSON.stringify(relation.result(build(probe))));
   const atBottom = relation.result(build(BOTTOM_VIEW));
   if (answers.every((answer) => answer === answers[0]))
-    assert.equal(
-      JSON.stringify(atBottom),
-      answers[0],
-      `${label}: the operand decides nothing, so bottom is answered as any kind is`,
+    assert.ok(
+      atBottom.kind === "unconstrained" || JSON.stringify(atBottom) === answers[0],
+      `${label}: at bottom, the answer every kind gives, or a wait`,
     );
   else assert.equal(atBottom.kind, "unconstrained", `${label}: the operand decides the answer`);
 }
@@ -319,12 +336,15 @@ test("randomWeighted over every source and call shape", () => {
     },
     { label: "extra named", write: "(a, extra: 1)", named: { extra: INTEGER }, extra: false },
     { label: "extra positional", write: "(a, 1)", named: {}, extra: true },
+    { label: "named only", write: "(weight: a)", named: {}, extra: false },
   ];
   for (const source of WEIGHTED_SOURCES)
     for (const call of calls) {
       const label = `randomWeighted${call.write} of ${source.label}`;
       const build = (view: OperandView) =>
-        inputsOf({ arguments: call.extra ? [view, INTEGER] : [view], named: call.named });
+        call.label === "named only"
+          ? inputsOf({ arguments: [], named: { weight: view } })
+          : inputsOf({ arguments: call.extra ? [view, INTEGER] : [view], named: call.named });
       if (source === BOTTOM) {
         assertBottomRule(relation, build, label);
         continue;
@@ -365,16 +385,40 @@ test("min and max of one value over every shape: the list form, the value form, 
     const calls: readonly {
       readonly label: string;
       readonly write: string;
+      readonly positional: readonly OperandView[];
       readonly named: Record<string, OperandView>;
+      readonly only?: "named";
     }[] = [
-      { label: "plain", write: "(a)", named: {} },
-      { label: "extra named", write: "(a, extra: 1)", named: { extra: INTEGER } },
-      { label: "by", write: '(a, by: "p")', named: { by: closedView(STRING_TYPE) } },
+      { label: "plain", write: "(a)", positional: [], named: {} },
+      { label: "extra named", write: "(a, extra: 1)", positional: [], named: { extra: INTEGER } },
+      {
+        label: "extra text",
+        write: '(a, extra: "x")',
+        positional: [],
+        named: { extra: closedView(STRING_TYPE) },
+      },
+      {
+        label: "extra duration",
+        write: "(a, extra: 1 s)",
+        positional: [],
+        named: { extra: closedView({ kind: "scalar", name: "duration" }) },
+      },
+      {
+        label: "by",
+        write: '(a, by: "p")',
+        positional: [],
+        named: { by: closedView(STRING_TYPE) },
+      },
+      { label: "extra positional", write: "(a, 1)", positional: [INTEGER], named: {} },
+      { label: "named only", write: "(extra: a)", positional: [], named: {}, only: "named" },
     ];
     for (const value of SINGLE_VALUES)
       for (const call of calls) {
         const label = `${name}${call.write} of ${value.label}`;
-        const build = (view: OperandView) => inputsOf({ arguments: [view], named: call.named });
+        const build = (view: OperandView) =>
+          call.only === "named"
+            ? inputsOf({ arguments: [], named: { extra: view } })
+            : inputsOf({ arguments: [view, ...call.positional], named: call.named });
         if (value === BOTTOM) {
           assertBottomRule(relation, build, label);
           continue;

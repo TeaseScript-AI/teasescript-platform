@@ -57,7 +57,7 @@ export interface CaseRow {
   readonly adapter: AdapterCell;
   /** Why an operand the legacy cannot type is dynamic: the view the adapter is given for it. */
   readonly why: DynamicWhy | null;
-  /** The messages of the operation's own errors, in order, by which the invalidating reports (§6.6) are told apart. */
+  /** The messages of the operation's own errors, in order: the reports beside the fact, pinned, not interpreted. */
   readonly messages: readonly string[];
   readonly stage5?: "Q1" | "Q2";
   readonly note?: string;
@@ -74,7 +74,7 @@ interface Variant {
   readonly id: string;
   readonly prelude: readonly string[];
   readonly operation: string;
-  /** The provenance of an operand the legacy cannot type, and of a result it cannot type without an error. */
+  /** The provenance of an operand the legacy cannot type: the dynamic view the adapter is given for it. */
   readonly why: DynamicWhy | null;
   /** The operation is written in a function whose untyped parameter `p` is called with this argument. */
   readonly call?: string;
