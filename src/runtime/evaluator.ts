@@ -24,11 +24,7 @@ import type {
   TypePlan,
 } from "../plan/model.js";
 import { escapedMarkupLength, escapeMarkup } from "../message-markup.js";
-import {
-  expressionPlanChildren,
-  lazyDefaultArgumentIndex,
-  lazyDefaultCallOperation,
-} from "../plan/expression-children.js";
+import { lazyDefaultArgumentIndex, lazyDefaultCallOperation } from "../plan/expression-children.js";
 import type { LazyDefaultOperation } from "../lazy-defaults.js";
 import { isNumericFunction } from "../numeric-functions.js";
 import { isRandomFunction } from "../random-functions.js";
@@ -48,7 +44,7 @@ import {
 } from "./prepared-references.js";
 import type { RandomSource } from "./random.js";
 import { RandomControlSignal, type RandomControl } from "./random-control.js";
-import { isReadingMethod } from "./say-staging.js";
+import { evaluatedChildren, expressionEffects } from "./effect-facts.js";
 import { isVisibleScalar, quotedText, visibleText } from "./value-text.js";
 import { checkTextLength, MAX_TEXT_LENGTH, messageText, textTooLong } from "./text-length.js";
 import { textSha256 } from "./sha256.js";
@@ -1087,8 +1083,8 @@ export class Evaluator {
           }
           if (frame.stage === 1) {
             frame.value = result.value;
-            // An operand is read when it is evaluated: copy a shared list, set, or object before a call in the right
-            // operand can change it.
+            // An operand is read when it is evaluated: copy a shared list, set, or object before the right operand can
+            // change it.
             if (
               (expression.operator === "==" || expression.operator === "!=") &&
               !result.owned &&
@@ -1096,7 +1092,7 @@ export class Evaluator {
                 isSet(frame.value) ||
                 isObject(frame.value) ||
                 isDict(frame.value)) &&
-              mayRunCall(expression.right)
+              mayChangeValue(expression.right)
             )
               frame.value = cloneCapturedSerializableValue(frame.value);
             if (expression.operator === "and" || expression.operator === "or") {
@@ -1920,46 +1916,35 @@ interface EvaluationFrame {
   /** With a debug trace, the causes collected for this frame's value. */
   deps: DebugDependencies | null;
 }
-const callingExpressions = new WeakMap<ExpressionPlan, boolean>();
+const changingExpressions = new WeakMap<ExpressionPlan, boolean>();
 
 /**
- * Whether evaluating an expression can run a call that may change a value: any call but a conversion's, a random
- * function's, a numeric or angle function's, a list function's, a clock read's, or a method's that only reads (see
- * `Conversion`, `RandomFunction`, `NumericFunction`, `ListFunction`, `ClockFunction`, and `isReadingMethod`). Results
- * are cached per plan node, so nested checks stay linear.
+ * Whether evaluating an expression may change a value in place, as `expressionEffects` says of each of its nodes, such
+ * as a list method that changes its receiver or a call whose effects the engine does not know. Results are cached per
+ * plan node, so nested checks stay linear.
  */
-function mayRunCall(expression: ExpressionPlan): boolean {
+function mayChangeValue(expression: ExpressionPlan): boolean {
   // A node is decided after its children, which are pushed above it.
   const work: { expression: ExpressionPlan; children: readonly ExpressionPlan[] | null }[] = [
     { expression, children: null },
   ];
   while (work.length > 0) {
     const current = work.pop()!;
-    if (callingExpressions.has(current.expression)) continue;
-    const callee = current.expression.kind === "call" ? current.expression.callee : null;
-    if (
-      callee !== null &&
-      (callee.kind === "identifier"
-        ? !isConversion(callee.name) &&
-          !isRandomFunction(callee.name) &&
-          !isNumericFunction(callee.name) &&
-          !isListFunction(callee.name) &&
-          !isClockFunction(callee.name)
-        : callee.kind !== "property" || !isReadingMethod(callee.name))
-    ) {
-      callingExpressions.set(current.expression, true);
+    if (changingExpressions.has(current.expression)) continue;
+    if (expressionEffects(current.expression).changesValue) {
+      changingExpressions.set(current.expression, true);
     } else if (current.children !== null) {
-      callingExpressions.set(
+      changingExpressions.set(
         current.expression,
-        current.children.some((child) => callingExpressions.get(child) === true),
+        current.children.some((child) => changingExpressions.get(child) === true),
       );
     } else {
-      const children = expressionPlanChildren(current.expression);
+      const children = evaluatedChildren(current.expression);
       work.push({ expression: current.expression, children });
       for (const child of children) work.push({ expression: child, children: null });
     }
   }
-  return callingExpressions.get(expression)!;
+  return changingExpressions.get(expression)!;
 }
 
 function evaluationFrame(

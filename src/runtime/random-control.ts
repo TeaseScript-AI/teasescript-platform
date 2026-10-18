@@ -4,15 +4,19 @@ import type {
   InstructionPlan,
   PlanSourceLocation,
 } from "../plan/model.js";
-import { changesEntries } from "../dict-operations.js";
-import { expressionPlanChildren } from "../plan/expression-children.js";
-import { isAnyHandleMethod, kindsWithMethod, kindsWithProperty } from "../handle-members.js";
+import { instructionExpressions } from "../plan/instruction-expressions.js";
 import { RANDOM_FUNCTIONS } from "../language-facts.js";
 import { domainFailure, type NumericFailure } from "../numeric-functions.js";
-import { isRandomFunction, RANDOM_CONTRACTS } from "../random-functions.js";
-import { listDraw, listMethod } from "../list-methods.js";
+import { RANDOM_CONTRACTS } from "../random-functions.js";
 import type { SourceSpan } from "../source.js";
 import type { RuntimeDebugRandomOperation, TraceStore } from "./debug-trace.js";
+import {
+  changesAnything,
+  drawKind,
+  evaluatedChildren,
+  expressionEffects,
+  writeDraws,
+} from "./effect-facts.js";
 import type { InterpreterEvent } from "./events.js";
 import { weightedIndex } from "./list-statistics.js";
 import { nextXorShift32, XORSHIFT32_ALGORITHM, type XorShift32State } from "./random.js";
@@ -284,7 +288,7 @@ function randomSitesOf(plan: InstructionPlan): PlanRandomSites {
         : files[index]!;
     for (const expression of instructionExpressions(instruction)) {
       walkExpression(expression, (node) => {
-        const kind = drawKindOf(node);
+        const kind = drawKind(node);
         if (kind !== null) add(file, node.span, kind);
         if (node.kind === "template")
           for (const part of node.parts)
@@ -355,18 +359,6 @@ function drawsTimerDuration(
   );
 }
 
-function drawKindOf(node: ExpressionPlan): RandomDrawKind | null {
-  if (node.kind === "call") {
-    if (node.callee.kind === "identifier" && isRandomFunction(node.callee.name))
-      return node.callee.name;
-    if (node.callee.kind === "property") return listDraw(node.callee.name, "method") ?? null;
-    return null;
-  }
-  if (node.kind === "property") return listDraw(node.name, "property") ?? null;
-  if (node.kind === "tagQuery" && node.select === "random") return "tagQuery";
-  return null;
-}
-
 /** Visits every node of an expression; a method call's callee is visited through its receiver only. */
 function walkExpression(root: ExpressionPlan, visit: (node: ExpressionPlan) => void): void {
   const pending = [root];
@@ -377,104 +369,9 @@ function walkExpression(root: ExpressionPlan, visit: (node: ExpressionPlan) => v
   }
 }
 
-/** The children an expression evaluates, in evaluation order. */
-function evaluatedChildren(node: ExpressionPlan): readonly ExpressionPlan[] {
-  if (node.kind === "call" && node.callee.kind === "property")
-    return [node.callee.object, ...node.arguments.map((argument) => argument.value)];
-  if (node.kind === "call") return node.arguments.map((argument) => argument.value);
-  return expressionPlanChildren(node);
-}
-
-/** The expressions an instruction may evaluate. */
-function instructionExpressions(instruction: Instruction): readonly ExpressionPlan[] {
-  switch (instruction.kind) {
-    case "declareSpeaker":
-      return instruction.properties.map((property) => property.value);
-    case "declareGlobal":
-    case "declareBinding":
-    case "storeTemporary":
-    case "bindDefaultParameter":
-    case "prepareSayText":
-    case "returnValue":
-      return [instruction.value];
-    case "prepareReference":
-    case "evaluate":
-      return [instruction.expression];
-    case "validateAssignmentTarget":
-      return [instruction.target];
-    case "assign":
-      return [instruction.value, instruction.target];
-    case "validateCallReceiver":
-      return [instruction.receiver];
-    case "jumpIfFalse":
-      return [instruction.condition];
-    case "loopStart":
-      return [instruction.expression];
-    case "callFunction":
-      return instruction.arguments.map((argument) => argument.value);
-    case "transfer":
-    case "setFallback":
-      return instruction.destination !== null && "value" in instruction.destination
-        ? [instruction.destination.value]
-        : [];
-    case "say":
-      return [
-        ...(typeof instruction.textTemporary === "number" ? [] : [instruction.value]),
-        ...(typeof instruction.pacing === "object" ? [instruction.pacing] : []),
-        ...(instruction.presentation === null ? [] : [instruction.presentation]),
-      ];
-    case "wait":
-    case "startTimer":
-      return [
-        instruction.duration,
-        ...(typeof instruction.display === "object" ? [instruction.display] : []),
-        ...(instruction.label === null ? [] : [instruction.label]),
-      ];
-    case "showPermanentButton":
-      return [instruction.text];
-    case "showImage":
-      return instruction.image === null ? [] : [instruction.image];
-    case "capture":
-      return instruction.tags === null ? [] : [instruction.tags];
-    case "fileStore":
-      return [instruction.value, ...(instruction.files === null ? [] : [instruction.files])];
-    case "lock":
-      return [
-        instruction.value,
-        ...(instruction.password === null ? [] : [instruction.password]),
-        ...(instruction.passwordField?.hint ? [instruction.passwordField.hint] : []),
-        ...(instruction.publicKey === null ? [] : [instruction.publicKey]),
-        ...(instruction.key === null ? [] : [instruction.key]),
-        ...(instruction.timeLock === null ? [] : [instruction.timeLock]),
-      ];
-    case "storageWrite":
-      return instruction.value === null ? [instruction.key] : [instruction.value, instruction.key];
-    case "playMedia":
-      return [
-        instruction.file,
-        ...(instruction.repeat.kind === "value" ? [instruction.repeat.value] : []),
-        ...(instruction.repeat.kind === "times" ? [instruction.repeat.count] : []),
-        ...[instruction.startAt, instruction.endAt, instruction.volume].filter(
-          (operand): operand is ExpressionPlan => operand !== null,
-        ),
-        ...instruction.cues.map((cue) => cue.offset),
-      ];
-    default:
-      return [];
-  }
-}
-
 /* ---------------------------------------------------------------------------------------------------------------- */
 /* Which units need a state copy                                                                                    */
 /* ---------------------------------------------------------------------------------------------------------------- */
-
-/**
- * Whether a method call changes runtime state: a list, set, or dict method that changes its receiver (see
- * `LIST_METHODS` and `DICT_METHODS`), or a handle method (see `HandleMethod`).
- */
-function mutatingCall(name: string): boolean {
-  return listMethod(name)?.changes !== undefined || changesEntries(name) || isAnyHandleMethod(name);
-}
 
 const changesBeforeDraw = new WeakMap<Instruction, boolean>();
 
@@ -492,19 +389,96 @@ function mayChangeBeforeDraw(instruction: Instruction): boolean {
   return known;
 }
 
+/**
+ * What an instruction does itself, besides evaluating its operands (`instructionExpressions`), that a pause must undo.
+ * Every kind has its case, so a new kind must decide how its own work comes before or after a draw.
+ */
 function analyseChangesBeforeDraw(instruction: Instruction): boolean {
-  // A staged say or speaker changes only its stage, which a pause drops.
-  if (instruction.kind === "say" || instruction.kind === "declareSpeaker") return false;
-  // A write such as `timer.remaining = …` changes the timer, then may end its round, which draws the next one.
-  if (
-    instruction.kind === "assign" &&
-    instruction.target.kind === "property" &&
-    kindsWithProperty(instruction.target.name, (property) => property.draws === true).length > 0
-  )
-    return true;
+  switch (instruction.kind) {
+    // A staged say or speaker changes only its stage, which a pause drops.
+    case "say":
+    case "declareSpeaker":
+      return false;
+    // A write such as `timer.remaining = …` changes the timer, then may end its round, which draws the next one.
+    case "assign":
+      return (
+        (instruction.target.kind === "property" && writeDraws(instruction.target.name)) ||
+        operandsChangeBeforeDraw(instruction, false)
+      );
+    // A ranged duration is drawn after every operand.
+    case "wait":
+    case "startTimer":
+      return operandsChangeBeforeDraw(instruction, drawsTimerDuration(instruction));
+    // A glob destination is drawn before the transfer changes anything.
+    case "transfer":
+    // An `end` that continues at a glob fallback, and a return from a block, draw after their own work, which
+    // `unitNeedsStateCopy` decides from the state.
+    case "end":
+    case "returnVoid":
+    case "returnValue":
+    // The others draw nothing after their own work, which follows their operands.
+    case "declareGlobal":
+    case "declareBinding":
+    case "storeTemporary":
+    case "bindDefaultParameter":
+    case "prepareSayText":
+    case "prepareReference":
+    case "evaluate":
+    case "validateAssignmentTarget":
+    case "validateCallReceiver":
+    case "jumpIfFalse":
+    case "loopStart":
+    case "callFunction":
+    case "setFallback":
+    case "showPermanentButton":
+    case "showImage":
+    case "capture":
+    case "fileStore":
+    case "lock":
+    case "storageWrite":
+    case "playMedia":
+    case "interaction":
+    case "setDefaultSpeaker":
+    case "copyAccount":
+    case "enterScope":
+    case "leaveScope":
+    case "jump":
+    case "loopControl":
+    case "prepareSaySpeaker":
+    case "prepareSayContextualSpeaker":
+    case "prepareInteractionSpeaker":
+    case "clearTemporary":
+    case "clearTemporaries":
+    case "bindSuppliedParameter":
+    case "beginFunctionDefaults":
+    case "prepareParameterDefault":
+    case "enterFunctionBody":
+    case "showCamera":
+    case "hideCamera":
+    case "stopAudio":
+    case "goto":
+    case "exit":
+      return operandsChangeBeforeDraw(instruction, false);
+    default:
+      return unknownInstruction(instruction);
+  }
+}
+
+/**
+ * A kind without its case keeps a state copy, which undoes anything. Its parameter has type `never`, so a kind added
+ * without its case fails to compile.
+ */
+function unknownInstruction(_instruction: never): boolean {
+  return true;
+}
+
+/**
+ * Whether an operand of the instruction may change state before a draw of another operand, or before a draw of the
+ * instruction's own after all its operands (`drawsLast`); within one operand the evaluation order decides, and across
+ * operands any order counts.
+ */
+function operandsChangeBeforeDraw(instruction: Instruction, drawsLast: boolean): boolean {
   const facts = instructionExpressions(instruction).map(analyseExpression);
-  const drawsLast = drawsTimerDuration(instruction);
-  // Within one expression the evaluation order decides; across expressions any order counts.
   return facts.some(
     (fact, index) =>
       fact.changeBeforeDraw ||
@@ -513,7 +487,10 @@ function analyseChangesBeforeDraw(instruction: Instruction): boolean {
   );
 }
 
-/** Post-order facts about an expression: whether it changes state, draws, and changes state before a later draw. */
+/**
+ * Post-order facts about an expression, from `expressionEffects` of each node: whether it changes state, draws, and
+ * changes state before a later draw.
+ */
 function analyseExpression(root: ExpressionPlan): {
   readonly changes: boolean;
   readonly draws: boolean;
@@ -538,25 +515,10 @@ function analyseExpression(root: ExpressionPlan): {
         work.push({ node: children[index]!, entered: false });
       continue;
     }
-    if (node.kind === "template") {
-      // Each placeholder that holds a list draws right after it is evaluated; a conservative reading draws after all.
-      if (node.parts.some((part) => part.kind === "expression")) draw();
-      continue;
-    }
-    if (drawKindOf(node) !== null) draw();
-    if (node.kind === "call") {
-      const name =
-        node.callee.kind === "property"
-          ? node.callee.name
-          : node.callee.kind === "identifier"
-            ? node.callee.name
-            : null;
-      if (node.callee.kind === "property" && name !== null && mutatingCall(name)) {
-        changes = true;
-        // A call such as `pause()` may end a round that is already due, which draws the next one after the change.
-        if (kindsWithMethod(name, (method) => method.draws === true).length > 0) draw();
-      }
-    }
+    const effects = expressionEffects(node);
+    if (effects.draws && !effects.drawsAfterChange) draw();
+    if (changesAnything(effects)) changes = true;
+    if (effects.draws && effects.drawsAfterChange) draw();
   }
   return { changes, draws, changeBeforeDraw };
 }
