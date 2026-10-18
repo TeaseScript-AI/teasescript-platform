@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   INTEGER_TYPE,
   NUMBER_TYPE,
+  optional,
   PropertyTable,
   STRING_TYPE,
   union,
@@ -104,16 +105,148 @@ test("get gives the element or the default (Q2) and needs its default; union joi
     method("union"),
     inputsOf({ receiver: LIST, arguments: [closedView({ kind: "list", element: NUMBER_TYPE })] }),
     legacyOperation(`${XS}let r = xs.union([1.5])\nexit`),
-    "join",
+    "type",
   );
-  // Elements that mix: the legacy reports and recovers a list of unknown; the join has no value (a declared recovery).
+  // Elements that mix: the legacy reports and recovers a list of unknown elements, which the relation gives too.
   assertCase(
     method("union"),
     inputsOf({ receiver: LIST, arguments: [closedView({ kind: "list", element: STRING_TYPE })] }),
     legacyOperation(`${XS}let r = xs.union(["x"])\nexit`),
     { fact: "list<unknown>", errors: ["TSV044"] },
-    { realized: "invalid" },
-    "join",
+    "fact",
+    "type",
+  );
+});
+
+test("the shape gates and the recoveries of the collection methods, as the legacy's branches give them", () => {
+  // A list's `get` has no value when its shape is wrong; the other methods keep their result beside the report.
+  assertCase(
+    method("get"),
+    inputsOf({ receiver: LIST, named: { default: closedView(STRING_TYPE) } }),
+    legacyOperation(`${XS}let r = xs.get(default: "n")\nexit`),
+    { fact: "unknown", errors: ["TSV020"] },
+    "invalid",
+  );
+  assertCase(
+    method("get"),
+    inputsOf({ receiver: LIST, arguments: [INTEGER], named: { default: INTEGER, extra: INTEGER } }),
+    legacyOperation(`${XS}let r = xs.get(0, default: 1, extra: 2)\nexit`),
+    { fact: "unknown", errors: ["TSV022"] },
+    "invalid",
+  );
+  assertCase(
+    method("union"),
+    inputsOf({ receiver: LIST }),
+    legacyOperation(`${XS}let r = xs.union()\nexit`),
+    { fact: "list<integer>", errors: ["TSV020"] },
+    "fact",
+  );
+  assertCase(
+    method("union"),
+    inputsOf({ receiver: LIST, arguments: [LIST, INTEGER] }),
+    legacyOperation(`${XS}let r = xs.union([2], 3)\nexit`),
+    { fact: "list<integer>", errors: ["TSV020"] },
+    "fact",
+  );
+  assertCase(
+    method("add"),
+    inputsOf({ receiver: LIST }),
+    legacyOperation(`${XS}let r = xs.add()\nexit`),
+    { fact: "null", errors: ["TSV020"] },
+    "fact",
+  );
+  // A set operation's argument that may be null needs a check first, and the elements are not known.
+  assertCase(
+    method("intersection"),
+    inputsOf({
+      receiver: LIST,
+      arguments: [closedView(optional({ kind: "list", element: NUMBER_TYPE }))],
+    }),
+    legacyOperation(`${XS}let other: number[]? = hostValue\nlet r = xs.intersection(other)\nexit`),
+    { fact: "list<unknown>", errors: ["TSV043"] },
+    "fact",
+  );
+  assertCase(
+    method("union"),
+    inputsOf({
+      receiver: LIST,
+      arguments: [closedView(optional({ kind: "list", element: INTEGER_TYPE }))],
+    }),
+    legacyOperation(`${XS}let other: integer[]? = hostValue\nlet r = xs.union(other)\nexit`),
+    { fact: "list<unknown>", errors: ["TSV043"] },
+    "fact",
+  );
+  // A union with a member of each collection joins the elements of each; a mix, a member that is no collection, or
+  // an argument the compiler cannot know leaves the elements unknown.
+  assertCase(
+    method("union"),
+    inputsOf({
+      receiver: LIST,
+      arguments: [
+        closedView(
+          union([
+            { kind: "list", element: INTEGER_TYPE },
+            { kind: "set", element: STRING_TYPE },
+          ]),
+        ),
+      ],
+    }),
+    legacyOperation(
+      `${XS}let other: integer[] | string set = hostValue\nlet r = xs.union(other)\nexit`,
+    ),
+    { fact: "list<unknown>", errors: ["TSV044"] },
+    "fact",
+  );
+  assertCase(
+    method("union"),
+    inputsOf({ receiver: LIST, arguments: [closedView(STRING_TYPE)] }),
+    legacyOperation(`${XS}let r = xs.union("a")\nexit`),
+    { fact: "list<unknown>", errors: ["TSV043"] },
+    "fact",
+  );
+  assertCase(
+    method("union"),
+    inputsOf({ receiver: LIST, arguments: [dynamicView("host")] }),
+    legacyOperation(`${XS}let r = xs.union(hostList)\nexit`),
+    { fact: "list<unknown>" },
+    "fact",
+  );
+  // A dict method's shape is a gate: another count or an unknown name leaves the call without a value.
+  assertCase(
+    method("remove"),
+    inputsOf({ receiver: DICT }),
+    legacyOperation('let d = dict { "a": 1 }\nlet r = d.remove()\nexit'),
+    { fact: "unknown", errors: ["TSV020"] },
+    "invalid",
+  );
+  assertCase(
+    method("clear"),
+    inputsOf({ receiver: DICT, arguments: [INTEGER] }),
+    legacyOperation('let d = dict { "a": 1 }\nlet r = d.clear(1)\nexit'),
+    { fact: "unknown", errors: ["TSV020"] },
+    "invalid",
+  );
+});
+
+test("a receiver that may also hold data the compiler cannot know is never rejected: the legacy holds it unknown", () => {
+  const guide = 'speaker guide {\n displayName: "Guide"\n}\n';
+  // A speaker beside the remainder: the runtime checks the member; the legacy's element is unknown.
+  assertCase(
+    method("trim"),
+    inputsOf({ receiver: dynamicView("host", [{ kind: "speaker" }]) }),
+    legacyOperation(`${guide}let xs = [hostValue, guide]\nlet r = xs.first.trim()\nexit`),
+    { fact: "unknown" },
+    { realized: "unknown" },
+    "alternatives",
+  );
+  // A kind without the method beside the remainder: no rejection either.
+  assertCase(
+    method("trim"),
+    inputsOf({ receiver: dynamicView("host", [INTEGER_TYPE]) }),
+    legacyOperation("let xs = [hostValue, 1]\nlet r = xs.first.trim()\nexit"),
+    { fact: "unknown" },
+    { realized: "unknown" },
+    "alternatives",
   );
 });
 

@@ -410,6 +410,13 @@ const CHOICE_TEMPLATES: readonly Template[] = [
         ["let v: timer = hostValue", "let o = { text: v }"],
         "askChoice o",
       );
+      yield variant(
+        "labelled-host-text-and-computed",
+        ['let o = { value: 1, text: "One" }'],
+        "askChoice first: hostText, o",
+        "host",
+      );
+      yield variant("labelled-host-and-literal", [], 'askChoice first: hostText, "b"', "host");
     },
   },
 ];
@@ -1368,12 +1375,15 @@ function provenance(inputs: CaseInputs, why: DynamicWhy | null): DynamicWhy {
   switch (`${contract.family}.${contract.name}`) {
     case "interaction.choice": {
       if (evidence?.kind !== "choice") return "unknown member";
+      // A labelled option's button returns the label: nothing of the option contributes.
       const places = evidence.options.flatMap((option) =>
-        option.content.kind === "list" || option.content.kind === "set"
-          ? elements(option.content.elements)
-          : option.content.kind === "object"
-            ? [returned(option.content.object, option.place)]
-            : [option.place],
+        option.label !== null
+          ? []
+          : option.content.kind === "list" || option.content.kind === "set"
+            ? elements(option.content.elements)
+            : option.content.kind === "object"
+              ? [returned(option.content.object, option.place)]
+              : [option.place],
       );
       return first(places) ?? "unknown member";
     }

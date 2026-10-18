@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   INTEGER_TYPE,
   NUMBER_TYPE,
+  optional,
   PropertyTable,
   STRING_TYPE,
   type StaticType,
@@ -18,6 +19,8 @@ import {
   inputsOf,
   legacyOperation,
 } from "./helpers/adapter-parity.js";
+
+const INTEGER = closedView(INTEGER_TYPE);
 
 /** The relation of a random function, which the routing table must know. */
 function random(name: string) {
@@ -90,6 +93,41 @@ test("randomWeighted gives a key of a dict of weights, a copy of an element of a
     legacyOperation('let r = randomWeighted("x")\nexit'),
     { fact: "unknown", errors: ["TSV043"] },
     "invalid",
+  );
+});
+
+test("randomWeighted's shape is a gate, a source that may be null is reported and used, and a remainder is kept", () => {
+  const dict = closedView({ kind: "dict", element: INTEGER_TYPE });
+  assertCase(
+    random("randomWeighted"),
+    inputsOf({ arguments: [dict], named: { extra: INTEGER } }),
+    legacyOperation('let r = randomWeighted(dict { "a": 1 }, extra: 1)\nexit'),
+    { fact: "unknown", errors: ["TSV022"] },
+    "invalid",
+  );
+  assertCase(
+    random("randomWeighted"),
+    inputsOf({ arguments: [dict, INTEGER] }),
+    legacyOperation('let r = randomWeighted(dict { "a": 1 }, 1)\nexit'),
+    { fact: "unknown", errors: ["TSV020"] },
+    "invalid",
+  );
+  assertCase(
+    random("randomWeighted"),
+    inputsOf({ arguments: [closedView(optional({ kind: "dict", element: INTEGER_TYPE }))] }),
+    legacyOperation("let d: integer dict? = hostValue\nlet r = randomWeighted(d)\nexit"),
+    { fact: "string", errors: ["TSV043"] },
+    "fact",
+  );
+  // A source that may also be one the compiler cannot know, beside a known dict: the legacy's unknown.
+  assertCase(
+    random("randomWeighted"),
+    inputsOf({ arguments: [dynamicView("host", [{ kind: "dict", element: INTEGER_TYPE }])] }),
+    legacyOperation(
+      'let xs = [hostValue, dict { "a": 1 }]\nlet r = randomWeighted(xs.first)\nexit',
+    ),
+    { fact: "unknown" },
+    { dynamic: "host" },
   );
 });
 

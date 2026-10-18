@@ -1,15 +1,21 @@
 import { RANDOM_CONTRACTS, type RandomFunction } from "../../random-functions.js";
-import { BOOLEAN_TYPE, INTEGER_TYPE, NUMBER_TYPE, STRING_TYPE } from "../../static-types.js";
+import {
+  BOOLEAN_TYPE,
+  INTEGER_TYPE,
+  NUMBER_TYPE,
+  STRING_TYPE,
+  valueKindOfType,
+} from "../../static-types.js";
 import type { OperationInputs, OperationRelation, OperationResult } from "./relation.js";
 import {
   argument,
   dynamicFrom,
   INVALID,
   isBottom,
-  kindsOf,
   projectionOf,
   typeResult,
   UNCONSTRAINED,
+  viewMembers,
 } from "./views.js";
 
 /**
@@ -28,15 +34,26 @@ function relation(name: string, contract: RandomFunction): OperationRelation {
         case "range":
           return typeResult(INTEGER_TYPE);
         case "choices": {
-          const source = inputs.arguments[0];
-          if (source === undefined) return INVALID;
+          // The call's shape first (`shape`): a name the contract does not take, or another count, is reported and
+          // the call has no value.
+          if (
+            [...inputs.named.keys()].some((name) => !contract.shape.names.includes(name)) ||
+            inputs.arguments.length !== contract.shape.count
+          )
+            return INVALID;
+          const source = inputs.arguments[0]!;
           if (isBottom(source)) return UNCONSTRAINED;
-          const kinds = kindsOf(source);
-          if (kinds.length === 0) return dynamicFrom(source, "unknown member");
+          // A source that may also be one the compiler cannot know is not known (`forUse` on unknown).
+          if (source.dynamic !== null) return dynamicFrom(source, "unknown member");
+          // The members for use: without null, which is reported, unless null is all there is.
+          const all = viewMembers(source);
+          const used = all.filter((member) => member.kind !== "null");
+          const kinds = new Set((used.length === 0 ? all : used).map(valueKindOfType));
           // One kind of source: a dict gives one of its keys, a list a copy of one of its elements.
-          if (kinds.length !== 1) return INVALID;
-          if (kinds[0] === "dict") return typeResult(STRING_TYPE);
-          return kinds[0] === "list" ? projectionOf(argument(0), "element") : INVALID;
+          if (kinds.size !== 1) return INVALID;
+          const [kind] = kinds;
+          if (kind === "dict") return typeResult(STRING_TYPE);
+          return kind === "list" ? projectionOf(argument(0), "element") : INVALID;
         }
       }
     },

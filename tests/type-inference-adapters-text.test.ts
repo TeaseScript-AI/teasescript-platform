@@ -2,12 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BOOLEAN_TYPE,
   INTEGER_TYPE,
-  NULL_TYPE,
-  NUMBER_TYPE,
   optional,
-  PropertyTable,
   REGEX_TYPE,
   STRING_TYPE,
   union,
@@ -29,6 +25,7 @@ import {
   type AdapterExpectation,
   type LegacyExpectation,
 } from "./helpers/adapter-parity.js";
+import { OPERANDS } from "./helpers/adapter-operands.js";
 
 /**
  * Parity of the members of text with the legacy checker (work note §5.4, §6.3): every method of `TEXT_METHODS` with
@@ -67,52 +64,6 @@ const scalar = (name: Extract<StaticType, { kind: "scalar" }>["name"]): StaticTy
 });
 const TEXT = closedView(STRING_TYPE);
 const S = "let s: string = hostValue\n";
-
-/** An operand of each kind, as `let a` declares it (an annotation where it is written) and as its view holds it. */
-const OPERANDS: readonly (readonly [string, OperandView, string?])[] = [
-  ["integer", closedView(INTEGER_TYPE)],
-  ["number", closedView(NUMBER_TYPE)],
-  ["string", closedView(STRING_TYPE)],
-  ["boolean", closedView(BOOLEAN_TYPE)],
-  ["duration", closedView(scalar("duration"))],
-  ["calendarDuration", closedView(scalar("calendarDuration"))],
-  ["angle", closedView(scalar("angle"))],
-  ["date", closedView(scalar("date"))],
-  ["time", closedView(scalar("time"))],
-  ["datetime", closedView(scalar("datetime"))],
-  ["absoluteDateTime", closedView(scalar("absoluteDateTime"))],
-  ["script", closedView(scalar("script"))],
-  ["regex", closedView(REGEX_TYPE)],
-  ["range", closedView({ kind: "range" })],
-  ["integer[]", closedView({ kind: "list", element: INTEGER_TYPE })],
-  ["string[]", closedView({ kind: "list", element: STRING_TYPE })],
-  ["integer set", closedView({ kind: "set", element: INTEGER_TYPE })],
-  ["integer dict", closedView({ kind: "dict", element: INTEGER_TYPE })],
-  ["string dict", closedView({ kind: "dict", element: STRING_TYPE })],
-  [
-    "object",
-    closedView({ kind: "object", properties: new PropertyTable([["x", INTEGER_TYPE]]) }),
-    "let a = { x: 1 }",
-  ],
-  [
-    "speaker",
-    closedView({ kind: "speaker" }),
-    'speaker guide {\n displayName: "Guide"\n}\nlet a = guide',
-  ],
-  ["timer", closedView({ kind: "timer" })],
-  ["media", closedView({ kind: "media" })],
-  ["camera", closedView({ kind: "camera" }), "let a = showCamera"],
-  [
-    "permanentButton",
-    closedView({ kind: "permanentButton" }),
-    'let a = showPermanentButton "B" { }',
-  ],
-  ["messageHandle", closedView({ kind: "messageHandle" })],
-  ["null", closedView(NULL_TYPE), "let a = null"],
-  ["host", dynamicView("host"), "let a = hostValue"],
-  ["integer?", closedView(optional(INTEGER_TYPE))],
-  ["integer | string", closedView(union([INTEGER_TYPE, STRING_TYPE]))],
-];
 
 const declaration = (label: string, written: string | undefined) =>
   written ?? `let a: ${label} = hostValue`;
@@ -171,7 +122,7 @@ test("every method of text gives a new value of its result", () => {
 test("an argument of any kind is the visitor's check: the method's result stands", () => {
   for (const [name, parameters, fact] of METHODS)
     parameters.forEach((parameter, index) => {
-      for (const [label, view, written] of OPERANDS) {
+      for (const { label, view, declaration: written } of OPERANDS) {
         const args = parameters.map((other, at) =>
           at === index ? "a" : PARAMETERS[other].written,
         );

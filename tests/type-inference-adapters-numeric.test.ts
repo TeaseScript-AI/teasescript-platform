@@ -8,8 +8,6 @@ import {
   NULL_TYPE,
   NUMBER_TYPE,
   optional,
-  PropertyTable,
-  REGEX_TYPE,
   STRING_TYPE,
   union,
   withValues,
@@ -32,6 +30,7 @@ import {
   legacyOperation,
   type AdapterExpectation,
 } from "./helpers/adapter-parity.js";
+import { OPERANDS } from "./helpers/adapter-operands.js";
 
 /**
  * Parity of the numeric functions and of the value form of `min` and `max` with the legacy checker (work note §5.3,
@@ -106,52 +105,6 @@ test("the fixture cases of the parity helper hold of the real relations", () => 
   );
 });
 
-/** An operand of each kind, as `let a` declares it (an annotation where it is written) and as its view holds it. */
-const OPERANDS: readonly (readonly [string, OperandView, string?])[] = [
-  ["integer", INTEGER],
-  ["number", NUMBER],
-  ["string", TEXT],
-  ["boolean", closedView(BOOLEAN_TYPE)],
-  ["duration", closedView(scalar("duration"))],
-  ["calendarDuration", closedView(scalar("calendarDuration"))],
-  ["angle", ANGLE],
-  ["date", closedView(scalar("date"))],
-  ["time", closedView(scalar("time"))],
-  ["datetime", closedView(scalar("datetime"))],
-  ["absoluteDateTime", closedView(scalar("absoluteDateTime"))],
-  ["script", closedView(scalar("script"))],
-  ["regex", closedView(REGEX_TYPE)],
-  ["range", closedView({ kind: "range" })],
-  ["integer[]", closedView({ kind: "list", element: INTEGER_TYPE })],
-  ["string[]", closedView({ kind: "list", element: STRING_TYPE })],
-  ["integer set", closedView({ kind: "set", element: INTEGER_TYPE })],
-  ["integer dict", closedView({ kind: "dict", element: INTEGER_TYPE })],
-  ["string dict", closedView({ kind: "dict", element: STRING_TYPE })],
-  [
-    "object",
-    closedView({ kind: "object", properties: new PropertyTable([["x", INTEGER_TYPE]]) }),
-    "let a = { x: 1 }",
-  ],
-  [
-    "speaker",
-    closedView({ kind: "speaker" }),
-    'speaker guide {\n displayName: "Guide"\n}\nlet a = guide',
-  ],
-  ["timer", closedView({ kind: "timer" })],
-  ["media", closedView({ kind: "media" })],
-  ["camera", closedView({ kind: "camera" }), "let a = showCamera"],
-  [
-    "permanentButton",
-    closedView({ kind: "permanentButton" }),
-    'let a = showPermanentButton "B" { }',
-  ],
-  ["messageHandle", closedView({ kind: "messageHandle" })],
-  ["null", closedView(NULL_TYPE), "let a = null"],
-  ["host", HOST, "let a = hostValue"],
-  ["integer?", closedView(optional(INTEGER_TYPE))],
-  ["integer | string", closedView(union([INTEGER_TYPE, STRING_TYPE]))],
-];
-
 const declaration = (label: string, written: string | undefined) =>
   written ?? `let a: ${label} = hostValue`;
 
@@ -203,7 +156,7 @@ test("each argument of a numeric function over every kind: the rule's kind, no v
       const takes = ANGLE_FUNCTIONS.includes(name)
         ? ["angle", "host"]
         : ["integer", "number", "host"];
-      for (const [label, view, source] of OPERANDS) {
+      for (const { label, view, declaration: source } of OPERANDS) {
         const args = written.map((text, at) => (at === position ? "a" : text));
         const inputs = inputsOf({
           arguments: written.map((text, at) => (at === position ? view : writtenView(text))),
@@ -250,7 +203,7 @@ test("each argument of a numeric function over every kind: the rule's kind, no v
       }
     });
   // `decimals:` is read by its presence: the rounded number is a number, whatever the argument.
-  for (const [label, view, source] of OPERANDS)
+  for (const { label, view, declaration: source } of OPERANDS)
     assertCase(
       relation("numeric", "round"),
       inputsOf({ arguments: [known(NUMBER_TYPE, 1.5)], named: { decimals: view } }),
@@ -1170,26 +1123,23 @@ test("min and max of more values, of fewer than two, and the note's rows", () =>
 });
 
 test("the legacy's value form folds the named arguments' values too", () => {
-  // `min(1, 2, by: 1.5)` reports the name and folds its value: minMaxOfValues gives the legacy's result of the views of
-  // every argument, positional and named.
-  const valueForm: OperationRelation = {
-    contract: { family: "listFunction", name: "min" },
-    result: (inputs) => minMaxOfValues([...inputs.arguments, ...inputs.named.values()]),
-  };
-  for (const [call, args, named, fact] of [
-    ["min(1, 2, by: 1)", [INTEGER, INTEGER], { by: INTEGER }, "integer"],
-    ["min(1, 2, by: 1.5)", [INTEGER, INTEGER], { by: NUMBER }, "number"],
+  // `min(1, 2, by: 1.5)` reports the name and folds its value: the routed value form gives the legacy's result of
+  // the views of every argument, positional and named.
+  for (const [name, call, args, named, fact] of [
+    ["min", "min(1, 2, by: 1)", [INTEGER, INTEGER], { by: INTEGER }, "integer"],
+    ["min", "min(1, 2, by: 1.5)", [INTEGER, INTEGER], { by: NUMBER }, "number"],
     [
+      "min",
       "min(1 s, 2 s, foo: 1 s)",
       [1, 2].map(() => closedView(scalar("duration"))),
       { foo: closedView(scalar("duration")) },
       "duration",
     ],
-    ["max(1, by: 2)", [INTEGER], { by: INTEGER }, "integer"],
-    ['min(1, 2, by: "x")', [INTEGER, INTEGER], { by: TEXT }, "unknown"],
+    ["max", "max(1, by: 2)", [INTEGER], { by: INTEGER }, "integer"],
+    ["min", 'min(1, 2, by: "x")', [INTEGER, INTEGER], { by: TEXT }, "unknown"],
   ] as const)
     assertCase(
-      valueForm,
+      relation("listFunction", name),
       inputsOf({ arguments: args, named }),
       legacyOperation(`let r = ${call}\nexit`),
       { fact, errors: ["TSV022"] },

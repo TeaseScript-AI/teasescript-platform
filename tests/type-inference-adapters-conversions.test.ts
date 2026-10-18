@@ -8,10 +8,8 @@ import {
   NULL_TYPE,
   NUMBER_TYPE,
   optional,
-  PropertyTable,
   REGEX_TYPE,
   STRING_TYPE,
-  union,
   type StaticType,
 } from "../src/static-types.js";
 import { operationRelations } from "../src/type-inference/adapters/index.js";
@@ -26,6 +24,7 @@ import {
   legacyOperation,
   type AdapterExpectation,
 } from "./helpers/adapter-parity.js";
+import { OPERANDS } from "./helpers/adapter-operands.js";
 
 /**
  * Parity of the conversions and of the file, hash and lock calls, `escapeMarkup` and `script` with the legacy checker
@@ -44,80 +43,6 @@ const scalar = (name: Extract<StaticType, { kind: "scalar" }>["name"]): StaticTy
   kind: "scalar",
   name,
 });
-
-/** An operand of each kind, as `let a` declares it and as its view holds it. */
-const OPERANDS: readonly (readonly [string, string, OperandView])[] = [
-  ["integer", "let a: integer = hostValue", closedView(INTEGER_TYPE)],
-  ["number", "let a: number = hostValue", closedView(NUMBER_TYPE)],
-  ["string", "let a: string = hostValue", closedView(STRING_TYPE)],
-  ["boolean", "let a: boolean = hostValue", closedView(BOOLEAN_TYPE)],
-  ["duration", "let a: duration = hostValue", closedView(scalar("duration"))],
-  [
-    "calendarDuration",
-    "let a: calendarDuration = hostValue",
-    closedView(scalar("calendarDuration")),
-  ],
-  ["angle", "let a: angle = hostValue", closedView(scalar("angle"))],
-  ["date", "let a: date = hostValue", closedView(scalar("date"))],
-  ["time", "let a: time = hostValue", closedView(scalar("time"))],
-  ["datetime", "let a: datetime = hostValue", closedView(scalar("datetime"))],
-  [
-    "absoluteDateTime",
-    "let a: absoluteDateTime = hostValue",
-    closedView(scalar("absoluteDateTime")),
-  ],
-  ["script", "let a: script = hostValue", closedView(scalar("script"))],
-  ["regex", "let a: regex = hostValue", closedView(REGEX_TYPE)],
-  ["range", "let a: range = hostValue", closedView({ kind: "range" })],
-  [
-    "integer[]",
-    "let a: integer[] = hostValue",
-    closedView({ kind: "list", element: INTEGER_TYPE }),
-  ],
-  ["string[]", "let a: string[] = hostValue", closedView({ kind: "list", element: STRING_TYPE })],
-  [
-    "integer set",
-    "let a: integer set = hostValue",
-    closedView({ kind: "set", element: INTEGER_TYPE }),
-  ],
-  [
-    "integer dict",
-    "let a: integer dict = hostValue",
-    closedView({ kind: "dict", element: INTEGER_TYPE }),
-  ],
-  [
-    "string dict",
-    "let a: string dict = hostValue",
-    closedView({ kind: "dict", element: STRING_TYPE }),
-  ],
-  [
-    "object",
-    "let a = { x: 1 }",
-    closedView({ kind: "object", properties: new PropertyTable([["x", INTEGER_TYPE]]) }),
-  ],
-  [
-    "speaker",
-    'speaker guide {\n displayName: "Guide"\n}\nlet a = guide',
-    closedView({ kind: "speaker" }),
-  ],
-  ["timer", "let a: timer = hostValue", closedView({ kind: "timer" })],
-  ["media", "let a: media = hostValue", closedView({ kind: "media" })],
-  ["camera", "let a = showCamera", closedView({ kind: "camera" })],
-  [
-    "permanentButton",
-    'let a = showPermanentButton "B" { }',
-    closedView({ kind: "permanentButton" }),
-  ],
-  ["messageHandle", "let a: messageHandle = hostValue", closedView({ kind: "messageHandle" })],
-  ["null", "let a = null", closedView(NULL_TYPE)],
-  ["host", "let a = hostValue", dynamicView("host")],
-  ["integer?", "let a: integer? = hostValue", closedView(optional(INTEGER_TYPE))],
-  [
-    "integer | string",
-    "let a: integer | string = hostValue",
-    closedView(union([INTEGER_TYPE, STRING_TYPE])),
-  ],
-];
 
 const SCALARS = [
   "integer",
@@ -231,7 +156,7 @@ const CONVERSION_CALLS: Readonly<
 
 test("a conversion of an operand of any kind gives its result; the operand's kind is checking-only", () => {
   for (const [name, row] of Object.entries(CONVERSION_CALLS)) {
-    for (const [label, declaration, view] of OPERANDS) {
+    for (const { label, declaration, view } of OPERANDS) {
       const named = row.default === undefined ? {} : { default: row.default };
       assertCase(
         relation("conversion", name),
@@ -588,7 +513,7 @@ const BUILTIN_CALLS: readonly {
 
 test("a file, hash or lock call, escapeMarkup and script of an operand of any kind give their result", () => {
   for (const row of BUILTIN_CALLS)
-    for (const [label, declaration, view] of OPERANDS)
+    for (const { label, declaration, view } of OPERANDS)
       assertCase(
         relation("builtin", row.name),
         inputsOf({ arguments: [view], named: row.named }),

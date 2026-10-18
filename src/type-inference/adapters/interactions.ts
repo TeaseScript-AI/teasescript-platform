@@ -99,10 +99,12 @@ class Places {
   type(place: PlaceId): StaticType {
     const view = this.inputs.view(place);
     if (isBottom(view)) throw new Unconstrained();
-    const closed = closedType(view);
-    if (closed !== null) return closed;
-    this.whys.push(view.dynamic!);
-    return UNKNOWN_TYPE;
+    // A value that may also be one the compiler cannot know is, as the legacy holds it, not known at all.
+    if (view.dynamic !== null) {
+      this.whys.push(view.dynamic);
+      return UNKNOWN_TYPE;
+    }
+    return closedType(view)!;
   }
 
   /** The legacy's `unknown` without a report: of the operand's provenance, or of its own limit. */
@@ -226,29 +228,33 @@ function choice(inputs: OperationInputs): OperationResult {
     let empty = true;
     for (const option of evidence.options) {
       const label = option.label;
-      const written: StaticType | null =
-        label === null
-          ? null
-          : label.kind === "string"
+      if (label !== null) {
+        // A label is the button's value whatever the option holds (the visitor checks the option): a written list
+        // or set gives it once when it has elements, anything else once.
+        const written: StaticType =
+          label.kind === "string"
             ? STRING_TYPE
             : label.kind === "integer"
               ? INTEGER_TYPE
               : NUMBER_TYPE;
+        const elements =
+          option.content.kind === "list" || option.content.kind === "set"
+            ? option.content.elements.length
+            : null;
+        if (elements === null || elements > 0) {
+          empty = false;
+          add(written, label.value);
+        }
+        continue;
+      }
       if (option.content.kind === "list" || option.content.kind === "set") {
         const elements = option.content.elements;
         if (elements.length > 0) empty = false;
         for (const element of elements) {
-          const entry = choiceEntry(
-            places,
-            places.type(element.place),
-            element.object,
-            true,
-            label === null,
-          );
+          const entry = choiceEntry(places, places.type(element.place), element.object, true, true);
           rejected ||= entry.rejected;
-          if (label === null) add(entry.type, literalOf(element.literal));
+          add(entry.type, literalOf(element.literal));
         }
-        if (label !== null && elements.length > 0) add(written!, label.value);
         continue;
       }
       empty = false;
@@ -257,14 +263,12 @@ function choice(inputs: OperationInputs): OperationResult {
       if (parts.some((part) => part.kind === "list" || part.kind === "set")) {
         // Each member gives buttons: a collection its elements, a value itself. A choice object among the elements of
         // a computed collection may return its value or its text, so only scalar elements give a known result type.
-        const entry = choiceEntry(places, type, null, false, label === null);
+        const entry = choiceEntry(places, type, null, false, true);
         const accepted =
           entry.type !== UNKNOWN_TYPE &&
           !rejectsElements(
             type,
-            (element) =>
-              (label === null ? isChoiceValue(element) : isShown(element)) ||
-              resolved(element).kind === "object",
+            (element) => isChoiceValue(element) || resolved(element).kind === "object",
           );
         rejected ||= entry.rejected || !accepted;
         const results = parts.map((part) => {
@@ -273,11 +277,9 @@ function choice(inputs: OperationInputs): OperationResult {
           return button.kind === "object" ? UNKNOWN_TYPE : button;
         });
         add(
-          written ??
-            (accepted && !isNullable(type) ? (joinTypes(results) ?? UNKNOWN_TYPE) : UNKNOWN_TYPE),
-          label?.value,
+          accepted && !isNullable(type) ? (joinTypes(results) ?? UNKNOWN_TYPE) : UNKNOWN_TYPE,
+          undefined,
         );
-        if (label === null) literals = null;
         continue;
       }
       const entry = choiceEntry(
@@ -285,10 +287,10 @@ function choice(inputs: OperationInputs): OperationResult {
         type,
         option.content.kind === "object" ? option.content.object : null,
         false,
-        label === null,
+        true,
       );
       rejected ||= entry.rejected;
-      add(written ?? entry.type, label === null ? literalOf(option.literal) : label.value);
+      add(entry.type, literalOf(option.literal));
     }
     // An empty list or set gives no buttons, which the legacy reports.
     if (empty && evidence.options.length > 0) return INVALID;
@@ -338,15 +340,15 @@ function formAnswerType(kind: Exclude<FormFieldKind, "boolean" | "cycle">): Stat
   return FORM_ANSWER_TYPES[kind];
 }
 
-/** The answer of a kind: a toggle, a cycle of its options, or the kind's value. */
+/** The answer of a kind: a toggle, a cycle of its options (read only then), or the kind's value. */
 function fieldAnswer(
   places: Places,
   kind: FormFieldKind,
-  options: StaticType | undefined,
+  options: () => StaticType | undefined,
   elements: readonly ChoiceElementEvidence[] | undefined,
 ): StaticType {
   return kind === "cycle"
-    ? cycleAnswer(places, options, elements)
+    ? cycleAnswer(places, options(), elements)
     : kind === "boolean"
       ? BOOLEAN_TYPE
       : formAnswerType(kind);
@@ -396,24 +398,21 @@ function writtenField(
       : isFormFieldKind(descriptor.type)
         ? descriptor.type
         : null;
-  const valueType = typeOf(descriptor.value);
-  const kind =
-    tag !== undefined
-      ? tag
-      : descriptor.options !== null
-        ? valueType !== undefined && isScalar(valueType, "boolean")
-          ? "boolean"
-          : "cycle"
-        : valueType === undefined
-          ? null
-          : formKindOfStart(valueType);
+  // The start value decides the kind only without a written `type:`; the result rule reads nothing else of it.
+  const startKind = (): FormFieldKind | null => {
+    const valueType = typeOf(descriptor.value);
+    if (descriptor.options !== null)
+      return valueType !== undefined && isScalar(valueType, "boolean") ? "boolean" : "cycle";
+    return valueType === undefined ? null : formKindOfStart(valueType);
+  };
+  const kind = tag !== undefined ? tag : startKind();
   // A written `optional: false` keeps the answer required; any other value may make it optional.
   const required = descriptor.optional === null || descriptor.optional === false;
   if (kind === null) return optional(GENERIC_FORM_ANSWER_TYPE);
   const result = fieldAnswer(
     places,
     kind,
-    descriptor.options === null ? undefined : typeOf(descriptor.options.place),
+    () => (descriptor.options === null ? undefined : typeOf(descriptor.options.place)),
     descriptor.options?.elements ?? undefined,
   );
   return !required && kind !== "boolean" && kind !== "cycle" ? optional(result) : result;
@@ -472,7 +471,12 @@ function field(
       : computedField(places, value);
   const kind = formKindOfStart(value);
   if (kind === null) return optional(GENERIC_FORM_ANSWER_TYPE);
-  return fieldAnswer(places, kind, value, written?.kind === "list" ? written.elements : undefined);
+  return fieldAnswer(
+    places,
+    kind,
+    () => value,
+    written?.kind === "list" ? written.elements : undefined,
+  );
 }
 
 function form(inputs: OperationInputs): OperationResult {
@@ -484,9 +488,8 @@ function form(inputs: OperationInputs): OperationResult {
     if (isBottom(fields)) throw new Unconstrained();
     const cancellable =
       evidence.cancel || (evidence.onTimeout !== null && evidence.onTimeout !== "submit");
-    const closed = closedType(fields);
-    if (closed === null) return dynamicResult(fields.dynamic!);
-    const container = resolved(nonNullType(closed));
+    if (fields.dynamic !== null) return dynamicResult(fields.dynamic);
+    const container = resolved(nonNullType(closedType(fields)!));
     const written = evidence.fields === "computed" ? undefined : evidence.fields;
     let answers: StaticType;
     if (container.kind === "dict") {

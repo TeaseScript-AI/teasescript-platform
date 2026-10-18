@@ -230,6 +230,7 @@ function prediction(
   const xs = useOf(x);
   if (x.dynamic === null && xs.length === 0) return INVALID;
   if (
+    x.dynamic === null &&
     xs.some(
       (member) =>
         !unknownPart(member) &&

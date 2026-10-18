@@ -74,16 +74,19 @@ export function methodRelation(name: string): OperationRelation {
               }),
       }));
       const supported = answers.filter((answer) => answer.result !== undefined);
-      // A speaker alone has no methods; beside a kind that has the method, the runtime checks the speaker.
-      if (supported.length === 0) return INVALID;
-      if (answers.some((answer) => answer.kind !== "speaker" && answer.result === undefined))
-        return INVALID;
+      // A receiver that may also hold data the compiler cannot know is never rejected here (the legacy holds it as
+      // unknown): a kind without the method is the runtime's to check, as a speaker is.
+      if (receiver.dynamic === null) {
+        // A speaker alone has no methods; beside a kind that has the method, the runtime checks the speaker.
+        if (supported.length === 0) return INVALID;
+        if (answers.some((answer) => answer.kind !== "speaker" && answer.result === undefined))
+          return INVALID;
+      }
       const cases = answers.map((answer) => ({
         receiver: answer.kind,
         result: answer.result ?? UNKNOWN_MEMBER,
       }));
       const composed = byReceiver(cases);
-      // A receiver that may also hold data the compiler cannot know keeps that possibility.
       return receiver.dynamic === null
         ? composed
         : alternativesOf(composed, dynamicResult(receiver.dynamic));
