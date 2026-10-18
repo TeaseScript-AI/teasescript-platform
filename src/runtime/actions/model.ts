@@ -383,9 +383,12 @@ export type RuntimePendingActionSnapshot =
 /**
  * The completion events that an active action must still be able to publish, by kind: an interaction its transcript
  * entry and its completion, a storage write or a capture the warning of a failed write or an unavailable camera and its
- * completion, any other action its completion. Every kind has its entry, so a new kind must decide.
+ * completion, any other action its completion. Every kind has its entry, so a new kind must decide. The instruction that
+ * starts an action makes room for them as it does, and active actions reserve them until they settle.
  */
-const ACTION_COMPLETION_EVENTS: { readonly [K in RuntimePendingActionSnapshot["kind"]]: number } = {
+export const ACTION_COMPLETION_EVENTS: {
+  readonly [K in RuntimePendingActionSnapshot["kind"]]: number;
+} = {
   delay: 1,
   interaction: 2,
   chatPacingGate: 1,

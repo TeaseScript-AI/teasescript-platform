@@ -14,7 +14,7 @@ import type {
   RuntimeTimerSettlementSnapshot,
 } from "../actions/model.js";
 import { isValidSessionTime } from "../actions/delay.js";
-import { interruptibleAction } from "../actions/interrupts.js";
+import { holdsCatchUp, interruptibleAction } from "../actions/interrupts.js";
 import type { ActionCompletedEvent, DeveloperWarningEvent, InterpreterEvent } from "../events.js";
 import { drawFromSessionGenerator, sampleRangeInteger } from "../random-draws.js";
 import type { TraceStore } from "../debug-trace.js";
@@ -28,7 +28,7 @@ import {
   type RuntimeTimerSnapshot,
   type TimerHandleRecord,
 } from "../timers.js";
-import { assertEventSequenceCapacity, takeSequence } from "./support.js";
+import { assertEventSequenceCapacity, takeSequence, takeSettlementSequence } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
 
 /**
@@ -42,13 +42,15 @@ export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
 }
 
 /**
- * A queued block waits for a pending storage write, also one made inside a running block. Catch-up holds at the
- * block's due time, so the block still runs at that scene time once the host acknowledges the write.
+ * A queued block waits for a foreground host step that `holdsCatchUp` says holds catch-up, also one made inside a
+ * running block. Catch-up holds at the block's due time, so the block still runs at that scene time once the host
+ * answers.
  */
-export function timerHandlerAwaitsStorageWrite(snapshot: RuntimeSnapshot): boolean {
+export function timerHandlerHoldsCatchUp(snapshot: RuntimeSnapshot): boolean {
   return (
     snapshot.status === "waiting" &&
-    snapshot.foregroundAction?.kind === "storageWrite" &&
+    snapshot.foregroundAction !== null &&
+    holdsCatchUp(snapshot.foregroundAction) &&
     snapshot.pendingTimerHandlers.length > 0
   );
 }
@@ -97,7 +99,7 @@ function settleTimerAction(
     throw new Error("Only a finished or stopped timer can settle.");
   }
   assertEventSequenceCapacity(snapshot, 1);
-  const completionEventSequence = takeSequence(snapshot, 1);
+  const completionEventSequence = takeSettlementSequence(snapshot, action);
   snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(action), 1);
   snapshot.settledTimers.push(settledTimerRecord(action.timer));
   sweepRetainedScopes(snapshot, false);

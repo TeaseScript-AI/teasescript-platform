@@ -48,9 +48,10 @@ import {
   currentTemporalContext,
   MAX_RUNTIME_SESSION_TIME_MS,
 } from "../state.js";
-import type {
-  RuntimeInteractionActionSnapshot,
-  RuntimeFormStateSnapshot,
+import {
+  ACTION_COMPLETION_EVENTS,
+  type RuntimeInteractionActionSnapshot,
+  type RuntimeFormStateSnapshot,
 } from "../actions/model.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import {
@@ -148,7 +149,8 @@ export function executeInteraction(
       instruction.span,
     );
   }
-  const requiredEventSequences = 3;
+  // The request and the completion events.
+  const requiredEventSequences = 1 + ACTION_COMPLETION_EVENTS.interaction;
   assertEventSequenceCapacity(snapshot, requiredEventSequences, instruction.span);
   const prepared = "preparedUi" in instruction;
   const speaker = prepared

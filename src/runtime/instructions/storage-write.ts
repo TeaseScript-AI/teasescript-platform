@@ -16,7 +16,10 @@ import {
 } from "../script-storage.js";
 import { cloneCapturedSerializableValue } from "../serializable-values.js";
 import type { RuntimeSnapshot } from "../state.js";
-import type { RuntimeStorageWriteActionSnapshot } from "../actions/model.js";
+import {
+  ACTION_COMPLETION_EVENTS,
+  type RuntimeStorageWriteActionSnapshot,
+} from "../actions/model.js";
 import { assertValueType } from "../value-types.js";
 import { advance, fault } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
@@ -66,7 +69,7 @@ export function writeStorage(
   // The request, the completion, a possible failure warning, and every active action's own completions.
   assertEventSequenceCapacity(
     snapshot,
-    3 + requiredFutureActionCompletionEvents(snapshot),
+    1 + ACTION_COMPLETION_EVENTS.storageWrite + requiredFutureActionCompletionEvents(snapshot),
     instruction.span,
   );
   const requestSequence = takeSequence(snapshot);

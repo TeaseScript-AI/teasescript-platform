@@ -34,7 +34,7 @@ import type {
 import { describeValue } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
 import { isPlainRecord } from "../plain-data.js";
-import { isLockNotice, isLockOutcome } from "./model.js";
+import { ACTION_COMPLETION_EVENTS, isLockNotice, isLockOutcome } from "./model.js";
 import { USE_DEFAULT } from "../evaluation/support.js";
 
 // The calls that lock and open text and stored files (V30 §13). A `lock` instruction asks the Player and waits, and runs
@@ -543,7 +543,11 @@ function requestLock(
       copySpan(span),
     );
   // The request and the completion, besides what active actions reserve.
-  assertEventSequenceCapacity(snapshot, 2 + requiredFutureActionCompletionEvents(snapshot), span);
+  assertEventSequenceCapacity(
+    snapshot,
+    1 + ACTION_COMPLETION_EVENTS.lock + requiredFutureActionCompletionEvents(snapshot),
+    span,
+  );
   const sequence = takeSequence(snapshot);
   const action: RuntimeLockActionSnapshot = Object.freeze({
     kind: "lock",

@@ -56,9 +56,9 @@ import {
   type RandomDrawRequest,
   type RandomDrawResolutionOutcome,
   textSha256,
+  actionAwaitsHost,
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
-import { interruptibleAction } from "../src/runtime/actions/interrupts.js";
 import { formValueText } from "../src/interaction-answers.js";
 import { IMAGE_SKIP_TEXT } from "../src/image-input.js";
 import { formSummaryOf, type FormSummaryLine } from "../src/runtime/actions/form.js";
@@ -1902,16 +1902,15 @@ function nextMediaEventMs(media: RuntimeMediaSnapshot): number | null {
 }
 
 /**
- * Whether time cannot advance before the host answers: catch-up holds for a queued block behind a pending write, a host
- * step that no block interrupts waits for the host (a `save`, `delete`, `takePhoto()`, file store, or lock step), or
- * the session is paused at a random draw. A lock's dialog waits for the player, as an interaction does.
+ * Whether time cannot advance before the host answers: catch-up holds for a queued block behind a host step, the
+ * foreground action waits for the host alone (`actionAwaitsHost`), or the session is paused at a random draw.
  */
 export function playerRuntimeAwaitsHost(state: RuntimeSessionView): boolean {
   const pending = state.foregroundAction;
   return (
     state.randomDraw !== null ||
     state.currentSessionTimeMs < state.observedSessionTimeMs ||
-    (pending !== null && interruptibleAction(pending) === null)
+    (pending !== null && actionAwaitsHost(pending))
   );
 }
 

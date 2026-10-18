@@ -30,7 +30,10 @@ import {
   type RuntimeTemporarySnapshot,
   currentTemporalContext,
 } from "../state.js";
-import type { RuntimeChatPacingGateActionSnapshot } from "../actions/model.js";
+import {
+  ACTION_COMPLETION_EVENTS,
+  type RuntimeChatPacingGateActionSnapshot,
+} from "../actions/model.js";
 import {
   calculatePacingDeadlineMs,
   calculateSmartPacingDurationMs,
@@ -616,8 +619,7 @@ function validatePacingCreation(
 function requiredEventSequencesForNewPacingGate(): number {
   const sayOutput = 1;
   const pacingRequest = 1;
-  const pacingCompletion = 1;
-  return sayOutput + pacingRequest + pacingCompletion;
+  return sayOutput + pacingRequest + ACTION_COMPLETION_EVENTS.chatPacingGate;
 }
 
 /** `defaultSaySkippable` holds `value`, which is not true or false. */

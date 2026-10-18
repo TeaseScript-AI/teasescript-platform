@@ -1,3 +1,8 @@
+/*
+ * What blocks and the host do about each kind of foreground action: whether a block interrupts it and how it resumes,
+ * whether it waits for the host alone, and whether a block it holds back also holds scene time. Each decision is one
+ * exhaustive switch, so a new kind must make every one of them.
+ */
 import type {
   RuntimeChatPacingGateActionSnapshot,
   RuntimeDelayActionSnapshot,
@@ -27,9 +32,9 @@ export type RuntimeInterruptibleActionSnapshot =
  * waits until a host step settles. It interrupts a `wait`, an interaction, a media wait, and a message's reading time
  * alike (owner decision on #829, 2026-10-11), and a lock's dialog as an interaction.
  *
- * Every kind has its case, so a new kind must decide here; a kind that a block interrupts joins
- * `RuntimeInterruptibleActionSnapshot`, and then needs its case in `resumedAction`. Only the kind and a lock's phase are
- * read, so checkpoint validation can ask before it validates the rest of an action.
+ * A kind that a block interrupts joins `RuntimeInterruptibleActionSnapshot`, and then needs its case in
+ * `resumedAction`. Only the kind and a lock's phase are read, so checkpoint validation can ask before it validates the
+ * rest of an action.
  */
 export function interruptibleAction(
   action: RuntimeForegroundActionSnapshot,
@@ -46,9 +51,55 @@ export function interruptibleAction(
     case "capture":
     case "fileStore":
       return null;
-    // Only checkpoint data that is not validated yet can name another kind; its own validation rejects it.
     default:
-      return noForegroundKind(action);
+      return unknownKind(action, null);
+  }
+}
+
+/**
+ * Whether the foreground action waits for the host alone, which neither time nor the player settles: a storage write, a
+ * capture, a file store, or a lock's `work` step. A Player's development time jump stops at it. Today these are exactly
+ * the host steps of `interruptibleAction`, but each kind decides this on its own.
+ */
+export function actionAwaitsHost(action: RuntimeForegroundActionSnapshot): boolean {
+  switch (action.kind) {
+    case "storageWrite":
+    case "capture":
+    case "fileStore":
+      return true;
+    // A lock's dialog waits for the player, as an interaction does.
+    case "lock":
+      return action.phase === "work";
+    case "delay":
+    case "interaction":
+    case "chatPacingGate":
+    case "mediaPlayback":
+      return false;
+    default:
+      return unknownKind(action, false);
+  }
+}
+
+/**
+ * Whether a queued block that the foreground action holds back also holds scene time at the block's due time, so that
+ * the host answers the action at that scene time and the block then runs at it. Only a storage write does: a block may
+ * read the acknowledged value. Scene time runs on to the observed time behind any other host step, which the host
+ * answers at the observed time. A block interrupts the other actions, so they hold none back.
+ */
+export function holdsCatchUp(action: RuntimeForegroundActionSnapshot): boolean {
+  switch (action.kind) {
+    case "storageWrite":
+      return true;
+    case "capture":
+    case "fileStore":
+    case "lock":
+    case "delay":
+    case "interaction":
+    case "chatPacingGate":
+    case "mediaPlayback":
+      return false;
+    default:
+      return unknownKind(action, false);
   }
 }
 
@@ -57,9 +108,12 @@ export function interruptibleAction(
  * alone. An action of no foreground kind is not interruptible; its own validation rejects it.
  */
 export function interruptibleActionRecord(action: Record<string, unknown>): boolean {
-  const view = { kind: action.kind, phase: action.phase };
-  // EVIDENCE: validation: interruptibleAction reads only the kind, null for an unknown one, and a lock's phase.
-  return interruptibleAction(view as RuntimeForegroundActionSnapshot) !== null;
+  return interruptibleAction(recordView(action)) !== null;
+}
+
+/** `holdsCatchUp` for a foreground action of checkpoint data that is not validated yet, from its kind alone. */
+export function holdsCatchUpRecord(action: Record<string, unknown>): boolean {
+  return holdsCatchUp(recordView(action));
 }
 
 /**
@@ -107,10 +161,17 @@ function askingLock(action: RuntimeLockActionSnapshot): action is RuntimeLockAsk
   return action.phase === "ask";
 }
 
+/** The kind and phase of a record, which are all that `interruptibleAction` and `holdsCatchUp` read. */
+function recordView(action: Record<string, unknown>): RuntimeForegroundActionSnapshot {
+  const view = { kind: action.kind, phase: action.phase };
+  // EVIDENCE: validation: these decisions read only the kind, answering for an unknown one, and a lock's phase.
+  return view as RuntimeForegroundActionSnapshot;
+}
+
 /**
- * Not interruptible. Its parameter has type `never`, so a kind without its case in `interruptibleAction` fails to
- * compile.
+ * The answer for a kind that no foreground action has, which only checkpoint data that is not validated yet can name;
+ * its own validation rejects it. The parameter has type `never`, so a kind without its case fails to compile.
  */
-function noForegroundKind(_action: never): null {
-  return null;
+function unknownKind<T>(_action: never, answer: T): T {
+  return answer;
 }
