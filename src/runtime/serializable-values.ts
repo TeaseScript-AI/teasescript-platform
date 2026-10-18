@@ -261,11 +261,14 @@ export function cloneSerializableValue(value: SerializableRuntimeValue): Seriali
   return captured.value!;
 }
 
-/** Clones already captured/validated engine data without a second validation pass. */
+/**
+ * Clones already captured/validated engine data without a second validation pass. Validated data holds only finite
+ * numbers, text, truth values, and `null` as primitives, so a primitive is a scalar and is its own copy.
+ */
 export function cloneCapturedSerializableValue(
   value: SerializableRuntimeValue,
 ): SerializableRuntimeValue {
-  if (isScalar(value)) return value;
+  if (typeof value !== "object" || value === null) return value;
   const root = cloneSerializableNode(value);
   if (!isComposite(value)) return root;
 
@@ -276,8 +279,8 @@ export function cloneCapturedSerializableValue(
       root as CompositeValue,
     ],
   ];
-  // Each nested value is cloned into its slot; a nested composite is queued to fill its own slots.
-  const cloneInto = (nested: SerializableRuntimeValue): SerializableRuntimeValue => {
+  // Each nested record is cloned into its slot; a nested composite is queued to fill its own slots.
+  const cloneInto = (nested: SerializableRuntimeRecord): SerializableRuntimeValue => {
     const cloned = cloneSerializableNode(nested);
     if (isComposite(nested)) {
       // EVIDENCE: validation: cloneSerializableNode preserves the composite kind checked on nested.
@@ -287,34 +290,50 @@ export function cloneCapturedSerializableValue(
   };
   while (work.length > 0) {
     const [source, target] = work.pop()!;
-    if (source.kind === "list") {
-      // EVIDENCE: validation: work pairs each list source with its newly allocated list clone.
-      const targetItems = (target as SerializableRuntimeList).items;
-      for (let index = 0; index < source.items.length; index += 1)
-        targetItems[index] = cloneInto(source.items[index]!);
-    } else if (source.kind === "set") {
-      // EVIDENCE: validation: work pairs each set source with its newly allocated set clone.
-      const targetItems = (target as SerializableRuntimeSet).items;
-      for (let index = 0; index < source.items.length; index += 1)
-        targetItems[index] = cloneInto(source.items[index]!);
+    if (source.kind === "list" || source.kind === "set") {
+      // The clone starts with the source's items, so only a record is replaced by its own copy.
+      const items = source.items;
+      // EVIDENCE: validation: work pairs each list or set source with its newly allocated clone of the same kind.
+      const targetItems = (target as SerializableRuntimeList | SerializableRuntimeSet).items;
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index]!;
+        if (typeof item === "object" && item !== null) targetItems[index] = cloneInto(item);
+      }
     } else if (source.kind === "dict") {
       // EVIDENCE: validation: work pairs each dict source with its newly allocated dict clone.
       const targetEntries = (target as SerializableRuntimeDict).entries;
       for (let index = 0; index < source.entries.length; index += 1) {
         const entry = source.entries[index]!;
-        targetEntries[index] = { key: entry.key, value: cloneInto(entry.value) };
+        const entryValue = entry.value;
+        targetEntries[index] = {
+          key: entry.key,
+          value:
+            typeof entryValue === "object" && entryValue !== null
+              ? cloneInto(entryValue)
+              : entryValue,
+        };
       }
     } else {
       // EVIDENCE: validation: the remaining composite source and its paired clone are objects.
       const targetProperties = (target as SerializableRuntimeObject).properties;
       for (let index = 0; index < source.properties.length; index += 1) {
         const property = source.properties[index]!;
-        targetProperties[index] = { name: property.name, value: cloneInto(property.value) };
+        const propertyValue = property.value;
+        targetProperties[index] = {
+          name: property.name,
+          value:
+            typeof propertyValue === "object" && propertyValue !== null
+              ? cloneInto(propertyValue)
+              : propertyValue,
+        };
       }
     }
   }
   return root;
 }
+
+/** A value that is not a scalar: a record with a `kind`. */
+type SerializableRuntimeRecord = Exclude<SerializableRuntimeValue, SerializableRuntimeScalar>;
 
 /** A value that holds other values of any kind, which a copy copies in turn. */
 type CompositeValue =
@@ -330,8 +349,8 @@ const COMPOSITE_RECORDS: ReadonlySet<string> = new Set(
   ),
 );
 
-function isComposite(value: SerializableRuntimeValue): value is CompositeValue {
-  return typeof value === "object" && value !== null && COMPOSITE_RECORDS.has(value.kind);
+function isComposite(value: SerializableRuntimeRecord): value is CompositeValue {
+  return COMPOSITE_RECORDS.has(value.kind);
 }
 
 /**
@@ -370,14 +389,16 @@ export function findRuntimeIdentity(
   return null;
 }
 
-/** A copy of a value, without the values a list, set, object, or dict holds, which the caller copies into it. */
-function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRuntimeValue {
-  if (isScalar(value)) return value;
+/**
+ * A copy of a record without copies of the values it holds: a list or set starts with the source's items, and an object
+ * or dict with empty slots. The caller copies the records it holds into it.
+ */
+function cloneSerializableNode(value: SerializableRuntimeRecord): SerializableRuntimeValue {
   switch (value.kind) {
     case "set":
-      return { kind: "set", items: new Array(value.items.length) };
+      return { kind: "set", items: value.items.slice() };
     case "list":
-      return { kind: "list", items: new Array(value.items.length) };
+      return { kind: "list", items: value.items.slice() };
     case "object":
       return { kind: "object", properties: new Array(value.properties.length) };
     case "dict":
@@ -1216,15 +1237,6 @@ function serializableExternalDataFailureMessage(failure: ExternalDataFailure): s
     case "nonPlainObject":
       return `${failure.path} is not a JSON-safe runtime value.`;
   }
-}
-
-function isScalar(value: unknown): value is SerializableRuntimeScalar {
-  return (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
-  );
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
