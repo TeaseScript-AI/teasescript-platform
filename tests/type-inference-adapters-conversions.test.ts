@@ -372,6 +372,22 @@ test("what JSON holds is the contract's own dynamic data, with or without a defa
     relation("conversion", "fromJson").result(inputsOf({ arguments: [BOTTOM_VIEW] })),
     { kind: "dynamic", why: "json" },
   );
+  // The answer's structure with a written default (Astra's stage-3 r7-S1): the JSON provenance beside the default's
+  // copy as a reference, also for a null default and for a default the solver knows nothing of yet.
+  const JSON_OR_DEFAULT = {
+    kind: "alternatives",
+    results: [
+      { kind: "dynamic", why: "json" },
+      { kind: "projection", source: { of: { named: "default" }, path: [] } },
+    ],
+  };
+  for (const fallback of [closedView(INTEGER_TYPE), closedView(NULL_TYPE), BOTTOM_VIEW])
+    assert.deepEqual(
+      relation("conversion", "fromJson").result(
+        inputsOf({ arguments: [closedView(STRING_TYPE)], named: { default: fallback } }),
+      ),
+      JSON_OR_DEFAULT,
+    );
 });
 
 test("a call's shape problems are checking-only: the result stands", () => {
