@@ -382,6 +382,8 @@ const CHOICE_TEMPLATES: readonly Template[] = [
         "host",
       );
       yield variant("object-value-host-no-text", [], "askChoice { value: hostValue }", "host");
+      yield variant("object-text-value", [], 'askChoice { text: "A", value: 1 }');
+      yield variant("object-text", [], 'askChoice { text: "A" }');
       yield variant(
         "object-text-host-and-computed",
         ['let o = { text: "A" }'],
@@ -658,6 +660,11 @@ const FORM_TEMPLATES: readonly Template[] = [
       for (const kind of LITERAL_KINDS)
         yield variant(`cycle.${kind}`, [], form(`{ n: [${literal(kind)}] }`));
       yield variant("cycle.objects", [], form('{ n: [{ text: "A", value: 1 }, { text: "B" }] }'));
+      yield variant(
+        "cycle.objects-same",
+        [],
+        form('{ n: [{ text: "A", value: 1 }, { text: "B", value: 2 }] }'),
+      );
       yield variant(
         "cycle.computed-object",
         ['let o = { text: "A", value: 1 }'],
