@@ -8,7 +8,11 @@ import { reportMediaLoad } from "../../src/runtime/operations/media-reports.js";
 import { observeTime } from "../../src/runtime/operations/observe-time.js";
 import { pressPermanentButton } from "../../src/runtime/operations/press-permanent-button.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/serializable-values.js";
-import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../../src/runtime/state.js";
+import {
+  createFreshRuntimeSnapshot,
+  type FreshRuntimeOptions,
+  type RuntimeSnapshot,
+} from "../../src/runtime/state.js";
 import { compileValidPlan } from "./compile-valid-plan.js";
 
 /** A session at the default reading speed, driven by time observations, skips, and permanent-button clicks. */
@@ -17,7 +21,10 @@ export class Story {
   snapshot: RuntimeSnapshot;
   readonly events: InterpreterEvent[] = [];
 
-  constructor(source: string, options: { readonly persistentScriptStorage?: boolean } = {}) {
+  constructor(
+    source: string,
+    options: Pick<FreshRuntimeOptions, "persistentScriptStorage" | "wallClockMs"> = {},
+  ) {
     this.plan = compileValidPlan(source);
     this.snapshot = createFreshRuntimeSnapshot(this.plan, options);
     this.#run();
