@@ -14,6 +14,7 @@ import type {
   RuntimeTimerSettlementSnapshot,
 } from "../actions/model.js";
 import { isValidSessionTime } from "../actions/delay.js";
+import { interruptibleAction } from "../actions/interrupts.js";
 import type { ActionCompletedEvent, DeveloperWarningEvent, InterpreterEvent } from "../events.js";
 import { drawFromSessionGenerator, sampleRangeInteger } from "../random-draws.js";
 import type { TraceStore } from "../debug-trace.js";
@@ -32,20 +33,12 @@ import { copySpan } from "../../plan/source-location.js";
 
 /**
  * Whether a queued expiry block may interrupt now. Blocks never nest, and they wait for an interaction result handoff
- * and for a pending storage write, capture, file store, or lock step. They interrupt a `wait`, an interaction, a media
- * wait, and a message's reading time alike (owner decision on #829, 2026-10-11), and a lock's dialog as an interaction.
+ * and for a foreground action that `interruptibleAction` does not let them interrupt.
  */
 export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
   if (!timerHandlerQueuedAndUnblocked(snapshot)) return false;
   const foreground = snapshot.foregroundAction;
-  return (
-    foreground === null ||
-    foreground.kind === "delay" ||
-    foreground.kind === "interaction" ||
-    foreground.kind === "chatPacingGate" ||
-    foreground.kind === "mediaPlayback" ||
-    (foreground.kind === "lock" && foreground.phase === "ask")
-  );
+  return foreground === null || interruptibleAction(foreground) !== null;
 }
 
 /**
