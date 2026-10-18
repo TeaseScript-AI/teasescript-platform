@@ -1,3 +1,4 @@
+import { captureExternalData } from "../../external-data-capture.js";
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
 import { interruptRunning } from "../activations.js";
 import { MAX_RUNTIME_SESSION_TIME_MS, type RuntimeSnapshot } from "../state.js";
@@ -12,6 +13,7 @@ import {
 } from "../actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import { isValidSessionTime } from "../actions/delay.js";
+import { isPlainRecord } from "../plain-data.js";
 import type { PendingActionOperationResult, TimeObservationOutcome } from "./model.js";
 import { skipSilentRounds } from "../timers.js";
 import {
@@ -186,7 +188,7 @@ function observeCapturedTime(
     return pendingResult(current, [], {
       kind: "invalidObservation",
       message:
-        "Media progress reports must be a list of { mediaId, segment, progressMs } with a positive media ID, a non-negative segment, and a finite non-negative progress.",
+        "Media progress reports must be a plain-data list of { mediaId, segment, progressMs } with a positive media ID, a non-negative segment, and a finite non-negative progress.",
     });
   current.observedSessionTimeMs = Math.max(current.observedSessionTimeMs, suppliedNowMs);
   if (current.status !== "failed") {
@@ -552,12 +554,14 @@ function createPacingSettlement(
   });
 }
 
+/** Parses the captured plain data of a host batch; one malformed entry refuses the whole batch. */
 function parseMediaReports(value: unknown): MediaProgressReport[] | null {
-  if (!Array.isArray(value)) return null;
+  const captured = captureExternalData(value);
+  if (!captured.ok || !Array.isArray(captured.value)) return null;
   const reports: MediaProgressReport[] = [];
-  const entries: readonly unknown[] = value;
+  const entries: readonly unknown[] = captured.value;
   for (const entry of entries) {
-    if (!isReportRecord(entry)) return null;
+    if (!isPlainRecord(entry)) return null;
     const { mediaId, segment, progressMs } = entry;
     if (
       typeof mediaId !== "number" ||
@@ -572,8 +576,4 @@ function parseMediaReports(value: unknown): MediaProgressReport[] | null {
     reports.push({ mediaId, segment, progressMs });
   }
   return reports;
-}
-
-function isReportRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -6,18 +6,21 @@ import {
   compileSource,
   completeAction,
   createCheckpoint,
+  createFreshRuntimeSession,
   createFreshRuntimeSnapshot,
   deserializeCheckpoint,
   executeInstruction,
   mediaPlaybackProjection,
   observeTime,
   reportMediaLoad,
+  restoreRuntimeSession,
   run,
   serializeCheckpoint,
   stageProjection,
   validateRuntimeSnapshot,
   type InstructionPlan,
   type InterpreterEvent,
+  type RuntimeSessionOutcomeResult,
   type RuntimeSnapshot,
 } from "../src/index.js";
 import type { RuntimeMediaActionSnapshot } from "../src/runtime/actions/model.js";
@@ -1072,6 +1075,113 @@ test("malformed media reports are rejected atomically without changing state or 
   assert.equal(
     reportMediaLoad(compiled, snapshot, 1, { kind: "loaded", durationMs: 1 }).outcome.kind,
     "ignored",
+  );
+});
+
+test("a session reads media load and progress reports only from their captured plain data", () => {
+  // Like every host request, a report is captured once: an accessor is refused without being called, and a proxy is
+  // read through its property descriptors, never through `get`.
+  const session = createFreshRuntimeSession(
+    plan(
+      'let music = playAudio async "music.mp3"\nlet voice = playAudio async "voice.mp3"\nwait 10 s\nexit',
+    ),
+    { baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 },
+  );
+  session.run();
+  let reads = 0;
+  const read = (value: unknown) => {
+    reads += 1;
+    return value;
+  };
+  const throwing = () => {
+    throw new Error("host trap");
+  };
+  const music = () => {
+    const action = session.view().backgroundActions.find((candidate) => candidate.kind === "media");
+    assert.ok(action?.kind === "media");
+    return action.media;
+  };
+  // A refusal changes nothing, and the session stays usable with a valid checkpoint.
+  const refuses = (
+    kind: string,
+    operate: () => RuntimeSessionOutcomeResult<{ readonly kind: string }>,
+  ) => {
+    const before = serializeCheckpoint(session.exportCheckpoint());
+    const result = operate();
+    assert.equal(result.outcome.kind, kind);
+    assert.deepEqual(result.events, []);
+    assert.equal(serializeCheckpoint(session.exportCheckpoint()), before);
+  };
+
+  for (const report of [
+    {
+      kind: "loaded",
+      get durationMs() {
+        return read(reads === 0 ? 1_000 : Number.NaN);
+      },
+    },
+    {
+      kind: "failed",
+      get message() {
+        return read(Symbol("message"));
+      },
+    },
+    {
+      kind: "loaded",
+      get durationMs() {
+        return throwing();
+      },
+    },
+    new Proxy({ kind: "loaded", durationMs: 1_000 }, { ownKeys: throwing }),
+  ])
+    refuses("invalidReport", () => session.reportMediaLoad(1, report));
+  const lying = new Proxy({ kind: "loaded", durationMs: 10_000 }, { get: () => read(Number.NaN) });
+  assert.equal(session.reportMediaLoad(1, lying).outcome.kind, "accepted");
+  assert.equal(music().durationMs, 10_000);
+  session.run();
+  const failed = session.reportMediaLoad(2, { kind: "failed", message: "gone" });
+  assert.equal(failed.outcome.kind, "accepted");
+  assert.deepEqual(
+    failed.events.flatMap((event) => (event.kind === "developerWarning" ? [event.message] : [])),
+    ['Media "voice.mp3" could not be played: gone.'],
+  );
+  session.run();
+
+  const { segment } = music();
+  for (const reports of [
+    [
+      {
+        mediaId: 1,
+        segment,
+        get progressMs() {
+          return read(1_000);
+        },
+      },
+    ],
+    [
+      { mediaId: 1, segment, progressMs: 500 },
+      {
+        mediaId: 1,
+        segment,
+        get progressMs() {
+          return throwing();
+        },
+      },
+    ],
+    new Proxy([{ mediaId: 1, segment, progressMs: 1_000 }], { ownKeys: throwing }),
+  ])
+    refuses("invalidObservation", () => session.observeTime(1_000, reports));
+  const observed = session.observeTime(
+    1_000,
+    new Proxy([{ mediaId: 1, segment, progressMs: 1_000 }], { get: throwing }),
+  );
+  assert.equal(observed.outcome.kind, "observed");
+  assert.deepEqual(music().points.at(-1), { atMs: 1_000, progressMs: 1_000 });
+  assert.equal(reads, 0);
+  const checkpoint = serializeCheckpoint(session.exportCheckpoint());
+  assert.equal(
+    serializeCheckpoint(restoreRuntimeSession(JSON.parse(checkpoint)).exportCheckpoint()),
+    checkpoint,
   );
 });
 
