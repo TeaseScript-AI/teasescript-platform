@@ -17,7 +17,6 @@ import { internalFault } from "../errors.js";
 import {
   assertCounterCanAdvance,
   assertEventSequenceCapacity,
-  copySpan,
   requiredFutureActionCompletionEvents,
   setCapturedTemporary,
   takeSequence,
@@ -34,6 +33,7 @@ import { describeShownValue, shownChoice } from "../value-types.js";
 import { isAnyDuration, isDuration, isList, isRange } from "../value-predicates.js";
 import { DURATION_UNIT_MILLISECONDS } from "../../duration.js";
 import { advance, durationFix, fault, type SourceSpan } from "./support.js";
+import { copySpan } from "../../plan/source-location.js";
 
 // Waits and timers, with their durations, deadlines, labels, and displays.
 

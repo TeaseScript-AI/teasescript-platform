@@ -4,7 +4,7 @@ import type { DelayDisplay, ExpressionPlan } from "../../plan/model.js";
 import { parseMessageMarkup } from "../../message-markup.js";
 import { internalFault } from "../errors.js";
 import type { MessageRemovedEvent, MessageUpdatedEvent } from "../events.js";
-import { copySpan, takeSequence } from "../operations/support.js";
+import { takeSequence } from "../operations/support.js";
 import {
   assignedTypeMessage,
   handleMemberMessage,
@@ -66,6 +66,7 @@ import { stateKey } from "../debug-trace.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import type { Evaluator } from "../evaluator.js";
 import { type SourceSpan, fault, receiverLabel } from "./support.js";
+import { copySpan } from "../../plan/source-location.js";
 
 // Timer, media, message, camera-view, and permanent-button handles: their methods and their properties.
 

@@ -10,7 +10,6 @@ import { internalFault, RuntimeFault } from "../errors.js";
 import {
   assertCounterCanAdvance,
   assertEventSequenceCapacity,
-  copySpan,
   setCapturedTemporary,
   takeSequence,
 } from "../operations/support.js";
@@ -48,6 +47,7 @@ import {
   readTemporary,
   type SourceSpan,
 } from "./support.js";
+import { copySpan } from "../../plan/source-location.js";
 
 // Say and its speakers: declaring a speaker, and preparing, showing, and pacing a message.
 

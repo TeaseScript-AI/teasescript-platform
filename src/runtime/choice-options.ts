@@ -19,7 +19,6 @@ import type { SourceSpan as RichSourceSpan } from "../source.js";
 import type { TemporalContext } from "../temporal.js";
 import { RuntimeFault } from "./errors.js";
 import { describeShownValue } from "./value-types.js";
-import { copySpan } from "./operations/support.js";
 import {
   getSerializableProperty,
   serializableEquals,
@@ -29,6 +28,7 @@ import { isList, isObject, isSet } from "./value-predicates.js";
 import { unreturnableChoiceMessage } from "../choice-values.js";
 import { VALUE_KINDS, valueKindOf } from "../value-kinds.js";
 import { fieldText, isVisibleScalar, visibleText } from "./value-text.js";
+import { copySpan } from "../plan/source-location.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 

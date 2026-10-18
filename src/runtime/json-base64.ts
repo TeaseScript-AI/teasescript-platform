@@ -10,7 +10,6 @@ import {
 } from "../temporal.js";
 import { collectionTooLong, MAX_COLLECTION_LENGTH } from "./collection-size.js";
 import { RuntimeFault } from "./errors.js";
-import { copySpan } from "./operations/support.js";
 import type {
   SerializableRuntimeDict,
   SerializableRuntimeList,
@@ -21,6 +20,7 @@ import type {
 import { binaryFromBase64 } from "./stored-files.js";
 import { checkTextLength, textTooLong } from "./text-length.js";
 import { describeValue, unwritableJsonReason, VALUE_KINDS, valueKindOf } from "../value-kinds.js";
+import { copySpan } from "../plan/source-location.js";
 
 // `toJson`, `fromJson`, `toBase64`, and `fromBase64` (V30 §13), which exchange data with other programs as text. Native
 // JSON writes and reads each text and number, and native Base64 and UTF-8 do the rest; the structure is walked here,

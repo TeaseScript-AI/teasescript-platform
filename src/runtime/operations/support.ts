@@ -3,8 +3,8 @@ import type { InstructionPlan, PlanSourceLocation } from "../../plan/model.js";
 import { interruptFrame } from "../activations.js";
 import { cloneInteractionResult } from "../../choice-values.js";
 import { captureOrReuseInstructionPlan } from "../../plan/capture.js";
-import { createSourceSpan, type SourceSpan } from "../../source.js";
-import { planLocationToSourceSpan } from "../../plan/source-location.js";
+import type { SourceSpan } from "../../source.js";
+import { copySpan } from "../../plan/source-location.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import type { InterpreterEvent } from "../events.js";
 import type { InstructionTraceCollector } from "../instruction-trace.js";
@@ -221,15 +221,4 @@ export function pendingResult<T>(
 
 export function positiveSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
-}
-
-export function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-export function copySpan(span: SourceSpan | PlanSourceLocation): SourceSpan {
-  if ("so" in span) return planLocationToSourceSpan(span);
-  return createSourceSpan(span.start, span.end);
 }

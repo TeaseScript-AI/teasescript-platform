@@ -16,7 +16,6 @@ import type { ReadingDictMethod } from "../dict-operations.js";
 import { LIST_JOIN } from "../text-operations.js";
 import { checkCollectionLength, MAX_COLLECTION_LENGTH } from "./collection-size.js";
 import { RuntimeFault } from "./errors.js";
-import { copySpan } from "./operations/support.js";
 import {
   createCapturedSerializableList,
   createCapturedSerializableSet,
@@ -48,6 +47,7 @@ import {
   valueKindOf,
   type OrderedFamily,
 } from "../value-kinds.js";
+import { copySpan } from "../plan/source-location.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 

@@ -12,10 +12,10 @@ import { formatDuration } from "../duration.js";
 import { RuntimeFault } from "./errors.js";
 import { messageText } from "./text-length.js";
 import { quotedText } from "./value-text.js";
-import { copySpan } from "./operations/support.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 import { isAngle, isAnyDuration, isDict, isList, isObject, isSet } from "./value-predicates.js";
 import { describeValue, VALUE_KINDS } from "../value-kinds.js";
+import { copySpan } from "../plan/source-location.js";
 
 /**
  * Checks that a value the compiler could not know fits the type of the place that receives it (ADR 0021 rule 1.7);

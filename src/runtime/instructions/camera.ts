@@ -10,7 +10,6 @@ import type { Evaluator } from "../evaluator.js";
 import { internalFault } from "../errors.js";
 import {
   assertEventSequenceCapacity,
-  copySpan,
   requiredFutureActionCompletionEvents,
   setCapturedTemporary,
   takeSequence,
@@ -23,6 +22,7 @@ import type { RuntimeCaptureActionSnapshot } from "../actions/model.js";
 import { isList, isSet } from "../value-predicates.js";
 import { describeValue } from "../../value-kinds.js";
 import { advance, fault, type SourceSpan } from "./support.js";
+import { copySpan } from "../../plan/source-location.js";
 
 // The camera: its view on the Stage, and the photos takePhoto() asks for.
 

@@ -1,10 +1,10 @@
 import type { RandomDrawPendingOutcome } from "../random-control.js";
-import { randomDrawPending } from "./observe-time.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import { withDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
 import type { RuntimeSnapshot } from "../state.js";
 import type { PendingActionOperationResult } from "./model.js";
 import { captureExecutableData, pendingResult } from "./support.js";
+import { randomDrawPending } from "./model.js";
 
 export type DebugModeOutcome =
   /** `debugMode` reads `enabled` from now on; setting the value it already has changes nothing. */

@@ -5,7 +5,6 @@ import { internalFault } from "../errors.js";
 import {
   assertCounterCanAdvance,
   assertEventSequenceCapacity,
-  copySpan,
   requiredFutureActionCompletionEvents,
   setCapturedTemporary,
   takeSequence,
@@ -16,6 +15,7 @@ import { type RuntimeSnapshot, currentTemporalContext } from "../state.js";
 import type { RuntimePermanentButtonActionSnapshot } from "../actions/model.js";
 import { fieldText } from "../value-text.js";
 import { advance, fault } from "./support.js";
+import { copySpan } from "../../plan/source-location.js";
 
 /**
  * Shows a permanent button after the shown ones, as background work that waits for clicks. Its block runs for the

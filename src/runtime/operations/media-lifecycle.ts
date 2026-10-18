@@ -24,7 +24,8 @@ import {
   type RuntimeMediaSnapshot,
 } from "../media.js";
 import type { RuntimeSnapshot } from "../state.js";
-import { assertEventSequenceCapacity, copySpan, takeSequence } from "./support.js";
+import { assertEventSequenceCapacity, takeSequence } from "./support.js";
+import { copySpan } from "../../plan/source-location.js";
 
 export type MediaWaitOutcome = RuntimeMediaPlaybackSettlementSnapshot["outcome"];
 

@@ -2,7 +2,6 @@ import type { RuntimeErrorCode } from "../../diagnostic-codes.js";
 import type { PlanSourceLocation, ExpressionPlan, InstructionPlan } from "../../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../../source.js";
 import { RuntimeFault, internalFault } from "../errors.js";
-import { copySpan } from "../operations/support.js";
 import { rangeLength, rangeText, wholeRangeMessage } from "../../range-checks.js";
 import type { SerializableRuntimeRange, SerializableRuntimeValue } from "../serializable-values.js";
 import { readPreparedReference } from "../prepared-references.js";
@@ -11,6 +10,7 @@ import { messageText } from "../text-length.js";
 import { loweredOperand } from "../lowered-operands.js";
 import type { RuntimeTemporarySnapshot } from "../state.js";
 import type { Evaluator } from "../evaluator.js";
+import { copySpan } from "../../plan/source-location.js";
 
 // What the evaluator and its evaluation modules share.
 

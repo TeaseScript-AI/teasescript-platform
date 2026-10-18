@@ -27,7 +27,8 @@ import {
   type RuntimeTimerSnapshot,
   type TimerHandleRecord,
 } from "../timers.js";
-import { assertEventSequenceCapacity, copySpan, takeSequence } from "./support.js";
+import { assertEventSequenceCapacity, takeSequence } from "./support.js";
+import { copySpan } from "../../plan/source-location.js";
 
 /**
  * Whether a queued expiry block may interrupt now. Blocks never nest, and they wait for an interaction result handoff

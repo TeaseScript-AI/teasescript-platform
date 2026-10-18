@@ -14,7 +14,6 @@ import {
   type TemporalContext,
 } from "../temporal.js";
 import { RuntimeFault } from "./errors.js";
-import { copySpan } from "./operations/support.js";
 import { checkTextLength, MAX_TEXT_LENGTH, textTooLong } from "./text-length.js";
 import type {
   SerializableRuntimeDictEntry,
@@ -47,6 +46,7 @@ import {
   isTimerHandle,
 } from "./value-predicates.js";
 import { describeValue, VALUE_KINDS, valueKindOf } from "../value-kinds.js";
+import { copySpan } from "../plan/source-location.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 

@@ -6,9 +6,10 @@ import type {
   RuntimePermanentButtonSettlementSnapshot,
 } from "./actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "./events.js";
-import { assertEventSequenceCapacity, copySpan, takeSequence } from "./operations/support.js";
+import { assertEventSequenceCapacity, takeSequence } from "./operations/support.js";
 import type { RuntimeSnapshot } from "./state.js";
 import { sweepRetainedScopes, type RuntimeCaptureSnapshot } from "./captures.js";
+import { copySpan } from "../plan/source-location.js";
 
 /**
  * Permanent buttons (V30 §28). A shown button is a background action until it is removed; a click queues its block in

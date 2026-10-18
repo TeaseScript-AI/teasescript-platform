@@ -4,7 +4,7 @@ import { escapedMarkupLength, escapeMarkup } from "../../message-markup.js";
 import { PERSON_FIELDS, PLAYER } from "../../speaker-terms.js";
 import { internalFault } from "../errors.js";
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "../events.js";
-import { copySpan, takeSequence } from "../operations/support.js";
+import { takeSequence } from "../operations/support.js";
 import {
   GLOBAL_SCOPE_ID,
   detachPreparedReferencesForMutation,
@@ -41,6 +41,7 @@ import { timerOf, mediaOf, cameraView } from "./handles.js";
 import { randomItem } from "./draws.js";
 import { type SourceSpan, fault } from "./support.js";
 import type { Evaluator } from "../evaluator.js";
+import { copySpan } from "../../plan/source-location.js";
 
 // Speakers, the account, and the text a say shows: a speaker's output, interpolation, and handle notation.
 

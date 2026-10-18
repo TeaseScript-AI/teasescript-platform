@@ -46,6 +46,8 @@ import {
   CAPTURE_UNAVAILABLE_REASONS,
   fileStoreOperation,
   requiredActionCompletionEvents,
+  isLockNotice,
+  isLockOutcome,
 } from "./actions/model.js";
 import { buttonTimeoutMilliseconds, imageRequestValue } from "./actions/interaction.js";
 import {
@@ -72,7 +74,6 @@ import {
 } from "./stored-files.js";
 import { validPermanentButtonAction } from "./permanent-button-validation.js";
 import { isSha256Hex } from "./sha256.js";
-import { isLockNotice, isLockOutcome } from "./actions/lock.js";
 import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey } from "../public-keys.js";
 import { validTimerAction } from "./timer-validation.js";
 import { validateScriptStorageEntries } from "./script-storage.js";

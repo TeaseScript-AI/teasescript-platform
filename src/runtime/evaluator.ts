@@ -40,7 +40,7 @@ import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { internalFault, RuntimeFault } from "./errors.js";
 import type { InstructionTraceCollector, RuntimeInstructionObserver } from "./instruction-trace.js";
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
-import { copySpan, takeSequence } from "./operations/support.js";
+import { takeSequence } from "./operations/support.js";
 import {
   readPreparedReference,
   scopeBindings,
@@ -185,11 +185,7 @@ import {
   operandText,
 } from "./evaluation/operators.js";
 import { findBindingLocation } from "./evaluation/bindings.js";
-
-export { notBoolean, notLogicalOperand } from "./evaluation/operators.js";
-export { findBinding, bindingScopeId } from "./evaluation/bindings.js";
-
-export { assertIntegerRange, USE_DEFAULT, planLabel } from "./evaluation/support.js";
+import { copySpan } from "../plan/source-location.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];

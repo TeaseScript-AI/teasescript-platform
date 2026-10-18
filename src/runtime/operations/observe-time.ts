@@ -31,7 +31,7 @@ import {
 } from "./timer-lifecycle.js";
 import { timeOutButton } from "./complete-action.js";
 import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "../debug-trace.js";
-import { captureExecutableData, copySpan, pendingResult, takeSequence } from "./support.js";
+import { captureExecutableData, pendingResult, takeSequence } from "./support.js";
 import type { RuntimeSessionView } from "../session.js";
 import { randomControlFor } from "../random-control.js";
 import {
@@ -39,9 +39,10 @@ import {
   type RandomControl,
   RandomSuspension,
   type RandomControlOptions,
-  type RandomDrawPendingOutcome,
   type RandomPolicy,
 } from "../random-control.js";
+import { copySpan } from "../../plan/source-location.js";
+import { randomDrawPending } from "./model.js";
 
 /** One Player sample of media playback: the active playback time of `segment` so far. */
 export interface MediaProgressReport {
@@ -163,14 +164,6 @@ export function catchUpResult<T>(
       : { randomChoices: Object.freeze([...control.receipts]) }),
     ...(control.refusal === null ? {} : { randomRefusal: control.refusal }),
   });
-}
-
-/** The refusal of a host operation while a draw is paused: it changes nothing until the host resolves the draw. */
-export function randomDrawPending(current: RuntimeSnapshot): RandomDrawPendingOutcome | null {
-  const pending = current.randomControl?.pending ?? null;
-  return pending === null
-    ? null
-    : Object.freeze({ kind: "randomDrawPending", drawId: pending.draw.drawId } as const);
 }
 
 function observeCapturedTime(

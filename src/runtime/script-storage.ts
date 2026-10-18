@@ -3,7 +3,6 @@ import type { InstructionPlan, PlanSourceLocation, TypePlan } from "../plan/mode
 import type { SourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import { messageText } from "./text-length.js";
-import { copySpan } from "./operations/support.js";
 import {
   cloneCapturedSerializableValue,
   containsRuntimeIdentity,
@@ -14,6 +13,7 @@ import {
 import { isMessageHandle } from "./value-predicates.js";
 import { describeShownValue } from "./value-types.js";
 import { describeValue } from "../value-kinds.js";
+import { copySpan } from "../plan/source-location.js";
 
 /** One key of the session's view of script storage; the stored value is never `null`. */
 export interface RuntimeScriptStorageEntrySnapshot {

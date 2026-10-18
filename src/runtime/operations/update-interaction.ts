@@ -1,5 +1,4 @@
 import type { RandomDrawPendingOutcome } from "../random-control.js";
-import { randomDrawPending } from "./observe-time.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import { interruptFrame } from "../activations.js";
@@ -7,13 +6,10 @@ import { applyFormUpdate, formStatesEqual } from "../actions/form.js";
 import type { RuntimeSnapshot } from "../state.js";
 import { withDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
-import {
-  captureExecutableData,
-  isPlainRecord,
-  pendingResult,
-  positiveSafeInteger,
-} from "./support.js";
+import { captureExecutableData, pendingResult, positiveSafeInteger } from "./support.js";
 import type { PendingActionOperationResult } from "./model.js";
+import { isPlainRecord } from "../plain-data.js";
+import { randomDrawPending } from "./model.js";
 
 export type InteractionUpdateOutcome =
   | RandomDrawPendingOutcome
