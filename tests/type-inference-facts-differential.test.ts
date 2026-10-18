@@ -64,6 +64,40 @@ const R10: readonly SolverCase[] = [
   { name: "pow-folded", source: "let r = pow(1 + 1, 3)\nexit" },
 ];
 
+/** Astra's r11 cases of the oracle (work note §11): a possible receiver's member, the copy exemption, the product, a fold. */
+const R11: readonly SolverCase[] = [
+  {
+    name: "r11-possible-property-invented-witness",
+    source: 'let x = hostValue + "a"\nlet n = x.length\nexit',
+  },
+  {
+    name: "r11-covered-property-provenance",
+    source: 'let x: string = "s"\nx = hostValue + "a"\nlet n = x.length\nexit',
+  },
+  {
+    name: "r11-scalar-length-copy-exemption",
+    source: "let a = [1]\nlet b = a.length\na.add(2)\nexit",
+  },
+  {
+    name: "r11-literal-length-copy-exemption",
+    source: "let a = [1]\nlet b = [a].length\na.add(2)\nexit",
+  },
+  { name: "r11-mutation-before-copy-exemption", source: "let a = [1]\na.add(2)\nlet b = a\nexit" },
+  { name: "r11-partial-known-pow", source: "let r = pow(round(hostValue),3)\nexit" },
+  {
+    name: "r11-oracle-product-cutoff",
+    source: [
+      "let a = [1]",
+      ...Array.from({ length: 31 }, () => "a = [1]"),
+      'a = [fromJson("1"), 1]',
+      'let b = ["s"]',
+      ...Array.from({ length: 32 }, () => 'b = ["s"]'),
+      "let r = a + b",
+      "exit",
+    ].join("\n"),
+  },
+];
+
 const describe = (d: Difference): string =>
   `${d.what} ${d.name} @${d.site.start}: legacy ${d.legacy ?? "(none)"} | candidate ${d.candidate ?? "(none)"} | class ${d.class}: ${d.evidence}`;
 
@@ -75,7 +109,7 @@ test("every difference on the straight-line sources is a decided rule, a replace
     classes: [0, 0, 0, 0, 0],
   };
   const defects: string[] = [];
-  for (const c of [...readCases(), ...HAND, ...R10]) {
+  for (const c of [...readCases(), ...HAND, ...R10, ...R11]) {
     const result = differential(c.source);
     if (result === null) continue;
     counts.sources += 1;
@@ -185,6 +219,57 @@ test("Astra's r10 cases take their classes, and an injected fact at each is reje
     assert.match(folded[0]!.evidence, /known-value fold/);
   }
   assert.deepEqual(classes("pow-known", changeFirstBinding("string")), [4]);
+});
+
+test("Astra's r11 cases take their classes, and an injected fact at each is rejected", () => {
+  const source = (name: string): string => R11.find((c) => c.name === name)!.source;
+  const bindings = (name: string, mutate?: (facts: SolvedTypeFacts) => SolvedTypeFacts) =>
+    differential(source(name), mutate)!.differences.filter((d) => d.what === "binding");
+  const classes = (name: string, mutate?: (facts: SolvedTypeFacts) => SolvedTypeFacts) =>
+    bindings(name, mutate).map((d) => d.class);
+  const changeBinding =
+    (name: string, text: string) =>
+    (facts: SolvedTypeFacts): SolvedTypeFacts => ({
+      ...facts,
+      bindings: facts.bindings.map((b) => (b.name === name ? { ...b, type: text } : b)),
+    });
+  // a possible receiver's member answer is a possibility, not a witness (r11-B3)
+  assert.deepEqual(classes("r11-possible-property-invented-witness"), []);
+  assert.deepEqual(
+    classes("r11-possible-property-invented-witness", changeBinding("n", "integer!")),
+    [4],
+  );
+  const covered = bindings("r11-covered-property-provenance");
+  assert.deepEqual(
+    covered.map((d) => [d.name, d.class]),
+    [["n", 1]],
+  );
+  assert.match(covered[0]!.evidence, /Q3\.2a/);
+  // a computed scalar of a mutated collection is compared; a mutation before the copy exempts nothing (r11-B4)
+  for (const name of [
+    "r11-scalar-length-copy-exemption",
+    "r11-literal-length-copy-exemption",
+    "r11-mutation-before-copy-exemption",
+  ]) {
+    assert.deepEqual(classes(name), [], name);
+    assert.deepEqual(classes(name, changeBinding("b", "string")), [4], name);
+  }
+  // the product of choices is complete: the held mark of the last of 33 members is expected (r11-B5)
+  const product = bindings("r11-oracle-product-cutoff");
+  assert.equal(product.find((d) => d.name === "r")?.class, 1);
+  assert.equal(
+    bindings("r11-oracle-product-cutoff", changeBinding("r", "list<integer>")).find(
+      (d) => d.name === "r",
+    )?.class,
+    4,
+  );
+  // a known operand beside an unknown one narrows the legacy's answer: the fold, class 3 (r11-S1)
+  const fold = bindings("r11-partial-known-pow");
+  assert.deepEqual(
+    fold.map((d) => d.class),
+    [3],
+  );
+  assert.match(fold[0]!.evidence, /known-value fold/);
 });
 
 test("the classifier rejects a changed fact at an arbitrary site, a class-1 site and a class-2 site", () => {

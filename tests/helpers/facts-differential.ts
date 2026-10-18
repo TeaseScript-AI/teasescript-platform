@@ -9,6 +9,7 @@ import {
 } from "../../src/static-types.js";
 import { typeKey } from "../../src/storage-types.js";
 import { memberOf, operationRelations } from "../../src/type-inference/adapters/index.js";
+import type { MemberAnswer } from "../../src/type-inference/adapters/views.js";
 import type {
   OperandRef,
   OperandView,
@@ -81,7 +82,6 @@ export function differential(
   const graph = collectGraph(made);
   const candidate = mutate(exportFacts(solve(graph, { relations: RELATIONS })));
   const straightLine = isStraightLine(graph);
-  const involved = involvedBindings(graph);
   const differences: Difference[] = [];
   let compared = 0;
   const compare = <T extends { readonly site: FactSite; readonly type: TypeText }>(
@@ -136,11 +136,14 @@ export function differential(
       if (expected === null)
         return {
           class: 4,
-          evidence: "no rule-derived expectation: the oracle found no stores or no facts for them",
+          evidence:
+            oracle.failure ??
+            "no rule-derived expectation: the oracle found no stores or no facts for them",
         };
-      // a copied value changed in place after the copy: the bindings whose fact the copy reaches, not the others of
-      // the source (r10-B7)
-      if (expected.touched.some((place) => involved.has(place)))
+      // a copied value changed in place after the copy: the bindings whose fact reaches a literal that another
+      // binding holds through a copy and that a mutation after the copy changes, not the others of the source
+      // (r10-B7, r11-B4)
+      if (oracle.involved(expected.touched))
         return {
           class: 3,
           evidence:
@@ -206,92 +209,6 @@ export function differential(
     () => ({ class: 4, evidence: "a read resolves to another declaration than the legacy's" }),
   );
   return { straightLine, compared, differences, legacy, candidate };
-}
-
-/**
- * The bindings whose content a value changed in place reaches through a copy (`let b = a`, `let c = xs.first`, a
- * `get` or an `otherwise`, a literal that holds a variable's value): Q3a's content at the copy point, which the
- * flow-insensitive solver shares. A fact derived through one of them is class 3; the other bindings of the source
- * are compared (r10-B7).
- */
-function involvedBindings(graph: ConstraintGraph): ReadonlySet<PlaceId> {
-  const producers = new Map<PlaceId, Constraint[]>();
-  for (const c of graph.constraints) {
-    const targets =
-      c.kind === "read"
-        ? [c.occurrence]
-        : c.kind === "project"
-          ? [c.into]
-          : c.kind === "get" || c.kind === "fallback"
-            ? [c.result]
-            : [];
-    for (const target of targets) producers.set(target, [...(producers.get(target) ?? []), c]);
-  }
-  // the cells of a literal (its element, its properties), by the literal
-  const cellsOf = new Map<PlaceId, PlaceId[]>();
-  for (const place of graph.places)
-    if (place.kind.kind === "cell" || place.kind.kind === "property")
-      cellsOf.set(place.kind.owner, [...(cellsOf.get(place.kind.owner) ?? []), place.id]);
-  // the bindings whose content a value place carries: through a read, a projection, a `get`, an `otherwise`, and
-  // through a literal's content (the values stored into its cells)
-  const origins = (value: PlaceId, seen: Set<PlaceId> = new Set()): PlaceId[] => {
-    if (seen.has(value)) return [];
-    seen.add(value);
-    const held = (cellsOf.get(value) ?? []).flatMap((cell) =>
-      graph.constraints.flatMap((c) =>
-        c.kind === "store" && c.into === cell ? origins(c.value, seen) : [],
-      ),
-    );
-    return [
-      ...held,
-      ...(producers.get(value) ?? []).flatMap((c) =>
-        c.kind === "read"
-          ? [c.binding]
-          : c.kind === "project"
-            ? origins(c.owner, seen)
-            : c.kind === "get"
-              ? [...origins(c.receiver, seen), ...origins(c.fallback, seen)]
-              : c.kind === "fallback"
-                ? [...origins(c.left, seen), ...origins(c.right, seen)]
-                : [],
-      ),
-    ];
-  };
-  // the bindings a store's target belongs to: the binding, or the bindings that hold the literal whose cell it is
-  const holders = (into: PlaceId, seen: Set<PlaceId> = new Set()): PlaceId[] => {
-    const kind = graph.places[into]?.kind;
-    if (kind === undefined || seen.has(into)) return [];
-    seen.add(into);
-    if (kind.kind === "binding") return [into];
-    if (kind.kind === "cell" || kind.kind === "property")
-      return graph.constraints.flatMap((c) =>
-        c.kind === "store" && c.value === kind.owner ? holders(c.into, seen) : [],
-      );
-    return [];
-  };
-  const parent = new Map<PlaceId, PlaceId>();
-  const find = (place: PlaceId): PlaceId => {
-    let root = place;
-    while (parent.has(root)) root = parent.get(root)!;
-    return root;
-  };
-  for (const c of graph.constraints)
-    if (c.kind === "store")
-      for (const holder of holders(c.into))
-        for (const origin of origins(c.value)) {
-          const left = find(origin);
-          const right = find(holder);
-          if (left !== right) parent.set(left, right);
-        }
-  const bindings = graph.places.flatMap((p) => (p.kind.kind === "binding" ? [p.id] : []));
-  const out = new Set<PlaceId>();
-  for (const c of graph.constraints) {
-    if (c.kind !== "mutate") continue;
-    const root = find(c.binding);
-    const component = bindings.filter((b) => find(b) === root);
-    if (component.length > 1) for (const b of component) out.add(b);
-  }
-  return out;
 }
 
 /** Whether the legacy's text is the expectation's with a number narrowed to an integer, the known-value fold's effect. */
@@ -411,16 +328,48 @@ const provenancesOf = (fact: Fact): readonly DynamicWhy[] =>
       ),
     ]),
   ].sort();
-/** The structure of a member, for coverage and identity among flat members. */
+/** The structure of a member, for identity among flat members. */
 const shapeKey = (member: FactMember): string => typeKey(typeOfMember(member), true, true);
 /**
- * Whether a fact is held: by a value the compiler cannot know, or by a possibility no known member of the same
- * structure covers (work note §3.5).
+ * The shapes of a member, as the model enumerates a structural item's alternatives (work note §3.5): a flat type is
+ * one; a collection one per shape of its element, where a part holding a value the compiler cannot know is also
+ * `unknown`; an object one per combination of its properties' shapes (bounded; beyond the bound, its one type).
+ */
+function shapesOf(member: FactMember): readonly string[] {
+  if (member.cycle) return ["unknown"];
+  if (member.ctor !== null)
+    return shapesOfFact(member.element ?? EMPTY).map((shape) => `${member.ctor}<${shape}>`);
+  if (member.open) return ["object"];
+  if (member.props !== null) {
+    let combos: string[][] = [[]];
+    for (const [name, value] of [...member.props].sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    )) {
+      const shapes = shapesOfFact(value);
+      if (shapes.length === 0) continue;
+      combos = combos.flatMap((combo) =>
+        shapes.map((shape) => [...combo, `${JSON.stringify(name)}:${shape}`]),
+      );
+      if (combos.length > 64) return [shapeKey(member)];
+    }
+    return combos.map((combo) => `{${combo.join(",")}}`);
+  }
+  return [shapeKey(member)];
+}
+function shapesOfFact(fact: Fact): readonly string[] {
+  const out = new Set<string>();
+  for (const m of fact.members) if (!m.possible) for (const shape of shapesOf(m)) out.add(shape);
+  if (heldOf(fact) || fact.members.some((m) => m.possible)) out.add("unknown");
+  return [...out];
+}
+/**
+ * Whether a fact is held: by a value the compiler cannot know, or by a possibility no known member covers (every
+ * shape of it a shape of a known member, work note §3.5).
  */
 function heldOf(fact: Fact): boolean {
   if (fact.held) return true;
-  const known = fact.members.filter((m) => !m.possible).map(shapeKey);
-  return fact.members.some((m) => m.possible && !known.includes(shapeKey(m)));
+  const known = new Set(fact.members.filter((m) => !m.possible).flatMap(shapesOf));
+  return fact.members.some((m) => m.possible && !shapesOf(m).every((shape) => known.has(shape)));
 }
 /** Everything of a fact, for the binding iteration's convergence. */
 function factKey(fact: Fact): string {
@@ -696,7 +645,10 @@ function parse(text: string, id: string | null = null): Fact {
     if (member === "null") optional = true;
     else if (member === "?" || member === "never") continue;
     else if (member === "unknown") isHeld = true;
-    else if (member.length > 0) members.push(parseMember(member, id));
+    else if (member.length > 0) {
+      if (/,\+\}$/.test(member)) isHeld = true;
+      members.push(parseMember(member, id));
+    }
   }
   return { members, optional, held: isHeld };
 }
@@ -709,7 +661,9 @@ function parseMember(text: string, id: string | null): FactMember {
   if (text.startsWith("{") && text.endsWith("}")) {
     const props = new Map<string, Fact>();
     for (const entry of topLevel(text.slice(1, -1), ",")) {
-      if (entry.length === 0) continue;
+      // `+`: the legacy's open shape, an object a value the compiler cannot know reached (read as the held mark by
+      // `parse`, which sees it in the text)
+      if (entry.length === 0 || entry === "+") continue;
       const colon = entry.indexOf(":");
       // EVIDENCE: the property names of a typeKey text are JSON strings.
       props.set(JSON.parse(entry.slice(0, colon)) as string, parse(entry.slice(colon + 1), id));
@@ -787,6 +741,7 @@ function openForm(text: string): string | null {
   if (/\?null/.test(text)) return "?null";
   if (/\?(?!null)/.test(text)) return "?";
   if (/![|)]/.test(text)) return "a member's held mark";
+  if (/,\+\}/.test(text)) return "an open shape (+)";
   return null;
 }
 
@@ -885,9 +840,13 @@ class Oracle {
   readonly #estimates = new Map<PlaceId, Fact>();
   /** The bindings a derivation read (the dependence of a fact on a copied value changed in place). */
   readonly #touched = new Set<PlaceId>();
-  /** Whether a derivation asked a relation with every strict operand a constant (the legacy folds those). */
+  /** Whether a derivation asked a relation with a constant among its strict operands (the legacy folds those). */
   #folded = false;
   readonly #constants = new Map<PlaceId, boolean>();
+  /** Why the last expectation could not be derived, when it could not. */
+  failure: string | null = null;
+  #allFacts: Map<PlaceId, Fact> | null = null;
+  #copiedAndMutated: Set<PlaceId> | null = null;
 
   constructor(graph: ConstraintGraph, legacy: SolvedTypeFacts, source: string) {
     this.#graph = graph;
@@ -923,9 +882,18 @@ class Oracle {
     if (place === undefined || place.kind.kind !== "binding") return null;
     this.#touched.clear();
     this.#folded = false;
+    this.failure = null;
     const legacyText = this.#bindingFacts.get(siteKey(site));
     const legacy = legacyText === undefined ? null : parse(legacyText);
-    const derived = this.#binding(place.id, new Set());
+    let derived: Fact | null;
+    try {
+      derived = this.#binding(place.id, new Set());
+    } catch (error) {
+      if (!(error instanceof OracleBound)) throw error;
+      this.#estimates.clear();
+      this.failure = error.message;
+      return null;
+    }
     if (derived === null) return null;
     const touched = [...this.#touched];
     const folded = this.#folded;
@@ -944,6 +912,75 @@ class Oracle {
       return { text: renderFact(expected), rules: rulesFor(legacy, expected), touched, folded };
     }
     return { text: renderFact(derived), rules: rulesFor(legacy, derived), touched, folded };
+  }
+
+  /**
+   * Whether a derivation that read the given bindings depends on a copied value changed in place: one of them holds,
+   * at some level of its fact, a literal that another binding than the literal's own holds through a copy made before
+   * a mutation of it (r10-B7, r11-B4). A computed scalar (`a.length`) holds no literal and is compared.
+   */
+  involved(touched: readonly PlaceId[]): boolean {
+    const shared = this.#sharedMutated();
+    if (shared.size === 0) return false;
+    const facts = this.#factsOfBindings();
+    return touched.some((place) => {
+      const fact = facts.get(place);
+      return fact !== undefined && [...literalsOf(fact)].some((literal) => shared.has(literal));
+    });
+  }
+
+  /** The facts of every author binding, derived once (outside any expectation's reading). */
+  #factsOfBindings(): Map<PlaceId, Fact> {
+    if (this.#allFacts !== null) return this.#allFacts;
+    const touched = new Set(this.#touched);
+    const out = new Map<PlaceId, Fact>();
+    for (const place of this.#graph.places) {
+      if (place.kind.kind !== "binding" || place.kind.declared === "host") continue;
+      try {
+        const fact = this.#binding(place.id, new Set());
+        if (fact !== null) out.set(place.id, fact);
+      } catch (error) {
+        if (!(error instanceof OracleBound)) throw error;
+        this.#estimates.clear();
+      }
+    }
+    this.#touched.clear();
+    for (const place of touched) this.#touched.add(place);
+    this.#allFacts = out;
+    return out;
+  }
+
+  /** The literals a mutation changes in place that another binding than the literal's own holds from before it. */
+  #sharedMutated(): Set<PlaceId> {
+    if (this.#copiedAndMutated !== null) return this.#copiedAndMutated;
+    const facts = this.#factsOfBindings();
+    const holders = new Map<PlaceId, Set<PlaceId>>();
+    for (const [binding, fact] of facts)
+      for (const literal of literalsOf(fact))
+        holders.set(literal, new Set([...(holders.get(literal) ?? []), binding]));
+    const own = (literal: PlaceId): Set<PlaceId> =>
+      new Set(
+        this.#graph.constraints.flatMap((c) =>
+          c.kind === "store" && c.value === literal ? [c.into] : [],
+        ),
+      );
+    const firstStore = (binding: PlaceId): number =>
+      this.#stores(binding)[0]?.site.start ?? Number.POSITIVE_INFINITY;
+    const out = new Set<PlaceId>();
+    for (const c of this.#graph.constraints) {
+      if (c.kind !== "mutate") continue;
+      const mutated = facts.get(c.binding);
+      if (mutated === undefined) continue;
+      for (const literal of literalsOf(mutated)) {
+        const owners = own(literal);
+        const copies = [...(holders.get(literal) ?? [])].filter(
+          (holder) => !owners.has(holder) && firstStore(holder) < c.point.site.start,
+        );
+        if (copies.length > 0) out.add(literal);
+      }
+    }
+    this.#copiedAndMutated = out;
+    return out;
   }
 
   /** The fact of a binding with every family stored, iterated from nothing through any cycle. */
@@ -1094,12 +1131,20 @@ class Oracle {
           if (binding.kind.written !== null && text !== undefined) {
             const bound = parse(text.replace(/!$/, ""), `bound:${c.binding}`);
             const members = bound.members.map((m) => ({ ...m, group: `written:${c.binding}` }));
+            // the bound's members, with the stored possibilities beside them (a covered one too, as its provenance:
+            // the member it joined keeps it), so a read of the place asks the dynamic view as the lifting does
             return derived === null
               ? { ...bound, members }
               : {
-                  members: [...members, ...derived.members.filter((m) => m.possible)],
+                  members: [
+                    ...members,
+                    ...derived.members
+                      .filter((m) => m.possible || m.why !== null)
+                      .map((m) => ({ ...m, possible: true })),
+                  ],
                   optional: bound.optional || derived.optional,
                   held: derived.held,
+                  ...(derived.whys === undefined ? {} : { whys: derived.whys }),
                 };
           }
           if (derived !== null) return byDeclaration(derived);
@@ -1138,8 +1183,19 @@ class Oracle {
     return site === null || site === undefined ? undefined : this.#values.get(siteKey(site));
   }
 
-  /** A property read through the member rules per member of the owner. */
+  /**
+   * A property read through the member rules, as the lifting composes them over the receiver's choices: per member
+   * (a possibility's answers possibilities, r11-B3), and under the dynamic view per provenance of the owner's dynamic
+   * values and possibilities, where every case's answer is a possibility and the provenance is added (work note §3.5).
+   */
   #member(owner: Fact, name: string): Fact {
+    const site = `member@${name}`;
+    const readWith = (answer: MemberAnswer, receiver: Fact, dynamic: boolean): Fact =>
+      answer.kind === "held"
+        ? typeof answer.step === "object"
+          ? this.#property(receiver, answer.step.property)
+          : this.#elements(receiver)
+        : this.#read(answer, (ref) => ("receiver" in ref ? receiver : null), site, dynamic);
     const parts: Fact[] = [];
     for (const member of owner.members) {
       const type = typeOfMember(member);
@@ -1149,20 +1205,30 @@ class Oracle {
           ? undefined
           : memberOf(kind, name, { alternatives: [type], dynamic: null, known: undefined });
       if (answer === undefined) continue;
-      const one: Fact = { members: [member], optional: false, held: false };
-      if (answer.kind === "held")
-        parts.push(
-          typeof answer.step === "object"
-            ? this.#property(one, answer.step.property)
-            : this.#elements(one),
-        );
-      else
-        parts.push(
-          this.#read(answer, (ref) => ("receiver" in ref ? one : null), `member@${name}`, false),
-        );
+      const read = readWith(answer, { members: [member], optional: false, held: false }, false);
+      parts.push(member.possible ? asPossible(read, member.why) : read);
     }
-    const joined = join(parts);
-    return heldOf(owner) ? held(joined, provenancesOf(owner)) : joined;
+    const types = owner.members.map(typeOfMember);
+    for (const why of provenancesOf(owner)) {
+      const view: OperandView = {
+        alternatives: types.length === 0 ? null : types,
+        dynamic: why,
+        known: undefined,
+      };
+      for (const kind of new Set(types.map(valueKindOf))) {
+        if (kind === null) continue;
+        const answer = memberOf(kind, name, view);
+        if (answer === undefined) continue;
+        const those: Fact = {
+          members: owner.members.filter((m) => valueKindOf(typeOfMember(m)) === kind),
+          optional: false,
+          held: false,
+        };
+        parts.push(asPossible(readWith(answer, those, true), why));
+      }
+      parts.push(held(EMPTY, [why]));
+    }
+    return join(parts);
   }
 
   /** The variables a literal is stored into, their occurrences. */
@@ -1300,9 +1366,9 @@ class Oracle {
     ];
     if (c.contract.family === "logic" && operands[1] !== undefined)
       operands[1] = { ...operands[1], lazy: true };
+    // the legacy folds a known operand beside unknown ones too (`pow(round(hostValue), 3)`, r11-S1)
     const strict = operands.filter((operand) => !operand.lazy);
-    if (strict.length > 0 && strict.every((operand) => this.#constant(operand.place)))
-      this.#folded = true;
+    if (strict.some((operand) => this.#constant(operand.place))) this.#folded = true;
 
     const inputs = (views: readonly OperandView[]): OperationInputs => {
       let receiver: OperandView | null = null;
@@ -1381,14 +1447,44 @@ class Oracle {
         });
       return list;
     });
-    const strictEmpty = operands.some((o, i) => !o.lazy && choices[i]!.length === 0);
+    // two choices of one view, role and provenance are one (the model's alternatives are one per type and role),
+    // their chosen members joined for the projections; the product is complete, or the derivation fails loudly
+    // rather than silently losing the combinations beyond a bound (r11-B5)
+    const merged = choices.map((list) => {
+      const out = new Map<string, Pick>();
+      for (const pick of list) {
+        const key = [
+          pick.possible ? "p" : "",
+          pick.dynamic ?? "",
+          pick.chosen === null
+            ? "lazy"
+            : (pick.view.alternatives ?? []).map((t) => typeKey(t, true, true)).join("/"),
+          pick.chosen?.optional ? "n" : "",
+          [...new Set(pick.chosen?.members.map((m) => m.group ?? "") ?? [])].sort().join(","),
+        ].join("|");
+        const prior = out.get(key);
+        out.set(
+          key,
+          prior === undefined || prior.chosen === null || pick.chosen === null
+            ? pick
+            : { ...prior, chosen: join([prior.chosen, pick.chosen]) },
+        );
+      }
+      return [...out.values()];
+    });
+    const strictEmpty = operands.some((o, i) => !o.lazy && merged[i]!.length === 0);
     const parts: Fact[] = [];
     if (!strictEmpty) {
-      const product = choices.reduce<Pick[][]>(
+      const size = merged.reduce((n, list) => n * list.length, 1);
+      if (size > 4096)
+        throw new OracleBound(
+          `the oracle's product of choices at ${site} has ${size} combinations, beyond its bound of 4096`,
+        );
+      const product = merged.reduce<Pick[][]>(
         (acc, list) => acc.flatMap((combo) => list.map((pick) => [...combo, pick])),
         [[]],
       );
-      for (const combo of product.slice(0, 1024)) {
+      for (const combo of product) {
         const chosen = (ref: OperandRef): Fact | null =>
           combo[operands.findIndex((o) => sameRefs(o.ref, ref))]?.chosen ?? null;
         // under a dynamic receiver every applicable case of `byReceiver` is a possibility; a closed answer under a
@@ -1497,6 +1593,19 @@ class Oracle {
       }
     }
   }
+}
+
+/** A derivation the oracle refuses to complete approximately. */
+class OracleBound extends Error {}
+
+/** The literals a fact holds at any level: the structural members' own cells (`cell:<place>`). */
+function literalsOf(fact: Fact, out: Set<PlaceId> = new Set()): Set<PlaceId> {
+  for (const member of fact.members) {
+    if (member.id !== null && member.id.startsWith("cell:")) out.add(Number(member.id.slice(5)));
+    if (member.element !== null) literalsOf(member.element, out);
+    if (member.props !== null) for (const value of member.props.values()) literalsOf(value, out);
+  }
+  return out;
 }
 
 /** What the oracle expects for a binding: the text, the rules between it and the legacy's fact, what it read. */

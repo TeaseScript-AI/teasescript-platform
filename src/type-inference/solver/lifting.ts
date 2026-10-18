@@ -67,6 +67,18 @@ export type Choice =
 const unionOf = (left: readonly CellId[], right: readonly CellId[]): readonly CellId[] =>
   [...new Set([...left, ...right])].sort((a, b) => a - b);
 
+/**
+ * The roles of an alternative and of its chosen parts (tag, identity, provenance), down through the choices: two
+ * alternatives of one type are one only when every chosen part has the same role, else a projection through the
+ * merged choice would take the role of whichever was enumerated first (r11-B1).
+ */
+function roleOf(a: Alternative): string {
+  const own = `${a.tag}|${a.group ?? ""}|${a.why ?? ""}`;
+  if (a.choice === null) return own;
+  if (a.choice.element !== undefined) return `${own}[${roleOf(a.choice.element)}]`;
+  return `${own}{${[...a.choice.props].map(([name, p]) => `${name}:${roleOf(p)}`).join(",")}}`;
+}
+
 /** A dynamic item met along a projection of the dynamic view. */
 interface DynamicMark {
   readonly tag: "d";
@@ -97,7 +109,7 @@ function alternatives(
   for (const item of cells.items(cell)) {
     if (item.tag === "d" || item.tag === "e") continue;
     for (const alternative of itemAlternatives(cells, item, cell, path)) {
-      const key = `${alternative.tag}|${alternative.type}|${alternative.group ?? ""}|${alternative.why ?? ""}`;
+      const key = `${alternative.type}|${roleOf(alternative)}`;
       const prior = out.get(key);
       if (prior === undefined) out.set(key, alternative);
       else out.set(key, merged(prior, alternative));
