@@ -2,7 +2,7 @@ import type { FileStoreInstruction } from "../../plan/model.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import type { Evaluator } from "../evaluator.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
-import { jsonText, valueFromJson } from "../json-base64.js";
+import { jsonText, valueFromJson } from "../values/json-base64.js";
 import { emitDeveloperWarning } from "../operations/media-lifecycle.js";
 import {
   assertEventSequenceCapacity,
@@ -14,8 +14,8 @@ import type {
   SerializableRuntimeDict,
   SerializableRuntimeList,
   SerializableRuntimeValue,
-} from "../serializable-values.js";
-import type { RuntimeSnapshot } from "../state.js";
+} from "../values/serializable-values.js";
+import type { RuntimeSnapshot } from "../snapshot/state.js";
 import {
   base64FileType,
   base64FromBinary,
@@ -28,10 +28,10 @@ import {
   isRecognizedFileType,
   isStandardBase64,
   storedFileKind,
-} from "../stored-files.js";
+} from "../host-data/stored-files.js";
 import { interactionStringFits } from "../../interaction-limits.js";
-import { isSha256Hex } from "../sha256.js";
-import { checkTextLength, messageText } from "../text-length.js";
+import { isSha256Hex } from "../values/sha256.js";
+import { checkTextLength, messageText } from "../values/text-length.js";
 import type { CapturedMediaAdmission } from "./capture.js";
 import {
   ACTION_COMPLETION_EVENTS,
@@ -40,7 +40,7 @@ import {
 } from "./model.js";
 import { describeValue } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
-import { isPlainRecord } from "../plain-data.js";
+import { isPlainRecord } from "../values/plain-data.js";
 import { USE_DEFAULT } from "../evaluation/support.js";
 
 // The calls that may use the Player's file store (V30 §13 and §33). A `fileStore` instruction first works out which files

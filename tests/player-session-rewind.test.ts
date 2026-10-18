@@ -16,7 +16,7 @@ import {
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import { memoryKeptRoomStore, type KeptRoomStore } from "../player/kept-sessions.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../src/index.js";
-import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
+import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
 
 // Debug's rewind through the Player's real session host (DEBUGGER.md "Rewind"): Back shows an earlier state for

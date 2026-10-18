@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
-import { createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint, restoreCheckpoint } from "../src/runtime/snapshot/checkpoint.js";
 import { run, stepToEvent } from "../src/runtime/engine.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -14,7 +14,7 @@ import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { runValidSourceUntilExit } from "./helpers/run-until-exit.js";
 import { sayTexts } from "./helpers/runtime-events.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
 
 test("executes exclusive and inclusive integer ranges", () => {
   assert.deepEqual(sayTexts(runSource("for value in 1..4 { say value }\nexit")), ["1", "2", "3"]);

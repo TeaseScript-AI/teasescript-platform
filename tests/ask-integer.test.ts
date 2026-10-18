@@ -13,14 +13,14 @@ import {
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
-import { createCheckpoint, deserializeCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint, deserializeCheckpoint } from "../src/runtime/snapshot/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 function binding(session: PlayerRuntimeSession, name: string) {
   return playerRuntimeSnapshot(session).frames[0]?.bindings.find(

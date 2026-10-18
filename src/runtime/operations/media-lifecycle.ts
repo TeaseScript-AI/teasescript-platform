@@ -1,7 +1,7 @@
 import type { DeveloperWarningCode } from "../../diagnostic-codes.js";
 import { type InstructionPlan, type PlanSourceLocation, mainSourceSpan } from "../../plan/model.js";
-import { cloneCaptures, sweepRetainedScopes } from "../captures.js";
-import { interruptFrame } from "../activations.js";
+import { cloneCaptures, sweepRetainedScopes } from "../scopes/captures.js";
+import { interruptFrame } from "../scopes/activations.js";
 import type { SourceSpan } from "../../source.js";
 import type {
   RuntimeActionSettlementSnapshot,
@@ -22,8 +22,8 @@ import {
   type MediaHandleRecord,
   type MediaTimelineEvent,
   type RuntimeMediaSnapshot,
-} from "../media.js";
-import type { RuntimeSnapshot } from "../state.js";
+} from "../background/media.js";
+import type { RuntimeSnapshot } from "../snapshot/state.js";
 import { assertEventSequenceCapacity, takeSequence, takeSettlementSequence } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
 

@@ -33,7 +33,7 @@ import {
   type StoredFileKind,
 } from "../src/index.js";
 import { instructionSourcePath } from "../src/plan/model.js";
-import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
 import { isWellFormedCapturedMediaReference } from "./captured-media.js";
 import {
   base64urlSlices,

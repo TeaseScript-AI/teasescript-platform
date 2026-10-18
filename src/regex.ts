@@ -1,5 +1,5 @@
 import { compileRegexProgram, type RegexProgram } from "./regex-engine.js";
-import { groupedDigits, messageText } from "./runtime/text-length.js";
+import { groupedDigits, messageText } from "./runtime/values/text-length.js";
 
 /*
  * Regexes (V30 §8): RE2 patterns with the flags `i`, `m`, and `s`, shared by the compiler, plan and data validation,

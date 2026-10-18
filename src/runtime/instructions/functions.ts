@@ -1,18 +1,18 @@
-import { leaveScopes } from "../captures.js";
+import { leaveScopes } from "../scopes/captures.js";
 import type { Instruction, InstructionPlan } from "../../plan/model.js";
 import type { Evaluator } from "../evaluator.js";
 import { internalFault } from "../errors.js";
 import { assertCounterCanAdvance } from "../operations/support.js";
-import { activeFunctionFrame, contextRootId } from "../activations.js";
-import type { DebugDependencies, TraceStore } from "../debug-trace.js";
+import { activeFunctionFrame, contextRootId } from "../scopes/activations.js";
+import type { DebugDependencies, TraceStore } from "../debug/debug-trace.js";
 import type { InterpreterEvent } from "../events.js";
 import {
   cloneCapturedSerializableValue,
   type SerializableRuntimeValue,
-} from "../serializable-values.js";
-import type { RuntimeSnapshot, RuntimeCallFrameSnapshot } from "../state.js";
+} from "../values/serializable-values.js";
+import type { RuntimeSnapshot, RuntimeCallFrameSnapshot } from "../snapshot/state.js";
 import { returnFromTimerHandler } from "../operations/timer-handlers.js";
-import { assertValueType } from "../value-types.js";
+import { assertValueType } from "../values/value-types.js";
 import { advance, currentCallFrameId, currentFrame, fault, type SourceSpan } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
 import { findBinding } from "../evaluation/bindings.js";

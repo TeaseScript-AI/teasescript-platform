@@ -1,5 +1,5 @@
 import type { DeveloperWarningCode } from "../../diagnostic-codes.js";
-import { exactDurationMilliseconds } from "../temporal-operations.js";
+import { exactDurationMilliseconds } from "../values/temporal-operations.js";
 import { resolveMessagePresentation } from "../message-presentation.js";
 import type { TemporalContext } from "../../temporal.js";
 import {
@@ -40,14 +40,14 @@ import type { ActionRequestedEvent, DeveloperWarningEvent, InterpreterEvent } fr
 import {
   cloneCapturedSerializableValue,
   type SerializableRuntimeValue,
-} from "../serializable-values.js";
+} from "../values/serializable-values.js";
 import {
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
   type RuntimeTemporarySnapshot,
   currentTemporalContext,
   MAX_RUNTIME_SESSION_TIME_MS,
-} from "../state.js";
+} from "../snapshot/state.js";
 import {
   ACTION_COMPLETION_EVENTS,
   type RuntimeInteractionActionSnapshot,
@@ -72,7 +72,7 @@ import {
   imageFilterTextProblem,
 } from "../../image-input.js";
 import { normalizeOpaqueColor } from "../../color.js";
-import { describeShownValue } from "../value-types.js";
+import { describeShownValue } from "../values/value-types.js";
 import { conversionTo } from "../../conversions.js";
 import {
   isDate,
@@ -82,10 +82,10 @@ import {
   isObject,
   isSpeakerReference,
   isTime,
-} from "../value-predicates.js";
-import { fieldText } from "../value-text.js";
+} from "../values/value-predicates.js";
+import { fieldText } from "../values/value-text.js";
 import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "../../web-url.js";
-import { expandChoiceOptions, preselectedChoice } from "../choice-options.js";
+import { expandChoiceOptions, preselectedChoice } from "../actions/choice-options.js";
 import { cloneInteractionChoiceValue } from "../../choice-values.js";
 import { describeValue } from "../../value-kinds.js";
 import { advance, durationFix, fault, readTemporary, type SourceSpan } from "./support.js";

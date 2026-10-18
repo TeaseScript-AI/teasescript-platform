@@ -3,7 +3,7 @@ import {
   type RuntimeScriptStorageEntrySnapshot,
   type SerializableRuntimeValue,
 } from "../src/index.js";
-import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
 
 /**
  * Persistent script storage for TeaseScript `save`, `load`, and `delete` in one storage scope. The host chooses the

@@ -115,11 +115,11 @@ completion, time-observation, and media-load transitions live in
 `src/runtime/operations/complete-action.ts`, `observe-time.ts`, and
 `media-reports.ts`. Their small `model.ts` and `support.ts` companions hold
 shared operation results and common capture/sequence helpers so the engine can
-execute instructions without duplicating operation logic. `src/runtime/state.ts` holds the snapshot model and its
+execute instructions without duplicating operation logic. `src/runtime/snapshot/state.ts` holds the snapshot model and its
 constants; `snapshot-construction.ts` builds fresh snapshots and copies captured ones; `snapshot-validation.ts`
 captures a snapshot from outside the engine and orders its whole-snapshot validation, with the call, loop, and
 continuation invariants in `frame-validation.ts` and prepared temporaries in `prepared-temporary-validation.ts`; and
-`record-collection.ts` drops the records nothing reaches. The internal `src/runtime/action-validation.ts`
+`record-collection.ts` drops the records nothing reaches. The internal `src/runtime/actions/action-validation.ts`
 module owns pending-action, settlement, pacing-gate, and handoff validation.
 `src/runtime/session.ts` owns the engine-owned runtime session, which runs those operations and the engine on state it
 keeps private ([`RUNTIME.md`](RUNTIME.md#runtime-sessions)).
@@ -128,9 +128,9 @@ families such as function calls, loops, say, interactions, and timers to their m
 `src/runtime/evaluator.ts` owns expression evaluation, its order, and builtin calls; its families, such as property
 access, assignment, speakers, operators, handle members, collection methods, and random draws, are in
 `src/runtime/evaluation/`.
-The internal `src/runtime/prepared-references.ts` module owns prepared-reference encoding,
+The internal `src/runtime/scopes/prepared-references.ts` module owns prepared-reference encoding,
 resolution, detachment, and list-mutation rebasing, while
-`src/runtime/value-predicates.ts` supplies the small shared value-narrowing seam.
+`src/runtime/values/value-predicates.ts` supplies the small shared value-narrowing seam.
 `src/value-kinds.ts` has one entry per kind of value: its type name and description, its runtime predicate and
 stored form, and whether `==`, `<`, `${...}`, `toJson`, buttons, `case`, and dict keys take it; the compiler, the
 runtime, and the editor read these facts there.

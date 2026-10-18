@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import type { ExpressionPlan, InstructionPlan, SayInstruction } from "../../src/plan/model.js";
-import { sayStagesSelectively } from "../../src/runtime/say-staging.js";
+import { sayStagesSelectively } from "../../src/runtime/instructions/say-staging.js";
 
 /**
  * `plan` with each say that stages selectively made to stage on a deep copy of the state instead, so that a test can

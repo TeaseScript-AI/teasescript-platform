@@ -9,14 +9,14 @@ import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 /*
  * askPassword (V30 §20): a masked field whose answer is the SHA-256 of what was typed, as hashText gives it. The Player

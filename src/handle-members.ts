@@ -1,7 +1,7 @@
 /**
  * The members of each kind of handle: the properties and methods of timers (V30 §27), media and camera views (V30 §22),
  * permanent buttons (V30 §28), and messages (V30 §37). One contract per kind, shared by the compiler, the runtime, and
- * the editor; the runtime implements the members in `runtime/timers.ts`, `runtime/media.ts`, and the evaluator. A problem
+ * the editor; the runtime implements the members in `runtime/background/timers.ts`, `runtime/background/media.ts`, and the evaluator. A problem
  * with a member is the kind's own compile error (`code`), and the compiler and the runtime give it one message
  * (`handleMemberMessage`).
  */
@@ -16,7 +16,7 @@ import {
   mediaVolumeMessage,
   timerDisplayMessage,
 } from "./handle-rules.js";
-import type { SerializableRuntimeValue } from "./runtime/serializable-values.js";
+import type { SerializableRuntimeValue } from "./runtime/values/serializable-values.js";
 import { valueKindOf } from "./value-kinds.js";
 
 /** The kinds of handles, as the compiler names their types. */

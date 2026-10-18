@@ -155,10 +155,10 @@ import {
   weightedChoiceCheck,
   type ListFunctionCheck,
 } from "./list-function-checks.js";
-import { rangeListLengthProblem } from "./runtime/collection-operations.js";
-import { messageText } from "./runtime/text-length.js";
-import { quotedText } from "./runtime/value-text.js";
-import { describeShownValue, shownChoice } from "./runtime/value-types.js";
+import { rangeListLengthProblem } from "./runtime/values/collection-operations.js";
+import { messageText } from "./runtime/values/text-length.js";
+import { quotedText } from "./runtime/values/value-text.js";
+import { describeShownValue, shownChoice } from "./runtime/values/value-types.js";
 import {
   buttonBackgroundMessage,
   CHOICE_TEXT_MESSAGE,

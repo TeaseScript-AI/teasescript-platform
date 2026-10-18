@@ -12,9 +12,9 @@ import { isListFunction } from "../list-function-rules.js";
 import { listMethod } from "../list-methods.js";
 import type { StartValueOwner } from "../start-value-rules.js";
 import type { DeveloperWarningCode } from "../diagnostic-codes.js";
-import { temporalCaptureAt } from "./temporal-captures.js";
+import { temporalCaptureAt } from "./host-data/temporal-captures.js";
 import { isClockFunction } from "../temporal-builtins.js";
-import { temporalNow, temporalMethod } from "./temporal-operations.js";
+import { temporalNow, temporalMethod } from "./values/temporal-operations.js";
 import type {
   AssignmentTargetPlan,
   ExpressionPlan,
@@ -29,29 +29,37 @@ import type { LazyDefaultOperation } from "../lazy-defaults.js";
 import { isNumericFunction } from "../numeric-functions.js";
 import { isRandomFunction } from "../random-functions.js";
 import { angleDegrees, angleValue } from "../angle.js";
-import { accountFieldValue } from "./account.js";
-import { listFunctionValue } from "./list-statistics.js";
+import { accountFieldValue } from "./host-data/account.js";
+import { listFunctionValue } from "./values/list-statistics.js";
 import { CORE_RUNTIME_BUILTINS, type ConversionName } from "../language-facts.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { internalFault, RuntimeFault } from "./errors.js";
-import type { InstructionTraceCollector, RuntimeInstructionObserver } from "./instruction-trace.js";
+import type {
+  InstructionTraceCollector,
+  RuntimeInstructionObserver,
+} from "./debug/instruction-trace.js";
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
 import { takeSequence } from "./operations/support.js";
 import {
   readPreparedReference,
   scopeBindings,
   type PreparedReferenceDescriptor,
-} from "./prepared-references.js";
-import type { RandomSource } from "./random.js";
-import { RandomControlSignal, type RandomControl } from "./random-control.js";
-import { evaluatedChildren, expressionEffects } from "./effect-facts.js";
-import { isVisibleScalar, quotedText, visibleText } from "./value-text.js";
-import { checkTextLength, MAX_TEXT_LENGTH, messageText, textTooLong } from "./text-length.js";
-import { textSha256 } from "./sha256.js";
-import { conversionResult, numericFunction } from "./pure-operations.js";
+} from "./scopes/prepared-references.js";
+import type { RandomSource } from "./random/random.js";
+import { RandomControlSignal, type RandomControl } from "./random/random-control.js";
+import { evaluatedChildren, expressionEffects } from "./evaluation/effect-facts.js";
+import { isVisibleScalar, quotedText, visibleText } from "./values/value-text.js";
+import {
+  checkTextLength,
+  MAX_TEXT_LENGTH,
+  messageText,
+  textTooLong,
+} from "./values/text-length.js";
+import { textSha256 } from "./values/sha256.js";
+import { conversionResult, numericFunction } from "./values/pure-operations.js";
 import { rangeBoundRule, rangeLength } from "../range-checks.js";
 import { notNumberFix, UNIT_AMOUNT_RULE, unitAmountFix } from "../operand-rules.js";
-import { rangeListLengthProblem } from "./collection-operations.js";
+import { rangeListLengthProblem } from "./values/collection-operations.js";
 import {
   calendarDuration,
   durationParts,
@@ -59,8 +67,8 @@ import {
   negateDuration,
   unitValue,
 } from "../duration.js";
-import { callStringMethod } from "./string-operations.js";
-import { findScriptStorageEntry, storageKey, storageKeyPlace } from "./script-storage.js";
+import { callStringMethod } from "./values/string-operations.js";
+import { findScriptStorageEntry, storageKey, storageKeyPlace } from "./host-data/script-storage.js";
 import {
   addOwnedSerializableSetValue,
   addSerializableSetValue,
@@ -77,13 +85,13 @@ import {
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
   type SerializableScriptReference,
-} from "./serializable-values.js";
+} from "./values/serializable-values.js";
 import {
   currentTemporalContext,
   type RuntimeBindingSnapshot,
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
-} from "./state.js";
+} from "./snapshot/state.js";
 import {
   isAngle,
   isAnyDuration,
@@ -99,15 +107,15 @@ import {
   isMessageHandle,
   isCameraView,
   isPermanentButton,
-} from "./value-predicates.js";
+} from "./values/value-predicates.js";
 import {
   assertValueType,
   cannotConvert,
   describeShownValue,
   matchesValueType,
   storedValueMismatch,
-} from "./value-types.js";
-import { contextRootId, findRoot } from "./activations.js";
+} from "./values/value-types.js";
+import { contextRootId, findRoot } from "./scopes/activations.js";
 import {
   bindingKey,
   emptyDependencies,
@@ -116,7 +124,7 @@ import {
   type StatePart,
   type RuntimeDebugRandomOperation,
   type TraceStore,
-} from "./debug-trace.js";
+} from "./debug/debug-trace.js";
 import {
   CONVERSIONS,
   defaultDescription,

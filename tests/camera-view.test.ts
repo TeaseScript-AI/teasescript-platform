@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
-import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint, serializeCheckpoint } from "../src/runtime/snapshot/checkpoint.js";
 import { parse } from "../src/parser.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
@@ -14,7 +14,7 @@ import { runUntilExit, runValidSourceUntilExit } from "./helpers/run-until-exit.
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { sayTexts } from "./helpers/runtime-events.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
 
 const warnings = (events: readonly InterpreterEvent[]) =>
   events.flatMap((event) => (event.kind === "developerWarning" ? [event.code] : []));

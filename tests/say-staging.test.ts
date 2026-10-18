@@ -3,19 +3,19 @@ import test from "node:test";
 
 import type { ExpressionPlan, InstructionPlan, SayInstruction } from "../src/plan/model.js";
 import { withRegexWorkLimit } from "../src/regex-engine.js";
-import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint, serializeCheckpoint } from "../src/runtime/snapshot/checkpoint.js";
 import { executeValidatedInstruction } from "../src/runtime/engine.js";
 import { captureExecutableData } from "../src/runtime/operations/support.js";
-import { sayStagesSelectively } from "../src/runtime/say-staging.js";
+import { sayStagesSelectively } from "../src/runtime/instructions/say-staging.js";
 import { CLOCK_CONTRACTS, TEMPORAL_METHODS } from "../src/temporal-builtins.js";
 import { TEXT_METHODS } from "../src/text-operations.js";
 import {
   builtSerializableDictIndex,
   type SerializableRuntimeDict,
   type SerializableRuntimeValue,
-} from "../src/runtime/serializable-values.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
-import { isDict } from "../src/runtime/value-predicates.js";
+} from "../src/runtime/values/serializable-values.js";
+import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
+import { isDict } from "../src/runtime/values/value-predicates.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { withDeepSayStaging } from "./helpers/deep-say-staging.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";

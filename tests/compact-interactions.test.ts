@@ -12,17 +12,17 @@ import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import {
   createSerializableList,
   createSerializableObject,
-} from "../src/runtime/serializable-values.js";
+} from "../src/runtime/values/serializable-values.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 function compiled(source: string, options: Parameters<typeof compileSource>[1] = {}) {
   const plan = compileValidPlan(source, options);

@@ -5,7 +5,7 @@ import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { compileSource } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { executeInstruction, run } from "../src/runtime/engine.js";
@@ -13,7 +13,7 @@ import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { sayTexts } from "./helpers/runtime-events.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 type Plan = ReturnType<typeof compileValidPlan>;
 type Snapshot = ReturnType<typeof createImmediatePacingRuntimeSnapshot>;

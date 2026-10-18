@@ -8,7 +8,7 @@ import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
@@ -17,8 +17,8 @@ import {
   pressPermanentButton,
   type PermanentButtonPressOutcome,
 } from "../src/runtime/operations/press-permanent-button.js";
-import { permanentButtonProjection } from "../src/runtime/permanent-buttons.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
+import { permanentButtonProjection } from "../src/runtime/background/permanent-buttons.js";
+import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import {
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
@@ -30,7 +30,7 @@ import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSourceUntilExit } from "./helpers/run-until-exit.js";
 import { assertRuntimeResumeEquivalent, functionFrames } from "./helpers/runtime-equivalence.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 /** Drives a session with clicks, answers, and time, round-tripping every snapshot through checkpoint JSON. */
 class Session {

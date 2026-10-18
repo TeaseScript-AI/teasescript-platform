@@ -1,6 +1,6 @@
 import { normalizeColor, isNormalizedColor } from "./color.js";
 import { canonicalWebUrl } from "./web-url.js";
-import { isPlainRecord } from "./runtime/plain-data.js";
+import { isPlainRecord } from "./runtime/values/plain-data.js";
 
 export type MessageMarkupLineEnding = "" | "\n" | "\r\n";
 

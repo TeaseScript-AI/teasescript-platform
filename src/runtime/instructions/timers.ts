@@ -1,5 +1,5 @@
-import { exactDurationMilliseconds } from "../temporal-operations.js";
-import { resolveCaptures } from "../captures.js";
+import { exactDurationMilliseconds } from "../values/temporal-operations.js";
+import { resolveCaptures } from "../scopes/captures.js";
 import type { DelayDisplay, DurationUnitPlan, Instruction } from "../../plan/model.js";
 import { rangeStartProblem, rangeText } from "../../range-checks.js";
 import { UNIT_AMOUNT_RULE, unitAmountFix } from "../../operand-rules.js";
@@ -21,16 +21,16 @@ import {
   setCapturedTemporary,
   takeSequence,
 } from "../operations/support.js";
-import { contextRootId } from "../activations.js";
+import { contextRootId } from "../scopes/activations.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
-import type { SerializableRuntimeValue } from "../serializable-values.js";
-import { type RuntimeSnapshot, MAX_RUNTIME_SESSION_TIME_MS } from "../state.js";
+import type { SerializableRuntimeValue } from "../values/serializable-values.js";
+import { type RuntimeSnapshot, MAX_RUNTIME_SESSION_TIME_MS } from "../snapshot/state.js";
 import { ACTION_COMPLETION_EVENTS, type RuntimeTimerActionSnapshot } from "../actions/model.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import { expireTimerAction } from "../operations/timer-lifecycle.js";
-import { cloneTimer } from "../timers.js";
-import { describeShownValue, shownChoice } from "../value-types.js";
-import { isAnyDuration, isDuration, isList, isRange } from "../value-predicates.js";
+import { cloneTimer } from "../background/timers.js";
+import { describeShownValue, shownChoice } from "../values/value-types.js";
+import { isAnyDuration, isDuration, isList, isRange } from "../values/value-predicates.js";
 import { DURATION_UNIT_MILLISECONDS } from "../../duration.js";
 import { advance, durationFix, fault, type SourceSpan } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";

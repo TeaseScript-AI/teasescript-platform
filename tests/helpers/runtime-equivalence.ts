@@ -28,9 +28,9 @@ import {
   type RuntimeSessionView,
   type RuntimeSnapshot,
 } from "../../src/index.js";
-import type { RuntimeAccountInput } from "../../src/runtime/account.js";
+import type { RuntimeAccountInput } from "../../src/runtime/host-data/account.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
-import { interruptFrame } from "../../src/runtime/activations.js";
+import { interruptFrame } from "../../src/runtime/scopes/activations.js";
 import { executionRunnable } from "../../src/runtime/operations/observe-time.js";
 import { withValidationTestStatistics } from "../../src/validation-testing.js";
 

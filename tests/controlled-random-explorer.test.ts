@@ -3,14 +3,14 @@ import test from "node:test";
 
 import { compileProject } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
-import { randomDrawAlternatives } from "../src/runtime/random-alternatives.js";
+import { randomDrawAlternatives } from "../src/runtime/random/random-alternatives.js";
 import {
   replayRandomChoices,
   type RandomChoiceReceipt,
   type RandomDrawKind,
   type RandomDrawView,
   type RandomOutcome,
-} from "../src/runtime/random-control.js";
+} from "../src/runtime/random/random-control.js";
 import { createFreshRuntimeSession, type RuntimeSession } from "../src/runtime/session.js";
 
 /*

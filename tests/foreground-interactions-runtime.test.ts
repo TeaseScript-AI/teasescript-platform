@@ -18,14 +18,14 @@ import {
   deserializeCheckpoint,
   restoreCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { run, RuntimeDataError } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 type Mutable<T> = T extends readonly [infer First, infer Second]
   ? [Mutable<First>, Mutable<Second>]

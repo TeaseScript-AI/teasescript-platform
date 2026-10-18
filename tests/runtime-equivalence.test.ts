@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { HANDLE_MEMBERS } from "../src/handle-members.js";
-import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
+import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
+import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("resume equivalence preserves list warnings and collection state", () => {

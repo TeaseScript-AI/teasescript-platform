@@ -4,7 +4,7 @@ import {
   cloneCapturedSerializableValue,
   validateCapturedSerializableValue,
   type SerializableRuntimeValue,
-} from "./runtime/serializable-values.js";
+} from "./runtime/values/serializable-values.js";
 import { VALUE_KINDS, valueKindOf, type ValueKind } from "./value-kinds.js";
 
 /**

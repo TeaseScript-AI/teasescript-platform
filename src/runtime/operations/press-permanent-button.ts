@@ -1,9 +1,9 @@
-import type { RandomDrawPendingOutcome } from "../random-control.js";
+import type { RandomDrawPendingOutcome } from "../random/random-control.js";
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
-import { cloneCaptures } from "../captures.js";
+import { cloneCaptures } from "../scopes/captures.js";
 import type { PermanentButtonPressedEvent } from "../events.js";
-import { permanentButtonBusy, shownPermanentButton } from "../permanent-buttons.js";
-import type { RuntimeSnapshot } from "../state.js";
+import { permanentButtonBusy, shownPermanentButton } from "../background/permanent-buttons.js";
+import type { RuntimeSnapshot } from "../snapshot/state.js";
 import type { PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import {
@@ -13,7 +13,7 @@ import {
   positiveSafeInteger,
   takeSequence,
 } from "./support.js";
-import { withDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
+import { withDebugTrace, type RuntimeDebugContext } from "../debug/debug-trace.js";
 import { copySpan } from "../../plan/source-location.js";
 import { randomDrawPending } from "./model.js";
 

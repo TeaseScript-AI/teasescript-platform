@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { compileProject, compileSource } from "../src/compiler.js";
 import { run } from "../src/runtime/engine.js";
-import { MAX_TEXT_LENGTH } from "../src/runtime/text-length.js";
+import { MAX_TEXT_LENGTH } from "../src/runtime/values/text-length.js";
 import {
   readsPosition,
   stringLength,

@@ -13,12 +13,12 @@ import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { compareBackwardAnalyses } from "./helpers/backward-analyses-oracle.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
 
 /*
  * The backward analyses on the plan's control flow give what their own walks of the plan gave before (see the oracle):

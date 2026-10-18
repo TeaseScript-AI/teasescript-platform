@@ -13,7 +13,7 @@ import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
 
 test("wait lowers to a foreground delay and settles only after an explicit observation", () => {
   const compiled = plan('wait 1.5 s\nsay "done"\nexit');

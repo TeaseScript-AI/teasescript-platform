@@ -6,7 +6,7 @@ import type { ArgumentPlan, ExpressionPlan, InstructionPlan } from "../src/plan/
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
 import { RuntimeFault } from "../src/runtime/errors.js";
-import { temporalMethod, temporalNow } from "../src/runtime/temporal-operations.js";
+import { temporalMethod, temporalNow } from "../src/runtime/values/temporal-operations.js";
 import { createSourcePosition, createSourceSpan } from "../src/source.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";

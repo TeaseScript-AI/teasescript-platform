@@ -28,9 +28,13 @@ import { hasListMethod, LIST_METHODS, onlyReadsList, type ListMethod } from "./l
 import { isNumericFunction } from "./numeric-functions.js";
 import { canonicalRegexFlags, regexFlagProblem } from "./regex.js";
 import { withRegexWorkPool } from "./regex-engine.js";
-import { readCollection, readDict } from "./runtime/collection-operations.js";
-import { listFunctionValue } from "./runtime/list-statistics.js";
-import { conversionResult, joinedValue, numericFunction } from "./runtime/pure-operations.js";
+import { readCollection, readDict } from "./runtime/values/collection-operations.js";
+import { listFunctionValue } from "./runtime/values/list-statistics.js";
+import {
+  conversionResult,
+  joinedValue,
+  numericFunction,
+} from "./runtime/values/pure-operations.js";
 import {
   cloneCapturedSerializableValue,
   createCapturedSerializableList,
@@ -38,12 +42,12 @@ import {
   setOwnedSerializableDictValue,
   type SerializableRuntimeDict,
   type SerializableRuntimeValue,
-} from "./runtime/serializable-values.js";
-import { callStringMethod } from "./runtime/string-operations.js";
-import { temporalMethod } from "./runtime/temporal-operations.js";
-import { withTextLengthLimit } from "./runtime/text-length.js";
-import { isDict, isList, isSet, isTemporal } from "./runtime/value-predicates.js";
-import { joinedText, visibleText } from "./runtime/value-text.js";
+} from "./runtime/values/serializable-values.js";
+import { callStringMethod } from "./runtime/values/string-operations.js";
+import { temporalMethod } from "./runtime/values/temporal-operations.js";
+import { withTextLengthLimit } from "./runtime/values/text-length.js";
+import { isDict, isList, isSet, isTemporal } from "./runtime/values/value-predicates.js";
+import { joinedText, visibleText } from "./runtime/values/value-text.js";
 import type { SourceSpan } from "./source.js";
 import type { TemporalContext } from "./temporal.js";
 import { recordValidationTestWork } from "./validation-testing.js";

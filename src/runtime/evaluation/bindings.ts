@@ -1,7 +1,7 @@
 import type { InstructionPlan } from "../../plan/model.js";
-import { GLOBAL_SCOPE_ID } from "../prepared-references.js";
-import type { RuntimeBindingSnapshot, RuntimeSnapshot } from "../state.js";
-import { findRoot, findScope } from "../activations.js";
+import { GLOBAL_SCOPE_ID } from "../scopes/prepared-references.js";
+import type { RuntimeBindingSnapshot, RuntimeSnapshot } from "../snapshot/state.js";
+import { findRoot, findScope } from "../scopes/activations.js";
 
 // Which binding a name refers to, and the index that finds it in a large frame.
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { sipHash24 } from "../src/runtime/snapshot-tag.js";
+import { sipHash24 } from "../src/runtime/snapshot/snapshot-tag.js";
 
 /*
  * A tagged snapshot (docs/RUNTIME.md#runtime-sessions) is only as sound as its SipHash-2-4. The expected values come

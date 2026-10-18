@@ -1,4 +1,4 @@
-import { leaveScopes } from "../captures.js";
+import { leaveScopes } from "../scopes/captures.js";
 import type { ExpressionPlan, Instruction, InstructionPlan } from "../../plan/model.js";
 import { rangeLength } from "../../range-checks.js";
 import {
@@ -11,7 +11,7 @@ import {
 import type { Evaluator } from "../evaluator.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import { assertCounterCanAdvance } from "../operations/support.js";
-import { loopKey } from "../debug-trace.js";
+import { loopKey } from "../debug/debug-trace.js";
 import {
   cloneCapturedSerializableValue,
   createCapturedSerializableList,
@@ -20,15 +20,15 @@ import {
   type SerializableRuntimeRange,
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
-} from "../serializable-values.js";
+} from "../values/serializable-values.js";
 import type {
   RuntimeBindingSnapshot,
   RuntimeSnapshot,
   RuntimeLoopFrameSnapshot,
-} from "../state.js";
-import { describeShownValue } from "../value-types.js";
+} from "../snapshot/state.js";
+import { describeShownValue } from "../values/value-types.js";
 import { numberFromText } from "../../conversions.js";
-import { isDict, isList, isRange, isSet } from "../value-predicates.js";
+import { isDict, isList, isRange, isSet } from "../values/value-predicates.js";
 import { advance, currentCallFrameId, currentFrame, fault } from "./support.js";
 import { notBoolean } from "../evaluation/operators.js";
 import { assertIntegerRange, planLabel } from "../evaluation/support.js";

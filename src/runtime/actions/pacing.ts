@@ -1,6 +1,6 @@
 import { unmeasurableLengthMessage } from "../../delay-rules.js";
 import { formatDuration } from "../../duration.js";
-import { MAX_RUNTIME_SESSION_TIME_MS } from "../state.js";
+import { MAX_RUNTIME_SESSION_TIME_MS } from "../snapshot/state.js";
 
 export { calculateSmartPacingDurationMs } from "../../chat-pacing.js";
 

@@ -5,7 +5,7 @@ import {
   createPlayerRuntimeSession,
   type PlayerProject,
 } from "../../runtime-adapter.js";
-import type { RuntimeAccountInput } from "../../../src/runtime/account.js";
+import type { RuntimeAccountInput } from "../../../src/runtime/host-data/account.js";
 import type { ScriptFailure } from "./ScriptProblems.vue";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { MAIN_FILE_PATH } from "../../../src/index.js";

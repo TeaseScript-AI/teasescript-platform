@@ -1,14 +1,17 @@
-import type { RandomDrawPendingOutcome } from "../random-control.js";
+import type { RandomDrawPendingOutcome } from "../random/random-control.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import type { ScriptStorageEditedEvent } from "../events.js";
-import { validateScriptStorageEntries, writeOwnedScriptStorage } from "../script-storage.js";
-import type { SerializableRuntimeValue } from "../serializable-values.js";
-import type { RuntimeSnapshot } from "../state.js";
+import {
+  validateScriptStorageEntries,
+  writeOwnedScriptStorage,
+} from "../host-data/script-storage.js";
+import type { SerializableRuntimeValue } from "../values/serializable-values.js";
+import type { RuntimeSnapshot } from "../snapshot/state.js";
 import type { PendingActionOperationResult } from "./model.js";
 import { captureExecutableData, pendingResult, takeSequence } from "./support.js";
-import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "../debug-trace.js";
-import { isPlainRecord } from "../plain-data.js";
+import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "../debug/debug-trace.js";
+import { isPlainRecord } from "../values/plain-data.js";
 import { randomDrawPending } from "./model.js";
 
 export type ExternalStorageEditOutcome =

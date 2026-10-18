@@ -4,8 +4,11 @@ import {
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import { isWellFormedCapturedMediaReference, type CapturedMediaStore } from "./captured-media.js";
-import { serializeValidatedRuntimeJson, stateTooLarge } from "../src/runtime/checkpoint.js";
-import { MAX_TEXT_LENGTH } from "../src/runtime/text-length.js";
+import {
+  serializeValidatedRuntimeJson,
+  stateTooLarge,
+} from "../src/runtime/snapshot/checkpoint.js";
+import { MAX_TEXT_LENGTH } from "../src/runtime/values/text-length.js";
 import { capturedMediaReferences } from "./captured-media-persistence.js";
 import { checkImageFile, type ImageDecoder } from "./image-file.js";
 import {

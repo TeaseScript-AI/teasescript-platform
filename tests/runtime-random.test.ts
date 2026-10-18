@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint, restoreCheckpoint } from "../src/runtime/snapshot/checkpoint.js";
 import {
   createXorShift32State,
   nextXorShift32,
   XORSHIFT32_ALGORITHM,
-} from "../src/runtime/random.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
+} from "../src/runtime/random/random.js";
+import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import { run } from "../src/runtime/engine.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 test("rejects zero xorshift32 seeds and direct zero-state advancement", () => {
   assert.throws(() => createXorShift32State(0), RangeError);

@@ -3,7 +3,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import { normalizeOpaqueColor } from "../src/color.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
-import { deserializeCheckpoint } from "../src/runtime/checkpoint.js";
+import { deserializeCheckpoint } from "../src/runtime/snapshot/checkpoint.js";
 import {
   activatePlayerRuntimeButton,
   createPlayerRuntimeRestorePoint,
@@ -15,7 +15,7 @@ import {
   submitPlayerRuntimeComposer,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 const colours = ["gold", "oklch(0.7 0.18 45)"];
 

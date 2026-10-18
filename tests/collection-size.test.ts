@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { serializeCheckpoint } from "../src/runtime/checkpoint.js";
+import { serializeCheckpoint } from "../src/runtime/snapshot/checkpoint.js";
 import {
   createFreshRuntimeSession,
   deserializeRuntimeSession,

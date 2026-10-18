@@ -1,4 +1,4 @@
-import { CHECKPOINT_VERSION } from "../src/runtime/checkpoint.js";
+import { CHECKPOINT_VERSION } from "../src/runtime/snapshot/checkpoint.js";
 
 export const PLAYGROUND_EXAMPLES = Object.freeze({
   basic: Object.freeze({ label: "Basic introduction", file: "basic.tease" }),

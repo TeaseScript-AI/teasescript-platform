@@ -9,17 +9,17 @@ import {
   deserializeCheckpoint,
   restoreCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
-import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
+import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { pressPermanentButton } from "../src/runtime/operations/press-permanent-button.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 const IMAGE = "captured-media:chosen:1";
 // The trusted Player store vouches for exactly the images it stored.

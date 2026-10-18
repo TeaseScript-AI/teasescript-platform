@@ -17,7 +17,7 @@ import {
 import {
   SerializableValueError,
   validateSerializableValue,
-} from "../src/runtime/serializable-values.js";
+} from "../src/runtime/values/serializable-values.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 

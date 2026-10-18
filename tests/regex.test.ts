@@ -15,12 +15,12 @@ import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import {
   validateSerializableValue,
   type SerializableRuntimeValue,
-} from "../src/runtime/serializable-values.js";
+} from "../src/runtime/values/serializable-values.js";
 import { TokenKind } from "../src/token.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";

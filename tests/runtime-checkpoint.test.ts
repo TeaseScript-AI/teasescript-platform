@@ -11,18 +11,18 @@ import {
   deserializeCheckpoint,
   restoreCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { executeInstruction, run } from "../src/runtime/engine.js";
 import type {
   SerializableRuntimeObject,
   SerializableRuntimeSet,
   SerializableRuntimeValue,
-} from "../src/runtime/serializable-values.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
+} from "../src/runtime/values/serializable-values.js";
+import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 test("checkpoint accepts a large valid plan and snapshot without a shared work rejection", () => {
   const compiled = plan(

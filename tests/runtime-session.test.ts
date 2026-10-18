@@ -36,7 +36,7 @@ import {
   type FreshRuntimeOptions,
   type TaggedRuntimeSnapshot,
 } from "../src/index.js";
-import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";

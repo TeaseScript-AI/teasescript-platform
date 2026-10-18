@@ -1,4 +1,4 @@
-import { resolveCaptures } from "../captures.js";
+import { resolveCaptures } from "../scopes/captures.js";
 import type { Instruction } from "../../plan/model.js";
 import type { Evaluator } from "../evaluator.js";
 import { internalFault } from "../errors.js";
@@ -9,14 +9,14 @@ import {
   setCapturedTemporary,
   takeSequence,
 } from "../operations/support.js";
-import { contextRootId } from "../activations.js";
+import { contextRootId } from "../scopes/activations.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
-import { type RuntimeSnapshot, currentTemporalContext } from "../state.js";
+import { type RuntimeSnapshot, currentTemporalContext } from "../snapshot/state.js";
 import {
   ACTION_COMPLETION_EVENTS,
   type RuntimePermanentButtonActionSnapshot,
 } from "../actions/model.js";
-import { fieldText } from "../value-text.js";
+import { fieldText } from "../values/value-text.js";
 import { advance, fault } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
 

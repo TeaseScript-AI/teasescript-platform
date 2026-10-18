@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { InstructionPlan } from "../../src/plan/model.js";
 import { executeInstruction, type RuntimeOperationResult } from "../../src/runtime/engine.js";
 import type { InterpreterEvent } from "../../src/runtime/events.js";
-import type { RuntimeSnapshot } from "../../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../../src/runtime/snapshot/state.js";
 import { compileValidPlan } from "./compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
 

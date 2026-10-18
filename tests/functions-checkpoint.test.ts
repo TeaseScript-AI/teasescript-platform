@@ -13,26 +13,26 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
   serializeValidatedRuntimeJson,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { executeInstruction, run, type RuntimeBuiltinFunction } from "../src/runtime/engine.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { RuntimeDataError } from "../src/runtime/operations/support.js";
 import type {
   SerializableRuntimeObject,
   SerializableRuntimeValue,
-} from "../src/runtime/serializable-values.js";
+} from "../src/runtime/values/serializable-values.js";
 import { createFreshRuntimeSession, createRuntimeSession } from "../src/runtime/session.js";
 import {
   DEFAULT_MAX_CALL_DEPTH,
   MAX_SUPPORTED_CALL_DEPTH,
   type RuntimeSnapshot,
-} from "../src/runtime/state.js";
+} from "../src/runtime/snapshot/state.js";
 import { assertRuntimeResumeEquivalent, functionFrames } from "./helpers/runtime-equivalence.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 test("restores every instruction boundary during defaults and nested calls", () => {
   const { boundaries: observations } = assertRuntimeResumeEquivalent(

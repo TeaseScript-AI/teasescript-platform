@@ -18,7 +18,7 @@ import {
   restorePlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
-import { serializeValidatedRuntimeJsonWithin } from "../src/runtime/checkpoint.js";
+import { serializeValidatedRuntimeJsonWithin } from "../src/runtime/snapshot/checkpoint.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 /**

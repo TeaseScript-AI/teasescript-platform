@@ -4,7 +4,7 @@ import test from "node:test";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { Story } from "./helpers/story-session.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 /*
  * Developer warning TSW018 (owner decision, 2026-10-12): blocks never interrupt each other, so a repeating timer whose

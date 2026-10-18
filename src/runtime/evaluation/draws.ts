@@ -6,28 +6,28 @@ import { normalizeTagName } from "../../tags.js";
 import { globMatches, isPathGlob } from "../../project-paths.js";
 import { domainFailure } from "../../numeric-functions.js";
 import { RANDOM_CONTRACTS, type RandomFunction } from "../../random-functions.js";
-import { weightedChoices, weightedIndex } from "../list-statistics.js";
+import { weightedChoices, weightedIndex } from "../values/list-statistics.js";
 import type { RandomFunctionName } from "../../language-facts.js";
 import { internalFault } from "../errors.js";
-import { nextXorShift32 } from "../random.js";
+import { nextXorShift32 } from "../random/random.js";
 import {
   sampleIndex,
   sampleOrder,
   sampleRangeInteger,
   type PrimitiveDraw,
-} from "../random-draws.js";
-import { naturalOf, type RandomNatural, type RandomSupport } from "../random-control.js";
-import { callNumbers } from "../pure-operations.js";
+} from "../random/random-draws.js";
+import { naturalOf, type RandomNatural, type RandomSupport } from "../random/random-control.js";
+import { callNumbers } from "../values/pure-operations.js";
 import { emptyRangeProblem, rangeLength } from "../../range-checks.js";
 import {
   cloneCapturedSerializableValue,
   type SerializableRuntimeList,
   type SerializableRuntimeRange,
   type SerializableRuntimeValue,
-} from "../serializable-values.js";
-import { isList, isRange, isSet } from "../value-predicates.js";
-import { describeShownValue } from "../value-types.js";
-import { stateKey, type RuntimeDebugRandomOperation } from "../debug-trace.js";
+} from "../values/serializable-values.js";
+import { isList, isRange, isSet } from "../values/value-predicates.js";
+import { describeShownValue } from "../values/value-types.js";
+import { stateKey, type RuntimeDebugRandomOperation } from "../debug/debug-trace.js";
 import { describeValue } from "../../value-kinds.js";
 import type { Evaluator } from "../evaluator.js";
 import { type SourceSpan, fault, assertIntegerRange } from "./support.js";

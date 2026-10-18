@@ -30,14 +30,14 @@ import type {
 } from "../../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../../source.js";
 import type { TemporalContext } from "../../temporal.js";
-import { expandChoiceOptions } from "../choice-options.js";
+import { expandChoiceOptions } from "./choice-options.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import {
   getSerializableProperty,
   serializableEquals,
   type SerializableRuntimeObject,
   type SerializableRuntimeValue,
-} from "../serializable-values.js";
+} from "../values/serializable-values.js";
 import {
   isAnyDuration,
   isDate,
@@ -46,12 +46,12 @@ import {
   isList,
   isObject,
   isTime,
-} from "../value-predicates.js";
-import { fieldText } from "../value-text.js";
-import { exactDurationMilliseconds } from "../temporal-operations.js";
-import { describeShownValue, describeType, matchesValueType } from "../value-types.js";
+} from "../values/value-predicates.js";
+import { fieldText } from "../values/value-text.js";
+import { exactDurationMilliseconds } from "../values/temporal-operations.js";
+import { describeShownValue, describeType, matchesValueType } from "../values/value-types.js";
 import { escapedMarkupLength, escapeMarkup } from "../../message-markup.js";
-import { checkTextLength, MAX_TEXT_LENGTH, messageText } from "../text-length.js";
+import { checkTextLength, MAX_TEXT_LENGTH, messageText } from "../values/text-length.js";
 import {
   FORM_FIELD_PROPERTIES,
   FORM_FIELD_PROPERTIES_TEXT,

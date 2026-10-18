@@ -4,18 +4,18 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import { createSourcePosition, createSourceSpan } from "../src/source.js";
-import { valueFromJson } from "../src/runtime/json-base64.js";
-import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
+import { valueFromJson } from "../src/runtime/values/json-base64.js";
+import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 /** Runs `source`, which must not fail, and gives the variables it left. */
 function variables(source: string): Map<string, SerializableRuntimeValue> {

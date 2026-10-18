@@ -29,7 +29,7 @@ const OWNER_SOURCES: Readonly<Record<DiagnosticOwner, readonly string[]>> = {
   "plan analysis": ["reachability.ts", "speaker-flow.ts", "compiler.ts"],
   "plan validation": ["plan/"],
   runtime: ["runtime/", "angle.ts", "numeric-functions.ts", "list-methods.ts"],
-  checkpoint: ["runtime/checkpoint.ts"],
+  checkpoint: ["runtime/snapshot/checkpoint.ts"],
 };
 
 function filesUnder(directory: string, extension: string): string[] {

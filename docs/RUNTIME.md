@@ -1074,7 +1074,7 @@ Under ADR 0017, Standard Library and package-library wrappers may call documente
 ## Controlled randomness
 
 Owner decision, 2026-10-07 (#512): a host may decide the outcome of a random draw: leave it natural, choose another
-outcome the draw can produce, or pause the engine at it (`src/runtime/random-control.ts`). It is opt-in host control,
+outcome the draw can produce, or pause the engine at it (`src/runtime/random/random-control.ts`). It is opt-in host control,
 not language; without it every draw is natural and costs one more check.
 
 - **Draws.** A draw is one random operation as the script sees it: `random()`, `chance`, `randomInteger`, list and set
@@ -1568,7 +1568,7 @@ JSON reading does not for keys that look like whole numbers, and so that any dep
 
 `hashText` ([V30 §13](specifications/accepted-syntaxes-v30.md#hashes)) is a pure core built-in as well, and gives its
 result at once: native `crypto.subtle.digest` always waits, so the engine has its own SHA-256 (FIPS 180-4,
-`src/runtime/sha256.ts`). `TextEncoder` writes the text's UTF-8 in parts of 65,536 code units, a surrogate pair kept in
+`src/runtime/values/sha256.ts`). `TextEncoder` writes the text's UTF-8 in parts of 65,536 code units, a surrogate pair kept in
 one part and a lone surrogate written as U+FFFD, as for `toBase64`, so the time grows only with the bytes and no part
 needs the whole text's UTF-8 at once. The result is 64 lowercase hexadecimal digits. A value that is not text is
 `TSV043` where the compiler knows it and `TSR059` otherwise.
@@ -1913,7 +1913,7 @@ The zero-state rule prevents the absorbing xorshift32 state in which every futur
 
 ## Debug trace
 
-`RuntimeDebugContext` (`src/runtime/debug-trace.ts`) is an opt-in, host-owned record of why values have the values
+`RuntimeDebugContext` (`src/runtime/debug/debug-trace.ts`) is an opt-in, host-owned record of why values have the values
 they have. A host passes the same context as `debugTrace` to each operation on a session's successive results: in the
 options of `run`, `stepToEvent`, `executeInstruction`, `runValidatedState`, `completeAction`, `observeTime`,
 `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, `applyExternalStorageEdit`, `setDebugMode`, and

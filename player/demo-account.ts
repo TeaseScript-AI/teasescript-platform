@@ -1,4 +1,4 @@
-import type { RuntimeAccountInput } from "../src/runtime/account.js";
+import type { RuntimeAccountInput } from "../src/runtime/host-data/account.js";
 
 /**
  * The fixed account that tests, the Player's development scenarios, and packages of the playground server pass until

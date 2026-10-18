@@ -106,7 +106,7 @@ import {
   type SerializableRuntimeValue,
   type TemporalContext,
 } from "../../../src/index.js";
-import { serializableEquals } from "../../../src/runtime/serializable-values.js";
+import { serializableEquals } from "../../../src/runtime/values/serializable-values.js";
 import { IMAGE_SKIP_TEXT } from "../../../src/image-input.js";
 import { silence } from "./generatedAudio";
 import { useCameraChoice } from "./useCameraChoice";

@@ -14,7 +14,7 @@ import {
   type HandleValueType,
 } from "../src/handle-members.js";
 import { compileSource, createRuntimeSession, type RuntimeSnapshot } from "../src/index.js";
-import { describeShownValue, shownChoice } from "../src/runtime/value-types.js";
+import { describeShownValue, shownChoice } from "../src/runtime/values/value-types.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 

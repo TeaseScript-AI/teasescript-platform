@@ -1,7 +1,7 @@
 import { captureExternalData } from "../../external-data-capture.js";
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
-import { interruptRunning } from "../activations.js";
-import { MAX_RUNTIME_SESSION_TIME_MS, type RuntimeSnapshot } from "../state.js";
+import { interruptRunning } from "../scopes/activations.js";
+import { MAX_RUNTIME_SESSION_TIME_MS, type RuntimeSnapshot } from "../snapshot/state.js";
 import {
   interactionDeadlineMs,
   type RuntimeActionSettlementSnapshot,
@@ -14,9 +14,9 @@ import {
 } from "../actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import { isValidSessionTime } from "../actions/delay.js";
-import { isPlainRecord } from "../plain-data.js";
+import { isPlainRecord } from "../values/plain-data.js";
 import type { PendingActionOperationResult, TimeObservationOutcome } from "./model.js";
-import { skipSilentRounds } from "../timers.js";
+import { skipSilentRounds } from "../background/timers.js";
 import {
   nextMediaEvent,
   pruneMediaPoints,
@@ -24,7 +24,7 @@ import {
   repeatsSilently,
   skipSilentPasses,
   type MediaTimelineEvent,
-} from "../media.js";
+} from "../background/media.js";
 import { applyMediaEvent, mediaSpan } from "./media-lifecycle.js";
 import {
   expireTimerAction,
@@ -33,17 +33,17 @@ import {
   timerSpan,
 } from "./timer-lifecycle.js";
 import { timeOutButton } from "./complete-action.js";
-import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "../debug-trace.js";
+import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "../debug/debug-trace.js";
 import { captureExecutableData, pendingResult, takeSettlementSequence } from "./support.js";
 import type { RuntimeSessionView } from "../session.js";
-import { randomControlFor } from "../random-control.js";
+import { randomControlFor } from "../random/random-control.js";
 import {
   compileRandomPolicy,
   type RandomControl,
   RandomSuspension,
   type RandomControlOptions,
   type RandomPolicy,
-} from "../random-control.js";
+} from "../random/random-control.js";
 import { copySpan } from "../../plan/source-location.js";
 import { randomDrawPending } from "./model.js";
 

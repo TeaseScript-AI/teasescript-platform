@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { CheckpointError, restoreCheckpoint } from "../../src/runtime/checkpoint.js";
+import { CheckpointError, restoreCheckpoint } from "../../src/runtime/snapshot/checkpoint.js";
 
 /**
  * Asserts a structured checkpoint rejection. Snapshot errors always report `$.snapshot`, so a snapshot row isolates its

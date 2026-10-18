@@ -8,15 +8,15 @@ import type {
   LockCall,
   PlanTag,
 } from "../../plan/model.js";
-import type { RuntimeTimerSnapshot } from "../timers.js";
-import type { RuntimeMediaSnapshot } from "../media.js";
-import type { RuntimePermanentButtonSnapshot } from "../permanent-buttons.js";
+import type { RuntimeTimerSnapshot } from "../background/timers.js";
+import type { RuntimeMediaSnapshot } from "../background/media.js";
+import type { RuntimePermanentButtonSnapshot } from "../background/permanent-buttons.js";
 import type {
   SerializableRuntimeDict,
   SerializableRuntimeList,
   SerializableRuntimeObject,
   SerializableRuntimeValue,
-} from "../serializable-values.js";
+} from "../values/serializable-values.js";
 import type { TemporalAnswer } from "../../interaction-answers.js";
 
 /** Shared serializable pending-action and settlement contracts. */

@@ -1,7 +1,7 @@
 import { DICT_ACCESS, isDictMethod, missingDictMethodMessage } from "../../dict-operations.js";
 import { hasListMethod, missingListMethodMessage } from "../../list-methods.js";
 import { hasTemporalMethod } from "../../temporal-builtins.js";
-import { missingTemporalMember } from "../temporal-operations.js";
+import { missingTemporalMember } from "../values/temporal-operations.js";
 import type { AssignmentTargetPlan, ExpressionPlan, TypeCheckPlan } from "../../plan/model.js";
 import { propertiesReadThrough } from "../../speaker-terms.js";
 import { internalFault, RuntimeFault } from "../errors.js";
@@ -14,21 +14,21 @@ import {
   serializePreparedReference,
   type PreparedReferenceDescriptor,
   type PreparedReferenceStep,
-} from "../prepared-references.js";
-import { quotedText } from "../value-text.js";
-import { messageText } from "../text-length.js";
+} from "../scopes/prepared-references.js";
+import { quotedText } from "../values/value-text.js";
+import { messageText } from "../values/text-length.js";
 import {
   checkCollectionLength,
   collectionTooLong,
   MAX_COLLECTION_LENGTH,
-} from "../collection-size.js";
+} from "../values/collection-size.js";
 import {
   handleMemberMessage,
   hasAssignableProperties,
   isHandleMethod,
   handleKindOf,
 } from "../../handle-members.js";
-import { missingMemberMessage } from "../string-operations.js";
+import { missingMemberMessage } from "../values/string-operations.js";
 import { isTextMethod, unknownTextMemberMessage } from "../../text-operations.js";
 import {
   cloneCapturedSerializableValue,
@@ -37,7 +37,7 @@ import {
   setCapturedSerializableProperty,
   type SerializableRuntimeObject,
   type SerializableRuntimeValue,
-} from "../serializable-values.js";
+} from "../values/serializable-values.js";
 import {
   isDict,
   isList,
@@ -50,9 +50,9 @@ import {
   isMediaHandle,
   isMessageHandle,
   isCameraView,
-} from "../value-predicates.js";
-import { assertValueType, describeShownValue, matchesValueType } from "../value-types.js";
-import { bindingKey } from "../debug-trace.js";
+} from "../values/value-predicates.js";
+import { assertValueType, describeShownValue, matchesValueType } from "../values/value-types.js";
+import { bindingKey } from "../debug/debug-trace.js";
 import {
   assignTimerProperty,
   assignMediaProperty,

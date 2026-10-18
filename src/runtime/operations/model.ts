@@ -1,12 +1,12 @@
 import type { RuntimeActionSettlementSnapshot } from "../actions/model.js";
 import type { InterpreterEvent } from "../events.js";
-import type { RuntimeInstructionTrace } from "../instruction-trace.js";
-import type { RuntimeSnapshot } from "../state.js";
+import type { RuntimeInstructionTrace } from "../debug/instruction-trace.js";
+import type { RuntimeSnapshot } from "../snapshot/state.js";
 import type {
   RandomChoiceReceipt,
   RandomDecisionRefusal,
   RandomDrawPendingOutcome,
-} from "../random-control.js";
+} from "../random/random-control.js";
 
 export interface RuntimeOperationResult {
   readonly snapshot: RuntimeSnapshot;

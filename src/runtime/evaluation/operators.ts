@@ -1,5 +1,5 @@
 import type { RuntimeErrorCode } from "../../diagnostic-codes.js";
-import { compareTemporal, temporalBinary } from "../temporal-operations.js";
+import { compareTemporal, temporalBinary } from "../values/temporal-operations.js";
 import type { BinaryExpressionPlan, ExpressionPlan, InstructionPlan } from "../../plan/model.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
@@ -9,9 +9,9 @@ import {
   type StoredAngle,
 } from "../../angle.js";
 import { internalFault, RuntimeFault } from "../errors.js";
-import { joinedValue } from "../pure-operations.js";
+import { joinedValue } from "../values/pure-operations.js";
 import { logicalOperandRule, notNumberFix, orderRule } from "../../operand-rules.js";
-import { loweredOperand } from "../lowered-operands.js";
+import { loweredOperand } from "./lowered-operands.js";
 import {
   addDurations,
   compareDurations,
@@ -25,7 +25,10 @@ import {
   ZERO_DIVISOR,
   type AnyDuration,
 } from "../../duration.js";
-import { serializableEquals, type SerializableRuntimeValue } from "../serializable-values.js";
+import {
+  serializableEquals,
+  type SerializableRuntimeValue,
+} from "../values/serializable-values.js";
 import {
   isAngle,
   isAnyDuration,
@@ -34,8 +37,8 @@ import {
   isRange,
   isSet,
   isTemporal,
-} from "../value-predicates.js";
-import { describeShownValue } from "../value-types.js";
+} from "../values/value-predicates.js";
+import { describeShownValue } from "../values/value-types.js";
 import { numberFromText, withoutNegativeZero } from "../../conversions.js";
 import {
   describeValue,

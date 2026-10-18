@@ -9,19 +9,19 @@ import {
   playerRuntimeTimers,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
-import { interruptFrame } from "../src/runtime/activations.js";
+import { interruptFrame } from "../src/runtime/scopes/activations.js";
 import type { RuntimeForegroundActionSnapshot } from "../src/runtime/actions/model.js";
 import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { runtimeTimedWork } from "../src/runtime/operations/observe-time.js";
 import { createRuntimeSession } from "../src/runtime/session.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { Story } from "./helpers/story-session.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 /*
  * Preempt and resume (owner decision on #829, 2026-10-11): while a timer, media, or button block runs, everything the

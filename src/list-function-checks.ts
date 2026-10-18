@@ -21,7 +21,7 @@ import { familyOf, VALUE_KINDS } from "./value-kinds.js";
 import { RANGE_LIST_FIX } from "./list-methods.js";
 import type { OperationProblem } from "./operation-checks.js";
 import { RANDOM_CONTRACTS } from "./random-functions.js";
-import { isList } from "./runtime/value-predicates.js";
+import { isList } from "./runtime/values/value-predicates.js";
 import { staticChoiceValue, staticVisibleText, type KnownValue } from "./static-evaluation.js";
 import {
   copyType,

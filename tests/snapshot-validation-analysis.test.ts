@@ -12,7 +12,7 @@ import {
   type InstructionPlan,
   type RuntimeSnapshot,
 } from "../src/index.js";
-import { snapshotValidationAnalysis } from "../src/runtime/snapshot-validation-analysis.js";
+import { snapshotValidationAnalysis } from "../src/runtime/snapshot/snapshot-validation-analysis.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import {
@@ -20,7 +20,7 @@ import {
   functionFrames,
   type RuntimeResumeEquivalenceResult,
 } from "./helpers/runtime-equivalence.js";
-import { classifyCapturedRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { classifyCapturedRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 /**
  * Loops at the root and in a called function around suspended calls, with default parameters, prepared references and

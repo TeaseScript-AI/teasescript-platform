@@ -11,7 +11,7 @@
 import type {
   SerializableRuntimeScalar,
   SerializableRuntimeValue,
-} from "./runtime/serializable-values.js";
+} from "./runtime/values/serializable-values.js";
 import {
   isAbsoluteDateTime,
   isAngle,
@@ -33,7 +33,7 @@ import {
   isSpeakerReference,
   isTime,
   isTimerHandle,
-} from "./runtime/value-predicates.js";
+} from "./runtime/values/value-predicates.js";
 
 /** The `kind` of each record a snapshot stores a value as. */
 type RecordTag = Exclude<SerializableRuntimeValue, SerializableRuntimeScalar>["kind"];

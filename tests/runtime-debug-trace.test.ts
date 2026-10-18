@@ -46,7 +46,7 @@ import {
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
 } from "../player/runtime-adapter.js";
-import { TraceStore } from "../src/runtime/debug-trace.js";
+import { TraceStore } from "../src/runtime/debug/debug-trace.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { playerStateOf } from "./helpers/player-state.js";
 

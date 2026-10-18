@@ -9,7 +9,7 @@ import {
   deserializeCheckpoint,
   restoreCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { executeInstruction, run, RuntimeDataError, stepToEvent } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { reportMediaLoad } from "../src/runtime/operations/media-reports.js";
@@ -20,11 +20,14 @@ import type {
 } from "../src/runtime/actions/model.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import type { InstructionPlan } from "../src/plan/model.js";
-import { MAX_RUNTIME_SESSION_TIME_MS, type RuntimeSnapshot } from "../src/runtime/state.js";
+import {
+  MAX_RUNTIME_SESSION_TIME_MS,
+  type RuntimeSnapshot,
+} from "../src/runtime/snapshot/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 function delayAction(snapshot: RuntimeSnapshot): RuntimeDelayActionSnapshot {
   assert.ok(snapshot.foregroundAction?.kind === "delay");

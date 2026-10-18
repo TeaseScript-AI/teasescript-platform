@@ -1,7 +1,7 @@
 import type { ScalarTypeName } from "./ast.js";
 import { isNumberAnswerText } from "./interaction-answers.js";
 import { CONVERSION_FUNCTIONS, type ConversionName } from "./language-facts.js";
-import type { SerializableRuntimeValue } from "./runtime/serializable-values.js";
+import type { SerializableRuntimeValue } from "./runtime/values/serializable-values.js";
 import {
   parseIsoDate,
   parseIsoDateTime,

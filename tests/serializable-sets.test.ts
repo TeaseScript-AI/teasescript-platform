@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createSerializableSet, type SerializableRuntimeScalar } from "../src/index.js";
-import { validateSerializableValue } from "../src/runtime/serializable-values.js";
+import { validateSerializableValue } from "../src/runtime/values/serializable-values.js";
 
 test("serializable-set validation does not impose the removed capture-work threshold", () => {
   const acceptedSize = 100_001;

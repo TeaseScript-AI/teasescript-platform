@@ -21,7 +21,7 @@ import {
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import { captureExternalData } from "../src/external-data-capture.js";
-import { SerializableValueError } from "../src/runtime/serializable-values.js";
+import { SerializableValueError } from "../src/runtime/values/serializable-values.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { functionFrames } from "./helpers/runtime-equivalence.js";

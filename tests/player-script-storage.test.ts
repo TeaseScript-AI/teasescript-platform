@@ -5,7 +5,7 @@ import {
   createLocalScriptStorage,
   listLocalScriptStorageScopes,
 } from "../player/script-storage.js";
-import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 
 class MemoryStorage implements Storage {
