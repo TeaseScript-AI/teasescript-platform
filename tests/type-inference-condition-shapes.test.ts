@@ -3,7 +3,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 
 import { parse } from "../src/parser.js";
-import { generateConditionTable, type ConditionRow } from "./helpers/condition-shapes.js";
+import { conditionShape } from "../src/type-inference/narrowing-shapes.js";
+import {
+  conditionAt,
+  generateConditionTable,
+  type ConditionRow,
+} from "./helpers/condition-shapes.js";
 import { request } from "./helpers/type-inference-graph.js";
 
 /**
@@ -48,26 +53,44 @@ test("the condition-shape table is what its templates and the legacy give", () =
   assert.equal(table.length, rows.length, "the table has no row the templates do not generate");
 });
 
-test("every row's declared shape names a site of its condition", () => {
+test("the recognizer gives every row's condition its declared shape", () => {
   for (const { row } of generated) {
     if (row.condition === null) {
       assert.equal(row.shape, null, `${row.id}: the switch has no condition`);
       continue;
     }
     assert.ok(row.shape !== null, `${row.id}: a shape`);
-    const text = row.source.slice(row.condition.start, row.condition.end);
-    const { program } = parse(row.source);
-    assert.ok(program !== undefined, `${row.id}: parses`);
-    if (row.shape.kind === "null" || row.shape.kind === "type") {
-      const tested = row.source.slice(row.shape.tested.start, row.shape.tested.end);
-      assert.ok(
-        row.shape.tested.start >= row.condition.start && row.shape.tested.end <= row.condition.end,
-        `${row.id}: the tested expression lies inside the condition`,
-      );
-      assert.ok(
-        tested.length > 0 && text.includes(tested),
-        `${row.id}: tested ${tested} in ${text}`,
-      );
+    const node = conditionAt(parse(row.source).program, row.condition);
+    assert.ok(node !== undefined, `${row.id}: the condition at ${row.condition.start}`);
+    const shape = conditionShape(node);
+    assert.equal(shape.kind, row.shape.kind, `${row.id}: ${row.source}`);
+    switch (shape.kind) {
+      case "literal":
+        assert.ok(row.shape.kind === "literal");
+        assert.equal(shape.node.value, row.shape.value, row.id);
+        break;
+      case "null":
+      case "type": {
+        assert.ok(row.shape.kind === "null" || row.shape.kind === "type");
+        assert.equal(shape.negated, row.shape.negated, row.id);
+        assert.deepEqual(
+          { start: shape.tested.span.start.offset, end: shape.tested.span.end.offset },
+          row.shape.tested,
+          `${row.id}: the tested expression`,
+        );
+        if (shape.kind === "type" && row.shape.kind === "type")
+          assert.equal(
+            row.source.slice(shape.node.type.span.start.offset, shape.node.type.span.end.offset),
+            row.shape.type,
+            `${row.id}: the type term`,
+          );
+        break;
+      }
+      case "not":
+      case "and":
+      case "or":
+      case "other":
+        break;
     }
   }
 });
