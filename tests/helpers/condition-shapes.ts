@@ -220,9 +220,9 @@ const VARIABLE_SETUPS: readonly Setup[] = [
 const PLACE_SETUPS: readonly Setup[] = [
   {
     name: "property",
-    prelude: "let o = { p: 1 }\nif hostFlag { o.p = null }\n",
+    prelude: "let p: integer? = hostValue\nlet o = { p: p }\n",
     tested: "o.p",
-    runtime: "let o = { p: 1 }\nif randomInteger(0..=1) == 1 { o.p = null }\n",
+    runtime: "let p: integer? = null\nif randomInteger(0..=1) == 1 { p = 1 }\nlet o = { p: p }\n",
   },
   {
     name: "index",

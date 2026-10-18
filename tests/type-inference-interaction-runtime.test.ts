@@ -110,8 +110,8 @@ test("a labelled choice settles to its label", () => {
 });
 
 test("a choice object settles to its value, written alone or as an element of a written list", () => {
-  // choice/written-collection/integer.object-value: fact `integer{1}`, adapter `fact`. The table has no row for the
-  // object written alone; the legacy's fact for it is the same `integer{1}`.
+  // choice/written-collection/integer.object-value and choice/several/object-text-value: fact `integer{1}`, adapter
+  // `fact`, for the object as a written element and written alone.
   for (const options of ['{ text: "A", value: 1 }', '[{ text: "A", value: 1 }]']) {
     const r = answered(asked(`let r = askChoice ${options}\nexit`), "choice", {
       kind: "selectedOption",
