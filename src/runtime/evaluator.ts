@@ -10,8 +10,6 @@ import {
 import {
   changesEntries,
   DICT_ACCESS,
-  DICT_METHODS,
-  dictArgumentsProblem,
   dictKeyMessage,
   isDictMethod,
   missingDictMethodMessage,
@@ -22,17 +20,13 @@ import { isListFunction } from "../list-function-rules.js";
 import {
   emptyListPropertyFailure,
   hasListMethod,
-  LIST_METHODS,
-  listArgumentMessage,
   listMethod,
   listProperty,
   missingListMethodMessage,
   missingListPropertyMessage,
-  type ListMethod,
   type ElementProperty,
-  type MethodOf,
 } from "../list-methods.js";
-import { startValueMessage, type StartValueOwner } from "../start-value-rules.js";
+import type { StartValueOwner } from "../start-value-rules.js";
 import type { DeveloperWarningCode, RuntimeErrorCode } from "../diagnostic-codes.js";
 import { temporalCaptureAt } from "./temporal-captures.js";
 import {
@@ -41,7 +35,6 @@ import {
   isClockFunction,
 } from "../temporal-builtins.js";
 import {
-  exactDurationMilliseconds,
   missingTemporalMember,
   compareTemporal,
   temporalBinary,
@@ -54,29 +47,21 @@ import { normalizeColor } from "../color.js";
 import type {
   AssignmentTargetPlan,
   BinaryExpressionPlan,
-  DelayDisplay,
   ExpressionPlan,
   InstructionPlan,
-  PlanSourceLocation,
-  PlanTag,
   RangeExpressionPlan,
-  TagQueryExpressionPlan,
-  TagQueryStepPlan,
   TypeCheckPlan,
   TypePlan,
 } from "../plan/model.js";
-import { compareTagValue, evaluateTagSteps, passesTagList } from "../tag-query.js";
-import { normalizeTagName } from "../tags.js";
-import { globMatches, isPathGlob } from "../project-paths.js";
-import { escapedMarkupLength, escapeMarkup, parseMessageMarkup } from "../message-markup.js";
+import { escapedMarkupLength, escapeMarkup } from "../message-markup.js";
 import {
   expressionPlanChildren,
   lazyDefaultArgumentIndex,
   lazyDefaultCallOperation,
 } from "../plan/expression-children.js";
 import type { LazyDefaultOperation } from "../lazy-defaults.js";
-import { domainFailure, isNumericFunction } from "../numeric-functions.js";
-import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "../random-functions.js";
+import { isNumericFunction } from "../numeric-functions.js";
+import { isRandomFunction } from "../random-functions.js";
 import {
   ANGLE_ARITHMETIC_ROUTE,
   angleArithmetic,
@@ -95,55 +80,28 @@ import {
   speakerPropertyValue,
 } from "../speaker-terms.js";
 import { accountFieldValue } from "./account.js";
-import { listFunctionValue, weightedChoices, weightedIndex } from "./list-statistics.js";
-import {
-  CORE_RUNTIME_BUILTINS,
-  type ConversionName,
-  type RandomFunctionName,
-} from "../language-facts.js";
+import { listFunctionValue } from "./list-statistics.js";
+import { CORE_RUNTIME_BUILTINS, type ConversionName } from "../language-facts.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { internalFault, RuntimeFault } from "./errors.js";
 import type { InstructionTraceCollector, RuntimeInstructionObserver } from "./instruction-trace.js";
-import type {
-  DeveloperWarningEvent,
-  InterpreterEvent,
-  MessageRemovedEvent,
-  MessageUpdatedEvent,
-  OutputSpeaker,
-} from "./events.js";
+import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
 import { copySpan, takeSequence } from "./operations/support.js";
 import {
   GLOBAL_SCOPE_ID,
   detachPreparedReferencesForMutation,
-  freezePreparedReferenceDescendants,
-  preparePreparedReferencesForListRemoval,
-  preparePreparedReferencesForListReorder,
   preparedReferenceSpeakerPath,
   readPreparedReference,
-  refreshPreparedReferenceFallbacks,
   scopeBindings,
   serializePreparedReference,
   type PreparedReferenceDescriptor,
   type PreparedReferenceStep,
 } from "./prepared-references.js";
-import { nextXorShift32, type RandomSource } from "./random.js";
-import {
-  sampleIndex,
-  sampleOrder,
-  sampleRangeInteger,
-  type PrimitiveDraw,
-} from "./random-draws.js";
-import {
-  naturalOf,
-  RandomControlSignal,
-  type RandomControl,
-  type RandomNatural,
-  type RandomSupport,
-} from "./random-control.js";
+import type { RandomSource } from "./random.js";
+import { RandomControlSignal, type RandomControl } from "./random-control.js";
 import { isReadingMethod } from "./say-staging.js";
 import {
   isVisibleScalar,
-  joinedText,
   quotedText,
   quotedTextWithin,
   valueNotation,
@@ -156,14 +114,8 @@ import {
   MAX_COLLECTION_LENGTH,
 } from "./collection-size.js";
 import { textSha256 } from "./sha256.js";
-import { callNumbers, conversionResult, joinedValue, numericFunction } from "./pure-operations.js";
-import {
-  emptyRangeProblem,
-  rangeBoundRule,
-  rangeLength,
-  rangeText,
-  wholeRangeMessage,
-} from "../range-checks.js";
+import { conversionResult, joinedValue, numericFunction } from "./pure-operations.js";
+import { rangeBoundRule, rangeLength } from "../range-checks.js";
 import {
   logicalOperandRule,
   notNumberFix,
@@ -173,28 +125,12 @@ import {
 } from "../operand-rules.js";
 import { loweredOperand } from "./lowered-operands.js";
 import {
-  assignedTypeMessage,
   handleMemberMessage,
-  handleMethod,
-  handleProperty,
   hasAssignableProperties,
-  isAssignableHandleProperty,
   isHandleMethod,
-  isHandleProperty,
-  type AssignableHandleProperty,
-  type HandleKind,
-  type HandleMethodName,
-  type HandlePropertyName,
   handleKindOf,
 } from "../handle-members.js";
-import { unmeasurableLengthMessage } from "../delay-rules.js";
-import {
-  findValue,
-  rangeListLengthProblem,
-  readCollection,
-  readDict,
-  sortOrder,
-} from "./collection-operations.js";
+import { rangeListLengthProblem } from "./collection-operations.js";
 import {
   addDurations,
   calendarDuration,
@@ -214,18 +150,11 @@ import {
   type AnyDuration,
 } from "../duration.js";
 import { callStringMethod, missingMemberMessage } from "./string-operations.js";
-import {
-  isTextMethod,
-  methodArgumentCountMessage,
-  stringLength,
-  unknownTextMemberMessage,
-} from "../text-operations.js";
+import { isTextMethod, stringLength, unknownTextMemberMessage } from "../text-operations.js";
 import { missingPropertyMessage } from "../object-properties.js";
 import { findScriptStorageEntry, storageKey, storageKeyPlace } from "./script-storage.js";
 import {
   addSerializableSetValue,
-  clearSerializableDict,
-  clearSerializableSet,
   cloneCapturedSerializableValue,
   cloneSerializableValue,
   findRuntimeIdentity,
@@ -233,17 +162,12 @@ import {
   dictProperty,
   getSerializableDictEntry,
   getSerializableProperty,
-  removeSerializableDictEntry,
-  removeSerializableSetValue,
   serializableEquals,
-  serializableSetContains,
   SerializableValueError,
   setCapturedSerializableDictValue,
   setCapturedSerializableProperty,
   setOwnedSerializableDictValue,
-  type SerializableRuntimeCalendarDuration,
   type SerializableRuntimeDict,
-  type SerializableRuntimeDuration,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
   type SerializableRuntimeRange,
@@ -251,7 +175,6 @@ import {
   type SerializableRuntimeValue,
   type SerializableTimerHandle,
   type SerializableMediaHandle,
-  type SerializableMessageHandle,
   type SerializableCameraViewHandle,
   type SerializablePermanentButtonHandle,
   type SerializableScriptReference,
@@ -262,7 +185,6 @@ import {
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
   type RuntimeTemporarySnapshot,
-  MAX_RUNTIME_SESSION_TIME_MS,
 } from "./state.js";
 import {
   isAngle,
@@ -286,42 +208,12 @@ import {
   assertValueType,
   cannotConvert,
   describeShownValue,
-  shownChoice,
   matchesValueType,
   storedValueMismatch,
 } from "./value-types.js";
-import {
-  mediaProperty,
-  pauseMedia,
-  resumeMedia,
-  seekMedia,
-  setMediaVolume,
-  type MediaHandleRecord,
-  type MediaWarning,
-} from "./media.js";
-import {
-  activeMediaAction,
-  drainMediaEvents,
-  mediaRecord,
-  stopMediaAction,
-} from "./operations/media-lifecycle.js";
-import {
-  pauseTimer,
-  resumeTimer,
-  setTimerDisplay,
-  setTimerRemaining,
-  setTimerRepeatDuration,
-  timerProperty,
-  type TimerHandleRecord,
-  type TimerWarning,
-} from "./timers.js";
-import {
-  activeTimerAction,
-  expireTimerAction,
-  stopTimerAction,
-  timerRecord,
-} from "./operations/timer-lifecycle.js";
-import { removePermanentButtons, shownPermanentButton } from "./permanent-buttons.js";
+import { mediaProperty } from "./media.js";
+import { timerProperty } from "./timers.js";
+import { shownPermanentButton } from "./permanent-buttons.js";
 import { contextRootId, findRoot, findScope } from "./activations.js";
 import {
   bindingKey,
@@ -332,7 +224,6 @@ import {
   type RuntimeDebugRandomOperation,
   type TraceStore,
 } from "./debug-trace.js";
-import { isValidSessionTime } from "./actions/delay.js";
 import {
   CONVERSIONS,
   defaultDescription,
@@ -353,6 +244,33 @@ import {
   valueKindOf,
   type OrderedFamily,
 } from "../value-kinds.js";
+import {
+  callPermanentButton,
+  timerOf,
+  callTimer,
+  assignTimerProperty,
+  mediaOf,
+  callMedia,
+  assignMediaProperty,
+  cameraView,
+  assignCameraProperty,
+  liveMessage,
+  callMessage,
+  assignMessageProperty,
+  readHandleProperty,
+  handleMethodName,
+} from "./evaluation/handles.js";
+import { callCollection, callDict } from "./evaluation/collections.js";
+import {
+  tagQuery,
+  drawIndex,
+  randomFunction,
+  randomIntegerInRange,
+  randomItem,
+} from "./evaluation/draws.js";
+import { type SourceSpan, fault, USE_DEFAULT, assertIntegerRange } from "./evaluation/support.js";
+
+export { assertIntegerRange, USE_DEFAULT } from "./evaluation/support.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -367,8 +285,6 @@ export interface RuntimeCapabilities {
   /** Compatibility/testing override. Serializable xorshift32 is used otherwise. */
   readonly random?: RandomSource;
 }
-
-type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /** `text` with `part` of a `"${...}"` text appended; `TSR084` when the text would be too long. */
 function templateText(text: string, part: string, span: SourceSpan): string {
@@ -423,13 +339,14 @@ export class RuntimeExecutionContext {
   }
 }
 
+/** The public members serve the engine and the modules in `evaluation/`, and are internal to the runtime. */
 export class Evaluator {
   readonly #builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
 
   /** The builtin record `#builtins` was last filled from. */
   #registered: RuntimeCapabilities["builtins"] = undefined;
 
-  #referenceEpoch = 0;
+  public referenceEpoch = 0;
 
   /** Whether the reference being prepared keeps a copy of its root (`preparedReferenceTemporaries`). */
   #keepPreparedRoot = false;
@@ -437,17 +354,21 @@ export class Evaluator {
   /** The global or speaker whose start value is being evaluated, which may not select at random (ADR 0022 §6). */
   #startValue: StartValueOwner | null = null;
 
+  public get startValue(): StartValueOwner | null {
+    return this.#startValue;
+  }
+
   /** With controlled randomness, the generator state before the last draw: its ID. */
-  #drawId = 0;
+  public drawId = 0;
 
   /** Whether the call or `load` of `evaluateWithoutDefault` needs its default. */
   #defaultNeeded = false;
 
   public constructor(
-    private readonly snapshot: RuntimeSnapshot,
-    private readonly capabilities: RuntimeCapabilities,
-    private readonly events: InterpreterEvent[],
-    private readonly plan: InstructionPlan,
+    public readonly snapshot: RuntimeSnapshot,
+    public readonly capabilities: RuntimeCapabilities,
+    public readonly events: InterpreterEvent[],
+    public readonly plan: InstructionPlan,
     /** The debug trace that observes evaluation, or `null`. */
     public readonly trace: TraceStore | null = null,
     /** The operation's controlled randomness, or `null` when every draw is natural. */
@@ -722,7 +643,7 @@ export class Evaluator {
   #runMachine(rootFrame: EvaluationFrame, trace: TraceStore | null): EvaluatedExpression {
     // Frames are consumed synchronously within one instruction; no continuation escapes
     // into a checkpoint. Collection calls invalidate cached reference cursors.
-    this.#referenceEpoch = 0;
+    this.referenceEpoch = 0;
     const pending: EvaluationFrame[] = [rootFrame];
     // With a trace, the frame that finished last, whose causes its parent takes over.
     let previous: EvaluationFrame | null = null;
@@ -732,7 +653,7 @@ export class Evaluator {
       value: null,
       owned: false,
       descriptor: null,
-      epoch: this.#referenceEpoch,
+      epoch: this.referenceEpoch,
     };
     while (pending.length) {
       const frame = pending.at(-1)!;
@@ -768,7 +689,7 @@ export class Evaluator {
             // root only after a collection call could have mutated an earlier step.
             frame.descriptor = result.descriptor!;
             frame.value =
-              result.epoch === this.#referenceEpoch
+              result.epoch === this.referenceEpoch
                 ? result.value
                 : this.#resolveDescriptor(frame.descriptor, expression.object.span);
             if (expression.kind === "property") {
@@ -779,7 +700,7 @@ export class Evaluator {
                   throw emptyCollection(
                     element,
                     base,
-                    this.#receiverLabel(expression.object),
+                    this.receiverLabel(expression.object),
                     expression.span,
                   );
                 const index = this.#elementIndex(element, base.items, expression.span);
@@ -829,20 +750,20 @@ export class Evaluator {
                 value: frame.value,
                 owned: false,
                 descriptor: frame.descriptor,
-                epoch: this.#referenceEpoch,
+                epoch: this.referenceEpoch,
               };
               pending.pop();
               continue;
             }
             this.#assertIndexable(frame.value, expression.object, expression.span);
-            frame.epoch = this.#referenceEpoch;
+            frame.epoch = this.referenceEpoch;
             frame.stage = 2;
             pending.push(evaluationFrame(expression.index));
             continue;
           }
           if (expression.kind !== "index") throw new TypeError("Invalid reference continuation.");
           if (isDict(frame.value)) {
-            const key = this.#dictKey(result.value, expression.index);
+            const key = this.dictKey(result.value, expression.index);
             frame.descriptor!.path.push({ kind: "key", key });
             result = {
               value: this.#dictValue(frame.value, key, expression),
@@ -855,7 +776,7 @@ export class Evaluator {
           }
           // EVIDENCE: invariant: index reference stage 1 validates and retains the list or dict receiver.
           const object = frame.value as SerializableRuntimeList;
-          const index = this.#listPosition(
+          const index = this.listPosition(
             object,
             expression.object,
             expression.index,
@@ -898,7 +819,7 @@ export class Evaluator {
                   : undefined,
               detached: false,
             },
-            epoch: this.#referenceEpoch,
+            epoch: this.referenceEpoch,
           };
           pending.pop();
           continue;
@@ -918,7 +839,7 @@ export class Evaluator {
           if (!descriptor.detached && descriptor.capturedRoot !== undefined) {
             value = this.#resolvePreparedReference(serialized, expression.span);
             descriptor = readPreparedReference(serialized, expression.span);
-            epoch = this.#referenceEpoch;
+            epoch = this.referenceEpoch;
           }
           if (trace !== null)
             this.#tracePreparedReference(
@@ -941,7 +862,7 @@ export class Evaluator {
           value: capturedRoot,
           owned: false,
           descriptor: { rootFrameId: null, rootName: null, path: [], capturedRoot, detached: true },
-          epoch: this.#referenceEpoch,
+          epoch: this.referenceEpoch,
         };
         pending.pop();
         continue;
@@ -1024,7 +945,7 @@ export class Evaluator {
         case "dict": {
           if (frame.stage === 1) {
             // The key was evaluated; its value follows.
-            frame.key = this.#dictKey(result.value, expression.entries[frame.index]!.key);
+            frame.key = this.dictKey(result.value, expression.entries[frame.index]!.key);
             frame.stage = 2;
             pending.push(evaluationFrame(expression.entries[frame.index]!.value));
             continue;
@@ -1115,7 +1036,7 @@ export class Evaluator {
           if (isDict(frame.value)) {
             value = this.#dictValue(
               frame.value,
-              this.#dictKey(result.value, expression.index),
+              this.dictKey(result.value, expression.index),
               expression,
             );
             break;
@@ -1123,7 +1044,7 @@ export class Evaluator {
           {
             // EVIDENCE: invariant: stage 1 validates and retains the index receiver.
             const object = frame.value as SerializableRuntimeList;
-            const index = this.#listPosition(
+            const index = this.listPosition(
               object,
               expression.object,
               expression.index,
@@ -1303,7 +1224,7 @@ export class Evaluator {
             }
           } else if (frame.stage === 1 && expression.callee.kind === "property") {
             frame.value =
-              result.epoch === this.#referenceEpoch
+              result.epoch === this.referenceEpoch
                 ? result.value
                 : this.#resolveDescriptor(result.descriptor!, expression.callee.object.span);
             // A traced call keeps the variable its receiver names, which a collection method may change.
@@ -1376,7 +1297,7 @@ export class Evaluator {
             pending.push(evaluationFrame(expression.operands[frame.index++]!));
             continue;
           }
-          value = this.#tagQuery(expression, frame.results!);
+          value = tagQuery(this, expression, frame.results!);
           owned = true;
           break;
         case "storageLoad":
@@ -1426,7 +1347,7 @@ export class Evaluator {
           trace?.load(frame.key!, false, true, value, expression.span);
           break;
       }
-      result = { value, owned, descriptor: null, epoch: this.#referenceEpoch };
+      result = { value, owned, descriptor: null, epoch: this.referenceEpoch };
       pending.pop();
     }
     return result;
@@ -1559,25 +1480,25 @@ export class Evaluator {
         return;
       }
       if (isTimerHandle(object)) {
-        this.#assignTimerProperty(object, target.name, value, target.span);
+        assignTimerProperty(this, object, target.name, value, target.span);
         if (this.trace !== null)
           this.#writeState(object, target.name, value, target.span, { property: target.name });
         return;
       }
       if (isMediaHandle(object)) {
-        this.#assignMediaProperty(object, target.name, value, target.span);
+        assignMediaProperty(this, object, target.name, value, target.span);
         if (this.trace !== null)
           this.#writeState(object, target.name, value, target.span, { property: target.name });
         return;
       }
       if (isCameraView(object)) {
-        this.#assignCameraProperty(target.name, value, target.span);
+        assignCameraProperty(this, target.name, value, target.span);
         if (this.trace !== null)
           this.#writeState(object, target.name, value, target.span, { property: target.name });
         return;
       }
       if (isMessageHandle(object)) {
-        this.#assignMessageProperty(object, target.name, value, target.span, target.object);
+        assignMessageProperty(this, object, target.name, value, target.span, target.object);
         return;
       }
       throw this.#noAssignableProperties(target.object, object, target.span);
@@ -1585,7 +1506,7 @@ export class Evaluator {
     if (isSet(object)) throw this.#notIndexable("TSR004", target.object, object, target.span);
     if (isDict(object)) {
       // A new key is added at the end; an existing key keeps its position.
-      const key = this.#dictKey(this.evaluate(target.index), target.index);
+      const key = this.dictKey(this.evaluate(target.index), target.index);
       if (
         object.entries.length >= MAX_COLLECTION_LENGTH &&
         getSerializableDictEntry(object, key) === undefined
@@ -1613,7 +1534,7 @@ export class Evaluator {
       return;
     }
     if (!isList(object)) throw this.#notIndexable("TSR005", target.object, object, target.span);
-    const index = this.#listPosition(
+    const index = this.listPosition(
       object,
       target.object,
       target.index,
@@ -1771,11 +1692,11 @@ export class Evaluator {
     }
     if (isSet(object)) throw this.#notIndexable("TSR004", target.object, object, target.span);
     if (isDict(object)) {
-      this.#dictKey(this.evaluate(target.index), target.index);
+      this.dictKey(this.evaluate(target.index), target.index);
       return;
     }
     if (!isList(object)) throw this.#notIndexable("TSR005", target.object, object, target.span);
-    this.#listPosition(object, target.object, target.index, this.evaluate(target.index), "assign");
+    this.listPosition(object, target.object, target.index, this.evaluate(target.index), "assign");
   }
 
   public validateCallReceiver(
@@ -2042,7 +1963,7 @@ export class Evaluator {
         span,
       );
     return visibleText(
-      this.#randomItem(value.items, span, "interpolation"),
+      randomItem(this, value.items, span, "interpolation"),
       span,
       currentTemporalContext(this.snapshot),
     );
@@ -2082,7 +2003,7 @@ export class Evaluator {
   ): string {
     if (this.trace !== null) this.#readState(handle, null);
     if (isCameraView(handle)) {
-      const view = this.#cameraView();
+      const view = cameraView(this);
       return view.shown ? `<camera ${view.placement}>` : "<camera, hidden>";
     }
     if (isPermanentButton(handle)) {
@@ -2095,7 +2016,7 @@ export class Evaluator {
     const time = (value: SerializableRuntimeValue | undefined): string =>
       value !== undefined && isDuration(value) ? formatDuration(value.milliseconds) : "";
     if (isTimerHandle(handle)) {
-      const timer = this.#timer(handle, span);
+      const timer = timerOf(this, handle, span);
       const left = `${time(timerProperty(timer, "remaining", now))} left`;
       const rest =
         timer.state === "running"
@@ -2107,7 +2028,7 @@ export class Evaluator {
         ? `<timer${rest}`
         : quotedTextWithin("<timer ", timer.label, rest, "say", span);
     }
-    const media = this.#media(handle, span);
+    const media = mediaOf(this, handle, span);
     const at = `at ${time(mediaProperty(media, "position", now))}`;
     const state =
       media.state === "running"
@@ -2116,11 +2037,6 @@ export class Evaluator {
           ? `paused ${at}`
           : media.state;
     return quotedTextWithin("<media ", media.source, `, ${state}>`, "say", span);
-  }
-
-  /** One element of `list.join()`: a scalar as visible text, without selecting from nested lists. */
-  #joinedText(item: SerializableRuntimeValue, span: SourceSpan): string {
-    return joinedText(item, span, currentTemporalContext(this.snapshot));
   }
 
   #binary(
@@ -2283,7 +2199,7 @@ export class Evaluator {
         );
       if (name === "hashText") return hashedText(positional, named, expression.span);
       if (isRandomFunction(name))
-        return this.#randomFunction(name, positional, named, expression.span);
+        return randomFunction(this, name, positional, named, expression.span);
       if (isNumericFunction(name)) return numericFunction(name, positional, named, expression.span);
       if (isListFunction(name)) return listFunctionValue(name, positional, named, expression.span);
       if (name === "script") return scriptReference(positional, named, expression.span);
@@ -2368,7 +2284,8 @@ export class Evaluator {
       return copied;
     }
     if (expression.callee.kind === "property" && isTimerHandle(receiver)) {
-      const called = this.#callTimer(
+      const called = callTimer(
+        this,
         receiver,
         expression.callee.name,
         positional,
@@ -2380,7 +2297,8 @@ export class Evaluator {
       return called;
     }
     if (expression.callee.kind === "property" && isMediaHandle(receiver)) {
-      const called = this.#callMedia(
+      const called = callMedia(
+        this,
         receiver,
         expression.callee.name,
         positional,
@@ -2392,7 +2310,8 @@ export class Evaluator {
       return called;
     }
     if (expression.callee.kind === "property" && isPermanentButton(receiver)) {
-      const called = this.#callPermanentButton(
+      const called = callPermanentButton(
+        this,
         receiver,
         expression.callee.name,
         positional,
@@ -2404,7 +2323,8 @@ export class Evaluator {
       return called;
     }
     if (expression.callee.kind === "property" && isMessageHandle(receiver))
-      return this.#callMessage(
+      return callMessage(
+        this,
         receiver,
         expression.callee.name,
         positional,
@@ -2432,7 +2352,7 @@ export class Evaluator {
       );
     }
     if (expression.callee.kind === "property" && isCameraView(receiver)) {
-      const method = this.#handleMethod(
+      const method = handleMethodName(
         "camera",
         expression.callee.name,
         positional,
@@ -2443,8 +2363,8 @@ export class Evaluator {
       throw new Error(`Camera view method '${String(unhandled)}' has no implementation.`);
     }
     if (expression.callee.kind === "property" && isDict(receiver)) {
-      this.#referenceEpoch++;
-      return this.#callDict(receiver, expression, positional, named, defaulted);
+      this.referenceEpoch++;
+      return callDict(this, receiver, expression, positional, named, defaulted);
     }
     if (
       expression.callee.kind === "property" &&
@@ -2461,7 +2381,8 @@ export class Evaluator {
       return rangeList(receiver, expression.span);
     }
     if (expression.callee.kind === "property") {
-      return this.#callCollection(
+      return callCollection(
+        this,
         receiver!,
         expression.callee.object,
         expression.callee.name,
@@ -2485,640 +2406,6 @@ export class Evaluator {
     );
   }
 
-  /** `added` is the check of an element that `add` inserts, from the compiler (ADR 0021 rule 1.7). */
-  #callCollection(
-    receiver: SerializableRuntimeValue,
-    receiverPlan: ExpressionPlan,
-    name: string,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    defaulted: boolean,
-    span: SourceSpan,
-    added: { readonly check: TypeCheckPlan; readonly span: SourceSpan } | null,
-  ): SerializableRuntimeValue | typeof USE_DEFAULT {
-    this.#referenceEpoch++;
-    if (!isList(receiver) && !isSet(receiver))
-      throw fault("TSR016", missingMemberMessage(receiver, name, "method"), span);
-    const namedArgument = Object.keys(named)[0];
-    // Only a list's `get` takes a named argument, its `default:`; a set has no `get`.
-    if (namedArgument !== undefined && listMethod(name)?.named === undefined)
-      throw fault("TSR015", unknownNamedArgumentMessage(name, namedArgument, []), span);
-    // The method's parameters as the compiler checks them for a list or a set; `get` checks its own with its default.
-    const expect = (method: ListMethod): void => {
-      const required = method.parameters.filter((parameter) => !parameter.optional).length;
-      if (
-        method.named === undefined &&
-        (positional.length < required || positional.length > method.parameters.length)
-      )
-        throw fault("TSR028", methodArgumentCountMessage(method, positional.length), span);
-    };
-    try {
-      if (isSet(receiver)) {
-        if (!hasListMethod("set", name))
-          throw fault("TSR016", missingListMethodMessage("set", name), span);
-        expect(LIST_METHODS[name]);
-        return this.#callSet(receiver, name, positional, span, added);
-      }
-      if (!hasListMethod("list", name))
-        throw fault("TSR016", missingListMethodMessage("list", name), span);
-      expect(LIST_METHODS[name]);
-      return this.#callList(
-        receiver,
-        receiverPlan,
-        name,
-        positional,
-        named,
-        defaulted,
-        span,
-        added,
-      );
-    } catch (error) {
-      if (error instanceof RuntimeFault) throw error;
-      throw this.#translateValueError(error, span);
-    }
-  }
-
-  /** A method of a set, with as many arguments as it takes (see `LIST_METHODS`). */
-  #callSet(
-    receiver: SerializableRuntimeSet,
-    name: MethodOf<"set">,
-    positional: readonly SerializableRuntimeValue[],
-    span: SourceSpan,
-    added: { readonly check: TypeCheckPlan; readonly span: SourceSpan } | null,
-  ): SerializableRuntimeValue {
-    switch (name) {
-      case "add":
-        if (added !== null) assertValueType(positional[0]!, added.check, added.span);
-        if (
-          receiver.items.length >= MAX_COLLECTION_LENGTH &&
-          !serializableSetContains(receiver, positional[0]!)
-        )
-          throw collectionTooLong("set", "add(...)", span, receiver.items.length + 1);
-        addSerializableSetValue(receiver, positional[0]!);
-        return null;
-      case "remove":
-        removeSerializableSetValue(receiver, positional[0]!);
-        return null;
-      case "clear":
-        clearSerializableSet(receiver);
-        return null;
-      case "contains":
-      case "toList":
-      case "intersection":
-      case "union":
-      case "difference":
-        return readCollection(receiver, name, positional, {}, false, span, (item) =>
-          this.#joinedText(item, span),
-        )!;
-      default: {
-        const unhandled: never = name;
-        throw new Error(`Set method '${String(unhandled)}' has no implementation.`);
-      }
-    }
-  }
-
-  /** A method of a list, with as many arguments as it takes, but `get` (see `LIST_METHODS`). */
-  #callList(
-    receiver: SerializableRuntimeList,
-    receiverPlan: ExpressionPlan,
-    name: MethodOf<"list">,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    defaulted: boolean,
-    span: SourceSpan,
-    added: { readonly check: TypeCheckPlan; readonly span: SourceSpan } | null,
-  ): SerializableRuntimeValue | typeof USE_DEFAULT {
-    switch (name) {
-      case "add":
-        if (added !== null) assertValueType(positional[0]!, added.check, added.span);
-        checkCollectionLength(
-          "list",
-          receiver.items.length + 1,
-          receiver.items.length,
-          "add(...)",
-          span,
-        );
-        receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
-        return null;
-      case "addAll": {
-        const other = positional[0]!;
-        if (!isList(other))
-          throw fault(
-            "TSR060",
-            listArgumentMessage(
-              name,
-              "list",
-              describeValue(other),
-              isSet(other) ? "set" : isRange(other) ? "range" : "other",
-            ),
-            span,
-          );
-        // Every element is checked before any is added, and copies are taken first, so a list can add itself.
-        if (added !== null)
-          for (const item of other.items) assertValueType(item, added.check, added.span);
-        checkCollectionLength(
-          "list",
-          receiver.items.length + other.items.length,
-          Math.max(receiver.items.length, other.items.length),
-          "addAll(...)",
-          span,
-        );
-        const items = other.items.map((item) => cloneCapturedSerializableValue(item));
-        for (const item of items) receiver.items.push(item);
-        return null;
-      }
-      case "remove": {
-        const index = findValue(receiver.items, positional[0]!);
-        if (index >= 0) this.#removeListItem(receiver, index);
-        else {
-          this.#warn(
-            "TSW002",
-            "remove(...) found no matching value, so the list is unchanged.",
-            span,
-          );
-        }
-        return null;
-      }
-      case "removeAt": {
-        const index = this.#listPosition(
-          receiver,
-          receiverPlan,
-          null,
-          positional[0]!,
-          "remove",
-          span,
-        );
-        return this.#removeListItem(receiver, index);
-      }
-      case "removeFirst":
-      case "removeLast":
-        if (receiver.items.length === 0)
-          throw fault(
-            "TSR018",
-            `Cannot call ${name}() on an empty list. Check that the list's length is above 0 first.`,
-            span,
-          );
-        return this.#removeListItem(
-          receiver,
-          name === "removeFirst" ? 0 : receiver.items.length - 1,
-        );
-      case "clear":
-        if (receiver.items.length > 0) {
-          freezePreparedReferenceDescendants(this.snapshot, receiver);
-          receiver.items.length = 0;
-        }
-        return null;
-      case "contains":
-      case "indexOf":
-      case "lastIndexOf":
-      case "count":
-      case "get":
-      case "toSet":
-      case "take":
-      case "takeLast":
-      case "intersection":
-      case "union":
-      case "difference":
-      case "join": {
-        const value = readCollection(receiver, name, positional, named, defaulted, span, (item) =>
-          this.#joinedText(item, span),
-        );
-        return value === undefined ? USE_DEFAULT : value;
-      }
-      case "sort":
-      case "shuffle":
-        this.#reorderList(
-          receiver,
-          name === "sort" ? sortOrder(receiver.items, span) : this.#shuffleOrder(receiver, span),
-        );
-        return null;
-      // The last element first: the old indexes from the end.
-      case "reverse":
-        this.#reorderList(
-          receiver,
-          receiver.items.map((_, index) => receiver.items.length - 1 - index),
-        );
-        return null;
-      default: {
-        const unhandled: never = name;
-        throw new Error(`List method '${String(unhandled)}' has no implementation.`);
-      }
-    }
-  }
-
-  /** A method of a dict, with as many arguments as it takes (see `DICT_METHODS`), each a text key. */
-  #callDict(
-    receiver: SerializableRuntimeDict,
-    expression: Extract<ExpressionPlan, { kind: "call" }>,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    defaulted: boolean,
-  ): SerializableRuntimeValue | typeof USE_DEFAULT {
-    // EVIDENCE: invariant: #call dispatches here only for a property callee.
-    const callee = expression.callee as Extract<ExpressionPlan, { kind: "property" }>;
-    const name = callee.name;
-    const span = expression.span;
-    if (!isDictMethod(name)) throw fault("TSR016", missingDictMethodMessage(name), span);
-    const problem = dictArgumentsProblem(DICT_METHODS[name], positional.length, [
-      ...Object.keys(named),
-      ...(defaulted ? ["default"] : []),
-    ]);
-    if (problem !== undefined) throw fault("TSR028", problem.message, span);
-    if (name === "clear") {
-      if (receiver.entries.length > 0) {
-        freezePreparedReferenceDescendants(this.snapshot, receiver);
-        clearSerializableDict(receiver);
-      }
-      return null;
-    }
-    // Every other method takes one key.
-    const keyPlan = expression.arguments[0]!.value;
-    const key = this.#dictKey(positional[0]!, keyPlan);
-    switch (name) {
-      case "contains":
-      case "get": {
-        const value = readDict(receiver, name, key);
-        return value === undefined ? USE_DEFAULT : value;
-      }
-      case "remove":
-        if (getSerializableDictEntry(receiver, key) === undefined)
-          throw this.#missingKey(key, callee.object, keyPlan, span);
-        freezePreparedReferenceDescendants(this.snapshot, receiver, key);
-        return removeSerializableDictEntry(receiver, key)!.value;
-      default: {
-        const unhandled: never = name;
-        throw new Error(`Dict method '${String(unhandled)}' has no implementation.`);
-      }
-    }
-  }
-
-  /** `button.remove()` removes a shown button and its queued click; removing it again does nothing (#836). */
-  #callPermanentButton(
-    button: SerializablePermanentButtonHandle,
-    name: string,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    span: SourceSpan,
-  ): null {
-    this.#handleMethod("permanentButton", name, positional, named, span);
-    removePermanentButtons(
-      this.snapshot,
-      (shown) => shown.button.buttonId === button.buttonId,
-      span,
-      this.events,
-    );
-    return null;
-  }
-
-  #timer(handle: SerializableTimerHandle, span: SourceSpan): TimerHandleRecord {
-    const timer = timerRecord(this.snapshot, handle.timerId);
-    if (timer === undefined)
-      throw fault(
-        "TSR053",
-        internalFault("A timer handle refers to a timer that the session does not have."),
-        span,
-      );
-    return timer;
-  }
-
-  /** `pause()`, `resume()`, and `stop()`; repeated calls in the reached state are silent no-ops. */
-  #callTimer(
-    handle: SerializableTimerHandle,
-    name: string,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    span: SourceSpan,
-  ): null {
-    const method = this.#handleMethod("timer", name, positional, named, span);
-    const timer = this.#timer(handle, span);
-    const action = activeTimerAction(this.snapshot, handle.timerId);
-    const now = this.snapshot.currentSessionTimeMs;
-    switch (method) {
-      case "stop":
-        if (action !== undefined) stopTimerAction(this.snapshot, action, span, this.events);
-        return null;
-      case "pause":
-      case "resume": {
-        if (method === "resume" && timer.state === "paused") {
-          assertRepresentableRound(now, timer.remainingMs!, timer.repeat, span);
-        }
-        const warning = method === "pause" ? pauseTimer(timer, now) : resumeTimer(timer, now);
-        if (warning !== null) this.#warn(warning.code, warning.message, span);
-        // A round that is already due while its expiry work waits behind a block ends now, like `remaining = 0`.
-        if (action !== undefined && timer.state === "paused" && timer.remainingMs === 0) {
-          expireTimerAction(
-            this.snapshot,
-            action,
-            now,
-            span,
-            this.events,
-            this.trace,
-            this.control,
-          );
-        }
-        return null;
-      }
-      default: {
-        const unhandled: never = method;
-        throw new Error(`Timer method '${String(unhandled)}' has no implementation.`);
-      }
-    }
-  }
-
-  /** Assignment to `remaining`, `display`, or `repeatDuration` of a timer handle. */
-  #assignTimerProperty(
-    handle: SerializableTimerHandle,
-    name: string,
-    value: SerializableRuntimeValue,
-    span: SourceSpan,
-  ): void {
-    const timer = this.#timer(handle, span);
-    const property = this.#assignedHandleProperty("timer", name, value, span);
-    const now = this.snapshot.currentSessionTimeMs;
-    let warning: TimerWarning | "expired" | null;
-    switch (property) {
-      case "display":
-        // EVIDENCE: validation: assignedValueProblem accepted it through the display's domain (isTimerDisplay).
-        warning = setTimerDisplay(timer, value as DelayDisplay);
-        break;
-      case "remaining":
-      case "repeatDuration": {
-        // EVIDENCE: validation: assignedValueProblem accepted it as a duration (isAnyDuration).
-        const duration = value as SerializableRuntimeDuration | SerializableRuntimeCalendarDuration;
-        exactDurationMilliseconds(duration, `Timer ${property}`, span);
-        if (property === "remaining") {
-          if (timer.state === "running" || timer.state === "paused") {
-            assertRepresentableRound(now, Math.max(0, duration.milliseconds), timer.repeat, span);
-          }
-          warning = setTimerRemaining(timer, duration.milliseconds, now);
-        } else {
-          if (
-            !(duration.milliseconds > 0) ||
-            !isValidSessionTime(now + duration.milliseconds) ||
-            now + duration.milliseconds <= now
-          ) {
-            throw fault(
-              "TSR050",
-              `Timer repeatDuration must be longer than zero and short enough for scene time to reach, but this is ${describeShownValue(value)}.`,
-              span,
-            );
-          }
-          warning = setTimerRepeatDuration(timer, duration.milliseconds, now);
-        }
-        break;
-      }
-      default: {
-        const unhandled: never = property;
-        throw new Error(`Timer property '${String(unhandled)}' has no implementation.`);
-      }
-    }
-    if (warning === "expired") {
-      expireTimerAction(
-        this.snapshot,
-        activeTimerAction(this.snapshot, handle.timerId)!,
-        now,
-        span,
-        this.events,
-        this.trace,
-        this.control,
-      );
-    } else if (warning !== null) {
-      this.#warn(warning.code, warning.message, span);
-    }
-  }
-
-  #media(handle: SerializableMediaHandle, span: SourceSpan): MediaHandleRecord {
-    const media = mediaRecord(this.snapshot, handle.mediaId);
-    if (media === undefined)
-      throw fault(
-        "TSR053",
-        internalFault("A media handle refers to media that the session does not have."),
-        span,
-      );
-    return media;
-  }
-
-  /** `pause()`, `resume()`, and `stop()`; repeated calls in the reached state are silent no-ops. */
-  #callMedia(
-    handle: SerializableMediaHandle,
-    name: string,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    span: SourceSpan,
-  ): null {
-    const method = this.#handleMethod("media", name, positional, named, span);
-    const media = this.#media(handle, span);
-    const action = activeMediaAction(this.snapshot, handle.mediaId);
-    switch (method) {
-      case "stop":
-        if (action !== undefined) stopMediaAction(null, this.snapshot, action, this.events, span);
-        return null;
-      case "pause":
-      case "resume": {
-        // Playback already reached by now is committed before its segment changes.
-        if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
-        const now = this.snapshot.currentSessionTimeMs;
-        this.#mediaWarning(
-          method === "pause" ? pauseMedia(media, now) : resumeMedia(media, now),
-          span,
-        );
-        return null;
-      }
-      default: {
-        const unhandled: never = method;
-        throw new Error(`Media method '${String(unhandled)}' has no implementation.`);
-      }
-    }
-  }
-
-  /** Assignment to `position`, `remaining`, or `volume` of a media handle. */
-  #assignMediaProperty(
-    handle: SerializableMediaHandle,
-    name: string,
-    value: SerializableRuntimeValue,
-    span: SourceSpan,
-  ): void {
-    const media = this.#media(handle, span);
-    const property = this.#assignedHandleProperty("media", name, value, span);
-    switch (property) {
-      case "volume":
-        // EVIDENCE: validation: assignedValueProblem accepted it through the volume's domain (isMediaVolume).
-        this.#mediaWarning(setMediaVolume(media, value as number), span);
-        return;
-      case "position":
-      case "remaining": {
-        // EVIDENCE: validation: assignedValueProblem accepted it as a duration (isAnyDuration).
-        const duration = value as SerializableRuntimeDuration | SerializableRuntimeCalendarDuration;
-        if (!Number.isFinite(duration.milliseconds))
-          throw fault(
-            "TSR050",
-            assignedTypeMessage("media", property, describeShownValue(value)),
-            span,
-          );
-        exactDurationMilliseconds(duration, `Media ${property}`, span);
-        const action = activeMediaAction(this.snapshot, handle.mediaId);
-        // Playback already reached by now is committed before the seek starts a new segment.
-        if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
-        this.#mediaWarning(
-          seekMedia(media, duration.milliseconds, this.snapshot.currentSessionTimeMs, property),
-          span,
-        );
-        // A seek to the end of the range completes the pass at once, like a timer's `remaining = 0`.
-        if (action !== undefined) {
-          drainMediaEvents(null, this.snapshot, action, this.events, span, true);
-        }
-        return;
-      }
-      default: {
-        const unhandled: never = property;
-        throw new Error(`Media property '${String(unhandled)}' has no implementation.`);
-      }
-    }
-  }
-
-  /** The default camera's view, which snapshot validation guarantees once a camera view handle exists. */
-  #cameraView(): NonNullable<RuntimeSnapshot["cameraView"]> {
-    const view = this.snapshot.cameraView;
-    if (view === null) throw new TypeError("A camera view handle outlived its camera view.");
-    return view;
-  }
-
-  /** `view.placement = "window" | "stage"` moves a shown camera view; a hidden one stays hidden and only warns. */
-  #assignCameraProperty(name: string, value: SerializableRuntimeValue, span: SourceSpan): void {
-    const property = this.#assignedHandleProperty("camera", name, value, span);
-    const view = this.#cameraView();
-    if (!view.shown) {
-      this.#warn(
-        "TSW010",
-        "This camera view is hidden, so its placement does not change. Show it with showCamera first.",
-        span,
-      );
-      return;
-    }
-    switch (property) {
-      case "placement":
-        // EVIDENCE: validation: assignedValueProblem accepted it through the placement's domain (isCameraPlacement).
-        view.placement = value as "window" | "stage";
-        return;
-      default: {
-        const unhandled: never = property;
-        throw new Error(`Camera view property '${String(unhandled)}' has no implementation.`);
-      }
-    }
-  }
-
-  /** The index of a message handle's live record; snapshot validation keeps one for every handle the state holds. */
-  #liveMessage(handle: SerializableMessageHandle, span: SourceSpan): number {
-    const messages = this.snapshot.liveMessages;
-    let low = 0;
-    let high = messages.length - 1;
-    while (low <= high) {
-      const middle = (low + high) >>> 1;
-      const id = messages[middle]!.messageId;
-      if (id === handle.messageId) return middle;
-      if (id < handle.messageId) low = middle + 1;
-      else high = middle - 1;
-    }
-    throw fault(
-      "TSR053",
-      internalFault("A message handle refers to a message that the session does not have."),
-      span,
-    );
-  }
-
-  /**
-   * `message.remove()` takes the message out of the conversation, which an event tells; its record keeps its text,
-   * marked removed. Removing it again does nothing, and no pacing starts (#836).
-   */
-  #callMessage(
-    handle: SerializableMessageHandle,
-    name: string,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    span: SourceSpan,
-  ): null {
-    this.#handleMethod("messageHandle", name, positional, named, span);
-    const index = this.#liveMessage(handle, span);
-    const record = this.snapshot.liveMessages[index]!;
-    if (record.removed === true) return null;
-    const sequence = takeSequence(this.snapshot);
-    this.events.push(
-      Object.freeze({
-        kind: "messageRemoved",
-        sequence,
-        messageId: handle.messageId,
-        span: copySpan(span),
-      } satisfies MessageRemovedEvent),
-    );
-    this.snapshot.liveMessages[index] = { ...record, removed: true };
-    this.trace?.messageRemoved(
-      stateKey("message", handle.messageId),
-      handle.messageId,
-      record.sourceText,
-      span,
-      sequence,
-    );
-    return null;
-  }
-
-  /**
-   * `message.text = …` gives the shown message new text in place, which an event tells; the same text again changes
-   * nothing. Its speaker, presentation, and place in the conversation stay, and no pacing starts. A removed message
-   * keeps the text it had, as a stopped timer keeps its state, and the write reports developer warning `TSW010`, whose
-   * advice names `receiver` as written, or `line` for a receiver without a name.
-   */
-  #assignMessageProperty(
-    handle: SerializableMessageHandle,
-    name: string,
-    value: SerializableRuntimeValue,
-    span: SourceSpan,
-    receiver: ExpressionPlan,
-  ): void {
-    const property = this.#assignedHandleProperty("messageHandle", name, value, span);
-    if (property !== "text") {
-      const unhandled: never = property;
-      throw new Error(`Message property '${String(unhandled)}' has no implementation.`);
-    }
-    // EVIDENCE: validation: assignedValueProblem accepted it as text, the type the text property takes.
-    const text = value as string;
-    const index = this.#liveMessage(handle, span);
-    const record = this.snapshot.liveMessages[index]!;
-    if (record.removed === true) {
-      const label = this.#receiverLabel(receiver) ?? "line";
-      this.#warn(
-        "TSW010",
-        `This message was removed, so its text does not change. Show a new message with say instead. To keep a message you want to change later, empty it with '${label}.text = ""' instead of removing it.`,
-        span,
-      );
-      return;
-    }
-    if (record.sourceText === text) return;
-    const content = parseMessageMarkup(text);
-    const sequence = takeSequence(this.snapshot);
-    this.events.push(
-      Object.freeze({
-        kind: "messageUpdated",
-        sequence,
-        messageId: handle.messageId,
-        content,
-        text: content.visibleText,
-        span: copySpan(span),
-      } satisfies MessageUpdatedEvent),
-    );
-    this.snapshot.liveMessages[index] = { messageId: handle.messageId, sourceText: text };
-    this.trace?.messageText(
-      stateKey("message", handle.messageId),
-      handle.messageId,
-      text,
-      span,
-      sequence,
-    );
-  }
-
-  #mediaWarning(warning: MediaWarning | null, span: SourceSpan): void {
-    if (warning !== null) this.#warn(warning.code, warning.message, span);
-  }
-
   /**
    * Whether a stored value fits the load's type, if it has one (V30 §25). A value that does not is ignored by this load,
    * with a warning, and stays stored.
@@ -3131,11 +2418,11 @@ export class Evaluator {
   ): boolean {
     const warning = type === null ? null : storedValueMismatch(key, value, type);
     if (warning === null) return true;
-    this.#warn("TSW016", warning, span);
+    this.warn("TSW016", warning, span);
     return false;
   }
 
-  #warn(code: DeveloperWarningCode, message: string, span: SourceSpan): void {
+  public warn(code: DeveloperWarningCode, message: string, span: SourceSpan): void {
     this.events.push(
       Object.freeze({
         kind: "developerWarning",
@@ -3160,7 +2447,7 @@ export class Evaluator {
       throw fault("TSR017", missingListPropertyMessage(isList(value) ? "list" : "set", name), span);
     if (value.items.length === 0)
       throw emptyCollection(element, value, this.#optionalLabel(collection), span);
-    if (element === "random") return this.#randomItem(value.items, span, "collectionRandom");
+    if (element === "random") return randomItem(this, value.items, span, "collectionRandom");
     return value.items[this.#elementIndex(element, value.items, span)]!;
   }
 
@@ -3176,7 +2463,7 @@ export class Evaluator {
       case "last":
         return items.length - 1;
       case "random":
-        return this.#drawIndex(span, "collectionRandom", items);
+        return drawIndex(this, span, "collectionRandom", items);
       default: {
         const unhandled: never = property;
         throw new Error(`List property '${String(unhandled)}' has no implementation.`);
@@ -3218,231 +2505,6 @@ export class Evaluator {
     return value;
   }
 
-  /** The images matching a tag query, in catalog order, or one of them drawn from the session random generator. */
-  #tagQuery(
-    query: TagQueryExpressionPlan,
-    operands: readonly SerializableRuntimeValue[],
-  ): SerializableRuntimeValue {
-    const bounds = new Map<TagQueryStepPlan, number>();
-    const lists = new Map<TagQueryStepPlan, readonly string[]>();
-    let next = 0;
-    for (const step of query.steps) {
-      if (step.kind !== "tagCompare" && step.kind !== "tagList") continue;
-      const value = operands[next]!;
-      const span = query.operands[next++]!.span;
-      if (step.kind === "tagCompare") bounds.set(step, this.#tagBound(value, span));
-      else lists.set(step, tagNames(value, step.option, span));
-    }
-    const matches = (tags: ReadonlyMap<string, number | null>) =>
-      evaluateTagSteps(query.steps, (step) => {
-        if (step.kind === "tag") return tags.has(step.name);
-        if (step.kind === "tagCompare")
-          return compareTagValue(tags.get(step.name), step.operator, bounds.get(step)!);
-        if (step.kind === "tagList") return passesTagList(step.option, lists.get(step)!, tags);
-        return null;
-      });
-    const found: SerializableRuntimeValue[] = [];
-    if (query.catalog === "scripts") {
-      // The files that run something, those `from:` names, in path order, each as a reference to its top.
-      const named =
-        query.from === null
-          ? null
-          : new Set(
-              isPathGlob(query.from)
-                ? globMatches(
-                    query.from,
-                    this.plan.files.map((file) => file.path),
-                  )
-                : [query.from],
-            );
-      const paths: string[] = [];
-      for (const file of this.plan.files) {
-        if (
-          file.tags !== null &&
-          (named === null || named.has(file.path)) &&
-          matches(imageTags(file))
-        )
-          paths.push(file.path);
-      }
-      // Plan files start with main.tease; picks and lists see path order, as for images.
-      paths.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
-      for (const path of paths) found.push({ kind: "script", path, label: null });
-    } else {
-      // The package images in path order, then the photos taken with tags in capture order.
-      for (const image of this.plan.images) if (matches(imageTags(image))) found.push(image.path);
-      for (const image of this.snapshot.capturedImages) {
-        if (matches(imageTags(image))) found.push(image.reference);
-      }
-      // Tagged photos come from accepted captures.
-      this.trace?.readState(stateKey("photos"), null, null, null, false);
-    }
-    if (query.select === "list") return { kind: "list", items: found };
-    if (found.length === 0)
-      throw fault(
-        "TSR082",
-        query.catalog === "scripts" ? "No file has these tags." : "No image has these tags.",
-        query.span,
-      );
-    const picked = found[this.#drawIndex(query.span, "tagQuery", found)]!;
-    this.trace?.randomResult(picked);
-    return picked;
-  }
-
-  #tagBound(value: SerializableRuntimeValue, span: SourceSpan): number {
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      throw fault(
-        "TSR080",
-        `A tag's number is compared with a number, but this is ${describeValue(value)}.`,
-        span,
-      );
-    }
-    return value;
-  }
-
-  /**
-   * One semantic draw for `operation`: `sample` turns the primitive draws it takes into the outcome, and a debug trace
-   * records them as one record with the generator state around them. Every random operation of an expression draws
-   * through here.
-   */
-  #draw<T>(
-    span: SourceSpan,
-    operation: RuntimeDebugRandomOperation,
-    choices: number | null,
-    range: SerializableRuntimeRange | null,
-    sample: (draw: PrimitiveDraw) => T,
-  ): T {
-    const trace = this.trace;
-    const before = trace === null && this.control === null ? null : this.#randomState();
-    // A controlled run has no injected source, so the state before is the draw's ID.
-    if (this.control !== null) this.#drawId = before!;
-    let draws = 0;
-    const outcome = sample(() => {
-      draws += 1;
-      return this.#drawRandom(span, operation);
-    });
-    if (trace !== null && draws > 0)
-      trace.random(operation, span, choices, range, before, this.#randomState(), draws);
-    return outcome;
-  }
-
-  /**
-   * The outcome a controlled draw takes after its natural sampling: the natural one, one the host chose, or none, when
-   * the draw pauses.
-   */
-  #resolve(
-    span: SourceSpan,
-    operation: RuntimeDebugRandomOperation,
-    natural: RandomNatural,
-    support: () => RandomSupport,
-  ): RandomNatural {
-    return this.control!.resolve(
-      this.snapshot.nextInstruction,
-      span,
-      operation,
-      this.#drawId,
-      natural,
-      support,
-    );
-  }
-
-  /** The index of one of the equally likely `candidates`. */
-  #drawIndex(
-    span: SourceSpan,
-    operation: RuntimeDebugRandomOperation,
-    candidates: readonly SerializableRuntimeValue[],
-  ): number {
-    const count = candidates.length;
-    const index = this.#draw(span, operation, count, null, (draw) => sampleIndex(draw, count));
-    if (this.control === null) return index;
-    return outcomeIndex(
-      this.#resolve(span, operation, { kind: "index", index }, () => ({
-        kind: "candidates",
-        candidates,
-      })),
-    );
-  }
-
-  /** The session generator's state, or `null` when the host injected the random source. */
-  #randomState(): number | null {
-    return this.capabilities.random === undefined ? this.snapshot.rng.state : null;
-  }
-
-  #drawRandom(span: SourceSpan, operation: RuntimeDebugRandomOperation): number {
-    // The compiler reports '.random' and a list in '${...}' where it knows the value's type, and every other random
-    // operation of a start value as a call.
-    if (this.#startValue !== null)
-      throw fault(
-        "TSR067",
-        startValueMessage(this.#startValue, {
-          kind:
-            operation === "collectionRandom"
-              ? "random"
-              : operation === "interpolation"
-                ? "shownList"
-                : "call",
-        }),
-        span,
-      );
-    const random =
-      this.capabilities.random === undefined
-        ? nextXorShift32(this.snapshot.rng)
-        : this.capabilities.random.next();
-    if (!Number.isFinite(random) || random < 0 || random >= 1) {
-      throw fault(
-        "TSR020",
-        internalFault(
-          `The random source returned ${typeof random === "number" ? String(random) : random === null ? "null" : `a value of type ${typeof random}`}, but it must return a number that is at least 0 and less than 1.`,
-        ),
-        span,
-      );
-    }
-    return random;
-  }
-
-  /**
-   * A call of a random function (see `RANDOM_CONTRACTS`), whose arguments are checked before it draws. A debug trace
-   * records its draws as one record under its name, and under random control a host may choose the outcome.
-   */
-  #randomFunction(
-    name: RandomFunctionName,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    span: SourceSpan,
-  ): SerializableRuntimeValue {
-    const random: RandomFunction = RANDOM_CONTRACTS[name];
-    if (random.takes === "choices") return this.#randomWeighted(positional, named, span);
-    if (random.takes === "range") {
-      const problem = argumentShapeProblem(
-        name,
-        positionalShape(random.parameters),
-        positional.length,
-        Object.keys(named),
-      );
-      if (problem !== undefined) throw fault("TSR028", problem.message, span);
-      const range = positional[0]!;
-      if (!isRange(range))
-        throw fault(
-          "TSR040",
-          `${name}(range) needs a range such as '1..=6', but this is ${describeShownValue(range)}.`,
-          span,
-        );
-      return this.randomIntegerInRange(range, span, `${name}(range)`, name);
-    }
-    const { numbers, options } = callNumbers(name, random, positional, named, span);
-    const invalid = domainFailure(random, numbers, options);
-    if (invalid !== undefined) throw fault(invalid.code, invalid.failure, span);
-    let result = this.#draw(span, name, null, null, (draw) => random.sample(numbers, draw));
-    if (this.control !== null) {
-      const resolved = this.#resolve(span, name, naturalOf(result), () => random.support(numbers));
-      // A natural failure stays the draw's failure; a chosen outcome replaces it.
-      if (resolved.kind !== "failure")
-        result = random.result === "boolean" ? outcomeBoolean(resolved) : outcomeNumber(resolved);
-    }
-    if (typeof result === "object") throw fault(result.code, result.failure, span);
-    this.trace?.randomResult(result);
-    return result;
-  }
-
   /** Draws one whole number from a non-empty integer range with the session RNG. */
   public randomIntegerInRange(
     range: SerializableRuntimeRange,
@@ -3450,23 +2512,7 @@ export class Evaluator {
     subject: string,
     operation: RuntimeDebugRandomOperation,
   ): number {
-    assertIntegerRange(range, subject, span);
-    const empty = emptyRangeProblem(subject, range);
-    if (empty !== null) throw fault("TSR041", empty, span);
-    const length = rangeLength(range);
-    let drawn = this.#draw(span, operation, length, range, (draw) =>
-      sampleRangeInteger(draw, range, length),
-    );
-    if (this.control !== null)
-      drawn = outcomeNumber(
-        this.#resolve(span, operation, { kind: "number", value: drawn }, () => ({
-          kind: "integer",
-          min: range.start,
-          max: range.start + length - 1,
-        })),
-      );
-    this.trace?.randomResult(drawn);
-    return drawn;
+    return randomIntegerInRange(this, range, span, subject, operation);
   }
 
   /**
@@ -3511,29 +2557,6 @@ export class Evaluator {
     );
   }
 
-  /** One key of a dict, or element of a list, chosen with one draw, with the chance of its share of the weight. */
-  #randomWeighted(
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    span: SourceSpan,
-  ): SerializableRuntimeValue {
-    const { choices, weights } = weightedChoices(positional, named, span);
-    let index = this.#draw(span, "randomWeighted", choices.length, null, (draw) =>
-      weightedIndex(weights, draw()),
-    );
-    if (this.control !== null)
-      index = outcomeIndex(
-        this.#resolve(span, "randomWeighted", { kind: "index", index }, () => ({
-          kind: "weighted",
-          candidates: choices,
-          weights,
-        })),
-      );
-    const chosen = cloneSerializableValue(choices[index]!);
-    this.trace?.randomResult(chosen);
-    return chosen;
-  }
-
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
     this.#expectBuiltinArguments("escapeMarkup", call);
     const text = call.positional[0]!;
@@ -3559,53 +2582,6 @@ export class Evaluator {
       parameters.length > 0,
     );
     if (problem !== undefined) throw fault("TSR028", problem.message, call.span);
-  }
-
-  /** A uniform random order of the list's items, as their old indexes; a trace records it as one record of its draws. */
-  #shuffleOrder(list: SerializableRuntimeList, span: SourceSpan): readonly number[] {
-    const length = list.items.length;
-    const order = this.#draw(span, "shuffle", length, null, (draw) => sampleOrder(draw, length));
-    // Fewer than two items draw nothing, so nothing pauses.
-    if (this.control === null || length < 2) return order;
-    return outcomeOrder(
-      this.#resolve(span, "shuffle", { kind: "order", order }, () => ({
-        kind: "order",
-        items: list.items,
-      })),
-    );
-  }
-
-  /** Puts the items in `order` (old indexes), moving prepared references into items along with them. */
-  #reorderList(list: SerializableRuntimeList, order: readonly number[]): void {
-    const newIndexOf: number[] = [];
-    for (const [index, old] of order.entries()) newIndexOf[old] = index;
-    const rebased = preparePreparedReferencesForListReorder(this.snapshot, list, newIndexOf);
-    const items = order.map((old) => list.items[old]!);
-    for (const [index, item] of items.entries()) list.items[index] = item;
-    refreshPreparedReferenceFallbacks(this.snapshot, rebased);
-  }
-
-  #removeListItem(list: SerializableRuntimeList, index: number): SerializableRuntimeValue {
-    const rebased = preparePreparedReferencesForListRemoval(this.snapshot, list, index);
-    const removed = list.items.splice(index, 1)[0]!;
-    refreshPreparedReferenceFallbacks(this.snapshot, rebased);
-    return removed;
-  }
-
-  #randomItem(
-    items: readonly SerializableRuntimeValue[],
-    span: SourceSpan,
-    operation: RuntimeDebugRandomOperation,
-  ): SerializableRuntimeValue {
-    if (items.length === 0)
-      throw fault(
-        "TSR019",
-        "Cannot select '.random' from an empty collection. Check its length first.",
-        span,
-      );
-    const item = items[this.#drawIndex(span, operation, items)]!;
-    this.trace?.randomResult(item);
-    return item;
   }
 
   /** `name` of `value`, which `object` gives where the plan has it, to name it in a failure. */
@@ -3643,10 +2619,10 @@ export class Evaluator {
       return property;
     }
     if (isCameraView(value)) {
-      const property = this.#readHandleProperty("camera", name, span);
+      const property = readHandleProperty("camera", name, span);
       switch (property) {
         case "placement":
-          return this.#cameraView().placement;
+          return cameraView(this).placement;
         default: {
           const unhandled: never = property;
           throw new Error(`Camera view property '${String(unhandled)}' has no implementation.`);
@@ -3654,10 +2630,10 @@ export class Evaluator {
       }
     }
     if (isMediaHandle(value)) {
-      const media = this.#media(value, span);
+      const media = mediaOf(this, value, span);
       return mediaProperty(
         media,
-        this.#readHandleProperty("media", name, span),
+        readHandleProperty("media", name, span),
         this.snapshot.currentSessionTimeMs,
       );
     }
@@ -3680,23 +2656,23 @@ export class Evaluator {
       return property;
     }
     if (isTimerHandle(value)) {
-      const timer = this.#timer(value, span);
+      const timer = timerOf(this, value, span);
       return timerProperty(
         timer,
-        this.#readHandleProperty("timer", name, span),
+        readHandleProperty("timer", name, span),
         this.snapshot.currentSessionTimeMs,
       );
     }
     if (isMessageHandle(value)) {
-      const property = this.#readHandleProperty("messageHandle", name, span);
+      const property = readHandleProperty("messageHandle", name, span);
       if (property !== "text") {
         const unhandled: never = property;
         throw new Error(`Message property '${String(unhandled)}' has no implementation.`);
       }
-      return this.snapshot.liveMessages[this.#liveMessage(value, span)]!.sourceText;
+      return this.snapshot.liveMessages[liveMessage(this, value, span)]!.sourceText;
     }
     if (isPermanentButton(value)) {
-      const property = this.#readHandleProperty("permanentButton", name, span);
+      const property = readHandleProperty("permanentButton", name, span);
       const unhandled: never = property;
       throw new Error(`Permanent button property '${String(unhandled)}' has no implementation.`);
     }
@@ -3710,7 +2686,7 @@ export class Evaluator {
   }
 
   /** The key that `keyPlan` gave as `value`, which is text (`dictKey`, `dictKeyMessage`). */
-  #dictKey(value: SerializableRuntimeValue, keyPlan: ExpressionPlan): string {
+  public dictKey(value: SerializableRuntimeValue, keyPlan: ExpressionPlan): string {
     if (!isDictKey(value))
       throw fault(
         "TSR062",
@@ -3732,7 +2708,7 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     const entry = getSerializableDictEntry(dict, key);
     if (entry === undefined)
-      throw this.#missingKey(key, expression.object, expression.index, expression.span);
+      throw this.missingKey(key, expression.object, expression.index, expression.span);
     return entry.value;
   }
 
@@ -3740,7 +2716,7 @@ export class Evaluator {
    * The error for a key a dict does not have (`missingKeyMessage`), naming the dict and the key as the source spells
    * them where the plan still shows them.
    */
-  #missingKey(
+  public missingKey(
     key: string,
     dictPlan: ExpressionPlan,
     keyPlan: ExpressionPlan,
@@ -3750,7 +2726,7 @@ export class Evaluator {
       "TSR061",
       missingKeyMessage(
         quotedText(messageText(key)),
-        this.#receiverLabel(dictPlan),
+        this.receiverLabel(dictPlan),
         planLabel(keyPlan, this.plan),
       ),
       span,
@@ -3759,11 +2735,11 @@ export class Evaluator {
 
   /** How the source spells the value `plan` gives, where there is a plan, or `null`. */
   #optionalLabel(plan: ExpressionPlan | null): string | null {
-    return plan === null ? null : this.#receiverLabel(plan);
+    return plan === null ? null : this.receiverLabel(plan);
   }
 
   /** How the source spells a dict receiver, also one prepared before the rest of its statement, or `null`. */
-  #receiverLabel(plan: ExpressionPlan): string | null {
+  public receiverLabel(plan: ExpressionPlan): string | null {
     if (plan.kind !== "preparedReference") return planLabel(plan, this.plan);
     const descriptor = readPreparedReference(
       readTemporary(this.snapshot.temporaries, plan.temporaryId, plan.span),
@@ -3781,7 +2757,7 @@ export class Evaluator {
    * The position `value` gives in `list`, which `receiver` gives: `TSR024` unless it is a whole number and `TSR025` unless
    * the list has it. `indexPlan` is the index as written, or `null` for an argument such as of `removeAt(...)`.
    */
-  #listPosition(
+  public listPosition(
     list: SerializableRuntimeList,
     receiver: ExpressionPlan,
     indexPlan: ExpressionPlan | null,
@@ -3818,7 +2794,7 @@ export class Evaluator {
       );
     }
     const length = list.items.length;
-    const owner = this.#receiverLabel(receiver);
+    const owner = this.receiverLabel(receiver);
     const named = owner === null ? "the list" : `'${owner}'`;
     const action = `Cannot ${use === "assign" ? "assign to" : use} ${owner === null || indexLabel === null ? `index ${value}` : `'${owner}[${indexLabel}]'`}`;
     const given =
@@ -3841,7 +2817,7 @@ export class Evaluator {
     value: SerializableRuntimeValue,
     span: SourceSpan,
   ): RuntimeFault {
-    const label = this.#receiverLabel(plan);
+    const label = this.receiverLabel(plan);
     const subject = label === null ? "this" : `'${label}'`;
     return isSet(value)
       ? fault(
@@ -3856,115 +2832,18 @@ export class Evaluator {
         );
   }
 
-  /** `TSR003` for a property assignment on a value, which `plan` gives, that has no properties to assign. */
-  /** The property `name` of a handle of `kind` that a read finds (see `HANDLE_MEMBERS`), or `TSR017`. */
-  #readHandleProperty<Kind extends HandleKind>(
-    kind: Kind,
-    name: string,
-    span: SourceSpan,
-  ): HandlePropertyName<Kind> {
-    if (!isHandleProperty(kind, name))
-      throw fault("TSR017", handleMemberMessage(kind, name, "read"), span);
-    return name;
-  }
-
-  /**
-   * The property `name` of a handle of `kind` that `value` may be assigned to (see `HANDLE_MEMBERS`): `TSR003` for one
-   * that cannot be assigned, and `TSR050` for a value it does not take.
-   */
-  #assignedHandleProperty<Kind extends HandleKind>(
-    kind: Kind,
-    name: string,
-    value: SerializableRuntimeValue,
-    span: SourceSpan,
-  ): AssignableHandleProperty<Kind> {
-    if (!isAssignableHandleProperty(kind, name))
-      throw fault("TSR003", handleMemberMessage(kind, name, "assign"), span);
-    const { type, domain } = handleProperty(kind, name)!.assign!;
-    if (domain !== undefined) {
-      if (!domain.accepts(value))
-        throw fault(
-          "TSR050",
-          domain.message(
-            domain.shows === "choice" ? shownChoice(value) : describeShownValue(value),
-          ),
-          span,
-        );
-    } else if (type === "duration" ? !isAnyDuration(value) : typeof value !== "string")
-      throw fault("TSR050", assignedTypeMessage(kind, name, describeShownValue(value)), span);
-    return name;
-  }
-
-  /**
-   * The method `name` of a handle of `kind` (see `HANDLE_MEMBERS`) for a call with these arguments: `TSR016` for a method
-   * it does not have, and `TSR028` for arguments the method does not take.
-   */
-  #handleMethod<Kind extends HandleKind>(
-    kind: Kind,
-    name: string,
-    positional: readonly SerializableRuntimeValue[],
-    named: Readonly<Record<string, SerializableRuntimeValue>>,
-    span: SourceSpan,
-  ): HandleMethodName<Kind> {
-    if (!isHandleMethod(kind, name))
-      throw fault("TSR016", handleMemberMessage(kind, name, "call"), span);
-    const problem = argumentShapeProblem(
-      name,
-      handleMethod(kind, name)!.shape,
-      positional.length,
-      Object.keys(named),
-    );
-    if (problem !== undefined) throw fault("TSR028", problem.message, span);
-    return name;
-  }
-
   #noAssignableProperties(
     plan: ExpressionPlan,
     value: SerializableRuntimeValue,
     span: SourceSpan,
   ): RuntimeFault {
-    const label = this.#receiverLabel(plan);
+    const label = this.receiverLabel(plan);
     return fault(
       "TSR003",
       `Only objects, speakers, camera views, and handles for timers, media, and messages have assignable properties, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(value)}.`,
       span,
     );
   }
-
-  #translateValueError(error: unknown, span: SourceSpan): RuntimeFault {
-    if (error instanceof SerializableValueError) {
-      return fault("TSR031", internalFault(error.message), span);
-    }
-    throw error;
-  }
-}
-
-/*
- * A resolved draw has the kind of outcome its support admits: control checks every chosen outcome against the support
- * before it is used, and a natural one has its sampler's kind.
- */
-function outcomeIndex(outcome: RandomNatural): number {
-  if (outcome.kind !== "index")
-    throw new Error("A random draw resolved to another kind of outcome.");
-  return outcome.index;
-}
-
-function outcomeNumber(outcome: RandomNatural): number {
-  if (outcome.kind !== "number")
-    throw new Error("A random draw resolved to another kind of outcome.");
-  return outcome.value;
-}
-
-function outcomeBoolean(outcome: RandomNatural): boolean {
-  if (outcome.kind !== "boolean")
-    throw new Error("A random draw resolved to another kind of outcome.");
-  return outcome.value;
-}
-
-function outcomeOrder(outcome: RandomNatural): readonly number[] {
-  if (outcome.kind !== "order")
-    throw new Error("A random draw resolved to another kind of outcome.");
-  return outcome.order;
 }
 
 const DICT_TEXT_MESSAGE =
@@ -4394,33 +3273,6 @@ export function planLabel(plan: ExpressionPlan, program: InstructionPlan): strin
   return names.reverse().join(".");
 }
 
-/** A running round must end at a supported session time strictly after a positive remaining time starts. */
-function assertRepresentableRound(
-  nowMs: number,
-  remainingMs: number,
-  repeat: boolean,
-  span: SourceSpan,
-): void {
-  // A repeating timer whose remaining time becomes 0 s starts another positive round.
-  if (remainingMs > 0 && nowMs === MAX_RUNTIME_SESSION_TIME_MS) {
-    throw fault(
-      "TSR050",
-      `Scene time has reached its limit, so this timer cannot continue. ${repeat ? "Stop it." : "Stop it, or set its remaining time to 0 s."}`,
-      span,
-    );
-  }
-  const deadlineMs = nowMs + remainingMs;
-  if (!isValidSessionTime(deadlineMs) || (remainingMs > 0 && deadlineMs <= nowMs)) {
-    throw fault(
-      "TSR050",
-      isValidSessionTime(deadlineMs)
-        ? unmeasurableLengthMessage("Timer remaining time", remainingMs, nowMs, "duration")
-        : `Timer remaining time of ${formatDuration(remainingMs)} is too long for scene time to reach. Use a shorter duration.`,
-      span,
-    );
-  }
-}
-
 function optionalSpeakerString(
   speaker: RuntimeSpeakerSnapshot,
   name: string,
@@ -4614,30 +3466,6 @@ function readTemporary(
   return temporary.value;
 }
 
-/** `TSR045` unless `range` has whole-number bounds and a length that a number counts exactly. */
-export function assertIntegerRange(
-  range: SerializableRuntimeRange,
-  subject: string,
-  span: SourceSpan,
-): void {
-  const length = rangeLength(range);
-  if (
-    !Number.isSafeInteger(range.start) ||
-    !Number.isSafeInteger(range.end) ||
-    !Number.isSafeInteger(length)
-  ) {
-    throw fault(
-      "TSR045",
-      !Number.isInteger(range.start) || !Number.isInteger(range.end)
-        ? wholeRangeMessage(subject, `this range is ${rangeText(range)}`)
-        : Number.isSafeInteger(range.start) && Number.isSafeInteger(range.end)
-          ? `${subject} needs a range it can count, but ${rangeText(range)} holds too many numbers. Use a smaller range.`
-          : `${subject} needs a range of whole numbers, but the bounds of ${rangeText(range)} are too large. Use bounds closer to 0.`,
-      span,
-    );
-  }
-}
-
 /**
  * `range.toList()` (V30 §6): the whole numbers of the range as a new list, in order, as `for` goes through them, and at
  * most `MAX_COLLECTION_LENGTH` of them, checked before any is added. The list is new and nothing else holds its
@@ -4679,10 +3507,6 @@ function notComparable(
     `${orderRule(expression.operator)}, but these are ${describeShownValue(left)} and ${describeShownValue(right)}.${fix}`,
     expression.span,
   );
-}
-
-function fault(code: RuntimeErrorCode, message: string, span: SourceSpan): RuntimeFault {
-  return new RuntimeFault(code, message, copySpan(span));
 }
 
 /** `speaker` in a message that names no speaker with `as` while no default speaker is set (V30 §37). */
@@ -4784,46 +3608,6 @@ function mayRunCall(expression: ExpressionPlan): boolean {
   return callingExpressions.get(expression)!;
 }
 
-const imageTagMaps = new WeakMap<object, ReadonlyMap<string, number | null>>();
-
-/** An image's tags by name, built once per catalog entry: a plan image or a photo taken with tags. */
-function imageTags(image: {
-  readonly tags: readonly PlanTag[] | null;
-}): ReadonlyMap<string, number | null> {
-  let tags = imageTagMaps.get(image);
-  if (tags === undefined) {
-    tags = new Map((image.tags ?? []).map((tag) => [tag.name, tag.value]));
-    imageTagMaps.set(image, tags);
-  }
-  return tags;
-}
-
-/** The tag names of an `all:`, `none:`, or `any:` list or set, normalized as authors write them. */
-function tagNames(
-  value: SerializableRuntimeValue,
-  option: string,
-  span: SourceSpan,
-): readonly string[] {
-  if (!isList(value) && !isSet(value)) {
-    throw fault(
-      "TSR081",
-      `'${option}:' takes a list of tag names, but this is ${describeValue(value)}.`,
-      span,
-    );
-  }
-  return value.items.map((item) => {
-    const name = typeof item === "string" ? normalizeTagName(item) : null;
-    if (name === null) {
-      throw fault(
-        "TSR081",
-        `'${option}:' takes tag names, which use lowercase letters a–z, digits, and hyphens, but it holds ${typeof item === "string" ? `'${item}'` : describeValue(item)}.`,
-        span,
-      );
-    }
-    return name;
-  });
-}
-
 function evaluationFrame(
   expression: ExpressionPlan,
   reference = false,
@@ -4852,12 +3636,6 @@ function evaluationFrame(
     deps: null,
   };
 }
-
-/**
- * What a call gives when it needs its `default:`, which runs only then (owner decision, 2026-10-16), or a call or `load`
- * of `evaluateWithoutDefault` that needs the default that the instructions after it run.
- */
-export const USE_DEFAULT: unique symbol = Symbol("use the default");
 
 /**
  * The default that a call uses, checked as the call checks it: a `get` default that decided the element or value type
