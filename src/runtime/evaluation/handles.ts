@@ -65,7 +65,7 @@ import { removePermanentButtons } from "../permanent-buttons.js";
 import { stateKey } from "../debug-trace.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import type { Evaluator } from "../evaluator.js";
-import { type SourceSpan, fault } from "./support.js";
+import { type SourceSpan, fault, receiverLabel } from "./support.js";
 
 // Timer, media, message, camera-view, and permanent-button handles: their methods and their properties.
 
@@ -430,7 +430,7 @@ export function assignMessageProperty(
   const index = liveMessage(evaluator, handle, span);
   const record = evaluator.snapshot.liveMessages[index]!;
   if (record.removed === true) {
-    const label = evaluator.receiverLabel(receiver) ?? "line";
+    const label = receiverLabel(evaluator, receiver) ?? "line";
     evaluator.warn(
       "TSW010",
       `This message was removed, so its text does not change. Show a new message with say instead. To keep a message you want to change later, empty it with '${label}.text = ""' instead of removing it.`,
