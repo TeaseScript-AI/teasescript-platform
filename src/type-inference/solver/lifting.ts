@@ -928,12 +928,22 @@ function readAnswer(
           }
           elements.push(...projected);
         }
-        // a member's rebuilt collection keeps its own element cell, named by the chosen receiver alternative
-        const receiverIndex = operands.findIndex((operand) => "receiver" in operand.ref);
-        const receiverPick = receiverIndex < 0 ? undefined : combo[receiverIndex];
+        // a collection rebuilt under permitted members keeps its own element cell, named by the source element cells of
+        // the chosen members it is built from (r4-B3 Sol, W2-B1 Dropje97): one structure in, one structure out, whatever
+        // the member's element alternatives; witnesses merge into it (option B)
+        const sources = a.parts.flatMap((path) => {
+          const index = operands.findIndex((operand) => sameRef(operand.ref, path.of));
+          const pick = index < 0 ? undefined : combo[index];
+          return pick !== undefined &&
+            pick.kind === "closed" &&
+            pick.tag === "m" &&
+            pick.alt.choice?.element !== undefined
+            ? pick.alt.choice.cells
+            : [];
+        });
         const part =
-          tag === "m" && receiverPick !== undefined && receiverPick.kind === "closed"
-            ? `element#${receiverPick.alt.type}`
+          tag === "m" && sources.length > 0
+            ? `element#${[...new Set(sources)].sort((left, right) => left - right).join("+")}`
             : "element";
         outcomes.push({
           kind: "collection",
