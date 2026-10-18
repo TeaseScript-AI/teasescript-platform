@@ -587,11 +587,14 @@ actually played audio.
 
 ## Local browser smoke and future host E2E gate
 
-The playground and the Player's repository demo have a reproducible Chromium smoke route after `npm run build`:
+The playground and the Player's repository demo have a reproducible Chromium smoke route, which builds first:
 
 ```shell
-node tools/player-browser-smoke.mjs
+npm run test:player:browser
 ```
+
+Run it for a change to `player/` or to the fixture packages it opens (`tests/fixtures/packages/`): it needs a browser,
+so it is not part of `npm run check`. After a build, `node tools/player-browser-smoke.mjs` runs the smoke alone.
 
 `PLAYER_SMOKE_ONLY=photoColour,camera` runs only the named scenarios (each scenario function's name without
 `Scenario`; the technical playground is `playground`); an unknown name fails and lists the known ones.
