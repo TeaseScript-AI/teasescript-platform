@@ -1,8 +1,10 @@
+import { captureExternalData } from "../../external-data-capture.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import type { InterpreterEvent } from "../events.js";
 import { loadMedia } from "../media.js";
 import type { RuntimeSnapshot } from "../state.js";
+import { isPlainRecord } from "../plain-data.js";
 import {
   activeMediaAction,
   emitDeveloperWarning,
@@ -83,7 +85,7 @@ function reportCapturedMediaLoad(
     return pendingResult(current, [], {
       kind: "invalidReport",
       message:
-        "A media load report needs a media ID and { kind: 'loaded', durationMs } with a finite non-negative duration, or { kind: 'failed' }.",
+        "A media load report needs a media ID and plain data { kind: 'loaded', durationMs } with a finite non-negative duration, or { kind: 'failed' }.",
     });
   }
   if (mediaId >= current.nextMediaId) {
@@ -129,9 +131,11 @@ function isMediaId(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
 }
 
+/** Parses the captured plain data of a host report; capture refuses accessors and retains no proxy. */
 function parseLoadReport(value: unknown): MediaLoadReport | null {
-  if (!isRecord(value)) return null;
-  const record = value;
+  const captured = captureExternalData(value);
+  if (!captured.ok || !isPlainRecord(captured.value)) return null;
+  const record = captured.value;
   if (record.kind === "loaded" && isValidSessionTime(record.durationMs)) {
     return { kind: "loaded", durationMs: record.durationMs };
   }
@@ -144,8 +148,4 @@ function parseLoadReport(value: unknown): MediaLoadReport | null {
       : { kind: "failed", message: record.message };
   }
   return null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
