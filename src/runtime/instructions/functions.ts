@@ -10,11 +10,7 @@ import {
   cloneCapturedSerializableValue,
   type SerializableRuntimeValue,
 } from "../serializable-values.js";
-import type {
-  RuntimeSnapshot,
-  RuntimeCallFrameSnapshot,
-  RuntimeTemporarySnapshot,
-} from "../state.js";
+import type { RuntimeSnapshot, RuntimeCallFrameSnapshot } from "../state.js";
 import { returnFromTimerHandler } from "../operations/timer-handlers.js";
 import { assertValueType } from "../value-types.js";
 import { advance, currentCallFrameId, currentFrame, fault, type SourceSpan } from "./support.js";
@@ -71,7 +67,8 @@ export function enterFunction(
     returnInstruction: instruction.returnInstruction,
     destinationTemporary: instruction.destinationTemporary,
     timerInterruption: null,
-    callerTemporaries: snapshot.temporaries.map(cloneTemporary),
+    // Parking moves the caller's temporaries, as a file call or a block does: no assignment, so nothing is copied.
+    callerTemporaries: snapshot.temporaries.map((temporary) => ({ ...temporary })),
     scopeBaseDepth: snapshot.frames.length,
     loopBaseDepth: snapshot.loopFrames.length,
     arguments: definition.parameters.map((parameter) => {
@@ -310,11 +307,10 @@ export function returnFromFunction(
   leaveScopes(snapshot, frame.scopeBaseDepth);
   snapshot.loopFrames.splice(frame.loopBaseDepth);
   snapshot.callFrames.pop();
-  snapshot.temporaries.splice(
-    0,
-    snapshot.temporaries.length,
-    ...frame.callerTemporaries.map(cloneTemporary),
-  );
+  // They move back from the discarded frame one by one: a wide caller state must not depend on the host's
+  // argument-spread limit.
+  snapshot.temporaries.length = 0;
+  for (const temporary of frame.callerTemporaries) snapshot.temporaries.push({ ...temporary });
   const destinationTemporary = frame.destinationTemporary!;
   if (snapshot.temporaries.some((temporary) => temporary.id === destinationTemporary)) {
     throw fault(
@@ -392,8 +388,4 @@ function declareFunctionBinding(
     );
   }
   currentFrame(snapshot).bindings.push({ name, value });
-}
-
-function cloneTemporary(temporary: RuntimeTemporarySnapshot): RuntimeTemporarySnapshot {
-  return { id: temporary.id, value: cloneCapturedSerializableValue(temporary.value) };
 }
