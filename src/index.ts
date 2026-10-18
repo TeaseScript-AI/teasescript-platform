@@ -124,7 +124,7 @@ export {
   type RuntimeInspectionResult,
   type RuntimeSettlementInspection,
   type RuntimeStateInspection,
-} from "./runtime/inspection.js";
+} from "./runtime/debug/inspection.js";
 export type {
   ActionCompletedEvent,
   ActionRequestedEvent,
@@ -142,7 +142,7 @@ export { interpreterEventProblem } from "./runtime/event-validation.js";
 export {
   validateScriptStorageEntries,
   type RuntimeScriptStorageEntrySnapshot,
-} from "./runtime/script-storage.js";
+} from "./runtime/host-data/script-storage.js";
 export {
   executeInstruction,
   resumeRandomDraw,
@@ -158,11 +158,11 @@ export {
 export type {
   RuntimeInstructionObserver,
   RuntimeInstructionTrace,
-} from "./runtime/instruction-trace.js";
+} from "./runtime/debug/instruction-trace.js";
 export {
   randomDrawAlternatives,
   type RandomDrawAlternatives,
-} from "./runtime/random-alternatives.js";
+} from "./runtime/random/random-alternatives.js";
 export {
   checkedOutcome,
   listRandomSites,
@@ -185,7 +185,7 @@ export {
   type RandomSupport,
   type RuntimePendingRandomDrawSnapshot,
   type RuntimeRandomControlSnapshot,
-} from "./runtime/random-control.js";
+} from "./runtime/random/random-control.js";
 export {
   createFreshRuntimeSession,
   createRuntimeSession,
@@ -210,13 +210,13 @@ export {
   type ActionCompletionOptions,
 } from "./runtime/operations/complete-action.js";
 export type { CapturedMediaAdmission } from "./runtime/actions/capture.js";
-export { textSha256 } from "./runtime/sha256.js";
+export { textSha256 } from "./runtime/values/sha256.js";
 export {
   fileType,
   OCTET_STREAM,
   storedFileKind,
   type StoredFileKind,
-} from "./runtime/stored-files.js";
+} from "./runtime/host-data/stored-files.js";
 export {
   updateInteraction,
   type InteractionUpdateOutcome,
@@ -240,8 +240,8 @@ export {
   type RuntimeDebugTraceOrigin,
   type RuntimeDebugTraceStatus,
   type RuntimeDebugUnrecordedReason,
-} from "./runtime/debug-trace.js";
-export { RUNTIME_DEBUG_TRACE_LIMITS } from "./runtime/debug-trace-limits.js";
+} from "./runtime/debug/debug-trace.js";
+export { RUNTIME_DEBUG_TRACE_LIMITS } from "./runtime/debug/debug-trace-limits.js";
 export {
   recordContinueCapture,
   type ContinueCaptureOutcome,
@@ -251,7 +251,7 @@ export {
   type ExternalStorageEditOutcome,
 } from "./runtime/operations/external-storage-edit.js";
 export { setDebugMode, type DebugModeOutcome } from "./runtime/operations/debug-mode.js";
-export type { RuntimeTemporalCapture } from "./runtime/temporal-captures.js";
+export type { RuntimeTemporalCapture } from "./runtime/host-data/temporal-captures.js";
 export {
   reportMediaLoad,
   type MediaLoadReport,
@@ -265,13 +265,13 @@ export {
   permanentButtonProjection,
   type PermanentButtonProjection,
   type RuntimePermanentButtonSnapshot,
-} from "./runtime/permanent-buttons.js";
+} from "./runtime/background/permanent-buttons.js";
 export {
   mediaPlaybackProjection,
   stageProjection,
   type MediaPlaybackProjection,
   type StageProjection,
-} from "./runtime/media-projection.js";
+} from "./runtime/background/media-projection.js";
 export type {
   PendingActionOperationResult,
   TimeObservationOutcome,
@@ -287,7 +287,7 @@ export {
   serializeCheckpoint,
   type CheckpointErrorInfo,
   type RuntimeCheckpoint,
-} from "./runtime/checkpoint.js";
+} from "./runtime/snapshot/checkpoint.js";
 export {
   DEFAULT_MAX_CALL_DEPTH,
   MAX_RUNTIME_SESSION_TIME_MS,
@@ -314,10 +314,13 @@ export {
   type RuntimeSpeakerSnapshot,
   type RuntimeStatus,
   type SnapshotValidationResult,
-} from "./runtime/state.js";
-export { validateRuntimeSnapshot } from "./runtime/snapshot-validation.js";
-export { createFreshRuntimeSnapshot } from "./runtime/snapshot-construction.js";
-export type { RuntimeAccountFieldSnapshot, RuntimeAccountInput } from "./runtime/account.js";
+} from "./runtime/snapshot/state.js";
+export { validateRuntimeSnapshot } from "./runtime/snapshot/snapshot-validation.js";
+export { createFreshRuntimeSnapshot } from "./runtime/snapshot/snapshot-construction.js";
+export type {
+  RuntimeAccountFieldSnapshot,
+  RuntimeAccountInput,
+} from "./runtime/host-data/account.js";
 export type {
   CaptureUnavailableReason,
   RuntimeActionSettlementSnapshot,
@@ -350,7 +353,7 @@ export {
   nextXorShift32,
   XORSHIFT32_ALGORITHM,
   type XorShift32State,
-} from "./runtime/random.js";
+} from "./runtime/random/random.js";
 export {
   cloneSerializableValue,
   createSerializableList,
@@ -372,7 +375,7 @@ export {
   type SerializableRuntimeDateTime,
   type SerializableRuntimeTime,
   type SerializableRuntimeAbsoluteDateTime,
-} from "./runtime/serializable-values.js";
+} from "./runtime/values/serializable-values.js";
 export {
   DEFAULT_TEMPORAL_CONTEXT,
   type PresentationSettings,

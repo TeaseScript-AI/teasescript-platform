@@ -8,7 +8,7 @@ import {
   type RuntimeBuiltinFunction,
   type SerializableRuntimeValue,
 } from "../src/index.js";
-import type { RandomSource } from "../src/runtime/random.js";
+import type { RandomSource } from "../src/runtime/random/random.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 

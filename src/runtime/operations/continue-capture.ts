@@ -1,6 +1,6 @@
-import type { RandomDrawPendingOutcome } from "../random-control.js";
+import type { RandomDrawPendingOutcome } from "../random/random-control.js";
 import { captureExternalData } from "../../external-data-capture.js";
-import { interruptFrame } from "../activations.js";
+import { interruptFrame } from "../scopes/activations.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import {
   frozenTemporalContext,
@@ -8,16 +8,16 @@ import {
   temporalContextProblem,
   type TemporalContext,
 } from "../../temporal.js";
-import type { RuntimeSnapshot } from "../state.js";
+import type { RuntimeSnapshot } from "../snapshot/state.js";
 import {
   temporalCaptureAt,
   temporalCaptureShownAt,
   type RuntimeTemporalCapture,
-} from "../temporal-captures.js";
+} from "../host-data/temporal-captures.js";
 import type { PendingActionOperationResult } from "./model.js";
 import { captureExecutableData, type CapturedExecutableData, pendingResult } from "./support.js";
-import { withDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
-import { isPlainRecord } from "../plain-data.js";
+import { withDebugTrace, type RuntimeDebugContext } from "../debug/debug-trace.js";
+import { isPlainRecord } from "../values/plain-data.js";
 import { randomDrawPending } from "./model.js";
 
 export type ContinueCaptureOutcome =

@@ -6,18 +6,18 @@ import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import {
   calculatePacingDeadlineMs,
   calculateSmartPacingDurationMs,
   exactPacingMilliseconds,
 } from "../src/runtime/actions/pacing.js";
-import type { ChatPacingSettings } from "../src/runtime/state.js";
+import type { ChatPacingSettings } from "../src/runtime/snapshot/state.js";
 import {
   cloneRuntimeSnapshot,
   validateRuntimeSnapshot,
-} from "../src/runtime/snapshot-validation.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+} from "../src/runtime/snapshot/snapshot-validation.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
 
 function plan() {
   const compiled = compileSource("exit");

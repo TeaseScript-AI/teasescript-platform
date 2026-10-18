@@ -9,7 +9,7 @@ import {
   type NumberSignature,
   type NumericFailure,
 } from "./numeric-functions.js";
-import type { RandomSupport } from "./runtime/random-control.js";
+import type { RandomSupport } from "./runtime/random/random-control.js";
 
 /**
  * A random built-in (V30 §4): how it is called, what its arguments may be, what it gives, and its help. Every call

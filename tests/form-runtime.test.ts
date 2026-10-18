@@ -9,12 +9,12 @@ import {
   deserializeCheckpoint,
   restoreCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { updateInteraction } from "../src/runtime/operations/update-interaction.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import type { RuntimeFormStateSnapshot } from "../src/runtime/actions/model.js";
 import { formSummaryOf } from "../src/runtime/actions/form.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../src/temporal.js";
@@ -23,8 +23,8 @@ import { runUntilExit } from "./helpers/run-until-exit.js";
 import {
   createFreshRuntimeSnapshot,
   cloneCapturedRuntimeSnapshot,
-} from "../src/runtime/snapshot-construction.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+} from "../src/runtime/snapshot/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 /**
  * A plan whose `askChoice` is replaced by a prepared form reading the local `request`, as the compiler lowers `askForm`

@@ -1,6 +1,6 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { captureOrReuseInstructionPlan } from "../plan/capture.js";
-import { interruptFrame } from "./activations.js";
+import { interruptFrame } from "./scopes/activations.js";
 import type {
   RuntimeForegroundActionSnapshot,
   RuntimePendingActionSnapshot,
@@ -11,7 +11,7 @@ import {
   restoreCheckpoint,
   serializeValidatedRuntimeJson,
   type RuntimeCheckpoint,
-} from "./checkpoint.js";
+} from "./snapshot/checkpoint.js";
 import {
   executeValidatedInstruction,
   instructionBudget,
@@ -29,16 +29,19 @@ import {
   type RandomDrawResolutionOutcome,
   type RandomDrawView,
   type RandomPolicy,
-} from "./random-control.js";
+} from "./random/random-control.js";
 import {
   admittedBuiltinRecord,
   type RuntimeBuiltinFunction,
   type RuntimeCapabilities,
 } from "./evaluator.js";
 import type { InterpreterEvent } from "./events.js";
-import type { RuntimeInstructionObserver, RuntimeInstructionTrace } from "./instruction-trace.js";
-import { GLOBAL_SCOPE_ID } from "./prepared-references.js";
-import { runtimeDebugPreview, type RuntimeDebugContext } from "./debug-trace.js";
+import type {
+  RuntimeInstructionObserver,
+  RuntimeInstructionTrace,
+} from "./debug/instruction-trace.js";
+import { GLOBAL_SCOPE_ID } from "./scopes/prepared-references.js";
+import { runtimeDebugPreview, type RuntimeDebugContext } from "./debug/debug-trace.js";
 import {
   completeValidatedAction,
   type ActionCompletionOptions,
@@ -68,17 +71,20 @@ import {
   updateValidatedInteraction,
   type InteractionUpdateOutcome,
 } from "./operations/update-interaction.js";
-import { inspectRuntimeState, type RuntimeInspectionResult } from "./inspection.js";
+import { inspectRuntimeState, type RuntimeInspectionResult } from "./debug/inspection.js";
 import {
   mediaPlaybackProjection,
   stageProjection,
   type MediaPlaybackProjection,
   type StageProjection,
-} from "./media-projection.js";
-import { permanentButtonProjection, type PermanentButtonProjection } from "./permanent-buttons.js";
+} from "./background/media-projection.js";
+import {
+  permanentButtonProjection,
+  type PermanentButtonProjection,
+} from "./background/permanent-buttons.js";
 import { captureExecutableData, RuntimeDataError } from "./operations/support.js";
-import { copyPlainData, publishResult } from "./plain-data.js";
-import { hasSnapshotTag, snapshotTag } from "./snapshot-tag.js";
+import { copyPlainData, publishResult } from "./values/plain-data.js";
+import { hasSnapshotTag, snapshotTag } from "./snapshot/snapshot-tag.js";
 import type { PresentationSettings } from "../temporal.js";
 import type { SourceSpan } from "../source.js";
 import {
@@ -93,10 +99,10 @@ import {
   type RuntimeScopeFrameSnapshot,
   type RuntimeSnapshot,
   type RuntimeStatus,
-} from "./state.js";
+} from "./snapshot/state.js";
 import type { RuntimeInterruptibleActionSnapshot } from "./actions/interrupts.js";
 import { bindingScopeId } from "./evaluation/bindings.js";
-import { createFreshRuntimeSnapshotWithValidatedPlan } from "./snapshot-construction.js";
+import { createFreshRuntimeSnapshotWithValidatedPlan } from "./snapshot/snapshot-construction.js";
 
 /** What every operation of a session, and of the sessions forked from it, may call. */
 export interface RuntimeSessionOptions {

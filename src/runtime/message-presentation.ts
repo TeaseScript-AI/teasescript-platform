@@ -1,11 +1,11 @@
 import { normalizeColor } from "../color.js";
 import { isMessagePresentationOption, type MessagePresentation } from "../message-presentation.js";
 import type { SourceSpan } from "../source.js";
-import type { RuntimeSpeakerSnapshot } from "./state.js";
-import type { SerializableRuntimeValue } from "./serializable-values.js";
-import { isObject } from "./value-predicates.js";
+import type { RuntimeSpeakerSnapshot } from "./snapshot/state.js";
+import type { SerializableRuntimeValue } from "./values/serializable-values.js";
+import { isObject } from "./values/value-predicates.js";
 import { RuntimeFault } from "./errors.js";
-import { describeShownValue, shownChoice } from "./value-types.js";
+import { describeShownValue, shownChoice } from "./values/value-types.js";
 
 export function resolveMessagePresentation(
   explicit: SerializableRuntimeValue,

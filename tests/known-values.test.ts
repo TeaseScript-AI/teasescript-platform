@@ -8,7 +8,7 @@ import { run } from "../src/runtime/engine.js";
 import {
   serializableEquals,
   type SerializableRuntimeValue,
-} from "../src/runtime/serializable-values.js";
+} from "../src/runtime/values/serializable-values.js";
 import { KNOWN_VALUE_WORK, KnownValues } from "../src/static-evaluation.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSource } from "./helpers/run-valid-source.js";

@@ -13,14 +13,14 @@ import {
   storageKeyPlace,
   storageKeyType,
   writeOwnedScriptStorage,
-} from "../script-storage.js";
-import { cloneCapturedSerializableValue } from "../serializable-values.js";
-import type { RuntimeSnapshot } from "../state.js";
+} from "../host-data/script-storage.js";
+import { cloneCapturedSerializableValue } from "../values/serializable-values.js";
+import type { RuntimeSnapshot } from "../snapshot/state.js";
 import {
   ACTION_COMPLETION_EVENTS,
   type RuntimeStorageWriteActionSnapshot,
 } from "../actions/model.js";
-import { assertValueType } from "../value-types.js";
+import { assertValueType } from "../values/value-types.js";
 import { advance, fault } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
 

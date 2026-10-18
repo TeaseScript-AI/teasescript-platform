@@ -1,14 +1,14 @@
-import type { RandomDrawPendingOutcome } from "../random-control.js";
+import type { RandomDrawPendingOutcome } from "../random/random-control.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import type { InstructionPlan } from "../../plan/model.js";
-import { interruptFrame } from "../activations.js";
+import { interruptFrame } from "../scopes/activations.js";
 import { applyFormUpdate, formStatesEqual } from "../actions/form.js";
-import type { RuntimeSnapshot } from "../state.js";
-import { withDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
+import type { RuntimeSnapshot } from "../snapshot/state.js";
+import { withDebugTrace, type RuntimeDebugContext } from "../debug/debug-trace.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { captureExecutableData, pendingResult, positiveSafeInteger } from "./support.js";
 import type { PendingActionOperationResult } from "./model.js";
-import { isPlainRecord } from "../plain-data.js";
+import { isPlainRecord } from "../values/plain-data.js";
 import { randomDrawPending } from "./model.js";
 
 export type InteractionUpdateOutcome =

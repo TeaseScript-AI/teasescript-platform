@@ -9,32 +9,32 @@ import type {
   SetFallbackInstruction,
   TransferInstruction,
 } from "../../plan/model.js";
-import { runsNothing } from "../activation-validation.js";
-import { innermostFileCallIndex } from "../activations.js";
-import { leaveScopes, sweepRetainedScopes } from "../captures.js";
+import { runsNothing } from "../scopes/activation-validation.js";
+import { innermostFileCallIndex } from "../scopes/activations.js";
+import { leaveScopes, sweepRetainedScopes } from "../scopes/captures.js";
 import { RuntimeFault } from "../errors.js";
-import { messageText } from "../text-length.js";
+import { messageText } from "../values/text-length.js";
 import type { Evaluator } from "../evaluator.js";
-import { drawFromSessionGenerator, sampleIndex } from "../random-draws.js";
-import type { TraceStore } from "../debug-trace.js";
-import type { RandomControl } from "../random-control.js";
-import { isScriptReference } from "../value-predicates.js";
+import { drawFromSessionGenerator, sampleIndex } from "../random/random-draws.js";
+import type { TraceStore } from "../debug/debug-trace.js";
+import type { RandomControl } from "../random/random-control.js";
+import { isScriptReference } from "../values/value-predicates.js";
 import type { InterpreterEvent } from "../events.js";
-import type { RuntimeTimerSnapshot } from "../timers.js";
+import type { RuntimeTimerSnapshot } from "../background/timers.js";
 import type {
   RuntimeFileCallFrameSnapshot,
   RuntimeScopeFrameSnapshot,
   RuntimeSnapshot,
-} from "../state.js";
+} from "../snapshot/state.js";
 import { assertCounterCanAdvance, assertEventSequenceCapacity } from "./support.js";
 import { stopTimerAction } from "./timer-lifecycle.js";
 import {
   removePermanentButtons,
   type RuntimePermanentButtonSnapshot,
-} from "../permanent-buttons.js";
+} from "../background/permanent-buttons.js";
 import { describeValue } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
-import { cloneTransferDestination } from "../snapshot-construction.js";
+import { cloneTransferDestination } from "../snapshot/snapshot-construction.js";
 
 /*
  * Transfers (ADR 0022 §5). Each entry into a file is an activation with its own top-level variables, in a root scope.

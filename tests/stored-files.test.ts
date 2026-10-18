@@ -10,18 +10,22 @@ import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
-} from "../src/runtime/checkpoint.js";
+} from "../src/runtime/snapshot/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
-import type { FreshRuntimeOptions, RuntimeSnapshot } from "../src/runtime/state.js";
-import { fileType, storedFileKind, type StoredFileKind } from "../src/runtime/stored-files.js";
+import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
+import type { FreshRuntimeOptions, RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
+import {
+  fileType,
+  storedFileKind,
+  type StoredFileKind,
+} from "../src/runtime/host-data/stored-files.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import type { PlayerFileStoreAnswer } from "../player/runtime-adapter.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 /*
  * fileFromBase64, fileToBase64, hashFile, and toJson and fromJson with files (V30 §13 and §33), from source through the

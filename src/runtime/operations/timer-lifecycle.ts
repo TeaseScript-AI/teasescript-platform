@@ -6,8 +6,8 @@ import {
   mainSourceSpan,
 } from "../../plan/model.js";
 import { formatDuration } from "../../duration.js";
-import { cloneCaptures, sweepRetainedScopes } from "../captures.js";
-import { interruptFrame, interruptRunning } from "../activations.js";
+import { cloneCaptures, sweepRetainedScopes } from "../scopes/captures.js";
+import { interruptFrame, interruptRunning } from "../scopes/activations.js";
 import type { SourceSpan } from "../../source.js";
 import type {
   RuntimeTimerActionSnapshot,
@@ -16,10 +16,10 @@ import type {
 import { isValidSessionTime } from "../actions/delay.js";
 import { holdsCatchUp, interruptibleAction } from "../actions/interrupts.js";
 import type { ActionCompletedEvent, DeveloperWarningEvent, InterpreterEvent } from "../events.js";
-import { drawFromSessionGenerator, sampleRangeInteger } from "../random-draws.js";
-import type { TraceStore } from "../debug-trace.js";
-import type { RandomControl } from "../random-control.js";
-import type { RuntimeSnapshot, RuntimeTimerInterruptionSnapshot } from "../state.js";
+import { drawFromSessionGenerator, sampleRangeInteger } from "../random/random-draws.js";
+import type { TraceStore } from "../debug/debug-trace.js";
+import type { RandomControl } from "../random/random-control.js";
+import type { RuntimeSnapshot, RuntimeTimerInterruptionSnapshot } from "../snapshot/state.js";
 import {
   expireTimerRound,
   settledTimerRecord,
@@ -27,7 +27,7 @@ import {
   type RuntimeTimerRangeSnapshot,
   type RuntimeTimerSnapshot,
   type TimerHandleRecord,
-} from "../timers.js";
+} from "../background/timers.js";
 import { assertEventSequenceCapacity, takeSequence, takeSettlementSequence } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
 

@@ -8,7 +8,7 @@ import type {
   RuntimeStatus,
 } from "../src/index.js";
 import { captureExternalData } from "../src/external-data-capture.js";
-import { RandomDecisionError } from "../src/runtime/random-control.js";
+import { RandomDecisionError } from "../src/runtime/random/random-control.js";
 import {
   debugExportJson,
   rebuildRecordedSession,

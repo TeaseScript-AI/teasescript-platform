@@ -65,17 +65,17 @@ import { formSummaryOf, type FormSummaryLine } from "../src/runtime/actions/form
 import { instructionSourcePath } from "../src/plan/model.js";
 import { evaluateTagSteps } from "../src/tag-query.js";
 import { PLAYER } from "../src/speaker-terms.js";
-import type { RuntimeAccountInput } from "../src/runtime/account.js";
-import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
+import type { RuntimeAccountInput } from "../src/runtime/host-data/account.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
 import {
   mediaTerminalProgressMs,
   nextMediaEvent,
   repeatsSilently,
   type RuntimeMediaSnapshot,
-} from "../src/runtime/media.js";
+} from "../src/runtime/background/media.js";
 import type { DebugAnswerInput } from "./debug-export.js";
 import type { DebugRecorder } from "./debug-recorder.js";
-import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
+import type { RuntimeDebugContext } from "../src/runtime/debug/debug-trace.js";
 import type {
   PlayerFormEditorPresentation,
   PlayerFormFieldPresentation,

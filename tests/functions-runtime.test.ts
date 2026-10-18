@@ -8,12 +8,12 @@ import type {
   SerializableRuntimeObject,
   SerializableRuntimeSet,
   SerializableRuntimeValue,
-} from "../src/runtime/serializable-values.js";
+} from "../src/runtime/values/serializable-values.js";
 import {
   DEFAULT_MAX_CALL_DEPTH,
   MAX_SUPPORTED_CALL_DEPTH,
   type RuntimeSnapshot,
-} from "../src/runtime/state.js";
+} from "../src/runtime/snapshot/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runValidSource as runSource } from "./helpers/run-valid-source.js";
@@ -21,8 +21,8 @@ import { runValidSourceUntilExit } from "./helpers/run-until-exit.js";
 import { createFreshRuntimeSession } from "../src/index.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { sayTexts } from "./helpers/runtime-events.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 test("executes positional and named function calls with returned values", () => {
   const result = runValidSourceUntilExit(

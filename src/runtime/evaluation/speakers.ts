@@ -9,9 +9,14 @@ import {
   GLOBAL_SCOPE_ID,
   detachPreparedReferencesForMutation,
   type PreparedReferenceStep,
-} from "../prepared-references.js";
-import { isVisibleScalar, quotedTextWithin, valueNotation, visibleText } from "../value-text.js";
-import { checkTextLength, MAX_TEXT_LENGTH } from "../text-length.js";
+} from "../scopes/prepared-references.js";
+import {
+  isVisibleScalar,
+  quotedTextWithin,
+  valueNotation,
+  visibleText,
+} from "../values/value-text.js";
+import { checkTextLength, MAX_TEXT_LENGTH } from "../values/text-length.js";
 import { formatDuration } from "../../duration.js";
 import {
   cloneCapturedSerializableValue,
@@ -20,8 +25,8 @@ import {
   type SerializableMediaHandle,
   type SerializableCameraViewHandle,
   type SerializablePermanentButtonHandle,
-} from "../serializable-values.js";
-import { currentTemporalContext, type RuntimeSpeakerSnapshot } from "../state.js";
+} from "../values/serializable-values.js";
+import { currentTemporalContext, type RuntimeSpeakerSnapshot } from "../snapshot/state.js";
 import {
   isDict,
   isDuration,
@@ -30,12 +35,12 @@ import {
   isTimerHandle,
   isCameraView,
   isPermanentButton,
-} from "../value-predicates.js";
-import { describeShownValue } from "../value-types.js";
-import { mediaProperty } from "../media.js";
-import { timerProperty } from "../timers.js";
-import { shownPermanentButton } from "../permanent-buttons.js";
-import { stateKey } from "../debug-trace.js";
+} from "../values/value-predicates.js";
+import { describeShownValue } from "../values/value-types.js";
+import { mediaProperty } from "../background/media.js";
+import { timerProperty } from "../background/timers.js";
+import { shownPermanentButton } from "../background/permanent-buttons.js";
+import { stateKey } from "../debug/debug-trace.js";
 import { VALUE_KINDS, valueKindOf } from "../../value-kinds.js";
 import { timerOf, mediaOf, cameraView } from "./handles.js";
 import { randomItem } from "./draws.js";

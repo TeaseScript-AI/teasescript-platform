@@ -21,7 +21,7 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
   type RuntimeCheckpoint,
-} from "../../src/runtime/checkpoint.js";
+} from "../../src/runtime/snapshot/checkpoint.js";
 import type {
   RuntimeChatPacingGateActionSnapshot,
   RuntimeInteractionActionSnapshot,
@@ -34,7 +34,7 @@ import {
 import {
   cloneCapturedRuntimeSnapshot,
   createFreshRuntimeSnapshotWithValidatedPlan,
-} from "../../src/runtime/snapshot-construction.js";
+} from "../../src/runtime/snapshot/snapshot-construction.js";
 
 export interface WorkspaceDiagnostic {
   /** The project file, or the image, the diagnostic belongs to. */

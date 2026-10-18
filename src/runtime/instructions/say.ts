@@ -1,6 +1,6 @@
-import { exactDurationMilliseconds } from "../temporal-operations.js";
+import { exactDurationMilliseconds } from "../values/temporal-operations.js";
 import { resolveMessagePresentation } from "../message-presentation.js";
-import { sayStagesSelectively } from "../say-staging.js";
+import { sayStagesSelectively } from "./say-staging.js";
 import type { MessagePresentation } from "../../message-presentation.js";
 import type { Instruction } from "../../plan/model.js";
 import { parseMessageMarkup, type MessageMarkup } from "../../message-markup.js";
@@ -13,8 +13,8 @@ import {
   setCapturedTemporary,
   takeSequence,
 } from "../operations/support.js";
-import { bindingKey, stateKey } from "../debug-trace.js";
-import { GLOBAL_SCOPE_ID } from "../prepared-references.js";
+import { bindingKey, stateKey } from "../debug/debug-trace.js";
+import { GLOBAL_SCOPE_ID } from "../scopes/prepared-references.js";
 import type { ActionRequestedEvent, InterpreterEvent, OutputSpeaker, SayEvent } from "../events.js";
 import {
   cloneCapturedSerializableValue,
@@ -22,13 +22,13 @@ import {
   getSerializableProperty,
   type SerializableMessageHandle,
   type SerializableRuntimeValue,
-} from "../serializable-values.js";
+} from "../values/serializable-values.js";
 import {
   type RuntimeSnapshot,
   type RuntimeSpeakerSnapshot,
   type RuntimeTemporarySnapshot,
   currentTemporalContext,
-} from "../state.js";
+} from "../snapshot/state.js";
 import {
   ACTION_COMPLETION_EVENTS,
   type RuntimeChatPacingGateActionSnapshot,
@@ -38,9 +38,9 @@ import {
   calculateSmartPacingDurationMs,
   exactPacingMilliseconds,
 } from "../actions/pacing.js";
-import { describeShownValue } from "../value-types.js";
-import { isAnyDuration, isObject } from "../value-predicates.js";
-import { fieldText } from "../value-text.js";
+import { describeShownValue } from "../values/value-types.js";
+import { isAnyDuration, isObject } from "../values/value-predicates.js";
+import { fieldText } from "../values/value-text.js";
 import {
   advance,
   currentCallFrameId,
@@ -50,7 +50,7 @@ import {
   type SourceSpan,
 } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
-import { cloneCapturedRuntimeSnapshot } from "../snapshot-construction.js";
+import { cloneCapturedRuntimeSnapshot } from "../snapshot/snapshot-construction.js";
 
 // Say and its speakers: declaring a speaker, and preparing, showing, and pacing a message.
 

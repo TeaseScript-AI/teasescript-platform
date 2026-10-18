@@ -5,7 +5,7 @@ import test from "node:test";
 import { run } from "../src/runtime/engine.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
 
 test("downstream expression frames traverse each public stage and resume on a constrained stack", () => {
   const api = new URL("../src/index.js", import.meta.url).href;

@@ -4,7 +4,10 @@ import { gunzipSync, gzipSync } from "node:zlib";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
 import { createPlayerRuntimeSession, playerRuntimeSnapshot } from "../player/runtime-adapter.js";
-import { CheckpointError, serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
+import {
+  CheckpointError,
+  serializeValidatedRuntimeJson,
+} from "../src/runtime/snapshot/checkpoint.js";
 import {
   checkStorageTransferImages,
   bundleSavedScripts,

@@ -2,9 +2,9 @@ import { captureExternalData } from "../../external-data-capture.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import type { InterpreterEvent } from "../events.js";
-import { loadMedia } from "../media.js";
-import type { RuntimeSnapshot } from "../state.js";
-import { isPlainRecord } from "../plain-data.js";
+import { loadMedia } from "../background/media.js";
+import type { RuntimeSnapshot } from "../snapshot/state.js";
+import { isPlainRecord } from "../values/plain-data.js";
 import {
   activeMediaAction,
   emitDeveloperWarning,
@@ -15,10 +15,10 @@ import {
 } from "./media-lifecycle.js";
 import type { PendingActionOperationResult } from "./model.js";
 import { catchUp, catchUpPolicy, catchUpResult, type CatchUpOptions } from "./observe-time.js";
-import type { RandomDrawPendingOutcome, RandomPolicy } from "../random-control.js";
+import type { RandomDrawPendingOutcome, RandomPolicy } from "../random/random-control.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { captureExecutableData, type CapturedExecutableData, pendingResult } from "./support.js";
-import { withDebugTrace, type TraceStore } from "../debug-trace.js";
+import { withDebugTrace, type TraceStore } from "../debug/debug-trace.js";
 import { randomDrawPending } from "./model.js";
 
 /** The Player's load result for one media ID. */

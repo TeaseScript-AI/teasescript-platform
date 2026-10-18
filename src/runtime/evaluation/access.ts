@@ -14,16 +14,16 @@ import {
   missingTemporalMember,
   calendarDurationProperty,
   temporalProperty,
-} from "../temporal-operations.js";
+} from "../values/temporal-operations.js";
 import type { ExpressionPlan } from "../../plan/model.js";
 import { anglePropertyMessage } from "../../angle.js";
 import { speakerPropertySource, speakerPropertyValue } from "../../speaker-terms.js";
 import { RuntimeFault } from "../errors.js";
-import { quotedText } from "../value-text.js";
-import { messageText } from "../text-length.js";
-import { loweredOperand } from "../lowered-operands.js";
+import { quotedText } from "../values/value-text.js";
+import { messageText } from "../values/text-length.js";
+import { loweredOperand } from "./lowered-operands.js";
 import { durationPropertyMessage } from "../../duration.js";
-import { missingMemberMessage } from "../string-operations.js";
+import { missingMemberMessage } from "../values/string-operations.js";
 import { stringLength, unknownTextMemberMessage } from "../../text-operations.js";
 import { missingPropertyMessage } from "../../object-properties.js";
 import {
@@ -35,8 +35,8 @@ import {
   type SerializableRuntimeObject,
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
-} from "../serializable-values.js";
-import type { RuntimeSpeakerSnapshot } from "../state.js";
+} from "../values/serializable-values.js";
+import type { RuntimeSpeakerSnapshot } from "../snapshot/state.js";
 import {
   isAngle,
   isCalendarDuration,
@@ -52,10 +52,10 @@ import {
   isMessageHandle,
   isCameraView,
   isPermanentButton,
-} from "../value-predicates.js";
-import { describeShownValue } from "../value-types.js";
-import { mediaProperty } from "../media.js";
-import { timerProperty } from "../timers.js";
+} from "../values/value-predicates.js";
+import { describeShownValue } from "../values/value-types.js";
+import { mediaProperty } from "../background/media.js";
+import { timerProperty } from "../background/timers.js";
 import { numberFromText } from "../../conversions.js";
 import { describeValue, isDictKey } from "../../value-kinds.js";
 import { timerOf, mediaOf, cameraView, liveMessage, readHandleProperty } from "./handles.js";

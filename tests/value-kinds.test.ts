@@ -9,7 +9,7 @@ import {
   serializableEquals,
   validateSerializableValue,
   type SerializableRuntimeValue,
-} from "../src/runtime/serializable-values.js";
+} from "../src/runtime/values/serializable-values.js";
 import {
   describeValue as describeType,
   UNKNOWN_TYPE,

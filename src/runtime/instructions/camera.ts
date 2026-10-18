@@ -14,12 +14,12 @@ import {
   setCapturedTemporary,
   takeSequence,
 } from "../operations/support.js";
-import { stateKey } from "../debug-trace.js";
+import { stateKey } from "../debug/debug-trace.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
-import type { SerializableRuntimeValue } from "../serializable-values.js";
-import type { RuntimeSnapshot } from "../state.js";
+import type { SerializableRuntimeValue } from "../values/serializable-values.js";
+import type { RuntimeSnapshot } from "../snapshot/state.js";
 import { ACTION_COMPLETION_EVENTS, type RuntimeCaptureActionSnapshot } from "../actions/model.js";
-import { isList, isSet } from "../value-predicates.js";
+import { isList, isSet } from "../values/value-predicates.js";
 import { describeValue } from "../../value-kinds.js";
 import { advance, fault, type SourceSpan } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";

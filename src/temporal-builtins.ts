@@ -2,7 +2,7 @@
  * The built-ins of date and time values (V30 §35): the clock reads, such as `getDate()`, the methods and fields of
  * dates, times, dates and times, and absolute dates and times, and the parts of a calendar duration. One contract per
  * built-in, shared by the compiler, the runtime, and the editor; the runtime implements each in
- * `runtime/temporal-operations.ts`. A duration has no parts, and a calendar duration no methods. None of them takes
+ * `runtime/values/temporal-operations.ts`. A duration has no parts, and a calendar duration no methods. None of them takes
  * arguments, so none has a domain of its arguments: a call with any fails alike when the script is compiled and when it
  * runs (`temporalArgumentsMessage`).
  */

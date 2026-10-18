@@ -1,5 +1,5 @@
 import { isTimeoutLength } from "../../delay-rules.js";
-import { isSha256Hex } from "../sha256.js";
+import { isSha256Hex } from "../values/sha256.js";
 import { cloneInteractionChoiceValue } from "../../choice-values.js";
 import {
   invalidAnswerMessage,
@@ -15,7 +15,7 @@ import type {
   InteractionChoiceOption,
   InteractionUiPayload,
 } from "../../plan/model.js";
-import type { SerializableRuntimeValue } from "../serializable-values.js";
+import type { SerializableRuntimeValue } from "../values/serializable-values.js";
 import type { CapturedMediaAdmission } from "./capture.js";
 import { presentDate, presentDateTime, presentTime, type TemporalContext } from "../../temporal.js";
 import { recordValidationTestWork } from "../../validation-testing.js";

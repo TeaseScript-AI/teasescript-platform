@@ -3,12 +3,15 @@ import type { PlanSourceLocation, ExpressionPlan, InstructionPlan } from "../../
 import type { SourceSpan as RichSourceSpan } from "../../source.js";
 import { RuntimeFault, internalFault } from "../errors.js";
 import { rangeLength, rangeText, wholeRangeMessage } from "../../range-checks.js";
-import type { SerializableRuntimeRange, SerializableRuntimeValue } from "../serializable-values.js";
-import { readPreparedReference } from "../prepared-references.js";
-import { quotedText } from "../value-text.js";
-import { messageText } from "../text-length.js";
-import { loweredOperand } from "../lowered-operands.js";
-import type { RuntimeTemporarySnapshot } from "../state.js";
+import type {
+  SerializableRuntimeRange,
+  SerializableRuntimeValue,
+} from "../values/serializable-values.js";
+import { readPreparedReference } from "../scopes/prepared-references.js";
+import { quotedText } from "../values/value-text.js";
+import { messageText } from "../values/text-length.js";
+import { loweredOperand } from "./lowered-operands.js";
+import type { RuntimeTemporarySnapshot } from "../snapshot/state.js";
 import type { Evaluator } from "../evaluator.js";
 import { copySpan } from "../../plan/source-location.js";
 

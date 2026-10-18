@@ -7,8 +7,8 @@ import { captureExecutableData } from "../src/runtime/operations/support.js";
 import {
   builtSerializableDictIndex,
   type SerializableRuntimeDict,
-} from "../src/runtime/serializable-values.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
+} from "../src/runtime/values/serializable-values.js";
+import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";

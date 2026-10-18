@@ -47,7 +47,7 @@ import {
   type MediaLoadReport,
   type MediaProgressReport,
 } from "../src/index.js";
-import type { RandomDecision } from "../src/runtime/random-control.js";
+import type { RandomDecision } from "../src/runtime/random/random-control.js";
 
 const reference = "captured-media:11111111-1111-4111-8111-111111111111:1";
 const store = { holds: (asked: string, kind: string) => asked === reference && kind === "image" };

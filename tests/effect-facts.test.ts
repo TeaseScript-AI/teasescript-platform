@@ -21,13 +21,13 @@ import {
   methodEffects,
   writeDraws,
   type EffectFacts,
-} from "../src/runtime/effect-facts.js";
+} from "../src/runtime/evaluation/effect-facts.js";
 import type { TemporalMethodName } from "../src/temporal-builtins.js";
 import type { TextMethodName } from "../src/text-operations.js";
 
 /*
  * What each built-in operation may do besides giving its value, as rollback of a paused draw, say staging, and operand
- * copies read it (src/runtime/effect-facts.ts). The tables are keyed by the names of the operations' contracts, so an
+ * copies read it (src/runtime/evaluation/effect-facts.ts). The tables are keyed by the names of the operations' contracts, so an
  * operation added to a contract needs its row here, and a contract that leaves out an effect fails its row.
  */
 

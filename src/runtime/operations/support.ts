@@ -1,27 +1,27 @@
 import type { RuntimeErrorCode } from "../../diagnostic-codes.js";
 import type { InstructionPlan, PlanSourceLocation } from "../../plan/model.js";
-import { interruptFrame } from "../activations.js";
+import { interruptFrame } from "../scopes/activations.js";
 import { cloneInteractionResult } from "../../choice-values.js";
 import { captureOrReuseInstructionPlan } from "../../plan/capture.js";
 import type { SourceSpan } from "../../source.js";
 import { copySpan } from "../../plan/source-location.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import type { InterpreterEvent } from "../events.js";
-import type { InstructionTraceCollector } from "../instruction-trace.js";
+import type { InstructionTraceCollector } from "../debug/instruction-trace.js";
 import {
   cloneCapturedSerializableValue,
   type SerializableRuntimeValue,
-} from "../serializable-values.js";
-import type { RuntimeSnapshot, RuntimeTemporarySnapshot } from "../state.js";
+} from "../values/serializable-values.js";
+import type { RuntimeSnapshot, RuntimeTemporarySnapshot } from "../snapshot/state.js";
 import {
   requiredActionCompletionEvents,
   type RuntimeActionSettlementSnapshot,
   type RuntimePendingActionSnapshot,
 } from "../actions/model.js";
 import type { PendingActionOperationResult, RuntimeOperationResult } from "./model.js";
-import { captureRuntimeSnapshotWithValidatedPlan } from "../snapshot-validation.js";
-import { cloneInteractionUi } from "../snapshot-construction.js";
-import { dropUnreachableRecords } from "../record-collection.js";
+import { captureRuntimeSnapshotWithValidatedPlan } from "../snapshot/snapshot-validation.js";
+import { cloneInteractionUi } from "../snapshot/snapshot-construction.js";
+import { dropUnreachableRecords } from "../snapshot/record-collection.js";
 
 export class RuntimeDataError extends Error {
   public constructor(

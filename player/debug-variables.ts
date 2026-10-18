@@ -9,7 +9,7 @@ import {
   type RuntimeSessionVariablePreviews,
 } from "../src/index.js";
 import { instructionSourcePath, type InstructionPlan } from "../src/plan/model.js";
-import { quotedText } from "../src/runtime/value-text.js";
+import { quotedText } from "../src/runtime/values/value-text.js";
 
 /**
  * Player Debug's Variables view (DEBUGGER.md "Player Debug"): live variables grouped by where they live, and the trace's

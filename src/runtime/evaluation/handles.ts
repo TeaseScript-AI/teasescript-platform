@@ -1,5 +1,5 @@
 import { argumentShapeProblem } from "../../argument-rules.js";
-import { exactDurationMilliseconds } from "../temporal-operations.js";
+import { exactDurationMilliseconds } from "../values/temporal-operations.js";
 import type { DelayDisplay, ExpressionPlan } from "../../plan/model.js";
 import { parseMessageMarkup } from "../../message-markup.js";
 import { internalFault } from "../errors.js";
@@ -28,10 +28,10 @@ import type {
   SerializableMediaHandle,
   SerializableMessageHandle,
   SerializablePermanentButtonHandle,
-} from "../serializable-values.js";
-import { type RuntimeSnapshot, MAX_RUNTIME_SESSION_TIME_MS } from "../state.js";
-import { isAnyDuration } from "../value-predicates.js";
-import { describeShownValue, shownChoice } from "../value-types.js";
+} from "../values/serializable-values.js";
+import { type RuntimeSnapshot, MAX_RUNTIME_SESSION_TIME_MS } from "../snapshot/state.js";
+import { isAnyDuration } from "../values/value-predicates.js";
+import { describeShownValue, shownChoice } from "../values/value-types.js";
 import {
   pauseMedia,
   resumeMedia,
@@ -39,7 +39,7 @@ import {
   setMediaVolume,
   type MediaHandleRecord,
   type MediaWarning,
-} from "../media.js";
+} from "../background/media.js";
 import {
   activeMediaAction,
   drainMediaEvents,
@@ -54,15 +54,15 @@ import {
   setTimerRepeatDuration,
   type TimerHandleRecord,
   type TimerWarning,
-} from "../timers.js";
+} from "../background/timers.js";
 import {
   activeTimerAction,
   expireTimerAction,
   stopTimerAction,
   timerRecord,
 } from "../operations/timer-lifecycle.js";
-import { removePermanentButtons } from "../permanent-buttons.js";
-import { stateKey } from "../debug-trace.js";
+import { removePermanentButtons } from "../background/permanent-buttons.js";
+import { stateKey } from "../debug/debug-trace.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import type { Evaluator } from "../evaluator.js";
 import { type SourceSpan, fault, receiverLabel } from "./support.js";

@@ -26,7 +26,7 @@ import {
 } from "./temporal-builtins.js";
 import { misspelledPropertyHint } from "./object-properties.js";
 import { parsePublicKey } from "./public-keys.js";
-import { cannotConvert } from "./runtime/value-types.js";
+import { cannotConvert } from "./runtime/values/value-types.js";
 import type { SourceSpan } from "./source.js";
 import { staticVisibleText, type KnownValue } from "./static-evaluation.js";
 import {
@@ -107,7 +107,7 @@ import {
   type TextParameter,
   type TextSignature,
 } from "./text-operations.js";
-import { isRegex } from "./runtime/value-predicates.js";
+import { isRegex } from "./runtime/values/value-predicates.js";
 
 /** The value that every run gives an expression, when the compiler knows it (see `KnownValues`). */
 type Known = (expression: Expression) => KnownValue | undefined;

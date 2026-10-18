@@ -5,8 +5,8 @@ import { compileSource } from "../src/compiler.js";
 import { CLOCK_FUNCTIONS } from "../src/language-facts.js";
 import { run } from "../src/runtime/engine.js";
 import { RuntimeFault } from "../src/runtime/errors.js";
-import type { SerializableRuntimeTemporal } from "../src/runtime/serializable-values.js";
-import { temporalMethod, temporalNow } from "../src/runtime/temporal-operations.js";
+import type { SerializableRuntimeTemporal } from "../src/runtime/values/serializable-values.js";
+import { temporalMethod, temporalNow } from "../src/runtime/values/temporal-operations.js";
 import { createSourcePosition, createSourceSpan } from "../src/source.js";
 import {
   CALENDAR_DURATION_PARTS,

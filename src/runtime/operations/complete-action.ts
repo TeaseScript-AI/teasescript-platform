@@ -1,13 +1,13 @@
 import type { DeveloperWarningCode } from "../../diagnostic-codes.js";
 import { type InstructionPlan, type InteractionKind, mainSourceSpan } from "../../plan/model.js";
-import { interruptFrame } from "../activations.js";
-import { messageText } from "../text-length.js";
+import { interruptFrame } from "../scopes/activations.js";
+import { messageText } from "../values/text-length.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import {
   currentTemporalContext,
   type RuntimeInteractionResultHandoffSnapshot,
   type RuntimeSnapshot,
-} from "../state.js";
+} from "../snapshot/state.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimeCaptureActionSnapshot,
@@ -26,7 +26,7 @@ import type {
   InterpreterEvent,
   PlayerTranscriptEvent,
 } from "../events.js";
-import { writeOwnedScriptStorage } from "../script-storage.js";
+import { writeOwnedScriptStorage } from "../host-data/script-storage.js";
 import {
   captureUnavailableMessage,
   resolveCaptureCompletion,
@@ -35,8 +35,8 @@ import {
 import { resolveFileStoreCompletion } from "../actions/file-store.js";
 import { resolveLockCompletion } from "../actions/lock.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
-import { addStoredFile, addStoredFiles } from "../stored-files.js";
-import { createCapturedSerializableList } from "../serializable-values.js";
+import { addStoredFile, addStoredFiles } from "../host-data/stored-files.js";
+import { createCapturedSerializableList } from "../values/serializable-values.js";
 import { formShownOptions, timedOutFormResult } from "../actions/form.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
@@ -47,7 +47,7 @@ import {
   stateKey,
   type RuntimeDebugContext,
   type TraceStore,
-} from "../debug-trace.js";
+} from "../debug/debug-trace.js";
 import {
   assertEventSequenceCapacity,
   captureExecutableData,
@@ -59,7 +59,7 @@ import {
   takeSettlementSequence,
 } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
-import { isPlainRecord } from "../plain-data.js";
+import { isPlainRecord } from "../values/plain-data.js";
 import { randomDrawPending } from "./model.js";
 
 export interface ActionCompletionOptions {

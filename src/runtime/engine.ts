@@ -28,7 +28,7 @@ import { showPermanentButton } from "./instructions/show-permanent-button.js";
 import { writeStorage } from "./instructions/storage-write.js";
 import { advance, currentCallFrameId, currentFrame, fault } from "./instructions/support.js";
 import { executeWait, startTimer } from "./instructions/timers.js";
-import { leaveScopes } from "./captures.js";
+import { leaveScopes } from "./scopes/captures.js";
 import {
   type Instruction,
   type InstructionPlan,
@@ -47,8 +47,8 @@ export type {
   RuntimeCapabilityCall,
 } from "./evaluator.js";
 import { internalFault, RuntimeFault, type RuntimeErrorInfo } from "./errors.js";
-import { collectionTooLarge, exceedsHostCollectionSize } from "./collection-size.js";
-import { textTooLong } from "./text-length.js";
+import { collectionTooLarge, exceedsHostCollectionSize } from "./values/collection-size.js";
+import { textTooLong } from "./values/text-length.js";
 import {
   assertCounterCanAdvance,
   captureExecutableData,
@@ -60,7 +60,7 @@ import {
 } from "./operations/support.js";
 import type { PendingActionOperationResult, RuntimeOperationResult } from "./operations/model.js";
 import { captureExternalData } from "../external-data-capture.js";
-import { copyPlainData, isPlainRecord } from "./plain-data.js";
+import { copyPlainData, isPlainRecord } from "./values/plain-data.js";
 import {
   compileRandomPolicy,
   RandomControl,
@@ -75,18 +75,24 @@ import {
   type RandomPolicy,
   type RandomRootOperation,
   type RuntimePendingRandomDrawSnapshot,
-} from "./random-control.js";
+} from "./random/random-control.js";
 import {
   executeEnd,
   executeGoto,
   executeSetFallback,
   executeTransfer,
 } from "./operations/transfers.js";
-import { contextRootId } from "./activations.js";
-import { loweredLogicalOperator } from "./lowered-operands.js";
-import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "./debug-trace.js";
-import { InstructionTraceCollector, type RuntimeInstructionObserver } from "./instruction-trace.js";
-import { detachPreparedReferencesForMutation, GLOBAL_SCOPE_ID } from "./prepared-references.js";
+import { contextRootId } from "./scopes/activations.js";
+import { loweredLogicalOperator } from "./evaluation/lowered-operands.js";
+import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "./debug/debug-trace.js";
+import {
+  InstructionTraceCollector,
+  type RuntimeInstructionObserver,
+} from "./debug/instruction-trace.js";
+import {
+  detachPreparedReferencesForMutation,
+  GLOBAL_SCOPE_ID,
+} from "./scopes/prepared-references.js";
 export type {
   ActionCompletionOutcome,
   PendingActionOperationResult,
@@ -95,9 +101,9 @@ export type {
 } from "./operations/model.js";
 export { RuntimeDataError } from "./operations/support.js";
 import type { ExitEvent, InterpreterEvent, RuntimeFailureEvent } from "./events.js";
-import { cloneCapturedSerializableValue } from "./serializable-values.js";
-import type { RuntimeSnapshot } from "./state.js";
-import { snapshotValidationAnalysis } from "./snapshot-validation-analysis.js";
+import { cloneCapturedSerializableValue } from "./values/serializable-values.js";
+import type { RuntimeSnapshot } from "./snapshot/state.js";
+import { snapshotValidationAnalysis } from "./snapshot/snapshot-validation-analysis.js";
 import { startTimerHandler, timerHandlerDispatchable } from "./operations/timer-handlers.js";
 import { stopAllTimersForSessionEnd } from "./operations/timer-lifecycle.js";
 import { copySpan } from "../plan/source-location.js";
@@ -105,7 +111,7 @@ import { notBoolean, notLogicalOperand } from "./evaluation/operators.js";
 import { USE_DEFAULT } from "./evaluation/support.js";
 import { stopAllMediaForSessionEnd } from "./operations/media-lifecycle.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
-import { assertValueType } from "./value-types.js";
+import { assertValueType } from "./values/value-types.js";
 
 export interface RuntimeRunOptions {
   readonly instructionBudget?: number;

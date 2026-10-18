@@ -1,5 +1,5 @@
-import { exactDurationMilliseconds } from "../temporal-operations.js";
-import { resolveCaptures } from "../captures.js";
+import { exactDurationMilliseconds } from "../values/temporal-operations.js";
+import { resolveCaptures } from "../scopes/captures.js";
 import type { Instruction, InstructionPlan } from "../../plan/model.js";
 import {
   blockingRepeatMessage,
@@ -25,11 +25,11 @@ import {
   setCapturedTemporary,
   takeSequence,
 } from "../operations/support.js";
-import { contextRootId } from "../activations.js";
-import { stateKey } from "../debug-trace.js";
+import { contextRootId } from "../scopes/activations.js";
+import { stateKey } from "../debug/debug-trace.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
-import type { SerializableRuntimeValue } from "../serializable-values.js";
-import type { RuntimeSnapshot } from "../state.js";
+import type { SerializableRuntimeValue } from "../values/serializable-values.js";
+import type { RuntimeSnapshot } from "../snapshot/state.js";
 import {
   ACTION_COMPLETION_EVENTS,
   type RuntimeMediaActionSnapshot,
@@ -41,9 +41,9 @@ import {
   stopMediaAction,
   stopStageVideo,
 } from "../operations/media-lifecycle.js";
-import { cloneMedia, type RuntimeMediaRepeatSnapshot } from "../media.js";
-import { describeShownValue } from "../value-types.js";
-import { isAnyDuration } from "../value-predicates.js";
+import { cloneMedia, type RuntimeMediaRepeatSnapshot } from "../background/media.js";
+import { describeShownValue } from "../values/value-types.js";
+import { isAnyDuration } from "../values/value-predicates.js";
 import { formatDuration } from "../../duration.js";
 import { advance, durationFix, fault, type SourceSpan } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";

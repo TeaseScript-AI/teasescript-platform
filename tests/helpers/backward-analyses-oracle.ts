@@ -8,9 +8,9 @@ import {
 import {
   snapshotValidationAnalysis,
   type SnapshotValidationAnalysis,
-} from "../../src/runtime/snapshot-validation-analysis.js";
-import { requiredContinuationTemporaries } from "../../src/runtime/frame-validation.js";
-import type { ContinuationRequests } from "../../src/runtime/frame-validation.js";
+} from "../../src/runtime/snapshot/snapshot-validation-analysis.js";
+import { requiredContinuationTemporaries } from "../../src/runtime/snapshot/frame-validation.js";
+import type { ContinuationRequests } from "../../src/runtime/snapshot/frame-validation.js";
 
 /*
  * The two backward analyses as they walked the plan before they moved onto the plan's control flow

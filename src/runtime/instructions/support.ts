@@ -2,9 +2,9 @@ import type { RuntimeErrorCode } from "../../diagnostic-codes.js";
 import type { PlanSourceLocation } from "../../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../../source.js";
 import { internalFault, RuntimeFault } from "../errors.js";
-import type { SerializableRuntimeValue } from "../serializable-values.js";
-import type { RuntimeSnapshot, RuntimeTemporarySnapshot } from "../state.js";
-import { describeShownValue } from "../value-types.js";
+import type { SerializableRuntimeValue } from "../values/serializable-values.js";
+import type { RuntimeSnapshot, RuntimeTemporarySnapshot } from "../snapshot/state.js";
+import { describeShownValue } from "../values/value-types.js";
 import { copySpan } from "../../plan/source-location.js";
 
 // What the engine and its instruction families share.

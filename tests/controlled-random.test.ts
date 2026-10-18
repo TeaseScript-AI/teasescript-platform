@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { compileProject, type ProjectSourceFile } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
-import { RuntimeDebugContext, type RuntimeDebugRecord } from "../src/runtime/debug-trace.js";
+import { RuntimeDebugContext, type RuntimeDebugRecord } from "../src/runtime/debug/debug-trace.js";
 import {
   resumeRandomDraw,
   run,
@@ -27,7 +27,7 @@ import {
   type RandomDrawKind,
   type RandomDrawView,
   type RandomOutcome,
-} from "../src/runtime/random-control.js";
+} from "../src/runtime/random/random-control.js";
 import {
   createFreshRuntimeSession,
   deserializeRuntimeSession,
@@ -35,12 +35,12 @@ import {
   RuntimeSessionError,
   type RuntimeSession,
 } from "../src/runtime/session.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
-import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
+import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
+import { createCheckpoint, serializeCheckpoint } from "../src/runtime/snapshot/checkpoint.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { withDeepSayStaging } from "./helpers/deep-say-staging.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
 
 /*
  * Controlled randomness (docs/RUNTIME.md#controlled-randomness). The central invariant: a pause undoes its unit and

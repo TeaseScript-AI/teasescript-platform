@@ -42,10 +42,10 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
   const semanticUrl = new URL("../src/semantic.js", import.meta.url).href;
   const compilerLoweringUrl = new URL("../src/compiler/compile-program.js", import.meta.url).href;
   const snapshotConstructionUrl = new URL(
-    "../src/runtime/snapshot-construction.js",
+    "../src/runtime/snapshot/snapshot-construction.js",
     import.meta.url,
   ).href;
-  const checkpointUrl = new URL("../src/runtime/checkpoint.js", import.meta.url).href;
+  const checkpointUrl = new URL("../src/runtime/snapshot/checkpoint.js", import.meta.url).href;
   const runtimeEngineUrl = new URL("../src/runtime/engine.js", import.meta.url).href;
   const script = `
     const [

@@ -1,16 +1,16 @@
-import type { RandomControl } from "../random-control.js";
+import type { RandomControl } from "../random/random-control.js";
 import type { InstructionPlan } from "../../plan/model.js";
-import { cloneCaptures, leaveScopes, sweepRetainedScopes } from "../captures.js";
+import { cloneCaptures, leaveScopes, sweepRetainedScopes } from "../scopes/captures.js";
 import type { InterpreterEvent } from "../events.js";
 import { interruptibleAction, resumedAction } from "../actions/interrupts.js";
-import type { RuntimeCallFrameSnapshot, RuntimeSnapshot } from "../state.js";
+import type { RuntimeCallFrameSnapshot, RuntimeSnapshot } from "../snapshot/state.js";
 import { processDueWork } from "./observe-time.js";
 import { reportBlockOverrun, timerHandlerDispatchable } from "./timer-lifecycle.js";
 
 export { timerHandlerDispatchable };
 import { assertCounterCanAdvance } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
-import type { TraceStore } from "../debug-trace.js";
+import type { TraceStore } from "../debug/debug-trace.js";
 
 /**
  * Starts the next queued expiry, cue, or button block as an interrupt frame. The block sees top-level names and its own

@@ -21,15 +21,15 @@ import {
   preparePreparedReferencesForListRemoval,
   preparePreparedReferencesForListReorder,
   refreshPreparedReferenceFallbacks,
-} from "../prepared-references.js";
-import { joinedText } from "../value-text.js";
+} from "../scopes/prepared-references.js";
+import { joinedText } from "../values/value-text.js";
 import {
   checkCollectionLength,
   collectionTooLong,
   MAX_COLLECTION_LENGTH,
-} from "../collection-size.js";
-import { findValue, readCollection, readDict, sortOrder } from "../collection-operations.js";
-import { missingMemberMessage } from "../string-operations.js";
+} from "../values/collection-size.js";
+import { findValue, readCollection, readDict, sortOrder } from "../values/collection-operations.js";
+import { missingMemberMessage } from "../values/string-operations.js";
 import { methodArgumentCountMessage } from "../../text-operations.js";
 import {
   addOwnedSerializableSetValue,
@@ -44,10 +44,10 @@ import {
   type SerializableRuntimeList,
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
-} from "../serializable-values.js";
-import { currentTemporalContext } from "../state.js";
-import { isList, isRange, isSet } from "../value-predicates.js";
-import { assertValueType } from "../value-types.js";
+} from "../values/serializable-values.js";
+import { currentTemporalContext } from "../snapshot/state.js";
+import { isList, isRange, isSet } from "../values/value-predicates.js";
+import { assertValueType } from "../values/value-types.js";
 import { describeValue } from "../../value-kinds.js";
 import type { Evaluator } from "../evaluator.js";
 import { shuffleOrder } from "./draws.js";

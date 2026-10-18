@@ -8,7 +8,7 @@ import { isDictMethod } from "./dict-operations.js";
 import { isAnyHandleMethod } from "./handle-members.js";
 import { isListMethod, LIST_METHODS } from "./list-methods.js";
 import { compileRegex, replacementParts } from "./regex.js";
-import type { SerializableRegex } from "./runtime/serializable-values.js";
+import type { SerializableRegex } from "./runtime/values/serializable-values.js";
 
 /**
  * What an argument must be: `text`, a `regex`, `textOrRegex`, or a whole number (integer), as a `position` in the text

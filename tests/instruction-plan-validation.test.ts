@@ -4,11 +4,15 @@ import test from "node:test";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import type { Instruction, InstructionPlan } from "../src/plan/model.js";
 import type { PlanValidationResult } from "../src/plan/validation.js";
-import { CheckpointError, createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
+import {
+  CheckpointError,
+  createCheckpoint,
+  restoreCheckpoint,
+} from "../src/runtime/snapshot/checkpoint.js";
 import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
-import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 test("reports malformed nested binary expression nodes at their plan paths", () => {
   const malformed = structuredClone(plan("let target = 0\ntarget = 1 + 2 + 3\nexit"));

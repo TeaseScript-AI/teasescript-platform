@@ -10,8 +10,8 @@ import {
   setCapturedTemporary,
   takeSequence,
 } from "../operations/support.js";
-import type { SerializableRuntimeValue } from "../serializable-values.js";
-import { currentTemporalContext, type RuntimeSnapshot } from "../state.js";
+import type { SerializableRuntimeValue } from "../values/serializable-values.js";
+import { currentTemporalContext, type RuntimeSnapshot } from "../snapshot/state.js";
 import {
   base64FromBinary,
   binaryFromBase64,
@@ -20,10 +20,10 @@ import {
   isStandardBase64,
   OCTET_STREAM,
   storedFileKind,
-} from "../stored-files.js";
-import { temporalCaptureAt, wallClockAt } from "../temporal-captures.js";
-import { checkTextLength, messageText } from "../text-length.js";
-import { fieldText } from "../value-text.js";
+} from "../host-data/stored-files.js";
+import { temporalCaptureAt, wallClockAt } from "../host-data/temporal-captures.js";
+import { checkTextLength, messageText } from "../values/text-length.js";
+import { fieldText } from "../values/value-text.js";
 import type { CapturedMediaAdmission } from "./capture.js";
 import type {
   RuntimeLockActionSnapshot,
@@ -33,7 +33,7 @@ import type {
 } from "./model.js";
 import { describeValue } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
-import { isPlainRecord } from "../plain-data.js";
+import { isPlainRecord } from "../values/plain-data.js";
 import { ACTION_COMPLETION_EVENTS, isLockNotice, isLockOutcome } from "./model.js";
 import { USE_DEFAULT } from "../evaluation/support.js";
 
