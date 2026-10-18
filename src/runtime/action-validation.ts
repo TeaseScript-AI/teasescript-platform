@@ -85,6 +85,7 @@ import {
   serializedTopContext,
 } from "./activation-validation.js";
 import { functionHoldingInstruction } from "./snapshot-validation-analysis.js";
+import { isPlainRecord } from "./plain-data.js";
 
 const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
 
@@ -108,12 +109,6 @@ function hasEventSequenceCapacity(value: unknown, count: number): boolean {
 function nonNegativeSafeInteger(value: unknown): value is number {
   // EVIDENCE: validation: Number.isSafeInteger establishes the numeric value before comparison.
   return Number.isSafeInteger(value) && (value as number) >= 0;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {

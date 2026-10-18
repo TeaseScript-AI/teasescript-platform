@@ -128,6 +128,7 @@ import {
   validateScriptStorageEntries,
   type RuntimeScriptStorageEntrySnapshot,
 } from "./script-storage.js";
+import { isPlainRecord } from "./plain-data.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
 export const RUNTIME_SNAPSHOT_VERSION = 88;
@@ -4066,12 +4067,6 @@ function nonNegativeSafeInteger(value: unknown): value is number {
 
 function unsigned32(value: unknown): value is number {
   return nonNegativeSafeInteger(value) && value <= 0xffff_ffff;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {

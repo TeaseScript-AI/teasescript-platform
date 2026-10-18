@@ -17,6 +17,7 @@ import {
   type DateTimeFields,
   type TimeFields,
 } from "../temporal.js";
+import { isPlainRecord } from "./plain-data.js";
 
 export type SerializableRuntimeScalar = string | number | boolean | null;
 
@@ -1266,10 +1267,4 @@ function serializableExternalDataFailureMessage(failure: ExternalDataFailure): s
 function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value);
   return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
