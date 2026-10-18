@@ -404,12 +404,14 @@ export class DebugRecorder {
       if (this.#broken) this.#restart(input);
       // JSON would turn a value such as NaN into null and replay a different call, and a cycle has no JSON form, so
       // such a call is not recorded; the engine's own validation then still refuses or admits it.
-      const exact = captureExternalData(args).ok;
-      // Written without recursion, so a deeply nested argument is recorded like any other.
-      const json = exact ? debugExportJson(args) : "";
+      const captured = captureExternalData(args);
+      // The log keeps the captured arguments, the plain data the engine's own capture reads as well: reading the
+      // arguments again, such as a proxy, could give other values. Written without recursion, so a deeply nested
+      // argument is recorded like any other.
+      const json = captured.ok ? debugExportJson(captured.value) : "";
       // Reading an argument, such as a proxy, may run host code.
       if (owner !== this.#owner) return null;
-      if (!exact) {
+      if (!captured.ok) {
         this.#skip("A call's arguments could not be copied exactly.", input);
         return null;
       }
