@@ -20,7 +20,7 @@ import { naturalOf, type RandomNatural, type RandomSupport } from "../random-con
 import { callNumbers } from "../pure-operations.js";
 import { emptyRangeProblem, rangeLength } from "../../range-checks.js";
 import {
-  cloneSerializableValue,
+  cloneCapturedSerializableValue,
   type SerializableRuntimeList,
   type SerializableRuntimeRange,
   type SerializableRuntimeValue,
@@ -321,7 +321,8 @@ function randomWeighted(
         weights,
       })),
     );
-  const chosen = cloneSerializableValue(choices[index]!);
+  // The choices are parts of the captured arguments, so the result is a trusted copy of one.
+  const chosen = cloneCapturedSerializableValue(choices[index]!);
   evaluator.trace?.randomResult(chosen);
   return chosen;
 }

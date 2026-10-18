@@ -238,7 +238,11 @@ export function createSerializableSet(
   const failure = validateSerializableValueInternal({ kind: "list", items: capture.value }, "$");
   if (failure !== null) throw new SerializableValueError("invalid", failure);
   // EVIDENCE: validation: the captured items were just validated as runtime values.
-  return createCapturedSerializableSet(capture.value as SerializableRuntimeValue[]);
+  const captured = capture.value as SerializableRuntimeValue[];
+  // The capture made new items that nothing else holds, so the set takes them as they are.
+  const set: SerializableRuntimeSet = { kind: "set", items: [] };
+  for (const item of captured) addOwnedSerializableSetValue(set, item);
+  return set;
 }
 
 /** Creates a set of copies of engine-owned, already validated values; the first of equal values is kept. */

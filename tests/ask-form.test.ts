@@ -804,3 +804,32 @@ test("a form with a time limit settles by itself, with its answers as they stand
     `askForm field 'x': onTimeout: "submit" needs a value in every field, but it has none.`,
   );
 });
+
+test("a form's answers are the script's own copy, which the kept settlement and the event never share", () => {
+  const plan = compileValidPlan(
+    `let settings = askForm "Settings", fields: { enabled: false, sound: true }, submit: "Go"\nsettings.enabled = true\nexit`,
+  );
+  const { snapshot } = opened(plan);
+  const { events, finished } = submitted(plan, snapshot);
+  const shown = (value: unknown) => JSON.stringify(value);
+  const binding = finished.snapshot.frames[0]!.bindings.find((item) => item.name === "settings")!;
+  assert.match(shown(binding.value), /"enabled","value":true/);
+  // The settlement the session keeps and the completion event still show the answers as given.
+  const settlement = finished.snapshot.lastSettlement;
+  assert.ok(settlement?.actionKind === "interaction");
+  const completion = events.find((event) => event.kind === "actionCompleted");
+  assert.ok(
+    completion?.kind === "actionCompleted" && completion.settlement.actionKind === "interaction",
+  );
+  for (const result of [settlement.result, completion.settlement.result])
+    assert.equal(
+      shown(result),
+      shown({
+        kind: "object",
+        properties: [
+          { name: "enabled", value: false },
+          { name: "sound", value: true },
+        ],
+      }),
+    );
+});

@@ -1,5 +1,5 @@
 import type { DeveloperWarningCode } from "../../diagnostic-codes.js";
-import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
+import { type InstructionPlan, type InteractionKind, mainSourceSpan } from "../../plan/model.js";
 import { interruptFrame } from "../activations.js";
 import { messageText } from "../text-length.js";
 import { captureExternalData } from "../../external-data-capture.js";
@@ -55,7 +55,7 @@ import {
   cloneSettlement,
   pendingResult,
   positiveSafeInteger,
-  setTemporary,
+  setCapturedTemporary,
   takeSettlementSequence,
 } from "./support.js";
 import { copySpan } from "../../plan/source-location.js";
@@ -360,7 +360,8 @@ function completeCapture(
     });
   }
   assertEventSequenceCapacity(current, resolved.unavailableReason === null ? 1 : 2);
-  setTemporary(current.temporaries, action.destinationTemporary, reference);
+  // The admitted reference is text the request gave, captured with it.
+  setCapturedTemporary(current.temporaries, action.destinationTemporary, reference);
   const input = trace?.writeTemporary(
     action.ownerCallFrameId ?? 0,
     action.destinationTemporary,
@@ -737,7 +738,9 @@ function commitInteractionSettlement(
 ): RuntimeInteractionActionSettlementSnapshot {
   const result = outcome.result;
   if (action.destinationTemporary !== null) {
-    setTemporary(current.temporaries, action.destinationTemporary, result);
+    // The settlement and the handoff hold the result too, so the temporary takes its own copy.
+    resultBuiltByRuntime(action.interactionKind);
+    setCapturedTemporary(current.temporaries, action.destinationTemporary, result);
     // Only an accepted answer or a timeout reaches here; refused and repeated reports record nothing.
     trace?.writeTemporary(
       action.ownerCallFrameId ?? 0,
@@ -792,4 +795,31 @@ function commitInteractionSettlement(
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;
   return settlement;
+}
+
+/**
+ * Every interaction kind's result is built by the runtime from the captured request or the action's own validated
+ * data, so a temporary copies it without capturing it again. A new kind fails here until its result is classified.
+ */
+function resultBuiltByRuntime(kind: InteractionKind): void {
+  switch (kind) {
+    case "button":
+    case "text":
+    case "number":
+    case "choice":
+    case "temporal":
+    case "password":
+    case "image":
+    case "form":
+    case "popup":
+    case "url":
+    case "export":
+      return;
+    default: {
+      const unclassified: never = kind;
+      throw new Error(
+        `The result of an interaction of kind '${String(unclassified)}' is not classified.`,
+      );
+    }
+  }
 }

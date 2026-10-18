@@ -45,8 +45,8 @@ import {
   type Exact,
 } from "./exact-numbers.js";
 import {
-  cloneSerializableValue,
-  createSerializableObject,
+  cloneCapturedSerializableValue,
+  createCapturedSerializableObject,
   type SerializableRuntimeTemporal,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
@@ -380,14 +380,12 @@ function linearRegression(
     );
   const amount = (value: number): SerializableRuntimeValue =>
     amounts.kind === "numbers" ? (value === 0 ? 0 : value) : exactDuration(value);
-  return createSerializableObject([
+  // Built from the captured arguments, so the object takes trusted copies of its parts.
+  return createCapturedSerializableObject([
     { name: "slope", value: amount(slope) },
     { name: "intercept", value: amount(intercept) },
     { name: "r2", value: r2 === 0 ? 0 : r2 },
-    {
-      name: "start",
-      value: positions.kind === "steps" ? positions.start : cloneSerializableValue(positions.start),
-    },
+    { name: "start", value: positions.start },
   ]);
 }
 
@@ -682,7 +680,7 @@ function minMaxValue(
       const order = compareTemporal(candidate, best);
       if (name === "min" ? order < 0 : order > 0) best = candidate;
     }
-    return cloneSerializableValue(best);
+    return cloneCapturedSerializableValue(best);
   }
   // A loop, not a spread into Math.min/Math.max, so a call with very many arguments cannot overflow the native stack.
   if (kind === "number") {
@@ -710,7 +708,7 @@ function minMaxValue(
       throw fault("TSR059", `${name}(...) cannot compare these durations: ${order}.`, span);
     if (name === "min" ? order < 0 : order > 0) best = candidate;
   }
-  return cloneSerializableValue(best);
+  return cloneCapturedSerializableValue(best);
 }
 
 /**
