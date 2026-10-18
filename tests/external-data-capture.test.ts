@@ -343,7 +343,7 @@ test("snapshot validation accepts a deeply nested supplied call argument", () =>
   const plan = compiledPlan("function echo(value) { return value }\necho(1)\nexit");
   const snapshot = activeCallSnapshot(plan);
   const argument = functionFrames(snapshot)[0]!.arguments[0];
-  assert.ok(argument?.supplied);
+  assert.ok(argument !== undefined && "value" in argument);
   // EVIDENCE: the supplied call argument is intentionally replaced with a valid deeply nested runtime value.
   (argument as { value: SerializableRuntimeValue }).value = deepList(5_000);
 

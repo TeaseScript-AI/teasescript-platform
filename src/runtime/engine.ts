@@ -2257,7 +2257,19 @@ function bindSuppliedParameter(
     );
   }
   if (argument.supplied) {
+    if (!("value" in argument)) {
+      throw fault(
+        "TSR048",
+        internalFault("A supplied parameter of a function call was bound twice."),
+        instruction.span,
+      );
+    }
+    // The argument is the call's private copy, so the parameter takes it over instead of copying it again.
     declareFunctionBinding(plan, snapshot, parameter.name, argument.value, instruction.span);
+    frame.arguments[instruction.parameterIndex] = {
+      parameterName: argument.parameterName,
+      supplied: true,
+    };
     trace?.suppliedParameter(
       frame.id,
       currentFrame(snapshot).id,
@@ -2362,7 +2374,13 @@ function bindDefaultParameter(
   const value = evaluator.evaluate(instruction.value);
   if (instruction.typeCheck !== undefined)
     assertValueType(value, instruction.typeCheck, instruction.value.span);
-  declareFunctionBinding(plan, snapshot, parameter.name, value, instruction.span);
+  declareFunctionBinding(
+    plan,
+    snapshot,
+    parameter.name,
+    cloneCapturedSerializableValue(value),
+    instruction.span,
+  );
   evaluator.trace?.writeBinding(
     "parameter",
     currentFrame(snapshot).id,
@@ -2483,6 +2501,7 @@ function functionDefinition(
   return definition;
 }
 
+/** Binds parameter `name` to `value`, which nothing else may hold. */
 function declareFunctionBinding(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
@@ -2499,7 +2518,7 @@ function declareFunctionBinding(
       span,
     );
   }
-  currentFrame(snapshot).bindings.push({ name, value: cloneCapturedSerializableValue(value) });
+  currentFrame(snapshot).bindings.push({ name, value });
 }
 
 function executeLoopStart(

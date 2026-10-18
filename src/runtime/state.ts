@@ -131,7 +131,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 87;
+export const RUNTIME_SNAPSHOT_VERSION = 88;
 export const DEFAULT_MAX_CALL_DEPTH = 1024;
 export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -291,13 +291,18 @@ export interface RuntimeTemporarySnapshot {
   value: SerializableRuntimeValue;
 }
 
+/**
+ * A supplied argument holds the call's private copy of its value until its parameter is bound; the binding then owns
+ * that copy, and the argument keeps only that it was supplied.
+ */
 export type RuntimeCallArgumentSnapshot =
   | { readonly parameterName: string; readonly supplied: false }
   | {
       readonly parameterName: string;
       readonly supplied: true;
       readonly value: SerializableRuntimeValue;
-    };
+    }
+  | { readonly parameterName: string; readonly supplied: true };
 
 export interface RuntimeParameterStateSnapshot {
   phase: "supplied" | "defaults" | "body";
@@ -863,13 +868,13 @@ function cloneFunctionFrame(frame: RuntimeCallFrameSnapshot): RuntimeCallFrameSn
     scopeBaseDepth: frame.scopeBaseDepth,
     loopBaseDepth: frame.loopBaseDepth,
     arguments: frame.arguments.map((argument) =>
-      argument.supplied
+      "value" in argument
         ? {
             parameterName: argument.parameterName,
             supplied: true,
             value: cloneCapturedSerializableValue(argument.value),
           }
-        : { parameterName: argument.parameterName, supplied: false },
+        : { ...argument },
     ),
     parameterState: { ...frame.parameterState },
   };
@@ -2297,7 +2302,7 @@ function validateCallFrames(
     }
     if (nonNegativeSafeInteger(frame.loopBaseDepth)) previousLoopBase = frame.loopBaseDepth;
     if (isFunction) {
-      validateCallArguments(frame.arguments, definition, errors);
+      validateCallArguments(frame.arguments, frame.parameterState, definition, errors);
       validateCallArgumentSupply(frame.arguments, callInstruction, errors);
       validateParameterState(frame.parameterState, definition, errors);
       validateParameterBindings(frame, frames, definition, analysis, errors);
@@ -2667,18 +2672,29 @@ function validateParameterBindings(
     const phase = parameterState.phase;
     // EVIDENCE: validation: parameterIndex passed nonNegativeSafeInteger before iterating parameters.
     const progress = parameterState.parameterIndex as number;
-    const shouldBeBound =
-      phase === "body" ||
-      (phase === "supplied" && argument.supplied && index < progress) ||
-      (phase === "defaults" && (argument.supplied || index < progress));
+    const shouldBeBound = argument.supplied
+      ? suppliedParameterBound(parameterState, index)
+      : phase === "body" || (phase === "defaults" && index < progress);
     if (bindingNames.has(parameter.name) !== shouldBeBound) {
       errors.push("Runtime parameter bindings do not match prologue progress.");
     }
   });
 }
 
+/** Whether the prologue at `progress` has bound the supplied argument at `index`, whose binding then owns its value. */
+function suppliedParameterBound(progress: Record<string, unknown>, index: number): boolean {
+  return (
+    progress.phase === "body" ||
+    progress.phase === "defaults" ||
+    (progress.phase === "supplied" &&
+      typeof progress.parameterIndex === "number" &&
+      index < progress.parameterIndex)
+  );
+}
+
 function validateCallArguments(
   value: unknown,
+  parameterState: unknown,
   definition: CompiledFunctionDefinition | undefined,
   errors: string[],
 ): void {
@@ -2701,7 +2717,9 @@ function validateCallArguments(
       errors.push("Runtime call-frame argument state is malformed.");
       return;
     }
-    if (argument.supplied) {
+    // A malformed prologue state is reported on its own; the argument is then checked as if it were not bound yet.
+    const bound = isPlainRecord(parameterState) && suppliedParameterBound(parameterState, index);
+    if (argument.supplied && !bound) {
       if (!("value" in argument)) {
         errors.push("Supplied runtime argument is missing its value.");
       } else {
@@ -2709,7 +2727,11 @@ function validateCallArguments(
         if (failure !== null) errors.push(failure);
       }
     } else if ("value" in argument) {
-      errors.push("Missing runtime argument must not contain a value.");
+      errors.push(
+        argument.supplied
+          ? "A bound runtime argument must not keep its value."
+          : "Missing runtime argument must not contain a value.",
+      );
     }
   });
 }
@@ -3719,8 +3741,9 @@ function emptyIdentityIds(): RuntimeIdentityIds {
 
 /**
  * Every value a state holds where a script can reach it: the bindings of each scope and of the globals, speaker
- * properties, for-loop sources, temporaries, and each call frame's saved temporaries and supplied arguments. Validation
- * finds the runtime identities a state refers to through them, and record collection the records it still reaches.
+ * properties, for-loop sources, temporaries, and each call frame's saved temporaries and the supplied arguments it has
+ * not bound yet. Validation finds the runtime identities a state refers to through them, and record collection the
+ * records it still reaches.
  */
 function* identityRootValues(
   frames: unknown,
@@ -3765,7 +3788,7 @@ function* identityRootValues(
       }
       if (Array.isArray(frame.arguments)) {
         for (const argument of frame.arguments) {
-          if (isPlainRecord(argument) && argument.supplied === true) {
+          if (isPlainRecord(argument) && argument.supplied === true && "value" in argument) {
             yield argument.value;
           }
         }

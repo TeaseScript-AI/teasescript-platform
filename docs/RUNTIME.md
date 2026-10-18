@@ -1443,10 +1443,11 @@ cannot hold one, and `save` refuses one with `TSR055`.
 `RuntimeSnapshot.liveMessages` holds `{ messageId, sourceText }` in ascending ID order: the markup source of the current
 text of each message that a handle in the state reaches through the roots snapshot validation checks for runtime
 identities (scopes, retained scopes, globals, speaker properties, `for` sources, temporaries, and each call frame's saved
-temporaries and supplied arguments). Before it returns, every public operation drops the records no handle reaches; a
-handle to such a message cannot appear again, so where an operation boundary falls does not change the state. Snapshot
-validation requires unique positive IDs below `nextEventSequence`, text sources, and a record for every handle; a record
-no handle reaches is accepted and dropped by the next operation. Restore emits, sweeps, and observes nothing.
+temporaries and the supplied arguments it has not bound yet). Before it returns, every public operation drops the
+records no handle reaches; a handle to such a message cannot appear again, so where an operation boundary falls does not
+change the state. Snapshot validation requires unique positive IDs below `nextEventSequence`, text sources, and a record
+for every handle; a record no handle reaches is accepted and dropped by the next operation. Restore emits, sweeps, and
+observes nothing.
 
 Reading `.text` returns the source. Assigning it takes text (`TSR050` otherwise); another property fails with `TSR003`
 or, read, `TSR017`, and a handle without a record with `TSR053`, all before anything changes. The same text again
@@ -2038,8 +2039,8 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
 | Instruction plan | 100 | Public keys (owner decisions, 2026-10-13 and 2026-10-14): a `lock` instruction has `publicKey` and `key` operands, each `null` or a temporary or literal, `publicKey` for an encrypt call and `key` for a decrypt call, which it previously lacked. |
-| Runtime snapshot | 87 | Public keys (owner decisions, 2026-10-13 and 2026-10-14): a `lock` action has `publicKeys`, the encrypt call's at most 594 public keys, each an `age1…` recipient or an `ssh-ed25519` key without surrounding white space, and `key`, the decrypt call's written key or `null`, and its `notice` and answer handoff may be `"wrongKey"`; previously it lacked them. |
-| Checkpoint | 123 | The public key plan and snapshot contracts. |
+| Runtime snapshot | 88 | One copy per supplied argument (#512, runtime R1): binding a supplied parameter moves the call's copy of the argument into the binding, so the call frame's argument keeps `parameterName` and `supplied: true` without `value` once the prologue has bound it; previously the argument kept its value for the whole call. |
+| Checkpoint | 124 | The single-argument-copy snapshot contract. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -2267,6 +2268,10 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Runtime snapshot history
 
+- Revision 87: Public keys (owner decisions, 2026-10-13 and 2026-10-14): a `lock` action has `publicKeys`, the encrypt
+  call's at most 594 public keys, each an `age1…` recipient or an `ssh-ed25519` key without surrounding white space,
+  and `key`, the decrypt call's written key or `null`, and its `notice` and answer handoff may be `"wrongKey"`;
+  previously it lacked them.
 - Revision 86: `askPassword` (owner decisions, 2026-10-13 and 2026-10-14): a foreground `password` interaction, which
   the hash of the typed text completes, `{ kind: "submittedPassword", hash }`, with `resumes`, the count of its returns
   after interrupting blocks, once positive, and its result handoff of that hash, 64 lowercase hexadecimal digits; a
@@ -2422,6 +2427,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 123: the public key plan and snapshot contracts.
 - Revision 122: the `askPassword` plan and snapshot contracts.
 - Revision 121: the encryption plan and snapshot contracts.
 - Revision 120: the lazy-default plan contract.

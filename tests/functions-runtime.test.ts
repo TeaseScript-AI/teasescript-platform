@@ -70,29 +70,37 @@ test("bare and implicit returns produce null", () => {
   assert.deepEqual(sayTexts(result), ["null", "inside", "null"]);
 });
 
-test("parameters are deep copies of caller lists, objects, and sets", () => {
+test("parameters are deep copies of caller lists, objects, sets, and dicts", () => {
   const result = runSource(
     [
       "let listValue = [[1]]",
       "let objectValue = { nested: [1] }",
       "let setValue = set[1, 2]",
-      "function mutate(listInput, objectInput, setInput) {",
+      "let dictValue = dict{ nested: [1] }",
+      "function mutate(listInput, objectInput, setInput, dictInput, sameList) {",
       "  listInput[0][0] = 9",
       "  objectInput.nested[0] = 8",
       "  setInput.add(3)",
-      '  return "${listInput[0][0]}:${objectInput.nested[0]}:${setInput.contains(3)}"',
+      '  dictInput["nested"][0] = 7',
+      '  dictInput["added"] = [6]',
+      // The same caller list passed twice gives two copies.
+      '  return "${listInput[0][0]}:${objectInput.nested[0]}:${setInput.contains(3)}:${dictInput["nested"][0]}:${sameList[0][0]}"',
       "}",
-      "say mutate(listValue, objectValue, setValue)",
+      "say mutate(listValue, objectValue, setValue, dictValue, listValue)",
       "exit",
     ].join("\n"),
   );
 
   // The callee changed its copies, so the unchanged caller values below are not merely a failed call.
   assert.equal(result.snapshot.status, "halted");
-  assert.deepEqual(sayTexts(result), ["9:8:true"]);
+  assert.deepEqual(sayTexts(result), ["9:8:true:7:1"]);
   assert.deepEqual(rootValue(result.snapshot, "listValue"), {
     kind: "list",
     items: [{ kind: "list", items: [1] }],
+  });
+  assert.deepEqual(rootValue(result.snapshot, "dictValue"), {
+    kind: "dict",
+    entries: [{ key: "nested", value: { kind: "list", items: [1] } }],
   });
   assert.deepEqual(rootValue(result.snapshot, "objectValue"), {
     kind: "object",
