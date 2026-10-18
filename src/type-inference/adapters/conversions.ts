@@ -18,7 +18,6 @@ import {
   named,
   projectionOf,
   typeResult,
-  UNCONSTRAINED,
 } from "./views.js";
 
 /**
@@ -35,7 +34,12 @@ const RESULT_OR_DEFAULT = (result: StaticType): OperationResult =>
 
 /** A conversion's result, by its `default:` policy (`CallDefault.type`). */
 function conversionResult(conversion: Conversion, inputs: OperationInputs): OperationResult {
-  if (conversion.result === "unknown") return dynamicResult("json");
+  // What JSON holds is known only when the script runs; a written `default:` is a known value the call may give
+  // instead, so its copy joins the result (a known null makes it optional: the owner's Q3.2c, O4 stage 3a).
+  if (conversion.result === "unknown")
+    return inputs.named.has("default")
+      ? alternativesOf(dynamicResult("json"), projectionOf(named("default")))
+      : dynamicResult("json");
   const result: StaticType = { kind: "scalar", name: conversion.result };
   const fallback = inputs.named.get("default");
   switch (conversion.fallback?.type) {
@@ -44,7 +48,10 @@ function conversionResult(conversion: Conversion, inputs: OperationInputs): Oper
     case "optional": {
       // A default the compiler knows fits the result or null is given as it is; any other, or none, makes it optional.
       if (fallback === undefined) return typeResult(optional(result));
-      if (isBottom(fallback)) return UNCONSTRAINED;
+      // A default with no evidence yet (a lazy operand: it runs only when the conversion fails) does not hold the
+      // result back: the result stands alone, the lower bound of every answer a typed default gives (the default's
+      // copy when it fits, null when it does not), so the answer only grows as the default's type arrives (O4 stage 3a).
+      if (isBottom(fallback)) return typeResult(result);
       const type = fallback.dynamic === null ? closedType(fallback) : null;
       return type !== null && isKnown(type) && isAssignable(optional(result), type)
         ? RESULT_OR_DEFAULT(result)

@@ -143,7 +143,8 @@ const CONVERSION_CALLS: Readonly<
     fact: "unknown",
     takes: TEXT_AMONG,
     default: closedView(INTEGER_TYPE),
-    adapter: { dynamic: "json" },
+    // The written default's copy joins the JSON result (stage 3a); the legacy's union absorbs it into unknown.
+    adapter: "unknown",
   },
   toBase64: { call: "toBase64(a)", fact: "string", takes: TEXT },
   fromBase64: {
@@ -258,13 +259,14 @@ test("an optional conversion gives a known default that fits it as it is, and ot
     { fact: "(null|regex)" },
     "fact",
   );
-  // A default the solver knows nothing of yet waits; one that may also be dynamic is not known to fit.
+  // A default the solver knows nothing of yet does not hold the result back: the result stands alone, the lower bound
+  // of every answer a typed default gives (stage 3a); one that may also be dynamic is not known to fit.
   const toRegex = relation("conversion", "toRegex");
-  assert.equal(
+  assert.deepEqual(
     toRegex.result(
       inputsOf({ arguments: [closedView(STRING_TYPE)], named: { default: BOTTOM_VIEW } }),
-    ).kind,
-    "unconstrained",
+    ),
+    { kind: "type", type: REGEX_TYPE },
   );
   assert.deepEqual(
     toRegex.result(
@@ -330,7 +332,7 @@ test("what JSON holds is the contract's own dynamic data, with or without a defa
     DEFAULTS.host,
     DEFAULTS.list,
   ])
-    withDefault("fromJson", written, { fact: "unknown" }, { dynamic: "json" }, "dynamic");
+    withDefault("fromJson", written, { fact: "unknown" }, "unknown", "alternatives");
   // Without a default the call is reported, also for text the compiler sees is valid JSON; checking-only.
   withDefault(
     "fromJson",
@@ -354,7 +356,7 @@ test("what JSON holds is the contract's own dynamic data, with or without a defa
     }),
     legacyOperation('let r = fromJson("{}", default: 1)\nexit'),
     { fact: "unknown" },
-    { dynamic: "json" },
+    "unknown",
   );
   assertCase(
     relation("conversion", "fromJson"),
@@ -364,7 +366,7 @@ test("what JSON holds is the contract's own dynamic data, with or without a defa
     }),
     legacyOperation("let r = fromJson(hostText, default: 1, files: false)\nexit"),
     { fact: "unknown" },
-    { dynamic: "json" },
+    "unknown",
   );
   assert.deepEqual(
     relation("conversion", "fromJson").result(inputsOf({ arguments: [BOTTOM_VIEW] })),
@@ -698,7 +700,7 @@ test("a relation answers from its inputs alone: a bottom operand it does not nee
       grown(BOTTOM_VIEW),
       grown(closedView(INTEGER_TYPE)),
     ],
-    ["unconstrained", "alternatives", "unconstrained", "type"],
+    ["type", "alternatives", "type", "type"],
   );
   assert.deepEqual(relation("builtin", "hashText").result(inputsOf({ arguments: [BOTTOM_VIEW] })), {
     kind: "type",
