@@ -17,7 +17,8 @@ export type OperandRef =
   | { readonly receiver: true }
   | { readonly argument: number }
   | { readonly named: string }
-  | { readonly place: PlaceId };
+  /** A place the evidence names; `collected` for one the relation sums (read as an aggregate, see `collect`). */
+  | { readonly place: PlaceId; readonly collected?: boolean };
 
 /**
  * What the solver knows of an operand so far. `alternatives` lists the types the operand may have, as the solver has
@@ -38,10 +39,17 @@ export interface OperationInputs {
   /** What the source says beyond the operands' types (see `SyntaxEvidence`). */
   readonly evidence: SyntaxEvidence | undefined;
   /**
-   * The view of a place the evidence names, such as a written choice object's `value`. The solver selects one
-   * alternative of the place per ask, as it does for the operands.
+   * The view of a place the evidence names, such as a written form field's descriptor. The solver selects one
+   * alternative of the place per ask, as it does for the operands; the place must be one the evidence declares.
    */
   view(place: PlaceId): OperandView;
+  /**
+   * The aggregate view of a declared place whose alternatives the relation unions, such as a choice's option or an
+   * element of a field's option list: every alternative at once beside the provenance of its dynamic values and
+   * possibilities, so the answer is the union of the answers per alternative and the asks do not multiply with the
+   * options (work note §3.5, P1). A relation may sum only where its answer is that union.
+   */
+  collect(place: PlaceId): OperandView;
   /**
    * The view of a part of an operand along a path (a property of an object element, a descriptor's `value`): the
    * solver selects one alternative of that part per ask; `null` where the part is absent (a property the object does
@@ -110,10 +118,12 @@ export interface OperationRelation {
    */
   result(inputs: OperationInputs): OperationResult;
   /**
-   * Whether the result does not depend on the order of the positional arguments (`min` and `max` of values), so the
-   * solver asks once per multiset of the arguments' alternatives instead of once per sequence (work note §3.5).
+   * The input plan (work note §3.5, P1). `collected`: the positional arguments are summed, read as aggregates because
+   * the result unions them (a choice's options); `fold`: the result over any number of arguments is the fold of the
+   * relation's binary law (`min`, `max` of values), asked once per state and choice, the status naming the arguments
+   * that can be invalid (the owner's decision B); undefined: every operand is chosen, one alternative per ask.
    */
-  readonly symmetric?: boolean;
+  readonly plan?: "collected" | "fold";
 }
 
 /** The relations of every contract family, by family and name, which the solver asks. */

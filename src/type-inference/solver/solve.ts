@@ -17,14 +17,21 @@ import {
   type Tag,
   offsetOf,
 } from "./cells.js";
-import { interpret, interpretCells, nonWorking, type CellView } from "./interpret.js";
 import {
+  interpret,
+  interpretCells,
+  nonWorking,
+  orderComputations,
+  type CellView,
+} from "./interpret.js";
+import {
+  evidencePlaces,
+  getApplies,
+  getTally,
   lift,
   memberRelation,
   type LiftContext,
   type Operation,
-  getApplies,
-  getTally,
 } from "./lifting.js";
 import { run, type RunReport } from "./schedule.js";
 import { TypeTable } from "./types.js";
@@ -56,6 +63,17 @@ export interface Solution {
   readonly report: RunReport;
   /** The number of relation asks while solving and interpreting. */
   readonly asks: number;
+  /**
+   * The work per phase, for the growth series of the exit criterion (work note §3.5): the schedule's node
+   * evaluations, the relation asks, the cells allocated, and the item orders the interpretation computed (once per
+   * cell and visiting set).
+   */
+  readonly work: {
+    readonly evaluations: number;
+    readonly asks: number;
+    readonly cells: number;
+    readonly orders: number;
+  };
   /** The operations with an invalid counted combination: `<family>.<name>@<site>:none` or `:partial(i/n)`, sorted. */
   readonly statuses: readonly string[];
   view(cell: CellId): CellView;
@@ -160,10 +178,13 @@ class Solver {
       case "project":
         return [c.owner, c.into, ...this.#storesInto(c.into).map((s) => s.value)];
       case "operation":
+        // the places the evidence names are the operation's declared inputs too (P1): a choice's options, a form's
+        // descriptors and what they write
         return [
           ...(c.receiver === null ? [] : [c.receiver]),
           ...c.arguments,
           ...c.named.map((n) => n.value),
+          ...evidencePlaces(c.evidence),
           c.result,
         ];
       case "get":
@@ -215,7 +236,17 @@ class Solver {
         if (term.element.kind !== "ref")
           for (const item of this.termItems(term.element, tag, group, element, pos))
             this.cells.add(element, item);
-        return [{ tag, ctor: term.kind, parts: { element }, group, pos }];
+        // the case: the written member's or the literal's origin at its cell (I1)
+        return [
+          {
+            tag,
+            ctor: term.kind,
+            parts: { element },
+            group,
+            pos,
+            case: `${group}@${this.cells.name(owner)}`,
+          },
+        ];
       }
       case "object": {
         if (term.properties === null)
@@ -226,6 +257,7 @@ class Solver {
               parts: { props: this.cells.objectParts(new Map(), owner, pos), open: true },
               group,
               pos,
+              case: `${group}@${this.cells.name(owner)}`,
             },
           ];
         const props = new Map<string, CellId>();
@@ -246,6 +278,7 @@ class Solver {
             parts: { props: this.cells.objectParts(props, owner, pos), open: false },
             group,
             pos,
+            case: `${group}@${this.cells.name(owner)}`,
           },
         ];
       }
@@ -283,12 +316,12 @@ class Solver {
     let changed = false;
     const items = this.cells.items(from);
     // a copy of a place with a written type takes that type (the owner, 2026-10-18): the bound's members as members
-    // of the copy's union, the values the compiler cannot know beside them; the source's own witnesses and nulls
-    // were checked against the bound there and are not the copy's evidence (PR review r4-B2)
+    // of the copy's union and the values the compiler cannot know, selected positively (PR reviews r4-B2, r5-B2): no
+    // value evidence of the source, whatever its role, is the copy's evidence
     const bound = items.some((item) => item.tag === "b");
     for (const item of items) {
       if (item.tag === "e" || !keep(item)) continue;
-      if (bound && (item.tag === "w" || item.tag === "n")) continue;
+      if (bound && item.tag !== "b" && item.tag !== "d" && item.tag !== "p") continue;
       const known = item.tag === "w" || item.tag === "m" || item.tag === "b";
       const tag: Tag = known ? (retag !== null || item.tag === "b" ? "m" : item.tag) : item.tag;
       const contribution: Contribution = {
@@ -296,6 +329,7 @@ class Solver {
         type: item.type,
         ctor: item.ctor,
         parts: item.parts,
+        case: item.case,
         group: known ? (retag ?? item.group) : undefined,
         why: item.why,
         decl: decl === "set" ? true : decl === "mirror" ? item.decl : false,
@@ -403,7 +437,18 @@ class Solver {
             continue;
           }
           if (part.cell === c.into) continue;
-          if (this.copy(part.cell, c.into, "mirror")) changed = true;
+          // a part read through a permitted member or a written member is a member of the same union (Dropje97's
+          // W3-B1): the property of the object `get` chose, the element a loop takes from the list a default admitted
+          if (
+            this.copy(
+              part.cell,
+              c.into,
+              "mirror",
+              null,
+              item.tag === "m" || item.tag === "b" ? item.group : null,
+            )
+          )
+            changed = true;
           for (const s of stores) if (this.#storeInto(s, part.cell, false)) changed = true;
         }
         if (typeof c.step === "object") {
@@ -546,8 +591,14 @@ class Solver {
         throw new Error(
           `not a fixpoint at interpretation: ${operation.contract.family}.${operation.contract.name}@${operation.site}`,
         );
-      if (tally === null || tally.asked === 0) continue;
       const label = `${operation.contract.family}.${operation.contract.name}@${operation.site}`;
+      // a folded relation names the arguments that can be invalid (the owner's decision B), counting nothing
+      if (tally?.fold !== undefined) {
+        if (tally.fold.length > 0)
+          out.push(`${label}:invalid(${tally.fold.map((index) => index + 1).join(",")})`);
+        continue;
+      }
+      if (tally === null || tally.asked === 0) continue;
       if (tally.invalid === tally.asked) out.push(`${label}:none`);
       else if (tally.invalid > 0) out.push(`${label}:partial(${tally.invalid}/${tally.asked})`);
     }
@@ -604,6 +655,12 @@ export function solve(graph: ConstraintGraph, options: SolveOptions): Solution {
     cells: solver.cells,
     report,
     asks: solver.asks,
+    work: {
+      evaluations: report.evaluations,
+      asks: solver.asks,
+      cells: solver.cells.ids().length,
+      orders: orderComputations(solver.cells),
+    },
     statuses,
     view: (cell) => solver.view(cell),
     viewOf: (group) => solver.viewOf(group),

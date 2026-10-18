@@ -116,8 +116,8 @@ export function byReceiver(
 
 export const RECEIVER: OperandRef = Object.freeze({ receiver: true });
 
-export function placeRef(place: PlaceId): OperandRef {
-  return { place };
+export function placeRef(place: PlaceId, collected = false): OperandRef {
+  return collected ? { place, collected: true } : { place };
 }
 
 export function named(name: string): OperandRef {

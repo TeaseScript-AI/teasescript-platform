@@ -80,9 +80,55 @@ function sameEvidence(cells: Cells, a: Item, b: Item): boolean {
   );
 }
 
-/** The known items of a cell in rank order (see the module comment). */
-function order(cells: Cells, cell: CellId, visiting: ReadonlySet<CellId>): readonly Item[] {
-  return orderItems(cells, cells.items(cell), new Set([...visiting, cell]));
+/**
+ * The known items of a cell in rank order (see the module comment), computed once while the cells do not change: once
+ * per cell where no cycle was cut on the way (the order then does not depend on the visiting set), once per cell and
+ * visiting set where one was (the visiting set cuts cycles). A copy chain asked the same source for every item of every
+ * copy otherwise, and the work grew with 2^length (Dropje97's W3-B3); with the per-cell memo it grows with the length.
+ */
+interface Orders {
+  version: number;
+  computed: number;
+  /** The orders that consulted no cut cell: valid under every visiting set. */
+  readonly clean: Map<CellId, readonly Item[]>;
+  /** The orders that did, by cell and visiting set. */
+  readonly cut: Map<string, readonly Item[]>;
+}
+
+const ORDERS = new WeakMap<Cells, Orders>();
+
+function ordersOf(cells: Cells): Orders {
+  let memo = ORDERS.get(cells);
+  if (memo === undefined || memo.version !== cells.version) {
+    memo = { version: cells.version, computed: 0, clean: new Map(), cut: new Map() };
+    ORDERS.set(cells, memo);
+  }
+  return memo;
+}
+
+/** The number of item orders computed over the cells as they are: the interpretation's work, for measurement. */
+export function orderComputations(cells: Cells): number {
+  return ordersOf(cells).computed;
+}
+
+/** An order with whether a cell on the way was cut as a source (the result then depends on the visiting set). */
+interface Ordered {
+  readonly items: readonly Item[];
+  readonly cut: boolean;
+}
+
+function order(cells: Cells, cell: CellId, visiting: ReadonlySet<CellId>): Ordered {
+  const memo = ordersOf(cells);
+  const clean = memo.clean.get(cell);
+  if (clean !== undefined) return { items: clean, cut: false };
+  const key = `${cell}|${[...visiting].sort((a, b) => a - b).join(",")}`;
+  const known = memo.cut.get(key);
+  if (known !== undefined) return { items: known, cut: true };
+  memo.computed += 1;
+  const computed = orderedItems(cells, cells.items(cell), new Set([...visiting, cell]));
+  if (computed.cut) memo.cut.set(key, computed.items);
+  else memo.clean.set(cell, computed.items);
+  return computed;
 }
 
 /** The known items among `all` in rank order; `inner` the cells on the way, not consulted again as sources. */
@@ -91,16 +137,24 @@ function orderItems(
   all: readonly Item[],
   inner: ReadonlySet<CellId>,
 ): readonly Item[] {
+  return orderedItems(cells, all, inner).items;
+}
+
+function orderedItems(cells: Cells, all: readonly Item[], inner: ReadonlySet<CellId>): Ordered {
+  let cut = false;
   const items = all.filter(isKnown);
   // an item without a source (a store's own value, an operation's closed answer) is its own first evidence at its
   // position: rank 0, so the secondary site decides between it and an item first in its source (r10-B3)
   const sourceRank = (item: Item): number => {
     let best = NONE;
     for (const source of item.from) {
-      if (inner.has(source)) continue;
-      const index = order(cells, source, inner).findIndex((other) =>
-        sameEvidence(cells, other, item),
-      );
+      if (inner.has(source)) {
+        cut = true;
+        continue;
+      }
+      const ordered = order(cells, source, inner);
+      if (ordered.cut) cut = true;
+      const index = ordered.items.findIndex((other) => sameEvidence(cells, other, item));
       if (index >= 0 && index < best) best = index;
     }
     return best === NONE ? 0 : best;
@@ -117,7 +171,7 @@ function orderItems(
     familyOf(cells, item),
   ];
   const ranks = new Map(items.map((item) => [item, rank(item)] as const));
-  return [...items].sort((a, b) => {
+  const sorted = [...items].sort((a, b) => {
     const x = ranks.get(a)!;
     const y = ranks.get(b)!;
     for (let k = 0; k < x.length; k += 1) {
@@ -127,6 +181,7 @@ function orderItems(
     }
     return 0;
   });
+  return { items: sorted, cut };
 }
 
 /** The working kind of a cell, or `null` without a known item. */

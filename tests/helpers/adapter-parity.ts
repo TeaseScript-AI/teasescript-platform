@@ -211,6 +211,12 @@ export function inputsOf(parts: {
       assert.ok(found !== undefined, `a view of place ${place}`);
       return found;
     },
+    // a closed place's aggregate is its view: the parity helper gives each place one closed view
+    collect: (place) => {
+      const found = parts.places?.get(place);
+      assert.ok(found !== undefined, `a view of place ${place}`);
+      return found;
+    },
     leaf(path) {
       return leafOf(this, path);
     },

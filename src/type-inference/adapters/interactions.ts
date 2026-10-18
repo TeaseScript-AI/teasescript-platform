@@ -45,6 +45,7 @@ import type {
   OperationInputs,
   OperationRelation,
   OperationResult,
+  OperandView,
 } from "./relation.js";
 import {
   closedType,
@@ -106,7 +107,15 @@ class Places {
   constructor(private readonly inputs: OperationInputs) {}
 
   type(place: PlaceId): StaticType {
-    const view = this.inputs.view(place);
+    return this.#typeOf(this.inputs.view(place));
+  }
+
+  /** The type at a place the relation sums (an option, an element of an option list): every alternative at once. */
+  sum(place: PlaceId): StaticType {
+    return this.#typeOf(this.inputs.collect(place));
+  }
+
+  #typeOf(view: OperandView): StaticType {
     if (isBottom(view)) throw new Unconstrained();
     // A value that may also be one the compiler cannot know is, as the legacy holds it, not known at all.
     if (view.dynamic !== null) {
@@ -231,7 +240,7 @@ function choiceEntry(
   // A written choice object without `text` is reported (the visitor's check); without `value` too, what its button
   // returns is not known.
   const returned = object.value ?? object.text;
-  return { type: returned === null ? UNKNOWN_TYPE : places.type(returned), rejected: false };
+  return { type: returned === null ? UNKNOWN_TYPE : places.sum(returned), rejected: false };
 }
 
 function choice(inputs: OperationInputs): OperationResult {
@@ -272,14 +281,14 @@ function choice(inputs: OperationInputs): OperationResult {
         const elements = option.content.elements;
         if (elements.length > 0) empty = false;
         for (const element of elements) {
-          const entry = choiceEntry(places, places.type(element.place), element.object, true);
+          const entry = choiceEntry(places, places.sum(element.place), element.object, true);
           rejected ||= entry.rejected;
           add(entry.type, literalOf(element.literal));
         }
         continue;
       }
       empty = false;
-      const type = places.type(option.place);
+      const type = places.sum(option.place);
       const parts = members(nonNullType(type)).map(resolved);
       if (parts.some((part) => part.kind === "list" || part.kind === "set")) {
         // Each member gives buttons: a collection its elements, a value itself. A choice object among the elements of
@@ -403,11 +412,11 @@ function cycleAnswer(
     return union(
       elements.map((element) => {
         if (element.object === null) {
-          const at = pathOf(placeRef(element.place));
-          return union(members(places.type(element.place)).map((m) => computedOption(m, at)));
+          const at = pathOf(placeRef(element.place, true));
+          return union(members(places.sum(element.place)).map((m) => computedOption(m, at)));
         }
         const returned = element.object.value ?? element.object.text;
-        return returned === null ? UNKNOWN_TYPE : plainType(places.type(returned));
+        return returned === null ? UNKNOWN_TYPE : plainType(places.sum(returned));
       }),
     );
   // The options' type is read only here, for a cycle whose options are not written one by one.
@@ -638,7 +647,11 @@ export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map<string,
       "interaction.booleans",
       { contract: { family: "interaction", name: "booleans" }, result: askBooleans },
     ],
-    ["interaction.choice", { contract: { family: "interaction", name: "choice" }, result: choice }],
+    [
+      "interaction.choice",
+      // the options are summed: the result unions their values (P1)
+      { contract: { family: "interaction", name: "choice" }, plan: "collected", result: choice },
+    ],
     ["interaction.form", { contract: { family: "interaction", name: "form" }, result: form }],
     [
       "interaction.askImage",

@@ -38,6 +38,14 @@ export interface Item {
   readonly type: TypeId | undefined;
   readonly ctor: Constructor | undefined;
   readonly parts: Parts | undefined;
+  /**
+   * The case of a structural item (work note §3.5, I1): the static identity of the structure it is a part of, from a
+   * universe fixed by the graph: a written member or a literal by its origin and cell (`written:8@8/1`, `has@31@5`),
+   * a structure materialized from a type at a cell by the cell (`c:@44`), a form's structure by its result (`s:@44`),
+   * a rebuilt collection by the set of base cases it is built from (`j{...}`, a set, never a sequence). An identity,
+   * not support: a copy or a projection carries it; the cells an item was read from are `from`.
+   */
+  readonly case: string | undefined;
   /** The identity of the permitted union an `m` or `b` item belongs to: a written place or a defining site. */
   readonly group: string | undefined;
   readonly why: Provenance | undefined;
@@ -52,6 +60,9 @@ export interface Contribution {
   readonly type?: TypeId | undefined;
   readonly ctor?: Constructor | undefined;
   readonly parts?: Parts | undefined;
+  readonly case?: string | undefined;
+  /** The part a collection type is materialized in (`element{...}` for the case an operation's combination gives it). */
+  readonly part?: string | undefined;
   readonly group?: string | undefined;
   readonly why?: Provenance | undefined;
   readonly pos: Position;
@@ -81,6 +92,7 @@ export class Cells {
   readonly #owners = new Map<CellId, Set<CellId>>();
   readonly #touched = new Set<CellId>();
   #next: CellId;
+  #version = 0;
 
   readonly #propertyNames: readonly string[];
 
@@ -93,6 +105,11 @@ export class Cells {
 
   get table(): TypeTable {
     return this.#table;
+  }
+
+  /** A counter of every change, so a reader computed over the cells knows when it is stale. */
+  get version(): number {
+    return this.#version;
   }
 
   /** Every cell, the places first, then the derived cells in creation order. */
@@ -108,8 +125,21 @@ export class Cells {
     return this.#cell(cell).size > 0;
   }
 
-  /** The derived part cell of a cell: the element of its lists, or one of its properties. */
+  /**
+   * The derived part cell of a cell: the element of its lists (`element`, or `element{B}` over a set of base cases none
+   * of which is itself a rebuilt case), one of its properties, or a written member's index. The grammar is the finite
+   * universe of I1: a part outside it is a defect, thrown.
+   */
   derived(owner: CellId, part: string): CellId {
+    if (
+      !/^(element|element\{[^{}]+\}|[A-Za-z_][A-Za-z0-9_]*|\d+)$/.test(part) ||
+      (part.startsWith("element{") &&
+        part
+          .slice(8, -1)
+          .split(",")
+          .some((b) => b.includes("{")))
+    )
+      throw new Error(`a part outside the universe: ${this.name(owner)}/${part}`);
     const name = `${this.name(owner)}/${part}`;
     let id = this.#derived.get(name);
     if (id === undefined) {
@@ -182,23 +212,35 @@ export class Cells {
         case "list":
         case "set":
         case "dict": {
-          const element = this.derived(cell, "element");
+          // the part the combination's cases give it, else the cell's own; its case likewise (I1)
+          const element = this.derived(cell, contribution.part ?? "element");
           // a never element: the part is empty by construction
           const changedPart =
             this.#table.node(node.element).kind === "never"
               ? this.add(element, { tag: "e", pos: contribution.pos })
-              : this.add(element, { ...contribution, type: node.element });
-          const { type: _, ...rest } = contribution;
-          const changed = this.#put(cell, { ...rest, ctor: node.kind, parts: { element } });
+              : this.add(element, {
+                  ...contribution,
+                  type: node.element,
+                  part: undefined,
+                  case: undefined,
+                });
+          const { type: _, part: __, ...rest } = contribution;
+          const changed = this.#put(cell, {
+            ...rest,
+            ctor: node.kind,
+            parts: { element },
+            case: contribution.case ?? `c:${this.name(cell)}`,
+          });
           return changed || changedPart;
         }
         case "object": {
-          const { type: _, ...rest } = contribution;
+          const { type: _, part: __, ...rest } = contribution;
           if (node.properties === null)
             return this.#put(cell, {
               ...rest,
               ctor: "object",
               parts: { props: this.objectParts(new Map(), cell, contribution.pos), open: true },
+              case: `c:${this.name(cell)}`,
             });
           let changedPart = false;
           const props = new Map<string, CellId>();
@@ -211,6 +253,7 @@ export class Cells {
             ...rest,
             ctor: "object",
             parts: { props: this.objectParts(props, cell, contribution.pos), open: false },
+            case: `c:${this.name(cell)}`,
           });
           return changed || changedPart;
         }
@@ -274,6 +317,7 @@ export class Cells {
       type: contribution.type,
       ctor: contribution.ctor,
       parts: contribution.parts,
+      case: contribution.ctor === undefined ? undefined : contribution.case,
       group: contribution.tag === "m" || contribution.tag === "b" ? contribution.group : undefined,
       why: contribution.tag === "p" || contribution.tag === "d" ? contribution.why : undefined,
       pos: contribution.pos,
@@ -295,10 +339,14 @@ export class Cells {
         prior.from = new Set(item.from);
         changed = true;
       } else if (order === 0) for (const source of item.from) prior.from.add(source);
-      if (changed) this.#touched.add(cell);
+      if (changed) {
+        this.#touched.add(cell);
+        this.#version += 1;
+      }
       return changed;
     }
     map.set(key, item);
+    this.#version += 1;
     for (const part of this.partsOf(item)) {
       let owners = this.#owners.get(part);
       if (owners === undefined) {

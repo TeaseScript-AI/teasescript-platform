@@ -29,9 +29,12 @@ import type { TypeId, TypeNode } from "./types.js";
 // which no relation reads (a property's type is read as a leaf, O1). The sets only grow. The relation is asked when
 // every strict operand has evidence, over one product of choices: each operand chooses a closed alternative, a
 // possibility, a dynamic view (one per provenance: its alternatives and possibilities beside the provenance), or, when
-// lazy (a `default:`, the right side of `and` and `or`), nothing; a relation declared symmetric (`min` and `max` of
-// values) is asked once per multiset of its arguments' choices, so its asks grow polynomially with the arguments
-// (`symmetricCombinations`). Beyond the operands, the dimensions a relation reads
+// lazy (a `default:`, the right side of `and` and `or`), nothing. The relation's **plan** (P1) says how its inputs are
+// read: `collected` positional arguments are summed (one aggregate pick each, every alternative at once, because the
+// result unions them: a choice's options), a `fold` relation (`min`, `max` of values) folds its arguments by its
+// binary law, one ask per state and choice, and the places the evidence names are declared inputs: the schedule
+// depends on them, a relation reads them as a chosen dimension (`view`) or, where it sums them, as an aggregate
+// (`collect`), and a read of an undeclared place is a defect. Beyond the operands, the dimensions a relation reads
 // are selected lazily: a leaf of an operand along a path (`inputs.leaf`), a place the evidence names (`inputs.view`),
 // a structural step inside a path (the chosen item), and the presence of a property a projection reads (present or
 // absent where its slot is empty by construction beside evidence); a read of a dimension not yet selected records it,
@@ -62,6 +65,8 @@ export interface Alternative {
   readonly items: readonly Item[];
   /** The chosen part of a structural item, for projections; `null` for a flat type. */
   readonly choice: Choice | null;
+  /** The cases of the structural items it materializes (I1); none for a flat type or a synthetic part. */
+  readonly cases: readonly string[];
 }
 
 /**
@@ -87,7 +92,9 @@ const unionOf = (left: readonly CellId[], right: readonly CellId[]): readonly Ce
  * its properties are read as leaves, never chosen.
  */
 function roleOf(a: Alternative): string {
-  const own = `${a.tag}|${a.group ?? ""}|${a.why ?? ""}`;
+  // ... and by its cases (I1): two alternatives of one type and role but of different cases are two, so an
+  // alternative's cases never change once it exists (a merged case set would be support, growing with arrival)
+  const own = `${a.tag}|${a.group ?? ""}|${a.why ?? ""}|${a.cases.join("+")}`;
   if (a.choice === null || a.choice.element === undefined) return own;
   return `${own}[${roleOf(a.choice.element)}]`;
 }
@@ -116,6 +123,26 @@ function mergedLists(
 interface DynamicMark {
   readonly tag: "d";
   readonly why: Provenance;
+}
+
+/** Whether a property is absent in every alternative reached: no part cell for it and no written property. */
+function absentEverywhere(
+  cells: Cells,
+  found: readonly (Alternative | DynamicMark)[],
+  name: string,
+): boolean {
+  for (const a of found) {
+    if (a.tag === "d") return false;
+    if (a.choice?.props?.has(name) === true) return false;
+    const node = cells.table.node(a.type);
+    if (
+      node.kind === "object" &&
+      node.properties !== null &&
+      node.properties.some((p) => p.name === name)
+    )
+      return false;
+  }
+  return true;
 }
 
 const byName = ([a]: readonly [string, unknown], [b]: readonly [string, unknown]): number =>
@@ -174,7 +201,23 @@ function merged(prior: Alternative, other: Alternative): Alternative {
       choice = { props, cells: props };
     }
   }
-  return { ...prior, cells, items, choice };
+  const cases = [...new Set([...prior.cases, ...other.cases])].sort();
+  return { ...prior, cells, items, choice, cases };
+}
+
+/** The case of an item as an alternative reads it: a witness is the cell's schema (option B), a member or a bound its own. */
+function caseOf(cells: Cells, item: Item, cell: CellId): string {
+  return item.tag === "w" || item.tag === "n" ? `W${cell}` : (item.case ?? `c:${cells.name(cell)}`);
+}
+
+/**
+ * The base cases a rebuilt collection is built from: a rebuilt case (`j{...}`) contributes its own bases, so a
+ * feedback edge returns to the same case (I1).
+ */
+function basesOf(a: Alternative): readonly string[] {
+  return [
+    ...new Set(a.cases.flatMap((c) => (c.startsWith("j{") ? c.slice(2, -1).split(",") : [c]))),
+  ].sort();
 }
 
 export function itemAlternatives(
@@ -194,7 +237,14 @@ export function itemAlternatives(
           : item.tag === "m"
             ? "m"
             : "w";
-  const base = { tag, group: item.group, why: item.why, cells: [cell], items: [item] };
+  const base = {
+    tag,
+    group: item.group,
+    why: item.why,
+    cells: [cell],
+    items: [item],
+    cases: item.ctor === undefined ? [] : [caseOf(cells, item, cell)],
+  };
   if (item.type !== undefined) return [{ ...base, type: item.type, choice: null }];
   if (item.parts === undefined || item.ctor === undefined) return [];
   const inner = new Set([...path, cell]);
@@ -206,6 +256,7 @@ export function itemAlternatives(
     cells: [part],
     items: [],
     choice: null,
+    cases: [],
   });
   const partAlternatives = (part: CellId): Alternative[] => {
     if (path.has(part) || part === cell) return [synthetic(UNKNOWN_TYPE, part)];
@@ -296,6 +347,7 @@ function stepOf(
     cells: a.cells,
     items: [],
     choice: null,
+    cases: [],
   });
   if (a.choice !== null) {
     // the marks of every part cell the merged items hold the chosen part in
@@ -356,10 +408,14 @@ export interface LiftContext {
   asks: number;
 }
 
-/** The counted combinations of one operation: cascades are not counted at all. */
+/**
+ * The counted combinations of one operation: cascades are not counted at all. A folded relation counts nothing and
+ * names the arguments that can be invalid instead (`fold`, the owner's decision B).
+ */
 export interface Tally {
   readonly asked: number;
   readonly invalid: number;
+  readonly fold?: readonly number[];
 }
 
 /** One choice of a dimension: an operand's, a leaf's, a place's, or the presence of a property a projection reads. */
@@ -392,6 +448,14 @@ type Pick =
       readonly tag: "w";
       readonly why: undefined;
       readonly cells: readonly CellId[];
+    }
+  /** The one pick of a collected operand: every alternative at once (P1). */
+  | {
+      readonly kind: "aggregate";
+      readonly view: OperandView;
+      readonly tag: "w" | "m";
+      readonly why: undefined;
+      readonly cells: readonly CellId[];
     };
 
 interface Operand {
@@ -412,6 +476,9 @@ type Outcome =
       readonly from: readonly CellId[];
       /** The earliest site of a projected part's own evidence, the secondary position in the result (Q3.7). */
       readonly site: number | undefined;
+      /** For a collection type: the part and case the combination's structures give it (I1). */
+      readonly part?: string | undefined;
+      readonly case?: string | undefined;
     }
   | {
       readonly kind: "item";
@@ -444,10 +511,12 @@ type Outcome =
       readonly why: Provenance | undefined;
       readonly whys: readonly Provenance[];
       /**
-       * The result's element cell: `element` for a witness (the witnesses of one constructor are one schema), its own
-       * per chosen receiver alternative for a member of a permitted union (its members stay their own, r4-B3 Sol).
+       * The result's element cell, `element{B}` over the base cases of the structures the combination was asked about
+       * (I1): one structure in, one structure out; two members of one shape stay two; a feedback edge returns to the
+       * same case. `element` when no chosen structure contributed (a dynamic reading).
        */
       readonly part: string;
+      readonly case: string | undefined;
     };
 
 interface Reading {
@@ -511,6 +580,24 @@ function picksOf(cells: Cells, cell: CellId, lazy: boolean): Pick[] {
     });
   if (lazy) list.push({ kind: "bottom", view: BOTTOM_VIEW, tag: "w", why: undefined, cells: [] });
   return list;
+}
+
+/** The one pick of a collected operand or the aggregate view of a summed place (P1): every alternative at once. */
+function aggregateOf(cells: Cells, cell: CellId): Pick {
+  const table = cells.table;
+  const all = alternatives(cells, cell);
+  const whys = provenances(cells, cell);
+  return {
+    kind: "aggregate",
+    view: {
+      alternatives: all.length === 0 ? null : all.map((a) => table.toStatic(a.type)),
+      dynamic: whys.length === 0 ? null : dynamicWhy(whys[0]!),
+      known: undefined,
+    },
+    tag: all.some((a) => a.tag === "m") ? "m" : "w",
+    why: undefined,
+    cells: [cell],
+  };
 }
 
 /**
@@ -622,10 +709,21 @@ export function lift(
   for (const operand of operands)
     if (!operand.lazy && !cells.has(operand.cell)) return { changed: false, tally: null };
   const site = `op@${operation.site}`;
-  const choices = operands.map((operand) => picksOf(cells, operand.cell, operand.lazy));
+  const collected = relation.plan === "collected";
+  const choices = operands.map((operand) =>
+    collected && "argument" in operand.ref
+      ? [aggregateOf(cells, operand.cell)]
+      : picksOf(cells, operand.cell, operand.lazy),
+  );
   if (choices.some((list) => list.length === 0)) return { changed: false, tally: null };
-  const combos =
-    relation.symmetric === true ? symmetricCombinations(operands, choices) : product(choices);
+  if (
+    relation.plan === "fold" &&
+    operation.receiver === null &&
+    operation.named.length === 0 &&
+    operation.arguments.length >= 2
+  )
+    return foldLift(context, operation, relation, operands, choices);
+  const combos = product(choices);
   let changed = false;
   let asked = 0;
   let invalid = 0;
@@ -697,61 +795,202 @@ function product(lists: readonly (readonly Pick[])[]): Pick[][] {
   );
 }
 
-/** What tells two picks apart for a symmetric relation: the kind, the type, the tag, the group and the provenance. */
-function pickKey(pick: Pick): string {
-  return pick.kind === "closed" || pick.kind === "possible"
-    ? `${pick.kind}|${pick.alt.type}|${pick.tag}|${pick.alt.group ?? ""}|${pick.why ?? ""}`
-    : `${pick.kind}|${pick.why ?? ""}`;
+/** The places an operation's syntax evidence names: its declared inputs beside the operands (P1). */
+export function evidencePlaces(evidence: SyntaxEvidence | undefined): readonly PlaceId[] {
+  const out = new Set<PlaceId>();
+  const keys = new Set(["place", "value", "text", "min", "max"]);
+  const walk = (node: unknown, key: string): void => {
+    if (node === null || node === undefined) return;
+    if (typeof node === "number") {
+      if (keys.has(key)) out.add(node);
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const x of node) walk(x, key);
+      return;
+    }
+    if (typeof node === "object") for (const [k, v] of Object.entries(node)) walk(v, k);
+  };
+  walk(evidence, "");
+  return [...out].sort((a, b) => a - b);
+}
+
+/** A fold's state: the view the arguments so far give, with the tag, provenance and sources that reached it. */
+interface FoldState {
+  readonly view: OperandView;
+  readonly tag: "w" | "m" | "p" | "d";
+  readonly why: Provenance | undefined;
+  from: readonly string[];
 }
 
 /**
- * The combinations of a symmetric relation, whose result does not depend on the order of its positional arguments:
- * the arguments with the same picks form a group, and a group of g arguments over a picks is asked once per multiset
- * of a picks taken g at a time, the sorted picks assigned to the group's arguments in order; the receiver and the
- * named operands keep every choice. `min(a, a, a)` over `integer | number` is asked 4 times, not 8.
+ * The fold of `min` or `max` over its arguments (P1, the owner's decision B on the status): the states after the first
+ * argument are its choices; each further argument is folded in by the relation's binary law, one ask per state and
+ * choice, so the asks grow with the arguments. The results are the final states: a type tagged m when a member
+ * contributed (the operation's site as identity), p for a possibility (its provenance), d for a dynamic reading. At
+ * interpretation the status names the arguments that can be invalid: one whose working choice cannot be ordered at
+ * all (asked against itself), and the two of a pair of orderable choices that cannot be ordered together, asked once
+ * per distinct type and pair of types across the call; no combination is counted.
  */
-function symmetricCombinations(
+function foldLift(
+  context: LiftContext,
+  operation: Operation,
+  relation: OperationRelation,
   operands: readonly Operand[],
   choices: readonly (readonly Pick[])[],
-): Pick[][] {
-  const byKey = (x: Pick, y: Pick): number =>
-    pickKey(x) < pickKey(y) ? -1 : pickKey(x) > pickKey(y) ? 1 : 0;
-  const sorted = choices.map((list) => [...list].sort(byKey));
-  const groups = new Map<string, number[]>();
-  const parts: {
-    readonly indices: readonly number[];
-    readonly assignments: readonly (readonly Pick[])[];
-  }[] = [];
-  operands.forEach((operand, index) => {
-    if ("argument" in operand.ref) {
-      const key = sorted[index]!.map(pickKey).join(";");
-      groups.set(key, [...(groups.get(key) ?? []), index]);
-    } else parts.push({ indices: [index], assignments: sorted[index]!.map((pick) => [pick]) });
-  });
-  for (const indices of groups.values()) {
-    const width = sorted[indices[0]!]!.length;
-    const assignments: (readonly Pick[])[] = [];
-    const walk = (position: number, from: number, picks: readonly Pick[]): void => {
-      if (position === indices.length) {
-        assignments.push(picks);
-        return;
+): { readonly changed: boolean; readonly tally: Tally | null } {
+  const { cells } = context;
+  const table = cells.table;
+  const pos = positionAt(operation.site);
+  const ask = (left: OperandView, right: OperandView): OperationResult => {
+    context.asks += 1;
+    return relation.result({
+      receiver: null,
+      arguments: [left, right],
+      named: new Map(),
+      evidence: operation.evidence,
+      view: () => BOTTOM_VIEW,
+      collect: () => BOTTOM_VIEW,
+      leaf: () => BOTTOM_VIEW,
+    });
+  };
+  const viewOf = (pick: Pick): OperandView => pick.view ?? BOTTOM_VIEW;
+  const typeOf = (view: OperandView): string =>
+    view.alternatives === null ? "-" : view.alternatives.map((t) => table.intern(t)).join("|");
+  const keyOfState = (st: FoldState): string =>
+    `${typeOf(st.view)}|${st.view.dynamic ?? ""}|${st.tag}|${st.why ?? ""}`;
+  const mergeState = (map: Map<string, FoldState>, st: FoldState): void => {
+    const key = keyOfState(st);
+    const prior = map.get(key);
+    if (prior === undefined) map.set(key, st);
+    else prior.from = [...new Set([...prior.from, ...st.from])];
+  };
+  const fromOf = (pick: Pick, index: number): readonly string[] =>
+    pick.kind === "closed" ? [`${operands[index]!.cell}:${pick.alt.type}`] : [];
+  const tagOf = (pick: Pick): FoldState["tag"] =>
+    pick.kind === "possible" ? "p" : pick.kind === "dynamic" ? "d" : pick.tag === "m" ? "m" : "w";
+  let states = new Map<string, FoldState>();
+  for (const pick of choices[0]!)
+    mergeState(states, {
+      view: viewOf(pick),
+      tag: tagOf(pick),
+      why: pick.kind === "possible" || pick.kind === "dynamic" ? pick.why : undefined,
+      from: fromOf(pick, 0),
+    });
+  for (let index = 1; index < choices.length; index += 1) {
+    const next = new Map<string, FoldState>();
+    for (const st of states.values())
+      for (const pick of choices[index]!) {
+        const answer = ask(st.view, viewOf(pick));
+        const pickTag = tagOf(pick);
+        const tag: FoldState["tag"] =
+          st.tag === "p" || pickTag === "p"
+            ? "p"
+            : st.tag === "d" || pickTag === "d"
+              ? "d"
+              : st.tag === "m" || pickTag === "m"
+                ? "m"
+                : "w";
+        const why =
+          tag === "p" || tag === "d"
+            ? (st.why ??
+              (pick.kind === "possible" || pick.kind === "dynamic" ? pick.why : undefined))
+            : undefined;
+        const from = [...st.from, ...fromOf(pick, index)];
+        const results = answer.kind === "alternatives" ? answer.results : [answer];
+        for (const r of results) {
+          if (r.kind === "type")
+            mergeState(next, {
+              view: { alternatives: [r.type], dynamic: null, known: undefined },
+              tag,
+              why,
+              from,
+            });
+          else if (r.kind === "possible")
+            for (const t of r.types)
+              mergeState(next, {
+                view: { alternatives: [t], dynamic: null, known: undefined },
+                tag: "p",
+                why: r.why,
+                from,
+              });
+          else if (r.kind === "dynamic")
+            mergeState(next, {
+              view: { alternatives: null, dynamic: r.why, known: undefined },
+              tag: "d",
+              why: r.why,
+              from,
+            });
+        }
       }
-      for (let i = from; i < width; i += 1)
-        walk(position + 1, i, [...picks, sorted[indices[position]!]![i]!]);
-    };
-    walk(0, 0, []);
-    parts.push({ indices, assignments });
+    states = next;
   }
-  let placements: ReadonlyMap<number, Pick>[] = [new Map()];
-  for (const part of parts)
-    placements = placements.flatMap((placed) =>
-      part.assignments.map((assignment) => {
-        const next = new Map(placed);
-        part.indices.forEach((index, i) => next.set(index, assignment[i]!));
-        return next;
-      }),
-    );
-  return placements.map((placed) => operands.map((_, index) => placed.get(index)!));
+  let changed = false;
+  const site = `op@${operation.site}`;
+  for (const st of states.values()) {
+    if (st.tag === "d") {
+      if (cells.add(operation.result, { tag: "d", why: st.why ?? "unknown", pos })) changed = true;
+      continue;
+    }
+    for (const t of st.view.alternatives ?? [])
+      if (
+        cells.add(operation.result, {
+          tag: st.tag,
+          type: table.intern(t),
+          group: st.tag === "m" ? site : undefined,
+          why: st.tag === "p" ? st.why : undefined,
+          pos,
+          from: [],
+        })
+      )
+        changed = true;
+  }
+  if (context.nonWorking === null) return { changed, tally: { asked: 0, invalid: 0, fold: [] } };
+  // the status, once over the final cells: the arguments whose working choices cannot be ordered, alone or together
+  const working = (pick: Pick, index: number): boolean =>
+    (pick.kind === "closed" || pick.kind === "possible") &&
+    !context.nonWorking!.has(`${operands[index]!.cell}:${pick.alt.type}`);
+  const typesOf = choices.map(
+    (list, index) =>
+      new Map(
+        list
+          .filter((pick) => working(pick, index))
+          .map(
+            (pick) =>
+              [
+                String(pick.kind === "closed" || pick.kind === "possible" ? pick.alt.type : ""),
+                viewOf(pick),
+              ] as const,
+          ),
+      ),
+  );
+  const views = new Map(typesOf.flatMap((m) => [...m]));
+  const alone = new Map([...views].map(([k, v]) => [k, ask(v, v).kind === "invalid"] as const));
+  const keys = [...views.keys()].sort();
+  const pairInvalid = new Map<string, boolean>();
+  for (let a = 0; a < keys.length; a += 1)
+    for (let b = a + 1; b < keys.length; b += 1)
+      if (!alone.get(keys[a]!) && !alone.get(keys[b]!))
+        pairInvalid.set(
+          `${keys[a]}|${keys[b]}`,
+          ask(views.get(keys[a]!)!, views.get(keys[b]!)!).kind === "invalid",
+        );
+  const blamed = new Set<number>();
+  typesOf.forEach((mine, index) => {
+    for (const k of mine.keys()) {
+      if (alone.get(k)) {
+        blamed.add(index);
+        continue;
+      }
+      typesOf.forEach((theirs, other) => {
+        if (other === index) return;
+        for (const u of theirs.keys())
+          if (!alone.get(u) && pairInvalid.get(k < u ? `${k}|${u}` : `${u}|${k}`))
+            blamed.add(index);
+      });
+    }
+  });
+  return { changed, tally: { asked: 0, invalid: 0, fold: [...blamed].sort((x, y) => x - y) } };
 }
 
 /**
@@ -769,13 +1008,20 @@ function askLazy(
 ): Ask[] {
   const { cells } = context;
   const asks: Ask[] = [];
+  // the bound (P1): one completed ask per combination of the dimensions this ask selected, which the depth-first
+  // selection enumerates exactly; a structure's parts are asked on their own, each within its own bound
+  const dims = new Map<string, number>();
   const run = (selected: Selection): void => {
     // the first dimension read before its selection, recorded by the closures below
     const wanted: { current: { readonly key: string; readonly picks: readonly Pick[] } | null } = {
       current: null,
     };
     const want: Want = (key, picks) => {
-      if (wanted.current === null) wanted.current = { key, picks: picks() };
+      if (wanted.current === null) {
+        const list = picks();
+        wanted.current = { key, picks: list };
+        dims.set(key, Math.max(dims.get(key) ?? 0, list.length));
+      }
     };
     const inputs = inputsOf(cells, operands, combo, operation, selected, want);
     const answer = fn(inputs);
@@ -802,6 +1048,9 @@ function askLazy(
     asks.push({ reading: reading!, selection: selected });
   };
   run(selection);
+  const bound = [...dims.values()].reduce((acc, n) => acc * Math.max(1, n), 1);
+  if (asks.length > bound)
+    throw new Error(`asks above the bound at ${site}: ${asks.length} > ${bound}`);
   return asks;
 }
 
@@ -824,8 +1073,18 @@ function inputsOf(
     else if ("named" in operand.ref) named.set(operand.ref.named, view);
   });
   const table = cells.table;
-  const placePick = (place: PlaceId): Pick | null =>
-    select(`p:${place}`, () => picksOf(cells, place, false), selection, want);
+  // a place a relation reads must be one the evidence declares (P1): the schedule depends on those alone
+  const declared = new Set(evidencePlaces(operation.evidence));
+  const declare = (place: PlaceId): void => {
+    if (!declared.has(place))
+      throw new Error(
+        `undeclared read of place ${place} by ${operation.contract.family}.${operation.contract.name}@${operation.site}`,
+      );
+  };
+  const placePick = (place: PlaceId): Pick | null => {
+    declare(place);
+    return select(`p:${place}`, () => picksOf(cells, place, false), selection, want);
+  };
   // the view of a whole cell under a dynamic walk: every alternative beside the provenance
   const dynamicViewOf = (found: readonly (Alternative | DynamicMark)[]): OperandView => {
     const alts = [
@@ -851,10 +1110,28 @@ function inputsOf(
       const pick = placePick(place);
       return pick === null ? BOTTOM_VIEW : (pick.view ?? BOTTOM_VIEW);
     },
+    collect(place) {
+      declare(place);
+      if (!cells.has(place)) return BOTTOM_VIEW;
+      const pick = aggregateOf(cells, place);
+      return pick.view ?? BOTTOM_VIEW;
+    },
     leaf(path) {
       let key: string;
       let dynamicWalk = false;
       let found: readonly (Alternative | DynamicMark)[];
+      if ("place" in path.of && path.of.collected === true) {
+        // the collected walk of a summed place: every alternative stepped together, the leaves as one aggregate
+        declare(path.of.place);
+        found = [...alternatives(cells, path.of.place), ...marksOf(cells, path.of.place)];
+        if (found.length === 0) return BOTTOM_VIEW;
+        for (const along of path.path) {
+          if (typeof along === "object" && absentEverywhere(cells, found, along.property))
+            return null;
+          found = found.flatMap((a) => stepOf(cells, a, along, true));
+        }
+        return found.length === 0 ? BOTTOM_VIEW : dynamicViewOf(found);
+      }
       if ("place" in path.of) {
         const pick = placePick(path.of.place);
         if (
@@ -876,7 +1153,7 @@ function inputsOf(
         const pick = combo[index]!;
         if (pick.kind === "bottom" || pick.kind === "absent" || pick.kind === "present")
           return BOTTOM_VIEW;
-        if (pick.kind === "dynamic") {
+        if (pick.kind === "dynamic" || pick.kind === "aggregate") {
           dynamicWalk = true;
           const cell = operands[index]!.cell;
           found = [...alternatives(cells, cell), ...marksOf(cells, cell)];
@@ -926,6 +1203,25 @@ function inputsOf(
   };
 }
 
+/**
+ * The base cases of the structures a combination was asked about (I1): the chosen alternatives' cases, over the given
+ * operands or all. A dynamic reading contributes no case: what it yields is its own structure (the result's plain
+ * part), never a set that depends on the alternatives present.
+ */
+function basesOfCombo(
+  combo: readonly Pick[],
+  operands: readonly Operand[],
+  only: readonly OperandRef[] | null,
+): readonly string[] {
+  const bases = new Set<string>();
+  combo.forEach((pick, index) => {
+    if (only !== null && !only.some((ref) => sameRef(ref, operands[index]!.ref))) return;
+    if (pick.kind === "closed" || pick.kind === "possible")
+      for (const b of basesOf(pick.alt)) bases.add(b);
+  });
+  return [...bases].sort();
+}
+
 function readAnswer(
   context: LiftContext,
   answer: OperationResult,
@@ -943,6 +1239,14 @@ function readAnswer(
   let invalid = false;
   const own = (member: boolean, possible: boolean): "w" | "m" | "p" =>
     possible ? "p" : member ? "m" : reading.mode === "dynamic" ? "w" : reading.base;
+  // the case the combination's structures give a collection the operation answers with (I1)
+  const cased = (type: StaticType): { readonly part?: string; readonly case?: string } => {
+    if (type.kind !== "list" && type.kind !== "set" && type.kind !== "dict") return {};
+    const bases = basesOfCombo(combo, operands, null);
+    return bases.length > 0
+      ? { part: `element{${bases.join(",")}}`, case: `j{${bases.join(",")}}` }
+      : {};
+  };
   const walk = (a: OperationResult, member: boolean, possible: boolean): void => {
     switch (a.kind) {
       case "type": {
@@ -956,6 +1260,7 @@ function readAnswer(
           whys: reading.whys,
           from: [],
           site: undefined,
+          ...cased(a.type),
         });
         break;
       }
@@ -970,6 +1275,7 @@ function readAnswer(
             whys: reading.whys,
             from: [],
             site: undefined,
+            ...cased(type),
           });
         break;
       case "dynamic":
@@ -1017,23 +1323,13 @@ function readAnswer(
           }
           elements.push(...projected);
         }
-        // a collection rebuilt under permitted members keeps its own element cell, named by the source element cells of
-        // the chosen members it is built from (r4-B3 Sol, W2-B1 Dropje97): one structure in, one structure out, whatever
-        // the member's element alternatives; witnesses merge into it (option B)
-        const sources = a.parts.flatMap((path) => {
-          const index = operands.findIndex((operand) => sameRef(operand.ref, path.of));
-          const pick = index < 0 ? undefined : combo[index];
-          return pick !== undefined &&
-            pick.kind === "closed" &&
-            pick.tag === "m" &&
-            pick.alt.choice?.element !== undefined
-            ? pick.alt.choice.cells
-            : [];
-        });
-        const part =
-          tag === "m" && sources.length > 0
-            ? `element#${[...new Set(sources)].sort((left, right) => left - right).join("+")}`
-            : "element";
+        // a rebuilt collection's case is the set of base cases of the chosen structures it is built from (I1): one
+        // structure in, one structure out; two members of one shape stay two; a feedback edge returns to the same case
+        const bases = basesOfCombo(
+          combo,
+          operands,
+          a.parts.map((path) => path.of),
+        );
         outcomes.push({
           kind: "collection",
           tag,
@@ -1042,7 +1338,8 @@ function readAnswer(
           group: tag === "m" ? reading.site : undefined,
           why: undefined,
           whys: reading.whys,
-          part,
+          part: bases.length > 0 ? `element{${bases.join(",")}}` : "element",
+          case: bases.length > 0 ? `j{${bases.join(",")}}` : undefined,
         });
         break;
       }
@@ -1123,11 +1420,21 @@ function project(
   const index = operands.findIndex((operand) => sameRef(operand.ref, source.of));
   if (index < 0) return [];
   const pick = combo[index]!;
-  if (pick.kind !== "closed" && pick.kind !== "possible" && pick.kind !== "dynamic") return [];
-  const dynamicWalk = pick.kind === "dynamic";
+  if (
+    pick.kind !== "closed" &&
+    pick.kind !== "possible" &&
+    pick.kind !== "dynamic" &&
+    pick.kind !== "aggregate"
+  )
+    return [];
+  const dynamicWalk = pick.kind === "dynamic" || pick.kind === "aggregate";
   const cell = operands[index]!.cell;
-  let found: readonly (Alternative | DynamicMark)[] =
-    pick.kind === "dynamic" ? [...alternatives(cells, cell), ...marksOf(cells, cell)] : [pick.alt];
+  let found: readonly (Alternative | DynamicMark)[] = dynamicWalk
+    ? [...alternatives(cells, cell), ...marksOf(cells, cell)]
+    : [pick.alt];
+  // a part read through a permitted member is a member of the same union (Dropje97's W3-B1): the element of the list
+  // `get` chose is permitted as the list is; a witness element under a witness collection stays a witness
+  const via = !dynamicWalk && pick.alt.tag === "m" ? pick.alt : null;
   let key = `o:${index}`;
   for (const step of source.path) {
     key += typeof step === "object" ? `.${step.property}` : `.${step}`;
@@ -1155,8 +1462,11 @@ function project(
   }
   return found.flatMap((a): Outcome[] => {
     if (a.tag === "d") return [{ kind: "dynamic", why: a.why }];
-    const tag: "w" | "m" | "p" = a.tag === "p" || possible ? "p" : member ? "m" : a.tag;
-    const group = tag !== "m" ? undefined : member ? reading.site : a.group;
+    const viaMember = via !== null && a.tag === "w";
+    const tag: "w" | "m" | "p" =
+      a.tag === "p" || possible ? "p" : member || viaMember ? "m" : a.tag;
+    const group =
+      tag !== "m" ? undefined : member ? reading.site : viaMember ? via!.group : a.group;
     const why = tag !== "p" ? undefined : a.tag === "p" ? a.why : undefined;
     // a projected part keeps the earliest site of its own evidence as the secondary position (Q3.7: the earliest
     // member or operand by source position decides a collection built from several)
@@ -1201,6 +1511,7 @@ function emit(cells: Cells, result: CellId, outcome: Outcome, at: Position): boo
             tag: outcome.tag,
             ctor: outcome.item.ctor,
             parts: outcome.item.parts,
+            case: outcome.item.case,
             group: outcome.group,
             why,
             pos,
@@ -1222,6 +1533,7 @@ function emit(cells: Cells, result: CellId, outcome: Outcome, at: Position): boo
             tag: outcome.tag,
             ctor: outcome.ctor,
             parts: { element },
+            case: outcome.case ?? `c:${cells.name(result)}`,
             group: outcome.group,
             why,
             pos,
@@ -1239,6 +1551,8 @@ function emit(cells: Cells, result: CellId, outcome: Outcome, at: Position): boo
             why,
             pos,
             from: outcome.from,
+            part: outcome.part,
+            case: outcome.case,
           })
         )
           changed = true;
@@ -1256,6 +1570,7 @@ function emit(cells: Cells, result: CellId, outcome: Outcome, at: Position): boo
               tag: outcome.tag,
               ctor: "object",
               parts: { props: cells.objectParts(props, result, pos), open: false },
+              case: `s:${cells.name(result)}`,
               group: outcome.group,
               why,
               pos,
@@ -1272,6 +1587,7 @@ function emit(cells: Cells, result: CellId, outcome: Outcome, at: Position): boo
               tag: outcome.tag,
               ctor: "dict",
               parts: { element },
+              case: `s:${cells.name(result)}`,
               group: outcome.group,
               why,
               pos,
