@@ -143,7 +143,7 @@ export function differential(
       // a copied value changed in place after the copy: the bindings whose fact reaches a literal that another
       // binding holds through a copy and that a mutation after the copy changes, not the others of the source
       // (r10-B7, r11-B4)
-      if (oracle.involved(expected.touched))
+      if (oracle.involved(expected.content))
         return {
           class: 3,
           evidence:
@@ -636,7 +636,11 @@ function parse(text: string, id: string | null = null): Fact {
   const inner = body.startsWith("(") && body.endsWith(")") ? body.slice(1, -1) : body;
   const members: FactMember[] = [];
   let optional = false;
-  for (const raw of topLevel(inner, "|")) {
+  // a union the text writes, at any level, is a permitted union: every member admitted (a written `(integer |
+  // string)[]` keeps both element members, PR 3a review r1-B3)
+  const written = topLevel(inner, "|");
+  const group = written.length > 1 ? `parsed:${inner}` : null;
+  for (const raw of written) {
     let member = raw.trim();
     if (member.endsWith("!")) {
       isHeld = true;
@@ -646,8 +650,9 @@ function parse(text: string, id: string | null = null): Fact {
     else if (member === "?" || member === "never") continue;
     else if (member === "unknown") isHeld = true;
     else if (member.length > 0) {
-      if (/,\+\}$/.test(member)) isHeld = true;
-      members.push(parseMember(member, id));
+      if (/(,|\{)\+\}$/.test(member)) isHeld = true;
+      const parsed = parseMember(member, id);
+      members.push(group === null ? parsed : { ...parsed, group });
     }
   }
   return { members, optional, held: isHeld };
@@ -741,7 +746,7 @@ function openForm(text: string): string | null {
   if (/\?null/.test(text)) return "?null";
   if (/\?(?!null)/.test(text)) return "?";
   if (/![|)]/.test(text)) return "a member's held mark";
-  if (/,\+\}/.test(text)) return "an open shape (+)";
+  if (/(,|\{)\+\}/.test(text)) return "an open shape (+)";
   return null;
 }
 
@@ -838,8 +843,10 @@ class Oracle {
   readonly #places = new Map<string, Place>();
   readonly #producers = new Map<PlaceId, Constraint[]>();
   readonly #estimates = new Map<PlaceId, Fact>();
-  /** The bindings a derivation read (the dependence of a fact on a copied value changed in place). */
+  /** The bindings a derivation read. */
   readonly #touched = new Set<PlaceId>();
+  /** The literals whose content a derivation projected (an element, an entry, a property, a member held in place). */
+  readonly #content = new Set<PlaceId>();
   /** Whether a derivation asked a relation with a constant among its strict operands (the legacy folds those). */
   #folded = false;
   readonly #constants = new Map<PlaceId, boolean>();
@@ -881,6 +888,7 @@ class Oracle {
     const place = this.#places.get(siteKey(site));
     if (place === undefined || place.kind.kind !== "binding") return null;
     this.#touched.clear();
+    this.#content.clear();
     this.#folded = false;
     this.failure = null;
     const legacyText = this.#bindingFacts.get(siteKey(site));
@@ -896,6 +904,7 @@ class Oracle {
     }
     if (derived === null) return null;
     const touched = [...this.#touched];
+    const content = [...new Set([...this.#content, ...literalsOf(derived)])];
     const folded = this.#folded;
     if (place.kind.written !== null && legacyText !== undefined) {
       // a written type is the bound, every member admitted; the place is held by a stored value the compiler cannot
@@ -909,24 +918,32 @@ class Oracle {
         held:
           derived.held || derived.members.some((m) => m.possible && !known.includes(shapeKey(m))),
       };
-      return { text: renderFact(expected), rules: rulesFor(legacy, expected), touched, folded };
+      return {
+        text: renderFact(expected),
+        rules: rulesFor(legacy, expected),
+        touched,
+        content,
+        folded,
+      };
     }
-    return { text: renderFact(derived), rules: rulesFor(legacy, derived), touched, folded };
+    return {
+      text: renderFact(derived),
+      rules: rulesFor(legacy, derived),
+      touched,
+      content,
+      folded,
+    };
   }
 
   /**
-   * Whether a derivation that read the given bindings depends on a copied value changed in place: one of them holds,
-   * at some level of its fact, a literal that another binding than the literal's own holds through a copy made before
-   * a mutation of it (r10-B7, r11-B4). A computed scalar (`a.length`) holds no literal and is compared.
+   * Whether a fact depends on a copied value changed in place: the fact holds, at some level, or its derivation
+   * projected the content of, a literal that another binding than the literal's own holds through a copy made before
+   * a mutation of it (r10-B7, r11-B4, PR review r1-B2). A member the receiver's kind computes (`a.length`,
+   * `toString(a)`) reads no content and is compared.
    */
-  involved(touched: readonly PlaceId[]): boolean {
+  involved(content: readonly PlaceId[]): boolean {
     const shared = this.#sharedMutated();
-    if (shared.size === 0) return false;
-    const facts = this.#factsOfBindings();
-    return touched.some((place) => {
-      const fact = facts.get(place);
-      return fact !== undefined && [...literalsOf(fact)].some((literal) => shared.has(literal));
-    });
+    return shared.size > 0 && content.some((literal) => shared.has(literal));
   }
 
   /** The facts of every author binding, derived once (outside any expectation's reading). */
@@ -1032,6 +1049,7 @@ class Oracle {
 
   /** The elements of a collection fact (the alternatives of every collection member). */
   #elements(value: Fact): Fact {
+    for (const literal of literalsOf(value)) this.#content.add(literal);
     const parts = value.members.filter((m) => m.ctor !== null).map((m) => m.element ?? EMPTY);
     const joined = join(parts);
     return heldOf(value) ? held(joined, provenancesOf(value)) : joined;
@@ -1039,6 +1057,7 @@ class Oracle {
 
   /** The property of an object fact. */
   #property(value: Fact, name: string): Fact {
+    for (const literal of literalsOf(value)) this.#content.add(literal);
     const parts = value.members.map((m) => (m.open ? held(EMPTY) : (m.props?.get(name) ?? EMPTY)));
     const joined = join(parts);
     return heldOf(value) ? held(joined, provenancesOf(value)) : joined;
@@ -1198,6 +1217,10 @@ class Oracle {
         : this.#read(answer, (ref) => ("receiver" in ref ? receiver : null), site, dynamic);
     const parts: Fact[] = [];
     for (const member of owner.members) {
+      // a property read on an object reads its content, whether or not the property is there
+      if (member.props !== null || member.open)
+        for (const literal of literalsOf({ members: [member], optional: false, held: false }))
+          this.#content.add(literal);
       const type = typeOfMember(member);
       const kind = valueKindOf(type);
       const answer =
@@ -1614,6 +1637,8 @@ interface Expectation {
   readonly rules: readonly string[];
   /** The bindings the derivation read. */
   readonly touched: readonly PlaceId[];
+  /** The literals the fact holds or whose content the derivation projected. */
+  readonly content: readonly PlaceId[];
   /** Whether the derivation asked a relation over constant operands only (the legacy folds those). */
   readonly folded: boolean;
 }

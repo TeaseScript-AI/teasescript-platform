@@ -1,4 +1,4 @@
-import { PropertyTable, union, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
+import { PropertyTable, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
 import type { ValueKind } from "../../value-kinds.js";
 import { memberOf } from "../adapters/members.js";
 import type {
@@ -53,6 +53,8 @@ export interface Alternative {
   readonly items: readonly Item[];
   /** The chosen part alternatives of a structural item, for projections; `null` for a flat type. */
   readonly choice: Choice | null;
+  /** An object below another object's alternative: `object` in the view, its property lists for the projections. */
+  readonly opaque?: true;
 }
 
 /**
@@ -78,11 +80,14 @@ const unionOf = (left: readonly CellId[], right: readonly CellId[]): readonly Ce
  */
 function roleOf(a: Alternative): string {
   const own = `${a.tag}|${a.group ?? ""}|${a.why ?? ""}`;
-  // an object alternative's identity is its own role: its property lists keep every role of their alternatives and
-  // grow as evidence arrives, so naming them would make a merge depend on a transient state
-  return a.choice === null || a.choice.element === undefined
-    ? own
-    : `${own}[${roleOf(a.choice.element)}]`;
+  if (a.choice === null) return own;
+  if (a.choice.element !== undefined) return `${own}[${roleOf(a.choice.element)}]`;
+  // an opaque object's identity is its own role: its property lists grow as evidence arrives, so naming them would
+  // make a merge depend on a transient state; a product alternative names its chosen parts, which never change
+  if (a.opaque === true) return own;
+  return `${own}{${[...a.choice.props]
+    .map(([name, list]) => `${name}:${list.map(roleOf).sort().join("/")}`)
+    .join(",")}}`;
 }
 
 const keyOf = (a: Alternative): string => `${a.type}|${roleOf(a)}`;
@@ -130,11 +135,12 @@ function alternatives(
   cells: Cells,
   cell: CellId,
   path: ReadonlySet<CellId> = new Set(),
+  depth = 0,
 ): readonly Alternative[] {
   const out = new Map<string, Alternative>();
   for (const item of cells.items(cell)) {
     if (item.tag === "d" || item.tag === "e") continue;
-    for (const alternative of itemAlternatives(cells, item, cell, path)) {
+    for (const alternative of itemAlternatives(cells, item, cell, path, depth)) {
       const key = keyOf(alternative);
       const prior = out.get(key);
       if (prior === undefined) out.set(key, alternative);
@@ -179,6 +185,7 @@ export function itemAlternatives(
   item: Item,
   cell: CellId,
   path: ReadonlySet<CellId>,
+  depth = 0,
 ): readonly Alternative[] {
   const table = cells.table;
   const tag: Alternative["tag"] =
@@ -204,9 +211,9 @@ export function itemAlternatives(
     items: [],
     choice: null,
   });
-  const partAlternatives = (part: CellId): Alternative[] => {
+  const partAlternatives = (part: CellId, nextDepth = depth): Alternative[] => {
     if (path.has(part) || part === cell) return [synthetic(UNKNOWN_TYPE, part)];
-    const out = [...alternatives(cells, part, inner)];
+    const out = [...alternatives(cells, part, inner, nextDepth)];
     const items = cells.items(part);
     if (items.some((it) => it.tag === "e")) out.push(synthetic({ kind: "never" }, part));
     if (items.some((it) => it.tag === "d" || it.tag === "p"))
@@ -243,42 +250,51 @@ export function itemAlternatives(
           choice: { props: new Map(), cells: propCells },
         },
       ];
-    // An object item is one alternative whose property types are the union of each property's alternatives, the
-    // alternatives themselves kept per property for the projections (no product across the properties, work note
-    // §3.5); per property whose slot may be missing (empty by construction beside its evidence) one more
-    // alternative, the object without it, so a read of it stays a runtime check.
-    const props = new Map<string, readonly Alternative[]>();
-    const types: (readonly [string, StaticType])[] = [];
-    const missing: string[] = [];
+    // Views are one level deep (the orchestrator's decision on r11-B6, revised after PR review r1-B1): an object
+    // below another object's alternative (directly or through collections) is opaque in the view, an `object` whose
+    // property lists still serve the projections; the product over the properties is an object's own, so each
+    // alternative is a combination of part alternatives that never change (monotone) and the count is bounded.
+    if (depth >= 1) {
+      const props = new Map<string, readonly Alternative[]>();
+      for (const [name, part] of [...item.parts.props].sort(byName)) {
+        const parts = sortedAlternatives(
+          partAlternatives(part, depth).filter((a) => table.node(a.type).kind !== "never"),
+        );
+        if (parts.length > 0) props.set(name, parts);
+      }
+      return [
+        {
+          ...base,
+          type: table.intern({ kind: "object", properties: null }),
+          choice: { props, cells: propCells },
+          opaque: true,
+        },
+      ];
+    }
+    let combos: (readonly [string, Alternative])[][] = [[]];
     for (const [name, part] of [...item.parts.props].sort(byName)) {
+      // an empty slot: the property absent; beside evidence, both
       const parts = sortedAlternatives(
-        partAlternatives(part).filter((a) => table.node(a.type).kind !== "never"),
+        partAlternatives(part, depth + 1).filter((a) => table.node(a.type).kind !== "never"),
       );
       const absent = cells.items(part).some((it) => it.tag === "e");
       // a property without evidence yet: the object contributes nothing yet
       if (parts.length === 0 && !absent) return [];
-      if (parts.length === 0) continue;
-      props.set(name, parts);
-      types.push([
-        name,
-        parts.length === 1
-          ? table.toStatic(parts[0]!.type)
-          : union(parts.map((a) => table.toStatic(a.type))),
+      combos = combos.flatMap((combo) => [
+        ...(absent ? [combo] : []),
+        ...parts.map((a) => [...combo, [name, a] as const]),
       ]);
-      if (absent) missing.push(name);
     }
-    const objectOf = (without: string | null): Alternative => ({
-      ...base,
-      type: table.intern({
-        kind: "object",
-        properties: new PropertyTable(types.filter(([name]) => name !== without)),
-      }),
-      choice: {
-        props: without === null ? props : new Map([...props].filter(([name]) => name !== without)),
-        cells: propCells,
-      },
-    });
-    return [objectOf(null), ...missing.map(objectOf)];
+    return combos.map((combo) =>
+      compose(
+        {
+          kind: "object",
+          properties: new PropertyTable(combo.map(([name, a]) => [name, table.toStatic(a.type)])),
+        },
+        combo.map(([, a]) => a),
+        { props: new Map(combo.map(([name, a]) => [name, [a]])), cells: propCells },
+      ),
+    );
   }
   const element = item.parts.element;
   const ctor: Exclude<Constructor, "object"> = item.ctor === "object" ? "list" : item.ctor;

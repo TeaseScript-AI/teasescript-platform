@@ -197,15 +197,34 @@ function assertOracle(
       const parts = [own, ...others].filter((e) => e.kind !== "never");
       return parts.length > 0 && joinTypes(parts) === undefined;
     });
+  // A join answer (a new collection over the receiver's elements, or over both operands' for `union`, parts shared)
+  // realizes as one collection over the union of those elements, where the legacy echoed one per receiver member.
+  const receiverKind = viewMembers(
+    inputs.receiver ?? { alternatives: null, dynamic: null, known: undefined },
+  )
+    .map((m) => m.kind)
+    .find((k) => k === "list" || k === "set");
+  const joined =
+    receiverKind === undefined || owns.length === 0
+      ? null
+      : [...owns, ...(relation.contract.name === "union" ? (others ?? []) : [])].filter(
+          (e) => e.kind !== "never",
+        );
+  const joinText =
+    joined === null || joined.length === 0
+      ? null
+      : `${receiverKind}<${typeKey(union(joined), true, true)}>`;
+  const answer = relation.result(inputs);
   const decided = mixes
     ? {
-        realized: `${mixed![1]}<${typeKey(
-          union([...owns, ...others!].filter((e) => e.kind !== "never")),
-          true,
-          true,
-        )}>`,
+        realized: `${mixed![1]}<${typeKey(union([...owns, ...others!].filter((e) => e.kind !== "never")), true, true)}>`,
       }
-    : null;
+    : answer.kind === "join" &&
+        (others !== null || relation.contract.name !== "union") &&
+        joinText !== null &&
+        joinText !== fact
+      ? { realized: joinText }
+      : null;
   try {
     assertCase(
       relation,

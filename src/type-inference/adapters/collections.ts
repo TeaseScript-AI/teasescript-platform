@@ -251,14 +251,24 @@ function setOperation(
     return element === undefined ? unknownElements : { kind, element };
   };
   const joined = union(owns.map(result));
-  if (mixes) {
-    const argument: OperandRef =
-      inputs.arguments[0] !== undefined
-        ? { argument: 0 }
-        : { named: inputs.named.keys().next().value ?? "" };
-    return joinOf(kind, pathOf(RECEIVER, "element"), pathOf(argument, "element"));
-  }
-  return typeResult(joined);
+  const argument: OperandRef =
+    inputs.arguments[0] !== undefined
+      ? { argument: 0 }
+      : { named: inputs.named.keys().next().value ?? "" };
+  if (mixes) return joinOf(kind, pathOf(RECEIVER, "element"), pathOf(argument, "element"));
+  // A new collection over the receiver's elements (`intersection`, `difference`) or over both operands' elements
+  // (`union`): the parts shared, not the element types echoed, so that an object element's view, one level deep and
+  // widening while solving, never becomes evidence (PR 3a review r1-B1). The problem, null and dynamic paths of
+  // `union` keep the legacy's recovery above.
+  if (contract.name !== "union") return joinOf(kind, pathOf(RECEIVER, "element"));
+  if (
+    problems ||
+    first === undefined ||
+    first.dynamic !== null ||
+    useOf(first).some((member) => member.kind !== "list" && member.kind !== "set")
+  )
+    return typeResult(joined);
+  return joinOf(kind, pathOf(RECEIVER, "element"), pathOf(argument, "element"));
 }
 
 /**

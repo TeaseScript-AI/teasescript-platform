@@ -101,11 +101,12 @@ test("get gives the element or the default (Q2) and needs its default; union joi
     legacyOperation('let d = dict { "k": 1 }\nlet r = d.get("k", default: 1.5)\nexit'),
     "alternatives",
   );
+  // A new collection over both operands' elements, parts shared (a join), realized as the legacy's type.
   assertEqualResult(
     method("union"),
     inputsOf({ receiver: LIST, arguments: [closedView({ kind: "list", element: NUMBER_TYPE })] }),
     legacyOperation(`${XS}let r = xs.union([1.5])\nexit`),
-    "type",
+    "join",
   );
   // Elements that mix: the legacy reports and recovered a list of unknown elements; under Q3.7's scope the relation
   // builds the list from both operands' elements (the report stays at the construction).
@@ -379,6 +380,8 @@ test("set operations per member of the receiver, an empty collection adding noth
     { fact: "list<unknown>", errors: ["TSV044"] },
     { realized: "list<(integer|string)>" },
   );
+  // An intersection is a new collection over the receiver's elements (parts shared): one list over the elements of
+  // both members, where the legacy echoed a list per member.
   assertCase(
     method("intersection"),
     inputsOf({ receiver: lists, arguments: [dynamicView("host")] }),
@@ -386,7 +389,8 @@ test("set operations per member of the receiver, an empty collection adding noth
       "let xs: integer[] | string[] = hostValue\nlet r = xs.intersection(hostList)\nexit",
     ),
     { fact: "(list<integer>|list<string>)" },
-    "fact",
+    { realized: "list<(integer|string)>" },
+    "join",
   );
   // The dict shape gate takes the value away from a receiver that is a dict alone; beside a list the dict's value
   // stays and the shape problem is reported.

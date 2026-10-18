@@ -137,9 +137,9 @@ function concatenation(inputs: OperationInputs): OperationResult | undefined {
   const first = left.dynamic === null ? resolved(closedType(left)!) : null;
   const second = right.dynamic === null ? resolved(closedType(right)!) : null;
   if (first?.kind !== "list" || second?.kind !== "list") return undefined;
-  return arithmeticType("+", first, second) === undefined
-    ? joinOf("list", pathOf({ argument: 0 }, "element"), pathOf({ argument: 1 }, "element"))
-    : undefined;
+  // the list built from both operands' elements, parts shared, whatever their kinds (Q3.7's scope for a mix; for
+  // the same kinds the join is the legacy's answer with the parts shared instead of echoed, PR 3a review r1-B1)
+  return joinOf("list", pathOf({ argument: 0 }, "element"), pathOf({ argument: 1 }, "element"));
 }
 
 export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map<string, OperationRelation>(

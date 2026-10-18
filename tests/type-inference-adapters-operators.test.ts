@@ -97,7 +97,7 @@ test("two lists join their elements as a literal does; elements that mix join un
       ],
     }),
     legacyOperation("let r = [1, 2] + [3]\nexit"),
-    "type",
+    "join",
   );
   assertEqualResult(
     relation("operator", "+"),

@@ -84,6 +84,20 @@ const R11: readonly SolverCase[] = [
   },
   { name: "r11-mutation-before-copy-exemption", source: "let a = [1]\na.add(2)\nlet b = a\nexit" },
   { name: "r11-partial-known-pow", source: "let r = pow(round(hostValue),3)\nexit" },
+  // PR 3a review r1 (Astra and Sol): a computed scalar beside a real copy, before and after the mutation; a nested
+  // written union; the zero-property open shape
+  {
+    name: "r1-computed-scalar-exemption",
+    source: "let a = [1]\nlet b = a\nlet n = a.length\na.add(2)\nexit",
+  },
+  { name: "r1-copied-length", source: "let a = [1]\nlet b = a\na.add(2)\nlet n = b.length\nexit" },
+  {
+    name: "r1-computed-text-beside-copy",
+    source: "let a = [1]\nlet b = a\na.add(2)\nlet n = toString(a)\nexit",
+  },
+  { name: "r1-copied-first", source: 'let a = [1]\nlet b = a\na.add("s")\nlet n = b.first\nexit' },
+  { name: "r1-nested-written-union", source: "let x: (integer | string)[] = hostValue\nexit" },
+  { name: "r1-empty-open-shape", source: "let a = {}\na = -a\nexit" },
   {
     name: "r11-oracle-product-cutoff",
     source: [
@@ -270,6 +284,34 @@ test("Astra's r11 cases take their classes, and an injected fact at each is reje
     [3],
   );
   assert.match(fold[0]!.evidence, /known-value fold/);
+  // PR review r1-B2 (Astra, Sol): a computed scalar of a copied collection is compared, before or after the mutation
+  // and through the copy; a read of the copied content stays class 3
+  for (const [name, wrong] of [
+    ["r1-computed-scalar-exemption", "string"],
+    ["r1-copied-length", "string"],
+    ["r1-computed-text-beside-copy", "integer"],
+  ] as const) {
+    assert.deepEqual(classes(name), [], name);
+    assert.deepEqual(classes(name, changeBinding("n", wrong)), [4], name);
+  }
+  // a read of the copied content keeps the exemption: an injected fact there is class 3, not a defect
+  assert.deepEqual(classes("r1-copied-first"), []);
+  assert.deepEqual(classes("r1-copied-first", changeBinding("n", "string")), [3]);
+  // PR review r1-B3 (Astra): a nested written union keeps every member; the held mark is Q3.2a, the narrowed fact
+  // a defect
+  const nested = bindings("r1-nested-written-union");
+  assert.deepEqual(
+    nested.map((d) => [d.name, d.class]),
+    [["x", 1]],
+  );
+  assert.match(nested[0]!.evidence, /Q3\.2a/);
+  assert.deepEqual(classes("r1-nested-written-union", changeBinding("x", "list<integer>!")), [4]);
+  // PR review r1-S2 (Sol): the zero-property open shape is the legacy's replaced mechanism
+  const open = bindings("r1-empty-open-shape");
+  assert.deepEqual(
+    open.map((d) => [d.name, d.class]),
+    [["a", 2]],
+  );
 });
 
 test("the classifier rejects a changed fact at an arbitrary site, a class-1 site and a class-2 site", () => {

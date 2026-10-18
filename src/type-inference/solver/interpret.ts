@@ -158,6 +158,43 @@ function emptyPart(cells: Cells, cell: CellId): boolean {
   return cells.items(cell).every((item) => item.tag === "e");
 }
 
+/** Whether a known item covers a possibility: the same type, or the same constructor part by part. */
+function covers(cells: Cells, known: Item, possible: Item, visiting: Set<string>): boolean {
+  if (possible.type !== undefined) return known.type === possible.type;
+  if (known.ctor === undefined || known.ctor !== possible.ctor) return false;
+  if (possible.parts?.props !== undefined) {
+    if (possible.parts.open === true) return known.parts?.open === true;
+    if (known.parts?.props === undefined || known.parts.open === true) return false;
+    for (const [name, part] of possible.parts.props) {
+      const other = known.parts.props.get(name);
+      if (other === undefined || !partCovers(cells, other, part, visiting)) return false;
+    }
+    return true;
+  }
+  if (possible.parts?.element === undefined || known.parts?.element === undefined) return false;
+  return partCovers(cells, known.parts.element, possible.parts.element, visiting);
+}
+
+function partCovers(cells: Cells, known: CellId, possible: CellId, visiting: Set<string>): boolean {
+  if (known === possible) return true;
+  const key = `${known}|${possible}`;
+  if (visiting.has(key)) return true;
+  visiting.add(key);
+  const theirs = cells.items(known);
+  return cells
+    .items(possible)
+    .every((item) =>
+      item.tag === "e"
+        ? theirs.some((other) => other.tag === "e")
+        : item.tag === "d" || item.tag === "p"
+          ? theirs.some((other) => other.tag === "d" || other.tag === "p")
+          : theirs.some(
+              (other) =>
+                (isKnown(other) || other.tag === "b") && covers(cells, other, item, visiting),
+            ),
+    );
+}
+
 export function interpret(cells: Cells, cell: CellId): CellView {
   const items = cells.items(cell);
   const table = cells.table;
@@ -167,18 +204,14 @@ export function interpret(cells: Cells, cell: CellId): CellView {
       (item.tag === "b" && item.type !== undefined && table.node(item.type).kind === "null"),
   );
   const bound = items.filter((item) => item.tag === "b");
-  // held: a value the compiler cannot know, or a possibility no witness, member or bound covers (every alternative
-  // of it is an alternative of a known item); the same rule under a written bound (r10-B4)
-  const covered = new Set(
-    items
-      .filter((item) => isKnown(item) || item.tag === "b")
-      .flatMap((item) => itemAlternatives(cells, item, cell, new Set()).map((a) => a.type)),
-  );
+  // held: a value the compiler cannot know, or a possibility no witness, member or bound covers: the same type, or
+  // the same constructor with every item of each part covered by an item of the known item's part (views are one
+  // level deep, so coverage reads the cells); the same rule under a written bound (r10-B4)
+  const known = items.filter((item) => isKnown(item) || item.tag === "b");
   const held = items.some(
     (item) =>
       item.tag === "d" ||
-      (item.tag === "p" &&
-        !itemAlternatives(cells, item, cell, new Set()).every((a) => covered.has(a.type))),
+      (item.tag === "p" && !known.some((k) => covers(cells, k, item, new Set()))),
   );
   if (bound.length > 0)
     return { kind: "bound", members: bound.map(memberOf), families: [], optional, held };

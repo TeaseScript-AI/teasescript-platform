@@ -1669,16 +1669,21 @@ function* sameTask(leftType: StaticType, rightType: StaticType): CompileTask<boo
     return true;
   }
   if (left.kind === "union" && right.kind === "union") {
-    if (left.members.length !== right.members.length) return false;
-    for (const member of left.members) {
-      let found = false;
-      for (const other of right.members)
-        if (yield* compileChild(sameTask(member, other))) {
-          found = true;
-          break;
-        }
-      if (!found) return false;
-    }
+    // members as sets, both ways: `union` keeps structurally equal object members, so a count and one direction
+    // would let two equal members of one side match one member of the other (r1-S1 of PR 3a's review)
+    for (const [mine, theirs] of [
+      [left.members, right.members],
+      [right.members, left.members],
+    ] as const)
+      for (const member of mine) {
+        let found = false;
+        for (const other of theirs)
+          if (yield* compileChild(sameTask(member, other))) {
+            found = true;
+            break;
+          }
+        if (!found) return false;
+      }
     return true;
   }
   return true;
