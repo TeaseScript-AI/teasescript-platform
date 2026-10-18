@@ -24,6 +24,7 @@ import type {
   OperationResult,
 } from "./relation.js";
 import {
+  closedType,
   INVALID,
   isBottom,
   possibleResult,
@@ -121,12 +122,32 @@ const FIXED: readonly (readonly [ContractFamily, string, StaticType])[] = [
   ["range", "..=", { kind: "range" }],
 ];
 
+/**
+ * Two lists whose element types mix: the legacy reports them as `union()` reports them (V30 §16) and recovers a list
+ * of unknown elements, so the concatenation keeps a value.
+ */
+function concatenation(inputs: OperationInputs): OperationResult | undefined {
+  const [left, right] = inputs.arguments;
+  if (left === undefined || right === undefined || isBottom(left) || isBottom(right))
+    return undefined;
+  const first = left.dynamic === null ? resolved(closedType(left)!) : null;
+  const second = right.dynamic === null ? resolved(closedType(right)!) : null;
+  if (first?.kind !== "list" || second?.kind !== "list") return undefined;
+  return arithmeticType("+", first, second) === undefined
+    ? typeResult({ kind: "list", element: UNKNOWN_TYPE })
+    : undefined;
+}
+
 export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map<string, OperationRelation>(
   [
     ...["+", "-", "*", "/", "%"].map((operator): [string, OperationRelation] => [
       `operator.${operator}`,
-      relation("operator", operator, (inputs) =>
-        combine(inputs.arguments, (left, right) => arithmeticType(operator, left!, right!)),
+      relation(
+        "operator",
+        operator,
+        (inputs) =>
+          (operator === "+" ? concatenation(inputs) : undefined) ??
+          combine(inputs.arguments, (left, right) => arithmeticType(operator, left!, right!)),
       ),
     ]),
     ...["-", "+"].map((operator): [string, OperationRelation] => [

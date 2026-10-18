@@ -87,7 +87,9 @@ function valuesOf(
       ? union(lists.map((member) => (member.kind === "list" ? member.element : UNKNOWN_TYPE)))
       : UNKNOWN_TYPE;
   if (named === undefined)
-    return list.dynamic === null ? { type: element } : { result: dynamicFrom(list, "unknown member") };
+    return list.dynamic === null
+      ? { type: element }
+      : { result: dynamicFrom(list, "unknown member") };
   const parts = members(element).map(resolved);
   // Every element the legacy knows must be an object, also when the property's type stays unknown.
   if (parts.some((member) => !unknownPart(member) && member.kind !== "object"))
@@ -228,7 +230,9 @@ function prediction(
   const start = property("start");
   const fields = [property("slope"), intercept, start];
   // A line whose slope, intercept or start may be null is reported.
-  if (fields.some((field) => field !== undefined && members(field).some((one) => one.kind === "null")))
+  if (
+    fields.some((field) => field !== undefined && members(field).some((one) => one.kind === "null"))
+  )
     return INVALID;
   if (
     object.kind !== "object" ||
@@ -256,7 +260,9 @@ function relation(name: ListFunctionName, contract: ListFunction): OperationRela
             single !== undefined &&
             (single.alternatives === null ||
               members(closedType(single)!).some((member) => resolved(member).kind === "list"));
-          if (takesValues(name) && !list) return minMaxOfValues(inputs.arguments);
+          // The legacy folds every argument of the value form, the named ones too (reported as unknown names).
+          if (takesValues(name) && !list)
+            return minMaxOfValues([...inputs.arguments, ...inputs.named.values()]);
           return statistic(contract, inputs);
         }
         case "points":

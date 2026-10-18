@@ -42,7 +42,14 @@ import type {
   WrittenLiteral,
 } from "../graph.js";
 import type { OperationInputs, OperationRelation, OperationResult } from "./relation.js";
-import { closedType, dynamicResult, INVALID, isBottom, typeResult, UNCONSTRAINED } from "./views.js";
+import {
+  closedType,
+  dynamicResult,
+  INVALID,
+  isBottom,
+  typeResult,
+  UNCONSTRAINED,
+} from "./views.js";
 
 /**
  * The interactions and the command expressions (O4 stage 2b, work note §5.6 and §5.7): the asks with a fixed answer,
@@ -196,7 +203,8 @@ function choiceEntry(
     );
   };
   if (rejects(type, accepted)) return { type: UNKNOWN_TYPE, rejected: true };
-  if (object === null) return { type: value.kind === "object" ? UNKNOWN_TYPE : type, rejected: false };
+  if (object === null)
+    return { type: value.kind === "object" ? UNKNOWN_TYPE : type, rejected: false };
   // A written choice object without `text` is reported, and without `value` too it returns nothing known.
   const returned = object.value ?? object.text;
   return returned === null
@@ -231,7 +239,13 @@ function choice(inputs: OperationInputs): OperationResult {
         const elements = option.content.elements;
         if (elements.length > 0) empty = false;
         for (const element of elements) {
-          const entry = choiceEntry(places, places.type(element.place), element.object, true, label === null);
+          const entry = choiceEntry(
+            places,
+            places.type(element.place),
+            element.object,
+            true,
+            label === null,
+          );
           rejected ||= entry.rejected;
           if (label === null) add(entry.type, literalOf(element.literal));
         }
@@ -255,7 +269,8 @@ function choice(inputs: OperationInputs): OperationResult {
           );
         rejected ||= entry.rejected || !accepted;
         const results = parts.map((part) => {
-          const button = part.kind === "list" || part.kind === "set" ? resolved(part.element) : part;
+          const button =
+            part.kind === "list" || part.kind === "set" ? resolved(part.element) : part;
           return button.kind === "object" ? UNKNOWN_TYPE : button;
         });
         add(
@@ -310,14 +325,15 @@ function formKindOfStart(type: StaticType): FormFieldKind | null {
   }
 }
 
-const FORM_ANSWER_TYPES: Readonly<Record<Exclude<FormFieldKind, "boolean" | "cycle">, StaticType>> = {
-  text: STRING_TYPE,
-  integer: INTEGER_TYPE,
-  number: NUMBER_TYPE,
-  date: DATE_TYPE,
-  time: TIME_TYPE,
-  datetime: DATETIME_TYPE,
-};
+const FORM_ANSWER_TYPES: Readonly<Record<Exclude<FormFieldKind, "boolean" | "cycle">, StaticType>> =
+  {
+    text: STRING_TYPE,
+    integer: INTEGER_TYPE,
+    number: NUMBER_TYPE,
+    date: DATE_TYPE,
+    time: TIME_TYPE,
+    datetime: DATETIME_TYPE,
+  };
 
 function formAnswerType(kind: Exclude<FormFieldKind, "boolean" | "cycle">): StaticType {
   return FORM_ANSWER_TYPES[kind];
@@ -376,7 +392,11 @@ function writtenField(
   const typeOf = (place: PlaceId | null): StaticType | undefined =>
     place === null ? undefined : resolved(nonNullType(places.type(place)));
   const tag: FormFieldKind | null | undefined =
-    descriptor.type === null ? undefined : isFormFieldKind(descriptor.type) ? descriptor.type : null;
+    descriptor.type === null
+      ? undefined
+      : isFormFieldKind(descriptor.type)
+        ? descriptor.type
+        : null;
   const valueType = typeOf(descriptor.value);
   const kind =
     tag !== undefined
@@ -404,7 +424,10 @@ function writtenField(
  * `#computedFormField`: a descriptor's type merges every value it may hold, so it gives one kind only without `type:`,
  * and with `options:` only when no `value:` other than a toggle's beside it can make some fields typed.
  */
-function computedField(places: Places, descriptor: Extract<StaticType, { kind: "object" }>): StaticType {
+function computedField(
+  places: Places,
+  descriptor: Extract<StaticType, { kind: "object" }>,
+): StaticType {
   const properties = descriptor.properties;
   if (properties === null) return optional(GENERIC_FORM_ANSWER_TYPE);
   const part = (key: string): StaticType | undefined => {
@@ -438,10 +461,16 @@ function computedField(places: Places, descriptor: Extract<StaticType, { kind: "
 }
 
 /** `#formField`: the answer of one field from its type and, where it is written, its descriptor. */
-function field(places: Places, type: StaticType, written: FormDescriptorEvidence | undefined): StaticType {
+function field(
+  places: Places,
+  type: StaticType,
+  written: FormDescriptorEvidence | undefined,
+): StaticType {
   const value = resolved(nonNullType(type));
   if (value.kind === "object")
-    return written?.kind === "object" ? writtenField(places, written) : computedField(places, value);
+    return written?.kind === "object"
+      ? writtenField(places, written)
+      : computedField(places, value);
   const kind = formKindOfStart(value);
   if (kind === null) return optional(GENERIC_FORM_ANSWER_TYPE);
   return fieldAnswer(places, kind, value, written?.kind === "list" ? written.elements : undefined);
@@ -478,7 +507,9 @@ function form(inputs: OperationInputs): OperationResult {
     } else {
       if (container.properties === null) return dynamicResult("unknown member");
       const descriptors = new Map(
-        written?.shape === "object" ? written.entries.map((entry) => [entry.name, entry.written]) : [],
+        written?.shape === "object"
+          ? written.entries.map((entry) => [entry.name, entry.written])
+          : [],
       );
       const result = new PropertyTable();
       for (const [name, type] of container.properties)
@@ -492,14 +523,19 @@ function form(inputs: OperationInputs): OperationResult {
 // ---------------------------------------------------------------------------------------------------------------------
 // The asks with a fixed answer, and the command expressions
 
-function fixed(family: ContractFamily, name: string, type: StaticType): [string, OperationRelation] {
+function fixed(
+  family: ContractFamily,
+  name: string,
+  type: StaticType,
+): [string, OperationRelation] {
   return [`${family}.${name}`, { contract: { family, name }, result: () => typeResult(type) }];
 }
 
 function askImage(inputs: OperationInputs): OperationResult {
   const evidence = inputs.evidence;
   // The answer is an image reference, or also `null` unless `allowSkip:` is left out or written `false`.
-  const skippable = evidence?.kind === "image" && evidence.allowSkip !== null && evidence.allowSkip !== false;
+  const skippable =
+    evidence?.kind === "image" && evidence.allowSkip !== null && evidence.allowSkip !== false;
   return typeResult(skippable ? optional(STRING_TYPE) : STRING_TYPE);
 }
 
@@ -524,36 +560,45 @@ function speakerField(name: string): OperationRelation {
 
 const SCRIPT_TYPE: StaticType = { kind: "scalar", name: "script" };
 
-export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map<string, OperationRelation>([
-  fixed("interaction", "text", STRING_TYPE),
-  fixed("interaction", "password", STRING_TYPE),
-  fixed("interaction", "number", NUMBER_TYPE),
-  fixed("interaction", "integer", INTEGER_TYPE),
-  fixed("interaction", "date", DATE_TYPE),
-  fixed("interaction", "time", TIME_TYPE),
-  fixed("interaction", "datetime", DATETIME_TYPE),
-  fixed("interaction", "boolean", BOOLEAN_TYPE),
-  ["interaction.booleans", { contract: { family: "interaction", name: "booleans" }, result: askBooleans }],
-  ["interaction.choice", { contract: { family: "interaction", name: "choice" }, result: choice }],
-  ["interaction.form", { contract: { family: "interaction", name: "form" }, result: form }],
-  ["interaction.askImage", { contract: { family: "interaction", name: "askImage" }, result: askImage }],
-  fixed("say", "say", { kind: "messageHandle" }),
-  fixed("showButton", "showButton", DURATION_TYPE),
-  fixed("showButton", "showPermanentButton", { kind: "permanentButton" }),
-  fixed("popup", "showPopup", DURATION_TYPE),
-  fixed("timer", "short", { kind: "timer" }),
-  fixed("timer", "named", { kind: "timer" }),
-  fixed("camera", "showCamera", { kind: "camera" }),
-  fixed("capture", "takePhoto", optional(STRING_TYPE)),
-  fixed("tagQuery", "images.list", { kind: "list", element: STRING_TYPE }),
-  fixed("tagQuery", "images.random", STRING_TYPE),
-  fixed("tagQuery", "scripts.list", { kind: "list", element: SCRIPT_TYPE }),
-  fixed("tagQuery", "scripts.random", SCRIPT_TYPE),
-]);
+export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map<string, OperationRelation>(
+  [
+    fixed("interaction", "text", STRING_TYPE),
+    fixed("interaction", "password", STRING_TYPE),
+    fixed("interaction", "number", NUMBER_TYPE),
+    fixed("interaction", "integer", INTEGER_TYPE),
+    fixed("interaction", "date", DATE_TYPE),
+    fixed("interaction", "time", TIME_TYPE),
+    fixed("interaction", "datetime", DATETIME_TYPE),
+    fixed("interaction", "boolean", BOOLEAN_TYPE),
+    [
+      "interaction.booleans",
+      { contract: { family: "interaction", name: "booleans" }, result: askBooleans },
+    ],
+    ["interaction.choice", { contract: { family: "interaction", name: "choice" }, result: choice }],
+    ["interaction.form", { contract: { family: "interaction", name: "form" }, result: form }],
+    [
+      "interaction.askImage",
+      { contract: { family: "interaction", name: "askImage" }, result: askImage },
+    ],
+    fixed("say", "say", { kind: "messageHandle" }),
+    fixed("showButton", "showButton", DURATION_TYPE),
+    fixed("showButton", "showPermanentButton", { kind: "permanentButton" }),
+    fixed("popup", "showPopup", DURATION_TYPE),
+    fixed("timer", "short", { kind: "timer" }),
+    fixed("timer", "named", { kind: "timer" }),
+    fixed("camera", "showCamera", { kind: "camera" }),
+    fixed("capture", "takePhoto", optional(STRING_TYPE)),
+    fixed("tagQuery", "images.list", { kind: "list", element: STRING_TYPE }),
+    fixed("tagQuery", "images.random", STRING_TYPE),
+    fixed("tagQuery", "scripts.list", { kind: "list", element: SCRIPT_TYPE }),
+    fixed("tagQuery", "scripts.random", SCRIPT_TYPE),
+  ],
+);
 
 /** The relation of a media key (`media.<name>`), a handle whatever the media, and of a speaker field. */
 export function relationOf(family: ContractFamily, name: string): OperationRelation | undefined {
-  if (family === "media") return { contract: { family, name }, result: () => typeResult({ kind: "media" }) };
+  if (family === "media")
+    return { contract: { family, name }, result: () => typeResult({ kind: "media" }) };
   if (family === "speakerField") return speakerField(name);
   return RELATIONS.get(`${family}.${name}`);
 }

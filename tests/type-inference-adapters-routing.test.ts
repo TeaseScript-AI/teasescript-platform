@@ -8,8 +8,7 @@ import { request } from "./helpers/type-inference-graph.js";
 
 /**
  * Every operation the collector emits has a relation (work note §4); an injected host builtin's gives a result the
- * compiler cannot know. The families below are the ones whose modules are filled in; the set grows
- * with the stage and is complete when 2b lands.
+ * compiler cannot know. Every family the collector can emit is listed, so a key the modules forget is seen here.
  */
 const IMPLEMENTED: ReadonlySet<ContractFamily> = new Set([
   "operator",
@@ -21,10 +20,23 @@ const IMPLEMENTED: ReadonlySet<ContractFamily> = new Set([
   "unit",
   "angle",
   "range",
+  "conversion",
+  "numeric",
+  "clock",
   "random",
   "method",
   "listFunction",
   "builtin",
+  "interaction",
+  "say",
+  "showButton",
+  "popup",
+  "timer",
+  "media",
+  "camera",
+  "capture",
+  "tagQuery",
+  "speakerField",
 ]);
 
 const SOURCE = [
@@ -69,6 +81,7 @@ const SOURCE = [
   "let view = showCamera",
   "let photo = takePhoto()",
   'let images = findImages(where: "heat" > 1)',
+  'let stop = showPermanentButton "Stop" { exit }',
   "let first = account.firstName",
   "hostFn(1)",
   "switch n {\ncase 1 {\nsay 1\n}\n}",

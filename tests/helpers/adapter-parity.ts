@@ -49,13 +49,21 @@ export interface LegacyOutcome {
   readonly request: TypeAnalysisRequest;
   /** The expression the binding holds, as written. */
   readonly node: Expression;
-  /** The fact's type text, or `null` when the check typed no such node. */
+  /**
+   * The fact's type text: the expression's own, or the binding's when the check records none for the expression
+   * (a media expression), or `null` when neither is typed.
+   */
   readonly type: string | null;
+  readonly factFrom: "expression" | "binding" | null;
   /** The error codes reported inside the operation's span, and those reported anywhere else. */
   readonly errorsAtOperation: readonly string[];
   readonly errorsElsewhere: readonly string[];
   /** The errors inside the operation's span with their offsets, for telling an operand's own errors apart. */
-  readonly errorSpans: readonly { readonly code: string; readonly start: number; readonly end: number }[];
+  readonly errorSpans: readonly {
+    readonly code: string;
+    readonly start: number;
+    readonly end: number;
+  }[];
   /** The type text of a top-level binding of the source, for asserting an operand's closed type. */
   bindingType(name: string): string | undefined;
   /** The type texts the check gave the expressions at a site: one for a typed site, none for an untyped one. */
@@ -129,10 +137,12 @@ export function legacyOperation(
     readonly start: { readonly offset: number };
     readonly end: { readonly offset: number };
   }) => span.start.offset >= start && span.end.offset <= end;
+  const bound = facts.bindings.find((entry) => entry.name === binding)?.type;
   return {
     request: made!,
     node,
-    type: fact?.type ?? null,
+    type: fact?.type ?? bound ?? null,
+    factFrom: fact !== undefined ? "expression" : bound !== undefined ? "binding" : null,
     errorsAtOperation: errors.filter((error) => inside(error.span)).map((error) => error.code),
     errorSpans: errors
       .filter((error) => inside(error.span))
@@ -148,7 +158,9 @@ export function legacyOperation(
         facts.values
           .filter(
             (value) =>
-              value.site.file === 0 && value.site.start === site.start && value.site.end === site.end,
+              value.site.file === 0 &&
+              value.site.start === site.start &&
+              value.site.end === site.end,
           )
           .map((value) => value.type),
       ),
@@ -316,8 +328,8 @@ export type AdapterExpectation =
   | "invalid"
   | "unconstrained"
   | { readonly dynamic: DynamicWhy }
-  /** The exact possibilities, in the order the relation gives them. */
-  | { readonly possible: readonly StaticType[] }
+  /** The exact possibilities, in the order the relation gives them, and the provenance when the case declares it. */
+  | { readonly possible: readonly StaticType[]; readonly why?: DynamicWhy }
   /** A declared recovery: the realized text the adapter's answer gives, where the legacy recovered otherwise. */
   | { readonly realized: string };
 
@@ -357,12 +369,14 @@ export function assertCase(
     assert.deepEqual(result, { kind: "dynamic", why: adapter.dynamic }, "the dynamic result");
   } else if ("possible" in adapter) {
     assert.equal(result.kind, "possible", "a possible result");
-    if (result.kind === "possible")
+    if (result.kind === "possible") {
       assert.deepEqual(
         result.types.map((type) => typeKey(type, true, true)),
         adapter.possible.map((type) => typeKey(type, true, true)),
         "the possibilities",
       );
+      if (adapter.why !== undefined) assert.equal(result.why, adapter.why, "the provenance");
+    }
   } else {
     assert.equal(realizedText(realized), adapter.realized, "the declared realization");
   }

@@ -119,7 +119,7 @@ test("two lists join their elements as a literal does; elements that mix are the
     }),
     legacyOperation('let r = [1] + ["x"]\nexit'),
     { fact: "list<unknown>", errors: ["TSV044"] },
-    "invalid",
+    "fact",
   );
 });
 

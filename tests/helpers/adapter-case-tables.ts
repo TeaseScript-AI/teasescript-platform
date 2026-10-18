@@ -1,4 +1,5 @@
 import type { Expression } from "../../src/ast.js";
+import { PERSON_FIELDS } from "../../src/speaker-terms.js";
 import type { DynamicWhy } from "../../src/type-inference/graph.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../src/value-kinds.js";
 import { caseInputs, type CaseInputs } from "./adapter-case-inputs.js";
@@ -16,7 +17,7 @@ import { isClosedFact, legacyOperation, type LegacyOutcome } from "./adapter-par
  * this module generates, so that a table cannot drift from the oracle or from the templates.
  */
 
-export type RoutineName = "choice" | "form" | "values" | "regression" | "prediction";
+export type RoutineName = "choice" | "form" | "values" | "regression" | "prediction" | "commands";
 
 export type CaseClass =
   /** A closed fact without an error: the adapter realizes it. */
@@ -35,11 +36,7 @@ export type CaseClass =
   | "open";
 
 export type AdapterCell =
-  | "fact"
-  | "invalid"
-  | { readonly dynamic: DynamicWhy }
-  | { readonly realized: string }
-  | null;
+  "fact" | "invalid" | { readonly dynamic: DynamicWhy } | { readonly realized: string } | null;
 
 export interface CaseRow {
   /** `<routine>/<template>/<variant>`. */
@@ -47,6 +44,8 @@ export interface CaseRow {
   readonly source: string;
   /** The legacy's fact at the operation: a type text, or `unknown`. */
   readonly fact: string;
+  /** Where the fact was read when not at the expression itself: the binding, for an expression the check records no type for. */
+  readonly factFrom?: "binding";
   /** The error codes the operation reports, in order: those inside its span that are not an operand's own. */
   readonly errors: readonly string[];
   /** The error codes an operand reports on its own, such as a list literal that mixes kinds. */
@@ -119,6 +118,13 @@ const MADE: ReadonlyMap<ValueKind, string> = new Map([
 
 const SPEAKER = 'speaker guide {\n displayName: "Guide"\n}';
 
+/** The expression each kind is made by in these tables: its first literal, or the expression that makes one. */
+export const MADE_KINDS: ReadonlyMap<ValueKind, string> = new Map([
+  ...[...LITERALS].map(([kind, pair]): [ValueKind, string] => [kind, pair[0]]),
+  ...MADE,
+  ["speaker", "guide"],
+]);
+
 /**
  * Kinds no written form of these tables makes, with the reason: the tables cover them only where an annotation names
  * them (`written`), and not at all otherwise.
@@ -149,7 +155,8 @@ function valueForms(kind: ValueKind): ValueForm[] {
       forms.push({ form: "variable", prelude: [`let v = ${literal[0]}`], expression: "v" });
   }
   const made = MADE.get(kind);
-  if (made !== undefined) forms.push({ form: "variable", prelude: [`let v = ${made}`], expression: "v" });
+  if (made !== undefined)
+    forms.push({ form: "variable", prelude: [`let v = ${made}`], expression: "v" });
   if (kind === "speaker") forms.push({ form: "variable", prelude: [SPEAKER], expression: "guide" });
   if (VALUE_KINDS[kind].written) {
     forms.push({ form: "annotated", prelude: [`let v: ${kind} = hostValue`], expression: "v" });
@@ -161,7 +168,9 @@ function valueForms(kind: ValueKind): ValueForm[] {
 
 /** The kinds a literal is written for, in registry order. */
 const LITERAL_KINDS: readonly ValueKind[] = VALUE_KIND_NAMES.filter((kind) => LITERALS.has(kind));
-const WRITTEN_KINDS: readonly ValueKind[] = VALUE_KIND_NAMES.filter((kind) => VALUE_KINDS[kind].written);
+const WRITTEN_KINDS: readonly ValueKind[] = VALUE_KIND_NAMES.filter(
+  (kind) => VALUE_KINDS[kind].written,
+);
 
 function literal(kind: ValueKind, second = false): string {
   const pair = LITERALS.get(kind);
@@ -234,24 +243,40 @@ const CHOICE_TEMPLATES: readonly Template[] = [
         yield variant(`${kind}.set`, [], `askChoice set [${literal(kind)}, ${literal(kind)}]`);
         if (kind !== "null")
           yield variant(`${kind}.variable`, [`let v = ${literal(kind)}`], "askChoice [v]");
-        yield variant(`${kind}.object-value`, [], `askChoice [{ text: "A", value: ${literal(kind)} }]`);
+        yield variant(
+          `${kind}.object-value`,
+          [],
+          `askChoice [{ text: "A", value: ${literal(kind)} }]`,
+        );
         yield variant(`${kind}.object-text`, [], `askChoice [{ text: ${literal(kind)} }]`);
         yield variant(`${kind}.labelled`, [], `askChoice one: [${literal(kind)}]`);
       }
       for (const [left, right] of pairs(LITERAL_KINDS, false))
-        yield variant(`mixed.${left}.${right}`, [], `askChoice [${literal(left)}, ${literal(right)}]`);
+        yield variant(
+          `mixed.${left}.${right}`,
+          [],
+          `askChoice [${literal(left)}, ${literal(right)}]`,
+        );
       for (const kind of WRITTEN_KINDS)
         yield variant(`${kind}.annotated`, [`let v: ${kind} = hostValue`], "askChoice [v]");
       yield variant("nullable", ["let v: integer? = hostValue"], "askChoice [v]");
       yield variant("object-value-only", [], "askChoice [{ value: 1 }]");
-      yield variant("object-value-and-text", [], 'askChoice [{ text: "A", value: 1 }, { text: "B" }]');
+      yield variant(
+        "object-value-and-text",
+        [],
+        'askChoice [{ text: "A", value: 1 }, { text: "B" }]',
+      );
       yield variant("object-extra", [], 'askChoice [{ text: "A", value: 1, extra: 2 }]');
       yield variant("object-background", [], 'askChoice [{ text: "A", background: "#fff" }]');
       yield variant("object-text-host", [], "askChoice [{ text: hostText }]", "host");
       yield variant("object-value-host", [], 'askChoice [{ text: "A", value: hostValue }]', "host");
       yield variant("computed-object-value", ['let o = { text: "A", value: 1 }'], "askChoice [o]");
       yield variant("computed-object-text", ['let o = { text: "A" }'], "askChoice [o]");
-      yield variant("computed-object-labelled", ['let o = { text: "A", value: 1 }'], "askChoice one: [o]");
+      yield variant(
+        "computed-object-labelled",
+        ['let o = { text: "A", value: 1 }'],
+        "askChoice one: [o]",
+      );
       yield variant("host-element", [], "askChoice [hostValue]", "host");
       yield variant("host-element-labelled", [], "askChoice one: [hostValue]", "host");
       yield variant("nested", [], "askChoice [[1]]");
@@ -269,11 +294,19 @@ const CHOICE_TEMPLATES: readonly Template[] = [
     *variants() {
       for (const kind of WRITTEN_KINDS) {
         yield variant(`${kind}.list`, [`let xs: ${kind}[] = hostValue`], "askChoice xs");
-        yield variant(`${kind}.list.labelled`, [`let xs: ${kind}[] = hostValue`], "askChoice 7: xs");
+        yield variant(
+          `${kind}.list.labelled`,
+          [`let xs: ${kind}[] = hostValue`],
+          "askChoice 7: xs",
+        );
         yield variant(`${kind}.list.nullable`, [`let xs: ${kind}[]? = hostValue`], "askChoice xs");
         yield variant(`${kind}.set`, [`let xs: ${kind} set = hostValue`], "askChoice xs");
         yield variant(`${kind}.dict`, [`let xs: ${kind} dict = hostValue`], "askChoice xs");
-        yield variant(`${kind}.nullable-elements`, [`let xs: ${kind}?[] = hostValue`], "askChoice xs");
+        yield variant(
+          `${kind}.nullable-elements`,
+          [`let xs: ${kind}?[] = hostValue`],
+          "askChoice xs",
+        );
       }
       for (const kind of LITERAL_KINDS)
         if (kind !== "null")
@@ -284,7 +317,11 @@ const CHOICE_TEMPLATES: readonly Template[] = [
           );
       yield variant("list-or-string", ["let xs: integer[] | string = hostValue"], "askChoice xs");
       yield variant("list-or-list", ["let xs: integer[] | string[] = hostValue"], "askChoice xs");
-      yield variant("list-or-numbers", ["let xs: integer[] | number[] = hostValue"], "askChoice xs");
+      yield variant(
+        "list-or-numbers",
+        ["let xs: integer[] | number[] = hostValue"],
+        "askChoice xs",
+      );
       yield variant("list-or-null-list", ["let xs: integer[] | null = hostValue"], "askChoice xs");
       yield variant("bare-list", ["let xs: list = hostValue"], "askChoice xs");
       yield variant("bare-set", ["let xs: set = hostValue"], "askChoice xs");
@@ -296,7 +333,11 @@ const CHOICE_TEMPLATES: readonly Template[] = [
       yield variant("computed-objects-no-text", ["let xs = [{ value: 1 }]"], "askChoice xs");
       yield variant("computed-objects-number-text", ["let xs = [{ text: 1 }]"], "askChoice xs");
       yield variant("nested-lists", ["let xs = [[1]]"], "askChoice xs");
-      yield variant("restricted-elements", ['let c = askChoice "a", "b"', "let xs = [c]"], "askChoice xs");
+      yield variant(
+        "restricted-elements",
+        ['let c = askChoice "a", "b"', "let xs = [c]"],
+        "askChoice xs",
+      );
       yield parameterVariant("parameter", "askChoice p", "[1]");
     },
   },
@@ -304,7 +345,11 @@ const CHOICE_TEMPLATES: readonly Template[] = [
     id: "several",
     *variants() {
       for (const [left, right] of pairs(LITERAL_KINDS, true))
-        yield variant(`${left}.${right}`, [], `askChoice ${literal(left)}, ${literal(right, true)}`);
+        yield variant(
+          `${left}.${right}`,
+          [],
+          `askChoice ${literal(left)}, ${literal(right, true)}`,
+        );
       yield variant("prefill", [], 'askChoice "a", "b", prefill: "a"');
       yield variant("prefill-host", [], 'askChoice "a", "b", prefill: hostValue', "host");
       yield variant("restricted-and-literal", ['let c = askChoice "a", "b"'], 'askChoice c, "c"');
@@ -317,7 +362,11 @@ const CHOICE_TEMPLATES: readonly Template[] = [
       yield variant("literal-and-variable", ['let v = "b"'], 'askChoice "a", v');
       yield variant("literal-and-annotated", ["let v: string = hostValue"], 'askChoice "a", v');
       yield variant("literal-and-nullable", ["let v: string? = hostValue"], 'askChoice "a", v');
-      yield variant("literal-and-other-kind-annotated", ["let v: integer = hostValue"], 'askChoice "a", v');
+      yield variant(
+        "literal-and-other-kind-annotated",
+        ["let v: integer = hostValue"],
+        'askChoice "a", v',
+      );
     },
   },
 ];
@@ -383,45 +432,96 @@ const FORM_TEMPLATES: readonly Template[] = [
       yield variant("hint", [], form("{ n: 1 }", ', hint: "h"'));
       yield variant("timeout-submit", [], form("{ n: 1 }", ', timeout: 5 s, onTimeout: "submit"'));
       yield variant("timeout-cancel", [], form("{ n: 1 }", ', timeout: 5 s, onTimeout: "cancel"'));
-      yield variant("timeout-host", [], form("{ n: 1 }", ", timeout: 5 s, onTimeout: hostText"), "host");
+      yield variant(
+        "timeout-host",
+        [],
+        form("{ n: 1 }", ", timeout: 5 s, onTimeout: hostText"),
+        "host",
+      );
       yield variant("timeout-bogus", [], form("{ n: 1 }", ', timeout: 5 s, onTimeout: "bogus"'));
       yield variant("timeout-alone", [], form("{ n: 1 }", ", timeout: 5 s"));
       yield variant("on-timeout-alone", [], form("{ n: 1 }", ', onTimeout: "submit"'));
-      yield variant("timeout-submit-no-start", [], form("{ n: { type: \"integer\" } }", ', timeout: 5 s, onTimeout: "submit"'));
-      yield variant("cancel-and-timeout-submit", [], form("{ n: 1 }", ', cancel: "Back", timeout: 5 s, onTimeout: "submit"'));
+      yield variant(
+        "timeout-submit-no-start",
+        [],
+        form('{ n: { type: "integer" } }', ', timeout: 5 s, onTimeout: "submit"'),
+      );
+      yield variant(
+        "cancel-and-timeout-submit",
+        [],
+        form("{ n: 1 }", ', cancel: "Back", timeout: 5 s, onTimeout: "submit"'),
+      );
       yield variant("cancel-host-container", [], form("hostValue", ', cancel: "Back"'), "host");
     },
   },
   {
     id: "written-descriptor",
     *variants() {
-      for (const kind of FORM_FIELD_KINDS) yield variant(`type.${kind}`, [], form(`{ n: { type: "${kind}" } }`));
+      for (const kind of FORM_FIELD_KINDS)
+        yield variant(`type.${kind}`, [], form(`{ n: { type: "${kind}" } }`));
       yield variant("type.bogus", [], form('{ n: { type: "bogus" } }'));
       yield variant("type.host", [], form("{ n: { type: hostText } }"), "host");
       yield variant("type.number-literal", [], form("{ n: { type: 5 } }"));
       yield variant("type.variable", ['let t = "integer"'], form("{ n: { type: t } }"));
-      for (const kind of LITERAL_KINDS) yield variant(`value.${kind}`, [], form(`{ n: { value: ${literal(kind)} } }`));
+      for (const kind of LITERAL_KINDS)
+        yield variant(`value.${kind}`, [], form(`{ n: { value: ${literal(kind)} } }`));
       for (const kind of WRITTEN_KINDS)
-        yield variant(`value.${kind}.annotated`, [`let v: ${kind} = hostValue`], form("{ n: { value: v } }"));
-      yield variant("value.integer.nullable", ["let v: integer? = hostValue"], form("{ n: { value: v } }"));
+        yield variant(
+          `value.${kind}.annotated`,
+          [`let v: ${kind} = hostValue`],
+          form("{ n: { value: v } }"),
+        );
+      yield variant(
+        "value.integer.nullable",
+        ["let v: integer? = hostValue"],
+        form("{ n: { value: v } }"),
+      );
       yield variant("value.host", [], form("{ n: { value: hostValue } }"), "host");
       yield variant("options.strings", [], form('{ n: { options: ["a", "b"] } }'));
       yield variant("options.integers", [], form("{ n: { options: [1, 2] } }"));
       yield variant("options.mixed", [], form('{ n: { options: [1, "a"] } }'));
-      yield variant("options.objects", [], form('{ n: { options: [{ text: "A", value: 1 }, { text: "B" }] } }'));
+      yield variant(
+        "options.objects",
+        [],
+        form('{ n: { options: [{ text: "A", value: 1 }, { text: "B" }] } }'),
+      );
       yield variant("options.object-no-text", [], form("{ n: { options: [{ value: 1 }] } }"));
-      yield variant("options.computed-object", ['let o = { text: "A", value: 1 }'], form("{ n: { options: [o] } }"));
-      yield variant("options.computed-object-text", ['let o = { text: "A" }'], form("{ n: { options: [o] } }"));
+      yield variant(
+        "options.computed-object",
+        ['let o = { text: "A", value: 1 }'],
+        form("{ n: { options: [o] } }"),
+      );
+      yield variant(
+        "options.computed-object-text",
+        ['let o = { text: "A" }'],
+        form("{ n: { options: [o] } }"),
+      );
       yield variant("options.host-element", [], form("{ n: { options: [hostValue] } }"), "host");
       yield variant("options.nested", [], form("{ n: { options: [[1]] } }"));
       yield variant("options.empty", [], form("{ n: { options: [] } }"));
       for (const kind of WRITTEN_KINDS)
-        yield variant(`options.${kind}.list`, [`let xs: ${kind}[] = hostValue`], form("{ n: { options: xs } }"));
-      yield variant("options.list-variable", ['let xs = ["a", "b"]'], form("{ n: { options: xs } }"));
-      yield variant("options.objects-variable", ['let xs = [{ text: "A", value: 1 }, { text: "B" }]'], form("{ n: { options: xs } }"));
+        yield variant(
+          `options.${kind}.list`,
+          [`let xs: ${kind}[] = hostValue`],
+          form("{ n: { options: xs } }"),
+        );
+      yield variant(
+        "options.list-variable",
+        ['let xs = ["a", "b"]'],
+        form("{ n: { options: xs } }"),
+      );
+      yield variant(
+        "options.objects-variable",
+        ['let xs = [{ text: "A", value: 1 }, { text: "B" }]'],
+        form("{ n: { options: xs } }"),
+      );
       yield variant("options.number", [], form("{ n: { options: 5 } }"));
       yield variant("options.host", [], form("{ n: { options: hostList } }"), "host");
-      yield variant("options.nullable-list", ["let xs: string[]? = hostValue"], form("{ n: { options: xs } }"));
+      yield variant(
+        "options.nullable-list",
+        ["let xs: string[]? = hostValue"],
+        form("{ n: { options: xs } }"),
+      );
       yield variant("toggle", [], form("{ n: { value: true, options: [true, false] } }"));
       yield variant("value-and-options", [], form("{ n: { value: 1, options: [1, 2] } }"));
       yield variant("text-and-options", [], form('{ n: { value: "a", options: ["a"] } }'));
@@ -435,14 +535,22 @@ const FORM_TEMPLATES: readonly Template[] = [
       yield variant("min", [], form("{ n: { min: 1 } }"));
       yield variant("max", [], form("{ n: { max: 1.5 } }"));
       yield variant("min-and-value", [], form("{ n: { min: 1, value: 2.5 } }"));
-      yield variant("typed-integer-number-start", [], form('{ n: { type: "integer", value: 1.5 } }'));
+      yield variant(
+        "typed-integer-number-start",
+        [],
+        form('{ n: { type: "integer", value: 1.5 } }'),
+      );
       yield variant("typed-number-integer-start", [], form('{ n: { type: "number", value: 1 } }'));
       yield variant("typed-text-number-start", [], form('{ n: { type: "text", value: 1 } }'));
       yield variant("unknown-property", [], form("{ n: { bogus: 1 } }"));
       yield variant("empty", [], form("{ n: {} }"));
       yield variant("text-only", [], form('{ n: { text: "T" } }'));
       yield variant("two-fields", [], form('{ n: 1, s: "a" }'));
-      yield variant("two-fields-one-typed", [], form('{ n: { type: "integer" }, s: { value: "a", optional: true } }'));
+      yield variant(
+        "two-fields-one-typed",
+        [],
+        form('{ n: { type: "integer" }, s: { value: "a", optional: true } }'),
+      );
     },
   },
   {
@@ -453,9 +561,14 @@ const FORM_TEMPLATES: readonly Template[] = [
           yield variant(`${kind}.${value.form}`, value.prelude, form(`{ n: ${value.expression} }`));
       yield variant("host", [], form("{ n: hostValue }"), "host");
       yield parameterVariant("parameter", form("{ n: p }"), "1");
-      for (const kind of LITERAL_KINDS) yield variant(`cycle.${kind}`, [], form(`{ n: [${literal(kind)}] }`));
+      for (const kind of LITERAL_KINDS)
+        yield variant(`cycle.${kind}`, [], form(`{ n: [${literal(kind)}] }`));
       yield variant("cycle.objects", [], form('{ n: [{ text: "A", value: 1 }, { text: "B" }] }'));
-      yield variant("cycle.computed-object", ['let o = { text: "A", value: 1 }'], form("{ n: [o] }"));
+      yield variant(
+        "cycle.computed-object",
+        ['let o = { text: "A", value: 1 }'],
+        form("{ n: [o] }"),
+      );
       yield variant("cycle.host-element", [], form("{ n: [hostValue] }"), "host");
       yield variant("cycle.nested", [], form("{ n: [[1]] }"));
       yield variant("cycle.empty", [], form("{ n: [] }"));
@@ -484,13 +597,26 @@ const FORM_TEMPLATES: readonly Template[] = [
         ["text", '{ text: "T" }'],
       ];
       for (const [id, descriptor] of descriptors)
-        yield variant(id, [`let d = ${descriptor}`], form("{ n: d }"), descriptor.includes("host") ? "host" : null);
+        yield variant(
+          id,
+          [`let d = ${descriptor}`],
+          form("{ n: d }"),
+          descriptor.includes("host") ? "host" : null,
+        );
       yield variant("value-host", ["let d = { value: hostValue }"], form("{ n: d }"), "host");
       yield variant("options-host", ["let d = { options: hostList }"], form("{ n: d }"), "host");
       yield variant("object-annotated", ["let d: object = hostValue"], form("{ n: d }"));
-      yield variant("object-nullable", ["let d = { value: 1 }", "let e: object? = d"], form("{ n: e }"));
+      yield variant(
+        "object-nullable",
+        ["let d = { value: 1 }", "let e: object? = d"],
+        form("{ n: e }"),
+      );
       yield variant("in-variable-container", ["let f = { n: { value: 1 } }"], form("f"));
-      yield variant("in-variable-container-typed", ['let f = { n: { type: "integer" } }'], form("f"));
+      yield variant(
+        "in-variable-container-typed",
+        ['let f = { n: { type: "integer" } }'],
+        form("f"),
+      );
     },
   },
   {
@@ -524,7 +650,11 @@ const VALUES_TEMPLATES: readonly Template[] = [
     *variants() {
       for (const name of [...STATISTICS, "percentile"]) {
         for (const kind of LITERAL_KINDS)
-          yield variant(`${name}.${kind}`, [], statistic(name, `[${literal(kind)}, ${literal(kind, true)}]`));
+          yield variant(
+            `${name}.${kind}`,
+            [],
+            statistic(name, `[${literal(kind)}, ${literal(kind, true)}]`),
+          );
         yield variant(`${name}.one`, [], statistic(name, "[1]"));
         yield variant(`${name}.empty`, [], statistic(name, "[]"));
         yield variant(`${name}.mixed-numbers`, [], statistic(name, "[1, 2.5]"));
@@ -551,7 +681,11 @@ const VALUES_TEMPLATES: readonly Template[] = [
     id: "selector",
     *variants() {
       for (const kind of LITERAL_KINDS)
-        yield variant(`sum.${kind}`, [], `sum([{ p: ${literal(kind)} }, { p: ${literal(kind, true)} }], by: "p")`);
+        yield variant(
+          `sum.${kind}`,
+          [],
+          `sum([{ p: ${literal(kind)} }, { p: ${literal(kind, true)} }], by: "p")`,
+        );
       for (const name of STATISTICS)
         yield variant(`${name}.objects`, [], `${name}([{ p: 1 }, { p: 2 }], by: "p")`);
       yield variant("percentile.objects", [], 'percentile([{ p: 1 }, { p: 2 }], 50, by: "p")');
@@ -566,7 +700,11 @@ const VALUES_TEMPLATES: readonly Template[] = [
       yield variant("host-property", [], 'sum([{ p: hostValue }], by: "p")', "host");
       yield variant("object-and-scalar", [], 'sum([{ p: 1 }, 2], by: "p")');
       yield variant("nested-property", [], 'sum([{ p: { q: 1 } }], by: "p")');
-      yield variant("optional-property", ["let v: integer? = hostValue"], 'sum([{ p: v }], by: "p")');
+      yield variant(
+        "optional-property",
+        ["let v: integer? = hostValue"],
+        'sum([{ p: v }], by: "p")',
+      );
       yield variant("bare-objects", ["let xs: object[] = hostValue"], 'sum(xs, by: "p")');
       yield parameterVariant("parameter", 'sum(p, by: "p")', "[{ p: 1 }]");
     },
@@ -583,7 +721,11 @@ const REGRESSION_TEMPLATES: readonly Template[] = [
       yield variant("one-point", [], "linearRegression([{ x: 1, y: 2 }])");
       yield variant("empty", [], "linearRegression([])");
       yield variant("selectors", [], `linearRegression(${POINTS}, x: "x", y: "y")`);
-      yield variant("other-names", [], 'linearRegression([{ a: 1, b: 2 }, { a: 2, b: 3 }], x: "a", y: "b")');
+      yield variant(
+        "other-names",
+        [],
+        'linearRegression([{ a: 1, b: 2 }, { a: 2, b: 3 }], x: "a", y: "b")',
+      );
       yield variant("x-only", [], `linearRegression(${POINTS}, x: "x")`);
       yield variant("y-only", [], `linearRegression(${POINTS}, y: "y")`);
       yield variant("x-variable", ['let k = "x"'], `linearRegression(${POINTS}, x: k, y: "y")`);
@@ -603,7 +745,11 @@ const REGRESSION_TEMPLATES: readonly Template[] = [
       yield variant("host-element", [], "linearRegression([hostValue])", "host");
       yield variant("variable", [`let ps = ${POINTS}`], "linearRegression(ps)");
       yield variant("annotated", ["let ps: object[] = hostValue"], "linearRegression(ps)");
-      yield variant("nullable", [`let ps = ${POINTS}`, "let qs: object[]? = ps"], "linearRegression(qs)");
+      yield variant(
+        "nullable",
+        [`let ps = ${POINTS}`, "let qs: object[]? = ps"],
+        "linearRegression(qs)",
+      );
       yield parameterVariant("parameter", "linearRegression(p)", POINTS);
     },
   },
@@ -627,17 +773,41 @@ const PREDICTION_TEMPLATES: readonly Template[] = [
       yield variant("slope.host", [], `predict(${line("hostValue", "2", "0")}, 1)`, "host");
       yield variant("start.host", [], `predict(${line("1", "2", "hostValue")}, 1)`, "host");
       yield variant("x.host", [], `predict(${line("1", "2", "0")}, hostValue)`, "host");
-      yield variant("intercept.annotated", ["let i: integer = hostValue"], `predict(${line("1", "i", "0")}, 1)`);
-      yield variant("intercept.nullable", ["let i: integer? = hostValue"], `predict(${line("1", "i", "0")}, 1)`);
-      yield variant("intercept.duration-annotated", ["let i: duration = hostValue"], `predict(${line("1", "i", "0")}, 1)`);
+      yield variant(
+        "intercept.annotated",
+        ["let i: integer = hostValue"],
+        `predict(${line("1", "i", "0")}, 1)`,
+      );
+      yield variant(
+        "intercept.nullable",
+        ["let i: integer? = hostValue"],
+        `predict(${line("1", "i", "0")}, 1)`,
+      );
+      yield variant(
+        "intercept.duration-annotated",
+        ["let i: duration = hostValue"],
+        `predict(${line("1", "i", "0")}, 1)`,
+      );
       yield variant("no-start", [], "predict({ slope: 1, intercept: 2 }, 1)");
       yield variant("no-intercept", [], "predict({ slope: 1, start: 0 }, 1)");
       yield variant("no-slope", [], "predict({ intercept: 2, start: 0 }, 1)");
-      yield variant("extra", [], `predict(${line("1", "2", "0")}, 1)`.replace("start: 0 }", "start: 0, extra: 1 }"));
+      yield variant(
+        "extra",
+        [],
+        `predict(${line("1", "2", "0")}, 1)`.replace("start: 0 }", "start: 0, extra: 1 }"),
+      );
       yield variant("empty", [], "predict({}, 1)");
       yield variant("regression", [`let l = linearRegression(${POINTS})`], "predict(l, 1)");
-      yield variant("regression-durations", ["let l = linearRegression([{ x: 1 s, y: 2 }, { x: 2 s, y: 3 }])"], "predict(l, 3 s)");
-      yield variant("regression-duration-y", ["let l = linearRegression([{ x: 1, y: 2 s }, { x: 2, y: 3 s }])"], "predict(l, 3)");
+      yield variant(
+        "regression-durations",
+        ["let l = linearRegression([{ x: 1 s, y: 2 }, { x: 2 s, y: 3 }])"],
+        "predict(l, 3 s)",
+      );
+      yield variant(
+        "regression-duration-y",
+        ["let l = linearRegression([{ x: 1, y: 2 s }, { x: 2, y: 3 s }])"],
+        "predict(l, 3)",
+      );
       yield variant("variable", [`let l = ${line("1", "2", "0")}`], "predict(l, 1)");
       yield variant("annotated", ["let l: object = hostValue"], "predict(l, 1)");
       yield variant("host", [], "predict(hostValue, 1)", "host");
@@ -650,12 +820,136 @@ const PREDICTION_TEMPLATES: readonly Template[] = [
   },
 ];
 
+// ---------------------------------------------------------------------------------------------------------------------
+// The asks with a fixed answer and the command expressions (§5.6): small input spaces, enumerated whole
+
+const PERSON_FIELD_NAMES: readonly string[] = [...PERSON_FIELDS].sort();
+
+const COMMAND_TEMPLATES: readonly Template[] = [
+  {
+    id: "ask",
+    *variants() {
+      for (const name of [
+        "Text",
+        "Password",
+        "Number",
+        "Integer",
+        "Date",
+        "Time",
+        "DateTime",
+        "Boolean",
+      ])
+        yield variant(name.toLowerCase(), [], `ask${name} "Q?"`);
+      yield variant("text.prefill", [], 'askText "Q?", prefill: "a"');
+      yield variant("text.prefill-number", [], 'askText "Q?", prefill: 5');
+      yield variant("number.prefill-text", [], 'askNumber "Q?", prefill: "x"');
+      yield variant("text.hint", [], 'askText "Q?", hint: "h"');
+      yield variant("text.question-host", [], "askText hostText", "host");
+      yield variant("text.question-number", [], "askText 5");
+      yield variant("boolean.prefill", [], 'askBoolean "Q?", prefill: true');
+      yield variant("boolean.prefill-text", [], 'askBoolean "Q?", prefill: "x"');
+    },
+  },
+  {
+    id: "booleans",
+    *variants() {
+      const ask = (more: string) => `askBooleans("Q?", texts: ["A"], prefill: [false]${more})`;
+      yield variant("plain", [], ask(""));
+      yield variant("cancel", [], ask(', cancel: "Back"'));
+      yield variant("cancel-object", [], ask(', cancel: { text: "Back" }'));
+      yield variant("cancel-host", [], ask(", cancel: hostValue"), "host");
+      yield variant("cancel-number", [], ask(", cancel: 5"));
+      yield variant("texts-numbers", [], 'askBooleans("Q?", texts: [1], prefill: [false])');
+      yield variant(
+        "texts-host",
+        [],
+        'askBooleans("Q?", texts: hostList, prefill: [false])',
+        "host",
+      );
+      yield variant(
+        "prefill-host",
+        [],
+        'askBooleans("Q?", texts: ["A"], prefill: hostList)',
+        "host",
+      );
+      yield variant("prefill-numbers", [], 'askBooleans("Q?", texts: ["A"], prefill: [1])');
+      yield variant("lengths", [], 'askBooleans("Q?", texts: ["A", "B"], prefill: [false])');
+      yield variant("no-texts", [], 'askBooleans("Q?", texts: [], prefill: [])');
+      yield variant(
+        "question-host",
+        [],
+        'askBooleans(hostText, texts: ["A"], prefill: [false])',
+        "host",
+      );
+    },
+  },
+  {
+    id: "image",
+    *variants() {
+      yield variant("plain", [], 'askImage("P")');
+      yield variant("skip", [], 'askImage("P", allowSkip: true)');
+      yield variant("no-skip", [], 'askImage("P", allowSkip: false)');
+      yield variant("skip-host", [], 'askImage("P", allowSkip: hostFlag)', "host");
+      yield variant("skip-number", [], 'askImage("P", allowSkip: 5)');
+      yield variant("no-source", [], 'askImage("P", allowCamera: false, allowFile: false)');
+      yield variant("camera-only", [], 'askImage("P", allowFile: false)');
+      yield variant("types", [], 'askImage("P", types: [".png"])');
+      yield variant("mime", [], 'askImage("P", mime: ["image/png"])');
+      yield variant("types-numbers", [], 'askImage("P", types: [1])');
+      yield variant("hint", [], 'askImage("P", hint: "h")');
+      yield variant("message-host", [], "askImage(hostText)", "host");
+    },
+  },
+  {
+    id: "command",
+    *variants() {
+      yield variant("say", [], 'say "hi"');
+      yield variant("say.presentation", [], 'say bubble(color: "#fff") "hi"');
+      yield variant("say.host", [], "say hostText", "host");
+      yield variant("say.number", [], "say 5");
+      yield variant("showButton", [], 'showButton "Go"');
+      yield variant("showButton.timeout", [], 'showButton "Go", timeout: 5 s');
+      yield variant("showButton.timeout-host", [], 'showButton "Go", timeout: hostValue', "host");
+      yield variant("showButton.number", [], "showButton 5");
+      yield variant("showPermanentButton", [], 'showPermanentButton "Stop" { exit }');
+      yield variant(
+        "showPermanentButton.host",
+        [],
+        "showPermanentButton hostText { exit }",
+        "host",
+      );
+      yield variant("showPopup", [], 'showPopup(message: "x")');
+      yield variant("showPopup.button", [], 'showPopup(message: "x", buttonText: "OK")');
+      yield variant("showPopup.host", [], "showPopup(message: hostText)", "host");
+      yield variant("timer", [], "timer async 1 s");
+      yield variant("timer.handler", [], "timer async 1 s { }");
+      yield variant("timer.host", [], "timer async hostValue", "host");
+      yield variant("timer.number", [], "timer async 5");
+      yield variant("playAudio", [], 'playAudio async "a.mp3"');
+      yield variant("playVideo", [], 'playVideo async "a.mp4"');
+      yield variant("playAudio.host", [], "playAudio async hostText", "host");
+      yield variant("showCamera", [], "showCamera");
+      yield variant("takePhoto", [], "takePhoto()");
+      yield variant("findImages", [], 'findImages(where: "heat" > 1)');
+      yield variant("findScripts", [], 'findScripts(where: "x" > 1)');
+    },
+  },
+  {
+    id: "speaker-field",
+    *variants() {
+      for (const name of PERSON_FIELD_NAMES) yield variant(name, [], `account.${name}`);
+      yield variant("bogus", [], "account.bogus");
+    },
+  },
+];
+
 const ROUTINES: ReadonlyMap<RoutineName, readonly Template[]> = new Map([
   ["choice", CHOICE_TEMPLATES],
   ["form", FORM_TEMPLATES],
   ["values", VALUES_TEMPLATES],
   ["regression", REGRESSION_TEMPLATES],
   ["prediction", PREDICTION_TEMPLATES],
+  ["commands", COMMAND_TEMPLATES],
 ]);
 
 export const ROUTINE_NAMES: readonly RoutineName[] = [...ROUTINES.keys()];
@@ -667,7 +961,13 @@ function program(variant: Variant): string {
   const lines =
     variant.call === undefined
       ? [...variant.prelude, `let r = ${variant.operation}`]
-      : [...variant.prelude, "function f(p) {", `  let r = ${variant.operation}`, "}", `f(${variant.call})`];
+      : [
+          ...variant.prelude,
+          "function f(p) {",
+          `  let r = ${variant.operation}`,
+          "}",
+          `f(${variant.call})`,
+        ];
   return [...lines, "exit"].join("\n");
 }
 
@@ -756,14 +1056,20 @@ function classify(
   if (variant.stage5 !== undefined) return { class: "legacy", adapter: null };
   if (inputs.open) return { class: "open", adapter: null };
   const closed = fact !== "unknown" && isClosedFact(fact);
-  if (fact !== "unknown" && !closed) throw new Error(`the fact ${fact} of ${variant.id} is not closed`);
+  if (fact !== "unknown" && !closed)
+    throw new Error(`the fact ${fact} of ${variant.id} is not closed`);
   if (errors.length > 0)
-    return closed ? { class: "recovery", adapter: "fact" } : { class: "invalid", adapter: "invalid" };
+    return closed
+      ? { class: "recovery", adapter: "fact" }
+      : { class: "invalid", adapter: "invalid" };
   if (closed) return { class: "fact", adapter: "fact" };
   if (variant.candidate !== undefined) return { class: "candidate", adapter: "invalid" };
   if (inputs.dynamic && variant.why === null)
     throw new Error(`${variant.id} has a dynamic operand without a declared provenance`);
-  return { class: "dynamic", adapter: { dynamic: inputs.dynamic ? variant.why! : "unknown member" } };
+  return {
+    class: "dynamic",
+    adapter: { dynamic: inputs.dynamic ? variant.why! : "unknown member" },
+  };
 }
 
 /** Every row of a routine's table, generated from its templates and pinned by the legacy oracle. */
@@ -779,7 +1085,8 @@ export function generateTable(routine: RoutineName): GeneratedRow[] {
       seen.add(id);
       const source = program(variant);
       const outcome = legacyOperation(source);
-      if (outcome.type === null) throw new Error(`the legacy typed no operation at ${id}:\n${source}`);
+      if (outcome.type === null)
+        throw new Error(`the legacy typed no operation at ${id}:\n${source}`);
       const fact = outcome.type;
       const inputs = caseInputs(outcome, variant.why);
       const { errors, operandErrors } = splitErrors(variant, source, outcome);
@@ -795,6 +1102,7 @@ export function generateTable(routine: RoutineName): GeneratedRow[] {
         class: cls,
         adapter,
         why: variant.why,
+        ...(outcome.factFrom === "binding" ? { factFrom: "binding" as const } : {}),
         ...(variant.stage5 === undefined ? {} : { stage5: variant.stage5 }),
         ...(variant.note === undefined && variant.candidate === undefined
           ? {}

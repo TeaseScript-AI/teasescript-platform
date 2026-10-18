@@ -41,7 +41,8 @@ class TypeTextReader {
     const next = this.#peek();
     if (next === "?") {
       this.#take("?");
-      if (this.text.startsWith("null", this.#at)) throw new Error(`an undecided null slot in ${this.text}`);
+      if (this.text.startsWith("null", this.#at))
+        throw new Error(`an undecided null slot in ${this.text}`);
       return { kind: "never" };
     }
     if (next === "!") throw new Error(`a held unknown in ${this.text}`);
@@ -95,7 +96,9 @@ class TypeTextReader {
       case "messageHandle":
         return { kind: word };
       default: {
-        const kind = VALUE_KIND_NAMES.find((candidate): candidate is ValueKind => candidate === word);
+        const kind = VALUE_KIND_NAMES.find(
+          (candidate): candidate is ValueKind => candidate === word,
+        );
         if (kind === undefined || !isScalarKind(kind))
           throw new Error(`no type named ${word} in ${this.text}`);
         const scalar: StaticType = { kind: "scalar", name: kind };

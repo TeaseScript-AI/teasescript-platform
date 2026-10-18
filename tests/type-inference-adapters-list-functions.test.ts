@@ -263,7 +263,7 @@ test("a regression keeps its line's object after a rejected value or selection, 
   );
 });
 
-test("a visible selector that names no property of the objects is a missing property: reported, not known", () => {
+test("a visible selector that names no property of the objects is a missing property: reported, no value", () => {
   const valued: StaticType = {
     kind: "object",
     properties: new PropertyTable([["value", INTEGER_TYPE]]),
@@ -277,7 +277,7 @@ test("a visible selector that names no property of the objects is a missing prop
     }),
     legacyOperation('let xs = [{ value: 1 }]\nlet r = sum(xs, by: "score")\nexit'),
     { fact: "unknown", errors: ["TSV043"] },
-    { dynamic: "unknown member" },
+    "invalid",
   );
 });
 
@@ -299,13 +299,13 @@ test("an intercept the compiler cannot know keeps the prediction unknown; a know
     { fact: "unknown" },
     { dynamic: "unknown member" },
   );
-  // The legacy gives unknown without a report, a validation hole; the candidate closes it (a declared refinement,
-  // listed for the orchestrator's acceptance at stage 5).
+  // The legacy gives unknown without a report for an intercept of another kind too: the line predicts nothing, and
+  // the relation keeps that (parity, as the prediction table pins it; a stricter answer would be a stage-5 decision).
   assertCase(
     listFunction("predict"),
     inputsOf({ arguments: [closedView(withIntercept(STRING_TYPE)), closedView(INTEGER_TYPE)] }),
     legacyOperation('let r = predict({ slope: 1, intercept: "x", start: 0 }, 1)\nexit'),
     { fact: "unknown" },
-    "invalid",
+    { dynamic: "unknown member" },
   );
 });

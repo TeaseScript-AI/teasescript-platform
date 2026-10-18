@@ -3,9 +3,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 
 import { operationRelations } from "../src/type-inference/adapters/index.js";
+import { VALUE_KIND_NAMES, VALUE_KINDS } from "../src/value-kinds.js";
 import {
   generateTable,
+  MADE_KINDS,
   ROUTINE_NAMES,
+  UNMADE_KINDS,
   type CaseRow,
   type RoutineName,
 } from "./helpers/adapter-case-tables.js";
@@ -47,13 +50,32 @@ function expectation(row: CaseRow): AdapterExpectation {
   return row.adapter;
 }
 
+test("every kind of the registry is made by a value of the tables, or named with the reason it is not", () => {
+  for (const kind of VALUE_KIND_NAMES)
+    assert.ok(
+      MADE_KINDS.has(kind) !== UNMADE_KINDS.has(kind),
+      `${kind} is made, or named as not made, not both or neither`,
+    );
+  // Every kind an annotation names has an annotated row, so the kind dimension is complete.
+  const sources = generateTable("choice").map((entry) => entry.row.source);
+  for (const kind of VALUE_KIND_NAMES)
+    if (VALUE_KINDS[kind].written)
+      assert.ok(
+        sources.some((source) => source.includes(`let v: ${kind} = hostValue`)),
+        `an annotated ${kind} option`,
+      );
+});
+
 for (const routine of ROUTINE_NAMES)
   test(`the ${routine} table is what its templates and the legacy give, and every row holds`, () => {
     const generated = generateTable(routine);
     const rows = generated.map((entry) => entry.row);
     if (process.env["ADAPTER_CASES_WRITE"] === "1") writeTable(routine, rows);
     const table = readTable(routine);
-    assert.ok(table !== null, `a table at ${tablePath(routine).pathname}; write it with ADAPTER_CASES_WRITE=1`);
+    assert.ok(
+      table !== null,
+      `a table at ${tablePath(routine).pathname}; write it with ADAPTER_CASES_WRITE=1`,
+    );
     const byId = new Map(table.map((row) => [row.id, row]));
     for (const row of rows) {
       const kept = byId.get(row.id);
@@ -80,9 +102,10 @@ for (const routine of ROUTINE_NAMES)
           expectation(row),
         );
       } catch (error) {
-        throw new Error(`${row.id}: ${error instanceof Error ? error.message : String(error)}\n${row.source}`, {
-          cause: error,
-        });
+        throw new Error(
+          `${row.id}: ${error instanceof Error ? error.message : String(error)}\n${row.source}`,
+          { cause: error },
+        );
       }
     }
     assert.deepEqual(pending, [], "a relation for every row's contract");
