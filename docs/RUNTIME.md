@@ -466,11 +466,11 @@ lastSettlement:
 ```
 
 A valid current `waiting` snapshot contains exactly one active foreground delay, interaction, `chatPacingGate`,
-`mediaPlayback`, `storageWrite`, or `capture` wait. Non-waiting states contain no active foreground action. `backgroundActions` may contain timer,
-media, and permanent button actions.
+`mediaPlayback`, `storageWrite`, `capture`, `fileStore`, or `lock` wait. Non-waiting states contain no active foreground
+action. `backgroundActions` may contain timer, media, and permanent button actions.
 
 The shared timer and media interrupt state may retain one inert suspended foreground delay, interaction, reading time,
-or media wait. Its ownership, settlement, and restore rules are defined under
+media wait, or lock `ask` step. Its ownership, settlement, and restore rules are defined under
 [Timers and scene time](#timers-and-scene-time) and [Stage image and media playback](#stage-image-and-media-playback).
 
 Blocking `wait` and `timer` use the foreground-delay path. `wait` is hidden; `timer` carries `visible`, `mystery`, or
@@ -688,12 +688,12 @@ observation for it.
 
 Expiry blocks compile to parameterless handler regions. A runtime entry starts the first queued block before executing
 the next instruction, including from `waiting`, unless a block is already running, a single-instruction commit window is
-open (an interaction result handoff or a settled terminal action), or a storage write or capture is pending. The block
-runs in an interrupt call frame that saves the interrupted position, temporaries, scope and loop depth, the scene time
-the block started (`startedAtMs`), and the interrupted foreground delay, interaction, reading time, or media wait. The
-interrupt frame may exceed `maxCallDepth` by one because it is not an author call. Expiry blocks count against the
-instruction budget of the scene time they run at ([Runtime defaults and limits](#runtime-defaults-and-limits)), so many
-rounds that end at one scene time can exhaust it.
+open (an interaction result handoff or a settled terminal action), or a host step is pending: a storage write, capture,
+file store, or lock `work` step. The block runs in an interrupt call frame that saves the interrupted position,
+temporaries, scope and loop depth, the scene time the block started (`startedAtMs`), and the interrupted foreground
+delay, interaction, reading time, media wait, or lock `ask` step. The interrupt frame may exceed `maxCallDepth` by one
+because it is not an author call. Expiry blocks count against the instruction budget of the scene time they run at
+([Runtime defaults and limits](#runtime-defaults-and-limits)), so many rounds that end at one scene time can exhaust it.
 
 The suspended foreground action is inert: a completion for it returns `suspendedAction` without mutation. It also stands
 still (preempt and resume, owner decision on #829, 2026-10-11): it is no due work while the block runs, and a normal
