@@ -29,7 +29,9 @@ import type { TypeId, TypeNode } from "./types.js";
 // which no relation reads (a property's type is read as a leaf, O1). The sets only grow. The relation is asked when
 // every strict operand has evidence, over one product of choices: each operand chooses a closed alternative, a
 // possibility, a dynamic view (one per provenance: its alternatives and possibilities beside the provenance), or, when
-// lazy (a `default:`, the right side of `and` and `or`), nothing. Beyond the operands, the dimensions a relation reads
+// lazy (a `default:`, the right side of `and` and `or`), nothing; a relation declared symmetric (`min` and `max` of
+// values) is asked once per multiset of its arguments' choices, so its asks grow polynomially with the arguments
+// (`symmetricCombinations`). Beyond the operands, the dimensions a relation reads
 // are selected lazily: a leaf of an operand along a path (`inputs.leaf`), a place the evidence names (`inputs.view`),
 // a structural step inside a path (the chosen item), and the presence of a property a projection reads (present or
 // absent where its slot is empty by construction beside evidence); a read of a dimension not yet selected records it,
@@ -622,15 +624,12 @@ export function lift(
   const site = `op@${operation.site}`;
   const choices = operands.map((operand) => picksOf(cells, operand.cell, operand.lazy));
   if (choices.some((list) => list.length === 0)) return { changed: false, tally: null };
-  const product = (lists: readonly (readonly Pick[])[]): Pick[][] =>
-    lists.reduce<Pick[][]>(
-      (acc, list) => acc.flatMap((combo) => list.map((pick) => [...combo, pick])),
-      [[]],
-    );
+  const combos =
+    relation.symmetric === true ? symmetricCombinations(operands, choices) : product(choices);
   let changed = false;
   let asked = 0;
   let invalid = 0;
-  for (const combo of product(choices)) {
+  for (const combo of combos) {
     const asks = askLazy(
       context,
       (inputs) => relation.result(inputs),
@@ -663,6 +662,71 @@ export function lift(
 interface Ask {
   readonly reading: { readonly outcomes: readonly Outcome[]; readonly invalid: boolean };
   readonly selection: Selection;
+}
+
+/** Every choice of one pick per operand. */
+function product(lists: readonly (readonly Pick[])[]): Pick[][] {
+  return lists.reduce<Pick[][]>(
+    (acc, list) => acc.flatMap((combo) => list.map((pick) => [...combo, pick])),
+    [[]],
+  );
+}
+
+/** What tells two picks apart for a symmetric relation: the kind, the type, the tag, the group and the provenance. */
+function pickKey(pick: Pick): string {
+  return pick.kind === "closed" || pick.kind === "possible"
+    ? `${pick.kind}|${pick.alt.type}|${pick.tag}|${pick.alt.group ?? ""}|${pick.why ?? ""}`
+    : `${pick.kind}|${pick.why ?? ""}`;
+}
+
+/**
+ * The combinations of a symmetric relation, whose result does not depend on the order of its positional arguments:
+ * the arguments with the same picks form a group, and a group of g arguments over a picks is asked once per multiset
+ * of a picks taken g at a time, the sorted picks assigned to the group's arguments in order; the receiver and the
+ * named operands keep every choice. `min(a, a, a)` over `integer | number` is asked 4 times, not 8.
+ */
+function symmetricCombinations(
+  operands: readonly Operand[],
+  choices: readonly (readonly Pick[])[],
+): Pick[][] {
+  const byKey = (x: Pick, y: Pick): number =>
+    pickKey(x) < pickKey(y) ? -1 : pickKey(x) > pickKey(y) ? 1 : 0;
+  const sorted = choices.map((list) => [...list].sort(byKey));
+  const groups = new Map<string, number[]>();
+  const parts: {
+    readonly indices: readonly number[];
+    readonly assignments: readonly (readonly Pick[])[];
+  }[] = [];
+  operands.forEach((operand, index) => {
+    if ("argument" in operand.ref) {
+      const key = sorted[index]!.map(pickKey).join(";");
+      groups.set(key, [...(groups.get(key) ?? []), index]);
+    } else parts.push({ indices: [index], assignments: sorted[index]!.map((pick) => [pick]) });
+  });
+  for (const indices of groups.values()) {
+    const width = sorted[indices[0]!]!.length;
+    const assignments: (readonly Pick[])[] = [];
+    const walk = (position: number, from: number, picks: readonly Pick[]): void => {
+      if (position === indices.length) {
+        assignments.push(picks);
+        return;
+      }
+      for (let i = from; i < width; i += 1)
+        walk(position + 1, i, [...picks, sorted[indices[position]!]![i]!]);
+    };
+    walk(0, 0, []);
+    parts.push({ indices, assignments });
+  }
+  let placements: ReadonlyMap<number, Pick>[] = [new Map()];
+  for (const part of parts)
+    placements = placements.flatMap((placed) =>
+      part.assignments.map((assignment) => {
+        const next = new Map(placed);
+        part.indices.forEach((index, i) => next.set(index, assignment[i]!));
+        return next;
+      }),
+    );
+  return placements.map((placed) => operands.map((_, index) => placed.get(index)!));
 }
 
 /**

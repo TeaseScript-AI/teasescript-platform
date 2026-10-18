@@ -12,6 +12,7 @@ import {
   type LiftContext,
   type Operation,
 } from "../src/type-inference/solver/lifting.js";
+import { solve } from "../src/type-inference/solver/solve.js";
 import { TypeTable } from "../src/type-inference/solver/types.js";
 import { request } from "./helpers/type-inference-graph.js";
 
@@ -215,4 +216,37 @@ test("a property read goes through the member rules: a held part's items name th
     memberRelation("length"),
   );
   assert.deepEqual(missing.tally, { asked: 1, invalid: 1 });
+});
+
+test("a symmetric relation is asked once per multiset of its arguments' alternatives", () => {
+  const callOf = (count: number, declared: string, fn: string) => {
+    const args = Array.from({ length: count }, () => "a").join(", ");
+    const solution = solve(graphOf(`let a: ${declared} = 1\nlet b = ${fn}(${args})\nexit`), {
+      relations: RELATIONS,
+      verify: true,
+    });
+    return { asks: solution.asks, statuses: solution.statuses };
+  };
+  // k arguments over two alternatives are k + 1 multisets, not 2^k sequences: six arguments more cost the same asks
+  // at every size (Dropje97's W2-B2 measured 786,432 asks for eighteen arguments before the rule)
+  const six = callOf(6, "integer | number", "min");
+  const twelve = callOf(12, "integer | number", "min");
+  const eighteen = callOf(18, "integer | number", "min");
+  assert.equal(eighteen.asks - twelve.asks, twelve.asks - six.asks);
+  assert.ok(eighteen.asks < 100, `${eighteen.asks} asks for eighteen arguments`);
+  // the status counts multisets: `max` over `integer | string` is valid for the all-integer multiset alone
+  assert.deepEqual(callOf(6, "integer | string", "max").statuses, [
+    "listFunction.max@36:partial(6/7)",
+  ]);
+  assert.deepEqual(callOf(12, "integer | string", "max").statuses, [
+    "listFunction.max@36:partial(12/13)",
+  ]);
+  // arguments with different alternatives are their own groups: the multisets of each, combined
+  const mixed = solve(
+    graphOf(
+      "let a: integer | number = 1\nlet c: integer | string = 2\nlet b = min(a, c, a, c, a, c)\nexit",
+    ),
+    { relations: RELATIONS, verify: true },
+  );
+  assert.deepEqual(mixed.statuses, ["listFunction.min@64:partial(12/16)"]);
 });

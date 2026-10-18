@@ -289,6 +289,8 @@ function prediction(
 function relation(name: ListFunctionName, contract: ListFunction): OperationRelation {
   return {
     contract: { family: "listFunction", name },
+    // `min` and `max` of values give the same result in any order of their arguments
+    symmetric: takesValues(name),
     result(inputs: OperationInputs): OperationResult {
       switch (contract.takes) {
         case "values": {

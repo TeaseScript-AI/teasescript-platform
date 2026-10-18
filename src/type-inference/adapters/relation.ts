@@ -109,6 +109,11 @@ export interface OperationRelation {
    * function of its inputs alone: no state, no reading of other places.
    */
   result(inputs: OperationInputs): OperationResult;
+  /**
+   * Whether the result does not depend on the order of the positional arguments (`min` and `max` of values), so the
+   * solver asks once per multiset of the arguments' alternatives instead of once per sequence (work note §3.5).
+   */
+  readonly symmetric?: boolean;
 }
 
 /** The relations of every contract family, by family and name, which the solver asks. */
