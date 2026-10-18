@@ -53,6 +53,7 @@ import { describeValue } from "../../value-kinds.js";
 import type { Evaluator } from "../evaluator.js";
 import { shuffleOrder } from "./draws.js";
 import { type SourceSpan, fault, USE_DEFAULT } from "./support.js";
+import { dictKey, missingKey, listPosition } from "./access.js";
 
 // The methods of lists, sets, and dicts.
 
@@ -224,7 +225,8 @@ function callList(
       return null;
     }
     case "removeAt": {
-      const index = evaluator.listPosition(
+      const index = listPosition(
+        evaluator,
         receiver,
         receiverPlan,
         null,
@@ -321,7 +323,7 @@ export function callDict(
   }
   // Every other method takes one key.
   const keyPlan = expression.arguments[0]!.value;
-  const key = evaluator.dictKey(positional[0]!, keyPlan);
+  const key = dictKey(evaluator, positional[0]!, keyPlan);
   switch (name) {
     case "contains":
     case "get": {
@@ -330,7 +332,7 @@ export function callDict(
     }
     case "remove":
       if (getSerializableDictEntry(receiver, key) === undefined)
-        throw evaluator.missingKey(key, callee.object, keyPlan, span);
+        throw missingKey(evaluator, key, callee.object, keyPlan, span);
       freezePreparedReferenceDescendants(evaluator.snapshot, receiver, key);
       return removeSerializableDictEntry(receiver, key)!.value;
     default: {
