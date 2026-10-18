@@ -538,17 +538,17 @@ export class RuntimeSession {
 
   /** What the Stage shows, as `stageProjection` gives it for a snapshot. */
   public stageProjection(): StageProjection {
-    return this.#read((state) => published(stageProjection(state)));
+    return this.#read((state) => stageProjection(state));
   }
 
   /** The media a Player plays, as `mediaPlaybackProjection` gives them for a snapshot. */
   public mediaPlaybackProjection(): readonly MediaPlaybackProjection[] {
-    return this.#read((state) => published(mediaPlaybackProjection(state)));
+    return this.#read((state) => mediaPlaybackProjection(state));
   }
 
   /** The shown permanent buttons, as `permanentButtonProjection` gives them for a snapshot. */
   public permanentButtonProjection(): readonly PermanentButtonProjection[] {
-    return this.#read((state) => published(permanentButtonProjection(state)));
+    return this.#read((state) => permanentButtonProjection(state));
   }
 
   /**
