@@ -16,7 +16,7 @@ import {
   type StaticType,
 } from "../../static-types.js";
 import type { ValueKind } from "../../value-kinds.js";
-import type { OperandView, OperationInputs, OperationResult } from "./relation.js";
+import type { OperandRef, OperandView, OperationInputs, OperationResult } from "./relation.js";
 import {
   alternativesOf,
   dynamicResult,
@@ -230,6 +230,10 @@ function setOperation(
   });
   if (owns.length === 0) return INVALID;
   if (contract.name === "union" && first !== undefined && isBottom(first)) return UNCONSTRAINED;
+  // Elements that mix (TSV044 at the construction, which the check keeps): under Q3.7's scope (the orchestrator,
+  // 2026-10-18) the union is the collection built from both operands' elements, whose working kind the solver takes
+  // from the earliest operand by source position, instead of the legacy's recovery of unknown elements.
+  let mixes = false;
   const result = (own: StaticType): StaticType => {
     if (contract.name !== "union" || first === undefined) return { kind, element: own };
     if (first.dynamic !== null) return unknownElements;
@@ -243,9 +247,18 @@ function setOperation(
     const parts = [own, ...others].filter((part) => part.kind !== "never");
     if (parts.length === 0) return { kind, element: own };
     const element = joinTypes(parts);
+    if (element === undefined) mixes = true;
     return element === undefined ? unknownElements : { kind, element };
   };
-  return typeResult(union(owns.map(result)));
+  const joined = union(owns.map(result));
+  if (mixes) {
+    const argument: OperandRef =
+      inputs.arguments[0] !== undefined
+        ? { argument: 0 }
+        : { named: inputs.named.keys().next().value ?? "" };
+    return joinOf(kind, pathOf(RECEIVER, "element"), pathOf(argument, "element"));
+  }
+  return typeResult(joined);
 }
 
 /**

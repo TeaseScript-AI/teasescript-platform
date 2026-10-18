@@ -257,12 +257,21 @@ class Exporter {
         if (view.optional && view.kind !== "bound") members.push(this.#null);
         const type = union(members.map((member) => member.type));
         if (members.length === 1 && !view.held) return members[0]!;
-        // `union` keeps the members it is given or merges scalars, which `typeKey` writes.
-        const texts = new Map(members.map((member) => [member.type, member.text]));
-        const text = (member: StaticType): TypeText =>
-          texts.get(member) ?? typeKey(member, true, true);
-        const written =
-          type.kind === "union" ? `(${type.members.map(text).sort().join("|")})` : text(type);
+        // `union` keeps the members it is given or merges scalars, which `typeKey` writes; two members of one type
+        // whose texts differ (a held mark inside one of them) both keep their text.
+        const texts = new Map<StaticType, Set<TypeText>>();
+        for (const member of members) {
+          const known = texts.get(member.type);
+          if (known === undefined) texts.set(member.type, new Set([member.text]));
+          else known.add(member.text);
+        }
+        const text = (member: StaticType): readonly TypeText[] => [
+          ...(texts.get(member) ?? [typeKey(member, true, true)]),
+        ];
+        const all = [
+          ...new Set((type.kind === "union" ? type.members : [type]).flatMap(text)),
+        ].sort();
+        const written = all.length === 1 ? all[0]! : `(${all.join("|")})`;
         return { type, text: view.held ? `${written}!` : written };
       }
     }
@@ -296,9 +305,13 @@ class Exporter {
         return exported;
       }
       case "object": {
+        // the written bare `object`: a known kind whose properties are unknown
+        if (member.open) return this.#leaf({ kind: "object", properties: null });
         const known = this.#objects.get(member.props);
         if (known !== undefined) return known;
+        // a slot no store reached (empty by construction) is not a property of this object
         const entries = [...member.props]
+          .filter(([, cell]) => !this.#solution.cells.items(cell).every((item) => item.tag === "e"))
           .map(([name, cell]): readonly [string, ExportedType] => [name, this.#part(cell)])
           .sort(([left], [right]) => compareText(left, right));
         const exported: ExportedType = {

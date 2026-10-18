@@ -87,7 +87,7 @@ test("arithmetic combines every pair of operand members, and a pair that cannot 
   );
 });
 
-test("two lists join their elements as a literal does; elements that mix are the legacy's recovery", () => {
+test("two lists join their elements as a literal does; elements that mix join under Q3.7, reported at the construction", () => {
   assertEqualResult(
     relation("operator", "+"),
     inputsOf({
@@ -119,7 +119,9 @@ test("two lists join their elements as a literal does; elements that mix are the
     }),
     legacyOperation('let r = [1] + ["x"]\nexit'),
     { fact: "list<unknown>", errors: ["TSV044"] },
-    "fact",
+    // Q3.7's scope: the list built from both operands' elements, not the legacy's recovery (the report stays)
+    { realized: "list<(integer|string)>" },
+    "join",
   );
 });
 

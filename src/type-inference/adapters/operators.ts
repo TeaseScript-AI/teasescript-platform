@@ -27,6 +27,8 @@ import {
   closedType,
   INVALID,
   isBottom,
+  joinOf,
+  pathOf,
   possibleResult,
   typeResult,
   UNCONSTRAINED,
@@ -123,8 +125,10 @@ const FIXED: readonly (readonly [ContractFamily, string, StaticType])[] = [
 ];
 
 /**
- * Two lists whose element types mix: the legacy reports them as `union()` reports them (V30 §16) and recovers a list
- * of unknown elements, so the concatenation keeps a value.
+ * Two lists whose element types mix: the legacy reports them as `union()` reports them (V30 §16, TSV044 at the
+ * construction, which the check keeps) and recovered a list of unknown elements; under Q3.7's scope (the
+ * orchestrator, 2026-10-18) the concatenation is the list built from both operands' elements, whose working kind the
+ * solver takes from the earliest operand by source position, so no later report is silenced.
  */
 function concatenation(inputs: OperationInputs): OperationResult | undefined {
   const [left, right] = inputs.arguments;
@@ -134,7 +138,7 @@ function concatenation(inputs: OperationInputs): OperationResult | undefined {
   const second = right.dynamic === null ? resolved(closedType(right)!) : null;
   if (first?.kind !== "list" || second?.kind !== "list") return undefined;
   return arithmeticType("+", first, second) === undefined
-    ? typeResult({ kind: "list", element: UNKNOWN_TYPE })
+    ? joinOf("list", pathOf({ argument: 0 }, "element"), pathOf({ argument: 1 }, "element"))
     : undefined;
 }
 

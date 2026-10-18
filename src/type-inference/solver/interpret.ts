@@ -4,8 +4,8 @@ import type { TypeId } from "./types.js";
 
 // The interpretation of a cell's final set (O4 stage 3a, work note §3.2 and §3.5; the executable reference model is
 // the contract), computed once after solving and never changing a cell. The order of a cell's known items decides
-// its working kind: by the declaration mark, the position, then, where positions tie, the order of the cells the
-// items came from (a copied value keeps its source's working order, a projected part its part's; sources are
+// its working kind: by the declaration mark, the position (the site in this cell, then the site of the evidence in
+// its source), then, where positions tie, the order of the cells the items came from (a copied value keeps its source's working order, a projected part its part's; sources are
 // followed recursively, a cell already on the way is not consulted again), then a defined union before a witness at
 // the same site, then the name. The first item decides: a witness admits its family (integer with number), a member
 // admits every family of its union (Q3.8); every known item of another family is a conflict, kept as the conflict's
@@ -92,8 +92,8 @@ function order(cells: Cells, cell: CellId, visiting: ReadonlySet<CellId>): reado
   const rank = (item: Item): readonly [number, number, number, number, number, string, string] => [
     item.decl ? 0 : 1,
     item.pos[0],
-    sourceRank(item),
     item.pos[1],
+    sourceRank(item),
     item.tag === "m" ? 0 : 1,
     item.tag === "m" ? (item.group ?? "") : "",
     familyOf(cells, item),

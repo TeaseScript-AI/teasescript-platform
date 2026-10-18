@@ -144,7 +144,7 @@ class Solver {
       case "read":
         return [c.binding, c.occurrence];
       case "project":
-        return [c.owner, c.into];
+        return [c.owner, c.into, ...this.#storesInto(c.into).map((s) => s.value)];
       case "operation":
         return [
           ...(c.receiver === null ? [] : [c.receiver]),
@@ -279,6 +279,32 @@ class Solver {
     return changed;
   }
 
+  #storesInto(target: PlaceId): Extract<Constraint, { kind: "store" }>[] {
+    return this.#graph.constraints.flatMap((s) =>
+      s.kind === "store" && s.into === target ? [s] : [],
+    );
+  }
+
+  /** A store's value into a cell: the parts' items for a store of elements (`addAll`), else the value's items. */
+  #storeInto(s: Extract<Constraint, { kind: "store" }>, into: CellId, decl: boolean): boolean {
+    const site = s.site.start;
+    if (s.how === "elements") {
+      let changed = false;
+      for (const item of this.cells.items(s.value)) {
+        if (item.tag === "d" || item.tag === "p") {
+          if (this.cells.add(into, { tag: "d", why: item.why, pos: positionAt(site) }))
+            changed = true;
+        } else if (
+          item.parts?.element !== undefined &&
+          this.copy(item.parts.element, into, decl ? "set" : "strip", site)
+        )
+          changed = true;
+      }
+      return changed;
+    }
+    return this.copy(s.value, into, decl ? "set" : "strip", site);
+  }
+
   /** The part of a structural item a step reaches: a cell, a dict's key type for its iteration, or nothing. */
   part(
     item: Item,
@@ -308,32 +334,24 @@ class Solver {
       }
       case "store":
       case "assign": {
+        // The declaration's evidence (Q3.1r): a let/global initializer, a parameter default, a loop variable's
+        // iterable, a start value, and the members of a literal stored into the literal's own cells. The mark is the
+        // store's own: a value copied from a declared variable does not carry that variable's mark (R7-B10).
         const into = c.kind === "store" ? c.into : c.binding;
         const intoKind = this.#graph.places[into]?.kind.kind;
         const decl =
           c.kind === "store" &&
           (DECL_STORES.includes(c.how) || intoKind === "cell" || intoKind === "property");
-        if (c.kind === "store" && c.how === "elements") {
-          // a store of a collection's elements (`addAll`): the parts' items
-          let changed = false;
-          for (const item of this.cells.items(c.value)) {
-            if (item.tag === "d" || item.tag === "p") {
-              if (this.cells.add(into, { tag: "d", why: item.why, pos })) changed = true;
-            } else if (
-              item.parts?.element !== undefined &&
-              this.copy(item.parts.element, into, decl ? "set" : "strip", site)
-            )
-              changed = true;
-          }
-          return changed;
-        }
-        return this.copy(c.value, into, decl ? "set" : "strip", site);
+        if (c.kind === "store") return this.#storeInto(c, into, decl);
+        return this.copy(c.value, into, "strip", site);
       }
       case "read":
         return this.copy(c.binding, c.occurrence, "mirror");
       case "project": {
         let changed = false;
-        const storePath = this.#stored.has(c.into);
+        // on a store path the stored values reach the part in place: the stores' own values, never what the target
+        // read from a sibling alternative's part
+        const stores = this.#storesInto(c.into);
         for (const item of this.cells.items(c.owner)) {
           if (item.tag === "d") {
             if (this.cells.add(c.into, { tag: "d", why: item.why, pos: item.pos })) changed = true;
@@ -358,8 +376,7 @@ class Solver {
           }
           if (part.cell === c.into) continue;
           if (this.copy(part.cell, c.into, "mirror")) changed = true;
-          // a store into the projected target reaches the part in place, on a store path only
-          if (storePath && this.copy(c.into, part.cell, "mirror")) changed = true;
+          for (const s of stores) if (this.#storeInto(s, part.cell, false)) changed = true;
         }
         if (typeof c.step === "object") {
           const read = this.memberRead(c.owner, c.step.property, c.into, site);

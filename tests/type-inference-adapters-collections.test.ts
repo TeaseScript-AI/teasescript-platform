@@ -107,14 +107,15 @@ test("get gives the element or the default (Q2) and needs its default; union joi
     legacyOperation(`${XS}let r = xs.union([1.5])\nexit`),
     "type",
   );
-  // Elements that mix: the legacy reports and recovers a list of unknown elements, which the relation gives too.
+  // Elements that mix: the legacy reports and recovered a list of unknown elements; under Q3.7's scope the relation
+  // builds the list from both operands' elements (the report stays at the construction).
   assertCase(
     method("union"),
     inputsOf({ receiver: LIST, arguments: [closedView({ kind: "list", element: STRING_TYPE })] }),
     legacyOperation(`${XS}let r = xs.union(["x"])\nexit`),
     { fact: "list<unknown>", errors: ["TSV044"] },
-    "fact",
-    "type",
+    { realized: "list<(integer|string)>" },
+    "join",
   );
 });
 
@@ -195,7 +196,7 @@ test("the shape gates and the recoveries of the collection methods, as the legac
       `${XS}let other: integer[] | string set = hostValue\nlet r = xs.union(other)\nexit`,
     ),
     { fact: "list<unknown>", errors: ["TSV044"] },
-    "fact",
+    { realized: "list<(integer|string)>" },
   );
   assertCase(
     method("union"),
@@ -376,7 +377,7 @@ test("set operations per member of the receiver, an empty collection adding noth
     inputsOf({ receiver: lists, arguments: [LIST] }),
     legacyOperation("let xs: integer[] | string[] = hostValue\nlet r = xs.union([1])\nexit"),
     { fact: "list<unknown>", errors: ["TSV044"] },
-    "fact",
+    { realized: "list<(integer|string)>" },
   );
   assertCase(
     method("intersection"),

@@ -274,11 +274,11 @@ function realize(result: OperationResult, inputs: OperationInputs): Realized {
     case "projection":
       return { kind: "type", type: pathType(inputs, result.source) };
     case "join": {
-      // The parts' types join as the elements of a literal do (numeric promotion); parts that mix give no value.
-      const element = joinTypes(result.parts.map((part) => pathType(inputs, part)));
-      return element === undefined
-        ? { kind: "invalid" }
-        : { kind: "type", type: { kind: result.constructor, element } };
+      // The parts' types join as the elements of a literal do (numeric promotion); parts that mix are the union of
+      // both (Q3.7's scope: the collection is built from them, its working kind the solver's).
+      const parts = result.parts.map((part) => pathType(inputs, part));
+      const element = joinTypes(parts) ?? union(parts);
+      return { kind: "type", type: { kind: result.constructor, element } };
     }
     case "dynamic":
       return { kind: "type", type: UNKNOWN_TYPE };

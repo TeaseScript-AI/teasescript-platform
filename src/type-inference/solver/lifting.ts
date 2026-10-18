@@ -47,10 +47,10 @@ export interface Alternative {
   readonly tag: "w" | "m" | "p";
   readonly group: string | undefined;
   readonly why: Provenance | undefined;
-  /** The cell the alternative was read from, the contribution's source where it is projected. */
-  readonly cell: CellId;
-  /** The structural item it materializes, carried as itself by a projection; `null` for a flat type or a synthetic part. */
-  readonly item: Item | null;
+  /** Every cell the alternative was read from (two items alike give one alternative), the sources of a projection. */
+  readonly cells: readonly CellId[];
+  /** The structural items it materializes, carried as themselves by a projection; none for a flat type or a synthetic part. */
+  readonly items: readonly Item[];
   /** The chosen part alternatives of a structural item, for projections; `null` for a flat type. */
   readonly choice: Choice | null;
 }
@@ -94,10 +94,39 @@ function alternatives(
     if (item.tag === "d" || item.tag === "e") continue;
     for (const alternative of itemAlternatives(cells, item, cell, path)) {
       const key = `${alternative.tag}|${alternative.type}|${alternative.group ?? ""}|${alternative.why ?? ""}`;
-      if (!out.has(key)) out.set(key, alternative);
+      const prior = out.get(key);
+      if (prior === undefined) out.set(key, alternative);
+      else out.set(key, merged(prior, alternative));
     }
   }
   return [...out.values()];
+}
+
+/**
+ * Two alternatives of one type from two items (sharing their parts, or alike) are one alternative that names every
+ * cell and every item either was read from, down through the chosen parts, so a projection's sources do not depend
+ * on which item was enumerated first.
+ */
+function merged(prior: Alternative, other: Alternative): Alternative {
+  const cells = [...new Set([...prior.cells, ...other.cells])].sort((a, b) => a - b);
+  const items = [...prior.items, ...other.items.filter((item) => !prior.items.includes(item))];
+  let choice = prior.choice;
+  if (prior.choice !== null && other.choice !== null) {
+    if (prior.choice.element !== undefined && other.choice.element !== undefined)
+      choice = {
+        element: merged(prior.choice.element, other.choice.element),
+        cell: prior.choice.cell,
+      };
+    else if (prior.choice.props !== undefined && other.choice.props !== undefined) {
+      const props = new Map(prior.choice.props);
+      for (const [name, alternative] of other.choice.props) {
+        const mine = props.get(name);
+        if (mine !== undefined) props.set(name, merged(mine, alternative));
+      }
+      choice = { props, cells: prior.choice.cells };
+    }
+  }
+  return { ...prior, cells, items, choice };
 }
 
 export function itemAlternatives(
@@ -117,7 +146,7 @@ export function itemAlternatives(
           : item.tag === "m"
             ? "m"
             : "w";
-  const base = { tag, group: item.group, why: item.why, cell, item };
+  const base = { tag, group: item.group, why: item.why, cells: [cell], items: [item] };
   if (item.type !== undefined) return [{ ...base, type: item.type, choice: null }];
   if (item.parts === undefined || item.ctor === undefined) return [];
   const inner = new Set([...path, cell]);
@@ -126,8 +155,8 @@ export function itemAlternatives(
     tag: "w",
     group: undefined,
     why: undefined,
-    cell: part,
-    item: null,
+    cells: [part],
+    items: [],
     choice: null,
   });
   const partAlternatives = (part: CellId): Alternative[] => {
@@ -172,11 +201,12 @@ export function itemAlternatives(
       // an empty slot: the property absent; beside evidence, both
       const parts = partAlternatives(part).filter((a) => table.node(a.type).kind !== "never");
       const absent = cells.items(part).some((it) => it.tag === "e");
-      combos = combos.flatMap((combo) =>
-        parts.length === 0
-          ? [combo]
-          : [...(absent ? [combo] : []), ...parts.map((a) => [...combo, [name, a] as const])],
-      );
+      // a property without evidence yet: the object contributes nothing yet
+      if (parts.length === 0 && !absent) return [];
+      combos = combos.flatMap((combo) => [
+        ...(absent ? [combo] : []),
+        ...parts.map((a) => [...combo, [name, a] as const]),
+      ]);
     }
     return combos.map((combo) =>
       compose(
@@ -222,8 +252,8 @@ function stepOf(
     tag: a.tag === "p" ? "p" : "w",
     group: undefined,
     why: a.why,
-    cell: a.cell,
-    item: null,
+    cells: a.cells,
+    items: [],
     choice: null,
   });
   if (a.choice !== null) {
@@ -246,12 +276,12 @@ function stepOf(
   if (typeof step === "object") {
     if (node.kind !== "object" || node.properties === null) return [];
     const property = node.properties.find((p) => p.name === step.property);
-    return property === undefined ? [] : [{ ...a, type: property.type, item: null, choice: null }];
+    return property === undefined ? [] : [{ ...a, type: property.type, items: [], choice: null }];
   }
   if (node.kind === "list" || node.kind === "set" || node.kind === "dict")
     return node.kind === "dict" && step === "iteration"
       ? [text()]
-      : [{ ...a, type: node.element, item: null, choice: null }];
+      : [{ ...a, type: node.element, items: [], choice: null }];
   return [];
 }
 
@@ -317,6 +347,8 @@ type Outcome =
       readonly why: Provenance | undefined;
       readonly whys: readonly Provenance[];
       readonly from: readonly CellId[];
+      /** The earliest site of a projected part's own evidence, the secondary position in the result (Q3.7). */
+      readonly site: number | undefined;
     }
   | {
       readonly kind: "item";
@@ -326,6 +358,7 @@ type Outcome =
       readonly why: Provenance | undefined;
       readonly whys: readonly Provenance[];
       readonly from: readonly CellId[];
+      readonly site: number | undefined;
     }
   | { readonly kind: "dynamic"; readonly why: Provenance }
   | {
@@ -526,6 +559,7 @@ function readAnswer(
           why: undefined,
           whys: reading.whys,
           from: [],
+          site: undefined,
         });
         break;
       }
@@ -539,6 +573,7 @@ function readAnswer(
             why: a.why,
             whys: reading.whys,
             from: [],
+            site: undefined,
           });
         break;
       case "dynamic":
@@ -627,14 +662,29 @@ function project(
       ]
     : [pick.alt];
   for (const step of source.path) found = found.flatMap((a) => stepOf(cells, a, step, dynamicWalk));
-  return found.map((a): Outcome => {
-    if (a.tag === "d") return { kind: "dynamic", why: a.why };
+  return found.flatMap((a): Outcome[] => {
+    if (a.tag === "d") return [{ kind: "dynamic", why: a.why }];
     const tag: "w" | "m" | "p" = a.tag === "p" || possible ? "p" : member ? "m" : a.tag;
     const group = tag !== "m" ? undefined : member ? reading.site : a.group;
     const why = tag !== "p" ? undefined : a.tag === "p" ? a.why : undefined;
-    if (a.item !== null && a.item.ctor !== undefined)
-      return { kind: "item", tag, item: a.item, group, why, whys: reading.whys, from: [a.cell] };
-    return { kind: "type", tag, type: a.type, group, why, whys: reading.whys, from: [a.cell] };
+    // a projected part keeps the earliest site of its own evidence as the secondary position (Q3.7: the earliest
+    // member or operand by source position decides a collection built from several)
+    const site = a.items.length === 0 ? undefined : Math.min(...a.items.map((item) => item.pos[0]));
+    const structural = a.items.filter((item) => item.ctor !== undefined);
+    if (structural.length > 0)
+      return structural.map((item) => ({
+        kind: "item",
+        tag,
+        item,
+        group,
+        why,
+        whys: reading.whys,
+        from: a.cells,
+        site,
+      }));
+    return [
+      { kind: "type", tag, type: a.type, group, why, whys: reading.whys, from: a.cells, site },
+    ];
   });
 }
 
@@ -643,8 +693,10 @@ function project(
  * whose elements go to the result's derived part cell (empty by construction when a projected part is never or
  * there is none). A possibility without a provenance of its own takes each provenance of its combination.
  */
-function emit(cells: Cells, result: CellId, outcome: Outcome, pos: Position): boolean {
-  if (outcome.kind === "dynamic") return cells.add(result, { tag: "d", why: outcome.why, pos });
+function emit(cells: Cells, result: CellId, outcome: Outcome, at: Position): boolean {
+  if (outcome.kind === "dynamic") return cells.add(result, { tag: "d", why: outcome.why, pos: at });
+  const pos: Position =
+    outcome.kind !== "collection" && outcome.site !== undefined ? [at[0], outcome.site] : at;
   const whys: readonly (Provenance | undefined)[] =
     outcome.tag === "p" && outcome.why === undefined ? outcome.whys : [outcome.why];
   let changed = false;
