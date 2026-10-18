@@ -12,7 +12,7 @@ import {
   storageKey,
   storageKeyPlace,
   storageKeyType,
-  writeScriptStorage,
+  writeOwnedScriptStorage,
 } from "../script-storage.js";
 import { cloneCapturedSerializableValue } from "../serializable-values.js";
 import type { RuntimeSnapshot } from "../state.js";
@@ -51,7 +51,8 @@ export function writeStorage(
   if (type !== undefined)
     assertValueType(value, { type, place: storageKeyPlace(key) }, instruction.value!.span);
   if (!snapshot.scriptStoragePersistent) {
-    writeScriptStorage(snapshot, key, value);
+    // The value was copied before the key ran, so storage takes that copy.
+    writeOwnedScriptStorage(snapshot, key, value);
     evaluator.trace?.storage(key, value);
     advance(snapshot);
     return;

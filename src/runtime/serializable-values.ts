@@ -238,7 +238,11 @@ export function createSerializableSet(
   const failure = validateSerializableValueInternal({ kind: "list", items: capture.value }, "$");
   if (failure !== null) throw new SerializableValueError("invalid", failure);
   // EVIDENCE: validation: the captured items were just validated as runtime values.
-  return createCapturedSerializableSet(capture.value as SerializableRuntimeValue[]);
+  const captured = capture.value as SerializableRuntimeValue[];
+  // The capture made new items that nothing else holds, so the set takes them as they are.
+  const set: SerializableRuntimeSet = { kind: "set", items: [] };
+  for (const item of captured) addOwnedSerializableSetValue(set, item);
+  return set;
 }
 
 /** Creates a set of copies of engine-owned, already validated values; the first of equal values is kept. */
@@ -567,12 +571,31 @@ export function addSerializableSetValue(
   set: SerializableRuntimeSet,
   value: SerializableRuntimeValue,
 ): boolean {
+  return addMember(set, value, true);
+}
+
+/**
+ * Adds an engine-owned value that no other value shares, as it is, unless the set already has an equal (`==`) member;
+ * returns whether it did.
+ */
+export function addOwnedSerializableSetValue(
+  set: SerializableRuntimeSet,
+  value: SerializableRuntimeValue,
+): boolean {
+  return addMember(set, value, false);
+}
+
+function addMember(
+  set: SerializableRuntimeSet,
+  value: SerializableRuntimeValue,
+  copy: boolean,
+): boolean {
   const known = membership(set);
   const key = valueKey(value);
   if (known.members.has(key)) return false;
   known.members.add(key);
   known.keys.push(key);
-  set.items.push(cloneCapturedSerializableValue(value));
+  set.items.push(copy ? cloneCapturedSerializableValue(value) : value);
   return true;
 }
 

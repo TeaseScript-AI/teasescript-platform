@@ -10,7 +10,6 @@ import type { InterpreterEvent } from "../events.js";
 import type { InstructionTraceCollector } from "../instruction-trace.js";
 import {
   cloneCapturedSerializableValue,
-  cloneSerializableValue,
   type SerializableRuntimeValue,
 } from "../serializable-values.js";
 import {
@@ -45,19 +44,6 @@ export class RuntimeDataError extends Error {
 export interface CapturedExecutableData {
   readonly plan: InstructionPlan;
   readonly snapshot: RuntimeSnapshot;
-}
-
-export function setTemporary(
-  temporaries: RuntimeTemporarySnapshot[],
-  temporaryId: number,
-  value: SerializableRuntimeValue,
-): void {
-  const existing = temporaries.find((item) => item.id === temporaryId);
-  if (existing === undefined) {
-    temporaries.push({ id: temporaryId, value: cloneSerializableValue(value) });
-  } else {
-    existing.value = cloneSerializableValue(value);
-  }
 }
 
 /** Stores a detached copy of an engine-owned, already validated temporary value. */

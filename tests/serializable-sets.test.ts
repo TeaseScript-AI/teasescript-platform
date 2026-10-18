@@ -40,3 +40,26 @@ test("serializable-set construction preserves scalar equality and insertion orde
   // The shared snapshot validator keeps scalars of different kinds distinct as well.
   assert.equal(validateSerializableValue(createSerializableSet(values)), null);
 });
+
+test("a constructed set owns copies of the caller's items and keeps the first of equal ones", () => {
+  const inner = { kind: "list" as const, items: [1] };
+  const items = [
+    inner,
+    { kind: "list" as const, items: [1] },
+    { kind: "list" as const, items: [2] },
+  ];
+  const set = createSerializableSet(items);
+  inner.items.push(9);
+  items.push({ kind: "list", items: [3] });
+  assert.equal(
+    JSON.stringify(set),
+    JSON.stringify({
+      kind: "set",
+      items: [
+        { kind: "list", items: [1] },
+        { kind: "list", items: [2] },
+      ],
+    }),
+  );
+  assert.equal(validateSerializableValue(set), null);
+});

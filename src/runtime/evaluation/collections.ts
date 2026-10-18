@@ -32,10 +32,9 @@ import { findValue, readCollection, readDict, sortOrder } from "../collection-op
 import { missingMemberMessage } from "../string-operations.js";
 import { methodArgumentCountMessage } from "../../text-operations.js";
 import {
-  addSerializableSetValue,
+  addOwnedSerializableSetValue,
   clearSerializableDict,
   clearSerializableSet,
-  cloneCapturedSerializableValue,
   getSerializableDictEntry,
   removeSerializableDictEntry,
   removeSerializableSetValue,
@@ -138,7 +137,8 @@ function callSet(
         !serializableSetContains(receiver, positional[0]!)
       )
         throw collectionTooLong("set", "add(...)", span, receiver.items.length + 1);
-      addSerializableSetValue(receiver, positional[0]!);
+      // Arguments are captured when evaluated, so the set takes its own.
+      addOwnedSerializableSetValue(receiver, positional[0]!);
       return null;
     case "remove":
       removeSerializableSetValue(receiver, positional[0]!);
@@ -183,7 +183,8 @@ function callList(
         "add(...)",
         span,
       );
-      receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
+      // Arguments are captured when evaluated, so the list takes its own.
+      receiver.items.push(positional[0]!);
       return null;
     case "addAll": {
       const other = positional[0]!;
@@ -198,7 +199,8 @@ function callList(
           ),
           span,
         );
-      // Every element is checked before any is added, and copies are taken first, so a list can add itself.
+      // Every element is checked before any is added. The argument was captured when evaluated, also a list adding
+      // itself, so its elements are the list's own to take.
       if (added !== null)
         for (const item of other.items) assertValueType(item, added.check, added.span);
       checkCollectionLength(
@@ -208,8 +210,7 @@ function callList(
         "addAll(...)",
         span,
       );
-      const items = other.items.map((item) => cloneCapturedSerializableValue(item));
-      for (const item of items) receiver.items.push(item);
+      for (const item of other.items) receiver.items.push(item);
       return null;
     }
     case "remove": {

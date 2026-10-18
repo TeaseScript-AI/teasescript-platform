@@ -5,7 +5,9 @@ import {
   compileSource,
   completeAction,
   createCheckpoint,
+  createFreshRuntimeSession,
   createFreshRuntimeSnapshot,
+  restoreRuntimeSession,
   deserializeCheckpoint,
   observeTime,
   reportMediaLoad,
@@ -1190,4 +1192,51 @@ test("a member named load or default does not start a nested string in interpola
   // Recovery from the malformed interpolation matches an ordinary member name.
   assert.deepEqual(diagnostics("load"), diagnostics("name"));
   assert.deepEqual(diagnostics("default"), diagnostics("name"));
+});
+
+test("an acknowledged save stores its own copy, which later changes to the variable or a loaded value never reach", () => {
+  const compiled = plan(
+    [
+      "let original = [{ items: [1] }]",
+      'save original as "k"',
+      "original[0].items.add(2)",
+      'let loaded = load "k" + "", default: null',
+      "loaded[0].items.add(3)",
+      'let reloaded = load("k" + "", default: null)',
+      "exit",
+    ].join("\n"),
+  );
+  const nested = (items: number[]): SerializableRuntimeValue => ({
+    kind: "list",
+    items: [{ kind: "object", properties: [{ name: "items", value: { kind: "list", items } }] }],
+  });
+  const fresh = createFreshRuntimeSession(compiled, {
+    baseDelayMs: 0,
+    delayPerWordMs: 0,
+    delayPerCharacterMs: 0,
+    persistentScriptStorage: true,
+  });
+  const requested = fresh.run().events;
+  // Also a write restored while it waits: the restored action's value is the one storage takes.
+  const restored = restoreRuntimeSession(JSON.parse(serializeCheckpoint(fresh.exportCheckpoint())));
+  for (const session of [fresh, restored]) {
+    const action = session.view().foregroundAction;
+    assert.ok(action?.kind === "storageWrite");
+    session.completeAction({
+      actionId: action.actionId,
+      actionKind: "storageWrite",
+      payload: { kind: "stored" },
+    });
+    session.run();
+    const finished = session.exportSnapshot();
+    assert.equal(finished.status, "halted");
+    assert.deepEqual(finished.scriptStorage, [{ key: "k", value: nested([1]) }]);
+    assert.deepEqual(binding(finished, "reloaded"), nested([1]));
+    assert.deepEqual(binding(finished, "original"), nested([1, 2]));
+    assert.deepEqual(binding(finished, "loaded"), nested([1, 3]));
+  }
+  // The request the host saw still shows the value as it was saved.
+  const request = requested.find((event) => event.kind === "actionRequested");
+  assert.ok(request?.kind === "actionRequested" && request.action.kind === "storageWrite");
+  assert.deepEqual(request.action.value, nested([1]));
 });

@@ -10,6 +10,7 @@ import {
 } from "../src/index.js";
 import type { RandomSource } from "../src/runtime/random.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("deep-copies lists for declarations and direct assignments", () => {
   const captured: unknown[] = [];
@@ -501,3 +502,89 @@ function toNative(value: SerializableRuntimeValue): NativeValue {
     value.properties.map(({ name, value: item }) => [name, toNative(item)]),
   );
 }
+
+test("an inserted value is the collection's own, from add, addAll, a set's add, and a set literal", () => {
+  // Arguments and borrowed literal members are copied when evaluated, so nothing inserted shares a part with its source:
+  // a later change to either side reaches only that side, also for a list adding itself.
+  const result = assertRuntimeResumeEquivalent(
+    [
+      "let inner = [1]",
+      'let record = { tags: ["a"] }',
+      "let bag = set[[0]]",
+      "let table = dict{ k: [1] }",
+      "let lists = []",
+      "lists.add(inner)",
+      "lists.add([0])",
+      "inner.add(2)",
+      "lists[0].add(3)",
+      "say lists",
+      "say inner",
+      "let records = []",
+      "records.add(record)",
+      'record.tags.add("b")',
+      'records[0].tags.add("c")',
+      "say records",
+      "say record",
+      "let bags = []",
+      "bags.add(bag)",
+      "bag.add([9])",
+      "say bags",
+      "let tables = []",
+      "tables.add(table)",
+      'table["k"].add(2)',
+      "say tables",
+      "let many = [[1], [2]]",
+      "let all = []",
+      "all.addAll(many)",
+      "many[0].add(5)",
+      "all[1].add(6)",
+      "say all",
+      "say many",
+      "let looped = [[1]]",
+      "looped.addAll(looped)",
+      "looped[0].add(2)",
+      "say looped",
+      "let member = [1]",
+      "let members = set[[0]]",
+      "members.add(member)",
+      "member.add(2)",
+      "say members",
+      "let literal = set[[1], member, [1], inner]",
+      "member.add(3)",
+      "say literal",
+      "let order = [1]",
+      "function bump: integer {",
+      "    order.add(9)",
+      "    return 0",
+      "}",
+      "let log = []",
+      "log.add({ before: order, step: bump() })",
+      "say log",
+      "say order",
+      // A later member of a set literal changes an earlier, borrowed one, which the set already holds as its own.
+      "let early = [1, 9]",
+      "say set[early, [early.removeLast()]]",
+      "exit",
+    ].join("\n"),
+    { scenarioName: "inserted values" },
+  );
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    [
+      "[[1, 3], [0]]",
+      "[1, 2]",
+      '[{ tags: ["a", "c"] }]',
+      '{ tags: ["a", "b"] }',
+      "[[[0]]]",
+      '[dict{ "k": [1] }]',
+      "[[1], [2, 6]]",
+      "[[1, 5], [2]]",
+      "[[1, 2], [1]]",
+      "[[0], [1]]",
+      "[[1], [1, 2]]",
+      "[{ before: [1], step: 0 }]",
+      "[1, 9]",
+      "[[1, 9], [9]]",
+    ],
+  );
+});
