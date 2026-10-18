@@ -128,6 +128,41 @@ test("a prepared receiver whose index removes its ancestor keeps the value it se
   }
 });
 
+test("a prepared receiver whose argument removes or clears its entry keeps the value it selected", () => {
+  // The argument takes the selected entry out of its dict or list, so the change goes to the selected copy, and every
+  // entry that the receiver did not go through stays as it was.
+  for (const [change, said] of [
+    ['table["k"].add(dynamic(table.remove("k").length))', 'dict{ "j": [1] }'],
+    ['table["k"].add(dynamic(({ drop: table.clear(), n: 5 }).n))', "dict{}"],
+    ['table["j"].add(dynamic(table.remove("k").length))', 'dict{ "j": [1, 1] }'],
+    ['nested["k"]["m"][dynamic(({ drop: nested.remove("k"), i: 0 }).i)] = 9', "dict{}"],
+    ["rows[0].add(dynamic(({ drop: rows.clear(), n: 5 }).n))", "[]"],
+  ] as const) {
+    const subject = change.split(/[[.]/u, 1)[0]!;
+    const result = assertRuntimeResumeEquivalent(
+      [
+        "function dynamic(value) {",
+        "    return value",
+        "}",
+        'let table = dict{ "k": [0], "j": [1] }',
+        'let nested = dict{ "k": dict{ "m": [0] } }',
+        "let rows = [[0], [1]]",
+        change,
+        `say ${subject}`,
+        "exit",
+      ].join("\n"),
+      { scenarioName: change },
+    );
+
+    assert.equal(result.finalSnapshot.failure, null, change);
+    assert.deepEqual(
+      result.events.filter((event) => event.kind === "say").map((event) => event.text),
+      [said],
+      change,
+    );
+  }
+});
+
 test("a list joined with += under a prepared receiver leaves the receiver the value it selected", () => {
   // `rows += more` stores a new list in `rows` (V30 §16), so the receiver selected before the call keeps the old one.
   const result = assertRuntimeResumeEquivalent(
