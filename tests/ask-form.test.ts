@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { parseMessageMarkup } from "../src/message-markup.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import {
   deserializeCheckpoint,
@@ -85,6 +86,14 @@ test("askForm says its question, then its descriptions and outro as prose, and r
     "prose mistress: enabled — Turn it on\nlevel — How hard\n\nThen press Continue.",
     "form opens",
   ]);
+  // The prose is its descriptions and outro parsed as markup, as a say would show them.
+  const prose = events.find((event) => event.kind === "say" && event.presentation.kind === "prose");
+  assert.ok(prose?.kind === "say");
+  assert.deepEqual(
+    prose.content,
+    parseMessageMarkup("enabled — Turn it on\nlevel — How *hard*\n\nThen press Continue."),
+  );
+  assert.equal(prose.text, prose.content.visibleText);
   assert.equal(ui.hint, "Change values");
   assert.deepEqual(ui.submit, { text: "Continue" });
   assert.deepEqual(

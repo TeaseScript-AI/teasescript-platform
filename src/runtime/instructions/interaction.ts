@@ -13,7 +13,7 @@ import {
   DEFAULT_OPEN_URL_BUTTON_TEXT,
   DEFAULT_POPUP_BUTTON_TEXT,
 } from "../../plan/model.js";
-import { messageMarkupVisibleText, parseMessageMarkup } from "../../message-markup.js";
+import { parseMessageMarkup } from "../../message-markup.js";
 import {
   isBlankTextAnswer,
   numberAnswerText,
@@ -203,13 +203,14 @@ export function executeInteraction(
   // A form's descriptions and outro are said as one prose message as it opens, after its question.
   if (materialized.prose !== undefined) {
     assertEventSequenceCapacity(snapshot, requiredEventSequences + 1, instruction.span);
+    const content = parseMessageMarkup(materialized.prose);
     emitSay(
       snapshot,
       events,
       instruction.span,
       speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events),
-      parseMessageMarkup(materialized.prose),
-      messageMarkupVisibleText(parseMessageMarkup(materialized.prose)),
+      content,
+      content.visibleText,
       resolveMessagePresentation(PROSE_PRESENTATION, speaker, copySpan(instruction.span)),
     );
   }
