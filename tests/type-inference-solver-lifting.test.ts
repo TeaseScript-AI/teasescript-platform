@@ -218,7 +218,7 @@ test("a property read goes through the member rules: a held part's items name th
   assert.deepEqual(missing.tally, { asked: 1, invalid: 1 });
 });
 
-test("a symmetric relation is asked once per multiset of its arguments' alternatives", () => {
+test("a folded relation is asked once per state and choice, and its status names the arguments that can be invalid", () => {
   const callOf = (count: number, declared: string, fn: string) => {
     const args = Array.from({ length: count }, () => "a").join(", ");
     const solution = solve(graphOf(`let a: ${declared} = 1\nlet b = ${fn}(${args})\nexit`), {
@@ -227,26 +227,41 @@ test("a symmetric relation is asked once per multiset of its arguments' alternat
     });
     return { asks: solution.asks, statuses: solution.statuses };
   };
-  // k arguments over two alternatives are k + 1 multisets, not 2^k sequences: six arguments more cost the same asks
-  // at every size (Dropje97's W2-B2 measured 786,432 asks for eighteen arguments before the rule)
+  // the fold of `min` over k arguments asks once per state and choice (P1): six arguments more cost the same asks
+  // at every size, where the product asked 2^k (Dropje97's W2-B2 measured 786,432 asks for eighteen arguments)
   const six = callOf(6, "integer | number", "min");
   const twelve = callOf(12, "integer | number", "min");
   const eighteen = callOf(18, "integer | number", "min");
   assert.equal(eighteen.asks - twelve.asks, twelve.asks - six.asks);
-  assert.ok(eighteen.asks < 100, `${eighteen.asks} asks for eighteen arguments`);
-  // the status counts multisets: `max` over `integer | string` is valid for the all-integer multiset alone
+  assert.ok(eighteen.asks < 300, `${eighteen.asks} asks for eighteen arguments`);
+  // the status names the arguments that can be invalid, counting nothing (the owner, 2026-10-19, decision B): every
+  // argument of `max` over `integer | string` can be a text, which cannot be ordered
   assert.deepEqual(callOf(6, "integer | string", "max").statuses, [
-    "listFunction.max@36:partial(6/7)",
+    "listFunction.max@36:invalid(1,2,3,4,5,6)",
   ]);
-  assert.deepEqual(callOf(12, "integer | string", "max").statuses, [
-    "listFunction.max@36:partial(12/13)",
-  ]);
-  // arguments with different alternatives are their own groups: the multisets of each, combined
-  const mixed = solve(
+  // distinct bindings of one type are the same work as one binding repeated (Sol r5-B3, Dropje97's W3-B2)
+  const distinct = solve(
     graphOf(
-      "let a: integer | number = 1\nlet c: integer | string = 2\nlet b = min(a, c, a, c, a, c)\nexit",
+      `${Array.from({ length: 12 }, (_, i) => `let a${i}: integer | number = 1`).join("\n")}\nlet b = min(${Array.from({ length: 12 }, (_, i) => `a${i}`).join(", ")})\nexit`,
     ),
     { relations: RELATIONS, verify: true },
   );
-  assert.deepEqual(mixed.statuses, ["listFunction.min@64:partial(12/16)"]);
+  assert.equal(distinct.asks, twelve.asks);
+  // the argument that cannot be ordered is named by its position whatever the order of the call (Astra r5-B5): `a`
+  // works as an integer, `b` as a text
+  const conflicts = (call: string) =>
+    solve(
+      graphOf(`let i = 1\nlet s = "s"\nlet a = i\na = s\nlet b = s\nb = i\nlet r = ${call}\nexit`),
+      { relations: RELATIONS, verify: true },
+    ).statuses;
+  assert.deepEqual(conflicts("min(a, b)"), ["listFunction.min@62:invalid(2)"]);
+  assert.deepEqual(conflicts("min(b, a)"), ["listFunction.min@62:invalid(1)"]);
+  // two orderable kinds that cannot be ordered together name both; an integer and an angle
+  assert.deepEqual(
+    solve(graphOf("let a = 1\nlet b = 90 deg\nlet r = min(a, b)\nexit"), {
+      relations: RELATIONS,
+      verify: true,
+    }).statuses,
+    ["listFunction.min@33:invalid(1,2)"],
+  );
 });
