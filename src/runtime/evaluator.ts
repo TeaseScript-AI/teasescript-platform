@@ -66,6 +66,7 @@ import {
 import { callStringMethod } from "./string-operations.js";
 import { findScriptStorageEntry, storageKey, storageKeyPlace } from "./script-storage.js";
 import {
+  addOwnedSerializableSetValue,
   addSerializableSetValue,
   cloneCapturedSerializableValue,
   cloneSerializableValue,
@@ -834,8 +835,11 @@ export class Evaluator {
             }
             frame.stage = 1;
           } else {
-            if (expression.kind === "set") addSerializableSetValue(frame.set!, result.value);
-            else
+            if (expression.kind === "set") {
+              // An owned child moves in, a borrowed one is copied; the first of equal members stays.
+              if (result.owned) addOwnedSerializableSetValue(frame.set!, result.value);
+              else addSerializableSetValue(frame.set!, result.value);
+            } else
               frame.results!.push(
                 result.owned ? result.value : cloneCapturedSerializableValue(result.value),
               );
