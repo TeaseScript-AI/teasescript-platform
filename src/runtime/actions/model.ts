@@ -380,27 +380,42 @@ export type RuntimePendingActionSnapshot =
   | RuntimeMediaActionSnapshot
   | RuntimePermanentButtonActionSnapshot;
 
+/**
+ * The completion events that an active action must still be able to publish, by kind: an interaction its transcript
+ * entry and its completion, a storage write or a capture the warning of a failed write or an unavailable camera and its
+ * completion, any other action its completion. Every kind has its entry, so a new kind must decide.
+ */
+const ACTION_COMPLETION_EVENTS: { readonly [K in RuntimePendingActionSnapshot["kind"]]: number } = {
+  delay: 1,
+  interaction: 2,
+  chatPacingGate: 1,
+  mediaPlayback: 1,
+  storageWrite: 2,
+  capture: 2,
+  fileStore: 1,
+  lock: 1,
+  timer: 1,
+  media: 1,
+  permanentButton: 1,
+};
+
 /** Completion events that an active action must still be able to publish. */
-export function requiredActionCompletionEvents(action: { readonly kind?: unknown } | null): number {
-  // An interaction publishes its transcript entry; a failed storage write or an unavailable capture its warning.
-  if (
-    action?.kind === "interaction" ||
-    action?.kind === "storageWrite" ||
-    action?.kind === "capture"
-  )
-    return 2;
-  if (
-    action?.kind === "delay" ||
-    action?.kind === "chatPacingGate" ||
-    action?.kind === "timer" ||
-    action?.kind === "media" ||
-    action?.kind === "mediaPlayback" ||
-    action?.kind === "permanentButton" ||
-    action?.kind === "fileStore" ||
-    action?.kind === "lock"
-  )
-    return 1;
-  return 0;
+export function requiredActionCompletionEvents(
+  action: RuntimePendingActionSnapshot | null,
+): number {
+  return action === null ? 0 : ACTION_COMPLETION_EVENTS[action.kind];
+}
+
+/**
+ * The completion events that an action of checkpoint data that is not validated yet must still be able to publish, or
+ * `null` for a kind that no action has.
+ */
+export function actionRecordCompletionEvents(action: Record<string, unknown>): number | null {
+  return isPendingActionKind(action.kind) ? ACTION_COMPLETION_EVENTS[action.kind] : null;
+}
+
+function isPendingActionKind(kind: unknown): kind is RuntimePendingActionSnapshot["kind"] {
+  return typeof kind === "string" && Object.hasOwn(ACTION_COMPLETION_EVENTS, kind);
 }
 
 /**

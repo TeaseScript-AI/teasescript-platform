@@ -45,11 +45,12 @@ import {
 import {
   CAPTURE_UNAVAILABLE_REASONS,
   fileStoreOperation,
-  requiredActionCompletionEvents,
+  actionRecordCompletionEvents,
   isLockNotice,
   isLockOutcome,
 } from "./actions/model.js";
 import { buttonTimeoutMilliseconds, imageRequestValue } from "./actions/interaction.js";
+import { interruptibleActionRecord } from "./actions/interrupts.js";
 import {
   formAnswerMismatch,
   formRequestValue,
@@ -198,8 +199,10 @@ function validActiveActionCompletionCapacity(snapshot: Record<string, unknown>):
     ? snapshot.backgroundActions
     : [];
   const actions = [snapshot.foregroundAction, ...backgroundActions, ...suspendedActions(snapshot)];
+  // An action of no known kind is malformed, which its own check reports; it reserves nothing here.
   const requiredCompletionEvents = actions.reduce(
-    (count, action) => count + (isPlainRecord(action) ? requiredActionCompletionEvents(action) : 0),
+    (count, action) =>
+      count + (isPlainRecord(action) ? (actionRecordCompletionEvents(action) ?? 0) : 0),
     0,
   );
   return hasEventSequenceCapacity(snapshot.nextEventSequence, requiredCompletionEvents);
@@ -239,56 +242,22 @@ function validForegroundActionKind(
   allowDue: boolean,
 ): boolean {
   if (!isPlainRecord(action)) return false;
-  if (action.kind === "delay") {
-    return (
-      delayTimesAreValid &&
-      action.expectedCompletion === "time" &&
-      hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
-    );
-  }
-  if (action.kind === "interaction") {
-    return (
-      validInteractionAction(action, snapshot, plan, allowDue) &&
-      hasEventSequenceCapacity(snapshot.nextEventSequence, 2)
-    );
-  }
-  if (action.kind === "chatPacingGate") {
-    return (
-      validPacingGateAction(action, snapshot, plan, allowDue) &&
-      hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
-    );
-  }
-  if (action.kind === "mediaPlayback") {
-    return (
-      validMediaPlaybackAction(action, snapshot) &&
-      hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
-    );
-  }
-  if (action.kind === "storageWrite") {
-    return (
-      validStorageWriteAction(action, snapshot) &&
-      hasEventSequenceCapacity(snapshot.nextEventSequence, 2)
-    );
-  }
-  if (action.kind === "capture") {
-    // A pending capture may still publish an unavailable-camera warning and its completion.
-    return (
-      validCaptureAction(action, snapshot, plan) &&
-      hasEventSequenceCapacity(snapshot.nextEventSequence, 2)
-    );
-  }
-  if (action.kind === "fileStore") {
-    return (
-      validFileStoreAction(action, snapshot, plan) &&
-      hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
-    );
-  }
-  if (action.kind === "lock") {
-    return (
-      validLockAction(action, snapshot, plan) &&
-      hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
-    );
-  }
+  const completionEvents = actionRecordCompletionEvents(action);
+  if (
+    completionEvents === null ||
+    !hasEventSequenceCapacity(snapshot.nextEventSequence, completionEvents)
+  )
+    return false;
+  if (action.kind === "delay") return delayTimesAreValid && action.expectedCompletion === "time";
+  if (action.kind === "interaction")
+    return validInteractionAction(action, snapshot, plan, allowDue);
+  if (action.kind === "chatPacingGate")
+    return validPacingGateAction(action, snapshot, plan, allowDue);
+  if (action.kind === "mediaPlayback") return validMediaPlaybackAction(action, snapshot);
+  if (action.kind === "storageWrite") return validStorageWriteAction(action, snapshot);
+  if (action.kind === "capture") return validCaptureAction(action, snapshot, plan);
+  if (action.kind === "fileStore") return validFileStoreAction(action, snapshot, plan);
+  if (action.kind === "lock") return validLockAction(action, snapshot, plan);
   return false;
 }
 
@@ -770,14 +739,7 @@ export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
     return false;
   const foreground = snapshot.foregroundAction;
   return (
-    foreground === null ||
-    (isPlainRecord(foreground) &&
-      (foreground.kind === "delay" ||
-        foreground.kind === "interaction" ||
-        foreground.kind === "chatPacingGate" ||
-        foreground.kind === "mediaPlayback" ||
-        // A lock's dialog, as `timerHandlerDispatchable` lets a block interrupt it.
-        (foreground.kind === "lock" && foreground.phase === "ask")))
+    foreground === null || (isPlainRecord(foreground) && interruptibleActionRecord(foreground))
   );
 }
 

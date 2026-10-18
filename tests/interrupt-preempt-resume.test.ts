@@ -8,7 +8,15 @@ import {
   playerRuntimeTimers,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { interruptFrame } from "../src/runtime/activations.js";
+import type { RuntimeForegroundActionSnapshot } from "../src/runtime/actions/model.js";
+import {
+  createCheckpoint,
+  deserializeCheckpoint,
+  serializeCheckpoint,
+} from "../src/runtime/checkpoint.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { Story } from "./helpers/story-session.js";
 
@@ -210,4 +218,178 @@ test("the Player shows an interrupted blocking timer standing still and schedule
   assert.deepEqual(remaining(3_000), [2]);
   assert.deepEqual(remaining(4_000), [1]);
   assert.deepEqual(playerRuntimeDeadlines(session.state), [5_000]);
+});
+
+/** How a Player makes a block due at 1 s and lets it run on, for each source of a block that then waits 2 s. */
+const BLOCK_SOURCES = [
+  {
+    name: "timer",
+    block: BLOCK,
+    start: (story: Story) => story,
+    at: (story: Story, atMs: number) => story.at(atMs),
+    due: (story: Story) => story.at(1_000),
+  },
+  {
+    name: "media cue",
+    block: 'let music = playAudio async "music.mp3" {\n  at 1 s {\n    wait 2 s\n  }\n}',
+    start: (story: Story) => story.load(1, 60_000),
+    at: (story: Story, atMs: number) => story.at(atMs, [1, atMs]),
+    due: (story: Story) => story.at(1_000, [1, 1_000]),
+  },
+  {
+    name: "permanent button",
+    block: 'showPermanentButton "Hint" {\n  wait 2 s\n}',
+    start: (story: Story) => story,
+    at: (story: Story, atMs: number) => story.at(atMs),
+    due: (story: Story) => {
+      assert.equal(story.at(1_000).press(1), "pressed");
+      return story;
+    },
+  },
+] as const;
+
+/**
+ * Statements that make the main path wait on a foreground action of each kind, keyed by kind so that a new kind needs
+ * its rows. A block interrupts the action, which then resumes as it was with `resumesWith` changed, or the action is a
+ * host step that the block waits for until the Player settles it with `settledBy` (owner decision on #829, 2026-10-11,
+ * and the host steps in docs/RUNTIME.md).
+ */
+const FOREGROUND_ROWS: {
+  readonly [K in RuntimeForegroundActionSnapshot["kind"]]: readonly (
+    | { readonly source: string; readonly resumesWith: Readonly<Record<string, number>> }
+    | { readonly source: string; readonly settledBy: Readonly<Record<string, string>> }
+  )[];
+} = {
+  // A wait and a reading time keep the time they had left.
+  delay: [{ source: "wait 3 s", resumesWith: { createdAtMs: 2_000, deadlineMs: 5_000 } }],
+  chatPacingGate: [
+    { source: 'say "Read this.", 3 s', resumesWith: { createdAtMs: 2_000, deadlineMs: 5_000 } },
+  ],
+  // An interaction leaves out the time it stood still; a password field is shown anew too.
+  interaction: [
+    { source: 'let name = askText "Name?"', resumesWith: { pausedMs: 2_000 } },
+    { source: 'let code = askPassword "Code?"', resumesWith: { pausedMs: 2_000, resumes: 1 } },
+  ],
+  // A media wait is not timed.
+  mediaPlayback: [{ source: 'playAudio "sounds/bell.mp3"', resumesWith: {} }],
+  // A lock's dialog asks again; its work step is a host step.
+  lock: [
+    { source: 'let locked = encryptText("x")', resumesWith: { resumes: 1 } },
+    {
+      source: 'let locked = encryptText("x", password: "p", publicKey: false, timeLock: false)',
+      settledBy: { kind: "locked", text: "AAAA" },
+    },
+  ],
+  storageWrite: [{ source: 'save 2 as "k"', settledBy: { kind: "stored" } }],
+  capture: [
+    { source: "let photo = takePhoto()", settledBy: { kind: "unavailable", reason: "denied" } },
+  ],
+  fileStore: [
+    { source: 'let file = fileFromBase64("YWJj", default: null)', settledBy: { kind: "failed" } },
+  ],
+};
+
+test("a block from each source interrupts each foreground action that is no host step, and waits for a host step", () => {
+  for (const source of BLOCK_SOURCES) {
+    for (const [kind, rows] of Object.entries(FOREGROUND_ROWS)) {
+      for (const row of rows) {
+        const name = `${source.name} block during ${row.source}`;
+        const story = source.start(
+          new Story(`${source.block}\n${row.source}\nsay "Done.", instant\nexit`, {
+            persistentScriptStorage: true,
+            wallClockMs: Date.UTC(2026, 9, 14, 12, 0, 0),
+          }),
+        );
+        const waiting = story.snapshot.foregroundAction!;
+        assert.equal(waiting.kind, kind, name);
+        if (waiting.kind === "lock")
+          assert.equal(waiting.phase, "resumesWith" in row ? "ask" : "work", name);
+        source.due(story);
+        // The state at the block's due time checkpoints as it is, an interrupted action and a waiting block alike.
+        assert.deepEqual(
+          deserializeCheckpoint(serializeCheckpoint(createCheckpoint(story.plan, story.snapshot)))
+            .snapshot,
+          story.snapshot,
+          name,
+        );
+        const completion = (payload: Readonly<Record<string, string>>) =>
+          completeAction(story.plan, story.snapshot, {
+            actionId: waiting.actionId,
+            actionKind: waiting.kind,
+            ...(waiting.kind === "interaction" ? { interactionKind: waiting.interactionKind } : {}),
+            payload,
+          });
+        if ("resumesWith" in row) {
+          // The block runs; the interrupted action is inert until it returns.
+          assert.equal(story.snapshot.foregroundAction?.kind, "delay", name);
+          assert.equal(
+            interruptFrame(story.snapshot)?.timerInterruption?.suspendedAction?.actionId,
+            waiting.actionId,
+            name,
+          );
+          assert.equal(completion({ kind: "skip" }).outcome.kind, "suspendedAction", name);
+          source.at(story, 3_000);
+          assert.deepEqual(
+            story.snapshot.foregroundAction,
+            { ...waiting, ...row.resumesWith },
+            name,
+          );
+        } else {
+          // The block waits until the host step settles, and then runs at once.
+          assert.equal(interruptFrame(story.snapshot), undefined, name);
+          assert.equal(story.snapshot.pendingTimerHandlers.length, 1, name);
+          assert.deepEqual(story.snapshot.foregroundAction, waiting, name);
+          const settled = completion(row.settledBy);
+          assert.equal(settled.outcome.kind, "completed", name);
+          story.snapshot = settled.snapshot;
+          source.at(story, 1_000);
+          assert.equal(story.snapshot.foregroundAction?.kind, "delay", name);
+          assert.equal(
+            interruptFrame(story.snapshot)?.timerInterruption?.suspendedAction,
+            null,
+            name,
+          );
+          source.at(story, 3_000);
+          assert.equal(story.said().at(-1), "Done.", name);
+        }
+      }
+    }
+  }
+});
+
+test("structural validation refuses a block frame that suspends a host step", () => {
+  const story = new Story(`${BLOCK}\nwait 3 s\nexit`, { persistentScriptStorage: true });
+  story.at(1_000);
+  // Assembled: the engine's frame of a block that interrupted a wait, with the wait replaced by a storage write of the
+  // same identity and context. Validation without the plan leaves out ownership, so only the host step is wrong.
+  // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; the case replaces one action.
+  const tampered = JSON.parse(JSON.stringify(story.snapshot)) as {
+    callFrames: { timerInterruption: { suspendedAction: Record<string, unknown> } | null }[];
+  };
+  assert.deepEqual(validateRuntimeSnapshot(tampered).errors, []);
+  const interruption = tampered.callFrames.find(
+    (frame) => frame.timerInterruption !== null,
+  )!.timerInterruption!;
+  const wait = interruption.suspendedAction;
+  assert.equal(wait.kind, "delay");
+  interruption.suspendedAction = {
+    kind: "storageWrite",
+    ...Object.fromEntries(
+      [
+        "actionId",
+        "owningInstruction",
+        "continuationInstruction",
+        "ownerCallFrameId",
+        "scopeDepth",
+        "loopDepth",
+        "createdAtMs",
+        "requestEventSequence",
+      ].map((field) => [field, wait[field]]),
+    ),
+    key: "k",
+    value: 2,
+  };
+  assert.deepEqual(validateRuntimeSnapshot(tampered).errors, [
+    "Runtime suspended foreground action is malformed.",
+  ]);
 });

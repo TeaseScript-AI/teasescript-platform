@@ -20,16 +20,15 @@ import {
 } from "./temporal-captures.js";
 import type {
   RuntimeActionSettlementSnapshot,
-  RuntimeChatPacingGateActionSnapshot,
-  RuntimeDelayActionSnapshot,
-  RuntimeMediaPlaybackActionSnapshot,
   RuntimeForegroundActionSnapshot,
-  RuntimeInteractionActionSnapshot,
-  RuntimeLockActionSnapshot,
   RuntimePendingActionSnapshot,
   InteractionResultValue,
 } from "./actions/model.js";
 import { cloneFormState, cloneFormUi } from "./actions/form.js";
+import {
+  interruptibleActionRecord,
+  type RuntimeInterruptibleActionSnapshot,
+} from "./actions/interrupts.js";
 import { DEFAULT_CHAT_PACING_SETTINGS, type ChatPacingSettings } from "../chat-pacing.js";
 import { speakerPropertyValue } from "../speaker-terms.js";
 import {
@@ -342,14 +341,6 @@ export type RuntimeTimerInterruptionSnapshot =
       readonly startedAtMs: number;
       readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
     };
-
-/** Foreground actions that an interrupt block can suspend; of a lock, only a step whose dialog asks the player. */
-export type RuntimeInterruptibleActionSnapshot =
-  | RuntimeDelayActionSnapshot
-  | RuntimeInteractionActionSnapshot
-  | RuntimeChatPacingGateActionSnapshot
-  | RuntimeMediaPlaybackActionSnapshot
-  | RuntimeLockActionSnapshot;
 
 export interface RuntimeCallFrameSnapshot {
   readonly kind: "function";
@@ -2520,11 +2511,7 @@ function validateTimerHandlerFrame(
   };
   if (
     !isPlainRecord(action) ||
-    (action.kind !== "delay" &&
-      action.kind !== "interaction" &&
-      action.kind !== "chatPacingGate" &&
-      action.kind !== "mediaPlayback" &&
-      (action.kind !== "lock" || action.phase !== "ask")) ||
+    !interruptibleActionRecord(action) ||
     !validForegroundActionState(action, view, plan, true)
   ) {
     errors.push("Runtime suspended foreground action is malformed.");

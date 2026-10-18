@@ -2,11 +2,8 @@ import type { RandomControl } from "../random-control.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import { cloneCaptures, leaveScopes, sweepRetainedScopes } from "../captures.js";
 import type { InterpreterEvent } from "../events.js";
-import type {
-  RuntimeCallFrameSnapshot,
-  RuntimeInterruptibleActionSnapshot,
-  RuntimeSnapshot,
-} from "../state.js";
+import { interruptibleAction, resumedAction } from "../actions/interrupts.js";
+import type { RuntimeCallFrameSnapshot, RuntimeSnapshot } from "../state.js";
 import { processDueWork } from "./observe-time.js";
 import { reportBlockOverrun, timerHandlerDispatchable } from "./timer-lifecycle.js";
 
@@ -34,17 +31,10 @@ export function startTimerHandler(
   assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
   if (invocation.count > 1) invocation.count -= 1;
   else snapshot.pendingTimerHandlers.shift();
-  const suspendedAction = snapshot.foregroundAction;
-  if (
-    suspendedAction !== null &&
-    (suspendedAction.kind === "storageWrite" ||
-      suspendedAction.kind === "capture" ||
-      suspendedAction.kind === "fileStore" ||
-      (suspendedAction.kind === "lock" && suspendedAction.phase !== "ask"))
-  ) {
-    throw new Error(
-      "Only a foreground delay, interaction, reading time, media wait, or lock dialog can be interrupted.",
-    );
+  const foreground = snapshot.foregroundAction;
+  const suspendedAction = foreground === null ? null : interruptibleAction(foreground);
+  if (foreground !== null && suspendedAction === null) {
+    throw new Error(`A block cannot interrupt the foreground ${foreground.kind} action.`);
   }
   const startedAtMs = snapshot.currentSessionTimeMs;
   const frame: RuntimeCallFrameSnapshot = {
@@ -145,32 +135,4 @@ function restoreSuspendedAction(snapshot: RuntimeSnapshot, frame: RuntimeCallFra
   if (suspended === null) return;
   snapshot.foregroundAction = resumedAction(suspended, snapshot.currentSessionTimeMs - startedAtMs);
   snapshot.status = "waiting";
-}
-
-/**
- * An interrupted action after a block that ran for `stoodStillMs`: its remaining time is what it had when the block
- * started (owner decision on #829, 2026-10-11). A media wait is not timed; it ends with its media.
- */
-function resumedAction(
-  action: RuntimeInterruptibleActionSnapshot,
-  stoodStillMs: number,
-): RuntimeInterruptibleActionSnapshot {
-  // A lock's dialog asks again, shown anew; it has no time of its own.
-  if (action.kind === "lock") return Object.freeze({ ...action, resumes: action.resumes + 1 });
-  // A password field is shown anew too, and counts the time it stood still as any interaction.
-  if (action.kind === "interaction" && action.interactionKind === "password")
-    return Object.freeze({
-      ...action,
-      ...(stoodStillMs === 0 ? {} : { pausedMs: (action.pausedMs ?? 0) + stoodStillMs }),
-      resumes: (action.resumes ?? 0) + 1,
-    });
-  // A media wait is not timed.
-  if (stoodStillMs === 0 || action.kind === "mediaPlayback") return action;
-  if (action.kind === "interaction")
-    return Object.freeze({ ...action, pausedMs: (action.pausedMs ?? 0) + stoodStillMs });
-  return Object.freeze({
-    ...action,
-    createdAtMs: action.createdAtMs + stoodStillMs,
-    deadlineMs: action.deadlineMs + stoodStillMs,
-  });
 }

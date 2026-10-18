@@ -92,10 +92,10 @@ import {
   type RuntimeCallFrameSnapshot,
   type RuntimeLiveMessageSnapshot,
   type RuntimeScopeFrameSnapshot,
-  type RuntimeInterruptibleActionSnapshot,
   type RuntimeSnapshot,
   type RuntimeStatus,
 } from "./state.js";
+import type { RuntimeInterruptibleActionSnapshot } from "./actions/interrupts.js";
 import { bindingScopeId } from "./evaluation/bindings.js";
 
 /** What every operation of a session, and of the sessions forked from it, may call. */
