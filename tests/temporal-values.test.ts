@@ -11,13 +11,14 @@ import {
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import type { TemporalContext } from "../src/temporal.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileSource } from "../src/compiler.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { AMSTERDAM } from "./helpers/temporal-fixtures.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
 
 type Mutable<T> = T extends readonly [infer First, infer Second]
   ? [Mutable<First>, Mutable<Second>]

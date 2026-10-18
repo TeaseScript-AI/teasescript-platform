@@ -23,9 +23,10 @@ import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import type { RuntimeDelayActionSettlementSnapshot } from "../src/runtime/actions/model.js";
-import { type RuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 function interactionPlan(
   interactionKind: InteractionInstruction["interactionKind"],

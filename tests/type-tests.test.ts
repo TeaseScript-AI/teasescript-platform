@@ -3,7 +3,6 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { run } from "../src/runtime/engine.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../src/runtime/script-storage.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
@@ -11,6 +10,7 @@ import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
 
 function diagnostics(source: string): [string, string, string, string][] {
   return compileSource(source).diagnostics.map((diagnostic) => [

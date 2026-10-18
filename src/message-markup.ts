@@ -1,5 +1,6 @@
 import { normalizeColor, isNormalizedColor } from "./color.js";
 import { canonicalWebUrl } from "./web-url.js";
+import { isPlainRecord } from "./runtime/plain-data.js";
 
 export type MessageMarkupLineEnding = "" | "\n" | "\r\n";
 
@@ -451,12 +452,6 @@ function validMessageMarkupSpan(value: unknown, textLength: number): value is Me
   if (value.kind === "weight") return WEIGHTS.has(value.value);
   if (value.kind === "size") return SIZES.has(value.value);
   return false;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {

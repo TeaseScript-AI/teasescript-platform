@@ -30,8 +30,7 @@ Priorities are triage aids, not schedules or capacity policy:
 
 ### Split large production modules along existing responsibilities
 
-The current candidate is `src/runtime/state.ts`. `src/parser.ts` is also large, but its parser
-state is tightly coupled; do not split it by line count alone.
+`src/parser.ts` is large, but its parser state is tightly coupled; do not split it by line count alone.
 
 The useful outcome is lower source-context and merge-conflict cost with clearer invariant ownership. Keep a split
 mechanical: preserve supported exports and runtime/diagnostic/event/checkpoint/serialization behavior, use ordinary

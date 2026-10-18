@@ -8,6 +8,7 @@ import {
   type RuntimeMediaCueSnapshot,
   type RuntimeMediaRepeatSnapshot,
 } from "./media.js";
+import { isPlainRecord } from "./plain-data.js";
 
 /** Restore validation for media playback records, their handles, queued cue blocks, and cue-block frames. */
 
@@ -621,12 +622,6 @@ function positiveSafeInteger(value: unknown): value is number {
 
 function nonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {

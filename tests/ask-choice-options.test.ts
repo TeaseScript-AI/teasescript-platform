@@ -13,10 +13,11 @@ import {
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { createSerializableList } from "../src/runtime/serializable-values.js";
-import { validateRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { sayTexts } from "./helpers/runtime-events.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 const OFFENSES = [
   'let offenses = [{ value: "spank", text: "Spanking", background: "seagreen" }, { text: "Corner" }]',

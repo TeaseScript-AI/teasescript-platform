@@ -115,9 +115,11 @@ completion, time-observation, and media-load transitions live in
 `src/runtime/operations/complete-action.ts`, `observe-time.ts`, and
 `media-reports.ts`. Their small `model.ts` and `support.ts` companions hold
 shared operation results and common capture/sequence helpers so the engine can
-execute instructions without duplicating operation logic. Whole-snapshot
-construction, cloning, validation orchestration, and cross-state coordination
-remain in `src/runtime/state.ts`; the internal `src/runtime/action-validation.ts`
+execute instructions without duplicating operation logic. `src/runtime/state.ts` holds the snapshot model and its
+constants; `snapshot-construction.ts` builds fresh snapshots and copies captured ones; `snapshot-validation.ts`
+captures a snapshot from outside the engine and orders its whole-snapshot validation, with the call, loop, and
+continuation invariants in `frame-validation.ts` and prepared temporaries in `prepared-temporary-validation.ts`; and
+`record-collection.ts` drops the records nothing reaches. The internal `src/runtime/action-validation.ts`
 module owns pending-action, settlement, pacing-gate, and handoff validation.
 `src/runtime/session.ts` owns the engine-owned runtime session, which runs those operations and the engine on state it
 keeps private ([`RUNTIME.md`](RUNTIME.md#runtime-sessions)).

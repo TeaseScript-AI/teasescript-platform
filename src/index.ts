@@ -228,7 +228,6 @@ export {
   type RuntimeTimedWork,
 } from "./runtime/operations/observe-time.js";
 export {
-  RUNTIME_DEBUG_TRACE_LIMITS,
   RuntimeDebugContext,
   runtimeDebugPreview,
   type RuntimeDebugDependency,
@@ -242,6 +241,7 @@ export {
   type RuntimeDebugTraceStatus,
   type RuntimeDebugUnrecordedReason,
 } from "./runtime/debug-trace.js";
+export { RUNTIME_DEBUG_TRACE_LIMITS } from "./runtime/debug-trace-limits.js";
 export {
   recordContinueCapture,
   type ContinueCaptureOutcome,
@@ -289,13 +289,11 @@ export {
   type RuntimeCheckpoint,
 } from "./runtime/checkpoint.js";
 export {
-  createFreshRuntimeSnapshot,
   DEFAULT_MAX_CALL_DEPTH,
   MAX_RUNTIME_SESSION_TIME_MS,
   MAX_SUPPORTED_CALL_DEPTH,
   RUNTIME_SNAPSHOT_FORMAT,
   RUNTIME_SNAPSHOT_VERSION,
-  validateRuntimeSnapshot,
   type FreshRuntimeOptions,
   type RuntimeBindingSnapshot,
   type RuntimeFailureSnapshot,
@@ -317,6 +315,8 @@ export {
   type RuntimeStatus,
   type SnapshotValidationResult,
 } from "./runtime/state.js";
+export { validateRuntimeSnapshot } from "./runtime/snapshot-validation.js";
+export { createFreshRuntimeSnapshot } from "./runtime/snapshot-construction.js";
 export type { RuntimeAccountFieldSnapshot, RuntimeAccountInput } from "./runtime/account.js";
 export type {
   CaptureUnavailableReason,

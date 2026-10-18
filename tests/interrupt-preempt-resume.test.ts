@@ -19,9 +19,9 @@ import {
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { runtimeTimedWork } from "../src/runtime/operations/observe-time.js";
 import { createRuntimeSession } from "../src/runtime/session.js";
-import { validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { Story } from "./helpers/story-session.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 /*
  * Preempt and resume (owner decision on #829, 2026-10-11): while a timer, media, or button block runs, everything the

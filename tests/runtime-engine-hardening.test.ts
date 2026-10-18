@@ -9,8 +9,8 @@ import {
   type RuntimeCapabilityCall,
 } from "../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
-import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
 
 test("requires explicit own registration for an inherited builtin name", () => {
   const compiled = inheritedBuiltinPlan("valueOf");

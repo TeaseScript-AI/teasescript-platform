@@ -18,7 +18,7 @@ import {
   type PermanentButtonPressOutcome,
 } from "../src/runtime/operations/press-permanent-button.js";
 import { permanentButtonProjection } from "../src/runtime/permanent-buttons.js";
-import { validateRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import {
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
@@ -30,6 +30,7 @@ import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSourceUntilExit } from "./helpers/run-until-exit.js";
 import { assertRuntimeResumeEquivalent, functionFrames } from "./helpers/runtime-equivalence.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 /** Drives a session with clicks, answers, and time, round-tripping every snapshot through checkpoint JSON. */
 class Session {

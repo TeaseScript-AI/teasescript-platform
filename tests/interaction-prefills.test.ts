@@ -18,9 +18,10 @@ import {
 } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
-import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { AMSTERDAM } from "./helpers/temporal-fixtures.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 type Plan = ReturnType<typeof compileValidPlan>;
 type Snapshot = ReturnType<typeof createFreshRuntimeSnapshot>;

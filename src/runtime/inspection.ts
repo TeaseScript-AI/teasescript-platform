@@ -6,12 +6,8 @@ import type {
   RuntimeActionSettlementSnapshot,
   RuntimePendingActionSnapshot,
 } from "./actions/model.js";
-import {
-  captureRuntimeSnapshotWithValidatedPlan,
-  type ChatPacingSettings,
-  type RuntimeSnapshot,
-  type RuntimeStatus,
-} from "./state.js";
+import type { ChatPacingSettings, RuntimeSnapshot, RuntimeStatus } from "./state.js";
+import { captureRuntimeSnapshotWithValidatedPlan } from "./snapshot-validation.js";
 
 export interface RuntimeInspectionError {
   readonly kind: "plan" | "snapshot";

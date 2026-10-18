@@ -27,14 +27,14 @@ import type {
   RuntimeInteractionActionSnapshot,
 } from "../../src/runtime/actions/model.js";
 import {
-  cloneCapturedRuntimeSnapshot,
-  createFreshRuntimeSnapshotWithValidatedPlan,
-} from "../../src/runtime/state.js";
-import {
   activePlayerRuntimeInteraction,
   activePlayerRuntimePacingGate,
   completePlayerRuntimeAction,
 } from "../../player/runtime-adapter.js";
+import {
+  cloneCapturedRuntimeSnapshot,
+  createFreshRuntimeSnapshotWithValidatedPlan,
+} from "../../src/runtime/snapshot-construction.js";
 
 export interface WorkspaceDiagnostic {
   /** The project file, or the image, the diagnostic belongs to. */

@@ -2,6 +2,7 @@ import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import { rootFitsFunction, serializedRootFiles } from "./activation-validation.js";
 import { sameCaptures } from "./capture-validation.js";
+import { isPlainRecord } from "./plain-data.js";
 
 /** Restore validation for permanent buttons, their identifiers, and their queued or running blocks. */
 
@@ -182,12 +183,6 @@ function positiveSafeInteger(value: unknown): value is number {
 
 function nonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {

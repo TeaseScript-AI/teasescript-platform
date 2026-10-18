@@ -12,10 +12,10 @@ import {
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
-import { validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 /** Runs `source`, which must not fail, and gives the variables it left. */
 function variables(source: string): Map<string, SerializableRuntimeValue> {

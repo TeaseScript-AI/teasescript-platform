@@ -12,12 +12,12 @@ import {
   calculateSmartPacingDurationMs,
   exactPacingMilliseconds,
 } from "../src/runtime/actions/pacing.js";
+import type { ChatPacingSettings } from "../src/runtime/state.js";
 import {
   cloneRuntimeSnapshot,
-  createFreshRuntimeSnapshot,
   validateRuntimeSnapshot,
-  type ChatPacingSettings,
-} from "../src/runtime/state.js";
+} from "../src/runtime/snapshot-validation.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
 
 function plan() {
   const compiled = compileSource("exit");

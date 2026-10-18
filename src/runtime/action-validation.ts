@@ -50,7 +50,6 @@ import {
   isLockOutcome,
 } from "./actions/model.js";
 import { buttonTimeoutMilliseconds, imageRequestValue } from "./actions/interaction.js";
-import { holdsCatchUpRecord, interruptibleActionRecord } from "./actions/interrupts.js";
 import {
   formAnswerMismatch,
   formRequestValue,
@@ -76,7 +75,7 @@ import {
 import { validPermanentButtonAction } from "./permanent-button-validation.js";
 import { isSha256Hex } from "./sha256.js";
 import { MAX_LOCK_PUBLIC_KEYS, parsePublicKey } from "../public-keys.js";
-import { validTimerAction } from "./timer-validation.js";
+import { validTimerAction, catchUpPaused } from "./timer-validation.js";
 import { validateScriptStorageEntries } from "./script-storage.js";
 import {
   contextHoldsInstruction,
@@ -85,6 +84,7 @@ import {
   serializedTopContext,
 } from "./activation-validation.js";
 import { functionHoldingInstruction } from "./snapshot-validation-analysis.js";
+import { isPlainRecord } from "./plain-data.js";
 
 const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
 
@@ -108,12 +108,6 @@ function hasEventSequenceCapacity(value: unknown, count: number): boolean {
 function nonNegativeSafeInteger(value: unknown): value is number {
   // EVIDENCE: validation: Number.isSafeInteger establishes the numeric value before comparison.
   return Number.isSafeInteger(value) && (value as number) >= 0;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
@@ -699,47 +693,6 @@ export function validForegroundActionState(
     validForegroundActionKind(action, snapshot, plan, delayTimesAreValid, allowDue) &&
     (plan === undefined ||
       (isPlainRecord(action) && validForegroundActionOwnership(action, snapshot, plan)))
-  );
-}
-
-/**
- * Mirrors the engine's pause of catch-up toward the observed time: the script or a queued expiry block can execute,
- * or a queued block waits for a host step that holds catch-up, a storage write. Only then may scene time stand behind
- * the observed time, and timed work due exactly now wait for that execution.
- */
-export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
-  if (snapshot.status === "ready" || snapshot.status === "running") return true;
-  // A random draw paused during catch-up leaves the rest of the catch-up to resuming it.
-  const control = snapshot.randomControl;
-  if (
-    isPlainRecord(control) &&
-    isPlainRecord(control.pending) &&
-    control.pending.unit === "dueWork" &&
-    snapshot.status === "waiting"
-  )
-    return true;
-  if (
-    snapshot.status === "waiting" &&
-    isPlainRecord(snapshot.foregroundAction) &&
-    holdsCatchUpRecord(snapshot.foregroundAction) &&
-    Array.isArray(snapshot.pendingTimerHandlers) &&
-    snapshot.pendingTimerHandlers.length > 0
-  )
-    return true;
-  if (
-    snapshot.status !== "waiting" ||
-    !Array.isArray(snapshot.callFrames) ||
-    !Array.isArray(snapshot.pendingTimerHandlers) ||
-    snapshot.pendingTimerHandlers.length === 0 ||
-    snapshot.callFrames.some(
-      (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
-    ) ||
-    snapshot.interactionResultHandoff !== null
-  )
-    return false;
-  const foreground = snapshot.foregroundAction;
-  return (
-    foreground === null || (isPlainRecord(foreground) && interruptibleActionRecord(foreground))
   );
 }
 

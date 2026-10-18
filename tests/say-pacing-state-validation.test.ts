@@ -10,15 +10,12 @@ import {
 import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import {
-  createFreshRuntimeSnapshot,
-  validateRuntimeSnapshot,
-  type RuntimeSnapshot,
-  type RuntimeTemporarySnapshot,
-} from "../src/runtime/state.js";
+import type { RuntimeSnapshot, RuntimeTemporarySnapshot } from "../src/runtime/state.js";
 import type { SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { functionFrames } from "./helpers/runtime-equivalence.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../src/runtime/snapshot-validation.js";
 
 type Mutable<T> = T extends readonly [infer First, infer Second]
   ? [Mutable<First>, Mutable<Second>]
