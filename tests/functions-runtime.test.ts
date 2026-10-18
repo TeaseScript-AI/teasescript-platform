@@ -113,6 +113,37 @@ test("parameters are deep copies of caller lists, objects, sets, and dicts", () 
   );
 });
 
+test("parameters copy mixed nested and empty containers but keep the speakers and handles they hold", () => {
+  const result = runSource(
+    [
+      'speaker vera { displayName: "Vera"\ntitle: "Mistress" }',
+      "let running = timer async 10 s",
+      "let noItems: integer[] = []",
+      "let noEntries: integer dict = dict{}",
+      "let noMembers: integer set = set[]",
+      'let caller = { rows: dict{ first: [{ tags: set["a"], empty: noItems }] }, emptyList: noItems, emptyDict: noEntries, emptySet: noMembers, crew: [vera], clocks: dict{ main: running } }',
+      "function mutate(input) {",
+      '  input.rows["first"][0].tags.add("b")',
+      '  input.rows["first"][0].empty.add(1)',
+      "  input.emptyList.add(2)",
+      '  input.emptyDict["added"] = 3',
+      "  input.emptySet.add(4)",
+      '  input.crew[0].title = "Director"',
+      '  input.clocks["main"].pause()',
+      '  return "${input.rows["first"][0].tags.length}:${input.rows["first"][0].empty.length}:${input.emptyList.length}:${input.emptyDict.length}:${input.emptySet.length}"',
+      "}",
+      "say mutate(caller)",
+      'say "${caller.rows["first"][0].tags.length}:${caller.rows["first"][0].empty.length}:${caller.emptyList.length}:${caller.emptyDict.length}:${caller.emptySet.length}"',
+      "say vera.title",
+      "say running.state",
+      "exit",
+    ].join("\n"),
+  );
+
+  // The callee's containers changed and the caller's did not; the speaker and the timer the copies name are the caller's.
+  assert.deepEqual(sayTexts(result), ["2:1:1:1:1", "1:0:0:0:0", "Director", "paused"]);
+});
+
 test("returned lists, objects, and sets are independent deep copies", () => {
   const result = runSource(
     [

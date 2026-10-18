@@ -5,6 +5,8 @@ import { HANDLE_KINDS } from "../src/handle-members.js";
 import { compileProject, createFreshRuntimeSession } from "../src/index.js";
 import { TEASESCRIPT_PROTECTED_TYPE_NAMES } from "../src/language-facts.js";
 import {
+  cloneCapturedSerializableValue,
+  serializableEquals,
   validateSerializableValue,
   type SerializableRuntimeValue,
 } from "../src/runtime/serializable-values.js";
@@ -226,6 +228,81 @@ test("a value of each kind is of its kind, is stored as its entry says, and has 
     assert.equal(describeValue(value), EXPECTED[kind][0], kind);
     assert.equal(describeType(typeOf(kind)), EXPECTED[kind][0], kind);
   }
+});
+
+/** The stored kinds whose values hold other values, which a copy must not share. */
+const CONTAINERS: ReadonlySet<unknown> = new Set(["list", "set", "object", "dict"]);
+
+/**
+ * Checks without recursion that `copy` has the shape and scalars of `source`, and that none of its arrays, containers,
+ * dict entries, or object properties is one of `source`'s, so changing either cannot change the other.
+ */
+function assertDetachedCopy(
+  source: SerializableRuntimeValue,
+  copy: SerializableRuntimeValue,
+  where: string,
+): void {
+  const mutable = new Set<object>();
+  const pending: unknown[] = [source];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (typeof current !== "object" || current === null) continue;
+    // A dict entry and an object property have no kind.
+    if (Array.isArray(current) || !("kind" in current) || CONTAINERS.has(current.kind))
+      mutable.add(current);
+    for (const part of Object.values(current)) pending.push(part);
+  }
+  const pairs: (readonly [unknown, unknown])[] = [[source, copy]];
+  while (pairs.length > 0) {
+    const [original, copied] = pairs.pop()!;
+    if (typeof original !== "object" || original === null) {
+      assert.ok(Object.is(copied, original), where);
+      continue;
+    }
+    assert.ok(typeof copied === "object" && copied !== null && !mutable.has(copied), where);
+    assert.equal(Array.isArray(copied), Array.isArray(original), where);
+    assert.deepEqual(Object.keys(copied), Object.keys(original), where);
+    // The keys are the same and in the same order, so the parts pair up by position.
+    const copiedParts = Object.values(copied);
+    for (const [index, part] of Object.values(original).entries())
+      pairs.push([part, copiedParts[index]]);
+  }
+}
+
+test("a copy of a value of each kind, alone, in each container, and deep inside containers, equals it and shares no container", () => {
+  const values = VALUE_KIND_NAMES.map((kind) => VALUES[kind]);
+  const containers: SerializableRuntimeValue[] = [
+    { kind: "list", items: values },
+    { kind: "set", items: values },
+    { kind: "object", properties: VALUE_KIND_NAMES.map((name) => ({ name, value: VALUES[name] })) },
+    { kind: "dict", entries: VALUE_KIND_NAMES.map((key) => ({ key, value: VALUES[key] })) },
+  ];
+  // 20,000 levels, which the copy reaches without recursion: each kind of container in turn, beside a scalar and a handle.
+  let deep: SerializableRuntimeValue = { kind: "list", items: values };
+  for (let depth = 0; depth < 20_000; depth += 1) {
+    const parts: SerializableRuntimeValue[] = [depth, VALUES.timer, deep];
+    if (depth % 4 === 0) deep = { kind: "list", items: parts };
+    else if (depth % 4 === 1) deep = { kind: "set", items: parts };
+    else if (depth % 4 === 2)
+      deep = {
+        kind: "object",
+        properties: parts.map((value, index) => ({ name: `p${index}`, value })),
+      };
+    else
+      deep = { kind: "dict", entries: parts.map((value, index) => ({ key: `k${index}`, value })) };
+  }
+  const cases: (readonly [string, SerializableRuntimeValue])[] = [
+    ...VALUE_KIND_NAMES.map((kind) => [kind, VALUES[kind]] as const),
+    ...containers.map((value, index) => [`container ${index}`, value] as const),
+    ["containers in a list", { kind: "list", items: containers }],
+  ];
+  for (const [where, value] of cases) {
+    const copy = cloneCapturedSerializableValue(value);
+    // A copied speaker or handle names the same speaker or record, so it is `==` to the original.
+    assert.ok(serializableEquals(copy, value), where);
+    assertDetachedCopy(value, copy, where);
+  }
+  assertDetachedCopy(deep, cloneCapturedSerializableValue(deep), "deep");
 });
 
 test("the compiler and the runtime name a value of each kind with one text", () => {
