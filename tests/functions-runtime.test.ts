@@ -20,6 +20,7 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runValidSource as runSource } from "./helpers/run-valid-source.js";
 import { runValidSourceUntilExit } from "./helpers/run-until-exit.js";
+import { createFreshRuntimeSession } from "../src/index.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 
@@ -820,4 +821,75 @@ test("a recursive call inside a loop runs its own instance of the loop (#587)", 
   const result = assertRuntimeResumeEquivalent(source);
   const said = result.events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
   assert.deepEqual(said, ["visit 1", "visit 0", "visit 0", "visit 1", "visit 0", "visit 0"]);
+});
+
+test("a call keeps its caller's live temporaries through waits, defaults, prepared references, and every checkpoint", () => {
+  // Each object field before a call stays a live temporary of its caller while the call, a call in its default, or a
+  // prepared assignment target's call waits; the earlier field keeps the list as it was before the call changed it.
+  // The list is a literal, so that resuming from each boundary does not build it again.
+  const items = Array.from(
+    { length: 300 },
+    (_, index) => `{ n: ${index + 1}, label: "item ${index + 1}" }`,
+  );
+  const result = assertRuntimeResumeEquivalent(
+    `let big = [${items.join(", ")}]
+function pausing(n) {
+    wait 1 s
+    return n
+}
+function withDefault(n = pausing(4)) {
+    return n + 1
+}
+function middle(xs) {
+    big.add({ n: 0, label: "late" })
+    return { seen: xs.length, paused: pausing(2), now: big.length, fallback: withDefault() }
+}
+let results = { before: big, inner: middle(big), text: "count \${pausing(3)}", after: big.length }
+big[1].label = "set by \${pausing(5)}"
+say results.before.length
+say results.inner
+say results.text
+say results.after
+say big[1].label
+say big.length
+exit
+`,
+    { scenarioName: "parked caller temporaries" },
+  );
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["300", "{ seen: 300, paused: 2, now: 301, fallback: 5 }", "count 3", "301", "set by 5", "301"],
+  );
+});
+
+test("a returned local that a permanent button keeps is a copy, also while the next call waits", () => {
+  const session = createFreshRuntimeSession(
+    plan(`function make {
+    let local = [[1]]
+    showPermanentButton "Change" { local[0][0] = 9 }
+    return local
+}
+function pause {
+    wait 1 s
+    return [[0]]
+}
+let results = [make(), pause()]
+say results[0][0][0], instant
+exit
+`),
+    { baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 },
+  );
+  const said: string[] = [];
+  const collect = (events: readonly { readonly kind: string; readonly text?: string }[]) => {
+    for (const event of events) if (event.kind === "say") said.push(event.text!);
+  };
+  collect(session.run().events);
+  assert.equal(session.view().foregroundAction?.kind, "delay");
+  // The block changes the local that `make` returned while `make`'s result waits as a temporary of the caller.
+  assert.equal(session.pressPermanentButton(1).outcome.kind, "pressed");
+  collect(session.run().events);
+  collect(session.observeTime(1_000).events);
+  collect(session.run().events);
+  assert.equal(session.view().status, "halted");
+  assert.deepEqual(said, ["1"]);
 });
