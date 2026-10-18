@@ -505,6 +505,22 @@ test("a site ends where its draw's source ends, so a host can mark the draw", ()
   assert.deepEqual(marked, ["randomInteger(1..=6)", "items.random", "chance(…)"]);
 });
 
+test("a written place lists the draws that reach it, but writing a field named random is no draw", () => {
+  // Reading `rows.random` to reach the element draws; writing `o.random` reads no list. (Deliberate change on #990: the
+  // write was listed as a site that never draws.)
+  const plan = compileValidPlan(
+    "let o = { random: 0 }\no.random = 5\nlet rows = [[1, 2]]\nrows.random[0] = 3\nexit",
+  );
+  assert.deepEqual(
+    listRandomSites(plan).map((site) => `${site.id} ${site.kinds.join("+")}`),
+    ["main.tease:4:1 collectionRandom"],
+  );
+  assert.deepEqual(
+    drive({ plan, stepMs: 1000 }, "pause", natural).pauses.map((draw) => draw.site),
+    ["main.tease:4:1"],
+  );
+});
+
 test("a builtin the unit called before a pause is not called again when it resumes, also after a restore", () => {
   const scenario = SCENARIOS.builtinBeforeDraw!();
   let calls = 0;

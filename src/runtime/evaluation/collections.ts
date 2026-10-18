@@ -251,10 +251,7 @@ function callList(
         name === "removeFirst" ? 0 : receiver.items.length - 1,
       );
     case "clear":
-      if (receiver.items.length > 0) {
-        freezePreparedReferenceDescendants(evaluator.snapshot, receiver);
-        receiver.items.length = 0;
-      }
+      clearList(evaluator, receiver);
       return null;
     case "contains":
     case "indexOf":
@@ -316,10 +313,7 @@ export function callDict(
   ]);
   if (problem !== undefined) throw fault("TSR028", problem.message, span);
   if (name === "clear") {
-    if (receiver.entries.length > 0) {
-      freezePreparedReferenceDescendants(evaluator.snapshot, receiver);
-      clearSerializableDict(receiver);
-    }
+    clearDict(evaluator, receiver);
     return null;
   }
   // Every other method takes one key.
@@ -334,8 +328,7 @@ export function callDict(
     case "remove":
       if (getSerializableDictEntry(receiver, key) === undefined)
         throw missingKey(evaluator, key, callee.object, keyPlan, span);
-      freezePreparedReferenceDescendants(evaluator.snapshot, receiver, key);
-      return removeSerializableDictEntry(receiver, key)!.value;
+      return removeDictEntry(evaluator, receiver, key);
     default: {
       const unhandled: never = name;
       throw new Error(`Dict method '${String(unhandled)}' has no implementation.`);
@@ -366,6 +359,33 @@ function removeListItem(
   const removed = list.items.splice(index, 1)[0]!;
   refreshPreparedReferenceFallbacks(evaluator.snapshot, rebased);
   return removed;
+}
+
+/** Empties a list; the prepared references into its items keep the values they refer to now. */
+function clearList(evaluator: Evaluator, list: SerializableRuntimeList): void {
+  if (list.items.length === 0) return;
+  freezePreparedReferenceDescendants(evaluator.snapshot, list);
+  list.items.length = 0;
+}
+
+/**
+ * Removes the entry of `key`; the prepared references through it keep the values they refer to now. The other entries
+ * keep their keys, so no reference moves and no fallback needs refreshing, unlike a list's removal.
+ */
+function removeDictEntry(
+  evaluator: Evaluator,
+  dict: SerializableRuntimeDict,
+  key: string,
+): SerializableRuntimeValue {
+  freezePreparedReferenceDescendants(evaluator.snapshot, dict, key);
+  return removeSerializableDictEntry(dict, key)!.value;
+}
+
+/** Empties a dict; the prepared references into its entries keep the values they refer to now. */
+function clearDict(evaluator: Evaluator, dict: SerializableRuntimeDict): void {
+  if (dict.entries.length === 0) return;
+  freezePreparedReferenceDescendants(evaluator.snapshot, dict);
+  clearSerializableDict(dict);
 }
 
 function translateValueError(error: unknown, span: SourceSpan): RuntimeFault {

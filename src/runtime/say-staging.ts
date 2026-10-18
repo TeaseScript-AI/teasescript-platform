@@ -1,41 +1,5 @@
-import { isConversion } from "../conversions.js";
-import { isAnyHandleMethod } from "../handle-members.js";
-import { isListFunction } from "../list-function-rules.js";
-import { isDictMethod, onlyReadsDict } from "../dict-operations.js";
-import { isListMethod, onlyReadsList } from "../list-methods.js";
-import { isNumericFunction } from "../numeric-functions.js";
-import { isRandomFunction } from "../random-functions.js";
-import { isClockFunction, isTemporalMethod } from "../temporal-builtins.js";
-import { isTextOnlyMethod } from "../text-operations.js";
-import { expressionPlanChildren } from "../plan/expression-children.js";
 import type { ExpressionPlan, SayInstruction } from "../plan/model.js";
-
-/**
- * Engine functions that only read copies of their arguments and return a new value; so do the conversions, the numeric
- * and angle functions, the list functions, and the random functions, apart from drawing from the session generator, and
- * the clock reads, which read the session clock (see `Conversion`, `NumericFunction`, `ListFunction`, `RandomFunction`,
- * and `ClockFunction`). A host built-in runs code the engine has not checked, so it is not listed.
- */
-const READING_FUNCTIONS: ReadonlySet<string> = new Set(["hashText", "script", "escapeMarkup"]);
-
-/**
- * Whether a call of the method `name` only reads its receiver and arguments, whatever value it is called on: every
- * method of text and of date and time values does (see `TextMethod` and `TemporalMethod`), and no other value has a
- * method of a date and time value's name; a method of lists and sets or of dicts (see `LIST_METHODS` and
- * `DICT_METHODS`) does where it only reads each of them that has it, and then also only reads text or a range that has
- * a method of its name. A method of a handle changes the handle (see `HandleMethod`), so no name of one is a reading
- * method.
- */
-export function isReadingMethod(name: string): boolean {
-  return (
-    !isAnyHandleMethod(name) &&
-    (isTextOnlyMethod(name) ||
-      isTemporalMethod(name) ||
-      ((isListMethod(name) || isDictMethod(name)) &&
-        (!isListMethod(name) || onlyReadsList(name)) &&
-        (!isDictMethod(name) || onlyReadsDict(name))))
-  );
-}
+import { changesAnything, evaluatedChildren, expressionEffects } from "./effect-facts.js";
 
 const selectiveSays = new WeakMap<SayInstruction, boolean>();
 
@@ -57,63 +21,18 @@ export function sayStagesSelectively(instruction: SayInstruction): boolean {
 }
 
 /**
- * Whether evaluating an expression changes no state in place but the session generator: it reads variables,
- * temporaries, and storage, builds new values, and calls only the functions and methods listed above and the
- * conversions, which may also report warnings. A conversion that may wait for the Player's file store runs as an
- * instruction before the say, which reads its result, so a call of one in the plan only reads. A lookup may still build
- * a key index of a dict it reads, which is derived from entries it does not change. Any other expression, including one
- * of a kind added later, counts as one that may change state.
+ * Whether evaluating an expression changes no state but the session generator, as `expressionEffects` says of each of
+ * its nodes: it reads variables, temporaries, and storage, builds new values, draws, and calls only functions and methods
+ * that read copies of their arguments. A conversion that may wait for the Player's file store runs as an instruction
+ * before the say, which reads its result, so a call of one in the plan only reads.
  */
 function changesOnlyGenerator(root: ExpressionPlan): boolean {
   const pending = [root];
   while (pending.length > 0) {
     const node = pending.pop()!;
-    switch (node.kind) {
-      case "call":
-        if (
-          node.callee.kind === "identifier"
-            ? !READING_FUNCTIONS.has(node.callee.name) &&
-              !isConversion(node.callee.name) &&
-              !isListFunction(node.callee.name) &&
-              !isNumericFunction(node.callee.name) &&
-              !isRandomFunction(node.callee.name) &&
-              !isClockFunction(node.callee.name)
-            : node.callee.kind !== "property" || !isReadingMethod(node.callee.name)
-        )
-          return false;
-        break;
-      case "literal":
-      case "regex":
-      case "duration":
-      case "calendarDuration":
-      case "identifier":
-      case "debugMode":
-      case "accountField":
-      case "temporary":
-      case "list":
-      case "object":
-      case "set":
-      case "dict":
-      case "group":
-      case "template":
-      case "property":
-      case "index":
-      case "typeTest":
-      case "unary":
-      case "unit":
-      case "angleUnit":
-      case "binary":
-      case "range":
-      case "storageLoad":
-      case "tagQuery":
-        break;
-      // Reading a prepared reference can detach it, which changes the temporary that holds it.
-      case "preparedReference":
-      default:
-        return false;
-    }
+    if (changesAnything(expressionEffects(node))) return false;
     // One by one: a wide list must not depend on the host's argument-spread limit.
-    for (const child of expressionPlanChildren(node)) pending.push(child);
+    for (const child of evaluatedChildren(node)) pending.push(child);
   }
   return true;
 }
