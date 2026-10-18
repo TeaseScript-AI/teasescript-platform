@@ -23,6 +23,8 @@ import type {
 import type { VariableSite } from "../semantic.js";
 import type { SpeakerFlowInput } from "../speaker-flow.js";
 import type { WayFacts } from "../way-facts.js";
+import type { OperationRelations } from "./adapters/relation.js";
+import type { RegistryView } from "./registry-view.js";
 
 /**
  * The boundary in front of the type analysis of a project (ADR 0021): the compiler hands it the parsed files and what
@@ -41,8 +43,19 @@ export interface TypeAnalysisRequest {
   /** The project's files with their parsed programs, in project order. */
   readonly files: readonly { readonly path: string; readonly program: Program }[];
   readonly options: TypeCheckOptions;
+  /**
+   * What the constraint-based analysis reads instead of keeping lists of its own: the value-kind registry and the
+   * built-in contracts, as views (O4 stage 2). `analyzeTypes` supplies the defaults; the legacy backend reads none.
+   */
+  readonly services?: TypeAnalysisServices;
   /** Hears of each file whose source the analysis enters, so a stack exhaustion is blamed on the right file. */
   readonly onFile?: (file: number) => void;
+}
+
+export interface TypeAnalysisServices {
+  readonly valueKinds: RegistryView;
+  /** The result relations of the built-in contracts, once the adapters exist (O4 stage 2b); absent until then. */
+  readonly operations?: OperationRelations;
 }
 
 export interface TypeAnalysisOutcome {
@@ -162,6 +175,12 @@ export interface SolvedTypeFacts {
     readonly site: FactSite;
     readonly kind: string;
     readonly type: TypeText;
+  }[];
+  /** Each read of a variable with the declaration it resolved to; a host global has none. */
+  readonly reads: readonly {
+    readonly site: FactSite;
+    readonly name: string;
+    readonly binding: FactSite | null;
   }[];
   /**
    * Author functions: the parameter types their declaration and defaults give, the parameters as the body accepts
