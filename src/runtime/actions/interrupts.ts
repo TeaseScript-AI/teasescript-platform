@@ -61,7 +61,7 @@ export function interruptibleAction(
  * capture, a file store, or a lock's `work` step. A Player's development time jump stops at it. Today these are exactly
  * the host steps of `interruptibleAction`, but each kind decides this on its own.
  */
-export function awaitsHost(action: RuntimeForegroundActionSnapshot): boolean {
+export function actionAwaitsHost(action: RuntimeForegroundActionSnapshot): boolean {
   switch (action.kind) {
     case "storageWrite":
     case "capture":
