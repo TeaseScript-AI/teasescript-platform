@@ -169,7 +169,9 @@ timer async 2 s {
 }
 say "Read this slowly", 1 s
 let picked = askChoice "left", "right", "up"
-note.text = "picked \${picked}"
+if picked == "right" {
+    note.text = "picked \${picked}"
+}
 wait 5 s
 exit
 `;
@@ -198,6 +200,7 @@ test("results and projections are deeply frozen and stay as published after late
     held.push([value, JSON.stringify(value)]);
   };
   const eventKinds = new Set<string>();
+  let branchPairs = 0;
   const same = <R extends RuntimeSessionResult>(
     legacy: RuntimeOperationResult,
     operate: (current: RuntimeSession) => R,
@@ -218,6 +221,7 @@ test("results and projections are deeply frozen and stay as published after late
       eventKinds.add(
         event.kind === "actionRequested" ? `request ${event.action.kind}` : event.kind,
       );
+    branchPairs += result.instructionTrace?.branches.length ?? 0;
     return result;
   };
   const progress = () =>
@@ -266,6 +270,8 @@ test("results and projections are deeply frozen and stay as published after late
   observe(8_000);
   runBoth();
   assert.equal(session.view().status, "halted");
+  // The traces held the branch pairs of the choice's condition, which are published as they are like the rest.
+  assert.ok(branchPairs > 0);
   assert.deepEqual([...eventKinds].sort(), [
     "actionCompleted",
     "exit",
