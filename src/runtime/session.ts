@@ -778,7 +778,7 @@ function executed(done: RuntimeOperationResult): RuntimeSessionResult {
       ...(done.randomChoices === undefined ? {} : { randomChoices: done.randomChoices }),
       ...(done.randomRefusal === undefined ? {} : { randomRefusal: done.randomRefusal }),
     },
-    reusedInPublication(done.events, null),
+    reusedInPublication(done, null),
   );
 }
 
@@ -792,21 +792,23 @@ function settled<T>(done: PendingActionOperationResult<T>): RuntimeSessionOutcom
       ...(done.randomRefusal === undefined ? {} : { randomRefusal: done.randomRefusal }),
       outcome: done.outcome,
     },
-    reusedInPublication(done.events, done.outcome),
+    reusedInPublication(done, done.outcome),
   );
 }
 
 /**
- * What a result's publication reuses instead of copying (`publishResult`), or `null` for nothing: the markup of a say
- * or message update, which its parser froze deeply and no state holds, as it is; and each record the outcome holds,
- * such as a completion's settlement that its event holds too, copied once.
+ * What a result's publication reuses instead of copying (`publishResult`), or `null` for nothing: the instruction
+ * trace and the markup of a say or message update, which their producers froze deeply and no state holds, as they are;
+ * and each record the outcome holds, such as a completion's settlement that its event holds too, copied once.
  */
 function reusedInPublication(
-  events: readonly InterpreterEvent[],
+  done: RuntimeOperationResult,
   outcome: unknown,
 ): Map<object, object | null> | null {
   let reuse: Map<object, object | null> | null = null;
-  for (const event of events)
+  if (done.instructionTrace !== undefined)
+    (reuse ??= new Map()).set(done.instructionTrace, done.instructionTrace);
+  for (const event of done.events)
     if (event.kind === "say" || event.kind === "messageUpdated")
       (reuse ??= new Map()).set(event.content, event.content);
   if (typeof outcome === "object" && outcome !== null)

@@ -2,7 +2,8 @@ import type { Instruction } from "../plan/model.js";
 
 /**
  * What one `run`, `stepToEvent`, or `executeInstruction` call executed, returned when it is called with
- * `instructionTrace: true`. See `docs/RUNTIME.md#instruction-trace`.
+ * `instructionTrace: true`. See `docs/RUNTIME.md#instruction-trace`. Built fresh and deeply frozen, so a session
+ * publishes it as it is.
  */
 export interface RuntimeInstructionTrace {
   /** The plan indices of the instructions the call executed, in ascending order, each once. */

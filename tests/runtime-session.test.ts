@@ -238,7 +238,10 @@ test("results and projections are deeply frozen and stay as published after late
     same(reportMediaLoad(plan, snapshot, mediaId, { kind: "loaded", durationMs }), (current) =>
       current.reportMediaLoad(mediaId, { kind: "loaded", durationMs }),
     );
-  const runBoth = () => same(run(plan, snapshot), (current) => current.run());
+  const runBoth = () =>
+    same(run(plan, snapshot, {}, { instructionTrace: true }), (current) =>
+      current.run({ instructionTrace: true }),
+    );
 
   runBoth();
   load(1, 10_000);
