@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
+  playerRuntimeAwaitsHost,
   playerRuntimeDeadlines,
   playerRuntimeTimers,
   type PlayerRuntimeSession,
@@ -16,6 +17,8 @@ import {
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { runtimeTimedWork } from "../src/runtime/operations/observe-time.js";
+import { createRuntimeSession } from "../src/runtime/session.js";
 import { validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { Story } from "./helpers/story-session.js";
@@ -220,76 +223,160 @@ test("the Player shows an interrupted blocking timer standing still and schedule
   assert.deepEqual(playerRuntimeDeadlines(session.state), [5_000]);
 });
 
-/** How a Player makes a block due at 1 s and lets it run on, for each source of a block that then waits 2 s. */
+/**
+ * How a Player lets a block run on, for each source of a block that waits 2 s: a timer's and a media cue's block is due
+ * at 1 s, and a button's when the Player clicks it on observing `atMs`.
+ */
 const BLOCK_SOURCES = [
   {
     name: "timer",
     block: BLOCK,
     start: (story: Story) => story,
     at: (story: Story, atMs: number) => story.at(atMs),
-    due: (story: Story) => story.at(1_000),
+    due: (story: Story, atMs: number) => story.at(atMs),
+    dueAtMs: () => 1_000,
   },
   {
     name: "media cue",
     block: 'let music = playAudio async "music.mp3" {\n  at 1 s {\n    wait 2 s\n  }\n}',
     start: (story: Story) => story.load(1, 60_000),
     at: (story: Story, atMs: number) => story.at(atMs, [1, atMs]),
-    due: (story: Story) => story.at(1_000, [1, 1_000]),
+    due: (story: Story, atMs: number) => story.at(atMs, [1, atMs]),
+    dueAtMs: () => 1_000,
   },
   {
     name: "permanent button",
     block: 'showPermanentButton "Hint" {\n  wait 2 s\n}',
     start: (story: Story) => story,
     at: (story: Story, atMs: number) => story.at(atMs),
-    due: (story: Story) => {
-      assert.equal(story.at(1_000).press(1), "pressed");
+    due: (story: Story, atMs: number) => {
+      assert.equal(story.at(atMs).press(1), "pressed");
       return story;
     },
+    dueAtMs: (atMs: number) => atMs,
   },
 ] as const;
 
 /**
  * Statements that make the main path wait on a foreground action of each kind, keyed by kind so that a new kind needs
- * its rows. A block interrupts the action, which then resumes as it was with `resumesWith` changed, or the action is a
- * host step that the block waits for until the Player settles it with `settledBy` (owner decision on #829, 2026-10-11,
- * and the host steps in docs/RUNTIME.md).
+ * its rows. Each row gives the deadline at which time settles or times out the action, or `null`, and whether the
+ * action waits for the host alone, so that a Player's time jump stops at it. A block interrupts the action, which then
+ * resumes as it was with `resumesWith` changed, or the action is a host step that the block waits for until the Player
+ * settles it with `settledBy`; meanwhile scene time stands at the block's due time if the step `holdsCatchUp` (owner
+ * decision on #829, 2026-10-11, and the host steps in docs/RUNTIME.md).
  */
 const FOREGROUND_ROWS: {
   readonly [K in RuntimeForegroundActionSnapshot["kind"]]: readonly (
-    | { readonly source: string; readonly resumesWith: Readonly<Record<string, number>> }
-    | { readonly source: string; readonly settledBy: Readonly<Record<string, string>> }
+    | {
+        readonly source: string;
+        readonly deadlineMs: number | null;
+        readonly awaitsHost: boolean;
+        readonly resumesWith: Readonly<Record<string, number>>;
+      }
+    | {
+        readonly source: string;
+        readonly deadlineMs: number | null;
+        readonly awaitsHost: boolean;
+        readonly holdsCatchUp: boolean;
+        readonly settledBy: Readonly<Record<string, string>>;
+      }
   )[];
 } = {
   // A wait and a reading time keep the time they had left.
-  delay: [{ source: "wait 3 s", resumesWith: { createdAtMs: 2_000, deadlineMs: 5_000 } }],
+  delay: [
+    {
+      source: "wait 3 s",
+      deadlineMs: 3_000,
+      awaitsHost: false,
+      resumesWith: { createdAtMs: 2_000, deadlineMs: 5_000 },
+    },
+  ],
   chatPacingGate: [
-    { source: 'say "Read this.", 3 s', resumesWith: { createdAtMs: 2_000, deadlineMs: 5_000 } },
+    {
+      source: 'say "Read this.", 3 s',
+      deadlineMs: 3_000,
+      awaitsHost: false,
+      resumesWith: { createdAtMs: 2_000, deadlineMs: 5_000 },
+    },
   ],
   // An interaction leaves out the time it stood still; a password field is shown anew too.
   interaction: [
-    { source: 'let name = askText "Name?"', resumesWith: { pausedMs: 2_000 } },
-    { source: 'let code = askPassword "Code?"', resumesWith: { pausedMs: 2_000, resumes: 1 } },
+    {
+      source: 'let name = askText "Name?"',
+      deadlineMs: null,
+      awaitsHost: false,
+      resumesWith: { pausedMs: 2_000 },
+    },
+    {
+      source: 'let elapsed = showButton "Go", timeout: 3 s',
+      deadlineMs: 3_000,
+      awaitsHost: false,
+      resumesWith: { pausedMs: 2_000 },
+    },
+    {
+      source: 'let code = askPassword "Code?"',
+      deadlineMs: null,
+      awaitsHost: false,
+      resumesWith: { pausedMs: 2_000, resumes: 1 },
+    },
   ],
   // A media wait is not timed.
-  mediaPlayback: [{ source: 'playAudio "sounds/bell.mp3"', resumesWith: {} }],
+  mediaPlayback: [
+    { source: 'playAudio "sounds/bell.mp3"', deadlineMs: null, awaitsHost: false, resumesWith: {} },
+  ],
   // A lock's dialog asks again; its work step is a host step.
   lock: [
-    { source: 'let locked = encryptText("x")', resumesWith: { resumes: 1 } },
+    {
+      source: 'let locked = encryptText("x")',
+      deadlineMs: null,
+      awaitsHost: false,
+      resumesWith: { resumes: 1 },
+    },
     {
       source: 'let locked = encryptText("x", password: "p", publicKey: false, timeLock: false)',
+      deadlineMs: null,
+      awaitsHost: true,
+      holdsCatchUp: false,
       settledBy: { kind: "locked", text: "AAAA" },
     },
   ],
-  storageWrite: [{ source: 'save 2 as "k"', settledBy: { kind: "stored" } }],
+  // A block may read the value a write stored, so it runs at its due time once the host acknowledged the write.
+  storageWrite: [
+    {
+      source: 'save 2 as "k"',
+      deadlineMs: null,
+      awaitsHost: true,
+      holdsCatchUp: true,
+      settledBy: { kind: "stored" },
+    },
+  ],
   capture: [
-    { source: "let photo = takePhoto()", settledBy: { kind: "unavailable", reason: "denied" } },
+    {
+      source: "let photo = takePhoto()",
+      deadlineMs: null,
+      awaitsHost: true,
+      holdsCatchUp: false,
+      settledBy: { kind: "unavailable", reason: "denied" },
+    },
   ],
   fileStore: [
-    { source: 'let file = fileFromBase64("YWJj", default: null)', settledBy: { kind: "failed" } },
+    {
+      source: 'let file = fileFromBase64("YWJj", default: null)',
+      deadlineMs: null,
+      awaitsHost: true,
+      holdsCatchUp: false,
+      settledBy: { kind: "failed" },
+    },
   ],
 };
 
 test("a block from each source interrupts each foreground action that is no host step, and waits for a host step", () => {
+  /** The deadline of the main path's action as timed work, or `null`, and whether a Player's time jump waits. */
+  const timing = (story: Story, actionId: number) => {
+    const view = createRuntimeSession(story.plan, story.snapshot).view();
+    const work = runtimeTimedWork(view).find((candidate) => candidate.actionId === actionId);
+    return { deadlineMs: work?.deadlineMs ?? null, awaitsHost: playerRuntimeAwaitsHost(view) };
+  };
   for (const source of BLOCK_SOURCES) {
     for (const [kind, rows] of Object.entries(FOREGROUND_ROWS)) {
       for (const row of rows) {
@@ -304,7 +391,14 @@ test("a block from each source interrupts each foreground action that is no host
         assert.equal(waiting.kind, kind, name);
         if (waiting.kind === "lock")
           assert.equal(waiting.phase, "resumesWith" in row ? "ask" : "work", name);
-        source.due(story);
+        assert.deepEqual(
+          timing(story, waiting.actionId),
+          { deadlineMs: row.deadlineMs, awaitsHost: row.awaitsHost },
+          name,
+        );
+        // A host step is observed late, at 1.5 s, so that a step that holds catch-up keeps scene time behind.
+        const observedMs = "resumesWith" in row ? 1_000 : 1_500;
+        source.due(story, observedMs);
         // The state at the block's due time checkpoints as it is, an interrupted action and a waiting block alike.
         assert.deepEqual(
           deserializeCheckpoint(serializeCheckpoint(createCheckpoint(story.plan, story.snapshot)))
@@ -339,17 +433,22 @@ test("a block from each source interrupts each foreground action that is no host
           assert.equal(interruptFrame(story.snapshot), undefined, name);
           assert.equal(story.snapshot.pendingTimerHandlers.length, 1, name);
           assert.deepEqual(story.snapshot.foregroundAction, waiting, name);
+          assert.equal(
+            story.snapshot.currentSessionTimeMs,
+            row.holdsCatchUp ? source.dueAtMs(observedMs) : observedMs,
+            name,
+          );
           const settled = completion(row.settledBy);
           assert.equal(settled.outcome.kind, "completed", name);
           story.snapshot = settled.snapshot;
-          source.at(story, 1_000);
+          source.at(story, observedMs);
           assert.equal(story.snapshot.foregroundAction?.kind, "delay", name);
           assert.equal(
             interruptFrame(story.snapshot)?.timerInterruption?.suspendedAction,
             null,
             name,
           );
-          source.at(story, 3_000);
+          source.at(story, 4_000);
           assert.equal(story.said().at(-1), "Done.", name);
         }
       }
