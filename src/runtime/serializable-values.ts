@@ -295,7 +295,8 @@ export function cloneCapturedSerializableValue(
       const items = source.items;
       // EVIDENCE: validation: work pairs each list or set source with its newly allocated clone of the same kind.
       const targetItems = (target as SerializableRuntimeList | SerializableRuntimeSet).items;
-      for (let index = 0; index < items.length; index += 1) {
+      // The length is read once: item arrays come in several V8 representations, so a load per round is megamorphic.
+      for (let index = 0, length = items.length; index < length; index += 1) {
         const item = items[index]!;
         if (typeof item === "object" && item !== null) targetItems[index] = cloneInto(item);
       }
