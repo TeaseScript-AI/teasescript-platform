@@ -38,7 +38,11 @@ interface Entry {
 
 const COLLECTION_KINDS: readonly ("list" | "set" | "dict")[] = ["list", "set", "dict"];
 
-/** The rendering of a type in the legacy's canonical form: `union` of one member normalizes what it holds. */
+/**
+ * The rendering of a type in the legacy's canonical form: `union` of one member normalizes the outer union it is given
+ * (its members, `integer | number`, a member another includes), not every descendant; the catalog's unnormalized
+ * entries are outer unions, which is what this oracle covers.
+ */
 function canonicalKey(type: StaticType): string {
   return key(union([type]));
 }
@@ -404,6 +408,10 @@ test("a list nested 20,000 deep interns and converts back without native recursi
   assert.equal(levels, depth);
   assert.equal(type.kind, "scalar");
   assert.equal(table.intern(table.toStatic(id)), id);
+  // A union around the deep list goes through the canonicalizing branch of `intern` at depth (Astra's review r2).
+  const optionalDeep = table.intern({ kind: "union", members: [deep(), NULL_TYPE] });
+  assert.equal(table.nonNull(optionalDeep), id);
+  assert.equal(table.intern({ kind: "union", members: [NULL_TYPE, deep()] }), optionalDeep);
   let term: TypeTerm = { kind: "atom", name: "integer" };
   for (let level = 0; level < depth; level += 1) term = { kind: "list", element: term };
   assert.equal(table.internTerm(term), id);
