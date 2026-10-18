@@ -680,6 +680,9 @@
 {"case":"unknown-element","what":"value","name":"listLiteral","site":"0:9:39","legacy":"list<unknown>","candidate":"list<(integer|null)!>","status":"deferred","group":"3b-values"}
 {"case":"unknown-element","what":"value","name":"identifier","site":"0:40:42","legacy":"list<unknown>","candidate":"list<(integer|null)!>","status":"deferred","group":"3b-values"}
 {"case":"unknown-without-null","what":"value","name":"callExpression","site":"0:14:42","legacy":"unknown","candidate":"integer!","status":"deferred","group":"3b-values"}
+{"case":"w2-get-on-a-scalar-member","what":"value","name":"identifier","site":"0:46:47","legacy":"(list<integer>|string)","candidate":"(list<integer>|string)!","status":"deferred","group":"3b-values"}
+{"case":"w2-get-on-a-scalar-member","what":"value","name":"callExpression","site":"0:46:69","legacy":"unknown","candidate":"(integer|null)!","status":"deferred","group":"3b-values"}
+{"case":"w2-get-on-a-set-receiver","what":"value","name":"callExpression","site":"0:28:51","legacy":"unknown","candidate":"null","status":"deferred","group":"3b-values"}
 {"case":"w2-intersection-of-written-union-element-set","what":"value","name":"listLiteral","site":"0:70:72","legacy":"list<?>","candidate":"list<never>","status":"deferred","group":"3b-values"}
 {"case":"w2-plus-of-two-written-list-unions","what":"value","name":"identifier","site":"0:81:83","legacy":"list<integer>","candidate":"(list<integer>|list<string>)","status":"deferred","group":"3b-values"}
 {"case":"w2-plus-of-two-written-list-unions","what":"value","name":"binaryExpression","site":"0:81:88","legacy":"list<unknown>","candidate":"(list<integer>|list<string>)","status":"deferred","group":"3b-values"}
@@ -717,6 +720,8 @@
 {"case":"wm-list-set-first-firstFirst-one","what":"value","name":"identifier","site":"0:44:45","legacy":"list<integer>","candidate":"(list<integer>|set<string>)","status":"deferred","group":"3b-values"}
 {"case":"wm-list-set-first-firstFirst-one","what":"value","name":"propertyAccessExpression","site":"0:44:51","legacy":"integer","candidate":null,"status":"deferred","group":"3b-values"}
 {"case":"wm-list-set-first-firstFirst-one","what":"value","name":"propertyAccessExpression","site":"0:44:57","legacy":"unknown","candidate":null,"status":"deferred","group":"3b-values"}
+{"case":"wm-list-set-first-get-one","what":"value","name":"identifier","site":"0:44:45","legacy":"list<integer>","candidate":"(list<integer>|set<string>)","status":"deferred","group":"3b-values"}
+{"case":"wm-list-set-first-getKey-one","what":"value","name":"identifier","site":"0:44:45","legacy":"list<integer>","candidate":"(list<integer>|set<string>)","status":"deferred","group":"3b-values"}
 {"case":"wm-list-set-first-intersection-one","what":"value","name":"identifier","site":"0:44:45","legacy":"list<integer>","candidate":"(list<integer>|set<string>)","status":"deferred","group":"3b-values"}
 {"case":"wm-list-set-first-intersection-one","what":"value","name":"callExpression","site":"0:44:62","legacy":"list<integer>","candidate":"(list<integer>|set<string>)","status":"deferred","group":"3b-values"}
 {"case":"wm-list-set-first-intersection-one","what":"value","name":"listLiteral","site":"0:59:61","legacy":"list<?>","candidate":"list<never>","status":"deferred","group":"3b-values"}
