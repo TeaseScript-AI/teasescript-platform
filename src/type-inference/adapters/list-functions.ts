@@ -280,10 +280,11 @@ function relation(name: ListFunctionName, contract: ListFunction): OperationRela
           // one value that may be a list, or that the compiler cannot know, is read as the list form (the legacy's
           // dispatch counts a member it does not know as a list).
           const single = inputs.arguments.length === 1 ? inputs.arguments[0]! : undefined;
+          // A single value still bottom gives no evidence for either form of `min`/`max`: the relation waits.
+          if (takesValues(name) && single !== undefined && isBottom(single)) return UNCONSTRAINED;
           const list =
             single !== undefined &&
-            (isBottom(single) ||
-              single.dynamic !== null ||
+            (single.dynamic !== null ||
               viewMembers(single).some(
                 (member) => !isKnown(member) || resolved(member).kind === "list",
               ));

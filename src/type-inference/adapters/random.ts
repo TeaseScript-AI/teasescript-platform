@@ -5,6 +5,7 @@ import {
   NUMBER_TYPE,
   resolved,
   STRING_TYPE,
+  union,
 } from "../../static-types.js";
 import type { OperationInputs, OperationRelation, OperationResult } from "./relation.js";
 import { dynamicFrom, INVALID, isBottom, typeResult, UNCONSTRAINED, viewMembers } from "./views.js";
@@ -25,8 +26,11 @@ function relation(name: string, contract: RandomFunction): OperationRelation {
         case "range":
           return typeResult(INTEGER_TYPE);
         case "choices": {
-          // The call's shape first (`shape`): a name the contract does not take, or another count, is reported and
-          // the call has no value.
+          // `weightedType`: the call's shape first (a name the contract does not take, another count: no value);
+          // then the source for use (`forUse`: without null unless null is all there is): one it cannot know gives
+          // unknown; the one resolved type of its members, a dict, gives a key, a list a copy of its element; any
+          // other, a union of collections included, is reported and has no value. The `weight:` checks are the
+          // visitor's.
           if (
             [...inputs.named.keys()].some((name) => !contract.shape.names.includes(name)) ||
             inputs.arguments.length !== contract.shape.count
@@ -34,18 +38,12 @@ function relation(name: string, contract: RandomFunction): OperationRelation {
             return INVALID;
           const source = inputs.arguments[0]!;
           if (isBottom(source)) return UNCONSTRAINED;
-          // A source that may also be one the compiler cannot know is not known (`forUse` on unknown).
           if (source.dynamic !== null) return dynamicFrom(source, "unknown member");
-          // The members for use: without null, which is reported, unless null is all there is. One resolved type
-          // of source (`resolved(forUse(type))`): a dict gives one of its keys, a list a copy of one of its
-          // elements; a union of several, also of one kind, is reported.
           const all = viewMembers(source);
           const used = all.filter((member) => member.kind !== "null");
-          const members = used.length === 0 ? all : used;
-          if (members.length !== 1) return INVALID;
-          const only = resolved(members[0]!);
-          if (only.kind === "dict") return typeResult(STRING_TYPE);
-          return only.kind === "list" ? typeResult(only.element) : INVALID;
+          const value = resolved(union(used.length === 0 ? all : used));
+          if (value.kind === "dict") return typeResult(STRING_TYPE);
+          return value.kind === "list" ? typeResult(resolved(value.element)) : INVALID;
         }
       }
     },

@@ -293,16 +293,18 @@ function realize(result: OperationResult, inputs: OperationInputs): Realized {
       return types.length === 0 ? { kind: "invalid" } : { kind: "type", type: union(types) };
     }
     case "byReceiver": {
+      // The cases' types union, as the legacy unions the members' results; a case without a value takes the value
+      // away from the whole, as the legacy's unknown member result does.
       assert.ok(inputs.receiver !== null, "a receiver for the cases");
-      const types = result.cases.flatMap((entry) => {
-        const restricted: OperationInputs = {
+      const parts = result.cases.map((entry) =>
+        realize(entry.result, {
           ...inputs,
           receiver: restrictedTo(inputs.receiver!, entry.receiver),
           view: inputs.view,
-        };
-        const realized = realize(entry.result, restricted);
-        return realized.kind === "type" ? [realized.type] : [];
-      });
+        }),
+      );
+      if (parts.some((part) => part.kind === "invalid")) return { kind: "invalid" };
+      const types = parts.flatMap((part) => (part.kind === "type" ? [part.type] : []));
       return types.length === 0 ? { kind: "invalid" } : { kind: "type", type: union(types) };
     }
   }
@@ -329,6 +331,11 @@ export type AdapterExpectation =
   | "fact"
   | "invalid"
   | "unconstrained"
+  /**
+   * The answer realizes to the legacy's unknown: `invalid`, `dynamic`, or a part the adapter cannot know; which, and
+   * the provenance, is stage 4's to test where it becomes observable (the case tables of work note §6.6).
+   */
+  | "unknown"
   | { readonly dynamic: DynamicWhy }
   /** The exact possibilities, in the order the relation gives them, and the provenance when the case declares it. */
   | { readonly possible: readonly StaticType[]; readonly why?: DynamicWhy }
@@ -373,6 +380,14 @@ export function assertCase(
       `a closed fact to compare with: ${legacy.fact}`,
     );
     assert.equal(realizedText(realized), legacy.fact, "the realized result is the legacy's type");
+  } else if (adapter === "unknown") {
+    assert.equal(legacy.fact, "unknown", "the legacy's unknown");
+    assert.ok(
+      result.kind === "invalid" ||
+        realized.kind === "invalid" ||
+        realizedText(realized) === "unknown",
+      `the adapter's answer realizes to unknown, not ${realizedText(realized)}`,
+    );
   } else if (adapter === "invalid" || adapter === "unconstrained") {
     assert.equal(result.kind, adapter, `the adapter answers ${adapter}`);
   } else if ("dynamic" in adapter) {

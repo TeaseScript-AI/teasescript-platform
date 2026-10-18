@@ -1,11 +1,6 @@
 import type { Expression } from "../../src/ast.js";
 import { PERSON_FIELDS } from "../../src/speaker-terms.js";
-import type {
-  ChoiceElementEvidence,
-  ChoiceObjectEvidence,
-  DynamicWhy,
-  PlaceId,
-} from "../../src/type-inference/graph.js";
+import type { DynamicWhy } from "../../src/type-inference/graph.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../src/value-kinds.js";
 import { caseInputs, type CaseInputs } from "./adapter-case-inputs.js";
 import { isClosedFact, legacyOperation, type LegacyOutcome } from "./adapter-parity.js";
@@ -29,17 +24,19 @@ export type CaseClass =
   | "fact"
   /** A closed fact with an error at the operation: the check reports and still types; the adapter realizes the fact. */
   | "recovery"
-  /** An error at the operation and no fact: the operation has no value. */
-  | "invalid"
-  /** No fact and no error: the compiler cannot know, from an operand's provenance or the legacy's own limit. */
-  | "dynamic"
+  /**
+   * No fact: the legacy's `unknown`, with or without a report. The adapter's answer realizes to unknown (`invalid`,
+   * `dynamic`, or a part it cannot know); which of them, and the provenance, is not asserted here (the orchestrator's
+   * decision of 2026-10-18: the oracle does not expose that distinction; stage 4's differential tests it where it
+   * becomes observable, site by site, in the diagnostics, the cascade suppression and the runtime guards).
+   */
+  | "unknown"
   /** A legacy fact that stage 5 changes on purpose (owner decisions Q1 and Q2): pinned, not required. */
   | "legacy"
   /** An operand holds a slot that saw only null, which the legacy has not decided: the solver's case, not a relation's. */
   | "open";
 
-export type AdapterCell =
-  "fact" | "invalid" | { readonly dynamic: DynamicWhy } | { readonly realized: string } | null;
+export type AdapterCell = "fact" | "unknown" | null;
 
 export interface CaseRow {
   /** `<routine>/<template>/<variant>`. */
@@ -946,6 +943,17 @@ const REGRESSION_TEMPLATES: readonly Template[] = [
         'linearRegression([{ x: hostValue, y: 1 }], x: "x", y: "y")',
         "host",
       );
+      yield variant("objects-for-y", [], 'linearRegression([1, 2], y: "y")');
+      yield variant(
+        "mixed-allowed-kinds",
+        ["let ys: (integer | duration)[] = hostValue"],
+        "linearRegression(ys)",
+      );
+      yield variant(
+        "x.mixed-allowed-kinds",
+        ["let v: integer | date = hostValue"],
+        'linearRegression([{ x: v, y: 1 }], x: "x", y: "y")',
+      );
       yield parameterVariant("parameter", "linearRegression(p)", POINTS);
     },
   },
@@ -1279,152 +1287,12 @@ function splitErrors(
 }
 
 /**
- * The reports of the legacy routines that take the operation's value away (the branch returns `UNKNOWN_TYPE` with
- * them), by routine, matched on the code or the message: every other report at the operation is the check's own and
- * leaves the answer it computed (work note §6.6). The sites, for review: `shape` (`list-function-checks.ts`, codes
- * TSV020 and TSV022); `valuesType` ("needs a list, not", "needs a list of objects for", "needs the name of a
- * property as its"); `valueKind` for the statistics ("needs <kinds>, not", "needs values of one kind", the angle
- * message) and the missing-property note of `#listFunctionType`; `listFunctionType` for points ("needs y: with
- * x:"); `predictType` (the x's kind, the angle message, "never null", "needs a line from linearRegression(...),
- * with"); `#choiceEntry` and the computed collection of `#interactionTask` (`#checkMembers` and `#checkElements`:
- * "A button cannot return", "A choice option must be a value", "A choice list element must be", the may-be report)
- * and the empty choice; `#formAnswersTask` ("'fields:' takes an object or dict of fields"); the account field read
- * ("The account has no field"). A regression keeps its object with unknown amounts after a rejected value, so
- * `valueKind`'s reports are not invalidating there.
- */
-const INVALIDATING: Readonly<Record<RoutineName, readonly RegExp[]>> = {
-  choice: [
-    /^A button cannot return /,
-    /^A choice option must be a value/,
-    /^A choice list element must be/,
-    / may be .*[Cc]heck it first/,
-    /^A choice needs at least one button/,
-  ],
-  form: [/^'fields:' takes an object or dict of fields/],
-  values: [
-    /^TSV020$/,
-    /^TSV022$/,
-    / needs a list, not /,
-    / needs a list of objects for /,
-    / needs the name of a property as its /,
-    /\(\.\.\.\) needs (?!a number as its |a percentage from ).*, not /,
-    / needs values of one kind: /,
-    / does not take angles/,
-    /: the objects in this list have no property /,
-  ],
-  regression: [
-    /^TSV020$/,
-    /^TSV022$/,
-    / needs y: with x:/,
-    / needs a list, not /,
-    / needs a list of objects for /,
-    / needs the name of a property as its /,
-  ],
-  prediction: [
-    /^TSV020$/,
-    /^TSV022$/,
-    / needs a number, date, datetime, or absolute date and time as its x, not /,
-    / does not take angles/,
-    / are never null\.$/,
-    / needs a line from linearRegression\(\.\.\.\), with slope, intercept, and start, not /,
-  ],
-  commands: [/^The account has no field /],
-};
-
-function invalidating(
-  routine: RoutineName,
-  error: { readonly code: string; readonly message: string },
-): boolean {
-  return INVALIDATING[routine].some(
-    (pattern) => pattern.test(error.code) || pattern.test(error.message),
-  );
-}
-
-/**
- * The provenance of a result the legacy leaves unknown without an invalidating report: the first dynamic place
- * among the places the contract's result is read from, in the order the routine reads them, else `unknown member`,
- * the legacy's own limit on closed operands. Declared per contract from the evidence, as the adapters walk it (work
- * note §6.6): a choice's options and written elements by what the button returns (a written object's `value`, else
- * its `text`); a form's `fields`, then the descriptors' `value` and `options`; a statistic's `by:` (a selector the
- * legacy cannot see leaves the property unknown before the list is read), then its list; a regression's `y:` and
- * `x:` likewise, then its list; a prediction's line (the x only validates).
- */
-function provenance(inputs: CaseInputs, why: DynamicWhy | null): DynamicWhy {
-  const { contract, operation, dynamicPlaces } = inputs;
-  const dynamic = (place: PlaceId | null | undefined): boolean =>
-    place !== null && place !== undefined && dynamicPlaces.has(place);
-  const named = (name: string) => operation.named.find((entry) => entry.name === name)?.value;
-  const first = (places: readonly (PlaceId | null | undefined)[]): DynamicWhy | undefined =>
-    places.some(dynamic) ? (why ?? undefined) : undefined;
-  const evidence = operation.evidence;
-  const returned = (object: ChoiceObjectEvidence | null, place: PlaceId): PlaceId | null =>
-    object === null ? place : (object.value ?? object.text);
-  const elements = (list: readonly ChoiceElementEvidence[]): (PlaceId | null)[] =>
-    list.map((element) => returned(element.object, element.place));
-  /** A selector that is not visible text leaves the property unknown before the list is read. */
-  const selector = (name: string): DynamicWhy | undefined => {
-    const place = named(name);
-    if (place === undefined) return undefined;
-    if (dynamic(place)) return why ?? undefined;
-    const written =
-      evidence?.kind === "selectors"
-        ? evidence.written.find((entry) => entry.name === name)
-        : undefined;
-    return written === undefined || written.text === null ? "unknown member" : undefined;
-  };
-  switch (`${contract.family}.${contract.name}`) {
-    case "interaction.choice": {
-      if (evidence?.kind !== "choice") return "unknown member";
-      // A labelled option's button returns the label: nothing of the option contributes.
-      const places = evidence.options.flatMap((option) =>
-        option.label !== null
-          ? []
-          : option.content.kind === "list" || option.content.kind === "set"
-            ? elements(option.content.elements)
-            : option.content.kind === "object"
-              ? [returned(option.content.object, option.place)]
-              : [option.place],
-      );
-      return first(places) ?? "unknown member";
-    }
-    case "interaction.form": {
-      if (dynamic(named("fields"))) return why ?? "unknown member";
-      if (evidence?.kind !== "form" || evidence.fields === "computed") return "unknown member";
-      const places = evidence.fields.entries.flatMap((entry) =>
-        entry.written.kind === "object"
-          ? [
-              entry.written.value,
-              entry.written.options?.place,
-              ...(entry.written.options?.elements == null
-                ? []
-                : elements(entry.written.options.elements)),
-            ]
-          : entry.written.kind === "list"
-            ? elements(entry.written.elements)
-            : [],
-      );
-      return first(places) ?? "unknown member";
-    }
-    case "listFunction.linearRegression":
-      return selector("y") ?? selector("x") ?? first([operation.arguments[0]]) ?? "unknown member";
-    case "listFunction.predict":
-      return first([operation.arguments[0]]) ?? "unknown member";
-    default:
-      if (contract.family === "listFunction")
-        return selector("by") ?? first([operation.arguments[0]]) ?? "unknown member";
-      return "unknown member";
-  }
-}
-
-/**
- * The class of a row, from what the oracle says and the routine's declared invalidating reports (work note §6.1 and
- * §6.6): a closed fact is `fact`, or `recovery` with an error; no fact with an invalidating report is `invalid`; no
- * fact without one (no report, or the check's own reports beside the answer) is `dynamic` of the result's
- * provenance; a `stage5` variant is `legacy`, and a row with an undecided null slot is `open`: neither asserts an
- * adapter answer.
+ * The class of a row, from what the oracle says (work note §6.1 and §6.6): a closed fact is `fact`, or `recovery`
+ * with an error; no fact is `unknown`, with the legacy's codes and messages pinned beside it, and the adapter's
+ * answer must realize to unknown; a `stage5` variant is `legacy`, and a row with an undecided null slot is `open`:
+ * neither asserts an adapter answer.
  */
 function classify(
-  routine: RoutineName,
   variant: Variant,
   fact: string,
   errors: readonly { readonly code: string; readonly message: string }[],
@@ -1436,9 +1304,7 @@ function classify(
   if (fact !== "unknown" && !closed)
     throw new Error(`the fact ${fact} of ${variant.id} is not closed`);
   if (closed) return { class: errors.length > 0 ? "recovery" : "fact", adapter: "fact" };
-  if (errors.some((error) => invalidating(routine, error)))
-    return { class: "invalid", adapter: "invalid" };
-  return { class: "dynamic", adapter: { dynamic: provenance(inputs, variant.why) } };
+  return { class: "unknown", adapter: "unknown" };
 }
 
 /** Every row of a routine's table, generated from its templates and pinned by the legacy oracle. */
@@ -1459,7 +1325,7 @@ export function generateTable(routine: RoutineName): GeneratedRow[] {
       const fact = outcome.type;
       const inputs = caseInputs(outcome, variant.why);
       const { errors, operandErrors } = splitErrors(variant, source, outcome);
-      const { class: cls, adapter } = classify(routine, variant, fact, errors, inputs);
+      const { class: cls, adapter } = classify(variant, fact, errors, inputs);
       const row: CaseRow = {
         id,
         source,
