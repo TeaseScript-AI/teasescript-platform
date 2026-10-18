@@ -19,7 +19,11 @@ export interface MemberRules {
   readonly kinds: readonly ValueKind[];
   /** Reading `name` on a receiver of `kind`: a held part of the receiver, a computed result, or no such member. */
   property(kind: ValueKind, name: string, receiver: OperandView): MemberAnswer | undefined;
-  /** Calling `name` on a receiver of `kind` with `inputs` (the receiver's view already restricted to `kind`). */
+  /**
+   * Calling `name` on a receiver of `kind` with `inputs`: the receiver's view as a whole, since a gate of the legacy
+   * may read the receiver's other kinds; a rule that reads the members of its kind restricts the view itself
+   * (`restrictedTo`). The solver realizes a `byReceiver` case on the restricted view.
+   */
   method(kind: ValueKind, name: string, inputs: OperationInputs): OperationResult | undefined;
 }
 
@@ -103,10 +107,6 @@ export function byReceiver(
 }
 
 export const RECEIVER: OperandRef = Object.freeze({ receiver: true });
-
-export function argument(index: number): OperandRef {
-  return { argument: index };
-}
 
 export function named(name: string): OperandRef {
   return { named: name };

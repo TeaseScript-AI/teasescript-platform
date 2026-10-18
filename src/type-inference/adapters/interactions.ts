@@ -12,7 +12,6 @@ import {
   isNullable,
   isScalar,
   isScalarKind,
-  isShown,
   joinTypes,
   members,
   nonNullType,
@@ -193,15 +192,12 @@ function choiceEntry(
   type: StaticType,
   object: ChoiceObjectEvidence | null,
   inList: boolean,
-  returns: boolean,
 ): { readonly type: StaticType; readonly rejected: boolean } {
   const value = resolved(nonNullType(type));
   const accepted = (member: StaticType): boolean => {
     const kind = resolved(member).kind;
     return (
-      (returns ? isChoiceValue(member) : isShown(member)) ||
-      kind === "object" ||
-      (!inList && (kind === "list" || kind === "set"))
+      isChoiceValue(member) || kind === "object" || (!inList && (kind === "list" || kind === "set"))
     );
   };
   if (rejects(type, accepted)) return { type: UNKNOWN_TYPE, rejected: true };
@@ -251,7 +247,7 @@ function choice(inputs: OperationInputs): OperationResult {
         const elements = option.content.elements;
         if (elements.length > 0) empty = false;
         for (const element of elements) {
-          const entry = choiceEntry(places, places.type(element.place), element.object, true, true);
+          const entry = choiceEntry(places, places.type(element.place), element.object, true);
           rejected ||= entry.rejected;
           add(entry.type, literalOf(element.literal));
         }
@@ -263,7 +259,7 @@ function choice(inputs: OperationInputs): OperationResult {
       if (parts.some((part) => part.kind === "list" || part.kind === "set")) {
         // Each member gives buttons: a collection its elements, a value itself. A choice object among the elements of
         // a computed collection may return its value or its text, so only scalar elements give a known result type.
-        const entry = choiceEntry(places, type, null, false, true);
+        const entry = choiceEntry(places, type, null, false);
         const accepted =
           entry.type !== UNKNOWN_TYPE &&
           !rejectsElements(
@@ -287,7 +283,6 @@ function choice(inputs: OperationInputs): OperationResult {
         type,
         option.content.kind === "object" ? option.content.object : null,
         false,
-        true,
       );
       rejected ||= entry.rejected;
       add(entry.type, literalOf(option.literal));
@@ -348,7 +343,7 @@ function fieldAnswer(
   elements: readonly ChoiceElementEvidence[] | undefined,
 ): StaticType {
   return kind === "cycle"
-    ? cycleAnswer(places, options(), elements)
+    ? cycleAnswer(places, options, elements)
     : kind === "boolean"
       ? BOOLEAN_TYPE
       : formAnswerType(kind);
@@ -360,7 +355,7 @@ function fieldAnswer(
  */
 function cycleAnswer(
   places: Places,
-  type: StaticType | undefined,
+  options: () => StaticType | undefined,
   elements: readonly ChoiceElementEvidence[] | undefined,
 ): StaticType {
   const computedOption = (member: StaticType): StaticType => {
@@ -380,9 +375,11 @@ function cycleAnswer(
         return returned === null ? UNKNOWN_TYPE : plainType(places.type(returned));
       }),
     );
-  const options = type === undefined ? undefined : resolved(nonNullType(type));
-  if (options?.kind !== "list") return UNKNOWN_TYPE;
-  return union(members(resolved(options.element)).map(computedOption));
+  // The options' type is read only here, for a cycle whose options are not written one by one.
+  const type = options();
+  const list = type === undefined ? undefined : resolved(nonNullType(type));
+  if (list?.kind !== "list") return UNKNOWN_TYPE;
+  return union(members(resolved(list.element)).map(computedOption));
 }
 
 /** `#writtenFormField`: a descriptor written where the form is asked has exactly the written properties. */
@@ -437,7 +434,7 @@ function computedField(
   let result: StaticType | null;
   if (properties.has("type")) result = null;
   else if (options !== undefined) {
-    const cycle = cycleAnswer(places, options, undefined);
+    const cycle = cycleAnswer(places, () => options, undefined);
     result =
       valueType === undefined
         ? cycle

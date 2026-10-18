@@ -96,6 +96,21 @@ test("a written field reads its start only without a type, and its options only 
     { fact: '{"n":integer}' },
     "fact",
   );
+  // A cycle whose options are written one by one reads the elements, never the options' whole type.
+  const cycle = legacyOperation(
+    'let r = askForm("Q", fields: { n: { type: "cycle", options: [1, 2] } })\nexit',
+  );
+  assertCase(
+    interaction("form"),
+    withView(
+      cycle,
+      (built) => descriptorPlace(built, (written) => written.options?.place ?? null),
+      BOTTOM_VIEW,
+    ),
+    cycle,
+    { fact: '{"n":integer}' },
+    "fact",
+  );
   const toggle = legacyOperation(
     'let r = askForm("Q", fields: { n: { type: "boolean", options: hostList } })\nexit',
   );

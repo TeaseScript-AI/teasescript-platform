@@ -333,3 +333,74 @@ test("properties are held parts, copies, or computed members by the receiver's k
     why: "unknown member",
   });
 });
+
+test("set operations per member of the receiver, an empty collection adding nothing, and the gates in their context", () => {
+  const empty = closedView({ kind: "list", element: { kind: "never" } });
+  // An empty collection (an element nothing was stored into) adds no element to a union.
+  assertCase(
+    method("union"),
+    inputsOf({ receiver: LIST, arguments: [empty] }),
+    legacyOperation(`${XS}let r = xs.union([])\nexit`),
+    { fact: "list<integer>" },
+    "fact",
+  );
+  assertCase(
+    method("union"),
+    inputsOf({ receiver: empty, arguments: [LIST] }),
+    legacyOperation("let xs = []\nlet r = xs.union([1])\nexit"),
+    { fact: "list<integer>" },
+    "fact",
+  );
+  // The nullable recovery applies only when the call's shape passed: with another count the receiver's element stays.
+  assertCase(
+    method("intersection"),
+    inputsOf({
+      receiver: LIST,
+      arguments: [closedView(optional({ kind: "list", element: INTEGER_TYPE })), INTEGER],
+    }),
+    legacyOperation(
+      `${XS}let other: integer[]? = hostValue\nlet r = xs.intersection(other, 1)\nexit`,
+    ),
+    { fact: "list<integer>", errors: ["TSV020"] },
+    "fact",
+  );
+  // A receiver of two list types answers per member: a union that mixes for one of them, an intersection of each.
+  const lists = closedView(
+    union([
+      { kind: "list", element: INTEGER_TYPE },
+      { kind: "list", element: STRING_TYPE },
+    ]),
+  );
+  assertCase(
+    method("union"),
+    inputsOf({ receiver: lists, arguments: [LIST] }),
+    legacyOperation("let xs: integer[] | string[] = hostValue\nlet r = xs.union([1])\nexit"),
+    { fact: "list<unknown>", errors: ["TSV044"] },
+    "fact",
+  );
+  assertCase(
+    method("intersection"),
+    inputsOf({ receiver: lists, arguments: [dynamicView("host")] }),
+    legacyOperation(
+      "let xs: integer[] | string[] = hostValue\nlet r = xs.intersection(hostList)\nexit",
+    ),
+    { fact: "(list<integer>|list<string>)" },
+    "fact",
+  );
+  // The dict shape gate takes the value away from a receiver that is a dict alone; beside a list the dict's value
+  // stays and the shape problem is reported.
+  assertCase(
+    method("remove"),
+    inputsOf({
+      receiver: closedView(
+        union([
+          { kind: "dict", element: INTEGER_TYPE },
+          { kind: "list", element: INTEGER_TYPE },
+        ]),
+      ),
+    }),
+    legacyOperation("let xs: integer dict | integer[] = hostValue\nlet r = xs.remove()\nexit"),
+    { fact: "(integer|null)", errors: ["TSV020"] },
+    "fact",
+  );
+});

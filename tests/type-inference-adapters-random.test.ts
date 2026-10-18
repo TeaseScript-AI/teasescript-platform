@@ -7,6 +7,7 @@ import {
   optional,
   PropertyTable,
   STRING_TYPE,
+  union,
   type StaticType,
 } from "../src/static-types.js";
 import { operationRelations } from "../src/type-inference/adapters/index.js";
@@ -76,7 +77,7 @@ test("randomWeighted gives a key of a dict of weights, a copy of an element of a
     legacyOperation(
       'let r = randomWeighted([{ weight: 1 }, { weight: 3 }], weight: "weight")\nexit',
     ),
-    "projection",
+    "type",
   );
   // A source the compiler cannot know: the legacy's unknown, a value of the source's provenance here.
   assertCase(
@@ -128,6 +129,59 @@ test("randomWeighted's shape is a gate, a source that may be null is reported an
     ),
     { fact: "unknown" },
     { dynamic: "host" },
+  );
+});
+
+test("randomWeighted reads one resolved source: a list that may be null is used, a union of sources is reported", () => {
+  const objects: StaticType = { kind: "list", element: { kind: "object", properties: null } };
+  assertCase(
+    random("randomWeighted"),
+    inputsOf({
+      arguments: [closedView(optional(objects))],
+      named: { weight: closedView(STRING_TYPE) },
+    }),
+    legacyOperation(
+      'let xs: object[]? = hostValue\nlet r = randomWeighted(xs, weight: "weight")\nexit',
+    ),
+    { fact: "object", errors: ["TSV043"] },
+    "fact",
+  );
+  assertCase(
+    random("randomWeighted"),
+    inputsOf({
+      arguments: [
+        closedView(
+          union([
+            { kind: "dict", element: INTEGER_TYPE },
+            { kind: "dict", element: STRING_TYPE },
+          ]),
+        ),
+      ],
+    }),
+    legacyOperation(
+      "let xs: integer dict | string dict = hostValue\nlet r = randomWeighted(xs)\nexit",
+    ),
+    { fact: "unknown", errors: ["TSV043"] },
+    "invalid",
+  );
+  assertCase(
+    random("randomWeighted"),
+    inputsOf({
+      arguments: [
+        closedView(
+          union([
+            { kind: "list", element: INTEGER_TYPE },
+            { kind: "list", element: STRING_TYPE },
+          ]),
+        ),
+      ],
+      named: { weight: closedView(STRING_TYPE) },
+    }),
+    legacyOperation(
+      'let xs: integer[] | string[] = hostValue\nlet r = randomWeighted(xs, weight: "w")\nexit',
+    ),
+    { fact: "unknown", errors: ["TSV043"] },
+    "invalid",
   );
 });
 

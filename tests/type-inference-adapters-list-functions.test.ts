@@ -15,6 +15,7 @@ import type { SyntaxEvidence } from "../src/type-inference/graph.js";
 import {
   assertCase,
   assertEqualResult,
+  BOTTOM_VIEW,
   closedView,
   dynamicView,
   inputsOf,
@@ -307,5 +308,42 @@ test("an intercept the compiler cannot know keeps the prediction unknown; a know
     legacyOperation('let r = predict({ slope: 1, intercept: "x", start: 0 }, 1)\nexit'),
     { fact: "unknown" },
     { dynamic: "unknown member" },
+  );
+});
+
+test("a value that may be a list is read as the list form; the x and the selector are read before a bottom list", () => {
+  // `min` of one value that may also be one the compiler cannot know: the list form, the legacy's unknown.
+  assertCase(
+    listFunction("min"),
+    inputsOf({ arguments: [dynamicView("host", [INTEGER_TYPE])] }),
+    legacyOperation("let xs = [hostValue, 1]\nlet r = min(xs.first)\nexit"),
+    { fact: "unknown" },
+    { dynamic: "host" },
+  );
+  // A selector that is no text decides before the list is read; a regression keeps its object with unknown amounts.
+  assertCase(
+    listFunction("sum"),
+    inputsOf({ arguments: [BOTTOM_VIEW], named: { by: closedView(INTEGER_TYPE) } }),
+    legacyOperation("let r = sum(hostList, by: 1)\nexit"),
+    { fact: "unknown", errors: ["TSV043"] },
+    "invalid",
+  );
+  assertCase(
+    listFunction("linearRegression"),
+    inputsOf({ arguments: [BOTTOM_VIEW], named: { y: closedView(INTEGER_TYPE) } }),
+    legacyOperation("let r = linearRegression(hostList, y: 1)\nexit"),
+    {
+      fact: '{"intercept":unknown,"r2":number,"slope":unknown,"start":integer}',
+      errors: ["TSV043"],
+    },
+    "fact",
+  );
+  // An x of another kind decides before the line is read.
+  assertCase(
+    listFunction("predict"),
+    inputsOf({ arguments: [BOTTOM_VIEW, closedView(STRING_TYPE)] }),
+    legacyOperation('let r = predict(hostValue, "x")\nexit'),
+    { fact: "unknown", errors: ["TSV043"] },
+    "invalid",
   );
 });

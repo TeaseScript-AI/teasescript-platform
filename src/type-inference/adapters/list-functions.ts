@@ -29,7 +29,6 @@ import type {
   OperationResult,
 } from "./relation.js";
 import {
-  closedType,
   dynamicFrom,
   dynamicResult,
   INVALID,
@@ -88,14 +87,16 @@ function valuesOf(
   selector: string,
 ): { readonly type: StaticType } | { readonly result: OperationResult } {
   const named = inputs.named.get(selector);
-  if (isBottom(list) || (named !== undefined && isBottom(named))) return { result: UNCONSTRAINED };
   let key: string | null | undefined;
   if (named !== undefined) {
+    if (isBottom(named)) return { result: UNCONSTRAINED };
     // A selector that is no text is reported; one the legacy cannot see, or cannot know, names no property.
     if (named.dynamic === null && !useOf(named).every((member) => isScalar(member, "string")))
       return { result: INVALID };
     key = named.dynamic === null ? writtenSelector(inputs.evidence, selector) : undefined;
   }
+  // The selector's name is checked whatever the list is; the list is read after it.
+  if (isBottom(list)) return { result: UNCONSTRAINED };
   const lists = useOf(list);
   if (list.dynamic === null && lists.some((member) => member.kind !== "list"))
     return { result: INVALID };
@@ -225,8 +226,9 @@ function prediction(
   if (misshapen(contract, inputs)) return INVALID;
   const line = inputs.arguments[0]!;
   const x = inputs.arguments[1]!;
-  if (isBottom(line) || isBottom(x)) return UNCONSTRAINED;
-  // Whatever the line, each kind the x may be is a number or a date and time value; null alone is no x.
+  // Whatever the line, each kind the x may be is a number or a date and time value; null alone is no x. The x is
+  // read first, as the legacy reads it, and the line only after it passes.
+  if (isBottom(x)) return UNCONSTRAINED;
   const xs = useOf(x);
   if (x.dynamic === null && xs.length === 0) return INVALID;
   if (
@@ -240,6 +242,7 @@ function prediction(
     )
   )
     return INVALID;
+  if (isBottom(line)) return UNCONSTRAINED;
   if (line.dynamic !== null) return dynamicFrom(line, "unknown member");
   const object = resolved(union(useOf(line)));
   if (unknownPart(object)) return dynamicResult("unknown member");
@@ -273,12 +276,17 @@ function relation(name: ListFunctionName, contract: ListFunction): OperationRela
     result(inputs: OperationInputs): OperationResult {
       switch (contract.takes) {
         case "values": {
-          // `min` and `max` of two or more values, or of one value that is no list, take their arguments' values.
+          // `min` and `max` of two or more values, or of one value that is no list, take their arguments' values;
+          // one value that may be a list, or that the compiler cannot know, is read as the list form (the legacy's
+          // dispatch counts a member it does not know as a list).
           const single = inputs.arguments.length === 1 ? inputs.arguments[0]! : undefined;
           const list =
             single !== undefined &&
-            (single.alternatives === null ||
-              members(closedType(single)!).some((member) => resolved(member).kind === "list"));
+            (isBottom(single) ||
+              single.dynamic !== null ||
+              viewMembers(single).some(
+                (member) => !isKnown(member) || resolved(member).kind === "list",
+              ));
           // The legacy folds every argument of the value form, the named ones too (reported as unknown names).
           if (takesValues(name) && !list)
             return minMaxOfValues([...inputs.arguments, ...inputs.named.values()]);

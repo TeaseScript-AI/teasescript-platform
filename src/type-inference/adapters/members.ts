@@ -17,7 +17,6 @@ import {
   INVALID,
   isBottom,
   kindsOf,
-  restrictedTo,
   UNCONSTRAINED,
   type MemberAnswer,
   type MemberRules,
@@ -64,14 +63,7 @@ export function methodRelation(name: string): OperationRelation {
       if (kinds.length === 0) return dynamicFrom(receiver, "unknown member");
       const answers = kinds.map((kind) => ({
         kind,
-        result:
-          kind === "speaker"
-            ? undefined
-            : rulesFor(kind)?.method(kind, name, {
-                ...inputs,
-                receiver: restrictedTo(receiver, kind),
-                view: (place) => inputs.view(place),
-              }),
+        result: kind === "speaker" ? undefined : rulesFor(kind)?.method(kind, name, inputs),
       }));
       const supported = answers.filter((answer) => answer.result !== undefined);
       // A receiver that may also hold data the compiler cannot know is never rejected here (the legacy holds it as

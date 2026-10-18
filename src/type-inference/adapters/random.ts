@@ -3,20 +3,11 @@ import {
   BOOLEAN_TYPE,
   INTEGER_TYPE,
   NUMBER_TYPE,
+  resolved,
   STRING_TYPE,
-  valueKindOfType,
 } from "../../static-types.js";
 import type { OperationInputs, OperationRelation, OperationResult } from "./relation.js";
-import {
-  argument,
-  dynamicFrom,
-  INVALID,
-  isBottom,
-  projectionOf,
-  typeResult,
-  UNCONSTRAINED,
-  viewMembers,
-} from "./views.js";
+import { dynamicFrom, INVALID, isBottom, typeResult, UNCONSTRAINED, viewMembers } from "./views.js";
 
 /**
  * The random functions (O4 stage 2b), as `#randomFunctionType` of the legacy checker gives them: a draw of numbers
@@ -45,15 +36,16 @@ function relation(name: string, contract: RandomFunction): OperationRelation {
           if (isBottom(source)) return UNCONSTRAINED;
           // A source that may also be one the compiler cannot know is not known (`forUse` on unknown).
           if (source.dynamic !== null) return dynamicFrom(source, "unknown member");
-          // The members for use: without null, which is reported, unless null is all there is.
+          // The members for use: without null, which is reported, unless null is all there is. One resolved type
+          // of source (`resolved(forUse(type))`): a dict gives one of its keys, a list a copy of one of its
+          // elements; a union of several, also of one kind, is reported.
           const all = viewMembers(source);
           const used = all.filter((member) => member.kind !== "null");
-          const kinds = new Set((used.length === 0 ? all : used).map(valueKindOfType));
-          // One kind of source: a dict gives one of its keys, a list a copy of one of its elements.
-          if (kinds.size !== 1) return INVALID;
-          const [kind] = kinds;
-          if (kind === "dict") return typeResult(STRING_TYPE);
-          return kind === "list" ? projectionOf(argument(0), "element") : INVALID;
+          const members = used.length === 0 ? all : used;
+          if (members.length !== 1) return INVALID;
+          const only = resolved(members[0]!);
+          if (only.kind === "dict") return typeResult(STRING_TYPE);
+          return only.kind === "list" ? typeResult(only.element) : INVALID;
         }
       }
     },

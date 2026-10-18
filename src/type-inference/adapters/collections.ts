@@ -1,5 +1,5 @@
 import { dictMethod, dictProperty } from "../../dict-operations.js";
-import { listMethod, listProperty } from "../../list-methods.js";
+import { listMethod, listProperty, type ListMethod } from "../../list-methods.js";
 import {
   BOOLEAN_TYPE,
   INTEGER_TYPE,
@@ -25,6 +25,7 @@ import {
   pathOf,
   projectionOf,
   RECEIVER,
+  restrictedTo,
   typeResult,
   UNCONSTRAINED,
   viewMembers,
@@ -103,11 +104,19 @@ function misshapen(
   );
 }
 
-/** A dict's methods: `dictMethod` names what each gives; `get` needs its default (V30 §40) and gives a copy of either. */
+/**
+ * A dict's methods: `dictMethod` names what each gives; `get` needs its default (V30 §40) and gives a copy of either.
+ * The legacy's shape gate (`#checkDictArguments`) takes the value away only from a receiver that is a dict alone
+ * (`isDictReceiver`); beside other kinds the shape problem is reported and the dict's value kept.
+ */
 function dictMethodResult(name: string, inputs: OperationInputs): OperationResult | undefined {
   const contract = dictMethod(name);
   if (contract === undefined) return undefined;
-  if (misshapen(inputs, contract.parameters.length, contract.named)) return INVALID;
+  const known = viewMembers(inputs.receiver!).filter(
+    (member) => member.kind !== "null" && isKnown(member),
+  );
+  const dictAlone = known.length > 0 && known.every((member) => resolved(member).kind === "dict");
+  if (dictAlone && misshapen(inputs, contract.parameters.length, contract.named)) return INVALID;
   switch (contract.result) {
     case "null":
       return typeResult(NULL_TYPE);
@@ -122,45 +131,50 @@ function dictMethodResult(name: string, inputs: OperationInputs): OperationResul
 }
 
 /**
- * `intersection`, `union` and `difference` (`#setOperationType`): a new collection of the receiver's kind. `union`
- * holds the elements of both, so their types join as in a list literal, and a mix, a member that is no collection
- * or an element the compiler cannot know leaves the elements unknown (the legacy's recovery, reported where it
- * mixes); the other operations keep the receiver's element. An argument that may be null needs a check first and
- * leaves the elements unknown too.
+ * `intersection`, `union` and `difference` (`#setOperationType`), per member of the receiver's kind: a new collection
+ * of that kind. `union` holds the elements of both, so their types join as in a list literal, and a member of the
+ * argument that is no collection, an element the compiler cannot know, or a mix leaves the elements unknown (the
+ * legacy's recovery, reported where it mixes); the other operations keep the member's element. An argument that may
+ * be null needs a check first and leaves the elements unknown, when the call's shape passed; an empty collection
+ * adds no element.
  */
 function setOperation(
   kind: "list" | "set",
-  name: string,
+  contract: ListMethod,
   inputs: OperationInputs,
 ): OperationResult {
+  const receiver = restrictedTo(inputs.receiver!, kind);
   const other = inputs.arguments[0];
-  const unknownElements = typeResult({ kind, element: UNKNOWN_TYPE });
-  if (other !== undefined && !isBottom(other) && other.dynamic === null) {
+  const unknownElements: StaticType = { kind, element: UNKNOWN_TYPE };
+  const shaped = !misshapen(inputs, contract.parameters.length, contract.named);
+  if (other !== undefined && isBottom(other)) return UNCONSTRAINED;
+  if (shaped && other !== undefined && other.dynamic === null) {
     const all = viewMembers(other);
     const passing = all.filter((member) => member.kind !== "null");
-    if (passing.length > 0 && passing.length < all.length) return unknownElements;
+    if (passing.length > 0 && passing.length < all.length) return typeResult(unknownElements);
   }
-  if (name !== "union" || other === undefined) return joinOf(kind, pathOf(RECEIVER, "element"));
-  if (isBottom(other)) return UNCONSTRAINED;
-  if (other.dynamic !== null) return unknownElements;
-  const others: StaticType[] = [];
-  for (const member of viewMembers(other).map(resolved)) {
-    if (member.kind === "null") continue;
-    if (member.kind !== "list" && member.kind !== "set") return unknownElements;
-    others.push(member.element);
-  }
-  const receiver = inputs.receiver;
-  if (receiver === null || isBottom(receiver)) return UNCONSTRAINED;
-  if (receiver.dynamic !== null) return unknownElements;
-  const own = union(
-    viewMembers(receiver).flatMap((member) => {
-      const value = resolved(member);
-      return value.kind === "list" || value.kind === "set" ? [value.element] : [];
-    }),
-  );
-  if (!isKnown(own) || !isKnown(union(others))) return unknownElements;
-  const element = joinTypes([own, ...others]);
-  return element === undefined ? unknownElements : typeResult({ kind, element });
+  const owns = viewMembers(receiver).flatMap((member) => {
+    const value = resolved(member);
+    return value.kind === "list" || value.kind === "set" ? [resolved(value.element)] : [];
+  });
+  if (owns.length === 0) return INVALID;
+  const result = (own: StaticType): StaticType => {
+    if (contract.name !== "union" || other === undefined) return { kind, element: own };
+    if (other.dynamic !== null) return unknownElements;
+    const others: StaticType[] = [];
+    for (const member of viewMembers(other).map(resolved)) {
+      if (member.kind === "null") continue;
+      if (member.kind !== "list" && member.kind !== "set") return unknownElements;
+      others.push(resolved(member.element));
+    }
+    // An empty collection (an element nothing was stored into) adds no element.
+    const parts = [own, ...others].filter((part) => part.kind !== "never");
+    if (parts.some((part) => part.kind === "unknown")) return unknownElements;
+    if (parts.length === 0) return { kind, element: own };
+    const element = joinTypes(parts);
+    return element === undefined ? unknownElements : { kind, element };
+  };
+  return typeResult(union(owns.map(result)));
 }
 
 /** A list's or set's methods, as `LIST_METHODS` names their results (`#collectionMethodType`, `#setOperationType`). */
@@ -178,7 +192,7 @@ function listMethodResult(
       !inputs.named.has("default")
       ? INVALID
       : alternativesOf(projectionOf(RECEIVER, "element"), projectionOf(named("default")));
-  if (contract.parameters[0]?.kind === "collection") return setOperation(kind, name, inputs);
+  if (contract.parameters[0]?.kind === "collection") return setOperation(kind, contract, inputs);
   switch (contract.result) {
     case "element":
       return projectionOf(RECEIVER, "element");
