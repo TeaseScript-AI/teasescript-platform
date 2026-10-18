@@ -22,6 +22,7 @@ export interface SayEvent {
   readonly kind: "say";
   readonly sequence: number;
   readonly speaker: OutputSpeaker | null;
+  /** Freshly parsed, deeply frozen markup that no state holds, so a session publishes it as it is. */
   readonly content: MessageMarkup;
   readonly text: string;
   readonly span: SourceSpan;
@@ -35,6 +36,7 @@ export interface MessageUpdatedEvent {
   readonly kind: "messageUpdated";
   readonly sequence: number;
   readonly messageId: number;
+  /** Freshly parsed, deeply frozen markup that no state holds, like a say's. */
   readonly content: MessageMarkup;
   readonly text: string;
   readonly span: SourceSpan;

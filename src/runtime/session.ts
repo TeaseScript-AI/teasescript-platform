@@ -77,7 +77,7 @@ import {
 } from "./media-projection.js";
 import { permanentButtonProjection, type PermanentButtonProjection } from "./permanent-buttons.js";
 import { captureExecutableData, RuntimeDataError } from "./operations/support.js";
-import { copyPlainData } from "./plain-data.js";
+import { copyPlainData, publishResult } from "./plain-data.js";
 import { hasSnapshotTag, snapshotTag } from "./snapshot-tag.js";
 import type { PresentationSettings } from "../temporal.js";
 import type { SourceSpan } from "../source.js";
@@ -770,24 +770,49 @@ function variablePreview(binding: RuntimeBindingSnapshot): RuntimeSessionVariabl
 }
 
 function executed(done: RuntimeOperationResult): RuntimeSessionResult {
-  return published({
-    events: done.events,
-    instructionsExecuted: done.instructionsExecuted,
-    ...(done.instructionTrace === undefined ? {} : { instructionTrace: done.instructionTrace }),
-    ...(done.randomChoices === undefined ? {} : { randomChoices: done.randomChoices }),
-    ...(done.randomRefusal === undefined ? {} : { randomRefusal: done.randomRefusal }),
-  });
+  return publishResult(
+    {
+      events: done.events,
+      instructionsExecuted: done.instructionsExecuted,
+      ...(done.instructionTrace === undefined ? {} : { instructionTrace: done.instructionTrace }),
+      ...(done.randomChoices === undefined ? {} : { randomChoices: done.randomChoices }),
+      ...(done.randomRefusal === undefined ? {} : { randomRefusal: done.randomRefusal }),
+    },
+    reusedInPublication(done.events, null),
+  );
 }
 
 function settled<T>(done: PendingActionOperationResult<T>): RuntimeSessionOutcomeResult<T> {
-  return published({
-    events: done.events,
-    instructionsExecuted: done.instructionsExecuted,
-    ...(done.instructionTrace === undefined ? {} : { instructionTrace: done.instructionTrace }),
-    ...(done.randomChoices === undefined ? {} : { randomChoices: done.randomChoices }),
-    ...(done.randomRefusal === undefined ? {} : { randomRefusal: done.randomRefusal }),
-    outcome: done.outcome,
-  });
+  return publishResult(
+    {
+      events: done.events,
+      instructionsExecuted: done.instructionsExecuted,
+      ...(done.instructionTrace === undefined ? {} : { instructionTrace: done.instructionTrace }),
+      ...(done.randomChoices === undefined ? {} : { randomChoices: done.randomChoices }),
+      ...(done.randomRefusal === undefined ? {} : { randomRefusal: done.randomRefusal }),
+      outcome: done.outcome,
+    },
+    reusedInPublication(done.events, done.outcome),
+  );
+}
+
+/**
+ * What a result's publication reuses instead of copying (`publishResult`), or `null` for nothing: the markup of a say
+ * or message update, which its parser froze deeply and no state holds, as it is; and each record the outcome holds,
+ * such as a completion's settlement that its event holds too, copied once.
+ */
+function reusedInPublication(
+  events: readonly InterpreterEvent[],
+  outcome: unknown,
+): Map<object, object | null> | null {
+  let reuse: Map<object, object | null> | null = null;
+  for (const event of events)
+    if (event.kind === "say" || event.kind === "messageUpdated")
+      (reuse ??= new Map()).set(event.content, event.content);
+  if (typeof outcome === "object" && outcome !== null)
+    for (const field of Object.values(outcome))
+      if (typeof field === "object" && field !== null) (reuse ??= new Map()).set(field, null);
+  return reuse;
 }
 
 /*
