@@ -157,6 +157,139 @@ test("nothing a session publishes or exports shares an object with its state", (
   assert.equal(session.view().status, "running");
 });
 
+/** A script whose results hold say, message update, button, media, timer, pacing, wait, choice, and completion output. */
+const EVERY_OUTPUT = `let note = say "# Plan\\n- **first** step\\n- [docs](https://example.com)\\n> keep \`calm\`", instant
+showPermanentButton "Add one" {
+    note.text = "*pressed*"
+}
+let music = playAudio async "music.mp3"
+let clip = playVideo async repeat "clip.mp4"
+timer async 2 s {
+    music.stop()
+}
+say "Read this slowly", 1 s
+let picked = askChoice "left", "right", "up"
+if picked == "right" {
+    note.text = "picked \${picked}"
+}
+wait 5 s
+exit
+`;
+
+/** Every object reachable from `root`. */
+function objectsOf(root: unknown): Set<object> {
+  const seen = new Set<object>();
+  const pending = [root];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (typeof value !== "object" || value === null || seen.has(value)) continue;
+    seen.add(value);
+    pending.push(...Object.values(value));
+  }
+  return seen;
+}
+
+test("results and projections are deeply frozen and stay as published after later operations", () => {
+  const plan = compileValidPlan(EVERY_OUTPUT);
+  let snapshot = createImmediatePacingRuntimeSnapshot(plan);
+  const session = createRuntimeSession(plan, snapshot);
+  // Deeply frozen output cannot share a mutable object with the session's state, which later operations change.
+  const held: [unknown, string][] = [];
+  const hold = (value: unknown) => {
+    for (const object of objectsOf(value)) assert.ok(Object.isFrozen(object));
+    held.push([value, JSON.stringify(value)]);
+  };
+  const eventKinds = new Set<string>();
+  let branchPairs = 0;
+  const same = <R extends RuntimeSessionResult>(
+    legacy: RuntimeOperationResult,
+    operate: (current: RuntimeSession) => R,
+  ): R => {
+    const { snapshot: state, ...output } = legacy;
+    snapshot = state;
+    const result = operate(session);
+    assert.deepEqual(result, output);
+    hold(result);
+    hold(session.stageProjection());
+    hold(session.mediaPlaybackProjection());
+    hold(session.permanentButtonProjection());
+    hold(session.view());
+    assert.deepEqual(session.stageProjection(), stageProjection(state));
+    assert.deepEqual(session.mediaPlaybackProjection(), mediaPlaybackProjection(state));
+    assert.deepEqual(session.permanentButtonProjection(), permanentButtonProjection(state));
+    for (const event of result.events)
+      eventKinds.add(
+        event.kind === "actionRequested" ? `request ${event.action.kind}` : event.kind,
+      );
+    branchPairs += result.instructionTrace?.branches.length ?? 0;
+    return result;
+  };
+  const progress = () =>
+    session
+      .view()
+      .backgroundActions.flatMap((action) =>
+        action.kind === "media" && action.media.loaded && action.media.state === "running"
+          ? [{ mediaId: action.media.mediaId, segment: action.media.segment, progressMs: 0 }]
+          : [],
+      );
+  const observe = (nowMs: number) => {
+    const reports = progress().map((report) => ({ ...report, progressMs: nowMs }));
+    same(observeTime(plan, snapshot, nowMs, reports), (current) =>
+      current.observeTime(nowMs, reports),
+    );
+  };
+  const load = (mediaId: number, durationMs: number) =>
+    same(reportMediaLoad(plan, snapshot, mediaId, { kind: "loaded", durationMs }), (current) =>
+      current.reportMediaLoad(mediaId, { kind: "loaded", durationMs }),
+    );
+  const runBoth = () =>
+    same(run(plan, snapshot, {}, { instructionTrace: true }), (current) =>
+      current.run({ instructionTrace: true }),
+    );
+
+  runBoth();
+  load(1, 10_000);
+  runBoth();
+  load(2, 4_000);
+  runBoth();
+  observe(1_000);
+  runBoth();
+  same(pressPermanentButton(plan, snapshot, 1), (current) => current.pressPermanentButton(1));
+  runBoth();
+  observe(2_500);
+  runBoth();
+  const request = choiceRequest(session, 1);
+  const completed = same(completeAction(plan, snapshot, request), (current) =>
+    current.completeAction(request),
+  );
+  // Scoped oracle for the publication: the settlement its event and the outcome both hold is published once.
+  const completion = completed.events.find((event) => event.kind === "actionCompleted");
+  assert.ok(completion?.kind === "actionCompleted" && completed.outcome.kind === "completed");
+  assert.equal(completed.outcome.settlement, completion.settlement);
+  runBoth();
+  observe(8_000);
+  runBoth();
+  assert.equal(session.view().status, "halted");
+  // The traces held the branch pairs of the choice's condition, which are published as they are like the rest.
+  assert.ok(branchPairs > 0);
+  assert.deepEqual([...eventKinds].sort(), [
+    "actionCompleted",
+    "exit",
+    "messageUpdated",
+    "permanentButtonPressed",
+    "playerTranscript",
+    "request chatPacingGate",
+    "request delay",
+    "request interaction",
+    "request media",
+    "request mediaPlayback",
+    "request permanentButton",
+    "request timer",
+    "say",
+  ]);
+  for (const [value, json] of held) assert.equal(JSON.stringify(value), json);
+});
+
 test("a fork is independent of its parent and shares only the immutable plan", () => {
   const plan = compileValidPlan(CHOICE_LOOP);
   const parent = createFreshRuntimeSession(plan, {

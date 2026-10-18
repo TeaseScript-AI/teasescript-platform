@@ -77,7 +77,7 @@ import {
 } from "./media-projection.js";
 import { permanentButtonProjection, type PermanentButtonProjection } from "./permanent-buttons.js";
 import { captureExecutableData, RuntimeDataError } from "./operations/support.js";
-import { copyPlainData } from "./plain-data.js";
+import { copyPlainData, publishResult } from "./plain-data.js";
 import { hasSnapshotTag, snapshotTag } from "./snapshot-tag.js";
 import type { PresentationSettings } from "../temporal.js";
 import type { SourceSpan } from "../source.js";
@@ -538,17 +538,17 @@ export class RuntimeSession {
 
   /** What the Stage shows, as `stageProjection` gives it for a snapshot. */
   public stageProjection(): StageProjection {
-    return this.#read((state) => published(stageProjection(state)));
+    return this.#read((state) => stageProjection(state));
   }
 
   /** The media a Player plays, as `mediaPlaybackProjection` gives them for a snapshot. */
   public mediaPlaybackProjection(): readonly MediaPlaybackProjection[] {
-    return this.#read((state) => published(mediaPlaybackProjection(state)));
+    return this.#read((state) => mediaPlaybackProjection(state));
   }
 
   /** The shown permanent buttons, as `permanentButtonProjection` gives them for a snapshot. */
   public permanentButtonProjection(): readonly PermanentButtonProjection[] {
-    return this.#read((state) => published(permanentButtonProjection(state)));
+    return this.#read((state) => permanentButtonProjection(state));
   }
 
   /**
@@ -770,24 +770,51 @@ function variablePreview(binding: RuntimeBindingSnapshot): RuntimeSessionVariabl
 }
 
 function executed(done: RuntimeOperationResult): RuntimeSessionResult {
-  return published({
-    events: done.events,
-    instructionsExecuted: done.instructionsExecuted,
-    ...(done.instructionTrace === undefined ? {} : { instructionTrace: done.instructionTrace }),
-    ...(done.randomChoices === undefined ? {} : { randomChoices: done.randomChoices }),
-    ...(done.randomRefusal === undefined ? {} : { randomRefusal: done.randomRefusal }),
-  });
+  return publishResult(
+    {
+      events: done.events,
+      instructionsExecuted: done.instructionsExecuted,
+      ...(done.instructionTrace === undefined ? {} : { instructionTrace: done.instructionTrace }),
+      ...(done.randomChoices === undefined ? {} : { randomChoices: done.randomChoices }),
+      ...(done.randomRefusal === undefined ? {} : { randomRefusal: done.randomRefusal }),
+    },
+    reusedInPublication(done, null),
+  );
 }
 
 function settled<T>(done: PendingActionOperationResult<T>): RuntimeSessionOutcomeResult<T> {
-  return published({
-    events: done.events,
-    instructionsExecuted: done.instructionsExecuted,
-    ...(done.instructionTrace === undefined ? {} : { instructionTrace: done.instructionTrace }),
-    ...(done.randomChoices === undefined ? {} : { randomChoices: done.randomChoices }),
-    ...(done.randomRefusal === undefined ? {} : { randomRefusal: done.randomRefusal }),
-    outcome: done.outcome,
-  });
+  return publishResult(
+    {
+      events: done.events,
+      instructionsExecuted: done.instructionsExecuted,
+      ...(done.instructionTrace === undefined ? {} : { instructionTrace: done.instructionTrace }),
+      ...(done.randomChoices === undefined ? {} : { randomChoices: done.randomChoices }),
+      ...(done.randomRefusal === undefined ? {} : { randomRefusal: done.randomRefusal }),
+      outcome: done.outcome,
+    },
+    reusedInPublication(done, done.outcome),
+  );
+}
+
+/**
+ * What a result's publication reuses instead of copying (`publishResult`), or `null` for nothing: the instruction
+ * trace and the markup of a say or message update, which their producers froze deeply and no state holds, as they are;
+ * and each record the outcome holds, such as a completion's settlement that its event holds too, copied once.
+ */
+function reusedInPublication(
+  done: RuntimeOperationResult,
+  outcome: unknown,
+): Map<object, object | null> | null {
+  let reuse: Map<object, object | null> | null = null;
+  if (done.instructionTrace !== undefined)
+    (reuse ??= new Map()).set(done.instructionTrace, done.instructionTrace);
+  for (const event of done.events)
+    if (event.kind === "say" || event.kind === "messageUpdated")
+      (reuse ??= new Map()).set(event.content, event.content);
+  if (typeof outcome === "object" && outcome !== null)
+    for (const field of Object.values(outcome))
+      if (typeof field === "object" && field !== null) (reuse ??= new Map()).set(field, null);
+  return reuse;
 }
 
 /*
