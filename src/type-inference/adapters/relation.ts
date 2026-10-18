@@ -1,5 +1,6 @@
 import type { StaticType } from "../../static-types.js";
 import type { KnownValue } from "../../static-evaluation.js";
+import type { ValueKind } from "../../value-kinds.js";
 import type { ContractRef, DynamicWhy, PlaceId, ProjectionStep, SyntaxEvidence } from "../graph.js";
 
 // The contract between the solver and the built-in contracts (O4 stage 2): an operation's result as a relation over
@@ -64,7 +65,16 @@ export type OperationResult =
   /** The operands can never combine under the contract; the check reports it, the result has no value. */
   | { readonly kind: "invalid" }
   /** One of several results, as `fromBase64(text, default: box)` gives text or a copy of its default. */
-  | { readonly kind: "alternatives"; readonly results: readonly OperationResult[] };
+  | { readonly kind: "alternatives"; readonly results: readonly OperationResult[] }
+  /**
+   * A result per kind the receiver may have, as `union(other)` on a receiver that is a list or a set. The solver
+   * evaluates each case with the receiver's view restricted to that kind, and every operand path inside the case
+   * refers to that restricted receiver; the cases join as alternatives do.
+   */
+  | {
+      readonly kind: "byReceiver";
+      readonly cases: readonly { readonly receiver: ValueKind; readonly result: OperationResult }[];
+    };
 
 export interface OperationRelation {
   readonly contract: ContractRef;

@@ -10,6 +10,7 @@ import type {
   SyntaxEvidence,
   TypeTerm,
 } from "../../src/type-inference/graph.js";
+import { operationRelations } from "../../src/type-inference/adapters/index.js";
 import { registryView } from "../../src/type-inference/registry-view.js";
 
 /**
@@ -44,7 +45,7 @@ export function request(
       },
       speakers: new Map(names.flatMap((result) => [...result.speakers])),
     },
-    services: { valueKinds: registryView() },
+    services: { valueKinds: registryView(), operations: operationRelations() },
   };
 }
 

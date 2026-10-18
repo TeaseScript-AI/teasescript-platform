@@ -39,7 +39,7 @@ import { isNumericFunction } from "../numeric-functions.js";
 import { accountCopy, sessionDeclarations, someNode } from "../project-globals.js";
 import { isRandomFunction } from "../random-functions.js";
 import type { SourceSpan } from "../source.js";
-import { staticChoiceValue } from "../static-evaluation.js";
+import { staticChoiceValue, staticVisibleText } from "../static-evaluation.js";
 import { PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "../speaker-terms.js";
 import { isClockFunction } from "../temporal-builtins.js";
 import type { ValueKind } from "../value-kinds.js";
@@ -1292,14 +1292,20 @@ class Collector {
         return result;
       }
       const args = yield* compileChild(this.#arguments(expression, scope));
-      if (entry === undefined && this.#builtins.has(callee.name))
+      if (entry === undefined && this.#builtins.has(callee.name)) {
+        const family = builtinFamily(callee.name);
         return this.#operation(
-          { family: builtinFamily(callee.name), name: callee.name },
+          { family, name: callee.name },
           null,
           args.positional,
           args.named,
           expression,
+          "operand",
+          family === "listFunction" || callee.name === "randomWeighted"
+            ? selectorsEvidence(expression)
+            : undefined,
         );
+      }
       const place = this.#value(expression);
       this.#has(place, { kind: "dynamic", why: "unknown callee" }, expression, "call");
       return place;
@@ -1451,6 +1457,17 @@ function builtinFamily(name: string): ContractRef["family"] {
   if (isListFunction(name)) return "listFunction";
   return "builtin";
 }
+
+/** The selectors of a list function or of `randomWeighted`, as text where they are written as text (see `SyntaxEvidence`). */
+function selectorsEvidence(expression: CallExpression): SyntaxEvidence {
+  const written: { readonly name: string; readonly text: string | null }[] = [];
+  for (const argument of expression.arguments)
+    if (argument.kind === "namedArgument" && SELECTORS.has(argument.name.name))
+      written.push({ name: argument.name.name, text: staticVisibleText(argument.value) ?? null });
+  return { kind: "selectors", written };
+}
+
+const SELECTORS: ReadonlySet<string> = new Set(["by", "x", "y", "weight"]);
 
 /** The spelling of a receiver for a label, or its site. */
 function label(expression: Expression): string {
