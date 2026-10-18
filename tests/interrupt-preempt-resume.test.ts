@@ -16,6 +16,7 @@ import {
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { Story } from "./helpers/story-session.js";
 
@@ -250,8 +251,8 @@ const BLOCK_SOURCES = [
 /**
  * Statements that make the main path wait on a foreground action of each kind, keyed by kind so that a new kind needs
  * its rows. A block interrupts the action, which then resumes as it was with `resumesWith` changed, or the action is a
- * host step that the block waits for until the Player settles it with `settledBy` (owner decision on #829, 2026-10-11;
- * V30 §13 for storage, captures, file stores, and locks).
+ * host step that the block waits for until the Player settles it with `settledBy` (owner decision on #829, 2026-10-11,
+ * and the host steps in docs/RUNTIME.md).
  */
 const FOREGROUND_ROWS: {
   readonly [K in RuntimeForegroundActionSnapshot["kind"]]: readonly (
@@ -354,4 +355,41 @@ test("a block from each source interrupts each foreground action that is no host
       }
     }
   }
+});
+
+test("structural validation refuses a block frame that suspends a host step", () => {
+  const story = new Story(`${BLOCK}\nwait 3 s\nexit`, { persistentScriptStorage: true });
+  story.at(1_000);
+  // Assembled: the engine's frame of a block that interrupted a wait, with the wait replaced by a storage write of the
+  // same identity and context. Validation without the plan leaves out ownership, so only the host step is wrong.
+  // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; the case replaces one action.
+  const tampered = JSON.parse(JSON.stringify(story.snapshot)) as {
+    callFrames: { timerInterruption: { suspendedAction: Record<string, unknown> } | null }[];
+  };
+  assert.deepEqual(validateRuntimeSnapshot(tampered).errors, []);
+  const interruption = tampered.callFrames.find(
+    (frame) => frame.timerInterruption !== null,
+  )!.timerInterruption!;
+  const wait = interruption.suspendedAction;
+  assert.equal(wait.kind, "delay");
+  interruption.suspendedAction = {
+    kind: "storageWrite",
+    ...Object.fromEntries(
+      [
+        "actionId",
+        "owningInstruction",
+        "continuationInstruction",
+        "ownerCallFrameId",
+        "scopeDepth",
+        "loopDepth",
+        "createdAtMs",
+        "requestEventSequence",
+      ].map((field) => [field, wait[field]]),
+    ),
+    key: "k",
+    value: 2,
+  };
+  assert.deepEqual(validateRuntimeSnapshot(tampered).errors, [
+    "Runtime suspended foreground action is malformed.",
+  ]);
 });
