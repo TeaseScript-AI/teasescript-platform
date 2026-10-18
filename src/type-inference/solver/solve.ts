@@ -18,7 +18,14 @@ import {
   offsetOf,
 } from "./cells.js";
 import { interpret, interpretCells, nonWorking, type CellView } from "./interpret.js";
-import { lift, memberRelation, type LiftContext, type Operation } from "./lifting.js";
+import {
+  lift,
+  memberRelation,
+  type LiftContext,
+  type Operation,
+  getApplies,
+  getTally,
+} from "./lifting.js";
 import { run, type RunReport } from "./schedule.js";
 import { TypeTable } from "./types.js";
 
@@ -64,9 +71,6 @@ const DECL_STORES: readonly string[] = [
 ];
 
 type DeclMode = "set" | "mirror" | "strip";
-
-/** Whether a receiver alternative has `get`: a list by index or a dict by key; a set or a scalar has none (Q3.9). */
-const getApplies = (item: Item): boolean => item.ctor === "list" || item.ctor === "dict";
 
 class Solver {
   readonly cells: Cells;
@@ -512,26 +516,13 @@ class Solver {
     };
   }
 
-  /** The combinations a `get` constraint counts: the receiver's alternatives, the ones without `get` invalid (Q3.9). */
-  #getTally(receiver: PlaceId): { readonly asked: number; readonly invalid: number } {
-    let asked = 0;
-    let invalid = 0;
-    for (const item of this.cells.items(receiver)) {
-      if (item.tag === "e" || item.tag === "n") continue;
-      if (item.type !== undefined && this.table.node(item.type).kind === "null") continue;
-      asked += 1;
-      if (item.tag !== "d" && item.tag !== "p" && !getApplies(item)) invalid += 1;
-    }
-    return { asked, invalid };
-  }
-
   /** The operations that cannot succeed or have an invalid counted combination, once over the final cells. */
   statuses(): readonly string[] {
     this.#context.nonWorking = nonWorking(this.cells);
     const out: string[] = [];
     for (const c of this.#graph.constraints) {
       if (c.kind === "get") {
-        const tally = this.#getTally(c.receiver);
+        const tally = getTally(this.#context, c.receiver, c.key);
         if (tally.asked === 0 || tally.invalid === 0) continue;
         const label = `method.get@${offsetOf(c.site)}`;
         out.push(

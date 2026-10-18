@@ -664,6 +664,31 @@ interface Ask {
   readonly selection: Selection;
 }
 
+/** Whether a receiver item has `get`: a list by index or a dict by key; a set, a scalar or null has none (Q3.9). */
+export const getApplies = (item: Item): boolean => item.ctor === "list" || item.ctor === "dict";
+
+/**
+ * The combinations a `get` constraint counts (Q2's own constraint kind), as the member relations count theirs: one per
+ * choice of the receiver, a list or a dict alternative valid, any other (a set, a scalar, null) invalid, a dynamic view
+ * asked and valid, a choice of a non-working alternative a cascade that is not counted; a strict key without evidence
+ * asks nothing (PR review r5-B6).
+ */
+export function getTally(context: LiftContext, receiver: CellId, key: CellId | null): Tally {
+  const { cells } = context;
+  if (!cells.has(receiver) || (key !== null && !cells.has(key))) return { asked: 0, invalid: 0 };
+  let asked = 0;
+  let invalid = 0;
+  for (const pick of picksOf(cells, receiver, false)) {
+    if (pick.kind === "closed" || pick.kind === "possible") {
+      if (context.nonWorking !== null && context.nonWorking.has(`${receiver}:${pick.alt.type}`))
+        continue;
+      asked += 1;
+      if (!pick.alt.items.some(getApplies)) invalid += 1;
+    } else if (pick.kind === "dynamic") asked += 1;
+  }
+  return { asked, invalid };
+}
+
 /** Every choice of one pick per operand. */
 function product(lists: readonly (readonly Pick[])[]): Pick[][] {
   return lists.reduce<Pick[][]>(
