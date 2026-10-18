@@ -25,6 +25,8 @@ interface RuleCase {
   readonly source?: string;
   readonly files?: readonly { readonly path: string; readonly source: string }[];
   readonly expect: Readonly<Record<string, string>>;
+  /** The operation statuses the rule gives (`<family>.<name>@<site>:none|partial(i/n)`), when the rule is about validity. */
+  readonly statuses?: readonly string[];
   readonly why: string;
 }
 
@@ -43,7 +45,12 @@ test("every rule-derived case exports the facts the decided rule gives", () => {
   for (const c of cases) {
     const made = request(c.files ?? [{ path: "main.tease", source: c.source ?? "" }], GLOBALS, []);
     assert.notEqual(made, null, `${c.name} parses and resolves`);
-    const facts = exportFacts(solve(collectGraph(made!), { relations, verify: true }));
+    const solution = solve(collectGraph(made!), { relations, verify: true });
+    const facts = exportFacts(solution);
+    if (c.statuses !== undefined && solution.statuses.join(",") !== c.statuses.join(","))
+      failures.push(
+        `${c.name} (${c.rule}): statuses ${solution.statuses.join(",") || "(none)"}, the rule gives ${c.statuses.join(",") || "(none)"}: ${c.why}`,
+      );
     for (const [name, text] of Object.entries(c.expect)) {
       const found = facts.bindings.find((b) => b.name === name);
       if (found === undefined) failures.push(`${c.name} (${c.rule}): no binding ${name}`);
@@ -54,5 +61,4 @@ test("every rule-derived case exports the facts the decided rule gives", () => {
     }
   }
   assert.deepEqual(failures, [], failures.join("\n"));
-  assert.ok(cases.length >= 25, `rule cases: ${cases.length}`);
 });

@@ -148,7 +148,9 @@ function normalized(text: string): string {
         ? topLevel(inner.slice(1, -1), "|")
         : [inner];
     });
-    return `(${[...new Set(members)].sort().join("|")})${mark}`;
+    const distinct = [...new Set(members)].sort();
+    // one member left (the legacy writes `({"x":integer}|{"x":integer})`): that member
+    return distinct.length === 1 ? `${distinct[0]}${mark}` : `(${distinct.join("|")})${mark}`;
   }
   for (const ctor of ["list", "set", "dict"] as const)
     if (body.startsWith(`${ctor}<`) && body.endsWith(">"))
@@ -182,7 +184,7 @@ export interface AcceptedRecord {
   readonly case: string;
   readonly what: Difference["what"];
   readonly name: string;
-  /** The fact's site as `start:end` (nested expressions share a start). */
+  /** The fact's site as `file:start:end` (nested expressions share a start; two files share offsets). */
   readonly site: string;
   readonly legacy: string | null;
   readonly candidate: string | null;
@@ -217,7 +219,8 @@ const FIXTURES = new URL("../../../tests/fixtures/type-inference/", import.meta.
 const ACCEPTED_FILE = new URL("accepted-differences.jsonl", FIXTURES);
 const DEFERRED_FILE = new URL("deferred-differences.jsonl", FIXTURES);
 
-const siteText = (site: FactSite): string => `${site.start}:${site.end}`;
+/** A site as `file:start:end`: two files' equal offsets are two sites (PR review r4-B1). */
+const siteText = (site: FactSite): string => `${site.file}:${site.start}:${site.end}`;
 
 export const recordKey = (
   caseName: string,

@@ -62,7 +62,7 @@ for (const c of cases) {
         case: c.name,
         what: v.difference.what,
         name: v.difference.name,
-        site: `${v.difference.site.start}:${v.difference.site.end}`,
+        site: `${v.difference.site.file}:${v.difference.site.start}:${v.difference.site.end}`,
         legacy: v.difference.legacy,
         candidate: v.difference.candidate,
         status: "deferred",
@@ -74,7 +74,7 @@ for (const c of cases) {
   }
 }
 if (mode === "pin") {
-  const start = (pin) => Number(pin.site.split(":")[0]);
+  const start = (pin) => Number(pin.site.split(":")[1]);
   pins.sort((a, b) => (a.case < b.case ? -1 : a.case > b.case ? 1 : start(a) - start(b)));
   const lines = [...GROUPS, ...pins].map((row) => JSON.stringify(row));
   writeFileSync(PINS, `${lines.join("\n")}\n`);

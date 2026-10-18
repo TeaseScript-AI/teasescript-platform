@@ -274,8 +274,14 @@ class Solver {
     keep: (item: Item) => boolean = () => true,
   ): boolean {
     let changed = false;
-    for (const item of this.cells.items(from)) {
+    const items = this.cells.items(from);
+    // a copy of a place with a written type takes that type (the owner, 2026-10-18): the bound's members as members
+    // of the copy's union, the values the compiler cannot know beside them; the source's own witnesses and nulls
+    // were checked against the bound there and are not the copy's evidence (PR review r4-B2)
+    const bound = items.some((item) => item.tag === "b");
+    for (const item of items) {
       if (item.tag === "e" || !keep(item)) continue;
+      if (bound && (item.tag === "w" || item.tag === "n")) continue;
       const known = item.tag === "w" || item.tag === "m" || item.tag === "b";
       const tag: Tag = known ? (retag !== null || item.tag === "b" ? "m" : item.tag) : item.tag;
       const contribution: Contribution = {

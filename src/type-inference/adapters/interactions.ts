@@ -536,19 +536,19 @@ function form(inputs: OperationInputs): OperationResult {
         return typeResult(field(places, at, type, descriptor));
       });
   if (container.kind === "dict") {
-    if (written?.shape === "dict" && written.entries.length > 0) {
-      // A written dict shows every field, so its answers are typed field by field.
-      const entries = written.entries;
+    if (written?.shape === "dict" && written.entries.length > 0)
+      // A written dict shows every field: one part per entry, each asked on its own (never a product across the
+      // entries, PR review r4-B3); every part of a dict goes to its element.
       return structureOf(
         "dict",
-        new Map([
-          [
-            "element",
-            (part: OperationInputs): OperationResult =>
-              answer(evidence, part, (places) =>
-                typeResult(
-                  union(
-                    entries.map((entry) =>
+        new Map(
+          written.entries.map(
+            (entry) =>
+              [
+                entry.name,
+                (part: OperationInputs): OperationResult =>
+                  answer(evidence, part, (places) =>
+                    typeResult(
                       field(
                         places,
                         pathOf(placeRef(entry.place)),
@@ -557,13 +557,11 @@ function form(inputs: OperationInputs): OperationResult {
                       ),
                     ),
                   ),
-                ),
-              ),
-          ],
-        ]),
+              ] as const,
+          ),
+        ),
         cancellable,
       );
-    }
     return structureOf(
       "dict",
       new Map([["element", partOf(pathOf(FIELDS, "element"), undefined)]]),

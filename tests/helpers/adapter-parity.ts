@@ -359,7 +359,7 @@ function realize(result: OperationResult, inputs: OperationInputs): Realized {
           ? { kind: "object", properties: new PropertyTable(parts) }
           : {
               kind: "dict",
-              element: parts.find(([name]) => name === "element")?.[1] ?? UNKNOWN_TYPE,
+              element: parts.length === 0 ? UNKNOWN_TYPE : union(parts.map(([, type]) => type)),
             };
       return { kind: "type", type: result.nullable ? optional(built) : built };
     }

@@ -441,6 +441,11 @@ type Outcome =
       readonly group: string | undefined;
       readonly why: Provenance | undefined;
       readonly whys: readonly Provenance[];
+      /**
+       * The result's element cell: `element` for a witness (the witnesses of one constructor are one schema), its own
+       * per chosen receiver alternative for a member of a permitted union (its members stay their own, r4-B3 Sol).
+       */
+      readonly part: string;
     };
 
 interface Reading {
@@ -627,7 +632,7 @@ export function lift(
   let invalid = 0;
   for (const combo of product(choices)) {
     const asks = askLazy(
-      cells,
+      context,
       (inputs) => relation.result(inputs),
       operands,
       combo,
@@ -646,7 +651,6 @@ export function lift(
       ];
       const cascade =
         context.nonWorking !== null && from.some((key) => context.nonWorking!.has(key));
-      context.asks += 1;
       if (!cascade) asked += 1; // a cascade combination is not counted at all; its valid evidence still stands
       if (reading.invalid && !cascade) invalid += 1;
       for (const outcome of reading.outcomes)
@@ -666,7 +670,7 @@ interface Ask {
  * completed ask with its selection.
  */
 function askLazy(
-  cells: Cells,
+  context: LiftContext,
   fn: (inputs: OperationInputs) => OperationResult,
   operands: readonly Operand[],
   combo: readonly Pick[],
@@ -674,6 +678,7 @@ function askLazy(
   site: string,
   selection: Selection,
 ): Ask[] {
+  const { cells } = context;
   const asks: Ask[] = [];
   const run = (selected: Selection): void => {
     // the first dimension read before its selection, recorded by the closures below
@@ -688,7 +693,7 @@ function askLazy(
     let reading: Ask["reading"] | null = null;
     if (wanted.current === null)
       reading = readAnswer(
-        cells,
+        context,
         answer,
         combo,
         operands,
@@ -703,6 +708,8 @@ function askLazy(
       for (const pick of picks) run(new Map([...selected, [key, pick]]));
       return;
     }
+    // every completed ask counts, the nested asks of a structure's parts too (r4-B3's measurement)
+    context.asks += 1;
     asks.push({ reading: reading!, selection: selected });
   };
   run(selection);
@@ -831,7 +838,7 @@ function inputsOf(
 }
 
 function readAnswer(
-  cells: Cells,
+  context: LiftContext,
   answer: OperationResult,
   combo: readonly Pick[],
   operands: readonly Operand[],
@@ -841,6 +848,7 @@ function readAnswer(
   selection: Selection,
   want: Want,
 ): { readonly outcomes: readonly Outcome[]; readonly invalid: boolean } {
+  const { cells } = context;
   const table = cells.table;
   const outcomes: Outcome[] = [];
   let invalid = false;
@@ -920,6 +928,13 @@ function readAnswer(
           }
           elements.push(...projected);
         }
+        // a member's rebuilt collection keeps its own element cell, named by the chosen receiver alternative
+        const receiverIndex = operands.findIndex((operand) => "receiver" in operand.ref);
+        const receiverPick = receiverIndex < 0 ? undefined : combo[receiverIndex];
+        const part =
+          tag === "m" && receiverPick !== undefined && receiverPick.kind === "closed"
+            ? `element#${receiverPick.alt.type}`
+            : "element";
         outcomes.push({
           kind: "collection",
           tag,
@@ -928,6 +943,7 @@ function readAnswer(
           group: tag === "m" ? reading.site : undefined,
           why: undefined,
           whys: reading.whys,
+          part,
         });
         break;
       }
@@ -964,7 +980,7 @@ function readAnswer(
         const parts = new Map<string, readonly Outcome[]>();
         for (const [name, part] of a.parts) {
           const collected: Outcome[] = [];
-          for (const ask of askLazy(cells, part, operands, combo, operation, site, selection))
+          for (const ask of askLazy(context, part, operands, combo, operation, site, selection))
             collected.push(...ask.reading.outcomes);
           parts.set(name, collected);
         }
@@ -1095,7 +1111,7 @@ function emit(cells: Cells, result: CellId, outcome: Outcome, at: Position): boo
           changed = true;
         break;
       case "collection": {
-        const element = cells.derived(result, "element");
+        const element = cells.derived(result, outcome.part);
         const table = cells.table;
         const empty =
           outcome.elements.length === 0 ||
@@ -1148,9 +1164,10 @@ function emit(cells: Cells, result: CellId, outcome: Outcome, at: Position): boo
           )
             changed = true;
         } else {
+          // every part of a dict (one per written entry, or `element`) goes to its element cell
           const element = cells.derived(result, "element");
-          for (const part of outcome.parts.get("element") ?? [])
-            if (emit(cells, element, part, pos)) changed = true;
+          for (const parts of outcome.parts.values())
+            for (const part of parts) if (emit(cells, element, part, pos)) changed = true;
           if (
             cells.add(result, {
               tag: outcome.tag,

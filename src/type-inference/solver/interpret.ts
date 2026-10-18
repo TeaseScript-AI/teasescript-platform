@@ -195,7 +195,22 @@ function membersOf(cells: Cells, items: readonly Item[]): readonly Member[] {
     seen.add(key);
     byCtor.set(key, [item]);
   }
-  for (const [, group] of byCtor) {
+  // a witness collection over a part empty by construction says nothing beside another member of its constructor
+  const emptyWitness = (group: readonly Item[]): boolean =>
+    group.every(
+      (item) =>
+        item.tag === "w" &&
+        item.ctor !== "object" &&
+        cells.partsOf(item).every((part) => emptyPart(cells, part)),
+    );
+  const groups = [...byCtor.values()].filter(
+    (group) =>
+      !(
+        emptyWitness(group) &&
+        [...byCtor.values()].some((other) => other !== group && other[0]!.ctor === group[0]!.ctor)
+      ),
+  );
+  for (const group of groups) {
     const ctor = group[0]!.ctor!;
     if (ctor === "object") {
       if (group.some((item) => item.parts?.open === true)) {

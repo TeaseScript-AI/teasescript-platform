@@ -159,4 +159,13 @@ test("a changed fact is rejected at an accepted site, a deferred site, a pinned 
   assert.ok(values.some((v) => v.outcome === "changed" || v.outcome === "unrecorded"));
   // arbitrary: a source whose facts equal the legacy's has no record to hide behind
   assert.deepEqual(outcomes("widening", changeBinding("x", "string")), ["unrecorded"]);
+  // two files, equal offsets (PR review r4-B1): the record of main.tease's binding admits nothing in other.tease
+  assert.deepEqual(outcomes("d97-two-files-same-offset-let"), ["accepted"]);
+  assert.deepEqual(
+    outcomes("d97-two-files-same-offset-let", (facts) => ({
+      ...facts,
+      bindings: facts.bindings.map((b) => (b.site.file === 1 ? { ...b, type: "integer!" } : b)),
+    })),
+    ["accepted", "unrecorded"],
+  );
 });

@@ -191,8 +191,8 @@ class Exporter {
   readonly #exports = new Map<PartKey, ExportedType>();
   /** The exports of the places asked for whose walk made a cut: relative to that place. */
   readonly #roots = new Map<PartKey, ExportedType>();
-  /** The cells whose export the walk is making, on the path from its root. */
-  readonly #active = new Set<PartKey>();
+  /** The cells whose export the walk is making, on the path from its root (every cell of a group). */
+  readonly #active = new Set<CellId>();
   readonly #types = new Map<TypeId, ExportedType>();
   readonly #collections = new Map<string, WeakMap<ExportedType, ExportedType>>();
   readonly #objects = new WeakMap<ReadonlyMap<string, readonly CellId[]>, ExportedType>();
@@ -240,12 +240,14 @@ class Exporter {
    */
   #walk(root: CellId): ExportedType {
     const stack: Frame[] = [];
+    const cellsOf = (key: PartKey): CellId[] =>
+      typeof key === "number" ? [key] : key.split("+").map(Number);
+    // a part is on the path when any of its cells is (a merged group shares cells with its constituents, r4-S1)
+    const active = (key: PartKey): boolean => cellsOf(key).some((cell) => this.#active.has(cell));
     const enter = (cell: PartKey): void => {
       const view =
-        typeof cell === "number"
-          ? this.#solution.view(cell)
-          : this.#solution.viewOf(cell.split("+").map(Number));
-      this.#active.add(cell);
+        typeof cell === "number" ? this.#solution.view(cell) : this.#solution.viewOf(cellsOf(cell));
+      for (const one of cellsOf(cell)) this.#active.add(one);
       // Reversed, so the parts are taken from the end in member order.
       stack.push({ cell, view, parts: view.members.flatMap(partsOf).reverse(), done: new Map() });
     };
@@ -256,11 +258,11 @@ class Exporter {
       const top = stack.at(-1)!;
       const part = top.parts.pop();
       if (part !== undefined) {
-        if (!this.#exports.has(part) && !top.done.has(part) && !this.#active.has(part)) enter(part);
+        if (!this.#exports.has(part) && !top.done.has(part) && !active(part)) enter(part);
         continue;
       }
       stack.pop();
-      this.#active.delete(top.cell);
+      for (const one of cellsOf(top.cell)) this.#active.delete(one);
       exported = this.#cell(
         top.view,
         (cell) => this.#exports.get(cell) ?? top.done.get(cell) ?? this.#cut,
