@@ -163,6 +163,7 @@ function assertOracle(
   inputs: ReturnType<typeof inputsOf>,
   source: string,
   label: string,
+  misshapen = false,
 ): void {
   const outcome = legacyOperation(source);
   assert.notEqual(outcome.type, null, `${label}: the legacy typed the operation`);
@@ -173,19 +174,24 @@ function assertOracle(
   // report (TSV044, or an arity or name report that pre-empts it) staying at the construction; the legacy recovered
   // unknown elements. The rows that mix are the relation's own condition read from the inputs: the first written
   // argument is collections only (no null, no other kind), no element is unknown, and the elements of some receiver
-  // member do not join with the argument's; the declared realization is the join over all those elements.
+  // member do not join with the argument's; the declared realization is the join over all those elements. Under a
+  // shape problem the legacy's argument check does not run and `#setOperationType` reads the argument without its
+  // null (`nonNullType`), so a null beside the collections is not what decides there.
   const mixed = /^(list|set)<unknown>$/.exec(fact);
   const first = inputs.arguments[0] ?? inputs.named.values().next().value;
-  const elementsOf = (view: OperandView | null | undefined): StaticType[] | null => {
+  const elementsOf = (
+    view: OperandView | null | undefined,
+    withoutNull: boolean,
+  ): StaticType[] | null => {
     if (view === null || view === undefined || view.alternatives === null || view.dynamic !== null)
       return null;
-    const members = viewMembers(view);
+    const members = viewMembers(view).filter((m) => !(withoutNull && m.kind === "null"));
     const collections = members.filter((m) => m.kind === "list" || m.kind === "set");
     if (collections.length === 0 || collections.length < members.length) return null;
     return collections.flatMap((m) => (m.kind === "list" || m.kind === "set" ? [m.element] : []));
   };
-  const owns = elementsOf(inputs.receiver) ?? [];
-  const others = elementsOf(first);
+  const owns = elementsOf(inputs.receiver, false) ?? [];
+  const others = elementsOf(first, misshapen);
   const known = (elements: readonly StaticType[]): boolean =>
     elements.every((e) => e.kind !== "unknown");
   const mixes =
@@ -274,7 +280,7 @@ test("the set operations over every receiver, argument and call shape", () => {
             continue;
           }
           const source = `${receiver.declare.replaceAll("$", "xs")}\n${argument.declare.replaceAll("$", "a")}\nlet r = xs.${name}${call.write("a")}\nexit`;
-          assertOracle(relation, build(argument.view), source, label);
+          assertOracle(relation, build(argument.view), source, label, call.extra !== null);
         }
   }
 });

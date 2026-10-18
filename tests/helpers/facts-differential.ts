@@ -14,6 +14,7 @@ import type {
   OperandRef,
   OperandView,
   OperationInputs,
+  OperationRelation,
   OperationResult,
 } from "../../src/type-inference/adapters/relation.js";
 import type { FactSite, SolvedTypeFacts, TypeText } from "../../src/type-inference/backend.js";
@@ -243,6 +244,8 @@ interface Fact {
   readonly optional: boolean;
   readonly held: boolean;
   readonly whys?: readonly DynamicWhy[];
+  /** The literals whose content this fact was projected from (an element, an entry, a property): its dependence. */
+  readonly content?: ReadonlySet<PlaceId>;
 }
 
 /** A member: a flat type, or a collection over an element fact, or an object over property facts. */
@@ -269,6 +272,61 @@ interface FactMember {
 }
 
 const EMPTY: Fact = { members: [], optional: false, held: false };
+/** The literals a fact depends on: those whose content it was projected from, at any level of its parts. */
+function contentOf(fact: Fact, out: Set<PlaceId> = new Set()): Set<PlaceId> {
+  for (const literal of fact.content ?? []) out.add(literal);
+  for (const member of fact.members) {
+    if (member.element !== null) contentOf(member.element, out);
+    if (member.props !== null) for (const value of member.props.values()) contentOf(value, out);
+  }
+  return out;
+}
+/** A fact that was projected from a value's content: it depends on the value's literals and on their dependence. */
+function projectedFrom(fact: Fact, value: Fact): Fact {
+  const content = new Set([...dependenceOf(value), ...(fact.content ?? [])]);
+  return content.size === 0 ? fact : { ...fact, content };
+}
+/** The literals a fact depends on: those it holds at some level and those its content was projected from. */
+const dependenceOf = (fact: Fact): Set<PlaceId> =>
+  new Set([...literalsOf(fact), ...contentOf(fact)]);
+/**
+ * The fact with the content it depends on unknown: what an answer over it is when that content is anything. A flat
+ * value projected from content, or a literal's own part, is a value the compiler cannot know; a structure keeps its
+ * constructor (an operation's own, `toSet()`) over parts likewise unknown.
+ */
+function withoutContent(fact: Fact, dependent = false): Fact {
+  const projected = dependent || (fact.content !== undefined && fact.content.size > 0);
+  const members: FactMember[] = [];
+  let unknown = false;
+  for (const m of fact.members) {
+    if (m.ctor === null && m.props === null) {
+      if (projected) unknown = true;
+      else members.push(m);
+      continue;
+    }
+    const literal = m.id !== null && m.id.startsWith("cell:");
+    const part = (f: Fact): Fact => withoutContent(f, literal);
+    members.push({
+      ...m,
+      element: m.element === null ? null : part(m.element),
+      props: m.props === null ? null : new Map([...m.props].map(([n, f]) => [n, part(f)])),
+    });
+  }
+  const stripped: Fact = {
+    members,
+    optional: fact.optional,
+    held: fact.held,
+    ...(fact.whys === undefined ? {} : { whys: fact.whys }),
+  };
+  return unknown ? held(stripped) : stripped;
+}
+/** An operand of an operation as the oracle reads it: its reference, its place, its fact and whether it is lazy. */
+interface Operand {
+  readonly ref: OperandRef;
+  readonly place: PlaceId;
+  readonly fact: Fact;
+  readonly lazy: boolean;
+}
 /** The provenances of a fact's values the compiler cannot know. */
 const whysOf = (fact: Fact): readonly DynamicWhy[] => fact.whys ?? (fact.held ? ["host"] : []);
 const held = (fact: Fact, whys: readonly DynamicWhy[] = ["host"]): Fact => ({
@@ -487,11 +545,13 @@ function join(facts: readonly Fact[]): Fact {
       }
     }
   const whys = [...new Set(facts.flatMap(whysOf))].sort();
+  const content = new Set(facts.flatMap((f) => [...(f.content ?? [])]));
   return {
     members,
     optional: facts.some((f) => f.optional),
     held: facts.some((f) => f.held),
     ...(whys.length > 0 ? { whys } : {}),
+    ...(content.size > 0 ? { content } : {}),
   };
 }
 
@@ -845,8 +905,6 @@ class Oracle {
   readonly #estimates = new Map<PlaceId, Fact>();
   /** The bindings a derivation read. */
   readonly #touched = new Set<PlaceId>();
-  /** The literals whose content a derivation projected (an element, an entry, a property, a member held in place). */
-  readonly #content = new Set<PlaceId>();
   /** Whether a derivation asked a relation with a constant among its strict operands (the legacy folds those). */
   #folded = false;
   readonly #constants = new Map<PlaceId, boolean>();
@@ -888,7 +946,6 @@ class Oracle {
     const place = this.#places.get(siteKey(site));
     if (place === undefined || place.kind.kind !== "binding") return null;
     this.#touched.clear();
-    this.#content.clear();
     this.#folded = false;
     this.failure = null;
     const legacyText = this.#bindingFacts.get(siteKey(site));
@@ -904,7 +961,10 @@ class Oracle {
     }
     if (derived === null) return null;
     const touched = [...this.#touched];
-    const content = [...new Set([...this.#content, ...literalsOf(derived)])];
+    // the fact's dependence on a copied value changed in place: the literals it holds and those its content was
+    // projected from (not every projection a derivation visited: a computed member of a projection, `a.toSet().length`,
+    // depends on no content, PR review r2-B2)
+    const content = [...dependenceOf(derived)];
     const folded = this.#folded;
     if (place.kind.written !== null && legacyText !== undefined) {
       // a written type is the bound, every member admitted; the place is held by a stored value the compiler cannot
@@ -1047,19 +1107,17 @@ class Oracle {
     return join(stores.map((store) => this.#stored(store, path)));
   }
 
-  /** The elements of a collection fact (the alternatives of every collection member). */
+  /** The elements of a collection fact (the alternatives of every collection member), projected from its content. */
   #elements(value: Fact): Fact {
-    for (const literal of literalsOf(value)) this.#content.add(literal);
     const parts = value.members.filter((m) => m.ctor !== null).map((m) => m.element ?? EMPTY);
-    const joined = join(parts);
+    const joined = projectedFrom(join(parts), value);
     return heldOf(value) ? held(joined, provenancesOf(value)) : joined;
   }
 
-  /** The property of an object fact. */
+  /** The property of an object fact, projected from its content. */
   #property(value: Fact, name: string): Fact {
-    for (const literal of literalsOf(value)) this.#content.add(literal);
     const parts = value.members.map((m) => (m.open ? held(EMPTY) : (m.props?.get(name) ?? EMPTY)));
-    const joined = join(parts);
+    const joined = projectedFrom(join(parts), value);
     return heldOf(value) ? held(joined, provenancesOf(value)) : joined;
   }
 
@@ -1217,18 +1275,20 @@ class Oracle {
         : this.#read(answer, (ref) => ("receiver" in ref ? receiver : null), site, dynamic);
     const parts: Fact[] = [];
     for (const member of owner.members) {
-      // a property read on an object reads its content, whether or not the property is there
-      if (member.props !== null || member.open)
-        for (const literal of literalsOf({ members: [member], optional: false, held: false }))
-          this.#content.add(literal);
       const type = typeOfMember(member);
       const kind = valueKindOf(type);
       const answer =
         kind === null
           ? undefined
           : memberOf(kind, name, { alternatives: [type], dynamic: null, known: undefined });
-      if (answer === undefined) continue;
-      const read = readWith(answer, { members: [member], optional: false, held: false }, false);
+      const one: Fact = { members: [member], optional: false, held: false };
+      if (answer === undefined) {
+        // a property the object does not have reads nothing, but depends on the object's content: a copy may add it
+        // in place (`property-added-copy`, PR review r2)
+        if (kind === "object") parts.push(projectedFrom(EMPTY, one));
+        continue;
+      }
+      const read = readWith(answer, one, false);
       parts.push(member.possible ? asPossible(read, member.why) : read);
     }
     const types = owner.members.map(typeOfMember);
@@ -1358,12 +1418,7 @@ class Oracle {
   ): Fact | null {
     const relation = RELATIONS.relation(c.contract);
     if (relation === undefined) return null;
-    const operands: {
-      readonly ref: OperandRef;
-      readonly place: PlaceId;
-      readonly fact: Fact;
-      readonly lazy: boolean;
-    }[] = [
+    const operands: Operand[] = [
       ...(c.receiver === null
         ? []
         : [
@@ -1392,7 +1447,31 @@ class Oracle {
     // the legacy folds a known operand beside unknown ones too (`pow(round(hostValue), 3)`, r11-S1)
     const strict = operands.filter((operand) => !operand.lazy);
     if (strict.some((operand) => this.#constant(operand.place))) this.#folded = true;
+    const site = `op@${c.site.start}`;
+    const answer = this.#operationOver(c, relation, operands, site);
+    // the answer depends on an operand's content only where it changes with that content: the length of a set
+    // joined from a copied list is an integer whatever the list holds, a sum over the list's element is not
+    // (PR review r2-B2)
+    const content = new Set<PlaceId>(answer.content ?? []);
+    operands.forEach((operand, index) => {
+      const own = dependenceOf(operand.fact);
+      if (own.size === 0) return;
+      const varied = operands.map((o, i) =>
+        i === index ? { ...o, fact: withoutContent(o.fact) } : o,
+      );
+      if (renderFact(this.#operationOver(c, relation, varied, site)) !== renderFact(answer))
+        for (const literal of own) content.add(literal);
+    });
+    return content.size === 0 ? answer : { ...answer, content };
+  }
 
+  /** The joined answer of an operation over the choices of its operands (the lifting's product, work note §3.5). */
+  #operationOver(
+    c: Extract<Constraint, { kind: "operation" }>,
+    relation: OperationRelation,
+    operands: readonly Operand[],
+    site: string,
+  ): Fact {
     const inputs = (views: readonly OperandView[]): OperationInputs => {
       let receiver: OperandView | null = null;
       const args: OperandView[] = [];
@@ -1411,7 +1490,6 @@ class Oracle {
         view: () => ({ alternatives: null, dynamic: null, known: undefined }),
       };
     };
-    const site = `op@${c.site.start}`;
     // the choices of each operand, as the lifting's (work note §3.5): its alternatives (an empty-by-construction
     // collection also over never, null as one of them, a possibility as a possible choice), one dynamic view per
     // provenance of its dynamic values and possibilities, an unevaluated lazy operand beside them

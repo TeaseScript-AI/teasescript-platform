@@ -77,7 +77,7 @@ test("randomWeighted gives a key of a dict of weights, a copy of an element of a
     legacyOperation(
       'let r = randomWeighted([{ weight: 1 }, { weight: 3 }], weight: "weight")\nexit',
     ),
-    "type",
+    "projection",
   );
   // A source the compiler cannot know: the legacy's unknown, a value of the source's provenance here.
   assertCase(

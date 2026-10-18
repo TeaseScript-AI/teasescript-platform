@@ -8,7 +8,15 @@ import {
   union,
 } from "../../static-types.js";
 import type { OperationInputs, OperationRelation, OperationResult } from "./relation.js";
-import { dynamicFrom, INVALID, isBottom, typeResult, UNCONSTRAINED, viewMembers } from "./views.js";
+import {
+  dynamicFrom,
+  INVALID,
+  isBottom,
+  projectionOf,
+  typeResult,
+  UNCONSTRAINED,
+  viewMembers,
+} from "./views.js";
 
 /**
  * The random functions (O4 stage 2b), as `#randomFunctionType` of the legacy checker gives them: a draw of numbers
@@ -43,7 +51,8 @@ function relation(name: string, contract: RandomFunction): OperationRelation {
           const used = all.filter((member) => member.kind !== "null");
           const value = resolved(union(used.length === 0 ? all : used));
           if (value.kind === "dict") return typeResult(STRING_TYPE);
-          return value.kind === "list" ? typeResult(resolved(value.element)) : INVALID;
+          // the selected element: a projection of the source's element, parts shared, not its type echoed
+          return value.kind === "list" ? projectionOf({ argument: 0 }, "element") : INVALID;
         }
       }
     },

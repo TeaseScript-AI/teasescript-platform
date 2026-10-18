@@ -111,6 +111,47 @@ const R11: readonly SolverCase[] = [
     ].join("\n"),
   },
 ];
+const R2: readonly SolverCase[] = [
+  { name: "r2-direct-length", source: "let a = [1]\nlet b = a\na.add(2)\nlet n = a.length\nexit" },
+  {
+    name: "r2-joined-length",
+    source: "let a = [1]\nlet b = a\na.add(2)\nlet n = a.toSet().length\nexit",
+  },
+  {
+    name: "r2-copied-joined-length",
+    source: "let a = [1]\nlet b = a\nlet c = a.toSet()\na.add(2)\nlet n = c.length\nexit",
+  },
+  {
+    name: "r2-projected-text",
+    source: "let a = [1]\nlet b = a\na.add(2)\nlet n = toString(a.first)\nexit",
+  },
+  {
+    name: "r2-nested-projected-length",
+    source: "let a = [1]\nlet b = a\na.add(2)\nlet n = [a.first].length\nexit",
+  },
+  { name: "r2-nested-bound-0", source: "let x: (integer | string)[] = hostValue\nexit" },
+  { name: "r2-nested-bound-1", source: "let x: (integer | string)[][] = hostValue\nexit" },
+  { name: "r2-nested-bound-2", source: "let x: (integer | string) set = hostValue\nexit" },
+  { name: "r2-nested-bound-3", source: "let x: (integer | string) dict = hostValue\nexit" },
+  {
+    name: "r2-random-nested-object",
+    source:
+      'let a = {weight: 1, x: {y: 1}}\nlet r = randomWeighted([a], weight: "weight")\nlet n = r.x.y\nexit',
+  },
+  {
+    name: "r2-form-0",
+    source: 'let fields = {n: {value: 1}}\nlet r = askForm("Q", fields: fields)\nlet n = r.n\nexit',
+  },
+  {
+    name: "r2-form-3",
+    source:
+      'let choices = [{text: "A", value: 1}]\nlet fields = {n: {options: choices}}\nlet r = askForm("Q", fields: fields)\nlet n = r.n\nexit',
+  },
+  {
+    name: "r2-missing-union",
+    source: "let a = {x: {y: 1}}\nlet c = [a].union()\nlet n = c.first.x.y\nexit",
+  },
+];
 
 const describe = (d: Difference): string =>
   `${d.what} ${d.name} @${d.site.start}: legacy ${d.legacy ?? "(none)"} | candidate ${d.candidate ?? "(none)"} | class ${d.class}: ${d.evidence}`;
@@ -123,7 +164,7 @@ test("every difference on the straight-line sources is a decided rule, a replace
     classes: [0, 0, 0, 0, 0],
   };
   const defects: string[] = [];
-  for (const c of [...readCases(), ...HAND, ...R10, ...R11]) {
+  for (const c of [...readCases(), ...HAND, ...R10, ...R11, ...R2]) {
     const result = differential(c.source);
     if (result === null) continue;
     counts.sources += 1;
@@ -312,6 +353,52 @@ test("Astra's r11 cases take their classes, and an injected fact at each is reje
     open.map((d) => [d.name, d.class]),
     [["a", 2]],
   );
+});
+
+test("Astra's r2 cases take their classes, and an injected fact at each is rejected", () => {
+  const source = (name: string): string => R2.find((c) => c.name === name)!.source;
+  const bindings = (name: string, mutate?: (facts: SolvedTypeFacts) => SolvedTypeFacts) =>
+    differential(source(name), mutate)!.differences.filter((d) => d.what === "binding");
+  const classes = (name: string, mutate?: (facts: SolvedTypeFacts) => SolvedTypeFacts) =>
+    bindings(name, mutate).map((d) => d.class);
+  const changeBinding =
+    (name: string, text: string) =>
+    (facts: SolvedTypeFacts): SolvedTypeFacts => ({
+      ...facts,
+      bindings: facts.bindings.map((b) => (b.name === name ? { ...b, type: text } : b)),
+    });
+  // PR review r2-B2 (Astra): a computed scalar beside a copied list is compared whether or not its derivation
+  // projected the list's elements; only an answer that changes with the content is exempt
+  const computed: readonly (readonly [string, string])[] = [
+    ["r2-direct-length", "string"],
+    ["r2-joined-length", "string"],
+    ["r2-copied-joined-length", "string"],
+    ["r2-projected-text", "integer"],
+    ["r2-nested-projected-length", "string"],
+  ];
+  for (const [name, wrong] of computed) {
+    assert.deepEqual(classes(name), [], name);
+    assert.deepEqual(classes(name, changeBinding("n", wrong)), [4], name);
+  }
+  // PR review r2-S1 (Astra): a written union nested in a collection keeps its members at every level; the held mark
+  // on the host's value is Q3.2a
+  for (const name of [
+    "r2-nested-bound-0",
+    "r2-nested-bound-1",
+    "r2-nested-bound-2",
+    "r2-nested-bound-3",
+  ]) {
+    const found = bindings(name);
+    assert.deepEqual(
+      found.map((d) => [d.name, d.class]),
+      [["x", 1]],
+      name,
+    );
+    assert.match(found[0]!.evidence, /Q3\.2a/, name);
+  }
+  // PR review r2-B1 (Astra): a consumer of a nested shape reads it through one store boundary (work note §3.5)
+  for (const name of ["r2-random-nested-object", "r2-form-0", "r2-form-3", "r2-missing-union"])
+    assert.deepEqual(classes(name), [], name);
 });
 
 test("the classifier rejects a changed fact at an arbitrary site, a class-1 site and a class-2 site", () => {

@@ -233,27 +233,31 @@ function operandOf(inputs: OperationInputs, ref: OperandRef): OperandView {
   return view;
 }
 
-/** One step of a path on a closed type, as the solver would take it. */
+/**
+ * One step of a path on a closed type, as the solver would take it: a member without the part (a null beside a list,
+ * `randomWeighted(xs?)`) contributes nothing, as the solver's `stepOf`.
+ */
 function step(type: StaticType, along: ProjectionStep): StaticType {
-  const parts = members(type).map((member) => {
+  const parts = members(type).flatMap((member): StaticType[] => {
     const value = resolved(member);
     if (typeof along === "object")
       return value.kind === "object"
-        ? (value.properties?.get(along.property) ?? UNKNOWN_TYPE)
-        : UNKNOWN_TYPE;
+        ? [value.properties?.get(along.property) ?? UNKNOWN_TYPE]
+        : [UNKNOWN_TYPE];
     switch (along) {
       case "element":
       case "entry":
       case "index":
         return value.kind === "list" || value.kind === "set" || value.kind === "dict"
-          ? value.element
-          : UNKNOWN_TYPE;
+          ? [value.element]
+          : [];
       case "iteration":
-        if (value.kind === "dict") return STRING_TYPE;
-        if (value.kind === "range") return INTEGER_TYPE;
-        return value.kind === "list" || value.kind === "set" ? value.element : UNKNOWN_TYPE;
+        if (value.kind === "dict") return [STRING_TYPE];
+        if (value.kind === "range") return [INTEGER_TYPE];
+        return value.kind === "list" || value.kind === "set" ? [value.element] : [];
     }
   });
+  if (parts.length === 0) return { kind: "never" };
   return parts.length === 1 ? parts[0]! : union(parts);
 }
 

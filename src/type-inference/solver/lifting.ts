@@ -59,8 +59,9 @@ export interface Alternative {
 
 /**
  * The chosen part alternatives, with every part cell the merged items hold them in (a dynamic walk reads each): a
- * collection's one chosen element; an object's alternatives per property, all of them (no product across the
- * properties: the orchestrator's decision on r11-B6, work note §3.5), in a canonical order.
+ * collection's one chosen element; an object's one chosen alternative per property (the product over its
+ * properties), or, for an opaque object beyond the view's depth, every alternative of each property in a canonical
+ * order, for the projections (work note §3.5). Two alternatives of one key merge their lists.
  */
 export type Choice =
   | { readonly element: Alternative; readonly cells: readonly CellId[]; readonly props?: undefined }
@@ -91,6 +92,9 @@ function roleOf(a: Alternative): string {
 }
 
 const keyOf = (a: Alternative): string => `${a.type}|${roleOf(a)}`;
+
+/** The origin of a cell: the place or literal whose derived part it is (the first segment of a derived cell's name). */
+const originOf = (cells: Cells, cell: CellId): string => cells.name(cell).split("/")[0]!;
 
 /** A list of alternatives in a canonical order (by key), so no order of enumeration shows in a choice. */
 function sortedAlternatives(list: readonly Alternative[]): readonly Alternative[] {
@@ -138,9 +142,17 @@ function alternatives(
   depth = 0,
 ): readonly Alternative[] {
   const out = new Map<string, Alternative>();
+  const derived = cells.name(cell).includes("/");
+  const origin = originOf(cells, cell);
   for (const item of cells.items(cell)) {
     if (item.tag === "d" || item.tag === "e") continue;
-    for (const alternative of itemAlternatives(cells, item, cell, path, depth)) {
+    // an item written in the same literal as the part that holds it keeps the depth; one that arrived through a
+    // store (another literal's, an answer's) is one store boundary deeper
+    const d =
+      derived && item.ctor !== undefined && originOf(cells, cells.partsOf(item)[0]!) !== origin
+        ? depth + 1
+        : depth;
+    for (const alternative of itemAlternatives(cells, item, cell, path, d)) {
       const key = keyOf(alternative);
       const prior = out.get(key);
       if (prior === undefined) out.set(key, alternative);
@@ -250,11 +262,13 @@ export function itemAlternatives(
           choice: { props: new Map(), cells: propCells },
         },
       ];
-    // Views are one level deep (the orchestrator's decision on r11-B6, revised after PR review r1-B1): an object
-    // below another object's alternative (directly or through collections) is opaque in the view, an `object` whose
-    // property lists still serve the projections; the product over the properties is an object's own, so each
-    // alternative is a combination of part alternatives that never change (monotone) and the count is bounded.
-    if (depth >= 1) {
+    // Views reach one store boundary deep (the orchestrator's decision on r11-B6, revised after PR reviews r1-B1
+    // and r2-B1): the product over an object's properties continues through the objects written inline in the same
+    // literal and through the objects that arrived through one store (a descriptor composed from variables); an
+    // object beyond the second store boundary is opaque in the view, an `object` whose property lists still serve
+    // the projections. Each alternative is a combination of part alternatives that never change (monotone), and a
+    // cyclic or deep structure is cut at the second boundary (bounded).
+    if (depth >= 2) {
       const props = new Map<string, readonly Alternative[]>();
       for (const [name, part] of [...item.parts.props].sort(byName)) {
         const parts = sortedAlternatives(
@@ -275,7 +289,7 @@ export function itemAlternatives(
     for (const [name, part] of [...item.parts.props].sort(byName)) {
       // an empty slot: the property absent; beside evidence, both
       const parts = sortedAlternatives(
-        partAlternatives(part, depth + 1).filter((a) => table.node(a.type).kind !== "never"),
+        partAlternatives(part, depth).filter((a) => table.node(a.type).kind !== "never"),
       );
       const absent = cells.items(part).some((it) => it.tag === "e");
       // a property without evidence yet: the object contributes nothing yet
