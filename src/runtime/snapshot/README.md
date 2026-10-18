@@ -3,7 +3,7 @@
 The runtime state: its model, how it is built and copied, how a snapshot from outside the engine is validated, and
 checkpoints.
 
-- `state.ts`: the snapshot model: format and version, limits, every snapshot type, and small shared checks.
+- `state.ts`: the snapshot model: format and version, limits, the shared snapshot types, and small shared checks.
 - `snapshot-construction.ts`: fresh snapshots for a plan, and copies of captured ones.
 - `snapshot-validation.ts`: capturing a snapshot from outside the engine and the order of its validation, with the
   checks of the session-wide state.

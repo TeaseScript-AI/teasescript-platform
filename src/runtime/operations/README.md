@@ -7,9 +7,10 @@ The host operations on a session's state, and what they share.
 - `debug-mode.ts`: setting what `debugMode` reads.
 - `external-storage-edit.ts`: a debugging tool's edit of one script-storage key.
 - `media-lifecycle.ts`: media records, events and waits, stopping media, and developer warnings.
-- `media-reports.ts`: the Player's media load results and progress reports.
+- `media-reports.ts`: the Player's media load results.
 - `model.ts`: operation results, and the refusal while a random draw is paused.
-- `observe-time.ts`: observing time: catching up, due timer and media work, and the timed-work schedule.
+- `observe-time.ts`: observing time: catching up, media progress reports, due timer and media work, and the timed-work
+  schedule.
 - `press-permanent-button.ts`: a click on a permanent button.
 - `support.ts`: capture, result, and event-sequence helpers the operations and the engine share.
 - `timer-handlers.ts`: starting and returning from expiry, cue, and button blocks.
