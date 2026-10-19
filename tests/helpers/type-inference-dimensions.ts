@@ -7,7 +7,15 @@
  * every other assertion hard.
  */
 
-export type Phase = "evaluations" | "asks" | "combinations" | "cells" | "items" | "orders";
+export type Phase =
+  | "evaluations"
+  | "asks"
+  | "combinations"
+  | "foldStates"
+  | "cells"
+  | "items"
+  | "orders"
+  | "selections";
 
 export interface Series {
   readonly name: string;

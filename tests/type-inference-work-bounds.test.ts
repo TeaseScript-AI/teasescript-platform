@@ -187,6 +187,7 @@ for (const series of FEEDBACK)
       "cells",
       "items",
       "orders",
+      "selections",
     ] as const)
       linearInSize(
         `${series.name}: ${phase}`,
@@ -194,6 +195,18 @@ for (const series of FEEDBACK)
         runs.map((run) => run.work[phase]),
         16,
       );
+    // the heap's comparisons are the selections times the heap's depth, never more (the closing check's CC-B2)
+    for (const run of runs)
+      assert.ok(
+        run.work.siftSteps <= run.work.selections * (2 + Math.log2(run.graph.constraints.length)),
+        `${series.name}: sift steps ${run.work.siftSteps} within the heap's bound`,
+      );
+    // a genuine feedback merges into its binding at the first fixpoint: one phase
+    assert.deepEqual(
+      runs.map((run) => run.work.phases),
+      sizes.map(() => 1),
+      `${series.name}: one phase`,
+    );
   });
 
 test("stores to one binding are linear in the schedule to 4,000 stores (Sol's D2)", () => {
@@ -203,16 +216,29 @@ test("stores to one binding are linear in the schedule to 4,000 stores (Sol's D2
   const runs = sizes.map((k) => solveOf(one(k)));
   for (const run of runs)
     assert.equal(exportFacts(run).bindings.find((b) => b.name === "x")?.type, "integer");
-  linearInSize(
-    "evaluations",
-    sizes,
-    runs.map((run) => run.work.evaluations),
-    16,
+  for (const phase of ["evaluations", "items", "selections"] as const)
+    linearInSize(
+      phase,
+      sizes,
+      runs.map((run) => run.work[phase]),
+      16,
+    );
+  // the worklist's comparisons stay within the heap's depth (the closing check's CC-B2)
+  for (const run of runs)
+    assert.ok(
+      run.work.siftSteps <= run.work.selections * (2 + Math.log2(run.graph.constraints.length)),
+      `sift steps ${run.work.siftSteps} within the heap's bound`,
+    );
+});
+
+test("a self-rebuild with no structure to merge into becomes the binding's own at the fixpoint, in bounded phases (the closing check's CC-B1)", () => {
+  // a null root gaining its first list, a rebuild of another constructor, and a genuine append: the phases are at
+  // most one more than the self-rebuild sites
+  const run = solveOf(
+    'let xs = null\nxs = toJson(xs).split(",")\nlet ys = [1]\nys = ys.toSet()\nlet zs = [1]\nzs = zs + [2]\nexit',
   );
-  linearInSize(
-    "items",
-    sizes,
-    runs.map((run) => run.work.items),
-    16,
-  );
+  const facts = exportFacts(run);
+  assert.equal(facts.bindings.find((b) => b.name === "xs")?.type, "(list<string>|null)");
+  assert.equal(facts.bindings.find((b) => b.name === "zs")?.type, "list<integer>");
+  assert.ok(run.work.phases >= 2 && run.work.phases <= 4, `phases ${run.work.phases}`);
 });

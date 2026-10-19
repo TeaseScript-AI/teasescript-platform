@@ -23,9 +23,11 @@ const PHASES: readonly Phase[] = [
   "evaluations",
   "asks",
   "combinations",
+  "foldStates",
   "cells",
   "items",
   "orders",
+  "selections",
 ];
 
 function solveOf(files: readonly { readonly path: string; readonly source: string }[]): Solution {

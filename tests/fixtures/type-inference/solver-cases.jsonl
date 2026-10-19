@@ -432,3 +432,24 @@
 {"name":"get-3","origin":"lead-r6","source":"let xs = [[1]].get(0, default: [2])\nxs = xs + []\nxs = xs + []\nxs = xs + []\nexit","model":{"summary":"xs=list<integer>","operations":""}}
 {"name":"p-get-shapes","origin":"lead-r6","source":"let xs = [[{x: 1}]].get(0, default: [{x: \"s\"}])\nlet r = xs + []\nexit","model":{"summary":"xs=(list<{\"x\":integer}>|list<{\"x\":string}>) r=(list<{\"x\":integer}>|list<{\"x\":string}>)","operations":""}}
 {"name":"p-otherwise","origin":"lead-r6","source":"let xs = [1] otherwise [2]\nlet r = xs + []\nexit","model":{"summary":"xs=list<integer> r=list<integer>","operations":""}}
+{"name":"self-null-json-split","origin":"closing-check-sol","source":"let xs = null\nxs = toJson(xs).split(\",\")\nexit","model":{"summary":"xs=(list<string>|null)","operations":""}}
+{"name":"other-null-json-split","origin":"closing-check-sol","source":"let xs = null\nlet ys = toJson(xs).split(\",\")\nxs = ys\nexit","model":{"summary":"xs=(list<string>|null) ys=list<string>","operations":""}}
+{"name":"self-dynamic-json-split","origin":"closing-check-sol","source":"let xs = hostValue\nxs = toJson(xs).split(\",\")\nexit","model":{"summary":"xs=list<string>!","operations":""}}
+{"name":"other-dynamic-json-split","origin":"closing-check-sol","source":"let xs = hostValue\nlet ys = toJson(xs).split(\",\")\nxs = ys\nexit","model":{"summary":"xs=list<string>! ys=list<string>","operations":""}}
+{"name":"self-dynamic-split","origin":"closing-check-sol","source":"let xs = hostValue\nxs = toString(xs).split(\",\")\nexit","model":{"summary":"xs=list<string>!","operations":""}}
+{"name":"other-dynamic-split","origin":"closing-check-sol","source":"let xs = hostValue\nlet ys = toString(xs).split(\",\")\nxs = ys\nexit","model":{"summary":"xs=list<string>! ys=list<string>","operations":""}}
+{"name":"self-null-split","origin":"closing-check-sol","source":"let xs = null\nxs = toString(xs).split(\",\")\nexit","model":{"summary":"xs=(list<string>|null)","operations":""}}
+{"name":"other-null-split","origin":"closing-check-sol","source":"let xs = null\nlet ys = toString(xs).split(\",\")\nxs = ys\nexit","model":{"summary":"xs=(list<string>|null) ys=list<string>","operations":""}}
+{"name":"self-list-set","origin":"closing-check-sol","source":"let xs = [1]\nxs = xs.toSet()\nexit","model":{"summary":"xs=CONFLICT{list,set}~list<integer>","operations":""}}
+{"name":"other-list-set","origin":"closing-check-sol","source":"let xs = [1]\nlet ys = xs.toSet()\nxs = ys\nexit","model":{"summary":"xs=CONFLICT{list,set}~list<integer> ys=set<integer>","operations":""}}
+{"name":"self-list-split","origin":"closing-check-sol","source":"let xs = [1]\nxs = toString(xs).split(\",\")\nexit","model":{"summary":"xs=list<CONFLICT{integer,string}~integer>","operations":""}}
+{"name":"self-bound-list-set","origin":"closing-check-sol","source":"let xs: integer[] = [1]\nxs = xs.toSet()\nexit","model":{"summary":"xs=list<integer>","operations":""}}
+{"name":"self-bound-cross","origin":"closing-check-sol","source":"let xs: integer[] | string set = [1]\nxs = xs.toSet()\nexit","model":{"summary":"xs=(list<integer>|set<string>)","operations":"method.toSet@42:partial(1/2)"}}
+{"name":"self-form-return","origin":"closing-check-sol","source":"let xs = [1]\nxs = askForm(\"Q\", fields: {q: {options: xs}})\nexit","model":{"summary":"xs=CONFLICT{list,object}~list<integer>","operations":""}}
+{"name":"self-ignored-input","origin":"closing-check-sol","source":"let xs = [1]\nxs = toString(\"a,b\", xs).split(\",\")\nexit","model":{"summary":"xs=list<CONFLICT{integer,string}~integer>","operations":""}}
+{"name":"self-split-ref","origin":"closing-check-sol","source":"let xs = [1]\nxs = toString(xs).split(\",\")\nexit","model":{"summary":"xs=list<CONFLICT{integer,string}~integer>","operations":""}}
+{"name":"self-bound-number","origin":"closing-check-sol","source":"let xs: integer[] = [1]\nxs = xs + [2.5]\nexit","model":{"summary":"xs=list<integer>","operations":""}}
+{"name":"script-label","origin":"closing-check-sol","source":"function f { return f() }\nlet r = script(\"main.tease\", label: f())\nexit","model":{"summary":"r=never f()=never","operations":""}}
+{"name":"script-path","origin":"closing-check-sol","source":"function f { return f() }\nlet r = script(f())\nexit","model":{"summary":"r=never f()=never","operations":""}}
+{"name":"encrypt-password","origin":"closing-check-sol","source":"function f { return f() }\nlet r = encryptText(\"a\", password: f(), publicKey: false, timeLock: false)\nexit","model":{"summary":"r=never f()=never","operations":""}}
+{"name":"hash-default","origin":"closing-check-sol","source":"let xs = [1]\nlet r = hashText(\"a\", default: xs)\nexit","model":{"summary":"xs=list<integer> r=string","operations":""}}
