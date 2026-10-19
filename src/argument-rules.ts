@@ -175,6 +175,9 @@ export const FIXED_PARAMETERS: ReadonlyMap<string, readonly string[]> = new Map(
   ["escapeMarkup", ["text"]],
 ]);
 
+/** The named parameters of `script(...)`: a label, by name only (V30 §29). */
+export const SCRIPT_NAMED_PARAMETERS: readonly string[] = ["label"];
+
 /** The argument count message of `script(...)`, which takes a path, and a label only by name (V30 §29). */
 export function scriptArgumentCountMessage(received: number): string {
   return argumentCountMessage(

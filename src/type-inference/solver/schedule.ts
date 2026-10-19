@@ -118,6 +118,10 @@ export interface RunReport {
   readonly evaluations: number;
   /** The largest number of evaluations one component took, a measure of its iteration. */
   readonly longestComponent: number;
+  /** The worklist's selections: every push and every pop of the heap (each O(log nodes)). */
+  readonly selections: number;
+  /** The heap's comparisons while sifting, the work behind the selections, at most selections × log2(nodes) + selections. */
+  readonly siftSteps: number;
 }
 
 /**
@@ -127,7 +131,7 @@ export interface RunReport {
  * ordered by node index, so two runs of the same input evaluate the same nodes in the same order (the result does not
  * depend on it, but the counts in the report do).
  */
-export function run(input: RunInput): RunReport {
+export function run(input: RunInput, seeds?: readonly NodeId[]): RunReport {
   const plan = schedule(input);
   const readers = new Map<CellId, NodeId[]>();
   for (let node = 0; node < input.nodes; node += 1)
@@ -140,27 +144,67 @@ export function run(input: RunInput): RunReport {
   // first pass, and a changed cell re-queues every reader of it, in an earlier component too. The static reads do
   // not see a part shared between cells (a copy shares its source's parts), so a store path through one owner
   // changes what an earlier component's node read; the worklist re-runs that node. Deterministic, and the work is
-  // the nodes plus one re-run per change of a cell per reader.
+  // the nodes plus one re-run per change of a cell per reader, each selection O(log nodes) through a binary heap
+  // (a scan of the pending set was quadratic in the nodes: the closing check's CC-B2). With `seeds`, the worklist
+  // starts from those nodes alone (a later phase of the solve).
   const rank = (node: NodeId): number => plan.componentOf[node]! * input.nodes + node;
-  const pending = new Set<NodeId>();
-  for (let node = 0; node < input.nodes; node += 1) pending.add(node);
+  const heap: NodeId[] = [];
+  const queued = new Array<boolean>(input.nodes).fill(false);
+  let selections = 0;
+  let siftSteps = 0;
+  const push = (node: NodeId): void => {
+    if (queued[node]) return;
+    queued[node] = true;
+    selections += 1;
+    heap.push(node);
+    let i = heap.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      siftSteps += 1;
+      if (rank(heap[parent]!) <= rank(heap[i]!)) break;
+      [heap[parent], heap[i]] = [heap[i]!, heap[parent]!];
+      i = parent;
+    }
+  };
+  const pop = (): NodeId => {
+    selections += 1;
+    const top = heap[0]!;
+    const last = heap.pop()!;
+    if (heap.length > 0) {
+      heap[0] = last;
+      let i = 0;
+      for (;;) {
+        const left = 2 * i + 1;
+        const right = left + 1;
+        let least = i;
+        siftSteps += 1;
+        if (left < heap.length && rank(heap[left]!) < rank(heap[least]!)) least = left;
+        if (right < heap.length && rank(heap[right]!) < rank(heap[least]!)) least = right;
+        if (least === i) break;
+        [heap[least], heap[i]] = [heap[i]!, heap[least]!];
+        i = least;
+      }
+    }
+    queued[top] = false;
+    return top;
+  };
+  if (seeds === undefined) for (let node = 0; node < input.nodes; node += 1) push(node);
+  else for (const node of seeds) push(node);
   const taken = new Array<number>(plan.components.length).fill(0);
   let evaluations = 0;
-  while (pending.size > 0) {
-    let node: NodeId | undefined;
-    for (const candidate of pending)
-      if (node === undefined || rank(candidate) < rank(node)) node = candidate;
-    // EVIDENCE: invariant: the set is not empty, so a lowest node was found.
-    pending.delete(node!);
+  while (heap.length > 0) {
+    const node = pop();
     evaluations += 1;
-    const component = plan.componentOf[node!]!;
+    const component = plan.componentOf[node]!;
     taken[component] = (taken[component] ?? 0) + 1;
-    for (const cell of input.evaluate(node!))
-      for (const reader of readers.get(cell) ?? []) pending.add(reader);
+    for (const cell of input.evaluate(node))
+      for (const reader of readers.get(cell) ?? []) push(reader);
   }
   return {
     components: plan.components.length,
     evaluations,
     longestComponent: taken.reduce((a, b) => Math.max(a, b), 0),
+    selections,
+    siftSteps,
   };
 }

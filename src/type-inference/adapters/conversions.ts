@@ -1,5 +1,12 @@
+import { FIXED_PARAMETERS, SCRIPT_NAMED_PARAMETERS } from "../../argument-rules.js";
 import { LOCK_CALLS } from "../../capture-call.js";
-import { CONVERSIONS, FILE_TEXT_FUNCTIONS, type Conversion } from "../../conversions.js";
+import {
+  CONVERSIONS,
+  FILE_TEXT_FUNCTIONS,
+  type CallShape,
+  type Conversion,
+} from "../../conversions.js";
+import { decryptsCall, LOCK_PARAMETERS } from "../../operation-checks.js";
 import { CONVERSION_FUNCTIONS } from "../../language-facts.js";
 import {
   isAssignable,
@@ -10,7 +17,7 @@ import {
   type StaticType,
 } from "../../static-types.js";
 import type { OperationInputs, OperationRelation, OperationResult } from "./relation.js";
-import { parameters } from "./relation.js";
+import { parameters, type Parameters } from "./relation.js";
 import {
   alternativesOf,
   closedType,
@@ -71,14 +78,33 @@ function textResult(defaulted: boolean): (inputs: OperationInputs) => OperationR
       : typeResult(STRING_TYPE);
 }
 
-const BUILTINS: readonly (readonly [string, (inputs: OperationInputs) => OperationResult])[] = [
+/** The named parameters a call's shape takes: its `default:` where it has a fallback, `files:` where it says so. */
+function namedOf(shape: CallShape): readonly string[] {
+  return [...(shape.fallback === null ? [] : ["default"]), ...(shape.files ? ["files"] : [])];
+}
+
+// Each builtin's declared parameters are the legacy's own (the closing check's CC-B3): a file text function's shape,
+// a lock call's openers or its password, key and default, `escapeMarkup`'s fixed text, `script`'s path and label.
+const BUILTINS: readonly (readonly [
+  string,
+  Parameters,
+  (inputs: OperationInputs) => OperationResult,
+])[] = [
   ...[...FILE_TEXT_FUNCTIONS].map(
-    ([name, shape]) => [name, textResult(shape.fallback !== null)] as const,
+    ([name, shape]) =>
+      [name, parameters(1, namedOf(shape)), textResult(shape.fallback !== null)] as const,
   ),
   // A lock call's written default is given beside the text, also by an encrypt call, which reports it.
-  ...[...LOCK_CALLS].map((name) => [name, textResult(true)] as const),
-  ["escapeMarkup", textResult(false)],
-  ["script", () => typeResult(SCRIPT_TYPE)],
+  ...[...LOCK_CALLS].map(
+    (name) =>
+      [
+        name,
+        parameters(1, decryptsCall(name) ? LOCK_PARAMETERS.decrypt : LOCK_PARAMETERS.encrypt),
+        textResult(true),
+      ] as const,
+  ),
+  ["escapeMarkup", parameters(FIXED_PARAMETERS.get("escapeMarkup")!.length), textResult(false)],
+  ["script", parameters(1, SCRIPT_NAMED_PARAMETERS), () => typeResult(SCRIPT_TYPE)],
 ];
 
 export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map<string, OperationRelation>(
@@ -87,16 +113,13 @@ export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map<string,
       `conversion.${name}`,
       {
         contract: { family: "conversion", name },
-        parameters: parameters(
-          "pair" in CONVERSIONS[name] ? 2 : 1,
-          CONVERSIONS[name].fallback === null ? [] : ["default"],
-        ),
+        parameters: parameters("pair" in CONVERSIONS[name] ? 2 : 1, namedOf(CONVERSIONS[name])),
         result: (inputs) => conversionResult(CONVERSIONS[name], inputs),
       },
     ]),
-    ...BUILTINS.map(([name, result]): [string, OperationRelation] => [
+    ...BUILTINS.map(([name, declared, result]): [string, OperationRelation] => [
       name,
-      { contract: { family: "builtin", name }, parameters: parameters(1, ["default"]), result },
+      { contract: { family: "builtin", name }, parameters: declared, result },
     ]),
   ],
 );

@@ -267,6 +267,7 @@ import {
   argumentShapeProblem,
   scriptArgumentCountMessage,
   unknownNamedArgumentMessage,
+  SCRIPT_NAMED_PARAMETERS,
 } from "./argument-rules.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
 import {
@@ -7225,10 +7226,10 @@ export class TypeChecker {
             expression.span,
           );
         for (const [index, item] of expression.arguments.entries()) {
-          if (item.kind === "namedArgument" && item.name.name !== "label")
+          if (item.kind === "namedArgument" && !SCRIPT_NAMED_PARAMETERS.includes(item.name.name))
             this.#report(
               typeCode.unknownNamedArgument,
-              unknownNamedArgumentMessage("script", item.name.name, ["label"]),
+              unknownNamedArgumentMessage("script", item.name.name, SCRIPT_NAMED_PARAMETERS),
               item.name.span,
             );
           else if (item.kind === "namedArgument" || positional === 1)

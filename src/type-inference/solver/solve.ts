@@ -35,7 +35,7 @@ import {
 } from "./lifting.js";
 import { cutCells, type BudgetCut } from "./budget.js";
 import { caseOf } from "./lifting.js";
-import { run, type RunReport } from "./schedule.js";
+import { run, type RunInput, type RunReport } from "./schedule.js";
 import { TypeTable } from "./types.js";
 
 // The solver's driver (O4 stage 3a, work note §3; the executable reference model is the contract): the graph's
@@ -79,6 +79,11 @@ export interface Solution {
     readonly cells: number;
     readonly items: number;
     readonly orders: number;
+    /** The worklist's heap operations and the comparisons behind them. */
+    readonly selections: number;
+    readonly siftSteps: number;
+    /** The phases of the solve: one, plus one per round of self-rebuilt structures added at a fixpoint. */
+    readonly phases: number;
   };
   /**
    * The operations with an invalid counted combination (`<family>.<name>@<site>:none` or `:partial(i/n)`), a fold's
@@ -446,23 +451,61 @@ class Solver {
    */
   #mergeRebuilt(value: CellId, into: CellId, decl: boolean, site: number): boolean {
     let changed = false;
-    const targets = this.cells.items(into).filter((t) => t.parts?.element !== undefined);
-    const targetCases = new Set(targets.map((t) => caseOf(this.cells, t, into)));
     for (const item of this.cells.items(value)) {
       if (item.parts?.element === undefined || item.ctor === undefined) continue;
-      const bases = new Set(
-        item.case?.startsWith("j{") === true ? item.case.slice(2, -1).split(",") : [],
-      );
-      const own = [...bases].some((base) => targetCases.has(base));
-      for (const target of targets) {
-        if (target.ctor !== item.ctor) continue;
-        const matches = own
-          ? bases.has(caseOf(this.cells, target, into))
-          : target.tag === "w" || target.tag === "n";
-        if (!matches) continue;
+      for (const target of this.rebuiltTargets(item, into))
         if (this.copy(item.parts.element, target.parts!.element!, decl ? "set" : "strip", site))
           changed = true;
-      }
+    }
+    return changed;
+  }
+
+  /** The bases a structure identifies by: its rebuilt case's set, else its case alone. */
+  #casesBases(item: Item, cell: CellId): readonly string[] {
+    const c = caseOf(this.cells, item, cell);
+    return c.startsWith("j{") ? c.slice(2, -1).split(",") : [c];
+  }
+
+  /**
+   * The target structures a rebuilt structure merges into: those of its constructor whose bases are among the rebuilt
+   * structure's bases (a member, or a structure an earlier phase added); with no such target, the target's witness
+   * structures (one schema per place, option B); with neither, none: the structure waits for the fixpoint, where
+   * `addUnmatched` makes it the binding's own (the closing check's CC-B1: a null or host root gaining its first
+   * collection, a rebuild of another constructor).
+   */
+  rebuiltTargets(item: Item, into: CellId): readonly Item[] {
+    const targets = this.cells
+      .items(into)
+      .filter((t) => t.parts?.element !== undefined && t.ctor === item.ctor);
+    const bases = new Set(
+      item.case?.startsWith("j{") === true ? item.case.slice(2, -1).split(",") : [],
+    );
+    const byBases = targets.filter((t) => {
+      const own = t.tag === "w" || t.tag === "n" ? [] : this.#casesBases(t, into);
+      return own.length > 0 && own.every((base) => bases.has(base));
+    });
+    if (byBases.length > 0) return byBases;
+    return targets.filter((t) => t.tag === "w" || t.tag === "n");
+  }
+
+  /**
+   * At a fixpoint: a self-rebuilt structure with no target to merge into becomes the binding's own structure, as any
+   * other store would make it (the second phase of `solve`). Returns whether anything changed.
+   */
+  addUnmatched(c: Extract<Constraint, { kind: "store" | "assign" }>): boolean {
+    const into = c.kind === "store" ? c.into : c.binding;
+    if (c.kind === "store" && c.how === "elements") return false;
+    const intoKind = this.#graph.places[into]?.kind.kind;
+    const decl =
+      c.kind === "store" &&
+      (DECL_STORES.includes(c.how) || intoKind === "cell" || intoKind === "property");
+    const site = offsetOf(c.site);
+    let changed = false;
+    for (const item of this.cells.items(c.value)) {
+      if (item.parts?.element === undefined || item.ctor === undefined) continue;
+      if (this.rebuiltTargets(item, into).length > 0) continue;
+      if (this.copy(c.value, into, decl ? "set" : "strip", site, null, (it) => it === item))
+        changed = true;
     }
     return changed;
   }
@@ -791,7 +834,7 @@ class Solver {
 export function solve(graph: ConstraintGraph, options: SolveOptions): Solution {
   const solver = new Solver(graph, options);
   const constraints = graph.constraints;
-  const report = run({
+  const input: RunInput = {
     nodes: constraints.length,
     reads: (node) => solver.reads(constraints[node]!),
     writes: (node) => solver.cellsOf(constraints[node]!),
@@ -801,7 +844,42 @@ export function solve(graph: ConstraintGraph, options: SolveOptions): Solution {
       options.trace?.(node, constraints[node]!, changed);
       return changed;
     },
+  };
+  // The solve in phases (the closing check's CC-B1): the worklist to its fixpoint; then every self-rebuilt structure
+  // that matched no target structure there is added as the binding's own structure (`addUnmatched`) and the worklist
+  // runs on from the readers of the cells that changed. The fixpoint of a phase is unique, so the structures added
+  // are the same under every schedule. Termination: a phase adds only structures that matched nothing, each
+  // structural item of a self-rebuild's value is added at most once (an add is idempotent, and a structure once added
+  // matches its own later rebuilds), so the phases are at most one more than the self-rebuild sites, asserted.
+  const selfStores = constraints.filter(
+    (c): c is Extract<Constraint, { kind: "store" | "assign" }> =>
+      (c.kind === "store" || c.kind === "assign") && solver.selfRebuild(c),
+  );
+  const readersOf = new Map<CellId, number[]>();
+  constraints.forEach((c, node) => {
+    for (const cell of solver.reads(c)) readersOf.set(cell, [...(readersOf.get(cell) ?? []), node]);
   });
+  let report = run(input);
+  let phases = 1;
+  for (;;) {
+    const seeds = new Set<number>();
+    for (const c of selfStores)
+      if (solver.addUnmatched(c))
+        for (const cell of solver.cells.drain())
+          for (const node of readersOf.get(cell) ?? []) seeds.add(node);
+    if (seeds.size === 0) break;
+    phases += 1;
+    if (phases > selfStores.length + 1)
+      throw new Error(`the self-rebuild phases did not end in ${selfStores.length + 1}`);
+    const more = run(input, [...seeds]);
+    report = {
+      components: report.components,
+      evaluations: report.evaluations + more.evaluations,
+      longestComponent: Math.max(report.longestComponent, more.longestComponent),
+      selections: report.selections + more.selections,
+      siftSteps: report.siftSteps + more.siftSteps,
+    };
+  }
   if (options.verify === true)
     for (const c of constraints) {
       solver.evaluate(c);
@@ -824,6 +902,9 @@ export function solve(graph: ConstraintGraph, options: SolveOptions): Solution {
       cells: solver.cells.ids().length,
       items: solver.cells.ids().reduce((n, cell) => n + solver.cells.items(cell).length, 0),
       orders: orderComputations(solver.cells),
+      selections: report.selections,
+      siftSteps: report.siftSteps,
+      phases,
     },
     statuses,
     cuts: solver.cuts,

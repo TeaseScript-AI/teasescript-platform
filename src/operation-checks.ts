@@ -463,14 +463,25 @@ export function builtinCallProblems(
  * `default:`, an option whose value can never fit it, a written text that is no public key, and an encrypt call that
  * gives some of its openers but not all, or gives each as `false`. The text or file is checked where it is called.
  */
+/** The named parameters of the lock calls (V30 §13): an encrypt call's openers, a decrypt call's password, key and default. */
+export const LOCK_PARAMETERS: {
+  readonly encrypt: readonly string[];
+  readonly decrypt: readonly string[];
+} = { encrypt: ["password", "publicKey", "timeLock"], decrypt: ["password", "key", "default"] };
+
+/** Whether a lock call decrypts (else it encrypts). */
+export function decryptsCall(name: string): boolean {
+  return name === "decryptText" || name === "decryptFile";
+}
+
 function lockProblems(
   name: string,
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
-  const decrypts = name === "decryptText" || name === "decryptFile";
-  const openers = ["password", "publicKey", "timeLock"];
-  const parameters = decrypts ? ["password", "key", "default"] : openers;
+  const decrypts = decryptsCall(name);
+  const openers = LOCK_PARAMETERS.encrypt;
+  const parameters = decrypts ? LOCK_PARAMETERS.decrypt : openers;
   const problems: OperationProblem[] = [];
   const named = new Map<string, Expression>();
   let positional = 0;
