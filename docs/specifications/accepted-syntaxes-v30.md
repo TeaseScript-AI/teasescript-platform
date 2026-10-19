@@ -1144,8 +1144,10 @@ picks.add("three")    // compile error
 ```
 
 - A variable that starts as `null` takes the type of its first non-null value and may still hold `null`, and storing
-  `null` later makes a variable optional too: after `let count = 1`, `count = null` makes `count` an `integer?`. The
-  compiler infers no other combination of types.
+  `null` later makes a variable optional too: after `let count = 1`, `count = null` makes `count` an `integer?`. A known
+  `default: null` also makes a place optional when the value's other types are unknown:
+  `[fromJson(t, default: null), 1]` is a list of `integer?`, so using an element where an integer is required needs a
+  check or `otherwise`. The compiler infers no other combination of types.
 - A variable without a type whose type is `integer` is a `number` when any of its assignments can store a non-whole
   number, wherever that assignment is. The elements and properties inside such a variable widen by the same rule. A
   declared type, such as `integer`, `integer[]`, or `integer set`, stays strict, and an integer-only use of a widened
@@ -1464,8 +1466,9 @@ let level: integer = saved   // valid: saved is an integer here
 - Code that may run and a loop's start never drop a check on a constant or on a path inside one
   ([§12](#constants)), since nothing assigns a constant or changes its ordinary value. A path that goes through a
   speaker or a handle is the exception: after `const p = player`, a timer can still change `p.mood`.
-- At a loop's start, the facts are those on entry joined with those at the end of the body, repeated until they no
-  longer change. A write in the body drops a fact only when the written value breaks it.
+- At the start of a loop, the compiler accounts for both the values from before the loop and the values an earlier
+  round left, and repeats this until what it knows no longer changes. A write in the loop body drops a check only when
+  the written value can make the check false.
 - A saved value keeps its facts: after `let item = items[i + 1]`, `if item != null { ... }` holds even when `items`
   changes later. Saving only an index still depends on the collection staying unchanged.
 - A use that needs a check has three outcomes. Without a check on some route to it, it is a compile error that
@@ -1657,16 +1660,18 @@ its last value, as in a dict ([§40](#40-dictionaries)). A date or time comes ba
 `toDateTime`, and `toAbsoluteDateTime` read.
 
 The result has an expected type: the written type of the place the call's value lands in directly
-([§18](#defaults-follow-the-same-rule)), otherwise the default's type. A default that does not fit a written type is a
-compile error. `default: []` gives a list whose element type is not settled yet, and `default: null` leaves the value's
-type unknown, to be tested with `is`. Text that is not JSON, and JSON of the wrong shape for the expected type, give the
-default; in debug or test mode, a developer warning reports a fallback that JSON of the wrong shape caused.
+([§18](#defaults-follow-the-same-rule)). Without a written target, it comes from the default: `default: []` gives a
+list whose element type is not settled yet, and `default: null` leaves the value's type unknown, to be tested with
+`is`. A default that does not fit a written target is a compile error. Text that is not JSON, and JSON of the wrong
+shape for the expected type, give the default; in debug or test mode, a developer warning reports a fallback that JSON
+of the wrong shape caused.
 
 An object default, or an expected object type, reads the JSON as that object: the result is an object whose properties
 have the default's types, so their uses are checked at compile time. The runtime checks the JSON once when it is read: a
-missing key takes that property's value from the default, and so does a key whose value has the wrong type, with the
-developer warning naming the key; extra keys are ignored, and nested objects follow the same rules inside. JSON of
-another kind than the default, such as a list or text where the default is an object, gives the whole default. A dict
+missing key takes that property's value from the default, and so does a key whose value has the wrong type; in debug
+or test mode, the developer warning names the key. Extra keys are ignored, and nested objects follow the same rules
+inside. Malformed text, or JSON of another kind than the default, such as a list or text where the default is an
+object, gives the whole default. A dict
 default, or a written dict type, gives a dict.
 
 ```text
@@ -2615,9 +2620,9 @@ let answer = nickname otherwise askText "Name?"
 ### Defaults follow the same rule
 **Status:** Accepted (owner decisions, 2026-10-19)
 
-Every `default:` follows the rule of `otherwise`: the default has the type of the value it stands in for, or is `null`.
-A default that cannot be `null` gives a result that cannot be `null`, and `default: null` makes the result optional.
-This holds for `get` on lists and dicts ([§16](#reading-an-element-with-a-default), [§40](#40-dictionaries)), the
+Every `default:` follows the rule of `otherwise`: the default has the type of the value it stands in for, or is `null`,
+and `default: null` makes the result optional. A `get` default replaces a missing entry; an existing entry is returned
+unchanged, also when it is `null`. This holds for `get` on lists and dicts ([§16](#reading-an-element-with-a-default), [§40](#40-dictionaries)), the
 conversions ([§13](#type-conversion)), `toRegex` ([§8](#regexes)), `fromJson` and `fromBase64`
 ([§13](#json-and-base64)), `fileFromBase64` ([§33](#stored-files)), and `decryptText` and `decryptFile`
 ([§13](#encryption)).
