@@ -54,11 +54,11 @@ This table is generated from the current section order.
 - **Rejected**: not part of the language
 
 **Type rules ahead of the compiler (owner decision, 2026-10-19):** the type rules decided for the new type checker (O4)
-are written in this document: [§11](#11-function-definitions), [§12](#12-variable-declarations),
+are written in this document: [§8](#regexes), [§11](#11-function-definitions), [§12](#12-variable-declarations),
 [§13](#13-explicit-types), [§15](#15-objects), [§16](#16-lists), [§17](#17-return-statements),
 [§18](#18-null-and-optional-values), [§25](#25-persistent-storage-and-keys), [§32](#32-switch-statements),
-[§34](#34-runtime-warnings-and-recoverable-values), and [§40](#40-dictionaries). The current compiler and runtime
-still apply the earlier rules until the compiler switches to that checker.
+[§33](#stored-files), [§34](#34-runtime-warnings-and-recoverable-values), and [§40](#40-dictionaries). The current
+compiler and runtime still apply the earlier rules until the compiler switches to that checker.
 
 ## Delimiter roles
 **Status:** Accepted
@@ -1185,9 +1185,9 @@ picks.add("three")    // compile error
   `let b = a`, both `b.add(1)` and `a.add("s")` are valid. A copy of a source with contents carries them: after
   `let a = [1]` and `let b = a`, `b.add("s")` is a compile error, as after `let b = [1]`. A copy of a variable with a
   written type keeps that type: after `let a: integer | string = 1` and `let b = a`, `b = "text"` is valid.
-- A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
-  decides nothing and is not rejected at compile time. Where a place of known type takes it, also through a place that
-  no other value decided, such as `let box = { t: null }` set only from such a parameter, it is checked when it runs.
+- A value whose type the compiler cannot know, such as untyped storage or host data, decides nothing and is not
+  rejected at compile time. Where a place of known type takes it, also through a place that no other value decided,
+  such as `let box = { t: null }` set only from such a value, it is checked when it runs.
   An arithmetic operator on such a value may also give a value of unknown type. A place with a written type, or one
   that a value decided, also later in the source, still rejects it at compile time when no result of that operator
   could fit, as in `let y: string = x / 4`, `y += x / 4` after `let y = "a"`, or `ys.add(x / 4)` after `let ys = []`
@@ -2621,7 +2621,8 @@ let answer = nickname otherwise askText "Name?"
   its fallback is never used. The message names what to remove, such as `'count' is never null here, so the fallback
   after 'otherwise' is never used. Remove 'otherwise 0'.` In a chain, the warning goes on the first `otherwise` whose
   left side can no longer be `null`, as `otherwise "x"` in `nickname otherwise "pet" otherwise "x"`, and names every
-  fallback from there. A value of unknown type, such as an untyped parameter or loaded data, gets no warning.
+  fallback from there. A value of unknown type, such as loaded data, and a value that depends on a parameter without a
+  type get no warning.
 - A fallback does not catch an error: `items[5] otherwise 0` still fails when the list has no position 5, and
   `toys[key] otherwise 0` when the dict has no such key. When the element can never be `null`, the warning names the
   read that has a default instead, `items.get(5, default: 0)` ([§16](#reading-an-element-with-a-default),
