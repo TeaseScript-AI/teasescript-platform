@@ -1,4 +1,12 @@
-import { members, resolved, union, valueKindOfType, type StaticType } from "../../static-types.js";
+import {
+  UNKNOWN_TYPE,
+  members,
+  resolved,
+  sameType,
+  union,
+  valueKindOfType,
+  type StaticType,
+} from "../../static-types.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { DynamicWhy, PlaceId, ProjectionStep, SyntaxEvidence } from "../graph.js";
 import type {
@@ -118,6 +126,42 @@ export const RECEIVER: OperandRef = Object.freeze({ receiver: true });
 
 export function placeRef(place: PlaceId, collected = false): OperandRef {
   return collected ? { place, collected: true } : { place };
+}
+
+/**
+ * The sum of the types a relation reads from an aggregate (work note §3.5, P1): every member kept apart, nested unions
+ * flattened, `never` dropped, `unknown` absorbing; no join and no numeric widening, which the interpretation does over
+ * the final sets. So the answer over a growing aggregate is the union of the answers over its alternatives, and the
+ * sets only grow: `union()` would make `integer` and `number` one `number`, an answer that an earlier `integer` answer
+ * is not part of.
+ */
+export function sumOf(types: readonly StaticType[]): StaticType {
+  const out: StaticType[] = [];
+  const walk = (type: StaticType): void => {
+    const value = resolved(type);
+    if (value.kind === "union") {
+      value.members.forEach(walk);
+      return;
+    }
+    if (value.kind === "never") return;
+    // deduplicated structurally, never through a rendered text (no text on a solving path)
+    if (!out.some((known) => sameType(known, value))) out.push(value);
+  };
+  types.forEach(walk);
+  if (out.some((type) => type.kind === "unknown")) return UNKNOWN_TYPE;
+  if (out.length === 0) return { kind: "never" };
+  return out.length === 1 ? out[0]! : { kind: "union", members: out };
+}
+
+/**
+ * A sum as a result: one `type` answer per member, so the members reach the cells apart (the type table would make
+ * `integer | number` one `number`); the solver reads two or more as the members of the union the operation defines.
+ */
+export function sumResult(type: StaticType): OperationResult {
+  const value = resolved(type);
+  return value.kind === "union"
+    ? alternativesOf(...value.members.map(typeResult))
+    : typeResult(type);
 }
 
 export function named(name: string): OperandRef {

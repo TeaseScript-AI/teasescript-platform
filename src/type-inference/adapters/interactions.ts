@@ -57,6 +57,8 @@ import {
   pathOf,
   placeRef,
   structureOf,
+  sumOf,
+  sumResult,
   typeResult,
   UNCONSTRAINED,
 } from "./views.js";
@@ -110,9 +112,18 @@ class Places {
     return this.#typeOf(this.inputs.view(place));
   }
 
-  /** The type at a place the relation sums (an option, an element of an option list): every alternative at once. */
+  /**
+   * The type at a place the relation sums (an option, an element of an option list): every alternative at once, kept
+   * apart (`sumOf`), so the answer over the aggregate is the union of the answers over its alternatives.
+   */
   sum(place: PlaceId): StaticType {
-    return this.#typeOf(this.inputs.collect(place));
+    const view = this.inputs.collect(place);
+    if (isBottom(view)) throw new Unconstrained();
+    if (view.dynamic !== null) {
+      this.whys.push(view.dynamic);
+      return UNKNOWN_TYPE;
+    }
+    return sumOf(view.alternatives ?? []);
   }
 
   #typeOf(view: OperandView): StaticType {
@@ -325,10 +336,11 @@ function choice(inputs: OperationInputs): OperationResult {
     if (empty && evidence.options.length > 0) return INVALID;
     if (values.length === 0) return INVALID;
     const known: readonly (ScalarValue | null)[] | null = literals;
-    const joined = joinTypes(values);
-    const type = known === null ? (joined ?? union(values)) : restrictedChoice(values, known);
+    // the options are summed (P1): kept apart, no join, the interpretation widens over the final sets; the literal
+    // options' values restrict the result as before
+    const type = known === null ? sumOf(values) : restrictedChoice(values, known);
     if (members(type).some(unknownPart)) return rejected ? INVALID : places.dynamic();
-    return typeResult(type);
+    return sumResult(type);
   });
 }
 
@@ -406,14 +418,15 @@ function cycleAnswer(
       places.leaf(step(at, { property: "value" })),
       places.leaf(step(at, { property: "text" })),
     ].filter((part): part is StaticType => part !== undefined);
-    return returned.length === 0 ? UNKNOWN_TYPE : union(returned.map(plainType));
+    return returned.length === 0 ? UNKNOWN_TYPE : sumOf(returned.map(plainType));
   };
+  // the options are summed (P1): kept apart, no join, the interpretation widens over the final sets
   if (elements !== undefined)
-    return union(
+    return sumOf(
       elements.map((element) => {
         if (element.object === null) {
           const at = pathOf(placeRef(element.place, true));
-          return union(members(places.sum(element.place)).map((m) => computedOption(m, at)));
+          return sumOf(summed(places.sum(element.place)).map((m) => computedOption(m, at)));
         }
         const returned = element.object.value ?? element.object.text;
         return returned === null ? UNKNOWN_TYPE : plainType(places.sum(returned));
@@ -427,7 +440,13 @@ function cycleAnswer(
   const at = step(options, "element");
   const element = places.leaf(at);
   if (element === undefined) return UNKNOWN_TYPE;
-  return union(members(resolved(element)).map((m) => computedOption(m, at)));
+  return sumOf(summed(element).map((m) => computedOption(m, at)));
+}
+
+/** The members of a sum, kept apart (`members` would make `integer` and `number` one `number`). */
+function summed(type: StaticType): readonly StaticType[] {
+  const value = resolved(type);
+  return value.kind === "union" ? value.members : [value];
 }
 
 /** `#writtenFormField`: a descriptor written where the form is asked has exactly the written properties. */
@@ -542,7 +561,7 @@ function form(inputs: OperationInputs): OperationResult {
         const type = places.leaf(at);
         // a slot the fields object does not have: no such field
         if (type === undefined) return UNCONSTRAINED;
-        return typeResult(field(places, at, type, descriptor));
+        return sumResult(field(places, at, type, descriptor));
       });
   if (container.kind === "dict") {
     if (written?.shape === "dict" && written.entries.length > 0)
@@ -557,7 +576,7 @@ function form(inputs: OperationInputs): OperationResult {
                 entry.name,
                 (part: OperationInputs): OperationResult =>
                   answer(evidence, part, (places) =>
-                    typeResult(
+                    sumResult(
                       field(
                         places,
                         pathOf(placeRef(entry.place)),

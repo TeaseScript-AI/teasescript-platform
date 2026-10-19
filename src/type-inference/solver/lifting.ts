@@ -449,14 +449,27 @@ type Pick =
       readonly why: undefined;
       readonly cells: readonly CellId[];
     }
-  /** The one pick of a collected operand: every alternative at once (P1). */
+  /**
+   * The one pick of a collected operand (P1): every alternative at once, the view closed and the provenances of the
+   * cell's dynamic values and possibilities beside it (`whys`), so the relation answers over the known alternatives
+   * and the ask adds a dynamic result per provenance: the answer grows with the alternatives instead of collapsing to
+   * unknown when one is unknown. An answer read from an aggregate is a member of the union the operation defines at
+   * its site, so a single-option answer and a two-option answer are members of one union, not a witness beside members.
+   */
   | {
       readonly kind: "aggregate";
       readonly view: OperandView;
-      readonly tag: "w" | "m";
+      readonly tag: "m";
       readonly why: undefined;
       readonly cells: readonly CellId[];
+      readonly whys: readonly Provenance[];
     };
+
+/** The summed reads of one ask: whether one happened, and the provenances of the dynamic values met. */
+interface Aggregated {
+  used: boolean;
+  readonly whys: Set<Provenance>;
+}
 
 interface Operand {
   readonly ref: OperandRef;
@@ -525,6 +538,8 @@ interface Reading {
   /** The provenances of the combination's dynamic views and possibilities, for a possibility without one of its own. */
   readonly whys: readonly Provenance[];
   readonly mode: "closed" | "dynamic" | "possible";
+  /** The provenances of the dynamic values among the combination's aggregate picks: a dynamic result each. */
+  readonly aggregateWhys: readonly Provenance[];
 }
 
 /** The dimensions selected for one ask, by key, and the recorder of a dimension read before its selection. */
@@ -583,20 +598,20 @@ function picksOf(cells: Cells, cell: CellId, lazy: boolean): Pick[] {
 }
 
 /** The one pick of a collected operand or the aggregate view of a summed place (P1): every alternative at once. */
-function aggregateOf(cells: Cells, cell: CellId): Pick {
+function aggregateOf(cells: Cells, cell: CellId): Extract<Pick, { kind: "aggregate" }> {
   const table = cells.table;
   const all = alternatives(cells, cell);
-  const whys = provenances(cells, cell);
   return {
     kind: "aggregate",
     view: {
       alternatives: all.length === 0 ? null : all.map((a) => table.toStatic(a.type)),
-      dynamic: whys.length === 0 ? null : dynamicWhy(whys[0]!),
+      dynamic: null,
       known: undefined,
     },
-    tag: all.some((a) => a.tag === "m") ? "m" : "w",
+    tag: "m",
     why: undefined,
     cells: [cell],
+    whys: provenances(cells, cell).map(dynamicWhy),
   };
 }
 
@@ -661,6 +676,7 @@ function readingOf(combo: readonly Pick[], selection: Selection, site: string): 
     : picks.some((pick) => pick.kind === "dynamic")
       ? "dynamic"
       : "closed";
+  // an aggregate pick (a collected operand) makes the answer a member (see the pick's documentation)
   const base: Reading["base"] =
     mode === "possible" ? "p" : picks.some((pick) => pick.tag === "m") ? "m" : "w";
   const whys = [
@@ -672,7 +688,10 @@ function readingOf(combo: readonly Pick[], selection: Selection, site: string): 
       ),
     ),
   ].sort();
-  return { base, site, whys, mode };
+  const aggregateWhys = [
+    ...new Set(picks.flatMap((pick) => (pick.kind === "aggregate" ? pick.whys : []))),
+  ].sort();
+  return { base, site, whys, mode, aggregateWhys };
 }
 
 /**
@@ -1023,7 +1042,8 @@ function askLazy(
         dims.set(key, Math.max(dims.get(key) ?? 0, list.length));
       }
     };
-    const inputs = inputsOf(cells, operands, combo, operation, selected, want);
+    const aggregated: Aggregated = { used: false, whys: new Set() };
+    const inputs = inputsOf(cells, operands, combo, operation, selected, want, aggregated);
     const answer = fn(inputs);
     let reading: Ask["reading"] | null = null;
     if (wanted.current === null)
@@ -1037,6 +1057,7 @@ function askLazy(
         site,
         selected,
         want,
+        aggregated,
       );
     if (wanted.current !== null) {
       const { key, picks } = wanted.current;
@@ -1062,6 +1083,7 @@ function inputsOf(
   operation: Operation,
   selection: Selection,
   want: Want,
+  aggregated: Aggregated = { used: false, whys: new Set() },
 ): OperationInputs {
   let receiver: OperandView | null = null;
   const args: OperandView[] = [];
@@ -1111,10 +1133,15 @@ function inputsOf(
       return pick === null ? BOTTOM_VIEW : (pick.view ?? BOTTOM_VIEW);
     },
     collect(place) {
+      // a summed read: the closed aggregate of the alternatives, the dynamic provenances recorded for the ask's result
+      // (a place with dynamic values alone is bottom to the relation: the ask waits, and the recorded provenances give
+      // the result its dynamic marks, as the chosen reading's dynamic pick did)
       declare(place);
       if (!cells.has(place)) return BOTTOM_VIEW;
       const pick = aggregateOf(cells, place);
-      return pick.view ?? BOTTOM_VIEW;
+      aggregated.used = true;
+      for (const why of pick.whys) aggregated.whys.add(why);
+      return pick.view;
     },
     leaf(path) {
       let key: string;
@@ -1125,12 +1152,25 @@ function inputsOf(
         declare(path.of.place);
         found = [...alternatives(cells, path.of.place), ...marksOf(cells, path.of.place)];
         if (found.length === 0) return BOTTOM_VIEW;
+        // the closed alternatives decide the leaf; the dynamic marks met add a dynamic result to the ask (recorded
+        // here), so an alternative without the part reads as absent beside a value the compiler cannot know, as the
+        // chosen reading of the two did one at a time
+        const rootClosed = found.some((a) => a.tag !== "d");
+        aggregated.used = true;
+        for (const a of found)
+          if (a.tag === "d" || a.tag === "p") aggregated.whys.add(dynamicWhy(a.why ?? "unknown"));
         for (const along of path.path) {
           if (typeof along === "object" && absentEverywhere(cells, found, along.property))
             return null;
           found = found.flatMap((a) => stepOf(cells, a, along, true));
+          for (const a of found) if (a.tag === "d") aggregated.whys.add(dynamicWhy(a.why));
         }
-        return found.length === 0 ? BOTTOM_VIEW : dynamicViewOf(found);
+        const closed = dynamicViewOf(found.filter((a) => a.tag !== "d"));
+        if (closed.alternatives !== null)
+          return { alternatives: closed.alternatives, dynamic: null, known: undefined };
+        // only dynamic marks reached: absent beside a closed root, else bottom (the ask waits; the recorded
+        // provenances give the result its dynamic marks)
+        return rootClosed ? null : BOTTOM_VIEW;
       }
       if ("place" in path.of) {
         const pick = placePick(path.of.place);
@@ -1232,13 +1272,21 @@ function readAnswer(
   site: string,
   selection: Selection,
   want: Want,
+  aggregated: Aggregated = { used: false, whys: new Set() },
 ): { readonly outcomes: readonly Outcome[]; readonly invalid: boolean } {
   const { cells } = context;
   const table = cells.table;
   const outcomes: Outcome[] = [];
   let invalid = false;
+  // an answer read from an aggregate is a member of the union the operation defines at its site
   const own = (member: boolean, possible: boolean): "w" | "m" | "p" =>
-    possible ? "p" : member ? "m" : reading.mode === "dynamic" ? "w" : reading.base;
+    possible
+      ? "p"
+      : member || aggregated.used || reading.aggregateWhys.length > 0 || hasAggregate(combo)
+        ? "m"
+        : reading.mode === "dynamic"
+          ? "w"
+          : reading.base;
   // the case the combination's structures give a collection the operation answers with (I1)
   const cased = (type: StaticType): { readonly part?: string; readonly case?: string } => {
     if (type.kind !== "list" && type.kind !== "set" && type.kind !== "dict") return {};
@@ -1395,8 +1443,14 @@ function readAnswer(
     }
   };
   walk(answer, false, reading.mode === "possible");
+  // the dynamic values and possibilities among the aggregates read: a dynamic result per provenance beside the answer
+  for (const why of [...new Set([...aggregated.whys, ...reading.aggregateWhys])].sort())
+    outcomes.push({ kind: "dynamic", why });
   return { outcomes, invalid };
 }
+
+const hasAggregate = (combo: readonly Pick[]): boolean =>
+  combo.some((pick) => pick.kind === "aggregate");
 
 /**
  * A projection: through the combination's chosen alternative of the operand (nothing for an unevaluated lazy
