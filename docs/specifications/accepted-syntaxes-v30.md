@@ -4074,8 +4074,9 @@ playing audio or video. It may use top-level names, the variables of the code th
 ([§14](#variables-in-timer-media-and-button-blocks)), its own locals, normal functions, and new timers.
 
 A due block interrupts at the next deterministic runtime boundary, including while the main path waits on an
-interaction, `wait`, blocking timer, media, or a message's reading time. The interrupted action is inert while the
-block runs, so there are never two active story paths:
+interaction, `wait`, blocking timer, media, or a message's reading time; inside an
+[`uninterruptible` block](#uninterruptible-blocks), it waits until that block ends. The interrupted action is inert
+while the block runs, so there are never two active story paths:
 
 - if the block completes normally, the interrupted action is presented again and the script continues where it
   left off;
@@ -4092,6 +4093,48 @@ timers and media keep running, and a wait for media to end ends with the media, 
 decision, 2026-10-11).
 
 Blocks run one at a time in due order. A block may itself wait; later expiries queue behind it.
+
+### Uninterruptible blocks
+**Status:** Accepted (Owner decision, 2026-10-20); not yet implemented, planned after the O4 type-checker switch.
+
+Timer, media, and permanent-button blocks do not interrupt the code inside an `uninterruptible` block; they wait until
+it ends. The code inside may itself wait: a message's reading time, `wait`, an interaction, and a function that waits
+all work as usual.
+
+```text
+timer async hidden 3 s {
+    say "Time is up.", instant
+    wait 2 s
+}
+uninterruptible {
+    say "Read this first.", instant
+    wait 10 s
+}
+say "Go on.", instant        // "Time is up." at 10 s, then "Go on." at 12 s
+```
+
+- Timers keep counting and media keep playing: a timer expires, and starts its next round, at its own time. Only their
+  blocks wait, queued in due order as usual. Nothing is dropped, paused, or merged, and every round of a repeating
+  timer runs its block once.
+- Once execution leaves the outermost `uninterruptible` block, the queued blocks run one at a time, before the next
+  ordinary statement. Each block starts then, so in the example the timer block's `wait 2 s` ends at 12 s. The
+  protection starts with the block: a block queued before it still runs first.
+- A permanent button can still be clicked, and its click is kept: the button's block joins the queue at the click and
+  runs after the `uninterruptible` block. As after any click, the button is then inactive until its block finishes
+  ([§28](#28-permanent-buttons)), so pressing it again adds nothing.
+- The protection covers all code that runs inside the block, waits included: the functions it calls, and a file it
+  runs with `call`, whose `end` returns into the block. The end of an inner `uninterruptible` block does not end the
+  protection of an outer one.
+- A label cannot stand inside the block, because a label stands only in a file's outer scope
+  ([§26](#26-labels-and-goto)), so no jump enters the block halfway.
+- A `goto`, `return`, `break`, `continue`, or `end` that leaves the block, also a `goto` or `end` in a function it
+  calls, ends the protection of each `uninterruptible` block it leaves. A `return` to a protected caller keeps the
+  caller protected.
+- `exit` and a runtime error end the session; the queued blocks do not run.
+- Stopping a timer or media, removing a button, and leaving a file entry cancel queued blocks as they would without
+  the `uninterruptible` block ([§22](#cues), [§27](#27-timers), [§28](#28-permanent-buttons)).
+- A checkpoint taken inside the block resumes inside it, with the queued blocks and kept clicks, and never runs them
+  early or twice.
 
 ### Timeline cues and self-handle (planned)
 **Status:** Accepted direction; not implemented. It follows the timer foundation separately.
@@ -4188,7 +4231,8 @@ Click and handler behavior:
 
 - A click runs the handler once, like a timer expiry block ([§27](#expiry-blocks)): it interrupts at the next
   deterministic runtime boundary, also while the main path waits on an interaction, `wait`, media, or a message's
-  reading time, and waits while another block runs. The interrupted action returns when the handler finishes.
+  reading time, and waits while another block runs or until an [`uninterruptible` block](#uninterruptible-blocks)
+  ends. The interrupted action returns when the handler finishes.
 - From the click until its handler finishes, the button stays in place but is inactive and cannot be clicked. It
   becomes active again unless it was removed.
 - The handler shares the variables of the code that showed the button
