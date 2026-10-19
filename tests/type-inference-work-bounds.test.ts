@@ -6,6 +6,7 @@ import { collectGraph } from "../src/type-inference/collector.js";
 import { exportFacts } from "../src/type-inference/solver/export.js";
 import { solve, type Solution } from "../src/type-inference/solver/solve.js";
 import { request } from "./helpers/type-inference-graph.js";
+import { variedSource } from "./helpers/type-inference-varied.js";
 
 /**
  * The growth series of the exit criterion (O4 stage 3a, work note §3.5, after review r5): the work of each phase grows
@@ -224,6 +225,46 @@ for (const series of FEEDBACK)
       `${series.name}: the same phases at every size`,
     );
   });
+
+test("the varied script of the profiler sweep is linear in every counter (every construct mixed)", () => {
+  const sizes = [25, 50, 100, 200];
+  const runs = sizes.map((k) => solveOf(variedSource(k)));
+  for (const [i, run] of runs.entries()) {
+    const k = sizes[i]! - 1;
+    const facts = exportFacts(run);
+    const typeOf = (name: string): string | undefined =>
+      facts.bindings.find((b) => b.name === name)?.type;
+    assert.equal(typeOf(`l${k}`), "list<integer>");
+    assert.equal(typeOf(`o${k}`), '{"a":integer,"b":string,"c":list<integer>}');
+    assert.equal(typeOf(`w${k}`), "(list<integer>|list<string>)");
+    assert.equal(typeOf(`g${k}`), "list<integer>");
+    assert.equal(typeOf(`pr${k}`), "integer");
+    assert.deepEqual(
+      run.statuses.filter((status) => status.includes("budget")),
+      [],
+    );
+    assert.ok(run.work.phases <= 2, `phases ${run.work.phases}`);
+  }
+  for (const phase of [
+    "evaluations",
+    "asks",
+    "combinations",
+    "foldStates",
+    "cells",
+    "items",
+    "orders",
+    "selections",
+    "visits",
+    "copies",
+    "entries",
+  ] as const)
+    linearInSize(
+      `varied: ${phase}`,
+      sizes,
+      runs.map((run) => run.work[phase]),
+      16,
+    );
+});
 
 test("objects of distinct literal shapes with their own stored names are linear in every counter (the second delta check's DC2-B1)", () => {
   // an object's slots are its own and the alternatives' shape is the group's own slots, never the program's vocabulary
