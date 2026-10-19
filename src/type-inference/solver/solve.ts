@@ -82,8 +82,17 @@ export interface Solution {
     /** The worklist's heap operations and the comparisons behind them. */
     readonly selections: number;
     readonly siftSteps: number;
-    /** The phases of the solve: one, plus one per round of self-rebuilt structures added at a fixpoint. */
+    /** The phases of the solve: one, plus one per round of self-rebuilt structures decided at a fixpoint. */
     readonly phases: number;
+    /**
+     * The primitive work behind the lookups and copies, so that a hidden scan shows in the growth series (the delta
+     * check's DC-B2 and the external review's N-B1): the candidates a lookup visited (the structures examined for a
+     * rebuilt structure's targets, the stores an index returned), the items a copy examined, and the entries the
+     * indexes built (the stores by target, the readers by cell, the decided witness targets).
+     */
+    readonly visits: number;
+    readonly copies: number;
+    readonly entries: number;
   };
   /**
    * The operations with an invalid counted combination (`<family>.<name>@<site>:none` or `:partial(i/n)`), a fold's
@@ -114,6 +123,15 @@ class Solver {
   readonly #functions: ReadonlyMap<number, FunctionSignature>;
   readonly #returns: ReadonlySet<number>;
   readonly #context: LiftContext & { nonWorking: ReadonlySet<string> | null };
+  /**
+   * The witness targets a fixpoint decided for a rebuilt structure, by target cell and the structure's element cell:
+   * decided once, never removed, so a rebuilt structure's target set only grows (rule (i), the delta check's DC-B1).
+   */
+  readonly #decided = new Map<string, Set<CellId>>();
+  /** The stores by target, indexed once per solve (the external review's N-B1). */
+  #storesByTarget: Map<PlaceId, Extract<Constraint, { kind: "store" }>[]> | null = null;
+  /** The primitive work counters (`Solution.work`). */
+  readonly #work = { visits: 0, copies: 0, entries: 0 };
   /** The targets a store reaches: a projection into one is a store path, whose value flows back into the part. */
   readonly #stored: ReadonlySet<PlaceId>;
   readonly #views = new Map<CellId, CellView>();
@@ -204,6 +222,15 @@ class Solver {
 
   get foldStates(): number {
     return this.#context.foldStates;
+  }
+
+  get work(): { readonly visits: number; readonly copies: number; readonly entries: number } {
+    return this.#work;
+  }
+
+  /** Counts an index's entries built outside the solver (the schedule's readers by cell). */
+  countEntries(n: number): void {
+    this.#work.entries += n;
   }
 
   /** The cells a constraint names: its reads and its writes, undirected (see the module comment). */
@@ -374,6 +401,7 @@ class Solver {
   ): boolean {
     let changed = false;
     const items = this.cells.items(from);
+    this.#work.copies += items.length;
     // a copy of a place with a written type takes that type (the owner, 2026-10-18): the bound's members as members
     // of the copy's union and the values the compiler cannot know, selected positively (PR reviews r4-B2, r5-B2): no
     // value evidence of the source, whatever its role, is the copy's evidence
@@ -400,10 +428,20 @@ class Solver {
     return changed;
   }
 
-  #storesInto(target: PlaceId): Extract<Constraint, { kind: "store" }>[] {
-    return this.#graph.constraints.flatMap((s) =>
-      s.kind === "store" && s.into === target ? [s] : [],
-    );
+  #storesInto(target: PlaceId): readonly Extract<Constraint, { kind: "store" }>[] {
+    if (this.#storesByTarget === null) {
+      this.#storesByTarget = new Map();
+      for (const s of this.#graph.constraints)
+        if (s.kind === "store") {
+          const stores = this.#storesByTarget.get(s.into);
+          if (stores === undefined) this.#storesByTarget.set(s.into, [s]);
+          else stores.push(s);
+          this.#work.entries += 1;
+        }
+    }
+    const stores = this.#storesByTarget.get(target) ?? [];
+    this.#work.visits += stores.length;
+    return stores;
   }
 
   /**
@@ -445,9 +483,9 @@ class Solver {
   /**
    * The merge of a rebuilt collection into the target's structures, per member or case (never across members): a
    * rebuilt structure merges its elements into every target structure of its constructor whose case is among its
-   * bases; one built from witnesses alone (no base), or from bases of other places only, merges into the target's
-   * witness structures (one schema per place, option B). A structure with no target yet waits (the store reads the
-   * target), so the structures of the target are those its other stores give it, whatever the order.
+   * bases, and into the witness structures a fixpoint decided for it (one schema per place, option B; rule (i)). A
+   * structure with no target yet waits for the fixpoint step (the store reads the target), so the structures of the
+   * target are those its other stores give it, whatever the order.
    */
   #mergeRebuilt(value: CellId, into: CellId, decl: boolean, site: number): boolean {
     let changed = false;
@@ -467,36 +505,50 @@ class Solver {
   }
 
   /**
-   * The target structures a rebuilt structure merges into: those of its constructor whose bases are among the rebuilt
-   * structure's bases (a member, or a structure an earlier phase added); with no such target, the target's witness
-   * structures (one schema per place, option B); with neither, none: the structure waits for the fixpoint, where
-   * `addUnmatched` makes it the binding's own (the closing check's CC-B1: a null or host root gaining its first
-   * collection, a rebuild of another constructor).
+   * The target structures a rebuilt structure merges into (rule (i), the delta check's DC-B1): those of its
+   * constructor whose bases are among the rebuilt structure's bases (a member, or a structure an earlier phase added),
+   * and the witness structures a fixpoint decided for it. Within a phase the set only grows: members only arrive,
+   * the bases are fixed by the cases, and the decided set changes only at a fixpoint; so the merge is monotone and a
+   * phase has one fixpoint whatever the schedule. A structure with no target waits for the fixpoint step.
    */
   rebuiltTargets(
     item: Item,
     into: CellId,
     among: readonly Item[] = this.cells.items(into),
   ): readonly Item[] {
-    const targets = among.filter((t) => t.parts?.element !== undefined && t.ctor === item.ctor);
     const bases = new Set(
       item.case?.startsWith("j{") === true ? item.case.slice(2, -1).split(",") : [],
     );
-    const byBases = targets.filter((t) => {
-      const own = t.tag === "w" || t.tag === "n" ? [] : this.#casesBases(t, into);
+    const decided = this.#decided.get(`${into}|${item.parts?.element}`);
+    this.#work.visits += among.length;
+    return among.filter((t) => {
+      if (t.parts?.element === undefined || t.ctor !== item.ctor) return false;
+      if (t.tag === "w" || t.tag === "n") return decided?.has(t.parts.element) === true;
+      const own = this.#casesBases(t, into);
       return own.length > 0 && own.every((base) => bases.has(base));
     });
-    if (byBases.length > 0) return byBases;
-    return targets.filter((t) => t.tag === "w" || t.tag === "n");
+  }
+
+  /** The witness structures of the target's constructor: the fallback a fixpoint decides (one schema per place). */
+  witnessTargets(item: Item, among: readonly Item[]): readonly Item[] {
+    this.#work.visits += among.length;
+    return among.filter(
+      (t) =>
+        t.parts?.element !== undefined && t.ctor === item.ctor && (t.tag === "w" || t.tag === "n"),
+    );
   }
 
   /**
-   * At a fixpoint: a self-rebuilt structure with no target to merge into becomes the binding's own structure, as any
-   * other store would make it (the second phase of `solve`). The whole set is decided against snapshots of the
-   * target, never against the target as this walk changes it: the witnesses against the fixpoint's targets, added
-   * first (one schema per place), then the members against the targets with those witnesses added, so a member
-   * merges into the place's witness as `rebuiltTargets` has it merge and never into another member; the order of the
-   * value's items decides nothing. Returns whether anything changed.
+   * The fixpoint step: a self-rebuilt structure that matched nothing within the phase is decided against snapshots of
+   * the target, never against the target as this walk changes it. The witnesses of the value first, against the
+   * fixpoint's targets: with witness targets of the constructor, those are decided for it (recorded in `#decided`, so
+   * the structure keeps merging into them from now on) and merged now; with none, the structure is added as the
+   * binding's own, as any other store would make it. Then the members, against the targets with those witnesses
+   * added: the same decision, so a member merges into the place's witness and never into another member; the order
+   * of the value's items decides nothing. A new decision counts as a change of the target (`Cells.touch`): every
+   * store into it re-evaluates, a sibling self-store of the same structure gains the target too. Each structure is
+   * decided or added at most once, so the phases are bounded by twice the structural items of the self-rebuild
+   * values plus one (asserted in `solve`). Returns whether anything changed.
    */
   addUnmatched(c: Extract<Constraint, { kind: "store" | "assign" }>): boolean {
     const into = c.kind === "store" ? c.into : c.binding;
@@ -510,26 +562,39 @@ class Solver {
     const structural = this.cells
       .items(c.value)
       .filter((it) => it.parts?.element !== undefined && it.ctor !== undefined);
-    const add = (items: readonly Item[]): boolean => {
+    const decide = (item: Item, among: readonly Item[]): boolean => {
+      const witnesses = this.witnessTargets(item, among);
+      if (witnesses.length === 0)
+        return this.copy(c.value, into, decl ? "set" : "strip", site, null, (it) => it === item);
+      const key = `${into}|${item.parts!.element!}`;
+      let decided = this.#decided.get(key);
+      if (decided === undefined) {
+        decided = new Set();
+        this.#decided.set(key, decided);
+      }
       let changed = false;
-      for (const item of items)
-        if (this.copy(c.value, into, decl ? "set" : "strip", site, null, (it) => it === item))
+      for (const w of witnesses)
+        if (!decided.has(w.parts!.element!)) {
+          decided.add(w.parts!.element!);
+          this.#work.entries += 1;
+          this.cells.touch(into);
+          changed = true;
+        }
+      for (const w of witnesses)
+        if (this.copy(item.parts!.element!, w.parts!.element!, decl ? "set" : "strip", site))
           changed = true;
       return changed;
     };
+    let changed = false;
     const before = this.cells.items(into);
-    const witnesses = add(
-      structural.filter(
-        (it) => isWitness(it) && this.rebuiltTargets(it, into, before).length === 0,
-      ),
-    );
+    for (const item of structural)
+      if (isWitness(item) && this.rebuiltTargets(item, into, before).length === 0)
+        if (decide(item, before)) changed = true;
     const withWitnesses = this.cells.items(into);
-    const members = add(
-      structural.filter(
-        (it) => !isWitness(it) && this.rebuiltTargets(it, into, withWitnesses).length === 0,
-      ),
-    );
-    return witnesses || members;
+    for (const item of structural)
+      if (!isWitness(item) && this.rebuiltTargets(item, into, withWitnesses).length === 0)
+        if (decide(item, withWitnesses)) changed = true;
+    return changed;
   }
 
   /** A store's value into a cell: the parts' items for a store of elements (`addAll`), else the value's items. */
@@ -867,20 +932,36 @@ export function solve(graph: ConstraintGraph, options: SolveOptions): Solution {
       return changed;
     },
   };
-  // The solve in phases (the closing check's CC-B1): the worklist to its fixpoint; then every self-rebuilt structure
-  // that matched no target structure there is added as the binding's own structure (`addUnmatched`) and the worklist
-  // runs on from the readers of the cells that changed. The fixpoint of a phase is unique, so the structures added
-  // are the same under every schedule. Termination: a phase adds only structures that matched nothing, each
-  // structural item of a self-rebuild's value is added at most once (an add is idempotent, and a structure once added
-  // matches its own later rebuilds), so the phases are at most one more than the self-rebuild sites, asserted.
+  // The solve in phases (the closing check's CC-B1, rule (i) after the delta check's DC-B1): the worklist to its
+  // fixpoint, where a rebuilt structure merges only into its targets by bases and the witnesses decided earlier, a set
+  // that only grows within the phase, so the phase's transfer functions are monotone and its fixpoint is one whatever
+  // the schedule; then the fixpoint step (`addUnmatched`) decides every self-rebuilt structure that matched nothing
+  // against the fixpoint's targets, and the worklist runs on from the readers of the cells that changed. Termination:
+  // every phase but the last decides or adds at least one structure of a self-rebuild value, each at most once (a
+  // decision is recorded, an add is idempotent), so the phases never exceed twice those structures plus one; the count
+  // only grows, so the check is sound at every phase.
   const selfStores = constraints.filter(
     (c): c is Extract<Constraint, { kind: "store" | "assign" }> =>
       (c.kind === "store" || c.kind === "assign") && solver.selfRebuild(c),
   );
   const readersOf = new Map<CellId, number[]>();
   constraints.forEach((c, node) => {
-    for (const cell of solver.reads(c)) readersOf.set(cell, [...(readersOf.get(cell) ?? []), node]);
+    for (const cell of solver.reads(c)) {
+      const readers = readersOf.get(cell);
+      if (readers === undefined) readersOf.set(cell, [node]);
+      else readers.push(node);
+      solver.countEntries(1);
+    }
   });
+  const structural = (): number =>
+    selfStores.reduce(
+      (n, c) =>
+        n +
+        solver.cells
+          .items(c.value)
+          .filter((it) => it.parts?.element !== undefined && it.ctor !== undefined).length,
+      0,
+    );
   let report = run(input);
   let phases = 1;
   for (;;) {
@@ -891,8 +972,8 @@ export function solve(graph: ConstraintGraph, options: SolveOptions): Solution {
           for (const node of readersOf.get(cell) ?? []) seeds.add(node);
     if (seeds.size === 0) break;
     phases += 1;
-    if (phases > selfStores.length + 1)
-      throw new Error(`the self-rebuild phases did not end in ${selfStores.length + 1}`);
+    if (phases > 2 * structural() + 1)
+      throw new Error(`the self-rebuild phases did not end in ${2 * structural() + 1}`);
     const more = run(input, [...seeds]);
     report = {
       components: report.components,
@@ -927,6 +1008,9 @@ export function solve(graph: ConstraintGraph, options: SolveOptions): Solution {
       selections: report.selections,
       siftSteps: report.siftSteps,
       phases,
+      visits: solver.work.visits,
+      copies: solver.work.copies,
+      entries: solver.work.entries,
     },
     statuses,
     cuts: solver.cuts,

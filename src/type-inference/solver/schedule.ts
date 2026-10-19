@@ -120,7 +120,7 @@ export interface RunReport {
   readonly longestComponent: number;
   /** The worklist's selections: every push and every pop of the heap (each O(log nodes)). */
   readonly selections: number;
-  /** The heap's comparisons while sifting, the work behind the selections, at most selections × log2(nodes) + selections. */
+  /** The heap's sift iterations (each up to two rank comparisons), the work behind the selections, at most selections × log2(nodes) + selections. */
   readonly siftSteps: number;
 }
 

@@ -277,6 +277,14 @@ export class Cells {
     return [...out].sort((a, b) => a - b);
   }
 
+  /**
+   * Marks a cell changed without an item: the fixpoint step's decision that a rebuilt structure merges into the
+   * cell's witness structures changes what the stores into the cell do, so their readers and they re-evaluate.
+   */
+  touch(cell: CellId): void {
+    this.#touched.add(cell);
+  }
+
   /** Whether anything changed since the last drain. */
   get dirty(): boolean {
     return this.#touched.size > 0;

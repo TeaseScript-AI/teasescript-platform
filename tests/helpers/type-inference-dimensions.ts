@@ -15,7 +15,10 @@ export type Phase =
   | "cells"
   | "items"
   | "orders"
-  | "selections";
+  | "selections"
+  | "visits"
+  | "copies"
+  | "entries";
 
 export interface Series {
   readonly name: string;

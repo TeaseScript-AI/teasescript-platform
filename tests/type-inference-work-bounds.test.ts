@@ -70,6 +70,15 @@ test("the growth detector rejects a quadratic and an exponential series (negativ
       sizes.map((n) => 2 ** (n / 25)),
     ),
   );
+  // an injected scan: a reader map built by copying each cell's reader list per reader (the delta check's DC-B2)
+  // counts n(n+1)/2 entries for n readers of one cell; the primitive counters make such a scan a growth failure
+  assert.throws(() =>
+    linearInSize(
+      "injected scan (entries copied per reader)",
+      sizes,
+      sizes.map((n) => (n * (n + 1)) / 2),
+    ),
+  );
 });
 
 test("a copy chain's interpretation orders each source once per copy (Dropje97's W3-B3)", () => {
@@ -188,6 +197,9 @@ for (const series of FEEDBACK)
       "items",
       "orders",
       "selections",
+      "visits",
+      "copies",
+      "entries",
     ] as const)
       linearInSize(
         `${series.name}: ${phase}`,
@@ -195,17 +207,21 @@ for (const series of FEEDBACK)
         runs.map((run) => run.work[phase]),
         16,
       );
-    // the heap's comparisons are the selections times the heap's depth, never more (the closing check's CC-B2)
+    // the heap's sift iterations are the selections times the heap's depth, never more (the closing check's CC-B2;
+    // each iteration compares up to two children: the delta check's DC-S1)
     for (const run of runs)
       assert.ok(
         run.work.siftSteps <= run.work.selections * (2 + Math.log2(run.graph.constraints.length)),
         `${series.name}: sift steps ${run.work.siftSteps} within the heap's bound`,
       );
-    // a genuine feedback merges into its binding at the first fixpoint: one phase
-    assert.deepEqual(
-      runs.map((run) => run.work.phases),
-      sizes.map(() => 1),
-      `${series.name}: one phase`,
+    // a genuine feedback merges into its binding's structures: into the members by their bases within the first
+    // phase, into a witness once the first fixpoint decides it (rule (i)); never a phase per append
+    for (const run of runs)
+      assert.ok(run.work.phases <= 2, `${series.name}: phases ${run.work.phases}, at most two`);
+    assert.equal(
+      new Set(runs.map((run) => run.work.phases)).size,
+      1,
+      `${series.name}: the same phases at every size`,
     );
   });
 
@@ -216,14 +232,21 @@ test("stores to one binding are linear in the schedule to 4,000 stores (Sol's D2
   const runs = sizes.map((k) => solveOf(one(k)));
   for (const run of runs)
     assert.equal(exportFacts(run).bindings.find((b) => b.name === "x")?.type, "integer");
-  for (const phase of ["evaluations", "items", "selections"] as const)
+  for (const phase of [
+    "evaluations",
+    "items",
+    "selections",
+    "visits",
+    "copies",
+    "entries",
+  ] as const)
     linearInSize(
       phase,
       sizes,
       runs.map((run) => run.work[phase]),
       16,
     );
-  // the worklist's comparisons stay within the heap's depth (the closing check's CC-B2)
+  // the worklist's sift iterations stay within the heap's depth (the closing check's CC-B2)
   for (const run of runs)
     assert.ok(
       run.work.siftSteps <= run.work.selections * (2 + Math.log2(run.graph.constraints.length)),
