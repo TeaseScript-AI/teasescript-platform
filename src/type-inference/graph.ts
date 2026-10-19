@@ -29,7 +29,9 @@ export type DynamicWhy =
   | "unknown callee"
   | "unknown function result"
   /** A written `list`, `set`, `dict`, or `object` says nothing about its parts. */
-  | "unwritten parts";
+  | "unwritten parts"
+  /** The budget of the solver cut the work (`solver/budget.ts`): a temporary limit of the compiler, not a rule. */
+  | "too complex";
 
 /** A type as the source writes it or as a built-in fixes it: no inference inside. */
 export type TypeTerm =
