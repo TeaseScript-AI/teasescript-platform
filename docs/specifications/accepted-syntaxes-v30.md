@@ -56,8 +56,9 @@ This table is generated from the current section order.
 **Type rules ahead of the compiler (owner decision, 2026-10-19):** the type rules decided for the new type checker (O4)
 are written in this document: [§11](#11-function-definitions), [§12](#12-variable-declarations),
 [§13](#13-explicit-types), [§15](#15-objects), [§16](#16-lists), [§17](#17-return-statements),
-[§18](#18-null-and-optional-values), [§32](#32-switch-statements), [§34](#34-runtime-warnings-and-recoverable-values),
-and [§40](#40-dictionaries). The current compiler still applies the earlier rules until it switches to that checker.
+[§18](#18-null-and-optional-values), [§25](#25-persistent-storage-and-keys), [§32](#32-switch-statements),
+[§34](#34-runtime-warnings-and-recoverable-values), and [§40](#40-dictionaries). The current compiler and runtime
+still apply the earlier rules until the compiler switches to that checker.
 
 ## Delimiter roles
 **Status:** Accepted
@@ -929,7 +930,8 @@ A regex is a value of type `regex` ([§13](#13-explicit-types)), which holds its
 
 `toRegex(text, default: value)` makes a regex of pattern text. The text has no slashes, its flags go inside it, as in
 `"(?i)yes|no"`, and in a string a backslash is written twice, as in `"\\d+"`. The `default:` is required and is a
-regex or `null`; the result is a `regex`, or a `regex?` with `default: null`. Text that is not a valid pattern, or that
+regex or `null`, or of another type only where a written union holds both ([§18](#defaults-follow-the-same-rule)); the
+result is a `regex`, or a `regex?` with `default: null`. Text that is not a valid pattern, or that
 is over the regex limits, gives the default. The default is evaluated only when it is used (owner decision,
 2026-10-16).
 
@@ -1047,8 +1049,11 @@ Rules:
 - A parameter with a default but no annotation takes the default's type by the same rule as `let`
   ([§12](#12-variable-declarations)): with `times = 1`, `times` is an `integer`, and a call that passes `0.5` is a compile
   error that suggests `times: number = 1`. Only an assignment in the body can make it a `number`, by the §12 rule for
-  non-whole numbers. What a default leaves open stays unknown: `null` gives an unknown type, and `[]` a list of
-  elements of unknown type.
+  non-whole numbers.
+- A parameter whose default leaves its type open, `= null` or `= []`, is treated like one without an annotation or a
+  default (below), and an omitted argument counts as the default. The default is checked once, at the function,
+  against what the body needs: `function shout(name = null) { say name.length }` is a compile error in the function,
+  not at each `shout()`.
 - A parameter without an annotation or a default needs no type. The compiler works out once, from the body, what the
   function requires of each such parameter, what it returns, and what it changes, and checks every call against
   that. The calls are never combined into one parameter type: inside each call's use of the body, the parameter and the
@@ -1624,7 +1629,8 @@ let boundedLevel = max(1, min(level, 10))
 ```
 
 ### JSON and Base64
-**Status:** Accepted (Owner decision, 2026-10-13; the expected type and defaults: owner decisions, 2026-10-19)
+**Status:** Accepted (Owner decision, 2026-10-13; the expected type and defaults: owner decisions, 2026-10-19 and
+2026-10-20)
 
 These protected functions exchange data with other programs as text:
 
@@ -1671,7 +1677,8 @@ have the default's types, so their uses are checked at compile time. The runtime
 missing key takes that property's value from the default, and so does a key whose value has the wrong type; in debug
 or test mode, the developer warning names the key. Extra keys are ignored, and nested objects follow the same rules
 inside. Malformed text, or JSON of another kind than the default, such as a list or text where the default is an
-object, gives the whole default. A dict
+object, gives the whole default. A property that is `null` in the default and gets no type anywhere else in the script
+stays unknown, to be tested with `is` before use, as with `default: null`; there is no warning. A dict
 default, or a written dict type, gives a dict.
 
 ```text
@@ -1692,13 +1699,15 @@ into UTF-8 text. It ignores spaces and line breaks, accepts the URL alphabet (`-
 does not need the padding.
 
 `fromJson` and `fromBase64` need their `default:`; a call without one is a compile error. The default of `fromBase64`
-is text or `null`. Text that is not Base64, or whose bytes are not UTF-8, gives the default, and neither call gives a
-runtime error for its text. The default is evaluated last, and only when it is used (owner decision, 2026-10-16).
+is text or `null`, or of another type only where a written union holds both ([§18](#defaults-follow-the-same-rule)).
+Text that is not Base64, or whose bytes are not UTF-8, gives the default, and neither call gives a runtime error for its
+text. The default is evaluated last, and only when it is used (owner decision, 2026-10-16).
 
 ```text
-let plain = fromBase64(text, default: "")        // text
-let maybeText = fromBase64(text, default: null)  // text or null
-let wrong = fromBase64(text, default: 0)         // compile error: the default is text or null
+let plain = fromBase64(text, default: "")                   // text
+let maybeText = fromBase64(text, default: null)             // text or null
+let wrong = fromBase64(text, default: 0)                    // compile error: no written union holds text and 0
+let mixed: string | integer = fromBase64(text, default: 0)  // valid: the written union holds both
 ```
 
 ```text
@@ -1813,7 +1822,8 @@ line. It locks once the lock has an opener, also one the call gives, and while n
 warns that the content never opens once the password and the private keys are lost.
 
 `decryptText` and `decryptFile` need their `default:`, which is text or `null`, as every `default:` has the call's
-result type or is `null` ([§18](#defaults-follow-the-same-rule)); a call without one is a compile error. A wrong
+result type or is `null`, or of another type only where a written union holds both
+([§18](#defaults-follow-the-same-rule)); a call without one is a compile error. A wrong
 password, a changed lock, text that is not a lock, a time lock whose moment has not come, and a cancelled dialog give
 the default, never a runtime error. The default is evaluated last, and only when it is used (owner decision,
 2026-10-16). With `password:` or `key:` a call tries only those. Without them, a lock whose time lock has passed opens
@@ -2618,19 +2628,21 @@ let answer = nickname otherwise askText "Name?"
   [§40](#40-dictionaries)).
 
 ### Defaults follow the same rule
-**Status:** Accepted (owner decisions, 2026-10-19)
+**Status:** Accepted (owner decisions, 2026-10-19 and 2026-10-20)
 
 Every `default:` follows the rule of `otherwise`: the default has the type of the value it stands in for, or is `null`,
 and `default: null` makes the result optional. A `get` default replaces a missing entry; an existing entry is returned
 unchanged, also when it is `null`. This holds for `get` on lists and dicts ([§16](#reading-an-element-with-a-default), [§40](#40-dictionaries)), the
 conversions ([§13](#type-conversion)), `toRegex` ([§8](#regexes)), `fromJson` and `fromBase64`
-([§13](#json-and-base64)), `fileFromBase64` ([§33](#stored-files)), and `decryptText` and `decryptFile`
-([§13](#encryption)).
+([§13](#json-and-base64)), `fileFromBase64` ([§33](#stored-files)), `decryptText` and `decryptFile`
+([§13](#encryption)), and `load` ([§25](#25-persistent-storage-and-keys)).
 
 A default or a fallback of another type is a compile error. A mix is allowed only when the value lands directly in a
 place whose written union holds both types: a typed `let`, an assignment to a variable with a written type, an argument
-for a parameter with a written type, or a `return` in a function with a written result type. A written type at a caller
-does not reach into the body of a function without types.
+for a parameter with a written type, or a `return` in a function with a written result type. At these places the
+written type also reaches the elements of list, set, and dict literals, nested ones included. It does not reach through
+a function without types, an operator such as `+`, or `${...}`: a written type at a caller does not reach into the body
+of a function without types.
 
 ```text
 let names = ["Ada", "Bo"]
@@ -2638,6 +2650,7 @@ let n = names.get(5, default: "none")                       // text
 let m = names.get(5, default: null)                         // text or null
 let k = names.get(5, default: 0)                            // compile error: names holds text
 let c: string | integer = names.get(5, default: 0)          // valid: the written union holds both
+let r: (string | integer)[] = [names.get(5, default: 0)]    // valid: the written type reaches the literal's elements
 say "${names.get(5, default: 0)}"                           // compile error: no written union here
 function helper(i) {
     return names.get(i, default: 0)    // compile error; the message suggests helper(i): string | integer
@@ -2653,9 +2666,10 @@ let flag = toBoolean(text, default: null)                   // a boolean or null
 let day = toDate(text, default: "today")                    // compile error: the default of toDate is a date
 let pattern = toRegex(text, default: null)                  // a regex or null
 let plain = fromBase64(text, default: "")                   // text
+let mixed: string | integer = fromBase64(text, default: 0)  // valid: the written union holds both
 let file = fileFromBase64(text, default: null)              // a file reference or null
 let secret = decryptText(locked, password: "x", default: "") // text
-let photo = decryptFile(locked, default: 0)                 // compile error: the default is text or null
+let photo = decryptFile(locked, default: 0)                 // compile error: no written union holds both
 ```
 
 ## 19. Choices
@@ -4001,7 +4015,7 @@ for item in items {
 
 ## 25. Persistent storage and keys
 **Status:** Accepted (bounded `load(...)`: Owner decision on #627, 2026-10-05; required default, load types, and wrong
-stored values: Owner decision, 2026-10-07)
+stored values: Owner decision, 2026-10-07; an object default per field: owner decision, 2026-10-20)
 
 Save or overwrite a value:
 
@@ -4049,7 +4063,10 @@ value of unknown type.
 
 A stored value that does not fit the load's type, such as a value that an older version of the script saved, is not
 returned. `load` reports developer warning `TSW016`, which names the key and both types, and evaluates and returns the
-default. The stored value stays as it is, and each such `load` warns again until a `save` replaces it. A saved value
+default. With an object default, `load` works per field, as `fromJson` reads JSON as an object
+([§13](#json-and-base64)): a missing field, or one whose stored value has the wrong type, takes that field's value from
+the default, and `TSW016` names the field, instead of the whole default being returned. The stored value stays as it
+is, and each such `load` warns again until a `save` replaces it. A saved value
 that the compiler cannot know, also under a computed key that equals a key a load reads, must fit the type every load
 of that key accepts, or the `save` raises runtime error `TSR058`.
 
@@ -4826,7 +4843,8 @@ fileToBase64(file)
 `fileFromBase64` stores the bytes that Base64 `text` holds as a file in the Player's file store and returns its
 store-issued file reference, a `string` like a photo reference. It reads Base64 as `fromBase64` does, with spaces and
 line breaks, the URL alphabet, and missing padding ([§13](#json-and-base64)), and also a `data:<type>;base64,…` URL.
-`default:` is required and is text or `null` ([§18](#defaults-follow-the-same-rule)); text that is not Base64 gives the
+`default:` is required and is text or `null`, or of another type only where a written union holds both
+([§18](#defaults-follow-the-same-rule)); text that is not Base64 gives the
 default, which is evaluated last, and only when it is used (owner decision, 2026-10-16). `fileToBase64` reads a stored
 file's bytes and returns them as plain Base64 text, and `hashFile` gives their SHA-256 ([§13](#hashes)). Storing a file
 and reading one each take a short wait, as a photo does. The result is recorded: a restore or a replay can reuse a
@@ -6446,8 +6464,6 @@ Parser-POC grammar blockers:
 
 Other open API and runtime decisions:
 
-- decide which JSON values a property that is `null` in the default accepts when JSON is read as an object
-  ([§13](#json-and-base64));
 - define the account field names for unit system and decimal precision;
 - decide whether an explicit unit-conversion method such as `measurement.to("km")` is needed in addition to presentation-only `format(...)`;
 - define background alignment/position values when `contain` or `cover` leaves or crops edges;
