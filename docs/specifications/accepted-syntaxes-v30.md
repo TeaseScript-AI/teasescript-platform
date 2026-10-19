@@ -1201,6 +1201,81 @@ construct before it that takes one ([§25](#25-persistent-storage-and-keys)), so
 local value is a compile error that names the global, explains that it needs a value from the start of the session,
 and shows both fixes: `, default: 0`, or `global attempts = 0` and a later `attempts = localCount`.
 
+### Constants
+**Status:** Accepted (Owner decision, 2026-10-19); not yet implemented, planned after the O4 type-checker switch.
+
+`const` declares a constant. It cannot be replaced, and, unlike JavaScript's `const`, no part of its ordinary value can
+change either. Copy it into a `let` variable for a version that can change:
+
+```text
+const rounds = 3
+rounds += 1                       // compile error
+
+const settings = { rounds: 3, locked: false }
+settings.locked = true            // compile error
+
+const groups = [[1, 2], [3, 4]]
+groups[0][1] = 9                  // compile error
+groups.add([5, 6])                // compile error
+
+let workingSettings = settings
+workingSettings.locked = true     // valid: changes an independent copy
+```
+
+- `const` follows the declaration, type, and scope rules of `let`, and like `let` it needs a start value. The value may
+  be one known only during play, as in `const name = askText "Your name?"`.
+- A constant cannot be assigned, also not with `+=` or `-=`. At any depth of its ordinary value, a property, element,
+  or dict entry cannot be assigned or added, and a method that changes a list, set, or dict, such as `add`, `remove`,
+  `sort`, or `clear`, is an error. This holds wherever the write stands, also in a function that sees the constant and
+  in a timer, media, or button block that shares it ([§14](#variables-in-timer-media-and-button-blocks)).
+- Copies are independent ([ADR 0014](../decisions/0014-core-runtime-value-semantics.md)) and can change: a `let` that
+  takes a constant's value, a parameter that receives it, and the result of a function that returns it.
+- Storage copies as usual ([§25](#25-persistent-storage-and-keys)): a constant that `load` started keeps its value
+  after a later `save` to that key, and loading the saved value into a `let` gives one that can change.
+- Only its declaration gives a constant its value. A declaration that runs again, in another call, another run of a
+  loop body, or after a `goto` back to an earlier label ([§26](#26-labels-and-goto)), sets its constant anew, as a
+  `let` would.
+
+Speakers and timer, media, and message handles stay references: a constant that holds one keeps naming the same
+speaker, timer, media, or message, which can still change, also through the constant:
+
+```text
+const p = player
+p.mood = "calm"                   // valid: changes the player
+p = mistressVera                  // compile error
+
+const scene = { lead: player, rounds: 3 }
+scene.lead = mistressVera         // compile error: changes the constant's value
+scene.lead.firstName = "Ada"      // valid: changes the player
+
+const deadline = timer async hidden 30 s {
+    say "Time is up", instant
+}
+deadline.pause()                  // valid: controls the timer
+```
+
+A write to a constant is a compile error that points at the write and at the constant's declaration and says what to
+do. The write on line 5 of the first example reports:
+
+```text
+Cannot change 'settings.locked' because 'settings' was declared with 'const' on line 4. Copy it into a 'let' variable to make changes.
+```
+
+Where only the running script shows whether a value is ordinary data or a reference, as for a constant started from a
+parameter without a type, the compiler warns, and the operation is checked when it runs.
+
+`global const` declares a global constant:
+
+```text
+global const maxRounds = 5
+global const difficulty = load("difficulty", default: 2)
+```
+
+It follows the rules of [global variables](#global-variables), so it is set once at session start from a start value
+that follows their initializer rules. The form `global attempts = localCount, default: 0` assigns its global again
+each time the declaration runs, so for a `global const` it is a compile error that names both fixes: `global`, or a
+start value that exists at session start. A `default:` that belongs to `load` is not affected.
+
 ## 13. Explicit types
 **Status:** Accepted
 
@@ -1317,7 +1392,8 @@ let level: integer = saved   // valid: saved is an integer here
   may let a function or block run, so it cancels narrowing for every top-level variable that a function or block
   assigns, and for every local variable that a timer, media, or button block shares and assigns
   ([§14](#variables-in-timer-media-and-button-blocks)). A loop's start forgets what the loop body may change, and a
-  function or block body does not inherit narrowing from the code around it.
+  function or block body does not inherit narrowing from the code around it. A statement that may let a function or
+  block run, and a loop's start, never cancel the narrowing of a constant ([§12](#constants)), which nothing assigns.
 
 ### Implicit conversions
 
@@ -1789,6 +1865,7 @@ function challenge {
   once.
 - Assignment still copies values ([§12](#12-variable-declarations)): after `let b = a`, a block that changes `a` does
   not change `b`.
+- A block that shares a constant cannot change it ([§12](#constants)).
 - A function called from a block sees its own variables and those of its file, never those of the block.
 
 ## 15. Objects
@@ -5239,7 +5316,8 @@ mistressVera.edgeInstructions = mistressVera.edgeInstructions + 1
 
 This allows state to remain attached to the character it describes instead of requiring unrelated global variables.
 
-Built-in dynamic terms, name lists, presentation fields, and custom properties may all be changed by the running script.
+Built-in dynamic terms, name lists, presentation fields, and custom properties may all be changed by the running script,
+also through a constant that holds the speaker ([§12](#constants)).
 
 A speaker has a built-in field, term, or name list only once a declaration, an assignment, or for `player` a copy of
 the account gives it one. Reading one where no way to the read has given it one is a compile error. `title` and
