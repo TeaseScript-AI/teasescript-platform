@@ -59,7 +59,7 @@ export interface CaseRow {
   readonly why: DynamicWhy | null;
   /** The messages of the operation's own errors, in order: the reports beside the fact, pinned, not interpreted. */
   readonly messages: readonly string[];
-  readonly stage5?: "Q1" | "Q2";
+  readonly stage5?: "Q1" | "Q2" | "choice-object" | "choice-sum";
   readonly note?: string;
 }
 
@@ -78,7 +78,7 @@ interface Variant {
   readonly why: DynamicWhy | null;
   /** The operation is written in a function whose untyped parameter `p` is called with this argument. */
   readonly call?: string;
-  readonly stage5?: "Q1" | "Q2";
+  readonly stage5?: "Q1" | "Q2" | "choice-object" | "choice-sum";
   readonly note?: string;
 }
 
@@ -306,6 +306,16 @@ const CHOICE_TEMPLATES: readonly Template[] = [
           `${kind}.nullable-elements`,
           [`let xs: ${kind}?[] = hostValue`],
           "askChoice xs",
+          null,
+          kind === "object"
+            ? {
+                // a choice object among computed elements returns its value or its text, which the compiler cannot
+                // know (the adapter sums per element, PR 3a review r6); the legacy keeps the written element type
+                // `object?`: the owner's export decision at stage 5
+                stage5: "choice-object",
+                note: "a choice object among the elements is a value the compiler cannot know; the legacy keeps the written `object?` element",
+              }
+            : {},
         );
       }
       for (const kind of LITERAL_KINDS)
@@ -315,8 +325,27 @@ const CHOICE_TEMPLATES: readonly Template[] = [
             [`let xs = [${literal(kind)}, ${literal(kind, true)}]`],
             "askChoice xs",
           );
-      yield variant("list-or-string", ["let xs: integer[] | string = hostValue"], "askChoice xs");
-      yield variant("list-or-list", ["let xs: integer[] | string[] = hostValue"], "askChoice xs");
+      // the buttons of a union of a collection and a scalar, or of two collections of different elements, are the
+      // members of the choice's union (P1 sums per member, PR 3a review r6); the legacy's join of the kinds fails to
+      // unknown: the owner's export decision at stage 5
+      const summed = {
+        stage5: "choice-sum" as const,
+        note: "the sum of the buttons is the choice's union; the legacy's join of integer and string fails to unknown",
+      };
+      yield variant(
+        "list-or-string",
+        ["let xs: integer[] | string = hostValue"],
+        "askChoice xs",
+        null,
+        summed,
+      );
+      yield variant(
+        "list-or-list",
+        ["let xs: integer[] | string[] = hostValue"],
+        "askChoice xs",
+        null,
+        summed,
+      );
       yield variant(
         "list-or-numbers",
         ["let xs: integer[] | number[] = hostValue"],

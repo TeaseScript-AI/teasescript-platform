@@ -32,6 +32,46 @@ const linear = (name: string, small: number, middle: number, large: number, slac
   );
 };
 
+/**
+ * The stronger detector (Sol's review of the target suite, 2026-10-19): a series over geometric sizes is linear when
+ * every doubling of the size at most doubles the count, with a bound on the constant: count(2n) <= 2 * count(n) +
+ * slack. A quadratic series (n^2) fails at the second doubling, an exponential one (2^n) at the first; the negative
+ * controls below prove the detector rejects both.
+ */
+const linearInSize = (
+  name: string,
+  sizes: readonly number[],
+  counts: readonly number[],
+  slack = 8,
+): void => {
+  for (let i = 1; i < sizes.length; i += 1) {
+    const ratio = sizes[i]! / sizes[i - 1]!;
+    assert.ok(
+      counts[i]! <= ratio * counts[i - 1]! + slack,
+      `${name}: ${counts.join(", ")} at sizes ${sizes.join(", ")} grows faster than linearly`,
+    );
+  }
+};
+
+test("the growth detector rejects a quadratic and an exponential series (negative controls)", () => {
+  const sizes = [25, 50, 100, 200];
+  linearInSize("linear", sizes, [50, 100, 200, 400]);
+  assert.throws(() =>
+    linearInSize(
+      "quadratic",
+      sizes,
+      sizes.map((n) => n * n),
+    ),
+  );
+  assert.throws(() =>
+    linearInSize(
+      "exponential",
+      sizes,
+      sizes.map((n) => 2 ** (n / 25)),
+    ),
+  );
+});
+
 test("a copy chain's interpretation orders each source once per copy (Dropje97's W3-B3)", () => {
   const chain = (copies: number): string =>
     `let v0: integer | string = 1\n${Array.from({ length: copies }, (_, i) => `let v${i + 1} = v${i}`).join("\n")}\nexit`;
@@ -81,4 +121,98 @@ test("a chain of rebuilds with a feedback edge stays finite and grows linearly (
     32,
   );
   linear("asks", small!.work.asks, middle!.work.asks, large!.work.asks, 32);
+});
+
+/**
+ * The feedback series of the owner's acceptance (2026-10-19, after PR 3a review r6): a binding appended at k sites,
+ * from every initializer role, to 200 appends; the counted work of every phase grows at most linearly with the
+ * appends, no budget cut happens, and the result is the one the rules give (a self-rebuild stored back merges into
+ * the binding's structures: a variable's list absorbs what is appended). The literal series was quadratic in
+ * evaluations and the permitted-initializer series cubic in asks before the merge; the plain `+ []` series
+ * exponential in the interpretation's orders before the per-cell order (Astra r6-B6).
+ */
+const FEEDBACK: readonly {
+  readonly name: string;
+  readonly source: (k: number) => string;
+  readonly xs: string;
+}[] = [
+  {
+    name: "a literal appended",
+    source: (k) =>
+      `let xs = [1]\n${Array.from({ length: k }, (_, i) => `xs = xs + [${i + 2}]`).join("\n")}\nexit`,
+    xs: "list<integer>",
+  },
+  {
+    name: "an empty literal appended",
+    source: (k) =>
+      `let xs = [1]\n${Array.from({ length: k }, () => "xs = xs + []").join("\n")}\nexit`,
+    xs: "list<integer>",
+  },
+  {
+    name: "a written bound rebuilt",
+    source: (k) =>
+      `let xs: integer[] | string[] = [1]\n${Array.from({ length: k }, () => "xs = xs + []").join("\n")}\nexit`,
+    xs: "(list<integer>|list<string>)",
+  },
+  {
+    name: "a get default appended",
+    source: (k) =>
+      `let xs = [[1]].get(0, default: [2])\n${Array.from({ length: k }, () => "xs = xs + []").join("\n")}\nexit`,
+    xs: "list<integer>",
+  },
+  {
+    name: "an otherwise initializer appended",
+    source: (k) =>
+      `let xs = [1] otherwise [2]\n${Array.from({ length: k }, (_, i) => `xs = xs + [${i + 3}]`).join("\n")}\nexit`,
+    xs: "list<integer>",
+  },
+];
+
+for (const series of FEEDBACK)
+  test(`feedback to 200 appends is linear in every phase: ${series.name}`, () => {
+    const sizes = [25, 50, 100, 200];
+    const runs = sizes.map((k) => solveOf(series.source(k)));
+    for (const run of runs) {
+      assert.equal(exportFacts(run).bindings.find((b) => b.name === "xs")?.type, series.xs);
+      assert.deepEqual(
+        run.statuses.filter((status) => status.includes("budget")),
+        [],
+        "no budget cut on an ordinary append",
+      );
+    }
+    for (const phase of [
+      "evaluations",
+      "asks",
+      "combinations",
+      "cells",
+      "items",
+      "orders",
+    ] as const)
+      linearInSize(
+        `${series.name}: ${phase}`,
+        sizes,
+        runs.map((run) => run.work[phase]),
+        16,
+      );
+  });
+
+test("stores to one binding are linear in the schedule to 4,000 stores (Sol's D2)", () => {
+  const one = (k: number): string =>
+    `let x = 1\n${Array.from({ length: k }, (_, i) => `x = ${i + 2}`).join("\n")}\nexit`;
+  const sizes = [500, 1000, 2000, 4000];
+  const runs = sizes.map((k) => solveOf(one(k)));
+  for (const run of runs)
+    assert.equal(exportFacts(run).bindings.find((b) => b.name === "x")?.type, "integer");
+  linearInSize(
+    "evaluations",
+    sizes,
+    runs.map((run) => run.work.evaluations),
+    16,
+  );
+  linearInSize(
+    "items",
+    sizes,
+    runs.map((run) => run.work.items),
+    16,
+  );
 });
