@@ -473,10 +473,12 @@ class Solver {
    * `addUnmatched` makes it the binding's own (the closing check's CC-B1: a null or host root gaining its first
    * collection, a rebuild of another constructor).
    */
-  rebuiltTargets(item: Item, into: CellId): readonly Item[] {
-    const targets = this.cells
-      .items(into)
-      .filter((t) => t.parts?.element !== undefined && t.ctor === item.ctor);
+  rebuiltTargets(
+    item: Item,
+    into: CellId,
+    among: readonly Item[] = this.cells.items(into),
+  ): readonly Item[] {
+    const targets = among.filter((t) => t.parts?.element !== undefined && t.ctor === item.ctor);
     const bases = new Set(
       item.case?.startsWith("j{") === true ? item.case.slice(2, -1).split(",") : [],
     );
@@ -490,7 +492,11 @@ class Solver {
 
   /**
    * At a fixpoint: a self-rebuilt structure with no target to merge into becomes the binding's own structure, as any
-   * other store would make it (the second phase of `solve`). Returns whether anything changed.
+   * other store would make it (the second phase of `solve`). The whole set is decided against snapshots of the
+   * target, never against the target as this walk changes it: the witnesses against the fixpoint's targets, added
+   * first (one schema per place), then the members against the targets with those witnesses added, so a member
+   * merges into the place's witness as `rebuiltTargets` has it merge and never into another member; the order of the
+   * value's items decides nothing. Returns whether anything changed.
    */
   addUnmatched(c: Extract<Constraint, { kind: "store" | "assign" }>): boolean {
     const into = c.kind === "store" ? c.into : c.binding;
@@ -500,14 +506,30 @@ class Solver {
       c.kind === "store" &&
       (DECL_STORES.includes(c.how) || intoKind === "cell" || intoKind === "property");
     const site = offsetOf(c.site);
-    let changed = false;
-    for (const item of this.cells.items(c.value)) {
-      if (item.parts?.element === undefined || item.ctor === undefined) continue;
-      if (this.rebuiltTargets(item, into).length > 0) continue;
-      if (this.copy(c.value, into, decl ? "set" : "strip", site, null, (it) => it === item))
-        changed = true;
-    }
-    return changed;
+    const isWitness = (it: Item): boolean => it.tag === "w" || it.tag === "n";
+    const structural = this.cells
+      .items(c.value)
+      .filter((it) => it.parts?.element !== undefined && it.ctor !== undefined);
+    const add = (items: readonly Item[]): boolean => {
+      let changed = false;
+      for (const item of items)
+        if (this.copy(c.value, into, decl ? "set" : "strip", site, null, (it) => it === item))
+          changed = true;
+      return changed;
+    };
+    const before = this.cells.items(into);
+    const witnesses = add(
+      structural.filter(
+        (it) => isWitness(it) && this.rebuiltTargets(it, into, before).length === 0,
+      ),
+    );
+    const withWitnesses = this.cells.items(into);
+    const members = add(
+      structural.filter(
+        (it) => !isWitness(it) && this.rebuiltTargets(it, into, withWitnesses).length === 0,
+      ),
+    );
+    return witnesses || members;
   }
 
   /** A store's value into a cell: the parts' items for a store of elements (`addAll`), else the value's items. */
