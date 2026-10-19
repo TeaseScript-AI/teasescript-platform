@@ -14,9 +14,11 @@ import type { TypeId, TypeTable } from "./types.js";
 // interpretation follows where positions tie), and the declaration mark of Q3.1r. The same evidence from two sites
 // is one item whose position is the earliest and whose mark is either's; both merges are changes, as a new item is,
 // and `drain` reports every changed cell together with every cell that holds an item whose part changed, so the
-// scheduler's readers of a place see a change anywhere under it. Every object item carries a slot for every property
-// name a store in the program gives any object, empty by construction until a store reaches it (`e`), so a property
-// store through a projected target reaches the object in place; a written bare `object` is an open object item.
+// scheduler's readers of a place see a change anywhere under it. An object item's slots are its own (N-B2): its
+// literal's properties and the names a projection reads or stores on it, created on first use (`slot`) and empty by
+// construction until a store reaches it (`e`), so a property store through a projected target reaches the object in
+// place; a name some store gives objects reads as `maybe absent` where an object lacks the slot (`stored`), a name no
+// store gives anywhere as certainly absent; a written bare `object` is an open object item.
 
 export type CellId = number;
 export type Tag = "w" | "m" | "b" | "n" | "p" | "d" | "e";
@@ -24,10 +26,27 @@ export type Constructor = "list" | "set" | "dict" | "object";
 /** The site in this cell, then the site in the source the evidence was copied from. */
 export type Position = readonly [number, number];
 export type Parts =
-  | { readonly element: CellId; readonly props?: undefined; readonly open?: undefined }
   | {
-      readonly props: ReadonlyMap<string, CellId>;
+      readonly element: CellId;
+      readonly props?: undefined;
+      readonly open?: undefined;
+      readonly owner?: undefined;
+      readonly identity?: undefined;
+      readonly written?: undefined;
+      readonly made?: undefined;
+    }
+  | {
+      /** The object's own slots: its literal's properties and the names a projection read or stored on it. */
+      readonly props: Map<string, CellId>;
       readonly open: boolean;
+      /** The cell the object was made in: the owner of its slots' derived cells. */
+      readonly owner: CellId;
+      /** The object's identity: its owner and the names its literal wrote, never the slots gained later. */
+      readonly identity: string;
+      /** The names the literal wrote, sorted: with every stored name, the object's shape for the alternatives. */
+      readonly written: readonly string[];
+      /** The object's creation position: a slot created later carries it, whichever copy touched the slot first. */
+      readonly made: Position;
       readonly element?: undefined;
     };
 /** The provenance of a `d` or `p` item: the graph's reasons, or the legacy's `unknown` type met in an answer. */
@@ -95,12 +114,15 @@ export class Cells {
   #next: CellId;
   #version = 0;
 
-  readonly #propertyNames: readonly string[];
+  /** The property names a store in the program gives any object (N-B2): a slot an object lacks for one of them reads as `maybe absent`. */
+  readonly #storedNames: ReadonlySet<string>;
+  /** The cells holding an object item, by its parts, so a slot created later knows its owners for the drain closure. */
+  readonly #holders = new WeakMap<Parts, Set<CellId>>();
 
   constructor(table: TypeTable, places: number, propertyNames: readonly string[] = []) {
     this.#table = table;
     this.#next = places;
-    this.#propertyNames = propertyNames;
+    this.#storedNames = new Set(propertyNames);
     for (let id = 0; id < places; id += 1) this.#cells.set(id, new Map());
   }
 
@@ -164,20 +186,59 @@ export class Cells {
     return item.parts.props === undefined ? [item.parts.element] : [...item.parts.props.values()];
   }
 
-  /** The property cells of an object with every stored name's slot, the missing ones empty by construction. */
-  objectParts(
-    props: ReadonlyMap<string, CellId>,
-    owner: CellId,
-    pos: Position,
-  ): Map<string, CellId> {
-    const out = new Map(props);
-    for (const name of this.#propertyNames)
-      if (!out.has(name)) {
-        const slot = this.derived(owner, name);
-        this.add(slot, { tag: "e", pos });
-        out.set(name, slot);
-      }
-    return out;
+  /**
+   * An object's slots are its own (the external review's N-B2): the properties its literal wrote, and a slot per name
+   * a projection reads or stores on it, created on demand (`slot`), empty by construction until a store reaches it;
+   * no object carries the program's whole vocabulary.
+   */
+  objectParts(props: ReadonlyMap<string, CellId>): Map<string, CellId> {
+    return new Map(props);
+  }
+
+  /** An object's identity: the cell it was made in and the names its literal wrote (never the slots gained later). */
+  objectIdentity(owner: CellId, props: ReadonlyMap<string, unknown>): string {
+    return `#${owner}{${[...props.keys()].sort().join(",")}}`;
+  }
+
+  /**
+   * The slot of a property on an object, created on first use with the empty-by-construction mark: a touched cell
+   * whose owners are every cell holding the item, so the object's readers re-evaluate. Every copy of the item shares
+   * the parts, so the slot is theirs too.
+   */
+  slot(item: Item, name: string): CellId {
+    const props = item.parts!.props!;
+    let cell = props.get(name);
+    if (cell === undefined) {
+      cell = this.derived(item.parts!.owner!, name);
+      props.set(name, cell);
+      for (const holder of this.#holders.get(item.parts!) ?? []) this.#own(cell, holder);
+      this.add(cell, { tag: "e", pos: item.parts!.made! });
+    }
+    return cell;
+  }
+
+  /** Whether a store in the program gives some object the property. */
+  stored(name: string): boolean {
+    return this.#storedNames.has(name);
+  }
+
+  /** The property names a store in the program gives any object. */
+  get storedNames(): ReadonlySet<string> {
+    return this.#storedNames;
+  }
+
+  /** The names an object literal wrote, sorted. */
+  writtenNames(props: ReadonlyMap<string, unknown>): readonly string[] {
+    return [...props.keys()].sort();
+  }
+
+  #own(part: CellId, owner: CellId): void {
+    let owners = this.#owners.get(part);
+    if (owners === undefined) {
+      owners = new Set();
+      this.#owners.set(part, owners);
+    }
+    owners.add(owner);
   }
 
   /**
@@ -237,7 +298,14 @@ export class Cells {
             return this.#put(cell, {
               ...rest,
               ctor: "object",
-              parts: { props: this.objectParts(new Map(), cell, contribution.pos), open: true },
+              parts: {
+                props: this.objectParts(new Map()),
+                open: true,
+                owner: cell,
+                identity: this.objectIdentity(cell, new Map()),
+                written: [],
+                made: contribution.pos,
+              },
               case: `c:${this.name(cell)}`,
             });
           let changedPart = false;
@@ -250,7 +318,14 @@ export class Cells {
           const changed = this.#put(cell, {
             ...rest,
             ctor: "object",
-            parts: { props: this.objectParts(props, cell, contribution.pos), open: false },
+            parts: {
+              props: this.objectParts(props),
+              open: false,
+              owner: cell,
+              identity: this.objectIdentity(cell, props),
+              written: this.writtenNames(props),
+              made: contribution.pos,
+            },
             case: `c:${this.name(cell)}`,
           });
           return changed || changedPart;
@@ -298,10 +373,7 @@ export class Cells {
         : item.ctor === undefined
           ? ""
           : item.ctor === "object"
-            ? `o${item.parts!.open === true ? "*" : ""}{${[...item.parts!.props!]
-                .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-                .map(([name, cell]) => `${name}:${cell}`)
-                .join(",")}}`
+            ? `o${item.parts!.open === true ? "*" : ""}${item.parts!.identity}`
             : `${item.ctor[0]}${item.parts!.element}`;
     const group = item.tag === "m" || item.tag === "b" ? (item.group ?? "") : "";
     const why = item.tag === "p" || item.tag === "d" ? (item.why ?? "") : "";
@@ -353,13 +425,14 @@ export class Cells {
     }
     map.set(key, item);
     this.#version += 1;
-    for (const part of this.partsOf(item)) {
-      let owners = this.#owners.get(part);
-      if (owners === undefined) {
-        owners = new Set();
-        this.#owners.set(part, owners);
+    for (const part of this.partsOf(item)) this.#own(part, cell);
+    if (item.parts?.props !== undefined) {
+      let holders = this.#holders.get(item.parts);
+      if (holders === undefined) {
+        holders = new Set();
+        this.#holders.set(item.parts, holders);
       }
-      owners.add(cell);
+      holders.add(cell);
     }
     this.#touched.add(cell);
     return true;

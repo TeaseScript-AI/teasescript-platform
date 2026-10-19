@@ -340,7 +340,9 @@ function covers(cells: Cells, known: Item, possible: Item, visiting: Set<string>
     if (known.parts?.props === undefined || known.parts.open === true) return false;
     for (const [name, part] of possible.parts.props) {
       const other = known.parts.props.get(name);
-      if (other === undefined || !partCovers(cells, other, part, visiting)) return false;
+      // a slot the known item lacks is empty by construction there: it covers an empty slot only
+      if (other === undefined ? !emptyPart(cells, part) : !partCovers(cells, other, part, visiting))
+        return false;
     }
     return true;
   }

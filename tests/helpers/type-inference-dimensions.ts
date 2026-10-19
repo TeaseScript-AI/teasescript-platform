@@ -166,10 +166,6 @@ export const SERIES: readonly Series[] = [
     sizes: [25, 50, 100, 200],
     source: (n) => `${lines(n, (i) => `let a${i} = {}\na${i}.p${i} = 1`)}\nexit`,
     expect: (n) => ({ bindings: [[`a${n - 1}`, `{"p${n - 1}":integer}`]] }),
-    todo: {
-      assertion: "work",
-      backlog: "o4-review-backlog.md: object slots per stored property name (Sol's D1)",
-    },
   },
   {
     name: "k objects each with the same stored property name",

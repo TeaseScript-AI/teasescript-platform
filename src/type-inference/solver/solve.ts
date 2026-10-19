@@ -154,7 +154,8 @@ class Solver {
         c.kind === "read" ? [[c.occurrence, c.binding] as const] : [],
       ),
     );
-    // every object carries a slot for every property name a store in the program gives any object
+    // the property names a store in the program gives any object: a slot an object lacks for one of them reads as
+    // `maybe absent` (N-B2: an object's slots are its own, created on first use)
     const propertyNames = [
       ...new Set(
         graph.constraints.flatMap((c) =>
@@ -340,7 +341,14 @@ class Solver {
             {
               tag,
               ctor: "object",
-              parts: { props: this.cells.objectParts(new Map(), owner, pos), open: true },
+              parts: {
+                props: this.cells.objectParts(new Map()),
+                open: true,
+                owner,
+                identity: this.cells.objectIdentity(owner, new Map()),
+                written: [],
+                made: pos,
+              },
               group,
               pos,
               case: `${group}@${this.cells.name(owner)}`,
@@ -361,7 +369,14 @@ class Solver {
           {
             tag,
             ctor: "object",
-            parts: { props: this.cells.objectParts(props, owner, pos), open: false },
+            parts: {
+              props: this.cells.objectParts(props),
+              open: false,
+              owner,
+              identity: this.cells.objectIdentity(owner, props),
+              written: this.cells.writtenNames(props),
+              made: pos,
+            },
             group,
             pos,
             case: `${group}@${this.cells.name(owner)}`,
@@ -635,12 +650,20 @@ class Solver {
   part(
     item: Item,
     step: ProjectionStep,
+    storing = false,
   ): { readonly cell: CellId } | { readonly text: true } | undefined {
     if (item.parts === undefined) return undefined;
     if (item.parts.props !== undefined) {
       if (typeof step !== "object") return undefined;
-      const cell = item.parts.props.get(step.property);
-      return cell === undefined ? undefined : { cell };
+      // the slot is the object's own, created on first use (N-B2): on a store path always; for a read only on a
+      // literal or written object (`c:`) and only for a name some store gives objects (the eager vocabulary slot's
+      // reading, `maybe absent`); a relation result's slots are its answers', a read of another name is absent, so
+      // no slot depends on whether a read ran before an answer
+      const existing = item.parts.props.get(step.property);
+      if (existing !== undefined) return { cell: existing };
+      const create =
+        storing || (item.case?.startsWith("s:") !== true && this.cells.stored(step.property));
+      return create ? { cell: this.cells.slot(item, step.property) } : undefined;
     }
     if (typeof step === "object") return undefined;
     if (item.ctor === "dict" && step === "iteration") return { text: true };
@@ -696,7 +719,7 @@ class Solver {
             continue;
           }
           if (item.tag === "p" || item.tag === "e" || item.ctor === undefined) continue;
-          const part = this.part(item, c.step);
+          const part = this.part(item, c.step, stores.length > 0);
           if (part === undefined) continue;
           if ("text" in part) {
             if (

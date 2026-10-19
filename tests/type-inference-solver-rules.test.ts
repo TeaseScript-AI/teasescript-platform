@@ -33,6 +33,8 @@ test("every row of the cell table interprets as the row says", () => {
       }
       return cell;
     };
+    // every object literal of a row is its own structure, as each literal's result cell is in the solver
+    let objects = 0;
     const contribution = (item: RuleItem): Contribution => {
       const base = {
         tag: item.tag,
@@ -50,6 +52,13 @@ test("every row of the cell table interprets as the row says", () => {
               Object.entries(item.props ?? {}).map(([name, part]) => [name, partOf(part)]),
             ),
             open: false,
+            owner: cells.derived(0, `object${objects}`),
+            identity: cells.objectIdentity(
+              cells.derived(0, `object${objects++}`),
+              new Map(Object.entries(item.props ?? {})),
+            ),
+            written: Object.keys(item.props ?? {}).sort(),
+            made: [item.pos, item.pos] as const,
           },
         };
       if (item.ctor !== undefined)

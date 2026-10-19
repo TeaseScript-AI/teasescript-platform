@@ -127,6 +127,19 @@ interface DynamicMark {
   readonly why: Provenance;
 }
 
+/**
+ * Whether an object alternative lacks a slot that some store in the program gives objects (N-B2): its slots are its
+ * own, so the property is read as `maybe absent` there, never as certainly absent.
+ */
+function lacksStoredSlot(cells: Cells, a: Alternative | DynamicMark, name: string): boolean {
+  return (
+    a.tag !== "d" &&
+    a.choice?.props !== undefined &&
+    !a.choice.props.has(name) &&
+    cells.stored(name)
+  );
+}
+
 /** Whether a property is absent in every alternative reached: no part cell for it and no written property. */
 function absentEverywhere(
   cells: Cells,
@@ -136,6 +149,7 @@ function absentEverywhere(
   for (const a of found) {
     if (a.tag === "d") return false;
     if (a.choice?.props?.has(name) === true) return false;
+    if (lacksStoredSlot(cells, a, name)) return false;
     const node = cells.table.node(a.type);
     if (
       node.kind === "object" &&
@@ -302,9 +316,11 @@ export function itemAlternatives(
     };
   };
   if (item.parts.props !== undefined) {
-    // one alternative: the shape, every slot with the placeholder `never` that no relation reads (a property's type
-    // is read as a leaf, one alternative per ask); the shape of an item never changes, so the set only grows and two
-    // items of one shape are one alternative whose part cells are read together
+    // one alternative: the shape, the names the literal wrote and every name a store in the program gives objects
+    // (the eager vocabulary slot's shape; N-B2 allocates the slots on demand but keeps the shape), every slot with
+    // the placeholder `never` that no relation reads (a property's type is read as a leaf, one alternative per ask);
+    // the shape of an item never changes, so the set only grows and two items of one shape are one alternative whose
+    // part cells are read together, a relation's growing answers among them
     const props: ReadonlyMap<string, readonly CellId[]> = new Map(
       [...item.parts.props].sort(byName).map(([name, part]) => [name, [part]]),
     );
@@ -316,12 +332,13 @@ export function itemAlternatives(
           choice: { props, cells: props },
         },
       ];
+    const names = [...new Set([...item.parts.written, ...cells.storedNames])].sort();
     return [
       {
         ...base,
         type: table.intern({
           kind: "object",
-          properties: new PropertyTable([...props.keys()].map((name) => [name, { kind: "never" }])),
+          properties: new PropertyTable(names.map((name) => [name, { kind: "never" }])),
         }),
         choice: { props, cells: props },
       },
@@ -1249,12 +1266,14 @@ function inputsOf(
           if (typeof along === "object") {
             if (absentEverywhere(cells, found, along.property)) return null;
             for (const a of found)
-              if (a.tag !== "d")
+              if (a.tag !== "d") {
+                if (lacksStoredSlot(cells, a, along.property)) maybeAbsent = true;
                 for (const part of a.choice?.props?.get(along.property) ?? []) {
                   const items = cells.items(part);
                   if (items.length === 0) pending = true;
                   else if (items.some((it) => it.tag === "e")) maybeAbsent = true;
                 }
+              }
           }
           found = found.flatMap((a) => stepOf(cells, a, along, true));
           for (const a of found) if (a.tag === "d") aggregated.whys.add(dynamicWhy(a.why));
@@ -1333,8 +1352,9 @@ function inputsOf(
               ? (a.choice.props.get(along.property) ?? [])
               : [],
           );
-          if (found.every((a) => a.tag !== "d") && parts.length === 0) return null;
-          absence = parts.some((part) => cells.items(part).some((it) => it.tag === "e"));
+          const lacking = found.some((a) => lacksStoredSlot(cells, a, along.property));
+          if (found.every((a) => a.tag !== "d") && parts.length === 0 && !lacking) return null;
+          absence = lacking || parts.some((part) => cells.items(part).some((it) => it.tag === "e"));
         }
         const stepped = found.flatMap((a) => stepOf(cells, a, along, true));
         const pick = select(key, () => picksFrom(cells, stepped, absence), selection, want);
@@ -1616,7 +1636,9 @@ function project(
           : [],
       );
       const present = parts.some((part) => cells.items(part).some((it) => it.tag !== "e"));
-      const absent = parts.some((part) => cells.items(part).some((it) => it.tag === "e"));
+      const absent =
+        found.some((a) => lacksStoredSlot(cells, a, step.property)) ||
+        parts.some((part) => cells.items(part).some((it) => it.tag === "e"));
       if (absent) {
         const picks = (): Pick[] => [
           ...(present
@@ -1740,7 +1762,14 @@ function emit(cells: Cells, result: CellId, outcome: Outcome, at: Position): boo
             cells.add(result, {
               tag: outcome.tag,
               ctor: "object",
-              parts: { props: cells.objectParts(props, result, pos), open: false },
+              parts: {
+                props: cells.objectParts(props),
+                open: false,
+                owner: result,
+                identity: cells.objectIdentity(result, props),
+                written: cells.writtenNames(props),
+                made: pos,
+              },
               case: `s:${cells.name(result)}`,
               group: outcome.group,
               why,
