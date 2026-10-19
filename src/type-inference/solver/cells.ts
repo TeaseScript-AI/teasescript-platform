@@ -1,5 +1,4 @@
 import type { DynamicWhy, SourceSite } from "../graph.js";
-import { PropertyTable } from "../../static-types.js";
 import type { TypeId, TypeTable } from "./types.js";
 
 // The cells of the solver (O4 stage 3a, work note §3.2; the executable reference model `model/solver-model.mjs` of
@@ -119,8 +118,8 @@ export class Cells {
   readonly #storedNames: ReadonlySet<string>;
   /** The cells holding an object item, by its parts, so a slot created later knows its owners for the drain closure. */
   readonly #holders = new WeakMap<Parts, Set<CellId>>();
-  /** The placeholder shapes by written-name set (`shapeType`). */
-  readonly #shapes = new Map<string, TypeId>();
+  /** The property entries the alternatives' shapes built (`Solution.work.entries`). */
+  #shapeEntries = 0;
 
   constructor(table: TypeTable, places: number, propertyNames: readonly string[] = []) {
     this.#table = table;
@@ -236,21 +235,22 @@ export class Cells {
   }
 
   /**
-   * The placeholder shape of a closed object for the alternatives: its written names with every stored name (the
-   * eager slots' shape), interned once per written set: building it per object was quadratic in the objects.
+   * The shape key of a closed object for the alternatives (DC2-B1): its written names outside the stored set, the
+   * partition the eager vocabulary shape gave (two objects were one alternative iff their written names agreed up to
+   * the stored names); the alternative's type is its own group's slots, never the vocabulary, so the construction is
+   * linear in the objects.
    */
-  shapeType(written: readonly string[]): TypeId {
-    const key = written.join(",");
-    let type = this.#shapes.get(key);
-    if (type === undefined) {
-      const names = [...new Set([...written, ...this.#storedNames])].sort();
-      type = this.#table.intern({
-        kind: "object",
-        properties: new PropertyTable(names.map((name) => [name, { kind: "never" }])),
-      });
-      this.#shapes.set(key, type);
-    }
-    return type;
+  shapeKey(written: readonly string[]): string {
+    return `o|${written.filter((name) => !this.#storedNames.has(name)).join(",")}`;
+  }
+
+  /** Counts the property entries an alternative's shape built. */
+  countShape(entries: number): void {
+    this.#shapeEntries += entries;
+  }
+
+  get shapeEntries(): number {
+    return this.#shapeEntries;
   }
 
   #own(part: CellId, owner: CellId): void {
@@ -428,6 +428,19 @@ export class Cells {
     const prior = map.get(key);
     if (prior !== undefined) {
       let changed = false;
+      // one structure, more slots: a relation's later answer with more properties extends the structure's map
+      // (shared by every copy), its new slots owned by every holder, so its slots are the union of its answers'
+      if (
+        item.parts?.props !== undefined &&
+        prior.parts?.props !== undefined &&
+        item.parts !== prior.parts
+      )
+        for (const [name, part] of item.parts.props)
+          if (!prior.parts.props.has(name)) {
+            prior.parts.props.set(name, part);
+            for (const holder of this.#holders.get(prior.parts) ?? []) this.#own(part, holder);
+            changed = true;
+          }
       if (item.decl && !prior.decl) {
         prior.decl = true;
         changed = true;

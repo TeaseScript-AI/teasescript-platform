@@ -1,4 +1,4 @@
-import { NULL_TYPE, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
+import { NULL_TYPE, PropertyTable, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
 import type { ValueKind } from "../../value-kinds.js";
 import { memberOf } from "../adapters/members.js";
 import type {
@@ -69,6 +69,11 @@ export interface Alternative {
   readonly choice: Choice | null;
   /** The cases of the structural items it materializes (I1); none for a flat type or a synthetic part. */
   readonly cases: readonly string[];
+  /**
+   * A closed object's grouping key, its written names outside the stored set (`Cells.shapeKey`): two alternatives of
+   * one key are one, whatever slots each gained; the type is the group's own slots. Absent for every other alternative.
+   */
+  readonly shape?: string | undefined;
 }
 
 /**
@@ -101,7 +106,17 @@ function roleOf(a: Alternative): string {
   return `${own}[${roleOf(a.choice.element)}]`;
 }
 
-const keyOf = (a: Alternative): string => `${a.type}|${roleOf(a)}`;
+const keyOf = (a: Alternative): string => `${a.shape ?? a.type}|${roleOf(a)}`;
+
+/** The placeholder type of an object alternative over its slots, every slot `never` (read as a leaf, never as a type). */
+function shapeOf(cells: Cells, names: Iterable<string>): TypeId {
+  const sorted = [...names].sort();
+  cells.countShape(sorted.length);
+  return cells.table.intern({
+    kind: "object",
+    properties: new PropertyTable(sorted.map((name) => [name, { kind: "never" }])),
+  });
+}
 
 /** A list of alternatives in a canonical order (by key), so no order of enumeration shows in a choice. */
 function sortedAlternatives(list: readonly Alternative[]): readonly Alternative[] {
@@ -110,13 +125,14 @@ function sortedAlternatives(list: readonly Alternative[]): readonly Alternative[
 
 /** Two lists of alternatives as one: the same key merged, in the canonical order. */
 function mergedLists(
+  cells: Cells,
   left: readonly Alternative[],
   right: readonly Alternative[],
 ): readonly Alternative[] {
   const out = new Map<string, Alternative>();
   for (const a of [...left, ...right]) {
     const prior = out.get(keyOf(a));
-    out.set(keyOf(a), prior === undefined ? a : merged(prior, a));
+    out.set(keyOf(a), prior === undefined ? a : merged(cells, prior, a));
   }
   return sortedAlternatives([...out.values()]);
 }
@@ -191,7 +207,7 @@ function alternatives(
       const key = keyOf(alternative);
       const prior = out.get(key);
       if (prior === undefined) out.set(key, alternative);
-      else out.set(key, merged(prior, alternative));
+      else out.set(key, merged(cells, prior, alternative));
       if (overBudget("alternatives", out.size)) {
         cutCell(cells, cell, out.size);
         return [];
@@ -206,26 +222,29 @@ function alternatives(
  * cell and every item either was read from, down through the chosen parts, so a projection's sources do not depend
  * on which item was enumerated first.
  */
-function merged(prior: Alternative, other: Alternative): Alternative {
+function merged(store: Cells, prior: Alternative, other: Alternative): Alternative {
   const cells = unionOf(prior.cells, other.cells);
   const items = [...prior.items, ...other.items.filter((item) => !prior.items.includes(item))];
   let choice = prior.choice;
+  let type = prior.type;
   if (prior.choice !== null && other.choice !== null) {
     if (prior.choice.element !== undefined && other.choice.element !== undefined)
       choice = {
-        element: merged(prior.choice.element, other.choice.element),
+        element: merged(store, prior.choice.element, other.choice.element),
         cells: unionOf(prior.choice.cells, other.choice.cells),
       };
     else if (prior.choice.props !== undefined && other.choice.props !== undefined) {
-      // two object items of one shape: their part cells per property, so a projection reads both (parts shared)
+      // two object items of one shape: their part cells per property, so a projection reads both (parts shared);
+      // the merged alternative's type is the group's slots
       const props = new Map(prior.choice.props);
       for (const [name, theirs] of other.choice.props)
         props.set(name, unionOf(props.get(name) ?? [], theirs));
       choice = { props, cells: props };
+      type = shapeOf(store, props.keys());
     }
   }
   const cases = [...new Set([...prior.cases, ...other.cases])].sort();
-  return { ...prior, cells, items, choice, cases };
+  return { ...prior, cells, items, choice, cases, type };
 }
 
 /** The case of an item as an alternative reads it: a witness is the cell's schema (option B), a member or a bound its own. */
@@ -316,11 +335,11 @@ export function itemAlternatives(
     };
   };
   if (item.parts.props !== undefined) {
-    // one alternative: the shape, the names the literal wrote and every name a store in the program gives objects
-    // (the eager vocabulary slot's shape; N-B2 allocates the slots on demand but keeps the shape), every slot with
-    // the placeholder `never` that no relation reads (a property's type is read as a leaf, one alternative per ask);
-    // the shape of an item never changes, so the set only grows and two items of one shape are one alternative whose
-    // part cells are read together, a relation's growing answers among them
+    // one alternative per shape key (the written names outside the stored set, `Cells.shapeKey`: the partition the
+    // eager vocabulary shape gave), typed by the group's own slots, every slot with the placeholder `never` that no
+    // relation reads as a type (a property's type is read as a leaf, one alternative per ask); the key of an item
+    // never changes, so the set only grows and two items of one key are one alternative whose part cells are read
+    // together, a relation's growing answers among them (DC2-B1: the vocabulary is never built)
     const props: ReadonlyMap<string, readonly CellId[]> = new Map(
       [...item.parts.props].sort(byName).map(([name, part]) => [name, [part]]),
     );
@@ -333,7 +352,12 @@ export function itemAlternatives(
         },
       ];
     return [
-      { ...base, type: cells.shapeType(item.parts.written), choice: { props, cells: props } },
+      {
+        ...base,
+        type: shapeOf(cells, props.keys()),
+        shape: cells.shapeKey(item.parts.written),
+        choice: { props, cells: props },
+      },
     ];
   }
   const element = item.parts.element;
@@ -393,6 +417,7 @@ function stepOf(
       if (parts === undefined) return [];
       return [
         ...mergedLists(
+          cells,
           parts.flatMap((part) => alternatives(cells, part)),
           [],
         ),
@@ -1758,8 +1783,9 @@ function emit(cells: Cells, result: CellId, outcome: Outcome, at: Position): boo
                 props: cells.objectParts(props),
                 open: false,
                 owner: result,
-                identity: cells.objectIdentity(result, props),
-                written: cells.writtenNames(props),
+                // one structure per relation site: a later answer with more properties extends its slots
+                identity: cells.objectIdentity(result, new Map()),
+                written: [],
                 made: pos,
               },
               case: `s:${cells.name(result)}`,

@@ -56,6 +56,11 @@ export interface SolveOptions {
   /** Hears every evaluation with the cells it changed (the measurement of work note §8, and debugging). */
   readonly trace?:
     ((node: number, constraint: Constraint, changed: readonly CellId[]) => void) | undefined;
+  /**
+   * A scan injected after every evaluation, its visits counted in `Solution.work.visits` (the work-bounds test's
+   * negative control: a real scan through a counted path must fail the growth detector). Tests only.
+   */
+  readonly injectedScan?: ((cells: Cells) => number) | undefined;
 }
 
 export interface Solution {
@@ -232,6 +237,11 @@ class Solver {
   /** Counts an index's entries built outside the solver (the schedule's readers by cell). */
   countEntries(n: number): void {
     this.#work.entries += n;
+  }
+
+  /** Counts visits made outside the solver (the injected scan of the work-bounds test). */
+  countVisits(n: number): void {
+    this.#work.visits += n;
   }
 
   /** The cells a constraint names: its reads and its writes, undirected (see the module comment). */
@@ -950,6 +960,8 @@ export function solve(graph: ConstraintGraph, options: SolveOptions): Solution {
     writes: (node) => solver.cellsOf(constraints[node]!),
     evaluate: (node) => {
       solver.evaluate(constraints[node]!);
+      if (options.injectedScan !== undefined)
+        solver.countVisits(options.injectedScan(solver.cells));
       const changed = solver.cells.drain();
       options.trace?.(node, constraints[node]!, changed);
       return changed;
@@ -1033,7 +1045,7 @@ export function solve(graph: ConstraintGraph, options: SolveOptions): Solution {
       phases,
       visits: solver.work.visits,
       copies: solver.work.copies,
-      entries: solver.work.entries,
+      entries: solver.work.entries + solver.cells.shapeEntries,
     },
     statuses,
     cuts: solver.cuts,

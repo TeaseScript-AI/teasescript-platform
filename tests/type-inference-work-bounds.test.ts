@@ -225,6 +225,69 @@ for (const series of FEEDBACK)
     );
   });
 
+test("objects of distinct literal shapes with their own stored names are linear in every counter (the second delta check's DC2-B1)", () => {
+  // an object's slots are its own and the alternatives' shape is the group's own slots, never the program's vocabulary
+  const varied = (k: number): string =>
+    `${Array.from({ length: k }, (_, i) => `let a${i} = {q${i}: 0}\na${i}.p${i} = 1\nlet r${i} = a${i}.p${i}`).join("\n")}\nexit`;
+  const sizes = [250, 500, 1000, 2000];
+  const runs = sizes.map((k) => solveOf(varied(k)));
+  for (const [i, run] of runs.entries()) {
+    const facts = exportFacts(run);
+    assert.equal(facts.bindings.find((b) => b.name === `r${sizes[i]! - 1}`)?.type, "integer");
+    assert.equal(
+      facts.bindings.find((b) => b.name === `a${sizes[i]! - 1}`)?.type,
+      `{"p${sizes[i]! - 1}":integer,"q${sizes[i]! - 1}":integer}`,
+    );
+    assert.deepEqual(
+      run.statuses.filter((status) => status.includes("budget")),
+      [],
+    );
+  }
+  for (const phase of [
+    "evaluations",
+    "asks",
+    "cells",
+    "items",
+    "selections",
+    "visits",
+    "copies",
+    "entries",
+  ] as const)
+    linearInSize(
+      phase,
+      sizes,
+      runs.map((run) => run.work[phase]),
+      16,
+    );
+});
+
+test("a scan injected through a counted path fails the growth detector (the real negative control)", () => {
+  // the injected scan visits every item of every cell after every evaluation: quadratic, and `visits` sees it
+  const one = (k: number): string =>
+    `let x = 1\n${Array.from({ length: k }, (_, i) => `x = ${i + 2}`).join("\n")}\nexit`;
+  const sizes = [250, 500, 1000, 2000];
+  const scanned = sizes.map((k) => {
+    const made = request([{ path: "main.tease", source: one(k) }], ["hostValue"], []);
+    return solve(collectGraph(made!), {
+      relations: RELATIONS,
+      injectedScan: (cells) => cells.ids().reduce((n, cell) => n + cells.items(cell).length, 0),
+    });
+  });
+  assert.throws(() =>
+    linearInSize(
+      "visits with an injected scan",
+      sizes,
+      scanned.map((run) => run.work.visits),
+    ),
+  );
+  const plain = sizes.map((k) => solveOf(one(k)));
+  linearInSize(
+    "visits without the scan",
+    sizes,
+    plain.map((run) => run.work.visits),
+  );
+});
+
 test("stores to one binding are linear in the schedule to 4,000 stores (Sol's D2)", () => {
   const one = (k: number): string =>
     `let x = 1\n${Array.from({ length: k }, (_, i) => `x = ${i + 2}`).join("\n")}\nexit`;
