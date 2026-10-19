@@ -15,6 +15,7 @@ import type {
   OperandView,
   OperationInputs,
   OperationResult,
+  Parameters,
 } from "./relation.js";
 
 /**
@@ -25,6 +26,8 @@ import type {
 /** The member rules of the receiver kinds one module owns. */
 export interface MemberRules {
   readonly kinds: readonly ValueKind[];
+  /** The parameters the method `name` takes on these kinds, or `undefined` for a method none of them has. */
+  parameters(name: string): Parameters | undefined;
   /** Reading `name` on a receiver of `kind`: a held part of the receiver, a computed result, or no such member. */
   property(kind: ValueKind, name: string, receiver: OperandView): MemberAnswer | undefined;
   /**
@@ -135,9 +138,13 @@ export function placeRef(place: PlaceId, collected = false): OperandRef {
  * sets only grow: `union()` would make `integer` and `number` one `number`, an answer that an earlier `integer` answer
  * is not part of.
  */
-export function sumOf(types: readonly StaticType[]): StaticType {
+export function sumOf(types: readonly (StaticType | Summed)[]): Summed {
   const out: StaticType[] = [];
-  const walk = (type: StaticType): void => {
+  const walk = (type: StaticType | Summed): void => {
+    if (type instanceof Summed) {
+      type.members.forEach(walk);
+      return;
+    }
     const value = resolved(type);
     if (value.kind === "union") {
       value.members.forEach(walk);
@@ -148,20 +155,41 @@ export function sumOf(types: readonly StaticType[]): StaticType {
     if (!out.some((known) => sameType(known, value))) out.push(value);
   };
   types.forEach(walk);
-  if (out.some((type) => type.kind === "unknown")) return UNKNOWN_TYPE;
-  if (out.length === 0) return { kind: "never" };
-  return out.length === 1 ? out[0]! : { kind: "union", members: out };
+  return new Summed(out.some((type) => type.kind === "unknown") ? [UNKNOWN_TYPE] : out);
+}
+
+/**
+ * The types a relation read from an aggregate, kept apart (P1). Only `sumResult` turns them into an answer and only
+ * `sumOf` combines them, so no join, union or widening can take them (PR 3a review r6: the joins that made a summed
+ * read order-dependent cannot be written again).
+ */
+export class Summed {
+  constructor(readonly members: readonly StaticType[]) {}
+  map(f: (member: StaticType) => StaticType): Summed {
+    return sumOf(this.members.map(f));
+  }
+  some(p: (member: StaticType) => boolean): boolean {
+    return this.members.some(p);
+  }
 }
 
 /**
  * A sum as a result: one `type` answer per member, so the members reach the cells apart (the type table would make
- * `integer | number` one `number`); the solver reads two or more as the members of the union the operation defines.
+ * `integer | number` one `number`); the solver reads two or more as the members of the union the operation defines. A
+ * plain type read one alternative per ask is given as it is (a union type as its members).
  */
-export function sumResult(type: StaticType): OperationResult {
-  const value = resolved(type);
-  return value.kind === "union"
-    ? alternativesOf(...value.members.map(typeResult))
-    : typeResult(type);
+export function sumResult(sum: Summed | StaticType): OperationResult {
+  const value = sum instanceof Summed ? undefined : resolved(sum);
+  const members =
+    sum instanceof Summed
+      ? sum.members
+      : value !== undefined && value.kind === "union"
+        ? value.members
+        : [sum];
+  if (members.length === 0) return typeResult({ kind: "never" });
+  return members.length === 1
+    ? typeResult(members[0]!)
+    : alternativesOf(...members.map(typeResult));
 }
 
 export function named(name: string): OperandRef {

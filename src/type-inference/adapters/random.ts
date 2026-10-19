@@ -8,6 +8,7 @@ import {
   union,
 } from "../../static-types.js";
 import type { OperationInputs, OperationRelation, OperationResult } from "./relation.js";
+import { parameters } from "./relation.js";
 import {
   dynamicFrom,
   INVALID,
@@ -27,6 +28,13 @@ import {
 function relation(name: string, contract: RandomFunction): OperationRelation {
   return {
     contract: { family: "random", name },
+    parameters:
+      contract.takes === "choices"
+        ? parameters(contract.shape.count, ["weight"])
+        : parameters(
+            contract.parameters.length,
+            contract.takes === "numbers" ? (contract.named ?? []) : [],
+          ),
     result(inputs: OperationInputs): OperationResult {
       switch (contract.takes) {
         case "numbers":

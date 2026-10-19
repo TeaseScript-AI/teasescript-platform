@@ -81,18 +81,19 @@ function sameEvidence(cells: Cells, a: Item, b: Item): boolean {
 }
 
 /**
- * The known items of a cell in rank order (see the module comment), computed once while the cells do not change: once
- * per cell where no cycle was cut on the way (the order then does not depend on the visiting set), once per cell and
- * visiting set where one was (the visiting set cuts cycles). A copy chain asked the same source for every item of every
- * copy otherwise, and the work grew with 2^length (Dropje97's W3-B3); with the per-cell memo it grows with the length.
+ * The known items of a cell in rank order (see the module comment), computed once per cell while the cells do not
+ * change. A source inside the cell's strongly connected component of the source graph is not consulted (the items
+ * there rank by their positions, Q3.1's primary key); a source outside it is, and the condensation is acyclic, so the
+ * recursion ends and the work is one order per cell. A copy chain asked the same source for every item of every copy
+ * once (Dropje97's W3-B3), and a memo keyed by the visiting set explored exponentially many sets on a cycle (PR 3a
+ * review r6, Astra B6).
  */
 interface Orders {
   version: number;
   computed: number;
-  /** The orders that consulted no cut cell: valid under every visiting set. */
-  readonly clean: Map<CellId, readonly Item[]>;
-  /** The orders that did, by cell and visiting set. */
-  readonly cut: Map<string, readonly Item[]>;
+  readonly orders: Map<CellId, readonly Item[]>;
+  /** The component of each cell (its representative), computed once. */
+  components: Map<CellId, CellId> | null;
 }
 
 const ORDERS = new WeakMap<Cells, Orders>();
@@ -100,10 +101,62 @@ const ORDERS = new WeakMap<Cells, Orders>();
 function ordersOf(cells: Cells): Orders {
   let memo = ORDERS.get(cells);
   if (memo === undefined || memo.version !== cells.version) {
-    memo = { version: cells.version, computed: 0, clean: new Map(), cut: new Map() };
+    memo = { version: cells.version, computed: 0, orders: new Map(), components: null };
     ORDERS.set(cells, memo);
   }
   return memo;
+}
+
+/** The strongly connected components of the source graph (an item's `from` cells are its sources), by Tarjan. */
+function componentOf(cells: Cells, cell: CellId): CellId {
+  const memo = ordersOf(cells);
+  if (memo.components === null) {
+    const components = new Map<CellId, CellId>();
+    const index = new Map<CellId, number>();
+    const low = new Map<CellId, number>();
+    const stack: CellId[] = [];
+    const onStack = new Set<CellId>();
+    let next = 0;
+    const sources = (v: CellId): readonly CellId[] => [
+      ...new Set(cells.items(v).flatMap((item) => [...item.from])),
+    ];
+    for (const start of cells.ids()) {
+      if (index.has(start)) continue;
+      const work: [CellId, number][] = [[start, 0]];
+      while (work.length > 0) {
+        const frame = work[work.length - 1]!;
+        const [v, i] = frame;
+        if (i === 0 && !index.has(v)) {
+          index.set(v, next);
+          low.set(v, next);
+          next += 1;
+          stack.push(v);
+          onStack.add(v);
+        }
+        const succ = sources(v);
+        if (i < succ.length) {
+          frame[1] = i + 1;
+          const w = succ[i]!;
+          if (!index.has(w)) work.push([w, 0]);
+          else if (onStack.has(w)) low.set(v, Math.min(low.get(v)!, index.get(w)!));
+        } else {
+          work.pop();
+          const parent = work[work.length - 1];
+          if (parent !== undefined) low.set(parent[0], Math.min(low.get(parent[0])!, low.get(v)!));
+          if (low.get(v) === index.get(v)) {
+            let w: CellId;
+            do {
+              w = stack.pop()!;
+              onStack.delete(w);
+              components.set(w, v);
+            } while (w !== v);
+          }
+        }
+      }
+    }
+    memo.components = components;
+  }
+  return memo.components.get(cell) ?? cell;
 }
 
 /** The number of item orders computed over the cells as they are: the interpretation's work, for measurement. */
@@ -111,50 +164,35 @@ export function orderComputations(cells: Cells): number {
   return ordersOf(cells).computed;
 }
 
-/** An order with whether a cell on the way was cut as a source (the result then depends on the visiting set). */
-interface Ordered {
-  readonly items: readonly Item[];
-  readonly cut: boolean;
-}
-
-function order(cells: Cells, cell: CellId, visiting: ReadonlySet<CellId>): Ordered {
+function order(cells: Cells, cell: CellId): readonly Item[] {
   const memo = ordersOf(cells);
-  const clean = memo.clean.get(cell);
-  if (clean !== undefined) return { items: clean, cut: false };
-  const key = `${cell}|${[...visiting].sort((a, b) => a - b).join(",")}`;
-  const known = memo.cut.get(key);
-  if (known !== undefined) return { items: known, cut: true };
+  const known = memo.orders.get(cell);
+  if (known !== undefined) return known;
   memo.computed += 1;
-  const computed = orderedItems(cells, cells.items(cell), new Set([...visiting, cell]));
-  if (computed.cut) memo.cut.set(key, computed.items);
-  else memo.clean.set(cell, computed.items);
+  const computed = orderItems(cells, cells.items(cell), new Set([cell]));
+  memo.orders.set(cell, computed);
   return computed;
 }
 
-/** The known items among `all` in rank order; `inner` the cells on the way, not consulted again as sources. */
+/**
+ * The known items among `all` in rank order; `inner` the cells the items are read for (a cell, or the merged part
+ * cells of a structure's property), whose components are not consulted as sources.
+ */
 function orderItems(
   cells: Cells,
   all: readonly Item[],
   inner: ReadonlySet<CellId>,
 ): readonly Item[] {
-  return orderedItems(cells, all, inner).items;
-}
-
-function orderedItems(cells: Cells, all: readonly Item[], inner: ReadonlySet<CellId>): Ordered {
-  let cut = false;
   const items = all.filter(isKnown);
+  const components = new Set([...inner].map((cell) => componentOf(cells, cell)));
   // an item without a source (a store's own value, an operation's closed answer) is its own first evidence at its
   // position: rank 0, so the secondary site decides between it and an item first in its source (r10-B3)
   const sourceRank = (item: Item): number => {
     let best = NONE;
     for (const source of item.from) {
-      if (inner.has(source)) {
-        cut = true;
-        continue;
-      }
-      const ordered = order(cells, source, inner);
-      if (ordered.cut) cut = true;
-      const index = ordered.items.findIndex((other) => sameEvidence(cells, other, item));
+      if (inner.has(source) || components.has(componentOf(cells, source))) continue;
+      const ordered = order(cells, source);
+      const index = ordered.findIndex((other) => sameEvidence(cells, other, item));
       if (index >= 0 && index < best) best = index;
     }
     return best === NONE ? 0 : best;
@@ -181,7 +219,7 @@ function orderedItems(cells: Cells, all: readonly Item[], inner: ReadonlySet<Cel
     }
     return 0;
   });
-  return { items: sorted, cut };
+  return sorted;
 }
 
 /** The working kind of a cell, or `null` without a known item. */

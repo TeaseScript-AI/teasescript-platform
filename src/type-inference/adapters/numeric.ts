@@ -20,6 +20,7 @@ import {
 } from "../../static-types.js";
 import { TEMPORAL_KINDS } from "../../temporal-builtins.js";
 import type { OperandView, OperationRelation, OperationResult } from "./relation.js";
+import { parameters } from "./relation.js";
 import {
   closedType,
   INVALID,
@@ -92,6 +93,7 @@ function relation(name: string, contract: NumericFunction): OperationRelation {
   const angles = contract.takes === "angles";
   return {
     contract: { family: "numeric", name },
+    parameters: parameters(contract.parameters.length, contract.named ?? []),
     result(inputs): OperationResult {
       const named = [...inputs.named];
       // A call with another number of arguments, or a name it does not take, tells the rule nothing of them.

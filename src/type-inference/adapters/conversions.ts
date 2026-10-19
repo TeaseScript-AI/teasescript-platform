@@ -10,6 +10,7 @@ import {
   type StaticType,
 } from "../../static-types.js";
 import type { OperationInputs, OperationRelation, OperationResult } from "./relation.js";
+import { parameters } from "./relation.js";
 import {
   alternativesOf,
   closedType,
@@ -86,12 +87,16 @@ export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map<string,
       `conversion.${name}`,
       {
         contract: { family: "conversion", name },
+        parameters: parameters(
+          "pair" in CONVERSIONS[name] ? 2 : 1,
+          CONVERSIONS[name].fallback === null ? [] : ["default"],
+        ),
         result: (inputs) => conversionResult(CONVERSIONS[name], inputs),
       },
     ]),
     ...BUILTINS.map(([name, result]): [string, OperationRelation] => [
       name,
-      { contract: { family: "builtin", name }, result },
+      { contract: { family: "builtin", name }, parameters: parameters(1, ["default"]), result },
     ]),
   ],
 );

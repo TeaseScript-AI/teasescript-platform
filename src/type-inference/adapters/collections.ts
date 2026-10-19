@@ -16,7 +16,13 @@ import {
   type StaticType,
 } from "../../static-types.js";
 import type { ValueKind } from "../../value-kinds.js";
-import type { OperandRef, OperandView, OperationInputs, OperationResult } from "./relation.js";
+import type {
+  OperandRef,
+  OperandView,
+  OperationInputs,
+  OperationResult,
+  Parameters,
+} from "./relation.js";
 import {
   alternativesOf,
   dynamicResult,
@@ -321,6 +327,22 @@ function method(
   }
 }
 
-const RULES: MemberRules = { kinds: ["list", "set", "dict", "object", "range"], property, method };
+/** A list or dict method's parameters from its contract: the most positional of the two, every named. */
+function parametersOf(name: string): Parameters | undefined {
+  const list = listMethod(name);
+  const dict = dictMethod(name);
+  if (list === undefined && dict === undefined) return undefined;
+  return {
+    positional: Math.max(list?.parameters.length ?? 0, dict?.parameters.length ?? 0),
+    named: [...new Set([...(list?.named ?? []), ...(dict?.named ?? [])])].sort(),
+  };
+}
+
+const RULES: MemberRules = {
+  kinds: ["list", "set", "dict", "object", "range"],
+  parameters: parametersOf,
+  property,
+  method,
+};
 
 export const MEMBER_RULES: MemberRules = Object.freeze(RULES);

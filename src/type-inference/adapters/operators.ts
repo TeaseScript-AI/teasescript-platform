@@ -23,6 +23,7 @@ import type {
   OperationRelation,
   OperationResult,
 } from "./relation.js";
+import { parameters } from "./relation.js";
 import {
   closedType,
   INVALID,
@@ -102,8 +103,9 @@ function relation(
   family: ContractFamily,
   name: string,
   result: (inputs: OperationInputs) => OperationResult,
+  operands: number,
 ): OperationRelation {
-  return { contract: { family, name }, result };
+  return { contract: { family, name }, parameters: parameters(operands), result };
 }
 
 const FIXED: readonly (readonly [ContractFamily, string, StaticType])[] = [
@@ -152,25 +154,33 @@ export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map<string,
         (inputs) =>
           (operator === "+" ? concatenation(inputs) : undefined) ??
           combine(inputs.arguments, (left, right) => arithmeticType(operator, left!, right!)),
+        2,
       ),
     ]),
     ...["-", "+"].map((operator): [string, OperationRelation] => [
       `unary.${operator}`,
-      relation("unary", operator, (inputs) =>
-        combine(inputs.arguments, (operand) => unaryResult(operator, operand!)),
+      relation(
+        "unary",
+        operator,
+        (inputs) => combine(inputs.arguments, (operand) => unaryResult(operator, operand!)),
+        1,
       ),
     ]),
     ...FIXED.map(([family, name, type]): [string, OperationRelation] => [
       `${family}.${name}`,
-      relation(family, name, () => typeResult(type)),
+      // a fixed answer reads no operand; two bounds the dimensions of every form
+      relation(family, name, () => typeResult(type), 2),
     ]),
-    ["angle.*", relation("angle", "*", () => typeResult(ANGLE_TYPE))],
+    ["angle.*", relation("angle", "*", () => typeResult(ANGLE_TYPE), 2)],
   ],
 );
 
 /** The relation of a unit key, whose name is the unit itself: a calendar unit gives a calendar duration. */
 export function unitRelation(name: string): OperationRelation {
-  return relation("unit", name, () =>
-    typeResult(name.startsWith("calendar ") ? CALENDAR_DURATION_TYPE : DURATION_TYPE),
+  return relation(
+    "unit",
+    name,
+    () => typeResult(name.startsWith("calendar ") ? CALENDAR_DURATION_TYPE : DURATION_TYPE),
+    1,
   );
 }

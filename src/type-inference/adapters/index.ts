@@ -8,6 +8,7 @@ import * as numeric from "./numeric.js";
 import * as operators from "./operators.js";
 import * as random from "./random.js";
 import type { OperationRelation, OperationRelations } from "./relation.js";
+import { NO_PARAMETERS } from "./relation.js";
 import { dynamicResult } from "./views.js";
 
 /**
@@ -46,7 +47,11 @@ const FREE_STANDING: ReadonlyMap<
 
 /** An injected host builtin: the compiler knows nothing of its result (the legacy's `UNKNOWN_TYPE`). */
 function hostBuiltin(name: string): OperationRelation {
-  return { contract: { family: "builtin", name }, result: () => dynamicResult("unknown callee") };
+  return {
+    contract: { family: "builtin", name },
+    parameters: NO_PARAMETERS,
+    result: () => dynamicResult("unknown callee"),
+  };
 }
 
 const RELATIONS: OperationRelations = Object.freeze({

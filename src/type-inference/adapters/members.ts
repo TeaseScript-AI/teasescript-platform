@@ -7,7 +7,9 @@ import type {
   OperationInputs,
   OperationRelation,
   OperationResult,
+  Parameters,
 } from "./relation.js";
+import { NO_PARAMETERS } from "./relation.js";
 import * as text from "./text.js";
 import {
   alternativesOf,
@@ -52,9 +54,28 @@ export function memberOf(
 }
 
 /** The `method.<name>` relation: the receiver's kinds decide, as `memberMethodType` does for each member. */
+/** The parameters a method takes over every kind that has it: the most positional, every named; none is unknown. */
+function parametersOfMethod(name: string): Parameters {
+  let positional: number | "variadic" = 0;
+  const named = new Set<string>();
+  let known = false;
+  for (const rules of RULES) {
+    const declared = rules.parameters(name);
+    if (declared === undefined) continue;
+    known = true;
+    positional =
+      positional === "variadic" || declared.positional === "variadic"
+        ? "variadic"
+        : Math.max(positional, declared.positional);
+    for (const entry of declared.named) named.add(entry);
+  }
+  return known ? { positional, named: [...named].sort() } : NO_PARAMETERS;
+}
+
 export function methodRelation(name: string): OperationRelation {
   return {
     contract: { family: "method", name },
+    parameters: parametersOfMethod(name),
     result(inputs: OperationInputs): OperationResult {
       const receiver = inputs.receiver;
       if (receiver === null) return INVALID;

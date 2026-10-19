@@ -37,6 +37,14 @@ function method(kind: ValueKind, name: string): OperationResult | undefined {
     : undefined;
 }
 
-const RULES: MemberRules = { kinds: ["string"], property, method };
+const RULES: MemberRules = {
+  kinds: ["string"],
+  parameters: (name) =>
+    isTextMethod(name)
+      ? { positional: TEXT_METHODS[name].parameters.length, named: [] }
+      : undefined,
+  property,
+  method,
+};
 
 export const MEMBER_RULES: MemberRules = Object.freeze(RULES);

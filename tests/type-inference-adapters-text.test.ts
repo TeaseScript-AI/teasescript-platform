@@ -12,6 +12,7 @@ import {
 } from "../src/static-types.js";
 import { memberOf, operationRelations } from "../src/type-inference/adapters/index.js";
 import type { OperandView, OperationRelation } from "../src/type-inference/adapters/relation.js";
+import { NO_PARAMETERS } from "../src/type-inference/adapters/relation.js";
 import { INVALID } from "../src/type-inference/adapters/views.js";
 import type { ValueKind } from "../src/value-kinds.js";
 import {
@@ -53,6 +54,7 @@ function assertProperty(
   if (adapter === "invalid") assert.equal(answer, undefined, `no member ${name}`);
   const read: OperationRelation = {
     contract: { family: "method", name },
+    parameters: NO_PARAMETERS,
     result: () => answer ?? INVALID,
   };
   assertCase(read, inputsOf({ receiver }), legacyOperation(source), legacy, adapter);

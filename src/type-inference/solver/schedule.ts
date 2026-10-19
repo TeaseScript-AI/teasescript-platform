@@ -136,26 +136,31 @@ export function run(input: RunInput): RunReport {
       if (list === undefined) readers.set(cell, [node]);
       else list.push(node);
     }
+  // One worklist over every node, the earliest component's lowest node first: the components give the order of a
+  // first pass, and a changed cell re-queues every reader of it, in an earlier component too. The static reads do
+  // not see a part shared between cells (a copy shares its source's parts), so a store path through one owner
+  // changes what an earlier component's node read; the worklist re-runs that node. Deterministic, and the work is
+  // the nodes plus one re-run per change of a cell per reader.
+  const rank = (node: NodeId): number => plan.componentOf[node]! * input.nodes + node;
+  const pending = new Set<NodeId>();
+  for (let node = 0; node < input.nodes; node += 1) pending.add(node);
+  const taken = new Array<number>(plan.components.length).fill(0);
   let evaluations = 0;
-  let longest = 0;
-  for (const [componentIndex, component] of plan.components.entries()) {
-    const inComponent = new Set(component);
-    const pending = new Set<NodeId>(component);
-    let taken = 0;
-    while (pending.size > 0) {
-      // The lowest pending node first: deterministic, and the order of a straight-line program.
-      let node: NodeId | undefined;
-      for (const candidate of pending) if (node === undefined || candidate < node) node = candidate;
-      // EVIDENCE: invariant: the set is not empty, so a lowest node was found.
-      pending.delete(node!);
-      taken += 1;
-      for (const cell of input.evaluate(node!))
-        for (const reader of readers.get(cell) ?? [])
-          if (inComponent.has(reader) && plan.componentOf[reader] === componentIndex)
-            pending.add(reader);
-    }
-    evaluations += taken;
-    longest = Math.max(longest, taken);
+  while (pending.size > 0) {
+    let node: NodeId | undefined;
+    for (const candidate of pending)
+      if (node === undefined || rank(candidate) < rank(node)) node = candidate;
+    // EVIDENCE: invariant: the set is not empty, so a lowest node was found.
+    pending.delete(node!);
+    evaluations += 1;
+    const component = plan.componentOf[node!]!;
+    taken[component] = (taken[component] ?? 0) + 1;
+    for (const cell of input.evaluate(node!))
+      for (const reader of readers.get(cell) ?? []) pending.add(reader);
   }
-  return { components: plan.components.length, evaluations, longestComponent: longest };
+  return {
+    components: plan.components.length,
+    evaluations,
+    longestComponent: taken.reduce((a, b) => Math.max(a, b), 0),
+  };
 }

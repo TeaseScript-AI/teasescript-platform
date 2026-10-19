@@ -33,6 +33,8 @@ import {
   type LiftContext,
   type Operation,
 } from "./lifting.js";
+import { cutCells, type BudgetCut } from "./budget.js";
+import { caseOf } from "./lifting.js";
 import { run, type RunReport } from "./schedule.js";
 import { TypeTable } from "./types.js";
 
@@ -65,17 +67,26 @@ export interface Solution {
   readonly asks: number;
   /**
    * The work per phase, for the growth series of the exit criterion (work note §3.5): the schedule's node
-   * evaluations, the relation asks, the cells allocated, and the item orders the interpretation computed (once per
-   * cell and visiting set).
+   * evaluations, the relation asks, the operand combinations the chosen lifts enumerated, the states the folds
+   * carried, the cells allocated, the items held at the fixpoint, and the item orders the interpretation computed
+   * (once per cell).
    */
   readonly work: {
     readonly evaluations: number;
     readonly asks: number;
+    readonly combinations: number;
+    readonly foldStates: number;
     readonly cells: number;
+    readonly items: number;
     readonly orders: number;
   };
-  /** The operations with an invalid counted combination: `<family>.<name>@<site>:none` or `:partial(i/n)`, sorted. */
+  /**
+   * The operations with an invalid counted combination (`<family>.<name>@<site>:none` or `:partial(i/n)`), a fold's
+   * arguments that can be invalid (`:invalid(i,j)`), or a cut the budget made (`:budget(<count>)`), sorted.
+   */
   readonly statuses: readonly string[];
+  /** The cuts the budget made (`budget.ts`), for the diagnostic of stage 4. */
+  readonly cuts: readonly BudgetCut[];
   view(cell: CellId): CellView;
   /** The view of several part cells read together: a merged property or element (O1). */
   viewOf(group: readonly CellId[]): CellView;
@@ -102,12 +113,24 @@ class Solver {
   readonly #stored: ReadonlySet<PlaceId>;
   readonly #views = new Map<CellId, CellView>();
   readonly #groupViews = new Map<string, CellView>();
+  /** The operation that computes each result cell, and the binding each occurrence cell reads. */
+  readonly #operationOf: ReadonlyMap<CellId, Extract<Constraint, { kind: "operation" }>>;
+  readonly #occurrenceOf: ReadonlyMap<CellId, PlaceId>;
+  readonly #rebuiltFrom = new Map<CellId, ReadonlySet<PlaceId>>();
 
   constructor(graph: ConstraintGraph, options: SolveOptions) {
     this.#graph = graph;
     this.#relations = options.relations;
     this.table = options.table ?? new TypeTable();
     this.#stored = new Set(graph.constraints.flatMap((c) => (c.kind === "store" ? [c.into] : [])));
+    this.#operationOf = new Map(
+      graph.constraints.flatMap((c) => (c.kind === "operation" ? [[c.result, c] as const] : [])),
+    );
+    this.#occurrenceOf = new Map(
+      graph.constraints.flatMap((c) =>
+        c.kind === "read" ? [[c.occurrence, c.binding] as const] : [],
+      ),
+    );
     // every object carries a slot for every property name a store in the program gives any object
     const propertyNames = [
       ...new Set(
@@ -121,7 +144,13 @@ class Solver {
     this.cells = new Cells(this.table, graph.places.length, propertyNames);
     this.#functions = new Map(graph.functions.map((fn) => [fn.id, fn]));
     this.#returns = new Set(graph.constraints.filter((c) => c.kind === "return").map((c) => c.fn));
-    this.#context = { cells: this.cells, nonWorking: null, asks: 0 };
+    this.#context = {
+      cells: this.cells,
+      nonWorking: null,
+      asks: 0,
+      combinations: 0,
+      foldStates: 0,
+    };
     for (const place of graph.places) {
       const site = place.site === null ? 0 : offsetOf(place.site);
       if (place.kind.kind === "binding" && place.kind.declared === "host")
@@ -162,6 +191,14 @@ class Solver {
 
   get asks(): number {
     return this.#context.asks;
+  }
+
+  get combinations(): number {
+    return this.#context.combinations;
+  }
+
+  get foldStates(): number {
+    return this.#context.foldStates;
   }
 
   /** The cells a constraint names: its reads and its writes, undirected (see the module comment). */
@@ -209,7 +246,24 @@ class Solver {
   }
 
   reads(c: Constraint): readonly CellId[] {
-    return c.kind === "has" || c.kind === "exit" || c.kind === "speakerRead" ? [] : this.cellsOf(c);
+    switch (c.kind) {
+      case "has":
+      case "exit":
+      case "speakerRead":
+        return [];
+      // a store reads its value and the owners of a projected target, never the cell it stores into: the bound's
+      // members there are static, so a node per store of one binding does not depend on every other (Sol's D2 of
+      // the target-suite review: the schedule was quadratic in the stores of one variable); a store of a rebuild of
+      // its own target reads the target too: it merges into the structures there (`#mergeRebuilt`)
+      case "store":
+        return this.selfRebuild(c)
+          ? [c.value, c.into, ...this.#ownerOf(c.into)]
+          : [c.value, ...this.#ownerOf(c.into)];
+      case "assign":
+        return this.selfRebuild(c) ? [c.value, c.binding] : [c.value];
+      default:
+        return this.cellsOf(c);
+    }
   }
 
   /** The items a term contributes: a written union's members as bound members, a literal's part as its own cell. */
@@ -347,6 +401,72 @@ class Solver {
     );
   }
 
+  /**
+   * The bindings a value is rebuilt from: the binding an occurrence reads, and for an operation's result the bindings
+   * its operands are rebuilt from (through operations only: `xs + []`, `(xs + []) + ys`, never through another
+   * binding).
+   */
+  #rebuiltOf(cell: CellId, visiting: ReadonlySet<CellId> = new Set()): ReadonlySet<PlaceId> {
+    const known = this.#rebuiltFrom.get(cell);
+    if (known !== undefined) return known;
+    const binding = this.#occurrenceOf.get(cell);
+    if (binding !== undefined) return new Set([binding]);
+    const operation = this.#operationOf.get(cell);
+    if (operation === undefined || visiting.has(cell)) return new Set();
+    const inner = new Set([...visiting, cell]);
+    const out = new Set<PlaceId>();
+    for (const operand of [
+      ...(operation.receiver === null ? [] : [operation.receiver]),
+      ...operation.arguments,
+      ...operation.named.map((entry) => entry.value),
+    ])
+      for (const place of this.#rebuiltOf(operand, inner)) out.add(place);
+    this.#rebuiltFrom.set(cell, out);
+    return out;
+  }
+
+  /**
+   * Whether a store's value is a rebuild of the place it is stored into (`xs = xs + [v]`, `xs = ys + xs`): the
+   * rebuilt collection's elements then merge into the place's existing structures (the owner, 2026-10-19, after PR
+   * 3a review r6: a variable's list absorbs what is appended, as the decided rules and the legacy say) instead of
+   * adding a structure per statement, so a binding appended at k sites keeps its structures and the work stays
+   * linear. A store into another place keeps its own structure.
+   */
+  selfRebuild(c: Extract<Constraint, { kind: "store" | "assign" }>): boolean {
+    const into = c.kind === "store" ? c.into : c.binding;
+    return this.#rebuiltOf(c.value).has(into);
+  }
+
+  /**
+   * The merge of a rebuilt collection into the target's structures, per member or case (never across members): a
+   * rebuilt structure merges its elements into every target structure of its constructor whose case is among its
+   * bases; one built from witnesses alone (no base), or from bases of other places only, merges into the target's
+   * witness structures (one schema per place, option B). A structure with no target yet waits (the store reads the
+   * target), so the structures of the target are those its other stores give it, whatever the order.
+   */
+  #mergeRebuilt(value: CellId, into: CellId, decl: boolean, site: number): boolean {
+    let changed = false;
+    const targets = this.cells.items(into).filter((t) => t.parts?.element !== undefined);
+    const targetCases = new Set(targets.map((t) => caseOf(this.cells, t, into)));
+    for (const item of this.cells.items(value)) {
+      if (item.parts?.element === undefined || item.ctor === undefined) continue;
+      const bases = new Set(
+        item.case?.startsWith("j{") === true ? item.case.slice(2, -1).split(",") : [],
+      );
+      const own = [...bases].some((base) => targetCases.has(base));
+      for (const target of targets) {
+        if (target.ctor !== item.ctor) continue;
+        const matches = own
+          ? bases.has(caseOf(this.cells, target, into))
+          : target.tag === "w" || target.tag === "n";
+        if (!matches) continue;
+        if (this.copy(item.parts.element, target.parts!.element!, decl ? "set" : "strip", site))
+          changed = true;
+      }
+    }
+    return changed;
+  }
+
   /** A store's value into a cell: the parts' items for a store of elements (`addAll`), else the value's items. */
   #storeInto(s: Extract<Constraint, { kind: "store" }>, into: CellId, decl: boolean): boolean {
     const site = offsetOf(s.site);
@@ -363,6 +483,20 @@ class Solver {
           changed = true;
       }
       return changed;
+    }
+    if (this.selfRebuild(s)) {
+      // the rebuilt structures merge; the rest of the value (its scalars, nulls, the values the compiler cannot know)
+      // is stored as any value is
+      const merged = this.#mergeRebuilt(s.value, into, decl, site);
+      const rest = this.copy(
+        s.value,
+        into,
+        decl ? "set" : "strip",
+        site,
+        null,
+        (item) => item.parts?.element === undefined,
+      );
+      return merged || rest;
     }
     return this.copy(s.value, into, decl ? "set" : "strip", site);
   }
@@ -405,6 +539,18 @@ class Solver {
           c.kind === "store" &&
           (DECL_STORES.includes(c.how) || intoKind === "cell" || intoKind === "property");
         if (c.kind === "store") return this.#storeInto(c, into, decl);
+        if (this.selfRebuild(c)) {
+          const merged = this.#mergeRebuilt(c.value, into, false, site);
+          const rest = this.copy(
+            c.value,
+            into,
+            "strip",
+            site,
+            null,
+            (item) => item.parts?.element === undefined,
+          );
+          return merged || rest;
+        }
         return this.copy(c.value, into, "strip", site);
       }
       case "read":
@@ -561,9 +707,13 @@ class Solver {
     };
   }
 
+  /** The cuts the budget made, recorded by `statuses()`. */
+  readonly cuts: BudgetCut[] = [];
+
   /** The operations that cannot succeed or have an invalid counted combination, once over the final cells. */
   statuses(): readonly string[] {
     this.#context.nonWorking = nonWorking(this.cells);
+    this.cuts.length = 0;
     const out: string[] = [];
     for (const c of this.#graph.constraints) {
       if (c.kind === "get") {
@@ -598,9 +748,20 @@ class Solver {
           out.push(`${label}:invalid(${tally.fold.map((index) => index + 1).join(",")})`);
         continue;
       }
+      // a cut the budget made (`budget.ts`): the operation's result is held, the quantity reported
+      if (tally?.budget !== undefined) {
+        this.cuts.push(tally.budget);
+        out.push(`${label}:budget(${tally.budget.quantity})`);
+        continue;
+      }
       if (tally === null || tally.asked === 0) continue;
       if (tally.invalid === tally.asked) out.push(`${label}:none`);
       else if (tally.invalid > 0) out.push(`${label}:partial(${tally.invalid}/${tally.asked})`);
+    }
+    // the cells the budget cut while expanding their alternatives (`budget.ts`)
+    for (const cut of cutCells(this.cells)) {
+      this.cuts.push(cut);
+      out.push(`cell@${this.cells.name(cut.at)}:budget(${cut.quantity})`);
     }
     return out.sort();
   }
@@ -658,10 +819,14 @@ export function solve(graph: ConstraintGraph, options: SolveOptions): Solution {
     work: {
       evaluations: report.evaluations,
       asks: solver.asks,
+      combinations: solver.combinations,
+      foldStates: solver.foldStates,
       cells: solver.cells.ids().length,
+      items: solver.cells.ids().reduce((n, cell) => n + solver.cells.items(cell).length, 0),
       orders: orderComputations(solver.cells),
     },
     statuses,
+    cuts: solver.cuts,
     view: (cell) => solver.view(cell),
     viewOf: (group) => solver.viewOf(group),
   };

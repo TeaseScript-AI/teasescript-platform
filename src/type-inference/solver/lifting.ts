@@ -19,6 +19,8 @@ import {
   type Position,
   type Provenance,
 } from "./cells.js";
+import { NO_PARAMETERS } from "../adapters/relation.js";
+import { BUDGET_WHY, cutCell, isCutCell, overBudget, type BudgetCut } from "./budget.js";
 import type { TypeId, TypeNode } from "./types.js";
 
 // The lifting of a relation's answers into cells (O4 stage 3a, work note §3.5; the executable reference model is the
@@ -165,6 +167,9 @@ function alternatives(
   cell: CellId,
   path: ReadonlySet<CellId> = new Set(),
 ): readonly Alternative[] {
+  // the budget's second cut point (`budget.ts`): a cell whose expansion exceeds the limit presents no alternative
+  // and a `too complex` mark instead (`marksOf`, `provenances`), checked while expanding
+  if (isCutCell(cells, cell)) return [];
   const out = new Map<string, Alternative>();
   for (const item of cells.items(cell)) {
     if (item.tag === "d" || item.tag === "e") continue;
@@ -173,6 +178,10 @@ function alternatives(
       const prior = out.get(key);
       if (prior === undefined) out.set(key, alternative);
       else out.set(key, merged(prior, alternative));
+      if (overBudget("alternatives", out.size)) {
+        cutCell(cells, cell, out.size);
+        return [];
+      }
     }
   }
   return [...out.values()];
@@ -206,7 +215,7 @@ function merged(prior: Alternative, other: Alternative): Alternative {
 }
 
 /** The case of an item as an alternative reads it: a witness is the cell's schema (option B), a member or a bound its own. */
-function caseOf(cells: Cells, item: Item, cell: CellId): string {
+export function caseOf(cells: Cells, item: Item, cell: CellId): string {
   return item.tag === "w" || item.tag === "n" ? `W${cell}` : (item.case ?? `c:${cells.name(cell)}`);
 }
 
@@ -215,8 +224,15 @@ function caseOf(cells: Cells, item: Item, cell: CellId): string {
  * feedback edge returns to the same case (I1).
  */
 function basesOf(a: Alternative): readonly string[] {
+  // a witness contributes no base (r6): a written or permitted member and a rebuilt collection identify what they
+  // are built into, a literal does not, so appends at k sites stay k cases per member and a feedback edge still
+  // returns to its case; a chain of distinct written unions stays 2^n and meets the budget
   return [
-    ...new Set(a.cases.flatMap((c) => (c.startsWith("j{") ? c.slice(2, -1).split(",") : [c]))),
+    ...new Set(
+      a.cases.flatMap((c) =>
+        c.startsWith("j{") ? c.slice(2, -1).split(",") : a.tag === "w" ? [] : [c],
+      ),
+    ),
   ].sort();
 }
 
@@ -263,7 +279,7 @@ export function itemAlternatives(
     const out = [...alternatives(cells, part, inner)];
     const items = cells.items(part);
     if (items.some((it) => it.tag === "e")) out.push(synthetic({ kind: "never" }, part));
-    if (items.some((it) => it.tag === "d" || it.tag === "p"))
+    if (items.some((it) => it.tag === "d" || it.tag === "p") || isCutCell(cells, part))
       out.push(synthetic(UNKNOWN_TYPE, part));
     return out;
   };
@@ -323,6 +339,7 @@ function provenances(cells: Cells, cell: CellId): readonly Provenance[] {
   const out = new Set<Provenance>();
   for (const item of cells.items(cell))
     if ((item.tag === "d" || item.tag === "p") && item.why !== undefined) out.add(item.why);
+  if (isCutCell(cells, cell)) out.add(BUDGET_WHY);
   return [...out].sort();
 }
 
@@ -406,6 +423,10 @@ export interface LiftContext {
   readonly nonWorking: ReadonlySet<string> | null;
   /** Counts every ask of a relation, for measurement. */
   asks: number;
+  /** Counts the operand combinations every chosen lift enumerated, before any lazy dimension (the budget's quantity). */
+  combinations: number;
+  /** Counts the states a fold carried across its arguments (states times choices, per argument). */
+  foldStates: number;
 }
 
 /**
@@ -416,6 +437,8 @@ export interface Tally {
   readonly asked: number;
   readonly invalid: number;
   readonly fold?: readonly number[];
+  /** The cut the budget made instead of asking (`budget.ts`). */
+  readonly budget?: BudgetCut;
 }
 
 /** One choice of a dimension: an operand's, a leaf's, a place's, or the presence of a property a projection reads. */
@@ -562,10 +585,17 @@ const dynamicWhy = (why: Provenance): Exclude<Provenance, "unknown"> =>
 
 /** The dynamic items of a cell, as marks a dynamic walk carries. */
 function marksOf(cells: Cells, cell: CellId): DynamicMark[] {
-  return cells
+  const marks = cells
     .items(cell)
     .filter((it) => it.tag === "d" && it.why !== undefined)
     .map((it): DynamicMark => ({ tag: "d", why: it.why! }));
+  if (isCutCell(cells, cell)) marks.push({ tag: "d", why: BUDGET_WHY });
+  return marks;
+}
+
+/** Whether an alternative is working at interpretation (every alternative is while solving). */
+function isWorking(nonWorking: ReadonlySet<string> | null, a: Alternative): boolean {
+  return nonWorking === null || !a.cells.some((cell) => nonWorking.has(`${cell}:${a.type}`));
 }
 
 /** The choices of an operand or a place: its closed alternatives, its possibilities, one dynamic view per provenance, and, when lazy, nothing. */
@@ -598,9 +628,15 @@ function picksOf(cells: Cells, cell: CellId, lazy: boolean): Pick[] {
 }
 
 /** The one pick of a collected operand or the aggregate view of a summed place (P1): every alternative at once. */
-function aggregateOf(cells: Cells, cell: CellId): Extract<Pick, { kind: "aggregate" }> {
+function aggregateOf(
+  cells: Cells,
+  cell: CellId,
+  nonWorking: ReadonlySet<string> | null,
+): Extract<Pick, { kind: "aggregate" }> {
   const table = cells.table;
-  const all = alternatives(cells, cell);
+  // at interpretation the non-working alternatives of a conflicting cell are not in the aggregate (the cascade rule
+  // of the chosen reading: a choice of one is not counted)
+  const all = alternatives(cells, cell).filter((a) => isWorking(nonWorking, a));
   return {
     kind: "aggregate",
     view: {
@@ -710,17 +746,25 @@ export function lift(
       changed: cells.add(operation.result, { tag: "d", why: "unknown callee", pos }),
       tally: null,
     };
+  // the operands the relation declares (P1, declared parameters): an argument outside the declaration is not a
+  // dimension and is not read; a malformed call keeps the stage-4 arity error as its only consequence (r6-B4/B5)
+  const { parameters } = relation;
+  const positional =
+    parameters.positional === "variadic"
+      ? operation.arguments
+      : operation.arguments.slice(0, parameters.positional);
+  const named = operation.named.filter((entry) => parameters.named.includes(entry.name));
   const operands: Operand[] = [];
   if (operation.receiver !== null)
     operands.push({ ref: RECEIVER, cell: operation.receiver, lazy: false });
-  operation.arguments.forEach((cell, index) =>
+  positional.forEach((cell, index) =>
     operands.push({ ref: { argument: index }, cell, lazy: false }),
   );
-  for (const named of operation.named)
+  for (const entry of named)
     operands.push({
-      ref: { named: named.name },
-      cell: named.value,
-      lazy: named.name === "default",
+      ref: { named: entry.name },
+      cell: entry.value,
+      lazy: entry.name === "default",
     });
   if (operation.contract.family === "logic" && operands[1] !== undefined)
     operands[1] = { ...operands[1], lazy: true };
@@ -731,17 +775,35 @@ export function lift(
   const collected = relation.plan === "collected";
   const choices = operands.map((operand) =>
     collected && "argument" in operand.ref
-      ? [aggregateOf(cells, operand.cell)]
+      ? [aggregateOf(cells, operand.cell, context.nonWorking)]
       : picksOf(cells, operand.cell, operand.lazy),
   );
   if (choices.some((list) => list.length === 0)) return { changed: false, tally: null };
   if (
     relation.plan === "fold" &&
     operation.receiver === null &&
-    operation.named.length === 0 &&
-    operation.arguments.length >= 2
+    named.length === 0 &&
+    positional.length >= 2
   )
     return foldLift(context, operation, relation, operands, choices);
+  // the budget's one cut point (`budget.ts`): the combinations of the operands' choices, counted before any lazy
+  // dimension; above the limit the result is held and the status reports the count
+  const combinations = choices.reduce((count, list) => count * list.length, 1);
+  context.combinations += combinations;
+  if (overBudget("combinations", combinations)) {
+    const cut: BudgetCut = {
+      quantity: "combinations",
+      count: combinations,
+      at: operation.site,
+      operands: operands
+        .map((operand, index) => ({ cell: operand.cell, count: choices[index]!.length }))
+        .sort((a, b) => b.count - a.count),
+    };
+    return {
+      changed: cells.add(operation.result, { tag: "d", why: BUDGET_WHY, pos }),
+      tally: { asked: 0, invalid: 0, budget: cut },
+    };
+  }
   const combos = product(choices);
   let changed = false;
   let asked = 0;
@@ -839,7 +901,6 @@ interface FoldState {
   readonly view: OperandView;
   readonly tag: "w" | "m" | "p" | "d";
   readonly why: Provenance | undefined;
-  from: readonly string[];
 }
 
 /**
@@ -861,6 +922,12 @@ function foldLift(
   const { cells } = context;
   const table = cells.table;
   const pos = positionAt(operation.site);
+  // a fold reads its two views alone: a place read is undeclared, as for the ordinary wrapper (Astra r6-N1)
+  const undeclared = (place: PlaceId): never => {
+    throw new Error(
+      `undeclared read of place ${place} by ${operation.contract.family}.${operation.contract.name}@${operation.site}`,
+    );
+  };
   const ask = (left: OperandView, right: OperandView): OperationResult => {
     context.asks += 1;
     return relation.result({
@@ -868,9 +935,9 @@ function foldLift(
       arguments: [left, right],
       named: new Map(),
       evidence: operation.evidence,
-      view: () => BOTTOM_VIEW,
-      collect: () => BOTTOM_VIEW,
-      leaf: () => BOTTOM_VIEW,
+      view: (place) => undeclared(place),
+      collect: (place) => undeclared(place),
+      leaf: (path) => ("place" in path.of ? undeclared(path.of.place) : BOTTOM_VIEW),
     });
   };
   const viewOf = (pick: Pick): OperandView => pick.view ?? BOTTOM_VIEW;
@@ -880,12 +947,8 @@ function foldLift(
     `${typeOf(st.view)}|${st.view.dynamic ?? ""}|${st.tag}|${st.why ?? ""}`;
   const mergeState = (map: Map<string, FoldState>, st: FoldState): void => {
     const key = keyOfState(st);
-    const prior = map.get(key);
-    if (prior === undefined) map.set(key, st);
-    else prior.from = [...new Set([...prior.from, ...st.from])];
+    if (!map.has(key)) map.set(key, st);
   };
-  const fromOf = (pick: Pick, index: number): readonly string[] =>
-    pick.kind === "closed" ? [`${operands[index]!.cell}:${pick.alt.type}`] : [];
   const tagOf = (pick: Pick): FoldState["tag"] =>
     pick.kind === "possible" ? "p" : pick.kind === "dynamic" ? "d" : pick.tag === "m" ? "m" : "w";
   let states = new Map<string, FoldState>();
@@ -894,12 +957,12 @@ function foldLift(
       view: viewOf(pick),
       tag: tagOf(pick),
       why: pick.kind === "possible" || pick.kind === "dynamic" ? pick.why : undefined,
-      from: fromOf(pick, 0),
     });
   for (let index = 1; index < choices.length; index += 1) {
     const next = new Map<string, FoldState>();
     for (const st of states.values())
       for (const pick of choices[index]!) {
+        context.foldStates += 1;
         const answer = ask(st.view, viewOf(pick));
         const pickTag = tagOf(pick);
         const tag: FoldState["tag"] =
@@ -915,7 +978,6 @@ function foldLift(
             ? (st.why ??
               (pick.kind === "possible" || pick.kind === "dynamic" ? pick.why : undefined))
             : undefined;
-        const from = [...st.from, ...fromOf(pick, index)];
         const results = answer.kind === "alternatives" ? answer.results : [answer];
         for (const r of results) {
           if (r.kind === "type")
@@ -923,7 +985,6 @@ function foldLift(
               view: { alternatives: [r.type], dynamic: null, known: undefined },
               tag,
               why,
-              from,
             });
           else if (r.kind === "possible")
             for (const t of r.types)
@@ -931,14 +992,12 @@ function foldLift(
                 view: { alternatives: [t], dynamic: null, known: undefined },
                 tag: "p",
                 why: r.why,
-                from,
               });
           else if (r.kind === "dynamic")
             mergeState(next, {
               view: { alternatives: null, dynamic: r.why, known: undefined },
               tag: "d",
               why: r.why,
-              from,
             });
         }
       }
@@ -994,6 +1053,11 @@ function foldLift(
           `${keys[a]}|${keys[b]}`,
           ask(views.get(keys[a]!)!, views.get(keys[b]!)!).kind === "invalid",
         );
+  // how many arguments hold each type, so "another argument holds u" is a count, not a scan of the arguments: the
+  // blame is linear in the arguments for a bounded number of types (r6-B3/B4)
+  const holders = new Map<string, number>();
+  for (const mine of typesOf)
+    for (const k of mine.keys()) holders.set(k, (holders.get(k) ?? 0) + 1);
   const blamed = new Set<number>();
   typesOf.forEach((mine, index) => {
     for (const k of mine.keys()) {
@@ -1001,12 +1065,14 @@ function foldLift(
         blamed.add(index);
         continue;
       }
-      typesOf.forEach((theirs, other) => {
-        if (other === index) return;
-        for (const u of theirs.keys())
-          if (!alone.get(u) && pairInvalid.get(k < u ? `${k}|${u}` : `${u}|${k}`))
-            blamed.add(index);
-      });
+      for (const u of keys) {
+        if (alone.get(u)) continue;
+        const elsewhere = (holders.get(u) ?? 0) - (mine.has(u) ? 1 : 0);
+        if (elsewhere > 0 && pairInvalid.get(k < u ? `${k}|${u}` : `${u}|${k}`)) {
+          blamed.add(index);
+          break;
+        }
+      }
     }
   });
   return { changed, tally: { asked: 0, invalid: 0, fold: [...blamed].sort((x, y) => x - y) } };
@@ -1043,7 +1109,16 @@ function askLazy(
       }
     };
     const aggregated: Aggregated = { used: false, whys: new Set() };
-    const inputs = inputsOf(cells, operands, combo, operation, selected, want, aggregated);
+    const inputs = inputsOf(
+      cells,
+      operands,
+      combo,
+      operation,
+      selected,
+      want,
+      aggregated,
+      context.nonWorking,
+    );
     const answer = fn(inputs);
     let reading: Ask["reading"] | null = null;
     if (wanted.current === null)
@@ -1084,6 +1159,7 @@ function inputsOf(
   selection: Selection,
   want: Want,
   aggregated: Aggregated = { used: false, whys: new Set() },
+  nonWorking: ReadonlySet<string> | null,
 ): OperationInputs {
   let receiver: OperandView | null = null;
   const args: OperandView[] = [];
@@ -1138,7 +1214,7 @@ function inputsOf(
       // the result its dynamic marks, as the chosen reading's dynamic pick did)
       declare(place);
       if (!cells.has(place)) return BOTTOM_VIEW;
-      const pick = aggregateOf(cells, place);
+      const pick = aggregateOf(cells, place, nonWorking);
       aggregated.used = true;
       for (const why of pick.whys) aggregated.whys.add(why);
       return pick.view;
@@ -1150,7 +1226,10 @@ function inputsOf(
       if ("place" in path.of && path.of.collected === true) {
         // the collected walk of a summed place: every alternative stepped together, the leaves as one aggregate
         declare(path.of.place);
-        found = [...alternatives(cells, path.of.place), ...marksOf(cells, path.of.place)];
+        found = [
+          ...alternatives(cells, path.of.place).filter((a) => isWorking(nonWorking, a)),
+          ...marksOf(cells, path.of.place),
+        ];
         if (found.length === 0) return BOTTOM_VIEW;
         // the closed alternatives decide the leaf; the dynamic marks met add a dynamic result to the ask (recorded
         // here), so an alternative without the part reads as absent beside a value the compiler cannot know, as the
@@ -1159,18 +1238,56 @@ function inputsOf(
         aggregated.used = true;
         for (const a of found)
           if (a.tag === "d" || a.tag === "p") aggregated.whys.add(dynamicWhy(a.why ?? "unknown"));
+        // a slot is read by what it is by construction, never by what has arrived (r6): a slot no alternative's
+        // shape has is absent; a slot whose cell holds nothing yet is pending (the ask waits); a slot empty by
+        // construction (`e`) is absent beside whatever evidence the other alternatives hold (the chosen reading's
+        // `absent` pick), told to the relation as `absent` on the view
+        let pending = false;
+        let maybeAbsent = false;
+        let dynamicMet = false;
         for (const along of path.path) {
-          if (typeof along === "object" && absentEverywhere(cells, found, along.property))
-            return null;
+          if (typeof along === "object") {
+            if (absentEverywhere(cells, found, along.property)) return null;
+            for (const a of found)
+              if (a.tag !== "d")
+                for (const part of a.choice?.props?.get(along.property) ?? []) {
+                  const items = cells.items(part);
+                  if (items.length === 0) pending = true;
+                  else if (items.some((it) => it.tag === "e")) maybeAbsent = true;
+                }
+          }
           found = found.flatMap((a) => stepOf(cells, a, along, true));
           for (const a of found) if (a.tag === "d") aggregated.whys.add(dynamicWhy(a.why));
+          // a part's dynamic evidence reads as a synthetic `unknown` alternative beside its values (the chosen
+          // reading's own dynamic pick); summed, it is the ask's provenance, never a member that absorbs the sum
+          found = found.filter((a) => {
+            if (a.tag !== "d" && !isWorking(nonWorking, a)) return false;
+            if (a.tag === "d") {
+              dynamicMet = true;
+              return true;
+            }
+            if (a.items.length > 0 || cells.table.node(a.type).kind !== "unknown") return true;
+            dynamicMet = true;
+            const whys = a.cells.flatMap((part) => provenances(cells, part));
+            for (const why of whys.length === 0 ? ["unknown" as const] : whys)
+              aggregated.whys.add(dynamicWhy(why));
+            return false;
+          });
         }
         const closed = dynamicViewOf(found.filter((a) => a.tag !== "d"));
         if (closed.alternatives !== null)
-          return { alternatives: closed.alternatives, dynamic: null, known: undefined };
-        // only dynamic marks reached: absent beside a closed root, else bottom (the ask waits; the recorded
-        // provenances give the result its dynamic marks)
-        return rootClosed ? null : BOTTOM_VIEW;
+          return maybeAbsent
+            ? { alternatives: closed.alternatives, dynamic: null, known: undefined, absent: true }
+            : { alternatives: closed.alternatives, dynamic: null, known: undefined };
+        if (pending || !rootClosed) return BOTTOM_VIEW;
+        // nothing closed reached beside a closed root: what was met is dynamic (recorded on the ask), read as an
+        // empty closed view, the chosen reading's dynamic pick; nothing met at all is absent (the slots empty by
+        // construction, or a part no alternative has)
+        return dynamicMet
+          ? maybeAbsent
+            ? { alternatives: [], dynamic: null, known: undefined, absent: true }
+            : { alternatives: [], dynamic: null, known: undefined }
+          : null;
       }
       if ("place" in path.of) {
         const pick = placePick(path.of.place);
@@ -1675,6 +1792,7 @@ export function memberRelation(name: string): OperationRelation {
   if (relation === undefined) {
     relation = {
       contract: { family: "member", name },
+      parameters: NO_PARAMETERS,
       result(inputs: OperationInputs): OperationResult {
         const receiver = inputs.receiver;
         if (receiver === null) return { kind: "invalid" };

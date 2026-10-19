@@ -53,7 +53,7 @@ function nameOf(node: ReturnType<TypeTable["node"]>): string {
 }
 
 function context(cells: Cells): LiftContext {
-  return { cells, nonWorking: null, asks: 0 };
+  return { cells, nonWorking: null, asks: 0, combinations: 0, foldStates: 0 };
 }
 
 test("a strict operand without evidence is never asked; a lazy one is always also asked unevaluated", () => {
@@ -133,6 +133,8 @@ test("a contract's alternatives answer defines a permitted union; a cascade is n
         `${op.named[0]!.value}:${table.internTerm({ kind: "atom", name: "boolean" })}`,
       ]),
       asks: 0,
+      combinations: 0,
+      foldStates: 0,
     },
     op,
     RELATIONS.relation(op.contract),

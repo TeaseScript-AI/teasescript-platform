@@ -13,7 +13,7 @@ import {
   type StaticType,
 } from "../../static-types.js";
 import type { ValueKind } from "../../value-kinds.js";
-import type { OperationResult } from "./relation.js";
+import type { OperationResult, Parameters } from "./relation.js";
 import { typeResult, type MemberAnswer, type MemberRules } from "./views.js";
 
 /**
@@ -41,8 +41,20 @@ function method(kind: ValueKind, name: string): OperationResult | undefined {
     : undefined;
 }
 
+/** A handle method's parameters: the most positional over the handle kinds that have it (`shape.count`). */
+function parametersOf(name: string): Parameters | undefined {
+  let count: number | undefined;
+  for (const kind of RULES.kinds)
+    if (isHandleKind(kind)) {
+      const method = handleMethod(kind, name);
+      if (method !== undefined) count = Math.max(count ?? 0, method.shape.count);
+    }
+  return count === undefined ? undefined : { positional: count, named: [] };
+}
+
 const RULES: MemberRules = {
   kinds: ["timer", "media", "camera", "messageHandle", "permanentButton"],
+  parameters: parametersOf,
   property,
   method,
 };

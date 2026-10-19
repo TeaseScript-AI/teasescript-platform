@@ -9,11 +9,8 @@ import {
   DURATION_TYPE,
   INTEGER_TYPE,
   isKnown,
-  isNullable,
   isScalar,
   isScalarKind,
-  joinTypes,
-  members,
   nonNullType,
   NUMBER_TYPE,
   optional,
@@ -47,7 +44,9 @@ import type {
   OperationResult,
   OperandView,
 } from "./relation.js";
+import { NO_PARAMETERS, parameters } from "./relation.js";
 import {
+  alternativesOf,
   closedType,
   dynamicFrom,
   dynamicResult,
@@ -57,6 +56,7 @@ import {
   pathOf,
   placeRef,
   structureOf,
+  Summed,
   sumOf,
   sumResult,
   typeResult,
@@ -100,6 +100,9 @@ function unknownPart(type: StaticType): boolean {
 /** A relation waits for a bottom operand: thrown where one is met, answered at the top. */
 class Unconstrained extends Error {}
 
+/** The sum that is the legacy's `unknown`: what a rejected option or a value the compiler cannot know gives. */
+const UNKNOWN_SUM = new Summed([UNKNOWN_TYPE]);
+
 /**
  * The types at the places an interaction's evidence names, with the provenance of the ones the compiler cannot
  * know: the legacy's `unknown` there, and the relation's `dynamic` when the answer rests on one.
@@ -116,14 +119,30 @@ class Places {
    * The type at a place the relation sums (an option, an element of an option list): every alternative at once, kept
    * apart (`sumOf`), so the answer over the aggregate is the union of the answers over its alternatives.
    */
-  sum(place: PlaceId): StaticType {
+  sum(place: PlaceId): Summed {
     const view = this.inputs.collect(place);
     if (isBottom(view)) throw new Unconstrained();
     if (view.dynamic !== null) {
       this.whys.push(view.dynamic);
-      return UNKNOWN_TYPE;
+      return UNKNOWN_SUM;
     }
     return sumOf(view.alternatives ?? []);
+  }
+
+  /**
+   * The types at a part along a path, summed: every alternative at once (a collected path's leaf, or the one
+   * alternative of a chosen path), and whether the part is empty by construction on some alternative beside them;
+   * `undefined` where the part is absent.
+   */
+  sumLeaf(path: OperandPath): { readonly sum: Summed; readonly absent: boolean } | undefined {
+    const view = this.inputs.leaf(path);
+    if (view === null) return undefined;
+    if (isBottom(view)) throw new Unconstrained();
+    if (view.dynamic !== null) {
+      this.whys.push(view.dynamic);
+      return { sum: UNKNOWN_SUM, absent: false };
+    }
+    return { sum: sumOf(view.alternatives ?? []), absent: view.absent === true };
   }
 
   #typeOf(view: OperandView): StaticType {
@@ -141,6 +160,9 @@ class Places {
    * where the part is absent (a property the object does not have).
    */
   leaf(path: OperandPath): StaticType | undefined {
+    // a collected leaf is summed (`sumLeaf`): closing it with one type would join what the relation must keep apart
+    if ("place" in path.of && path.of.collected === true)
+      throw new Error("a collected leaf is read with sumLeaf, not leaf");
     const view = this.inputs.leaf(path);
     if (view === null) return undefined;
     if (isBottom(view)) throw new Unconstrained();
@@ -176,21 +198,6 @@ function answer(
 // ---------------------------------------------------------------------------------------------------------------------
 // askChoice
 
-/** `#checkMembers`: a value is rejected when a known non-null member is not accepted (a mix is reported as may-be). */
-function rejects(type: StaticType, accepts: (member: StaticType) => boolean): boolean {
-  const known = members(nonNullType(type)).filter(isKnown);
-  return known.length > 0 && !known.every(accepts);
-}
-
-/** `#checkElements`: whether a collection's known elements, or the members beside it, fail the check. */
-function rejectsElements(type: StaticType, accepts: (element: StaticType) => boolean): boolean {
-  for (const member of members(type).map(resolved))
-    if (member.kind === "list" || member.kind === "set")
-      for (const element of members(member.element).filter(isKnown))
-        if (!accepts(element)) return true;
-  return false;
-}
-
 /** The value a written literal stands for in a restricted choice: a duration its milliseconds, an angle its degrees. */
 function literalOf(literal: WrittenLiteral): ScalarValue | null | undefined {
   if (literal === null) return undefined;
@@ -202,16 +209,23 @@ function literalOf(literal: WrittenLiteral): ScalarValue | null | undefined {
 
 /** `restrictedChoice`: the values' types, each scalar restricted to the literals its buttons return. */
 function restrictedChoice(
-  types: readonly StaticType[],
+  types: readonly Summed[],
   values: readonly (ScalarValue | null)[],
-): StaticType {
+): Summed {
   const families = new Map<string, { name: string; values: ScalarValue[] }>();
   const parts: StaticType[] = [];
-  for (const [index, type] of types.entries()) {
-    const value = resolved(type);
+  for (const [index, sum] of types.entries()) {
     const literal = values[index];
-    if (value.kind !== "scalar" || literal === null || literal === undefined) {
-      parts.push(type);
+    // a written option has one type; what is not one scalar with a literal is summed as it is
+    const type = sum.members.length === 1 ? sum.members[0]! : undefined;
+    const value = type === undefined ? undefined : resolved(type);
+    if (
+      value === undefined ||
+      value.kind !== "scalar" ||
+      literal === null ||
+      literal === undefined
+    ) {
+      parts.push(...sum.members);
       continue;
     }
     const key = value.name === "integer" ? "number" : value.name;
@@ -225,48 +239,67 @@ function restrictedChoice(
     if (kind !== undefined && isScalarKind(kind))
       parts.push(withValues({ kind: "scalar", name: kind }, family.values));
   }
-  return union(parts);
+  return sumOf(parts);
 }
 
 /**
- * `#choiceEntry`: what gives one button, a value or a choice object whose value, else its text, the button returns.
- * Rejected means the legacy reports and takes `unknown`; a computed choice object's value is not known.
+ * `#choiceEntry`: what gives buttons, per member of a sum (P1: the answer over an aggregate is the union of the
+ * answers over its alternatives, so no member retracts another's): an accepted value is a button; a choice object
+ * returns its value or its text, which the compiler cannot know, and a null member may be chosen as nothing
+ * (`dynamic`); a member not accepted is invalid beside the rest (`rejected`: the legacy reports it and takes
+ * `unknown`). A written choice object returns its `value`, else its `text`.
  */
 function choiceEntry(
   places: Places,
-  type: StaticType,
+  type: Summed,
   object: ChoiceObjectEvidence | null,
   inList: boolean,
-): { readonly type: StaticType; readonly rejected: boolean } {
-  const value = resolved(nonNullType(type));
-  const accepted = (member: StaticType): boolean => {
-    const kind = resolved(member).kind;
-    return (
-      isChoiceValue(member) || kind === "object" || (!inList && (kind === "list" || kind === "set"))
-    );
-  };
-  if (rejects(type, accepted)) return { type: UNKNOWN_TYPE, rejected: true };
-  if (object === null)
-    return { type: value.kind === "object" ? UNKNOWN_TYPE : type, rejected: false };
-  // A written choice object without `text` is reported (the visitor's check); without `value` too, what its button
-  // returns is not known.
-  const returned = object.value ?? object.text;
-  return { type: returned === null ? UNKNOWN_TYPE : places.sum(returned), rejected: false };
+): { readonly type: Summed; readonly rejected: boolean; readonly dynamic: boolean } {
+  if (object !== null) {
+    // A written choice object without `text` is reported (the visitor's check); without `value` too, what its
+    // button returns is not known.
+    const returned = object.value ?? object.text;
+    return {
+      type: returned === null ? UNKNOWN_SUM : places.sum(returned),
+      rejected: false,
+      dynamic: false,
+    };
+  }
+  let rejected = false;
+  let dynamic = false;
+  const buttons: StaticType[] = [];
+  for (const member of type.members) {
+    const value = resolved(member);
+    if (value.kind === "object" || !isKnown(member)) {
+      dynamic = true;
+      continue;
+    }
+    const accepted =
+      isChoiceValue(member) || (!inList && (value.kind === "list" || value.kind === "set"));
+    if (accepted) buttons.push(member);
+    else rejected = true;
+  }
+  return { type: sumOf(buttons), rejected, dynamic };
 }
 
 function choice(inputs: OperationInputs): OperationResult {
   const evidence = inputs.evidence;
   if (evidence?.kind !== "choice") return INVALID;
   return answer(evidence, inputs, (places) => {
-    const values: StaticType[] = [];
+    const values: Summed[] = [];
     let literals: (ScalarValue | null)[] | null = [];
-    const add = (type: StaticType, literal: ScalarValue | null | undefined): void => {
+    const add = (type: Summed, literal: ScalarValue | null | undefined): void => {
       values.push(type);
       if (literal === undefined) literals = null;
       else literals?.push(literal);
     };
     let rejected = false;
+    let dynamic = false;
     let empty = true;
+    const isCollection = (member: StaticType): boolean => {
+      const kind = resolved(member).kind;
+      return kind === "list" || kind === "set";
+    };
     for (const option of evidence.options) {
       const label = option.label;
       if (label !== null) {
@@ -284,7 +317,7 @@ function choice(inputs: OperationInputs): OperationResult {
             : null;
         if (elements === null || elements > 0) {
           empty = false;
-          add(written, label.value);
+          add(sumOf([written]), label.value);
         }
         continue;
       }
@@ -294,53 +327,56 @@ function choice(inputs: OperationInputs): OperationResult {
         for (const element of elements) {
           const entry = choiceEntry(places, places.sum(element.place), element.object, true);
           rejected ||= entry.rejected;
+          dynamic ||= entry.dynamic;
           add(entry.type, literalOf(element.literal));
         }
         continue;
       }
       empty = false;
+      // a computed option: each member of its sum gives buttons, a value itself, a collection its elements read as a
+      // collected leaf (the closed alternatives apart, the marks the compiler cannot know as the ask's provenances:
+      // PR 3a review r6), each element per `choiceEntry`
       const type = places.sum(option.place);
-      const parts = members(nonNullType(type)).map(resolved);
-      if (parts.some((part) => part.kind === "list" || part.kind === "set")) {
-        // Each member gives buttons: a collection its elements, a value itself. A choice object among the elements of
-        // a computed collection may return its value or its text, so only scalar elements give a known result type.
-        const entry = choiceEntry(places, type, null, false);
-        const accepted =
-          entry.type !== UNKNOWN_TYPE &&
-          !rejectsElements(
-            type,
-            (element) => isChoiceValue(element) || resolved(element).kind === "object",
-          );
-        rejected ||= entry.rejected || !accepted;
-        const results = parts.map((part) => {
-          const button =
-            part.kind === "list" || part.kind === "set" ? resolved(part.element) : part;
-          return button.kind === "object" ? UNKNOWN_TYPE : button;
-        });
-        add(
-          accepted && !isNullable(type) ? (joinTypes(results) ?? UNKNOWN_TYPE) : UNKNOWN_TYPE,
-          undefined,
-        );
-        continue;
-      }
       const entry = choiceEntry(
         places,
-        type,
+        option.content.kind === "object"
+          ? type
+          : sumOf(type.members.filter((m) => !isCollection(m))),
         option.content.kind === "object" ? option.content.object : null,
         false,
       );
       rejected ||= entry.rejected;
-      add(entry.type, literalOf(option.literal));
+      dynamic ||= entry.dynamic;
+      let buttons = entry.type;
+      if (option.content.kind !== "object" && type.some(isCollection)) {
+        const elements = places.sumLeaf(pathOf(placeRef(option.place, true), "element"));
+        const inner = choiceEntry(places, elements?.sum ?? sumOf([]), null, true);
+        rejected ||= inner.rejected;
+        dynamic ||= inner.dynamic;
+        // a collection that may be null gives buttons the compiler cannot know (as before the per-member sum)
+        if (type.some((m) => resolved(m).kind === "null")) dynamic = true;
+        buttons = sumOf([
+          ...buttons.members.filter((m) => resolved(m).kind !== "null"),
+          ...inner.type.members,
+        ]);
+      }
+      add(buttons, literalOf(option.literal));
     }
     // An empty list or set gives no buttons, which the legacy reports.
     if (empty && evidence.options.length > 0) return INVALID;
-    if (values.length === 0) return INVALID;
     const known: readonly (ScalarValue | null)[] | null = literals;
     // the options are summed (P1): kept apart, no join, the interpretation widens over the final sets; the literal
     // options' values restrict the result as before
     const type = known === null ? sumOf(values) : restrictedChoice(values, known);
-    if (members(type).some(unknownPart)) return rejected ? INVALID : places.dynamic();
-    return sumResult(type);
+    // a written choice object whose button returns nothing known: the legacy's unknown
+    if (type.some(unknownPart)) return places.dynamic();
+    // the buttons' sum, beside a value the compiler cannot know and beside the invalid members, each its own outcome;
+    // a rejected member is the legacy's report and unknown, so it also holds the result (no cascade downstream)
+    const outcomes: OperationResult[] = [];
+    if (type.members.length > 0) outcomes.push(sumResult(type));
+    if (dynamic || rejected) outcomes.push(places.dynamic());
+    if (rejected) outcomes.push(INVALID);
+    return outcomes.length === 0 ? INVALID : alternativesOf(...outcomes);
   });
 }
 
@@ -393,7 +429,7 @@ function fieldAnswer(
   kind: FormFieldKind,
   options: OperandPath | undefined,
   elements: readonly ChoiceElementEvidence[] | undefined,
-): StaticType {
+): StaticType | Summed {
   return kind === "cycle"
     ? cycleAnswer(places, options, elements)
     : kind === "boolean"
@@ -410,15 +446,17 @@ function cycleAnswer(
   places: Places,
   options: OperandPath | undefined,
   elements: readonly ChoiceElementEvidence[] | undefined,
-): StaticType {
-  const computedOption = (member: StaticType, at: OperandPath): StaticType => {
+): Summed {
+  const computedOption = (member: StaticType, at: OperandPath): Summed => {
     const option = resolved(member);
-    if (option.kind !== "object") return plainType(option);
-    const returned = [
-      places.leaf(step(at, { property: "value" })),
-      places.leaf(step(at, { property: "text" })),
-    ].filter((part): part is StaticType => part !== undefined);
-    return returned.length === 0 ? UNKNOWN_TYPE : sumOf(returned.map(plainType));
+    if (option.kind !== "object") return sumOf([plainType(option)]);
+    // its value and its text, each summed over the alternatives (a collected path) or the one alternative of a
+    // chosen path; a part absent on every alternative contributes nothing, a part with only values the compiler
+    // cannot know contributes its provenance (recorded on the ask); neither part at all is the legacy's unknown
+    const value = places.sumLeaf(step(at, { property: "value" }));
+    const text = places.sumLeaf(step(at, { property: "text" }));
+    if (value === undefined && text === undefined) return UNKNOWN_SUM;
+    return sumOf([...(value?.sum.members ?? []), ...(text?.sum.members ?? [])].map(plainType));
   };
   // the options are summed (P1): kept apart, no join, the interpretation widens over the final sets
   if (elements !== undefined)
@@ -426,20 +464,20 @@ function cycleAnswer(
       elements.map((element) => {
         if (element.object === null) {
           const at = pathOf(placeRef(element.place, true));
-          return sumOf(summed(places.sum(element.place)).map((m) => computedOption(m, at)));
+          return sumOf(places.sum(element.place).members.map((m) => computedOption(m, at)));
         }
         const returned = element.object.value ?? element.object.text;
-        return returned === null ? UNKNOWN_TYPE : plainType(places.sum(returned));
+        return returned === null ? UNKNOWN_SUM : places.sum(returned).map(plainType);
       }),
     );
   // The options' type is read only here, for a cycle whose options are not written one by one.
-  if (options === undefined) return UNKNOWN_TYPE;
+  if (options === undefined) return UNKNOWN_SUM;
   const type = places.leaf(options);
   const list = type === undefined ? undefined : resolved(nonNullType(type));
-  if (list?.kind !== "list") return UNKNOWN_TYPE;
+  if (list?.kind !== "list") return UNKNOWN_SUM;
   const at = step(options, "element");
   const element = places.leaf(at);
-  if (element === undefined) return UNKNOWN_TYPE;
+  if (element === undefined) return UNKNOWN_SUM;
   return sumOf(summed(element).map((m) => computedOption(m, at)));
 }
 
@@ -453,7 +491,7 @@ function summed(type: StaticType): readonly StaticType[] {
 function writtenField(
   places: Places,
   descriptor: Extract<FormDescriptorEvidence, { kind: "object" }>,
-): StaticType {
+): StaticType | Summed {
   const typeOf = (place: PlaceId | null): StaticType | undefined =>
     place === null ? undefined : resolved(nonNullType(places.type(place)));
   const tag: FormFieldKind | null | undefined =
@@ -479,7 +517,9 @@ function writtenField(
     descriptor.options === null ? undefined : pathOf(placeRef(descriptor.options.place)),
     descriptor.options?.elements ?? undefined,
   );
-  return !required && kind !== "boolean" && kind !== "cycle" ? optional(result) : result;
+  return result instanceof Summed || required || kind === "boolean" || kind === "cycle"
+    ? result
+    : optional(result);
 }
 
 /**
@@ -487,21 +527,22 @@ function writtenField(
  * `optional`), one alternative per ask; a part absent from the descriptor is `undefined`. It gives one kind only
  * without `type:`, and with `options:` only when no `value:` other than a toggle's beside it can make some fields typed.
  */
-function computedField(places: Places, at: OperandPath): StaticType {
+function computedField(places: Places, at: OperandPath): StaticType | Summed {
   const part = (key: string): StaticType | undefined => {
     const found = places.leaf(step(at, { property: key }));
     return found === undefined ? undefined : resolved(nonNullType(found));
   };
   const valueType = part("value");
   const hasOptions = part("options") !== undefined;
-  let result: StaticType | null;
+  let result: StaticType | Summed | null;
   if (part("type") !== undefined) result = null;
   else if (hasOptions) {
     const cycle = cycleAnswer(places, step(at, { property: "options" }), undefined);
+    const toggle = cycle.members.length === 1 && isScalar(resolved(cycle.members[0]!), "boolean");
     result =
       valueType === undefined
         ? cycle
-        : isScalar(valueType, "boolean") && isScalar(resolved(cycle), "boolean")
+        : isScalar(valueType, "boolean") && toggle
           ? BOOLEAN_TYPE
           : null;
   } else {
@@ -524,7 +565,7 @@ function field(
   at: OperandPath,
   type: StaticType,
   written: FormDescriptorEvidence | undefined,
-): StaticType {
+): StaticType | Summed {
   const value = resolved(nonNullType(type));
   if (value.kind === "object")
     return value.properties === null
@@ -620,7 +661,10 @@ function fixed(
   name: string,
   type: StaticType,
 ): [string, OperationRelation] {
-  return [`${family}.${name}`, { contract: { family, name }, result: () => typeResult(type) }];
+  return [
+    `${family}.${name}`,
+    { contract: { family, name }, parameters: NO_PARAMETERS, result: () => typeResult(type) },
+  ];
 }
 
 function askImage(inputs: OperationInputs): OperationResult {
@@ -641,6 +685,7 @@ function speakerField(name: string): OperationRelation {
   const property = name.replace(/^account\./, "");
   return {
     contract: { family: "speakerField", name },
+    parameters: NO_PARAMETERS,
     result: () =>
       SPEAKER_NAME_LISTS.has(property)
         ? typeResult({ kind: "list", element: STRING_TYPE })
@@ -664,17 +709,37 @@ export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map<string,
     fixed("interaction", "boolean", BOOLEAN_TYPE),
     [
       "interaction.booleans",
-      { contract: { family: "interaction", name: "booleans" }, result: askBooleans },
+      {
+        contract: { family: "interaction", name: "booleans" },
+        parameters: NO_PARAMETERS,
+        result: askBooleans,
+      },
     ],
     [
       "interaction.choice",
       // the options are summed: the result unions their values (P1)
-      { contract: { family: "interaction", name: "choice" }, plan: "collected", result: choice },
+      {
+        contract: { family: "interaction", name: "choice" },
+        parameters: parameters("variadic"),
+        plan: "collected",
+        result: choice,
+      },
     ],
-    ["interaction.form", { contract: { family: "interaction", name: "form" }, result: form }],
+    [
+      "interaction.form",
+      {
+        contract: { family: "interaction", name: "form" },
+        parameters: parameters(0, ["fields"]),
+        result: form,
+      },
+    ],
     [
       "interaction.askImage",
-      { contract: { family: "interaction", name: "askImage" }, result: askImage },
+      {
+        contract: { family: "interaction", name: "askImage" },
+        parameters: NO_PARAMETERS,
+        result: askImage,
+      },
     ],
     fixed("say", "say", { kind: "messageHandle" }),
     fixed("showButton", "showButton", DURATION_TYPE),
@@ -694,7 +759,11 @@ export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map<string,
 /** The relation of a media key (`media.<name>`), a handle whatever the media, and of a speaker field. */
 export function relationOf(family: ContractFamily, name: string): OperationRelation | undefined {
   if (family === "media")
-    return { contract: { family, name }, result: () => typeResult({ kind: "media" }) };
+    return {
+      contract: { family, name },
+      parameters: NO_PARAMETERS,
+      result: () => typeResult({ kind: "media" }),
+    };
   if (family === "speakerField") return speakerField(name);
   return RELATIONS.get(`${family}.${name}`);
 }

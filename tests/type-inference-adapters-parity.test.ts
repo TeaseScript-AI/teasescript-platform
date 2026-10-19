@@ -13,6 +13,7 @@ import type {
   OperationRelation,
   OperationResult,
 } from "../src/type-inference/adapters/relation.js";
+import { NO_PARAMETERS } from "../src/type-inference/adapters/relation.js";
 import {
   assertCase,
   closedView,
@@ -74,7 +75,11 @@ test("a declaration the legacy contradicts fails, so a case pins the oracle it i
 
 /** A fixture relation: the answer a family module will give, pinned here against the legacy before the module exists. */
 function fixture(result: OperationResult): OperationRelation {
-  return { contract: { family: "builtin", name: "fixture" }, result: () => result };
+  return {
+    contract: { family: "builtin", name: "fixture" },
+    parameters: NO_PARAMETERS,
+    result: () => result,
+  };
 }
 
 test("the declared classes the delegated families will meet, pinned against the legacy oracle", () => {

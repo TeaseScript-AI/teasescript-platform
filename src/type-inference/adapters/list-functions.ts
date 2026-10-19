@@ -29,6 +29,7 @@ import type {
   OperationRelation,
   OperationResult,
 } from "./relation.js";
+import { parameters } from "./relation.js";
 import {
   closedType,
   dynamicFrom,
@@ -289,6 +290,12 @@ function prediction(
 function relation(name: ListFunctionName, contract: ListFunction): OperationRelation {
   return {
     contract: { family: "listFunction", name },
+    // the arguments it reads: `min` and `max` of values any number of values, the others their parameters and the
+    // named ones the contract takes (an unknown name is the stage-4 error alone)
+    parameters:
+      contract.takes === "values" && contract.orValues === true
+        ? parameters("variadic", contract.named)
+        : parameters(contract.parameters.length, contract.named),
     // `min` and `max` of values fold their arguments by the binary law (P1)
     ...(takesValues(name) ? { plan: "fold" as const } : {}),
     result(inputs: OperationInputs): OperationResult {

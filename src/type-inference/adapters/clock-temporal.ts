@@ -5,6 +5,7 @@ import {
   CLOCK_CONTRACTS,
   hasTemporalField,
   hasTemporalMethod,
+  isTemporalMethod,
   isCalendarDurationPart,
   isTemporalKind,
   TEMPORAL_FIELDS,
@@ -12,7 +13,7 @@ import {
   type TemporalField,
 } from "../../temporal-builtins.js";
 import type { ValueKind } from "../../value-kinds.js";
-import type { OperationRelation, OperationResult } from "./relation.js";
+import { NO_PARAMETERS, type OperationRelation, type OperationResult } from "./relation.js";
 import { typeResult, type MemberAnswer, type MemberRules } from "./views.js";
 
 /**
@@ -49,12 +50,18 @@ function method(kind: ValueKind, name: string): OperationResult | undefined {
 export const RELATIONS: ReadonlyMap<string, OperationRelation> = new Map(
   Object.entries(CLOCK_CONTRACTS).map(([name, contract]): [string, OperationRelation] => [
     name,
-    { contract: { family: "clock", name }, result: () => typeResult(scalar(contract.result)) },
+    {
+      contract: { family: "clock", name },
+      parameters: NO_PARAMETERS,
+      result: () => typeResult(scalar(contract.result)),
+    },
   ]),
 );
 
 const RULES: MemberRules = {
   kinds: ["date", "time", "datetime", "absoluteDateTime", "calendarDuration"],
+  // a temporal method takes no arguments (`temporalArgumentsMessage`)
+  parameters: (name) => (isTemporalMethod(name) ? NO_PARAMETERS : undefined),
   property,
   method,
 };

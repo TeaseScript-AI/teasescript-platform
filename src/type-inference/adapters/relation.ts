@@ -30,6 +30,31 @@ export interface OperandView {
   readonly alternatives: readonly StaticType[] | null;
   readonly dynamic: DynamicWhy | null;
   readonly known: KnownValue | undefined;
+  /**
+   * Of a collected leaf only: the part is empty by construction on some alternative beside the values the others
+   * hold, so the relation sums the absent reading in (the chosen reading's `absent` pick, read together).
+   */
+  readonly absent?: true;
+}
+
+/**
+ * The parameters a relation declares (work note §3.5, P1, declared parameters): the positional arguments it reads,
+ * a count or every one, and the named ones. The solver makes dimensions of these alone: an argument the call gives
+ * outside them is not read, so a malformed call keeps the stage-4 arity error as its only consequence and never
+ * enumerates a product the contract does not bound.
+ */
+export interface Parameters {
+  readonly positional: number | "variadic";
+  readonly named: readonly string[];
+}
+
+export const NO_PARAMETERS: Parameters = Object.freeze({ positional: 0, named: [] });
+
+export function parameters(
+  positional: number | "variadic",
+  named: readonly string[] = [],
+): Parameters {
+  return { positional, named };
 }
 
 export interface OperationInputs {
@@ -112,6 +137,8 @@ export type OperationResult =
 
 export interface OperationRelation {
   readonly contract: ContractRef;
+  /** The arguments the relation reads (see `Parameters`); every relation declares them. */
+  readonly parameters: Parameters;
   /**
    * The result for operands known as `inputs` says. Called again whenever an operand's view grows, so it must be a
    * function of its inputs alone: no state, no reading of other places.

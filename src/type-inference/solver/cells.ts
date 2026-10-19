@@ -31,7 +31,8 @@ export type Parts =
       readonly element?: undefined;
     };
 /** The provenance of a `d` or `p` item: the graph's reasons, or the legacy's `unknown` type met in an answer. */
-export type Provenance = DynamicWhy | "unknown";
+/** Why a value is one the compiler cannot know; `too complex` marks what the budget cut (`budget.ts`). */
+export type Provenance = DynamicWhy | "unknown" | "too complex";
 
 export interface Item {
   readonly tag: Tag;
@@ -218,12 +219,9 @@ export class Cells {
           const changedPart =
             this.#table.node(node.element).kind === "never"
               ? this.add(element, { tag: "e", pos: contribution.pos })
-              : this.add(element, {
-                  ...contribution,
-                  type: node.element,
-                  part: undefined,
-                  case: undefined,
-                });
+              : // the nested structure keeps the case (a derived cell's name would leave the grammar at the next
+                // rebuild: PR 3a review r6, Astra B1)
+                this.add(element, { ...contribution, type: node.element, part: undefined });
           const { type: _, part: __, ...rest } = contribution;
           const changed = this.#put(cell, {
             ...rest,
