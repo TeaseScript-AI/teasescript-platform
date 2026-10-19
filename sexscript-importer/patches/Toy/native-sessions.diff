@@ -209,7 +209,7 @@
 -		}
 -		final sessions = DOMME.sessions.findAll { s -> eval(s.require ?: true) };
 -		final probabilities = sessions.withIndex().collect { s, idx -> [idx] * s.probability }.sum();
--		final session = sessions[probabilities[getRandom(probabilities.size)]];
+-		final session = sessions[probabilities[getRandom(probabilities.size())]];
 -		// Change if required
 -		dress(session.phases
 -			.collect { phase -> phase.activities + phase.intervals }

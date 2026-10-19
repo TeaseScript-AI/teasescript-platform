@@ -9,6 +9,7 @@
 Domme3                # favourite; SX_MESSAGE_COUNTER, SX_POPUP_ELAPSED, SX_REPEATED_TEXT_ACROSS_CHAIN, isolated TSR009/027
 DisciplineClinic      # favourite; SX_DISCARDED_CONCATENATION
 Toy                   # favourite
+ToyExperimental       # Toy with the owner-approved candidate sets and outfit controls
 ToyExpanded           # favourite; SX_BINDING_VARIABLE, SX_DICT_DEFAULT, SX_RANDOM_OBJECT, SX_UNSUPPORTED_EXPRESSION
 SubControl            # SX_EXTERNAL_PROGRAM, SX_PACKAGE_TEXT_UNKNOWN, isolated TSR016/TSR052
 PainStacks            # compile error TSV049, SX_PARAMETER_LIST_WRITE, SX_UNSUPPORTED_WHILE

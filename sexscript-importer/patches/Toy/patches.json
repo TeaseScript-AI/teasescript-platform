@@ -1,6 +1,20 @@
 {
   "patches": [
     {
+      "id": "session-size",
+      "layer": "source",
+      "category": "e",
+      "reason": "Apply the author's upstream fix 1be123a (Actually call the size method): call probabilities.size() when selecting a weighted session instead of reading .size.",
+      "diff": "session-size.diff"
+    },
+    {
+      "id": "mistress-outfits",
+      "layer": "source",
+      "category": "e",
+      "reason": "The author shipped several domme packs (the Emily packs on the SexScripts site and the domme branches) with no way to choose one; at the owner's request (2026-10-19), realise that intent with a start-screen mistress chooser and per-mistress outfit switches, keeping at least one set enabled.",
+      "diff": "mistress-outfits.diff"
+    },
+    {
       "id": "remove-all-toys-entry-key",
       "layer": "source",
       "category": "e",
@@ -46,7 +60,7 @@
       "id": "domme-data",
       "layer": "source",
       "category": "b",
-      "reason": "getDomme evaluated the Groovy data files images/toy/domme.groovy, images/toy/<domme>/person.groovy, and set.groovy at runtime (new File, Eval.me), which a package cannot do, so DOMME stayed null and every image lookup by DOMME.id failed. Write the title and the two person files out as a dict, with the id as before. The session plans in domme.groovy are left out: only sessionPlay reads them, and it evaluates their expression strings with Eval, which does not convert either.",
+      "reason": "getDomme evaluated the Groovy data files images/toy/domme.groovy, images/toy/<domme>/person.groovy, and set.groovy at runtime (new File, Eval.me), which a package cannot do, so DOMME stayed null and every image lookup by DOMME.id failed. Write the title and the bundled person files out as a dict, with the id as before. Session plans use the native-sessions methods; preserve the supplied per-set title overrides too. The local mistressName exposes each loaded name and outfit title to speaker metadata.",
       "diff": "domme-data.diff"
     },
     {
@@ -95,7 +109,7 @@
       "id": "imagery-loops",
       "layer": "source",
       "category": "b",
-      "reason": "Toy built its image catalogue at runtime by listing images/toy and reading each set's tags file (new File, listFiles, readLines), and chose images with closures (matchTags, findAll, every, intersect, Collections.shuffle), none of which converts, so IMAGEDATA stayed null and the first image stopped the script. Write the 31 tags files out as text (identical to ToyExpanded's) and read a set's images from its tags file in loops where a lookup needs them, instead of keeping a catalogue of every image that every saved state would carry (the domme and set keys are the tags file's path; a domme without tags files has no sets, as before); select images with Toy's own rule (every tag of the flat spec present, no '!tag' present, one random match), outfits and the recent-outfit check in loops in the same order, and pick a random matching tag for the comment instead of shuffling the intersection. A random element is taken through a small randomItem closure, whose parameter keeps the result type open for the TeaseScript compiler. selectImageSet returns null when no outfit fits, which dress() already handles, where the legacy random index of an empty list failed.",
+      "reason": "Toy built its image catalogue at runtime by listing images/toy and reading each set's tags file (new File, listFiles, readLines), and chose images with closures (matchTags, findAll, every, intersect, Collections.shuffle), none of which converts, so IMAGEDATA stayed null and the first image stopped the script. Write the 43 tags files out as text and read a set's images from its tags file in loops where a lookup needs them, instead of keeping a catalogue of every image that every saved state would carry (the domme and set keys are the tags file's path; a domme without tags files has no sets, as before); select images with Toy's own rule (every tag of the flat spec present, no '!tag' present, one random match), outfits and the recent-outfit check in loops in the same order, and pick a random matching tag for the comment instead of shuffling the intersection. A random element is taken through a small randomItem closure, whose parameter keeps the result type open for the TeaseScript compiler. selectImageSet returns null when no outfit fits, which dress() already handles, where the legacy random index of an empty list failed. Expose the same catalogue for the chooser and previews; retain the enabled-set checks.",
       "diff": "imagery-loops.diff"
     },
     {
@@ -111,6 +125,13 @@
       "category": "b",
       "reason": "sessionPlay ran the four session plans of images/toy/domme.groovy by evaluating their require and number expression strings with Eval.me in a scope of closures, which does not convert, so the first summon stopped the script (owner decision 2026-10-05: native code instead of eval emulation). Each plan becomes a method of a new module toy/domme.groovy (the data file under images is no script the converter reads): its phases are plain calls in the same order, with the conditions as ifs and the numbers as arguments; sessionChoices lists the sessions whose condition holds with their probabilities for the same weighted pick, and runSession calls one by its theme. The runner in play.groovy keeps Toy's older rules: wildcards expand by tags after the named entries, a null interval entry stays a chance of no interval, 'repeat' draws a random activity each time and 'take' draws its activities without repetition before running them (as shuffling and taking did), each followed by a random interval when there are any, and punishMultiply/punishApply apply numeric results; the session reads the punishment once at its start. The DEBUG self-check of the expression strings is dropped.",
       "diff": "native-sessions.diff"
+    },
+    {
+      "id": "domme-outfit-sessions",
+      "layer": "source",
+      "category": "b",
+      "reason": "The author's Dannii dungeon and Lucy bedroom set.groovy files override the default session recipes. Preserve those two recipes in native methods, selected from the current mistress and outfit, because the converter cannot evaluate their expression strings.",
+      "diff": "domme-outfit-sessions.diff"
     },
     {
       "id": "compose-loop",

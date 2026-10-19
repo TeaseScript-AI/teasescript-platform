@@ -1,5 +1,5 @@
 {
-  "reason": "One Mistress owns the player: the domme selected by the saved key toy.owner (default \"ancilla\"), titled \"Mistress\" by images/toy/domme.groovy and named by images/toy/<owner>/person.groovy (Ancilla; Emily only if toy.owner is set from outside). She speaks every present()/show() of the play modules; the lounge status, calendar, credits, debug output and error popups have no speaker.",
+  "reason": "The selected mistress speaks the play modules; the start screen, chooser and outfit controls are system prompts. Display name follows DOMME after each load, including outfit-specific titles; Ancilla is the default.",
   "speakers": {
     "mistress": {
       "title": "Mistress",
@@ -48,20 +48,32 @@
     {
       "after": "scripts/toy.groovy:201",
       "speaker": "mistress"
+    },
+    {
+      "function": "scripts/toy/chooser.groovy:chooseStart",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/toy/chooser.groovy:chooseMistress",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/toy/chooser.groovy:chooseOutfits",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/toy/intro.groovy:setupInitial",
+      "speaker": "mistress"
     }
   ],
   "names": [
     {
-      "variable": "OWNER",
+      "variable": "mistressName",
       "files": [
         "scripts/toy.groovy"
       ],
       "speaker": "mistress",
-      "values": {
-        "ancilla": "Mistress Ancilla",
-        "emily": "Mistress Emily"
-      },
-      "otherwise": "Mistress"
+      "template": "{}"
     }
   ]
 }
