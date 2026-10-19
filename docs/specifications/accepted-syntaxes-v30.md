@@ -1202,7 +1202,8 @@ local value is a compile error that names the global, explains that it needs a v
 and shows both fixes: `, default: 0`, or `global attempts = 0` and a later `attempts = localCount`.
 
 ### Constants
-**Status:** Accepted (Owner decision, 2026-10-19); not yet implemented, planned after the O4 type-checker switch.
+**Status:** Accepted (Owner decisions, 2026-10-19 and 2026-10-20); not yet implemented, planned after the O4
+type-checker switch.
 
 `const` declares a constant. It cannot be replaced, and, unlike JavaScript's `const`, no part of its ordinary value can
 change either. Copy it into a `let` variable for a version that can change:
@@ -1222,22 +1223,25 @@ let workingSettings = settings
 workingSettings.locked = true     // valid: changes an independent copy
 ```
 
-- `const` follows the declaration, type, and scope rules of `let`, and like `let` it needs a start value. The value may
-  be one known only during play, as in `const name = askText "Your name?"`.
+- `const` is a grammar keyword ([§38](#grammar-keywords)). It follows the declaration, type, and scope rules of `let`,
+  and like `let` it needs a start value. The value may be one known only during play, as in
+  `const name = askText "Your name?"`.
 - A constant cannot be assigned, also not with `+=` or `-=`. At any depth of its ordinary value, a property, element,
   or dict entry cannot be assigned or added, and a method that changes a list, set, or dict, such as `add`, `remove`,
   `sort`, or `clear`, is an error. This holds wherever the write stands, also in a function that sees the constant and
   in a timer, media, or button block that shares it ([§14](#variables-in-timer-media-and-button-blocks)).
 - Copies are independent ([ADR 0014](../decisions/0014-core-runtime-value-semantics.md)) and can change: a `let` that
-  takes a constant's value, a parameter that receives it, and the result of a function that returns it.
+  takes a constant's value, a parameter that receives it, a loop variable that runs through it, and the result of a
+  function that returns it.
 - Storage copies as usual ([§25](#25-persistent-storage-and-keys)): a constant that `load` started keeps its value
   after a later `save` to that key, and loading the saved value into a `let` gives one that can change.
 - Only its declaration gives a constant its value. A declaration that runs again, in another call, another run of a
   loop body, or after a `goto` back to an earlier label ([§26](#26-labels-and-goto)), sets its constant anew, as a
   `let` would.
 
-Speakers and timer, media, and message handles stay references: a constant that holds one keeps naming the same
-speaker, timer, media, or message, which can still change, also through the constant:
+Speakers and handles, such as those of timers, media, cameras, messages, and buttons, stay references: a constant
+that holds one keeps naming the same speaker or the same thing behind the handle, which can still change, also
+through the constant:
 
 ```text
 const p = player
@@ -1261,8 +1265,8 @@ do. The write on line 5 of the first example reports:
 Cannot change 'settings.locked' because 'settings' was declared with 'const' on line 4. Copy it into a 'let' variable to make changes.
 ```
 
-Where only the running script shows whether a value is ordinary data or a reference, as for a constant started from a
-parameter without a type, the compiler warns, and the operation is checked when it runs.
+Where the compiler cannot tell whether a value is ordinary data or a reference, it warns, and the operation is checked
+when it runs.
 
 `global const` declares a global constant:
 
@@ -1272,9 +1276,11 @@ global const difficulty = load("difficulty", default: 2)
 ```
 
 It follows the rules of [global variables](#global-variables), so it is set once at session start from a start value
-that follows their initializer rules. The form `global attempts = localCount, default: 0` assigns its global again
-each time the declaration runs, so for a `global const` it is a compile error that names both fixes: `global`, or a
-start value that exists at session start. A `default:` that belongs to `load` is not affected.
+that follows their initializer rules. It cannot take a value that exists only later, such as a local value or an
+answer: the form `global attempts = localCount, default: 0` assigns its global again each time the declaration runs,
+and a later assignment is not allowed. For a `global const`, such an initializer, with or without `default:`, is a
+compile error that names both fixes: `global`, or a start value that exists at session start. A `default:` that
+belongs to `load` is not affected.
 
 ## 13. Explicit types
 **Status:** Accepted
@@ -5685,6 +5691,7 @@ These words are reserved by the language grammar and may not be used as variable
 
 ```text
 let
+const
 function
 return
 if
