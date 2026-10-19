@@ -1664,9 +1664,10 @@ default; in debug or test mode, a developer warning reports a fallback that JSON
 
 An object default, or an expected object type, reads the JSON as that object: the result is an object whose properties
 have the default's types, so their uses are checked at compile time. The runtime checks the JSON once when it is read: a
-missing key takes that property's value from the default, extra keys are ignored, and nested objects follow the same
-rules inside; JSON that does not fit gives the default, with the developer warning. A dict default, or a written dict
-type, gives a dict.
+missing key takes that property's value from the default, and so does a key whose value has the wrong type, with the
+developer warning naming the key; extra keys are ignored, and nested objects follow the same rules inside. JSON of
+another kind than the default, such as a list or text where the default is an object, gives the whole default. A dict
+default, or a written dict type, gives a dict.
 
 ```text
 let tasks: string[] = fromJson(saved, default: [])      // a string[]; JSON that is not a list of text gives []
@@ -6440,8 +6441,8 @@ Parser-POC grammar blockers:
 
 Other open API and runtime decisions:
 
-- decide, for JSON read as an object ([§13](#json-and-base64)), what a key whose value has the wrong type does, and
-  which JSON values a property that is `null` in the default accepts;
+- decide which JSON values a property that is `null` in the default accepts when JSON is read as an object
+  ([§13](#json-and-base64));
 - define the account field names for unit system and decimal precision;
 - decide whether an explicit unit-conversion method such as `measurement.to("km")` is needed in addition to presentation-only `format(...)`;
 - define background alignment/position values when `contain` or `cover` leaves or crops edges;
