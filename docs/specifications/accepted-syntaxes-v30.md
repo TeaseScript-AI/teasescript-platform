@@ -1427,7 +1427,7 @@ if reward is integer {
   and `is integer` is true for any whole number, including `2.0`. A collection test with an element type checks every
   element; `[] is integer[]` is true. `is date`, `is time`, and `is datetime` test the date and time values of
   [§35](#35-date-time-and-durations).
-- A test works on every value, including untyped storage, host data, and parameters of unknown type. The operand is
+- A test works on every value, including untyped storage, host data, and parameters without a type. The operand is
   evaluated once, and the test has no side effects.
 - `x is "happy"` is a compile error: `is` checks a type, and `==` compares values.
 - The compiler warns about a test that is provably always true or always false, such as `5 is number`.
