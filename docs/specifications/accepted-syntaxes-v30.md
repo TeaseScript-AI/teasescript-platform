@@ -53,6 +53,12 @@ This table is generated from the current section order.
 - **Provisional**: direction chosen, details still open
 - **Rejected**: not part of the language
 
+**Type rules ahead of the compiler (owner decision, 2026-10-19):** the type rules decided for the new type checker (O4)
+are written in this document: [§11](#11-function-definitions), [§12](#12-variable-declarations),
+[§13](#13-explicit-types), [§15](#15-objects), [§16](#16-lists), [§17](#17-return-statements),
+[§18](#18-null-and-optional-values), [§32](#32-switch-statements), [§34](#34-runtime-warnings-and-recoverable-values),
+and [§40](#40-dictionaries). The current compiler still applies the earlier rules until it switches to that checker.
+
 ## Delimiter roles
 **Status:** Accepted
 
@@ -1043,8 +1049,24 @@ Rules:
   error that suggests `times: number = 1`. Only an assignment in the body can make it a `number`, by the §12 rule for
   non-whole numbers. What a default leaves open stays unknown: `null` gives an unknown type, and `[]` a list of
   elements of unknown type.
-- A parameter without an annotation or a default has an unknown type. Its arguments are not checked, because a
-  parameter's type is never inferred from its call sites.
+- A parameter without an annotation or a default needs no type. The compiler works out once, from the body, what the
+  function requires of each such parameter, what it returns, and what it changes, and checks every call against
+  that. The calls are never combined into one parameter type: inside each call's use of the body, the parameter and the
+  variables that depend on it follow [§12](#12-variable-declarations) for that call's arguments. Where the compiler
+  cannot show that a call fits, such as whether `x / 4` is an integer, the call compiles and the value is checked when
+  the script runs:
+
+  ```text
+  function dec(x) {
+      return x - 1
+  }
+  function id(x) {
+      return x
+  }
+  dec("a")    // compile error that names the call and the 'x - 1' line
+  id(1)       // valid: an integer
+  id("a")     // valid: text
+  ```
 
 ### Global functions
 
@@ -1121,8 +1143,9 @@ picks.add(3)          // picks is now integer[]
 picks.add("three")    // compile error
 ```
 
-- A variable that starts as `null` takes the type of its first non-null value and may still hold `null`. The compiler
-  infers no other combination of types.
+- A variable that starts as `null` takes the type of its first non-null value and may still hold `null`, and storing
+  `null` later makes a variable optional too: after `let count = 1`, `count = null` makes `count` an `integer?`. The
+  compiler infers no other combination of types.
 - A variable without a type whose type is `integer` is a `number` when any of its assignments can store a non-whole
   number, wherever that assignment is. The elements and properties inside such a variable widen by the same rule. A
   declared type, such as `integer`, `integer[]`, or `integer set`, stays strict, and an integer-only use of a widened
@@ -1141,20 +1164,25 @@ picks.add("three")    // compile error
 
 - An empty list or set takes its element type from the first element added or assigned. In a list or set literal,
   integers and numbers together are numbers, and `null` elements make the element type optional.
-- "First" follows checking order: top-level statements in source order, then function bodies that were not yet
-  needed, then timer and media blocks. The start values of globals and speakers come before all of this, in the order a
-  session sets them up. A package checks its files in turn, `main.tease` first and then the others by path; a global
-  function's body is checked where a call first needs its result, otherwise after its own file. The message for a later
-  contradiction names the line of the first value, and its file when that is another one.
-- The decided type holds wherever the place is read, also before that first value in checking order, such as in a
-  function body checked earlier or in another file. A copy taken while no value decided its source yet, such as
-  `let b = a`, `a.toSet()`, or a property read into a variable, holds what the source held then, so it shares the
-  source's type: after `let a = []` and `let b = a.toSet()`, a later `a.add(1)` makes `b.add("x")` a compile error.
+- A place without a written type takes its type from its declaration's start value when that value settles it, and
+  otherwise from the earliest value stored into it in source order: the files in project order, `main.tease` first and
+  then the others by path, each from top to bottom, wherever the store is, also in a function body or in a timer,
+  media, or button block. `null`, a value whose type the compiler cannot know, and the elements of an empty list, set,
+  or dict settle nothing. A written type settles the type from the start and is strict.
+- A store of another type is a compile error at that store. It names the line and the type that decided the place, for
+  a variable that started without a type also its declaration, and it suggests a written union. The place keeps its
+  type: the compiler ignores the rejected value, and later uses are checked against the decided type.
+- The decided type holds wherever the place is read, also before the value that decided it, such as in a function body
+  or in another file. A copy is a new value: `let b = a`, `a.toSet()`, or a property read into a variable starts with
+  what the source holds at that moment and then takes its type from its own stores, so after `let a = []` and
+  `let b = a`, both `b.add(1)` and `a.add("s")` are valid. A copy of a source with contents carries them: after
+  `let a = [1]` and `let b = a`, `b.add("s")` is a compile error, as after `let b = [1]`. A copy of a variable with a
+  written type keeps that type: after `let a: integer | string = 1` and `let b = a`, `b = "text"` is valid.
 - A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
   decides nothing and is not rejected at compile time. Where a place of known type takes it, also through a place that
   no other value decided, such as `let box = { t: null }` set only from such a parameter, it is checked when it runs.
   An arithmetic operator on such a value may also give a value of unknown type. A place with a written type, or one
-  that a value decided, also later in checking order, still rejects it at compile time when no result of that operator
+  that a value decided, also later in the source, still rejects it at compile time when no result of that operator
   could fit, as in `let y: string = x / 4`, `y += x / 4` after `let y = "a"`, or `ys.add(x / 4)` after `let ys = []`
   and before `ys.add("a")`, because `/` never gives text.
 
@@ -1322,7 +1350,6 @@ integer dict         // a dict of integers by text key (§40)
 integer?             // an integer or null: integer | null
 integer | string     // an integer or text
 (integer | string)[] // a list whose elements are integers or text
-integer | string[]   // an integer, or a list of text
 integer?[]           // a list of integers or nulls
 integer[]?           // a list of integers, or null
 ```
@@ -1330,10 +1357,34 @@ integer[]?           // a list of integers, or null
 `[]`, `set`, `dict`, and `?` follow a type and bind tighter than `|`; parentheses group. A set may hold any value a list
 may hold, so `integer[] set` is a set of lists of integers ([§16](#16-lists)).
 
+A union never holds a whole list, set, or dict beside another type: write the union inside the collection instead. An
+optional collection, such as `integer[]?`, is a collection or `null`, and stays allowed. The rule holds in every place
+a type is written: variables, parameters, results, list and set elements, and dict values, also inside another type:
+
+```text
+let a: (integer | string)[] = [1, "two"]       // valid: a union inside a list
+let b: (integer | string) set = set[1, "two"]  // valid
+let c: (integer | string) dict = dict{}        // valid
+let d: integer?[] = [1, null]                  // valid
+let e: integer[]? = null                       // valid: a list of integers, or null
+let f: integer[] | string[] = []               // compile error
+let g: string[] | string = "a"                 // compile error
+let h: integer | string[] = 1                  // compile error that suggests (integer | string)[]
+let i: integer set | string set = set[]        // compile error
+let j: integer dict | string dict = dict{}     // compile error
+let k: integer[] | string set = []             // compile error
+let l: list | integer = []                     // compile error
+let m: (integer[] | string[])[] = []           // compile error: also inside another list
+let n: (integer | string[]) dict = dict{}      // compile error: also as a dict's value type
+function o(x: integer | string[]) { }          // compile error: also for a parameter
+function p(): integer[] | string { return "a" } // compile error: also for a result
+```
+
 ### Union types
 
 A union `A | B` holds a value of either type. Unions may be used wherever a type is allowed: variables, list and set
-elements, dict values, parameters, and return types. The compiler never infers a union; mixing types without a declared
+elements, dict values, parameters, and return types, apart from unions of whole collections (above). The compiler
+never infers a union; mixing types without a declared
 union is an error whose message names the union form:
 
 ```text
@@ -1393,13 +1444,64 @@ let level: integer = saved   // valid: saved is an integer here
   `reward` is an `integer`.
 - Tests can overlap: an `else` branch keeps only what the test provably excludes, so a `number` that fails
   `is integer` is still a `number`.
-- Only plain variables narrow; `door.locked` and `items[0]` do not.
-- A function call, `wait`, interaction, `say`, timer, media command, storage write, or timer or media property write
-  may let a function or block run, so it cancels narrowing for every top-level variable that a function or block
-  assigns, and for every local variable that a timer, media, or button block shares and assigns
-  ([§14](#variables-in-timer-media-and-button-blocks)). A loop's start forgets what the loop body may change, and a
-  function or block body does not inherit narrowing from the code around it. A statement that may let a function or
-  block run, and a loop's start, never cancel the narrowing of a constant ([§12](#constants)), which nothing assigns.
+- A check on a stable path narrows like a check on a variable. A path is a variable followed by properties
+  (`shed.locked`, `door.lock.code`), fixed indexes (`items[0]`), fixed keys (`toys["collar"]`), or indexes and keys
+  held in plain variables (`items[i]`, `toys[name]`), in any combination (`rooms[i].door.locked`). Each read must
+  select the same stored value: an operation that selects anew, such as `.random`, is not a path.
+- A check holds in the places listed above, and only where every route into the place establishes it, also at labels
+  and in called files. A function, timer, media, or button body does not inherit the checks of the code around it.
+- The compiler drops a check on:
+  - an assignment or change to the value, to any part of its path, or to an index or key variable in it; an assignment
+    gives a new fact from its value;
+  - any change of a list or dict in the path: its order, length, entries, or stored values;
+  - a write through any reference to the same speaker (in variables, arguments, results, collection elements, and loop
+    variables), a replacement of a containing part, a bulk field update, a built-in derived field, and, for the
+    contextual `speaker`, a change of the effective speaker;
+  - code that may run and change the path: a call (also of another file), `say`, `wait`, an interaction, a storage
+    write, a timer or media command, a method, or a timer or media property write such as `deadline.remaining = 0 s`,
+    also through shared locals ([§14](#variables-in-timer-media-and-button-blocks)), calls inside calls, and blocks
+    that outlive the code that created them. Where the compiler cannot tell what code changes, it assumes it may.
+- Code that may run and a loop's start never drop a check on a constant or on a path inside one
+  ([§12](#constants)), since nothing assigns a constant or changes its ordinary value. A path that goes through a
+  speaker or a handle is the exception: after `const p = player`, a timer can still change `p.mood`.
+- At a loop's start, the facts are those on entry joined with those at the end of the body, repeated until they no
+  longer change. A write in the body drops a fact only when the written value breaks it.
+- A saved value keeps its facts: after `let item = items[i + 1]`, `if item != null { ... }` holds even when `items`
+  changes later. Saving only an index still depends on the collection staying unchanged.
+- A use that needs a check has three outcomes. Without a check on some route to it, it is a compile error that
+  suggests `if x != null` or `otherwise`. A use that the compiler proves invalid, such as one that is `null` because of
+  an assignment just before it, is a compile error. A use with a check on every route that the compiler cannot keep,
+  because of a computed index such as `items[i + 1]`, a possible write by a timer, media, or button block or by a
+  function in between, or an analysis limit, compiles with a compiler warning at that use, and the value is checked
+  there when the script runs; a failed check reports that use. The check uses the value just read and does not
+  evaluate the expression again. This holds for plain variables too: a check that a timer, media, or button block may
+  undo during a `say`, `wait`, or interaction gives the warning and the check when the script runs.
+- Narrowing never creates a property, widens a declared type, or proves that an index or key exists: the
+  missing-property, missing-key, and bounds rules still apply. A null check is not a key check; use `contains` or
+  `get` ([§40](#40-dictionaries)).
+
+```text
+let box = { n: 1 }
+timer(duration: 10 s, async: true, repeat: true) { box.n = null }
+if box.n != null {
+    say "Hello"            // the timer may clear box.n during this say
+    say box.n + 1          // warning, and checked when the script runs
+}
+```
+
+### Compile errors, warnings, and checks when the script runs
+**Status:** Accepted (owner decisions, 2026-10-19)
+
+Valid code always compiles. Valid code meets the language's syntax, type, and required-check rules, and a compile
+error names a violation of one of them, such as a value that may be `null` used without any check. Where the compiler
+cannot prove at reasonable cost that a written check still holds, or where checking at compile time is impractical,
+the check moves to the runtime: the code compiles, the value is checked there when the script runs, and the compiler
+gives a warning that names the place and says how to let the compiler check it now. The compiler catches as much as it
+can at compile time; a check when the script runs is the exception.
+
+The compiler has a temporary work budget. Where a place exceeds it, that place, and the checks that need what it would
+have found, are checked when the script runs, with a compiler warning there. Every other use, also of the same variable
+or function, is still checked at compile time, and a known violation of a rule stays a compile error.
 
 ### Implicit conversions
 
@@ -1479,8 +1581,9 @@ fits when every element or value fits, and an object fits when each known proper
   Other text, such as `"2,5"`, `"ten"`, or a number too large to represent, cannot be converted.
 - No other value can be converted: `toNumber(true)` and `toBoolean(1)` are errors, and a list is combined into text with
   [`join`](#16-lists).
-- A `default:` value must have the conversion's result type; an `integer` may be the default of `toNumber`. The default
-  is evaluated only when the value cannot be converted.
+- A `default:` value has the conversion's result type or is `null`, as every `default:`
+  ([§18](#defaults-follow-the-same-rule)): an `integer` may be the default of `toNumber`, and `default: null` makes the
+  result optional. The default is evaluated only when the value cannot be converted.
 
 `toInteger` discards the fractional part toward zero:
 
@@ -1518,7 +1621,7 @@ let boundedLevel = max(1, min(level, 10))
 ```
 
 ### JSON and Base64
-**Status:** Accepted (Owner decision, 2026-10-13)
+**Status:** Accepted (Owner decision, 2026-10-13; the expected type and defaults: owner decisions, 2026-10-19)
 
 These protected functions exchange data with other programs as text:
 
@@ -1547,28 +1650,50 @@ fromBase64(text, default: value)
 A `calendarDuration`, `range`, `script`, `regex`, `timer`, `media`, `messageHandle`, or permanent button cannot be
 written: that is a compile error where the types show it, and a runtime error otherwise.
 
-`fromJson` reads JSON text. An object becomes a dict in the order of its keys, an array a list, whose elements may be of
-different types, and text, numbers, `true`, `false`, and `null` stay what they are; a whole number becomes an `integer`
-and any other number a `number`. A key that appears more than once keeps its first position with its last value, as in
-a dict ([§40](#40-dictionaries)). A date or time comes back as text, which `toDate`, `toTime`, `toDateTime`, and
-`toAbsoluteDateTime` read. The compiler does not know the result's type: test it with `is`, or declare it, and the
-runtime checks it as any value whose type is not known:
+`fromJson` reads JSON text. An object becomes a dict in the order of its keys, or an object when the expected type is
+one (below), an array a list, and text, numbers, `true`, `false`, and `null` stay what they are; a whole number
+becomes an `integer` and any other number a `number`. A key that appears more than once keeps its first position with
+its last value, as in a dict ([§40](#40-dictionaries)). A date or time comes back as text, which `toDate`, `toTime`,
+`toDateTime`, and `toAbsoluteDateTime` read.
+
+The result has an expected type: the written type of the place the call's value lands in directly
+([§18](#defaults-follow-the-same-rule)), otherwise the default's type. A default that does not fit a written type is a
+compile error. `default: []` gives a list whose element type is not settled yet, and `default: null` leaves the value's
+type unknown, to be tested with `is`. Text that is not JSON, and JSON of the wrong shape for the expected type, give the
+default; in debug or test mode, a developer warning reports a fallback that JSON of the wrong shape caused.
+
+An object default, or an expected object type, reads the JSON as that object: the result is an object whose properties
+have the default's types, so their uses are checked at compile time. The runtime checks the JSON once when it is read: a
+missing key takes that property's value from the default, extra keys are ignored, and nested objects follow the same
+rules inside; JSON that does not fit gives the default, with the developer warning. A dict default, or a written dict
+type, gives a dict.
 
 ```text
-let tasks: string[] = fromJson(saved, default: [])
-let preset = fromJson(text, default: null)
+let tasks: string[] = fromJson(saved, default: [])      // a string[]; JSON that is not a list of text gives []
+let count = fromJson(text, default: 0)                  // an integer
+let preset = fromJson(text, default: null)              // unknown: test it with is
 if preset is dict {
     say "${preset.length} settings"
 }
+let settings = fromJson(text, default: { volume: 5, muted: false })
+say settings.volume + 1                                 // valid: volume is an integer
+let lookup = fromJson(text, default: dict{})            // a dict
+let level: integer = fromJson(text, default: "none")    // compile error: the default does not fit integer
 ```
 
 `toBase64` encodes text as UTF-8 in standard Base64, with padding and without line breaks. `fromBase64` decodes Base64
 into UTF-8 text. It ignores spaces and line breaks, accepts the URL alphabet (`-` and `_` instead of `+` and `/`), and
 does not need the padding.
 
-`fromJson` and `fromBase64` need their `default:`, which may be any value, also `null`; a call without one is a compile
-error. Text that is not JSON, or that is not Base64 or whose bytes are not UTF-8, gives the default, never a runtime
-error. The default is evaluated last, and only when it is used (owner decision, 2026-10-16).
+`fromJson` and `fromBase64` need their `default:`; a call without one is a compile error. The default of `fromBase64`
+is text or `null`. Text that is not Base64, or whose bytes are not UTF-8, gives the default, and neither call gives a
+runtime error for its text. The default is evaluated last, and only when it is used (owner decision, 2026-10-16).
+
+```text
+let plain = fromBase64(text, default: "")        // text
+let maybeText = fromBase64(text, default: null)  // text or null
+let wrong = fromBase64(text, default: 0)         // compile error: the default is text or null
+```
 
 ```text
 let shared = "-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----\n${toBase64(toJson(preset))}\n-----END CORNERTIME CUSTOM PUNISHMENT-----"
@@ -1681,15 +1806,16 @@ it to another moment in the future or switch it off; its password is typed twice
 line. It locks once the lock has an opener, also one the call gives, and while no time lock would open the lock, it
 warns that the content never opens once the password and the private keys are lost.
 
-`decryptText` and `decryptFile` need their `default:`, which may be any value, also `null`; a call without one is a
-compile error. A wrong password, a changed lock, text that is not a lock, a time lock whose moment has not come, and a
-cancelled dialog give the default, never a runtime error. The default is evaluated last, and only when it is used (owner
-decision, 2026-10-16). With `password:` or `key:` a call tries only those. Without them, a lock whose time lock has
-passed opens without asking; otherwise the Player asks the player with what opens this lock: a password; for a public
-key, the unlock request to copy or download for the owner of the private key and a field for the unlock key they send
-back; and the moment its time lock opens. A wrong password or key in that dialog lets the player try again, and Cancel
-gives the default. When the time lock has passed but the Player cannot reach the drand network, the dialog offers to try
-again, and without another opener the call gives the default.
+`decryptText` and `decryptFile` need their `default:`, which is text or `null`, as every `default:` has the call's
+result type or is `null` ([§18](#defaults-follow-the-same-rule)); a call without one is a compile error. A wrong
+password, a changed lock, text that is not a lock, a time lock whose moment has not come, and a cancelled dialog give
+the default, never a runtime error. The default is evaluated last, and only when it is used (owner decision,
+2026-10-16). With `password:` or `key:` a call tries only those. Without them, a lock whose time lock has passed opens
+without asking; otherwise the Player asks the player with what opens this lock: a password; for a public key, the unlock
+request to copy or download for the owner of the private key and a field for the unlock key they send back; and the
+moment its time lock opens. A wrong password or key in that dialog lets the player try again, and Cancel gives the
+default. When the time lock has passed but the Player cannot reach the drand network, the dialog offers to try again,
+and without another opener the call gives the default.
 
 ```text
 let photo = decryptFile(locked, password: "corner", default: null)
@@ -1896,30 +2022,42 @@ door.locked = false
 Properties have fixed names, so an object is not indexed: `door[name]` is a compile error that points to a dict for
 lookup by a name known only at runtime ([§40](#40-dictionaries)), and `door["name"]` to `door.name`.
 
-A property keeps the type of its first value, like a variable ([§12](#12-variable-declarations)); an `integer`
-property becomes a `number` when one of its assignments can store a non-whole number. Assignment may add a property,
-which then keeps its type:
+A property behaves like a variable: the object literal declares it once, with a start value, and after that it can be
+changed anywhere, also inside `if` and functions. It keeps the type of its literal's value
+([§12](#12-variable-declarations)); an `integer` property becomes a `number` when one of its assignments can store a
+non-whole number. Storing a property that the literal lacks is a compile error that points to the literal, or to a dict
+for names known only when the script runs ([§40](#40-dictionaries)). `null` in the literal means "not known yet";
+reading such a property then needs a check or `otherwise` ([§18](#18-null-and-optional-values)):
 
 ```text
 door.locked = "yes"    // compile error: locked holds true or false (boolean)
-door.color = "red"     // adds color, which holds text (string) from now on
+door.color = "red"     // compile error: the literal of door has no color; add it there, or use a dict
+let shed = { name: "shed", locked: false }
+if windy { shed.locked = true }
+say shed.locked
+let box = { label: "spare", owner: null }
+say box.owner otherwise "nobody"
 ```
 
-When an object is stored in a place that already holds an object, such as an element of a list of objects, the
-properties they share must have the same types.
+Objects with different property names may share a place, such as the elements of one list, or a variable that gets
+another object: `[{ value: "spank", text: "Spanking" }, { text: "Corner" }]` for `askChoice` ([§19](#19-choices)), or
+`room = { name: "hall" }` after `let room = { name: "shed", locked: false }`. The properties they share must have the
+same type. Storing a property never adds it to an object whose literal lacks it. Speakers keep their own rule: a custom
+property is declared in the speaker block or by its first unconditional assignment
+([§37](#extensible-character-state)).
 
-Reading a property, also with `+=` or `-=`, that no object in that place can have is a compile error that names the
-properties it can have. An object can have every property that a literal or an assignment anywhere in the project
-gives an object that reaches its place, in whatever order the script runs that code; the elements of a list, set, or
-dict share one place. A read that may find the property is checked when the script runs, such as a read of a property
-that only some code adds, or of an object that may come from a value the compiler cannot know, such as stored data,
-an `object`, or a parameter without a type or default:
+Reading or storing a property, also with `+=` or `-=`, that no object in that place has is a compile error that names
+the properties it can have. A read or a store that may reach an object without that property is checked when the
+script runs, as is one on an object that may come from a value the compiler cannot know, such as stored data or an
+`object`:
 
 ```text
-say door.colour        // compile error that names name, locked, and color, and asks: did you mean color?
-let shed = { name: "shed" }
-if windy { shed.locked = true }
-say shed.locked        // compiles, and fails when the script runs if shed.locked was not set
+say door.colour                    // compile error that names name and locked
+let rooms = [{ name: "shed", locked: false }, { name: "hall" }]
+say rooms[i].locked                // compiles, and fails when the script runs if rooms[i] is the hall
+let hall = { name: "hall" }
+hall.locked = true                 // compile error: the literal of hall has no locked
+let values = [{ a: 1 }, { a: "x" }]  // compile error: a holds an integer and text
 ```
 
 Two objects are equal (`==`) when they have the same property names with equal values, in any property order. A
@@ -2159,7 +2297,9 @@ Runtime behavior:
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
 - `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
   raises the same runtime error as indexing.
-- `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`.
+- `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`. Reading an
+  element of a list that the compiler can see is certainly empty there, such as `.first` of `let xs = []` when nothing
+  is ever added to `xs`, is a compile error; a list that may be empty keeps the runtime error.
 - `add(value)`, `addAll(other)`, `remove(value)`, `clear()`, `sort()`, `shuffle()`, and `reverse()` return `null`.
   Set `remove(value)` of an absent value is a no-op: the set stays unchanged and execution continues without an error
   or warning.
@@ -2242,17 +2382,16 @@ Sets have none of the three: a set has no indexes, and it holds each member once
 `count(value)` would.
 
 ### Reading an element with a default
-**Status:** Accepted (Owner decision, 2026-10-12)
+**Status:** Accepted (Owner decision, 2026-10-12; the `default:`: owner decisions, 2026-10-19)
 
-`get(index, default: value)` returns the element at `index`, or `value` when the list has no such position: an
-`index` that is negative, past the end, or, when the script runs, not a whole number, such as `1.5`, text, or `null`.
+`get(index, default: value)` returns the element at `index`, or `value` when the list has no such position: an `index`
+that is negative, past the end, or, when the script runs, not a whole number, such as `1.5`, text, or `null`.
 `items[index]` still raises its runtime error there, so a mistake stays visible where no default is given. The
-`default:` is required and may be of any type. The result's type joins the element type and the default's type: for a
-`string[]`, `default: null` gives a `string?` ([§18](#18-null-and-optional-values)), and `default: 0` a
-`string | integer`, and for an `integer[][]`, `default: []` gives an `integer[]`, as in a list literal. A list or dict
-whose element or value type no value decided yet, such as `[]` or `dict{}`, takes it from a default of known type other
-than `null`, as from a first stored value ([§40](#40-dictionaries)): after `let scores = []`,
-`scores.add(scores.get(0, default: 0) + 1)` makes `scores` an `integer[]`, and a later `scores.add("x")` is an error.
+`default:` is required and has the element type or is `null`, as every `default:`
+([§18](#defaults-follow-the-same-rule)): for a `string[]`, `default: "none"` gives a `string` and `default: null` a
+`string?`, and for an `integer[][]`, `default: []` gives an `integer[]`; `default: 0` is a compile error unless the
+value lands directly in a place with a written union that holds both. The default types only the result, never the list:
+after `let ys = []`, `let v = ys.get(0, default: 0)` makes `v` an `integer` and leaves the element type of `ys` open.
 The default is evaluated only when it is used, when the list has no such position (owner decision, 2026-10-16). The
 compiler checks the index as for `items[index]`, except that a negative index gives the default: an index that it can
 see is not a whole number, such as `0.5`, or may be `null`, is an error.
@@ -2385,8 +2524,9 @@ function calculateDamage(
 A function's result type comes from its `return` values, so callers keep it like any other value
 ([§12](#12-variable-declarations)). Integers and numbers together give a `number`. Returns of different types are a
 compile error that names both. A function that can end without returning a value, by reaching its end or through a
-bare `return`, returns `null` there, so its result may be `null`. A returned value of unknown type, such as an
-unannotated parameter, makes the result unknown; the other returned values must still agree.
+bare `return`, returns `null` there, so its result may be `null`. A returned value that depends on a parameter without
+a type follows each call ([§11](#11-function-definitions)): `id(1)` is an integer and `id("a")` text. A returned value
+of unknown type, such as stored data, makes the result unknown; the other returned values must still agree.
 
 With a return-type annotation, every returned value must fit the annotation, and a function that can end without a
 value needs an optional result type such as `number?`.
@@ -2418,8 +2558,9 @@ if file != null {
 ```
 
 Using a possibly null value where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
-error. The message names the check to write, inside which `n` is an `integer`, and a fallback
-([below](#fallback-with-otherwise)):
+error; a use with a check on every route that the compiler cannot keep compiles with a warning instead and is checked
+when the script runs ([§13](#type-tests-and-narrowing)). The message names the check to write, inside which `n` is an
+`integer`, and a fallback ([below](#fallback-with-otherwise)):
 
 ```text
 'n' may be null. Check it first: if n != null { ... }, or give a fallback: n otherwise 0
@@ -2430,10 +2571,10 @@ none for a value that an assignment or a method changes, such as `items` in `ite
 copy, nor for a handle, such as a timer's. A loaded value can instead get a default, as in `load("level", default: 1)`.
 
 ### Fallback with `otherwise`
-**Status:** Accepted (Owner decision on #850, 2026-10-12)
+**Status:** Accepted (Owner decision on #850, 2026-10-12; the fallback's type: owner decisions, 2026-10-19)
 
-`a otherwise b` gives `a` when it is not `null`, and otherwise `b`. `b` is evaluated only when `a` is `null`, so a
-fallback that calls a function or asks runs only then:
+`a otherwise b` evaluates `a` once and gives it unless it is `null`; then it evaluates and gives `b`. It does not assign
+to `a`. `b` is evaluated only when `a` is `null`, so a fallback that calls a function or asks runs only then:
 
 ```text
 let start = path.lastIndexOf("/") otherwise -1
@@ -2442,10 +2583,10 @@ let name = nickname otherwise savedName otherwise "pet"
 let answer = nickname otherwise askText "Name?"
 ```
 
-- The result is not `null` unless the fallback can be: with `count: integer?`, `count otherwise 0` is an `integer`,
-  and `count otherwise null` stays an `integer?`. The result's type joins the value's type without `null` and the
-  fallback's type as for a list `get` default ([§16](#reading-an-element-with-a-default)): `name otherwise 0` on a
-  `string?` is a `string | integer`.
+- `b` has the type of `a` without `null`, or is `null`. The result is not `null` unless the fallback can be: with
+  `count: integer?`, `count otherwise 0` is an `integer`, and `count otherwise null` stays an `integer?`. A fallback of
+  another type is a compile error, also inside `say "${...}"`: `name otherwise 0` on a `string?` is an error, unless
+  the value lands directly in a place with a written union that holds both ([below](#defaults-follow-the-same-rule)).
 - A chain runs from left to right and gives the first value that is not `null`.
 - An operand of `otherwise` that is arithmetic or a range needs parentheses, because the fallback could be meant for
   the value next to it or for the whole operand ([§5](#expression-precedence-and-associativity)). Arithmetic is `+`,
@@ -2469,6 +2610,47 @@ let answer = nickname otherwise askText "Name?"
   `toys[key] otherwise 0` when the dict has no such key. When the element can never be `null`, the warning names the
   read that has a default instead, `items.get(5, default: 0)` ([§16](#reading-an-element-with-a-default),
   [§40](#40-dictionaries)).
+
+### Defaults follow the same rule
+**Status:** Accepted (owner decisions, 2026-10-19)
+
+Every `default:` follows the rule of `otherwise`: the default has the type of the value it stands in for, or is `null`.
+A default that cannot be `null` gives a result that cannot be `null`, and `default: null` makes the result optional.
+This holds for `get` on lists and dicts ([§16](#reading-an-element-with-a-default), [§40](#40-dictionaries)), the
+conversions ([§13](#type-conversion)), `toRegex` ([§8](#regexes)), `fromJson` and `fromBase64`
+([§13](#json-and-base64)), `fileFromBase64` ([§33](#stored-files)), and `decryptText` and `decryptFile`
+([§13](#encryption)).
+
+A default or a fallback of another type is a compile error. A mix is allowed only when the value lands directly in a
+place whose written union holds both types: a typed `let`, an assignment to a variable with a written type, an argument
+for a parameter with a written type, or a `return` in a function with a written result type. A written type at a caller
+does not reach into the body of a function without types.
+
+```text
+let names = ["Ada", "Bo"]
+let n = names.get(5, default: "none")                       // text
+let m = names.get(5, default: null)                         // text or null
+let k = names.get(5, default: 0)                            // compile error: names holds text
+let c: string | integer = names.get(5, default: 0)          // valid: the written union holds both
+say "${names.get(5, default: 0)}"                           // compile error: no written union here
+function helper(i) {
+    return names.get(i, default: 0)    // compile error; the message suggests helper(i): string | integer
+}
+let counts: integer dict = dict{}
+let a = counts.get("x", default: 0)                         // an integer
+let b = counts.get("x", default: "none")                    // compile error
+let nickname: string? = null
+let shown = nickname otherwise "pet"                        // text
+let wrong = nickname otherwise 0                            // compile error
+let amount = toNumber(text, default: 0)                     // a number: an integer fits a number
+let flag = toBoolean(text, default: null)                   // a boolean or null
+let day = toDate(text, default: "today")                    // compile error: the default of toDate is a date
+let pattern = toRegex(text, default: null)                  // a regex or null
+let plain = fromBase64(text, default: "")                   // text
+let file = fileFromBase64(text, default: null)              // a file reference or null
+let secret = decryptText(locked, password: "x", default: "") // text
+let photo = decryptFile(locked, default: 0)                 // compile error: the default is text or null
+```
 
 ## 19. Choices
 **Status:** Accepted
@@ -4526,7 +4708,8 @@ Rules:
   never matches a range.
 - A type case, `case is T` or `case is not T`, tests the switched value like `value is T` ([§13](#13-explicit-types)).
   It tests one type; a union covers several, as in `case is integer | string`. A case has either values or a type test.
-- When the switched value is a plain variable, it narrows as in an `if`/`else if` chain: the block of `case is T` knows
+- When the switched value is a variable or a stable path ([§13](#type-tests-and-narrowing)), it narrows as in an
+  `if`/`else if` chain: the block of `case is T` knows
   the type `T`, the block of `case is not T` what remains without `T`, and a `case null` block knows `null`. Every later
   case and `default` know only what the cases above did not take.
 
@@ -4637,11 +4820,11 @@ fileToBase64(file)
 `fileFromBase64` stores the bytes that Base64 `text` holds as a file in the Player's file store and returns its
 store-issued file reference, a `string` like a photo reference. It reads Base64 as `fromBase64` does, with spaces and
 line breaks, the URL alphabet, and missing padding ([§13](#json-and-base64)), and also a `data:<type>;base64,…` URL.
-`default:` is required; text that is not Base64 gives the default, which is evaluated last, and only when it is used
-(owner decision, 2026-10-16). `fileToBase64` reads a stored file's bytes and returns them as plain Base64 text, and
-`hashFile` gives their SHA-256 ([§13](#hashes)). Storing a file and reading one each take a short wait, as a photo
-does. The result is recorded: a restore or a replay can reuse a recorded result without asking the store again. The
-Base64 text may be as long as any text.
+`default:` is required and is text or `null` ([§18](#defaults-follow-the-same-rule)); text that is not Base64 gives the
+default, which is evaluated last, and only when it is used (owner decision, 2026-10-16). `fileToBase64` reads a stored
+file's bytes and returns them as plain Base64 text, and `hashFile` gives their SHA-256 ([§13](#hashes)). Storing a file
+and reading one each take a short wait, as a photo does. The result is recorded: a restore or a replay can reuse a
+recorded result without asking the store again. The Base64 text may be as long as any text.
 
 A file's type comes from its first bytes, never from a file name or the type in a data URL:
 
@@ -4669,8 +4852,9 @@ if picture != null {
 **Status:** Accepted
 
 Using a possibly null value without an explicit check, where its non-null type is required, is a compile error
-([§18](#18-null-and-optional-values)). Commands that accept `null` themselves, such as media commands, still take it;
-see the fallback below.
+([§18](#18-null-and-optional-values)); a check on every route that the compiler cannot keep gives a compiler warning
+and a check when the script runs instead ([§13](#type-tests-and-narrowing)). Commands that accept `null` themselves,
+such as media commands, still take it; see the fallback below.
 
 Compatible built-ins may apply a safe fallback. For example, `showImage null` clears the Stage image, reports developer warning `TSW011` with the source location, and continues ([§22](#22-stage-image-audio-and-video)).
 
@@ -6050,7 +6234,7 @@ They are not currently executable syntax. Media and timers are controlled throug
 `available when` is reserved for future requirements or suitability metadata and is not executable syntax.
 
 ## 40. Dictionaries
-**Status:** Accepted (#536; any type for the `default:` of `get`: Owner decision, 2026-10-12)
+**Status:** Accepted (#536; the `default:` of `get`: owner decisions, 2026-10-19)
 
 A dict is a lookup table from text keys to values of one type, for names known only when the script runs. An object
 ([§15](#15-objects)) is one thing with fixed properties, each with its own type.
@@ -6088,13 +6272,12 @@ for name, toy in toys { ... }           // the keys with a copy of each value
   check, such as `Dictionary has no key "collar". Check toys.contains(name) first.` A missing key is visible to the
   compiler only for a literal dict, so `dict{ a: 1 }["b"]` is a compile error; for any other dict, check
   `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key. As for a list
-  ([§16](#reading-an-element-with-a-default)), its `default:` is required and may be of any type, and the result's
-  type joins the value type and the default's type: on an `integer dict`, `default: null` gives an `integer?` and
-  `default: "none"` an `integer | string`, and on a `string[] dict`, `default: []` gives a `string[]`. A list or dict
-  whose element or value type no value decided yet, such as `[]` or `dict{}`, takes it from a default of known type
-  other than `null`, as from a first stored value, so after `let counts = dict{}`,
-  `counts[name] = counts.get(name, default: 0) + 1` makes `counts` an `integer dict`. The default is evaluated only when
-  it is used, for a missing key.
+  ([§16](#reading-an-element-with-a-default)), its `default:` is required and has the value type or is `null`: on an
+  `integer dict`, `default: 0` gives an `integer` and `default: null` an `integer?`, and on a `string[] dict`,
+  `default: []` gives a `string[]`; `default: "none"` is a compile error unless the value lands directly in a place with
+  a written union that holds both ([§18](#defaults-follow-the-same-rule)). The default types only the result, never the
+  dict: after `let counts = dict{}`, `counts[name] = counts.get(name, default: 0) + 1` makes `counts` an
+  `integer dict` through the store of the integer. The default is evaluated only when it is used, for a missing key.
 - **Iteration:** `for key in toys` goes through the keys, and `for key, value in toys` through the keys with a copy of
   each value, as they were when the loop started ([§23](#23-loops)), so changing the dict inside the loop is safe.
 - **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an
@@ -6257,6 +6440,8 @@ Parser-POC grammar blockers:
 
 Other open API and runtime decisions:
 
+- decide, for JSON read as an object ([§13](#json-and-base64)), what a key whose value has the wrong type does, and
+  which JSON values a property that is `null` in the default accepts;
 - define the account field names for unit system and decimal precision;
 - decide whether an explicit unit-conversion method such as `measurement.to("km")` is needed in addition to presentation-only `format(...)`;
 - define background alignment/position values when `contain` or `cover` leaves or crops edges;
