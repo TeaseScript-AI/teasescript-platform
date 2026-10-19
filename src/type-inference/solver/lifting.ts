@@ -1,4 +1,4 @@
-import { NULL_TYPE, PropertyTable, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
+import { NULL_TYPE, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
 import type { ValueKind } from "../../value-kinds.js";
 import { memberOf } from "../adapters/members.js";
 import type {
@@ -332,16 +332,8 @@ export function itemAlternatives(
           choice: { props, cells: props },
         },
       ];
-    const names = [...new Set([...item.parts.written, ...cells.storedNames])].sort();
     return [
-      {
-        ...base,
-        type: table.intern({
-          kind: "object",
-          properties: new PropertyTable(names.map((name) => [name, { kind: "never" }])),
-        }),
-        choice: { props, cells: props },
-      },
+      { ...base, type: cells.shapeType(item.parts.written), choice: { props, cells: props } },
     ];
   }
   const element = item.parts.element;

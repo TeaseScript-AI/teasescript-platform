@@ -1,4 +1,5 @@
 import type { DynamicWhy, SourceSite } from "../graph.js";
+import { PropertyTable } from "../../static-types.js";
 import type { TypeId, TypeTable } from "./types.js";
 
 // The cells of the solver (O4 stage 3a, work note §3.2; the executable reference model `model/solver-model.mjs` of
@@ -118,6 +119,8 @@ export class Cells {
   readonly #storedNames: ReadonlySet<string>;
   /** The cells holding an object item, by its parts, so a slot created later knows its owners for the drain closure. */
   readonly #holders = new WeakMap<Parts, Set<CellId>>();
+  /** The placeholder shapes by written-name set (`shapeType`). */
+  readonly #shapes = new Map<string, TypeId>();
 
   constructor(table: TypeTable, places: number, propertyNames: readonly string[] = []) {
     this.#table = table;
@@ -230,6 +233,24 @@ export class Cells {
   /** The names an object literal wrote, sorted. */
   writtenNames(props: ReadonlyMap<string, unknown>): readonly string[] {
     return [...props.keys()].sort();
+  }
+
+  /**
+   * The placeholder shape of a closed object for the alternatives: its written names with every stored name (the
+   * eager slots' shape), interned once per written set: building it per object was quadratic in the objects.
+   */
+  shapeType(written: readonly string[]): TypeId {
+    const key = written.join(",");
+    let type = this.#shapes.get(key);
+    if (type === undefined) {
+      const names = [...new Set([...written, ...this.#storedNames])].sort();
+      type = this.#table.intern({
+        kind: "object",
+        properties: new PropertyTable(names.map((name) => [name, { kind: "never" }])),
+      });
+      this.#shapes.set(key, type);
+    }
+    return type;
   }
 
   #own(part: CellId, owner: CellId): void {
