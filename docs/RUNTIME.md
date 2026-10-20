@@ -597,7 +597,7 @@ marked `shared: true` from then on. Leaving a block, loop iteration, or function
 retains a marked scope that a live timer, media, button, or queued block still names, with only the bindings those lists
 name; a running block names only scopes below its own, and leaving an unmarked scope checks nothing. A retained scope of
 this kind drops a binding once no live list names it, and is dropped itself once nothing names it: when a block returns,
-a resource settles or is removed, or a transfer runs.
+a resource settles or is removed, `stop()` cancels the queued blocks of a finished resource, or a transfer runs.
 Settled timer and media records drop the list. `exit` clears everything. Prepared references keep addressing a scope
 by its ID wherever it is.
 
@@ -716,7 +716,8 @@ The interrupt frame keeps whether its timer's current round is inside it (`curre
 last whole round (`endedRoundMs`), and the active timer record whether the warning was reported (`overrunReported`), so
 a restored session reports it at the same return, once.
 
-`stop()` on an active timer cancels its unstarted queued blocks; on a finished or stopped timer it is a silent no-op.
+`stop()` on an active timer cancels its unstarted queued blocks; on a finished timer it cancels only those blocks, and
+the timer stays finished; on a stopped timer, which has none, it does nothing. None of these warns.
 `exit` inside a block halts the session and discards the interrupted action. A `goto` inside a block, or in a function
 it calls, also discards the interrupted action, without a settlement, and continues at its label. `exit` stops every
 timer and drops queued blocks. A timer records the root of the activation that started it (`rootScopeId`); a transfer
@@ -843,9 +844,10 @@ media's events due strictly before current scene time are committed; events due 
 catch-up order. While paused, an already-reached arrival at a range end or repeat-duration limit still commits and can
 wrap or finish; other uncommitted cues at the pause position wait until playback proceeds. After a seek, a pass that
 the seek completed is committed at once, also while paused, where the next pass stays paused. `stop()` and replacement
-drop the media's queued, not yet started cue blocks. A `stopAudio` instruction applies `stop()` to every active audio
-record in media ID order, which is start order, and leaves video alone. Author-visible seek,
-lifecycle, cue, and handle behavior is defined in specification §22.
+drop the media's queued, not yet started cue blocks. `stop()` also drops them, `finish` included, from media that has
+finished, also through those commits; the media stays finished. A `stopAudio` instruction applies `stop()` to every
+active audio record in media ID order, which is start order, and leaves video alone; neither it nor replacement touches
+finished media. Author-visible seek, lifecycle, cue, and handle behavior is defined in specification §22.
 
 **Cue blocks.** Cue, compact, and `finish` blocks compile to parameterless handler regions (`handler: "media"`),
 optionally with a self-handle name bound on entry to the media's handle. Their invocations share the timer expiry

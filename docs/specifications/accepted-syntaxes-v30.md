@@ -3513,13 +3513,12 @@ playAudio async repeat "music/beat.mp3" {
   runs and reports developer warning `TSW012`.
 - `finish` runs once after the whole invocation finishes naturally, after the last pass or when a repeat duration ends.
   It never runs after `stop()`, replacement, or a load failure, so it is a compile error on media that repeats
-  indefinitely. A queued `finish` block that has not started is also cancelled by `stop()` after the media finished
-  (not yet implemented). A block may declare `finish` at most once.
+  indefinitely. A queued `finish` block that has not started is also cancelled by `stop()` after the media finished.
+  A block may declare `finish` at most once.
 - Blocks are allowed for blocking and async media. They run one at a time through the timer interrupt queue with the
   same interruption and resumption rules as [timer expiry blocks](#expiry-blocks); cues due at the same point run in
   source order. Media keeps playing while a block runs unless the block controls it. `stop()` cancels queued blocks of
-  that media that have not started, also after the media finished (owner decision, 2026-10-20; not yet implemented
-  for finished media).
+  that media that have not started, also after the media finished (owner decision, 2026-10-20).
 - The blocks share the variables of the code that started the media
   ([§14](#variables-in-timer-media-and-button-blocks)), all blocks of one media the same ones, across its repeats. In
   `let NAME = playAudio async ... { ... }` every block also sees `NAME` as its own handle, including inside a function.
@@ -4049,8 +4048,7 @@ concerns the current round. `state` is `running`, `paused`, `finished`, or `stop
 
 - reads stay valid after the timer settles; `remaining` is then zero and `elapsed` is frozen;
 - `pause()` while paused, `resume()` while running, and `stop()` on a finished or stopped timer do nothing, except
-  that `stop()` on a finished timer cancels its expiry blocks that have not started yet (owner decision, 2026-10-20;
-  not yet implemented);
+  that `stop()` on a finished timer cancels its expiry blocks that have not started yet (owner decision, 2026-10-20);
 - other lifecycle methods or property assignments on a finished or stopped timer have no effect and report
   developer warning `TSW010` with the source location;
 - adjusting `remaining` while paused changes the current round and the timer stays paused;
