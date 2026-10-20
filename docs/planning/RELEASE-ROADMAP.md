@@ -57,6 +57,17 @@ architecture may change substantially while correctness and the basic model are 
   - **Reference:** [Accepted timer syntax](../specifications/accepted-syntaxes-v30.md#27-timers),
     [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time), and [`PLAYER-UI.md`](../ui/PLAYER-UI.md#timer-presentation).
 
+- [ ] **Constraint-based type checker (O4)**
+  - **Outcome:** The compiler's type analysis collects the constraints of the whole project, solves them once, and
+    checks once, in place of the legacy backend. Valid code compiles regardless of the order in which it is written or
+    checked; invalid code is a compile error at a useful place wherever the compiler can know it; no type is silently
+    unknown (a type is known, or the runtime check that remains is deliberate); one mechanism holds every type rule,
+    without repeated checking rounds; and the compiler is fast. The type rules the owner decided for this checker on
+    2026-10-19 and 2026-10-20 take effect at the switch, when it becomes the compiler's checker.
+  - **Reference:** [ADR 0021](../decisions/0021-static-types.md),
+    [`ARCHITECTURE.md`](../ARCHITECTURE.md#static-type-analysis), and PR #986, which writes those rules into V30 and
+    ADR 0021.
+
 - [ ] **Player UI**
   - **Outcome:** Replace the technical playground presentation with a practical Player interface for transcript output,
     Standard interactions, timers, status/errors, and the media capabilities selected for the POC. Keep development and
