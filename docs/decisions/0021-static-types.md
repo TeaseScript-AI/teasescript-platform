@@ -18,9 +18,9 @@ The Owner's direction is strict but invisible typing. Beginners never write or c
 programming error it can see and explains it in plain language with the concrete fix. Runtime checks cover only values
 the compiler cannot know. Experienced authors may opt into union types, type tests, and narrowing.
 
-In October 2026 the Owner simplified the rules so that one type checker can decide every type from the source alone,
-the same whatever order it meets the code in: object properties come from their literal, no union holds a whole
-collection, a fallback has the type it stands in for, and each place keeps the type its earliest value settles.
+In October 2026 the Owner simplified the rules for a new type checker: object properties come from their literal, no
+union holds a whole collection, a fallback has the type it stands in for, and each place keeps the type its earliest
+value in source order settles, whatever order the checker meets the code in.
 
 ## Decision
 
@@ -127,15 +127,11 @@ collection, a fallback has the type it stands in for, and each place keeps the t
    tighter than `|`: `(integer | string)[]` is a list whose elements are integers or strings, and `integer | string[]`
    would be an integer or a list of strings, which rule 3.4 forbids.
 2. `T?` is shorthand for `T | null`.
-3. Type names: the scalar types `string`, `boolean`, `integer`, `number`, `date`, `time`, `datetime`,
-   `absoluteDateTime` (named `timestamp` before ADR 0026), `duration`, and `calendarDuration` (ADR 0026);
-   `null`; `list`, `set`, `dict`, and `object` for any list, set, dict, or object; and the program-control types
-   `range`, `speaker`, `timer`, and `media`.
+3. The type names are those of V30 §13.
 4. Unions are usable everywhere a type is allowed, except that a union never holds a whole list, set, or dict beside
    another type, in any type position, also inside another type: `integer[] | string[]`, `string[] | string`, and
    `integer | string[]` are compile errors, the last suggesting `(integer | string)[]`. An optional collection such as
-   `integer[]?` stays. The union inside the collection covers what scripts need, and no operation has to branch on the
-   collection's kind. The compiler never infers a union; mixing types without a declared union stays an error whose
+   `integer[]?` stays. The compiler never infers a union; mixing types without a declared union stays an error whose
    message points to the union form.
 5. An operation on a union is allowed when every member supports it with a compatible result. Otherwise the error
    names the test the author needs, for example `'reward' may be text (string). Check it first: if reward is integer
@@ -218,8 +214,8 @@ collection, a fallback has the type it stands in for, and each place keeps the t
    There the written type also reaches the elements of nested list, set, and dict literals, but not through a function
    without types, an operator such as `+`, or `${...}`.
 
-`a otherwise b` is the short form of `if a == null { a = b }`, which never mixes types; a mixed result without a
-written union would be a union the compiler inferred (rule 3.4).
+A fallback follows the type rule of an assignment without assigning to its source. A mixed result without a written
+union would be an inferred union (rule 3.4).
 
 ## Consequences
 
@@ -246,9 +242,7 @@ written union would be a union the compiler inferred (rule 3.4).
   holds an integer in one place and text in another stays hidden until a player reaches it.
 - A key declaration, a typed `save`, or a generic `load`: explicit, but new syntax for what a declared variable already
   shows.
-- Saves that decide a key's type, with an optional default: no declaration needed, but a save anywhere could change
-  what an earlier load returned, which took several checks of the whole project and a guard against a key that holds
-  its own loaded value, and a missing value silently became `null`.
+- Saves that decide a key's type: a later save must not change what an earlier load returns.
 - Deleting or converting a stored value that does not fit: keeps storage clean, but destroys data that an older version
   of the script saved and an author may still want to migrate.
 - Assignment that adds a property, as in JavaScript (the earlier rule 1.4): a misspelt property silently became a new
@@ -259,20 +253,12 @@ written union would be a union the compiler inferred (rule 3.4).
   order, which authors cannot see.
 - Required parameter types: they make beginners write types; types at selected boundaries remain the fallback, by a new
   owner decision, if per-function summaries prove too costly.
-- An error, or a warning that suggests a value such as `nick: ""`, for a JSON object default's `null` property: the only
-  fix either offers turns "not set" into "empty text", because a property's type cannot be written, and an error also
-  rejects valid code. If it pinches in real scripts, the remedy is syntax to write a type at a `null`.
+- An error or a warning for a JSON object default's `null` property: its only fix, such as `nick: ""`, turns "not set"
+  into empty text, because a property's type cannot be written; if that pinches, the remedy is syntax for a type at a
+  `null`.
 - A compile error for a place over the work budget, or for a written check the compiler cannot keep: it rejects valid
   code for a limit of the compiler.
-- Typing families of computed keys by prefix, such as `"toys.${id}"`: prefixes overlap and computed keys can equal a
-  literal key, so a family needs its own explicit form rather than a guessed naming convention.
-- Typing a computed-key load by its default or by the declared type of the place that receives it: no new syntax, but
-  it turns a value of unknown type into a fixed type, so ordinary code such as `value = "ready"` after
-  `let value = load(key, default: 0)`, a `switch` on the value, or returning it beside text becomes a compile error.
-- Widening an inferred `integer` place to `number` when it can take a non-whole result from a value the compiler cannot
-  know, such as `p = p + d / 2` with `d` loaded from a computed key: it removes that runtime failure, but a place has
-  one type for the whole script, so every whole-number use of the place becomes a compile error, also before the
-  store, after `p = 0`, or when the store is in a function that is never called. The wider type also reaches a literal
-  key whose `default:` is that place, so a stored fraction that was treated as absent is accepted and fails later. A
-  correct version needs types that can differ per point in the script; until then such a store is checked when the
-  script runs (rule 1.7).
+- Typing computed keys by prefix, such as `"toys.${id}"`: prefixes overlap, so a family needs its own explicit form.
+- Typing a computed-key load by its default: it gives data the compiler cannot know a fixed type.
+- Widening an inferred `integer` place to `number` for a non-whole value from data the compiler cannot know: every
+  whole-number use of that place would become an error; such a store is checked when the script runs (rule 1.7).
