@@ -3383,8 +3383,9 @@ command; write `playAudio (async)` to use a variable of that name.
 - `async` media continues once the Player has reported the load result and evaluates to an opaque handle that may be
   ignored; after a successful load its duration is known.
 - Several audio sources may play at once. The Stage shows one video at a time over the Stage image: a new `playVideo`,
-  `showImage`, or `hideImage` stops an active video (`stopped`, without `finish`), and the Stage image is visible again
-  when the video ends.
+  `showImage`, or `hideImage` stops an active video (`stopped`, without `finish`) and cancels its queued blocks, and
+  the Stage image is visible again when the video ends. It also cancels the queued blocks of a video that already
+  finished, which stays `finished` (owner decision, 2026-10-20; not yet implemented).
 
 The named form carries less common options:
 
@@ -3537,8 +3538,10 @@ stopAudio                    // stops both
 `stopAudio` takes no arguments. To stop one sound, keep its handle and call `stop()`. It stops every running or paused
 sound of the session, including sounds started in another file, in the order they started, as `stop()` on each handle
 would: their queued blocks are cancelled, `finish` does not run, and their handles stay readable with state `stopped`.
-A blocking `playAudio` stopped this way from a timer or cue block continues once that block returns. Video, the Stage
-image, the camera view, and timers are unaffected. Without a running or paused sound, `stopAudio` does nothing.
+Like `stop()`, it also cancels the queued blocks of sounds that already finished, which stay `finished` (owner
+decision, 2026-10-20; not yet implemented). A blocking `playAudio` stopped this way from a timer or cue block continues
+once that block returns. Video, the Stage image, the camera view, and timers are unaffected. Without a running or
+paused sound or a queued block of a finished one, `stopAudio` does nothing.
 
 ### Failures, cleanup, and restore
 
@@ -4137,8 +4140,8 @@ say "Go on.", instant        // "Time is up." at 10 s, then "Go on." at 12 s
   protected.
 - `exit` and a runtime error end the session; the queued blocks do not run.
 - Stopping a timer or media, also one that has already finished, or removing a button cancels its queued blocks, as
-  outside the block ([§22](#cues), [§27](#handles), [§28](#28-permanent-buttons)). So does leaving the file entry of
-  a non-persistent timer or button ([§27](#repeat-persistence-and-cleanup)).
+  outside the block ([§22](#22-stage-image-audio-and-video), [§27](#handles), [§28](#28-permanent-buttons)). So does
+  leaving the file entry of a non-persistent timer or button ([§27](#repeat-persistence-and-cleanup)).
 - A checkpoint taken inside the block resumes inside it, with the queued blocks and kept clicks, and never runs them
   early or twice.
 
