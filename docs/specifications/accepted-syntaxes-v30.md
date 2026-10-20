@@ -3541,8 +3541,8 @@ sound of the session, including sounds started in another file, in the order the
 would: their queued blocks are cancelled, `finish` does not run, and their handles stay readable with state `stopped`.
 Like `stop()`, `stopAudio` also cancels the queued blocks of sounds that already finished, which stay `finished`
 (owner decision, 2026-10-20; not yet implemented). A blocking `playAudio` stopped this way from a timer or cue block
-continues once that block returns. Video, the Stage image, the camera view, and timers are unaffected. Without a running or
-paused sound or a queued block of a finished one, `stopAudio` does nothing.
+continues once that block returns. Video, the Stage image, the camera view, and timers are unaffected. Without a
+running or paused sound or a queued block of a finished one, `stopAudio` does nothing.
 
 ### Failures, cleanup, and restore
 
