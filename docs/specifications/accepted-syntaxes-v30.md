@@ -3384,8 +3384,9 @@ command; write `playAudio (async)` to use a variable of that name.
   ignored; after a successful load its duration is known.
 - Several audio sources may play at once. The Stage shows one video at a time over the Stage image: a new `playVideo`,
   `showImage`, or `hideImage` stops an active video (`stopped`, without `finish`) and cancels its queued blocks, and
-  the Stage image is visible again when the video ends. It also cancels the queued blocks of a video that already
-  finished, which stays `finished` (owner decision, 2026-10-20; not yet implemented).
+  the Stage image is visible again when the video ends. A new `playVideo`, `showImage`, or `hideImage` also cancels
+  the queued blocks of a video that already finished, which stays `finished` (owner decision, 2026-10-20; not yet
+  implemented).
 
 The named form carries less common options:
 
@@ -3538,9 +3539,9 @@ stopAudio                    // stops both
 `stopAudio` takes no arguments. To stop one sound, keep its handle and call `stop()`. It stops every running or paused
 sound of the session, including sounds started in another file, in the order they started, as `stop()` on each handle
 would: their queued blocks are cancelled, `finish` does not run, and their handles stay readable with state `stopped`.
-Like `stop()`, it also cancels the queued blocks of sounds that already finished, which stay `finished` (owner
-decision, 2026-10-20; not yet implemented). A blocking `playAudio` stopped this way from a timer or cue block continues
-once that block returns. Video, the Stage image, the camera view, and timers are unaffected. Without a running or
+Like `stop()`, `stopAudio` also cancels the queued blocks of sounds that already finished, which stay `finished`
+(owner decision, 2026-10-20; not yet implemented). A blocking `playAudio` stopped this way from a timer or cue block
+continues once that block returns. Video, the Stage image, the camera view, and timers are unaffected. Without a running or
 paused sound or a queued block of a finished one, `stopAudio` does nothing.
 
 ### Failures, cleanup, and restore
