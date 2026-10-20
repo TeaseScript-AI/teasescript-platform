@@ -1269,6 +1269,85 @@ test("stop() cancels a cue block that is queued and not yet started", () => {
   assert.equal(session.snapshot.pendingTimerHandlers.length, 0);
 });
 
+test("stop() on finished media cancels its queued cue and finish blocks, also after a restore", () => {
+  const source = [
+    "function play {",
+    '  let note = "never"',
+    '  let played = playAudio async "m.mp3" {',
+    "    at 500 ms {",
+    '      say "${note}: cue"',
+    "    }",
+    "    finish {",
+    '      say "${note}: finish"',
+    "    }",
+    "  }",
+    "  return played",
+    "}",
+    "let m = play()",
+    "timer async 400 ms {",
+    "  wait 800 ms",
+    "  m.stop()",
+    "  m.stop()",
+    '  say "${m.state} ${m.position}"',
+    "  wait 100 ms",
+    "}",
+    "wait 2 s",
+    "exit",
+  ].join("\n");
+  // The timer block waits from 400 ms to 1.2 s; the cue at 500 ms and the finish at 1 s queue behind it. Cancelling
+  // them also releases the function scope that only they shared, which validation while the block still waits shows.
+  const session = new Session(source).load(1, 1_000).at(1_000, [1, 1_000]).at(1_200);
+  assert.deepEqual(session.said(), ["finished 1 second"]);
+  assert.equal(session.snapshot.pendingTimerHandlers.length, 0);
+  assert.equal(session.snapshot.retainedScopes.length, 0);
+  session.at(1_300).at(2_900);
+  assert.deepEqual(session.said(), ["finished 1 second"]);
+  assert.deepEqual(session.warnings(), []);
+  assert.equal(session.mediaSettlement(1)?.settlementKind, "finished");
+  assert.equal(session.snapshot.status, "halted");
+
+  const resumed = assertRuntimeResumeEquivalent(source, { mediaDurationMs: 1_000 });
+  assert.deepEqual(
+    resumed.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["finished 1 second"],
+  );
+});
+
+test("stopAudio and Stage replacement leave the queued blocks of media that already finished", () => {
+  for (const [play, file, control] of [
+    ["playAudio", "m.mp3", "stopAudio"],
+    ["playVideo", "m.mp4", 'showImage "room.jpg"'],
+    ["playVideo", "m.mp4", "hideImage"],
+    ["playVideo", "m.mp4", 'playVideo async "other.mp4"'],
+  ] as const) {
+    const session = new Session(
+      [
+        `let m = ${play} async "${file}" {`,
+        "  at 500 ms {",
+        '    say "cue"',
+        "  }",
+        "  finish {",
+        '    say "finish"',
+        "  }",
+        "}",
+        "timer async 400 ms {",
+        "  wait 800 ms",
+        `  ${control}`,
+        '  say "${m.state}"',
+        "}",
+        "wait 2 s",
+        "exit",
+      ].join("\n"),
+    );
+    // As in the stop() case, the cue and finish queue behind the timer block, which only stop() would cancel.
+    session.load(1, 1_000).at(1_000, [1, 1_000]).at(1_200);
+    if (control.startsWith("playVideo")) session.load(2, 10_000);
+    session.at(2_800);
+    assert.deepEqual(session.said(), ["finished", "cue", "finish"], control);
+    assert.equal(session.snapshot.status, "halted", control);
+  }
+});
+
 /** How each media and each wait on media settled, in event order. */
 function mediaSettlements(session: Session): string[] {
   return session.events.flatMap((event) =>

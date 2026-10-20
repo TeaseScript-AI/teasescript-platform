@@ -44,7 +44,7 @@ import {
   activeMediaAction,
   drainMediaEvents,
   mediaRecord,
-  stopMediaAction,
+  stopMediaHandle,
 } from "../operations/media-lifecycle.js";
 import {
   pauseTimer,
@@ -58,7 +58,7 @@ import {
 import {
   activeTimerAction,
   expireTimerAction,
-  stopTimerAction,
+  stopTimerHandle,
   timerRecord,
 } from "../operations/timer-lifecycle.js";
 import { removePermanentButtons } from "../background/permanent-buttons.js";
@@ -119,7 +119,7 @@ export function callTimer(
   const now = evaluator.snapshot.currentSessionTimeMs;
   switch (method) {
     case "stop":
-      if (action !== undefined) stopTimerAction(evaluator.snapshot, action, span, evaluator.events);
+      stopTimerHandle(evaluator.snapshot, handle.timerId, span, evaluator.events);
       return null;
     case "pause":
     case "resume": {
@@ -241,8 +241,7 @@ export function callMedia(
   const action = activeMediaAction(evaluator.snapshot, handle.mediaId);
   switch (method) {
     case "stop":
-      if (action !== undefined)
-        stopMediaAction(null, evaluator.snapshot, action, evaluator.events, span);
+      stopMediaHandle(evaluator.snapshot, handle.mediaId, evaluator.events, span);
       return null;
     case "pause":
     case "resume": {

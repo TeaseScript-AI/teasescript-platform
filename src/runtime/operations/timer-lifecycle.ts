@@ -226,13 +226,36 @@ export function stopTimerAction(
   events: InterpreterEvent[],
 ): void {
   stopTimer(action.timer, snapshot.currentSessionTimeMs);
+  dropQueuedExpiryBlocks(snapshot, action.timer.timerId);
+  settleTimerAction(snapshot, action, span, events);
+}
+
+/**
+ * `stop()` on a timer handle. An active timer stops as with `stopTimerAction`; a finished one stays finished and loses
+ * only its expiry blocks that have not started. A stopped timer has none.
+ */
+export function stopTimerHandle(
+  snapshot: RuntimeSnapshot,
+  timerId: number,
+  span: SourceSpan | PlanSourceLocation,
+  events: InterpreterEvent[],
+): void {
+  const action = activeTimerAction(snapshot, timerId);
+  if (action !== undefined) {
+    stopTimerAction(snapshot, action, span, events);
+  } else if (timerRecord(snapshot, timerId)?.state === "finished") {
+    dropQueuedExpiryBlocks(snapshot, timerId);
+    sweepRetainedScopes(snapshot, false);
+  }
+}
+
+function dropQueuedExpiryBlocks(snapshot: RuntimeSnapshot, timerId: number): void {
   for (let index = snapshot.pendingTimerHandlers.length - 1; index >= 0; index -= 1) {
     const invocation = snapshot.pendingTimerHandlers[index]!;
-    if ("timerId" in invocation && invocation.timerId === action.timer.timerId) {
+    if ("timerId" in invocation && invocation.timerId === timerId) {
       snapshot.pendingTimerHandlers.splice(index, 1);
     }
   }
-  settleTimerAction(snapshot, action, span, events);
 }
 
 /**
