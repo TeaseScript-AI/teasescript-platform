@@ -150,6 +150,25 @@ export function stopMediaAction(
 }
 
 /**
+ * `stop()` on a media handle. Active media stops as with `stopMediaAction`; media that has finished, also through the
+ * playback that commits first, stays finished and loses its cue blocks that have not started, `finish` included.
+ * `stopAudio` and Stage replacement stop only active media.
+ */
+export function stopMediaHandle(
+  snapshot: RuntimeSnapshot,
+  mediaId: number,
+  events: InterpreterEvent[],
+  span: SourceSpan | PlanSourceLocation,
+): void {
+  const action = activeMediaAction(snapshot, mediaId);
+  if (action !== undefined) stopMediaAction(null, snapshot, action, events, span);
+  if (mediaRecord(snapshot, mediaId)?.state === "finished") {
+    dropQueuedCues(snapshot, mediaId);
+    sweepRetainedScopes(snapshot, false);
+  }
+}
+
+/**
  * `stopAudio` stops every running or paused audio in start order, as `stop()` on its handle does; video plays on.
  * Returns the IDs of the audio it found running or paused.
  */

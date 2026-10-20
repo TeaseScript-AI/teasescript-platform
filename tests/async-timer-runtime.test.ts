@@ -706,6 +706,41 @@ test("stop cancels queued expiry blocks of that timer only", () => {
   assert.deepEqual(session.said(), ["other 2", "count 2 stopped"]);
 });
 
+test("stop() on a finished timer cancels its queued expiry block; the timer stays finished without a warning", () => {
+  const session = new Session(
+    [
+      "function start {",
+      '  let note = "never"',
+      "  let started = timer async 500 ms {",
+      '    say "${note}"',
+      "  }",
+      "  return started",
+      "}",
+      "let t = start()",
+      "timer async 400 ms {",
+      "  wait 200 ms",
+      "  t.stop()",
+      "  t.stop()",
+      '  say "${t.state} ${t.remaining}"',
+      "  wait 100 ms",
+      "}",
+      "wait 2 s",
+      "exit",
+    ].join("\n"),
+  );
+  // The block waits from 400 ms to 600 ms; t finishes at 500 ms and its block queues behind it. Cancelling the block
+  // also releases the function scope that only the block shared, which the checkpoint while the block still waits
+  // shows.
+  session.at(600);
+  assert.deepEqual(session.said(), ["finished 0 seconds"]);
+  assert.equal(session.snapshot.pendingTimerHandlers.length, 0);
+  assert.equal(session.snapshot.retainedScopes.length, 0);
+  session.at(700).at(2_300);
+  assert.deepEqual(session.said(), ["finished 0 seconds"]);
+  assert.deepEqual(warnings(session), []);
+  assert.equal(session.snapshot.status, "halted");
+});
+
 test("expiry blocks queued at script end still run, while script end stops running timers", () => {
   const session = new Session(
     [

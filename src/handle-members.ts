@@ -119,7 +119,7 @@ const PAUSE_SUMMARY =
 const RESUME_SUMMARY =
   "Continues a paused timer or media from where it paused. Resuming a running one does nothing, and on a finished or stopped one it has no effect and reports developer warning TSW010.";
 const STOP_SUMMARY =
-  "Stops a running or paused timer or media for good, so its blocks that have not started yet do not run. Stopping a finished or stopped one does nothing.";
+  "Stops a running or paused timer or media for good, so its blocks that have not started yet do not run. On a finished one it only cancels those blocks, and on a stopped one it does nothing.";
 
 /** Each kind of handle with its members. */
 export const HANDLE_MEMBERS = {
