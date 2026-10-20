@@ -3384,9 +3384,7 @@ command; write `playAudio (async)` to use a variable of that name.
   ignored; after a successful load its duration is known.
 - Several audio sources may play at once. The Stage shows one video at a time over the Stage image: a new `playVideo`,
   `showImage`, or `hideImage` stops an active video (`stopped`, without `finish`) and cancels its queued blocks, and
-  the Stage image is visible again when the video ends. A new `playVideo`, `showImage`, or `hideImage` also cancels
-  the queued blocks of a video that already finished, which stays `finished` (owner decision, 2026-10-20; not yet
-  implemented).
+  the Stage image is visible again when the video ends.
 
 The named form carries less common options:
 
@@ -3515,7 +3513,8 @@ playAudio async repeat "music/beat.mp3" {
   runs and reports developer warning `TSW012`.
 - `finish` runs once after the whole invocation finishes naturally, after the last pass or when a repeat duration ends.
   It never runs after `stop()`, replacement, or a load failure, so it is a compile error on media that repeats
-  indefinitely. A block may declare `finish` at most once.
+  indefinitely. A queued `finish` block that has not started is also cancelled by `stop()` after the media finished
+  (not yet implemented). A block may declare `finish` at most once.
 - Blocks are allowed for blocking and async media. They run one at a time through the timer interrupt queue with the
   same interruption and resumption rules as [timer expiry blocks](#expiry-blocks); cues due at the same point run in
   source order. Media keeps playing while a block runs unless the block controls it. `stop()` cancels queued blocks of
@@ -3539,10 +3538,8 @@ stopAudio                    // stops both
 `stopAudio` takes no arguments. To stop one sound, keep its handle and call `stop()`. It stops every running or paused
 sound of the session, including sounds started in another file, in the order they started, as `stop()` on each handle
 would: their queued blocks are cancelled, `finish` does not run, and their handles stay readable with state `stopped`.
-Like `stop()`, `stopAudio` also cancels the queued blocks of sounds that already finished, which stay `finished`
-(owner decision, 2026-10-20; not yet implemented). A blocking `playAudio` stopped this way from a timer or cue block
-continues once that block returns. Video, the Stage image, the camera view, and timers are unaffected. Without a
-running or paused sound or a queued block of a finished one, `stopAudio` does nothing.
+A blocking `playAudio` stopped this way from a timer or cue block continues once that block returns. Video, the Stage
+image, the camera view, and timers are unaffected. Without a running or paused sound, `stopAudio` does nothing.
 
 ### Failures, cleanup, and restore
 
@@ -4122,8 +4119,8 @@ say "Go on.", instant        // "Time is up." at 10 s, then "Go on." at 12 s
 ```
 
 - Timers keep counting and media keep playing: a timer expires at its own time and, if it repeats, starts its next
-  round then. Only their blocks wait, queued in due order as usual. Nothing is dropped, paused, or merged, and every
-  round of a repeating timer runs its block once.
+  round then. Only their blocks wait, queued in due order as usual, also the blocks of timers and media that start
+  inside the block. Nothing is dropped, paused, or merged, and every round of a repeating timer runs its block once.
 - Once execution leaves the outermost `noInterrupts` block, the queued blocks run one at a time, before the next
   ordinary statement. Each block starts then, so in the example the timer block's `wait 2 s` ends at 12 s. Inside a
   timer, media, or button block, the queued blocks still wait until that block finishes, since blocks run one at a
@@ -4131,6 +4128,8 @@ say "Go on.", instant        // "Time is up." at 10 s, then "Go on." at 12 s
 - A permanent button (`showPermanentButton`) can still be clicked, and its click is kept: the button's block joins the
   queue at the click and runs after the `noInterrupts` block. As after any click, the button is then inactive until its
   block finishes ([§28](#28-permanent-buttons)), so pressing it again adds nothing.
+- A loop inside the block that waits for a variable that only a timer, media, or button block changes never ends,
+  because those blocks wait until the block ends.
 - The protection covers all code that runs inside the block, waits included: the functions it calls, and a file it
   runs with `call`, whose `end` returns into the block. The end of an inner `noInterrupts` block does not end the
   protection of an outer one.
@@ -4140,9 +4139,11 @@ say "Go on.", instant        // "Time is up." at 10 s, then "Go on." at 12 s
   calls, ends the protection of each `noInterrupts` block it leaves. A `return` to a protected caller keeps the caller
   protected.
 - `exit` and a runtime error end the session; the queued blocks do not run.
-- Stopping a timer or media, also one that has already finished, or removing a button cancels its queued blocks, as
-  outside the block ([§22](#22-stage-image-audio-and-video), [§27](#handles), [§28](#28-permanent-buttons)). So does
-  leaving the file entry of a non-persistent timer or button ([§27](#repeat-persistence-and-cleanup)).
+- Stopping a timer or media or removing a button cancels its queued blocks, as outside the block
+  ([§22](#22-stage-image-audio-and-video), [§27](#handles), [§28](#28-permanent-buttons)). For a timer or media that
+  has already finished, `stop()` on its handle does so, but `stopAudio` and a new Stage video or image do not. Leaving
+  the file entry of a non-persistent timer or button also cancels its queued blocks
+  ([§27](#repeat-persistence-and-cleanup)).
 - A checkpoint taken inside the block resumes inside it, with the queued blocks and kept clicks, and never runs them
   early or twice.
 
