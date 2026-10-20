@@ -3383,8 +3383,8 @@ command; write `playAudio (async)` to use a variable of that name.
 - `async` media continues once the Player has reported the load result and evaluates to an opaque handle that may be
   ignored; after a successful load its duration is known.
 - Several audio sources may play at once. The Stage shows one video at a time over the Stage image: a new `playVideo`,
-  `showImage`, or `hideImage` stops an active video (`stopped`, without `finish`), and the Stage image is visible again
-  when the video ends.
+  `showImage`, or `hideImage` stops an active video (`stopped`, without `finish`) and cancels its queued blocks, and
+  the Stage image is visible again when the video ends.
 
 The named form carries less common options:
 
@@ -3513,11 +3513,13 @@ playAudio async repeat "music/beat.mp3" {
   runs and reports developer warning `TSW012`.
 - `finish` runs once after the whole invocation finishes naturally, after the last pass or when a repeat duration ends.
   It never runs after `stop()`, replacement, or a load failure, so it is a compile error on media that repeats
-  indefinitely. A block may declare `finish` at most once.
+  indefinitely. A queued `finish` block that has not started is also cancelled by `stop()` after the media finished
+  (not yet implemented). A block may declare `finish` at most once.
 - Blocks are allowed for blocking and async media. They run one at a time through the timer interrupt queue with the
   same interruption and resumption rules as [timer expiry blocks](#expiry-blocks); cues due at the same point run in
   source order. Media keeps playing while a block runs unless the block controls it. `stop()` cancels queued blocks of
-  that media that have not started.
+  that media that have not started, also after the media finished (owner decision, 2026-10-20; not yet implemented
+  for finished media).
 - The blocks share the variables of the code that started the media
   ([§14](#variables-in-timer-media-and-button-blocks)), all blocks of one media the same ones, across its repeats. In
   `let NAME = playAudio async ... { ... }` every block also sees `NAME` as its own handle, including inside a function.
@@ -4046,7 +4048,9 @@ affects future rounds, not the current round.
 concerns the current round. `state` is `running`, `paused`, `finished`, or `stopped`:
 
 - reads stay valid after the timer settles; `remaining` is then zero and `elapsed` is frozen;
-- `pause()` while paused, `resume()` while running, and `stop()` on a finished or stopped timer do nothing;
+- `pause()` while paused, `resume()` while running, and `stop()` on a finished or stopped timer do nothing, except
+  that `stop()` on a finished timer cancels its expiry blocks that have not started yet (owner decision, 2026-10-20;
+  not yet implemented);
 - other lifecycle methods or property assignments on a finished or stopped timer have no effect and report
   developer warning `TSW010` with the source location;
 - adjusting `remaining` while paused changes the current round and the timer stays paused;
@@ -4074,8 +4078,9 @@ playing audio or video. It may use top-level names, the variables of the code th
 ([§14](#variables-in-timer-media-and-button-blocks)), its own locals, normal functions, and new timers.
 
 A due block interrupts at the next deterministic runtime boundary, including while the main path waits on an
-interaction, `wait`, blocking timer, media, or a message's reading time. The interrupted action is inert while the
-block runs, so there are never two active story paths:
+interaction, `wait`, blocking timer, media, or a message's reading time; inside a
+[`noInterrupts` block](#nointerrupts-blocks), it waits until that block ends. The interrupted action is inert while
+the block runs, so there are never two active story paths:
 
 - if the block completes normally, the interrupted action is presented again and the script continues where it
   left off;
@@ -4092,6 +4097,59 @@ timers and media keep running, and a wait for media to end ends with the media, 
 decision, 2026-10-11).
 
 Blocks run one at a time in due order. A block may itself wait; later expiries queue behind it.
+
+### `noInterrupts` blocks
+**Status:** Accepted (Owner decision, 2026-10-20); not yet implemented, planned after the O4 type-checker switch.
+
+Timer, media, and permanent-button blocks do not interrupt the code inside a `noInterrupts` block; they wait until it
+ends. `noInterrupts` is a grammar keyword ([§38](#grammar-keywords)) followed by a block in braces, as after `if`. The
+code inside may itself wait, and its waiting works as usual: a message's reading time, `wait`, a question or blocking
+button such as `askText`, `askChoice`, or `showButton`, and a function that waits.
+
+```text
+timer async hidden 3 s {
+    say "Time is up.", instant
+    wait 2 s
+}
+noInterrupts {
+    say "Read this first.", instant
+    wait 10 s
+}
+say "Go on.", instant        // "Time is up." at 10 s, then "Go on." at 12 s
+```
+
+- Timers keep counting and media keep playing: a timer expires at its own time and, if it repeats, starts its next
+  round then. Only their blocks wait, queued in due order as usual, also the blocks of timers and media that start
+  inside the block. Nothing is dropped, paused, or merged, and every round of a repeating timer runs its block once.
+- Once execution leaves the outermost `noInterrupts` block, the queued blocks run one at a time, before the next
+  ordinary statement. Each block starts then, so in the example the timer block's `wait 2 s` ends at 12 s. Inside a
+  timer, media, or button block, the queued blocks still wait until that block finishes, since blocks run one at a
+  time. The protection starts when execution enters the block; a block due before then interrupts as usual.
+- A permanent button (`showPermanentButton`) can still be clicked, and its click is kept: the button's block joins the
+  queue at the click and runs after the `noInterrupts` block. As after any click, the button is then inactive until its
+  block finishes ([§28](#28-permanent-buttons)), so pressing it again adds nothing.
+- A loop inside the block that waits for a variable that only a timer, media, or button block changes never ends,
+  because those blocks wait until the block ends. The compiler warns when it can tell: when nothing in the loop,
+  including the functions it calls, assigns that variable, and such a block does. Where it cannot tell, there is no
+  warning. For a button block that changes `done`, the warning reads "This loop waits for 'done' to change, but the
+  button block that changes it cannot run inside 'noInterrupts'. Move the loop outside the block." (not yet
+  implemented; built with the block).
+- The protection covers all code that runs inside the block, waits included: the functions it calls, and a file it
+  runs with `call`, whose `end` returns into the block. The end of an inner `noInterrupts` block does not end the
+  protection of an outer one.
+- A label cannot stand inside the block, because a label stands only in a file's outer scope
+  ([§26](#26-labels-and-goto)), so no jump enters the block halfway.
+- A `goto`, `return`, `break`, `continue`, or `end` that leaves the block, also a `goto` or `end` in a function it
+  calls, ends the protection of each `noInterrupts` block it leaves. A `return` to a protected caller keeps the caller
+  protected.
+- `exit` and a runtime error end the session; the queued blocks do not run.
+- Stopping a timer or media or removing a button cancels its queued blocks, as outside the block
+  ([§22](#22-stage-image-audio-and-video), [§27](#handles), [§28](#28-permanent-buttons)). For a timer or media that
+  has already finished, `stop()` on its handle does so, but `stopAudio` and a new Stage video or image do not. Leaving
+  the file entry of a non-persistent timer or button also cancels its queued blocks
+  ([§27](#repeat-persistence-and-cleanup)).
+- A checkpoint taken inside the block resumes inside it, with the queued blocks and kept clicks, and never runs them
+  early or twice.
 
 ### Timeline cues and self-handle (planned)
 **Status:** Accepted direction; not implemented. It follows the timer foundation separately.
@@ -4179,7 +4237,8 @@ decision on #836, 2026-10-11):
 buttonId.remove()
 ```
 
-`remove()` takes no arguments and gives `null`, and it is the button handle's only method. The earlier command
+`remove()` takes no arguments and gives `null`, and it is the button handle's only method. Removing a button also
+cancels a click whose block has not started yet (owner decision, 2026-10-20). The earlier command
 `removePermanentButton` stays protected: its call is a compile error that names `buttonId.remove()`.
 
 The text follows the rules of other button labels ([§16](#lists-in-text)). Buttons appear in the order they were shown.
@@ -4188,7 +4247,8 @@ Click and handler behavior:
 
 - A click runs the handler once, like a timer expiry block ([§27](#expiry-blocks)): it interrupts at the next
   deterministic runtime boundary, also while the main path waits on an interaction, `wait`, media, or a message's
-  reading time, and waits while another block runs. The interrupted action returns when the handler finishes.
+  reading time, and waits while another block runs or until a [`noInterrupts` block](#nointerrupts-blocks) ends.
+  The interrupted action returns when the handler finishes.
 - From the click until its handler finishes, the button stays in place but is inactive and cannot be clicked. It
   becomes active again unless it was removed.
 - The handler shares the variables of the code that showed the button
@@ -5705,6 +5765,7 @@ in
 while
 break
 continue
+noInterrupts
 and
 or
 not
