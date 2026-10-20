@@ -73,6 +73,7 @@ Accepted V30 forms and current implementation behavior remain authoritative unti
 main.tease
     -> parse
     -> semantic validation
+    -> static type analysis
     -> versioned JSON-safe instruction plan
     -> explicit versioned runtime state and typed sequenced events
         -> standalone browser playground
@@ -83,6 +84,28 @@ main.tease
 ADR 0015 defines the current runtime direction. The AST is compile-time data. Runtime execution uses validated instruction plans and explicit scopes, loop frames, call frames, temporaries, RNG state, event sequence state, prepared references, and structured failures. It does not depend on suspended JavaScript functions, generators, closures, or an implicit JavaScript call stack.
 
 Prepared references and suspended-continuation liveness are internal runtime mechanisms used to preserve source order and validate checkpoint restore; they are not new TeaseScript syntax.
+
+## Static type analysis
+
+The compiler analyzes types once every name resolves (ADR 0021), through one boundary in `src/type-inference/`:
+`checkTypes` and `analyzeTypes` (`index.ts`) hand a `TypeAnalysisRequest`, the project's parsed files in project order
+with options that include what the name pass found, to a `TypeAnalysisBackend` (`backend.ts`). The backend returns the
+`TypeCheckResult` that lowering and the checks on the compiled plan consume, and on request `SolvedTypeFacts`, a
+snapshot for comparing two analyses of the same sources.
+
+- **Legacy backend, used in production:** `LEGACY_BACKEND` (`legacy-rounds.ts`) runs the `TypeChecker` visitor of
+  `src/type-checker.ts`, which decides each place's type from the first value stored there, in checking order, and
+  checks the project again with what it found until a check finds nothing new; the last check alone reports.
+  `legacy-state.ts` holds what one check carries to the next, and `legacy-facts.ts` reads its facts. The compiler uses
+  no other backend.
+- **Constraint backend (O4), being built:** it collects the constraints of the whole project, solves them once, and
+  checks once. It is built in stages behind the legacy backend and has no production caller until the switch; so far
+  only tests reach its parts: the constraint graph (`graph.ts`) and the collector that makes it in one walk
+  (`collector.ts`), the result relations of the built-in contracts (`adapters/`), the view of the value-kind registry
+  (`registry-view.ts`), and the solver's interned type table (`solver/types.ts`). The condition-shape recognizer
+  (`narrowing-shapes.ts`) is shared: the visitor's branch rules and the collector read the same classification.
+- **The switch:** one change makes the constraint backend the compiler's backend in place of the legacy backend, and
+  a later stage removes the legacy backend. Until the switch, the compiler's type behavior is the legacy backend's.
 
 ## Performance boundary
 
