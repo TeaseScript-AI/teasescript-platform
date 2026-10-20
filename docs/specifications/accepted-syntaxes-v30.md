@@ -4117,9 +4117,9 @@ say "Go on.", instant        // "Time is up." at 10 s, then "Go on." at 12 s
   round then. Only their blocks wait, queued in due order as usual. Nothing is dropped, paused, or merged, and every
   round of a repeating timer runs its block once.
 - Once execution leaves the outermost `uninterruptible` block, the queued blocks run one at a time, before the next
-  ordinary statement. Inside a timer, media, or button block, they still wait until that block finishes, since blocks
-  run one at a time. Each block starts then, so in the example the timer block's `wait 2 s` ends at 12 s. The
-  protection starts when execution enters the block; a block due before then interrupts as usual.
+  ordinary statement. Each block starts then, so in the example the timer block's `wait 2 s` ends at 12 s. Inside a
+  timer, media, or button block, the queued blocks still wait until that block finishes, since blocks run one at a
+  time. The protection starts when execution enters the block; a block due before then interrupts as usual.
 - A permanent button can still be clicked, and its click is kept: the button's block joins the queue at the click and
   runs after the `uninterruptible` block. As after any click, the button is then inactive until its block finishes
   ([§28](#28-permanent-buttons)), so pressing it again adds nothing.
