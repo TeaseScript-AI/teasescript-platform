@@ -4129,7 +4129,11 @@ say "Go on.", instant        // "Time is up." at 10 s, then "Go on." at 12 s
   queue at the click and runs after the `noInterrupts` block. As after any click, the button is then inactive until its
   block finishes ([§28](#28-permanent-buttons)), so pressing it again adds nothing.
 - A loop inside the block that waits for a variable that only a timer, media, or button block changes never ends,
-  because those blocks wait until the block ends.
+  because those blocks wait until the block ends. The compiler warns when it can tell: when nothing in the loop,
+  including the functions it calls, assigns that variable, and such a block does. Where it cannot tell, there is no
+  warning. For a button block that changes `done`, the warning reads "This loop waits for 'done' to change, but the
+  button block that changes it cannot run inside 'noInterrupts'. Move the loop outside the block." (not yet
+  implemented; built with the block).
 - The protection covers all code that runs inside the block, waits included: the functions it calls, and a file it
   runs with `call`, whose `end` returns into the block. The end of an inner `noInterrupts` block does not end the
   protection of an outer one.
