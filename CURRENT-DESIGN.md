@@ -123,8 +123,8 @@ limitation.
 Use these current sources for detail:
 
 - [`docs/PRODUCT.md`](docs/PRODUCT.md): product direction and current implementation focus;
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): component boundaries, dependency direction, and current source
-  placement;
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): component boundaries, dependency direction, static type analysis,
+  and current source placement;
 - [`docs/RUNTIME.md`](docs/RUNTIME.md): execution, pending actions, checkpoints, formats, and runtime limits;
 - [`docs/LIBRARIES.md`](docs/LIBRARIES.md): engine, Standard Library, package-library, and privileged-adapter boundary;
 - [`docs/SECURITY.md`](docs/SECURITY.md): isolation, capture, validation, privacy, and capability restrictions;
