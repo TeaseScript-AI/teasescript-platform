@@ -1189,9 +1189,20 @@ picks.add("three")    // compile error
   rejected at compile time. Where a place of known type takes it, also through a place that no other value decided,
   such as `let box = { t: null }` set only from such a value, it is checked when it runs.
   An arithmetic operator on such a value may also give a value of unknown type. A place with a written type, or one
-  that a value decided, also later in the source, still rejects it at compile time when no result of that operator
-  could fit, as in `let y: string = x / 4`, `y += x / 4` after `let y = "a"`, or `ys.add(x / 4)` after `let ys = []`
-  and before `ys.add("a")`, because `/` never gives text.
+  that a value decided earlier in the source, still rejects it at compile time when no result of that operator could
+  fit, as in `let y: string = x / 4` or `y += x / 4` after `let y = "a"`, because `/` never gives text. Where only a
+  later value decides the place, as in `ys.add(x / 4)` after `let ys = []` and before `ys.add("a")`, the store is
+  accepted, the compiler warns that no result of the operator could fit, and the value is checked when it runs. With
+  `x` from a `load` on line 1 and `ys.add("a")` on line 4, the warning reads:
+
+  ```text
+  'x / 4' cannot be text, but 'ys' holds text since line 4. 'x' has no known type (it comes from 'load' on line 1),
+  so this is checked when the script runs. Give 'x' a type, for example with 'default: 0' in its 'load', or give 'ys' a written type.
+  ```
+
+  The warning names the source of the unknown value. When that source is not such a `load`, as for host data,
+  `fromJson(…, default: null)`, or a computed key, it names that source instead and advises only a written type for
+  the place.
 
 ### Global variables
 

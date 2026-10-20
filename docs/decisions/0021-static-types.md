@@ -73,8 +73,9 @@ value in source order settles, whatever order the checker meets the code in.
    meets the stores, decides, so the result is the same for every checking order.
 7. A value whose type the compiler cannot know, such as storage under a key without a type (rule 6.2) or host data,
    decides nothing and is not rejected at compile time. When it is stored in a place of known type, it is checked at
-   runtime with a source-located error. A place with a written or decided type still rejects at compile time a value
-   none of whose possible types fits, as in `let y: string = x / 4`.
+   runtime with a source-located error. A place with a written type, or a type decided earlier in the source, still
+   rejects at compile time a value none of whose possible types fits, as in `let y: string = x / 4`; where only a later
+   value decides the type, the compiler warns and the value is checked when it runs.
 8. Operations are checked by the same principle: an operator, condition, index, member, or command operand of a known
    type that does not support it is a compile error, because it would fail at runtime. Type checks apply to all code,
    reachable or not. Conditions and the operands of `and`, `or`, and `not` must be `true` or `false`; there is no
@@ -262,3 +263,5 @@ union would be an inferred union (rule 3.4).
 - Typing a computed-key load by its default: it gives data the compiler cannot know a fixed type.
 - Widening an inferred `integer` place to `number` for a non-whole value from data the compiler cannot know: every
   whole-number use of that place would become an error; such a store is checked when the script runs (rule 1.7).
+- A compile error for a value the compiler cannot know against a type that only a later value decides (rule 1.7): exact
+  admission against later deciders failed four review rounds of the new type checker, so the forward check was dropped.
