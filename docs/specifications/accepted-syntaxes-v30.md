@@ -2388,9 +2388,9 @@ Runtime behavior:
 - `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
   raises the same runtime error as indexing.
 - `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`. Reading an
-  element of a list into which the compiler sees no element stored, such as `.first` of `let xs = []` when nothing is
-  ever added to `xs`, gives a warning, and the read is checked when the script runs; a list that may be empty keeps
-  the runtime error.
+  element of a list for which the compiler sees no possible element at that read, such as `.first` of `let xs = []`
+  when nothing is ever added to `xs`, or right after `xs.clear()`, gives a warning, and the read is checked when the
+  script runs; a list that may be empty keeps the runtime error.
 - `add(value)`, `addAll(other)`, `remove(value)`, `clear()`, `sort()`, `shuffle()`, and `reverse()` return `null`.
   Set `remove(value)` of an absent value is a no-op: the set stays unchanged and execution continues without an error
   or warning.
