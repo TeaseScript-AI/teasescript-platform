@@ -403,7 +403,11 @@ test("take and takeLast return a new list of the first or last elements", () => 
     ["TSV043", "take() needs a whole number of at least 0, not -1.", "-1"],
   ]);
   assert.deepEqual(diagnostics("say [1, 2].takeLast(1.5)\nexit"), [
-    ["TSV043", "takeLast() needs a whole number (integer), not a number.", "1.5"],
+    [
+      "TSV043",
+      "takeLast() needs a whole number (integer), not a number. Round it with floor(...), round(...), or ceil(...) first.",
+      "1.5",
+    ],
   ]);
   assert.deepEqual(diagnostics("say set[1, 2].take(1)\nexit"), [
     ["TSV043", "A set has no take(). Copy it into a list with toList() first.", "take"],

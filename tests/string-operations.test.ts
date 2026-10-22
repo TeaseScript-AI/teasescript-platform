@@ -348,7 +348,7 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       'let t = "abc"\nsay t.repeat(1.5)\nexit',
       "TSV043",
-      "repeat() needs a whole number (integer) for 'count', not a number. Convert it with toInteger(...), which drops the fraction.",
+      "repeat() needs a whole number (integer) for 'count', not a number. Round it with floor(...), round(...), or ceil(...) first.",
       "1.5",
     ],
     [
@@ -457,7 +457,7 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       'let count = 2\nsay "x".repeat(count)\ncount = 2.5\nexit',
       "TSV043",
-      "repeat() needs a whole number (integer) for 'count', not a number. 'count' is a number because line 3 can store a non-whole number in it. Convert it with toInteger(...), which drops the fraction.",
+      "repeat() needs a whole number (integer) for 'count', not a number. 'count' is a number because line 3 can store a non-whole number in it. Round it with floor(...), round(...), or ceil(...) first.",
       "count",
     ],
   ];
@@ -494,7 +494,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "say text.substring(at)\nexit",
       { text: "abc", at: 0.5 },
       "TSR024",
-      "substring() needs a whole number (integer) for 'start', not a number. Convert it with toInteger(...), which drops the fraction.",
+      "substring() needs a whole number (integer) for 'start', not a number. Round it with floor(...), round(...), or ceil(...) first.",
     ],
     [
       'say text.replace(part, "x")\nexit',
@@ -518,7 +518,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "say text.repeat(times)\nexit",
       { text: "abc", times: 1.5 },
       "TSR057",
-      "repeat() needs a whole number (integer) for 'count', not a number. Convert it with toInteger(...), which drops the fraction.",
+      "repeat() needs a whole number (integer) for 'count', not a number. Round it with floor(...), round(...), or ceil(...) first.",
     ],
     [
       "say text.padStart(size, fill)\nexit",

@@ -334,7 +334,7 @@ test("compound assignment keeps the variable's type", () => {
   );
   assert.deepEqual(
     mismatches("let items: integer[] = [1]\nitems[0] += 0.5\nexit")[0]?.[1],
-    "'items' holds integer values (integer[]), so '+=' cannot make an element a number. To allow fractions, declare it as 'let items: number[] = ...'.",
+    "'items' holds integer values (integer[]), so '+=' cannot make an element a number. Round it with floor(...), round(...), or ceil(...), or declare it as 'let items: number[] = ...'.",
   );
 });
 
@@ -605,7 +605,7 @@ test("optional types keep their non-null type in operations, elements, and loops
   );
   assert.deepEqual(
     mismatches("let items: integer[]? = [1]\nitems.add(2.5)\nexit")[0]?.[1],
-    "'items' holds integer values (integer[]), so it cannot contain a number. To allow fractions, declare it as 'let items: number[]? = ...'.",
+    "'items' holds integer values (integer[]), so it cannot contain a number. Round it with floor(...), round(...), or ceil(...), or declare it as 'let items: number[]? = ...'.",
   );
   // A possibly null value is used only after a check, which narrows it (owner decision on #504 Q1).
   const nullable = "let items = [1]\nfunction f(n: integer?) {\n    BODY\n}\nexit";

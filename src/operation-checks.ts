@@ -87,6 +87,7 @@ import {
   type ListMethod,
   type ListParameterKind,
 } from "./list-methods.js";
+import { ROUND_COUNT_FIX } from "./loop-rules.js";
 import {
   argumentFix,
   argumentTypeMessage,
@@ -1208,7 +1209,10 @@ function argumentKindProblems(
     // The first kind the count may be that is not a whole number, such as the number in `number?`.
     const other = members(type).find((member) => !isAssignable(INTEGER_TYPE, member));
     if (other !== undefined)
-      return problem(listArgumentMessage(method.name, "count", describeValue(other), "other"));
+      return problem(
+        listArgumentMessage(method.name, "count", describeValue(other), "other") +
+          (isScalar(other, "number") ? ROUND_COUNT_FIX : ""),
+      );
     const count = known(argument);
     const message = typeof count === "number" ? countProblem(method.name, count) : undefined;
     return message === undefined ? [] : problem(message);

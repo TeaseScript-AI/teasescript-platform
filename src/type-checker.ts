@@ -10723,8 +10723,8 @@ function optionalResultFix(declared: StaticType): string {
 }
 
 /**
- * How to make a value fit a list or set: allow fractions or both where `declared` writes the collection's type, or keep
- * other values in a separate collection.
+ * How to make a value fit a list or set: round a number or allow fractions, or allow both, where `declared` writes the
+ * collection's type, or keep other values in a separate collection.
  */
 function elementFix(
   declared: Declared,
@@ -10734,7 +10734,7 @@ function elementFix(
 ): string {
   const optional = nullable ? "?" : "";
   if (declared !== null && isScalar(collection.element, "integer") && isScalar(value, "number"))
-    return ` To allow fractions, ${declareAs(declared, `${typeName({ kind: collection.kind, element: NUMBER_TYPE })}${optional}`)}.`;
+    return `${ROUND_FIX}, or ${declareAs(declared, `${typeName({ kind: collection.kind, element: NUMBER_TYPE })}${optional}`)}.`;
   if (isScalar(collection.element, "duration") && isNumeric(value))
     return " Give the number a unit, such as '5 s'.";
   if (isScalar(collection.element, "angle") && isNumeric(value))

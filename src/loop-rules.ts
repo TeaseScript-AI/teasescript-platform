@@ -17,7 +17,7 @@ export function repeatCountMessage(subject: string, shown: string, fix: string):
   return `${REPEAT_COUNT_RULE}, but ${subject} is ${shown}.${fix}`;
 }
 
-/** The fix for a count that may not be whole. */
+/** The fix for a count, or another number where a whole number is needed, that may not be whole. */
 export const ROUND_COUNT_FIX = " Round it with floor(...), round(...), or ceil(...) first.";
 
 /** The fix for a number that `repeat` cannot count. */

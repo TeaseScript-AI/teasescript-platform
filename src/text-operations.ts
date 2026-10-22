@@ -7,6 +7,7 @@ import { argumentCountMessage, argumentsTaken } from "./argument-rules.js";
 import { isDictMethod } from "./dict-operations.js";
 import { isAnyHandleMethod } from "./handle-members.js";
 import { isListMethod, LIST_METHODS } from "./list-methods.js";
+import { ROUND_COUNT_FIX } from "./loop-rules.js";
 import { compileRegex, replacementParts } from "./regex.js";
 import type { SerializableRegex } from "./runtime/values/serializable-values.js";
 
@@ -448,7 +449,7 @@ export function argumentFix(parameter: TextParameter, kind: ArgumentKind): strin
       : "";
   if (takesText(parameter))
     return kind !== null && kind !== "string" ? " Convert it with toString(...)." : "";
-  if (kind === "number") return " Convert it with toInteger(...), which drops the fraction.";
+  if (kind === "number") return ROUND_COUNT_FIX;
   return kind === "string" ? " Convert it with toInteger(...)." : "";
 }
 
