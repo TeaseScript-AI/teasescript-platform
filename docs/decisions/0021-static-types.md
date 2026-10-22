@@ -89,11 +89,11 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    truthiness. A list index is a whole number and a dict key is text; an object, whose properties have fixed names, is
    not indexed. Reading or storing a property that no object in its place has is a compile error that names the
    properties it can have (rule 1.4). A read or store that may reach an object without that property, or an object the
-   compiler cannot know, such as stored data or an `object`, is checked when the script runs, and so are a computed
-   choice object's missing `text`, other property, or
-   `value` or `background` that its button cannot use; only a `text` whose known type can never be shown fails at
-   compile time, because it fails whether the property is there or missing. A choice object written in
-   the option is checked as written.
+   compiler cannot know, such as stored data or an `object`, is checked when the script runs. A computed choice
+   object's missing `text`, other property, or `value` or `background` that its button cannot use is a compile error
+   where the compiler proves it, and otherwise checked when the script runs; a `text` whose known type can never be
+   shown always fails at compile time, because it fails whether the property is there or missing. A choice object
+   written in the option is checked as written.
 9. A possibly null value used where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
    error whose message names the check, `if n != null { ... }` (owner decision of 2026-10-04 on #504). The check
    narrows the value (rule 5.1). Places and operands that accept `null` themselves still take it.

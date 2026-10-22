@@ -601,9 +601,9 @@ runs zero times, and `toList()` returns `[]`. When both bounds are written as nu
 `for` ([§23](#23-loops)), `randomInteger` ([Randomness](#randomness)), and `toList()` give the whole numbers of a range,
 and `wait` and `timer` ([§27](#27-timers)) pick a whole number of units from one, so a range written in any of them
 needs whole-number bounds: a bound of type `number`, such as `count / 2`, is a compile error. Round it with
-`floor(...)`, `round(...)`, or `ceil(...)`, as in `for i in 1..=floor(count / 2)`. Other bounds, such as one whose type
-the compiler cannot know or one of a range kept in a variable, are checked when the range is used. A `switch` case range
-matches any number within its bounds ([§32](#32-switch-statements)).
+`floor(...)`, `round(...)`, or `ceil(...)`, as in `for i in 1..=floor(count / 2)`. A bound that the compiler cannot
+check, such as one whose type it cannot know, is checked when the range is used. A `switch` case range matches any
+number within its bounds ([§32](#32-switch-statements)).
 
 Ranges may also be used in `switch` cases:
 
@@ -2805,8 +2805,8 @@ Rules:
 - The elements of a list option are values or choice objects, not lists or sets.
 - A choice object has `text`, and optionally `value` and `background`. It has no `value` property when a value is
   written before its option's `:`, also as an element of a list or set option.
-- An empty list or set contributes no buttons. An `askChoice` without any button is an error: a compile error when it is
-  visible in the source, such as `askChoice []`, and a runtime error otherwise.
+- An empty list or set contributes no buttons. An `askChoice` without any button is an error: a compile error when the
+  compiler can see it, such as `askChoice []`, and a runtime error otherwise.
 - Buttons may repeat a value or a text: `askChoice win: "Open a door", lose: "Open a door", lose: "Open a door"` shows
   three buttons. A selected button is identified by its position, so each returns its own value.
 - `askChoice` does not return a result object.
@@ -4193,8 +4193,8 @@ Rules:
   media. A photo from `takePhoto()` or an image from `askImage(...)` is kept by the Player while saved storage
   references it (§33).
 - Storage keys are plain strings.
-- After unwrapping parentheses, a recognizably non-string outer key expression is a compile error (`TSV038`). Other
-  keys are checked at runtime and raise `TSR054` if non-string. For `load`, the diagnostic explains:
+- A key that the compiler can see is not a string, also inside parentheses, is a compile error (`TSV038`). Other keys
+  are checked at runtime and raise `TSR054` if non-string. For `load`, the diagnostic explains:
   `Storage key must be a string. To compare the loaded value, write 'load("k", default: null) == null'.`
 - Dots and slashes inside a key are naming conventions only.
 - The complete string is treated as one key.
@@ -4620,8 +4620,9 @@ Rules:
   value. A computed target, a `script(...)` call or a grouped expression such as `goto (next)`, must be a reference.
 - A `script(...)` whose path is literal, quoted text without `${...}`, is checked like a file target: a path that leaves
   the package, a missing file, a missing literal label, a glob, and a `goto` or `fallback` to a file of declarations
-  only are compile errors. Any other reference is checked when a transfer uses it, a computed `fallback` when the
-  statement runs: a missing file or label, or a `goto` or `fallback` to a file of declarations only, is a runtime error.
+  only are compile errors, also for another reference whose target the compiler can see. Any other reference is
+  checked when a transfer uses it, a computed `fallback` when the statement runs: a missing file or label, or a `goto`
+  or `fallback` to a file of declarations only, is a runtime error.
 - For the check of variables after labels ([§26](#26-labels-and-goto)), the compiler reads from the source alone which
   labels references may enter afresh: a `script(...)` with a literal label enters that label of its file, or with a
   computed path that label of every file that has it, and one with a computed label every label of its file, or of
@@ -4871,8 +4872,8 @@ openUrl("https://example.com", alwaysButton: true, buttonText: "Claim your rewar
 **Status (Owner decisions, 2026-10-13):** `openUrl(...)` waits until the URL is open in a new tab. That is usually
 immediate, and when the browser needs a click from the player first, the Player shows a button for it where
 `showButton` shows its button, without the URL. After a reload, a restore, or a replay the Player never opens the URL
-by itself: a restored waiting `openUrl(...)` shows the button. Only `http` and `https` URLs open: another written URL is
-a compile error, and another value fails at runtime.
+by itself: a restored waiting `openUrl(...)` shows the button. Only `http` and `https` URLs open: another URL is a
+compile error where the compiler can see it, as for a written one, and fails at runtime otherwise.
 
 Rules:
 
@@ -6463,12 +6464,12 @@ if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }
 - Comparison bounds and tag lists are evaluated once, in written order, before any candidate is matched. Matching draws
   no random number. A pick (`showImage tagged`, `goto tagged`, `call tagged`, `fallback tagged`) draws once from the
   session random generator, and restoring a checkpoint never draws again.
-- A `goto tagged`, `call tagged`, or `fallback tagged` whose tag tests and literal tag lists match no candidate, within
-  its `from:`, is a compile error: every file's header is known when the project compiles. Comparisons and computed lists
-  are not evaluated for this.
-- When the compilation is given the package images and no file takes photos with tags, a `showImage tagged` whose tag
-  tests and literal tag lists match none of them is a compile error; comparisons and computed lists are not evaluated
-  for this. Any other pick that finds no image is a runtime error.
+- A `goto tagged`, `call tagged`, or `fallback tagged` that the compiler can see matches no candidate within its
+  `from:` is a compile error, as when its tag tests and literal tag lists match none: every file's header is known when
+  the project compiles.
+- When the compilation is given the package images and no file takes photos with tags, a `showImage tagged` that the
+  compiler can see matches none of them is a compile error, as when its tag tests and literal tag lists match none. Any
+  other pick that finds no image is a runtime error.
 
 ### Image tags
 
