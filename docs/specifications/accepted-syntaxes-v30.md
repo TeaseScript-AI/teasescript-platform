@@ -1056,8 +1056,7 @@ Rules:
   argument, a `null` argument included, and the calls are never combined into one parameter type: inside each call's
   use of the body, the parameter and the variables that depend on it follow [§12](#12-variable-declarations) for that
   call's arguments. With `function shake(times = 1)`, `shake(0.5)` is valid, and `times` is a `number` in that call.
-  Where the compiler cannot show that a call fits, such as whether `x / 4` is an integer, the call compiles and the
-  value is checked when the script runs:
+  Where the compiler cannot show that a call fits, the call compiles and the value is checked when the script runs:
 
   ```text
   function dec(x) {
@@ -5671,11 +5670,10 @@ Custom-property rules:
 - A custom property may also be declared directly in a `speaker` property block.
 - Reading a property before it has definitely been declared is a compile error.
 - A conditionally assigned property is not considered definitely available after the condition unless every path assigns it.
-- The compiler follows a speaker through its name and through `speaker` under `as`. Reads through a variable, a
-  parameter, an element, or `speaker` without `as`, reads in timer, media, and button blocks, and reads that only a
-  computed target or a fallback reaches are checked when the script runs. A block or a called file counts as assigning
-  whatever it may assign. A recursive function, and a function that creates a timer, media, or button block, count as
-  assigning every property.
+- A read through the speaker's name, or through `speaker` under `as`, follows these rules at compile time. Where the
+  compiler cannot tell which speaker a read reaches, or what the code before the read assigns, the read is checked when
+  the script runs. A call, a timer, media, or button block, or a called file counts as assigning whatever it may
+  assign, and as assigning every property where the compiler cannot tell what that is.
 - The inferred or declared property type remains fixed.
 - Speaker references compare by identity with `==` and `!=` and may be used as `switch` values.
 
@@ -6361,9 +6359,10 @@ for name, toy in toys { ... }           // the keys with a copy of each value
   written type widens to numbers. Values of different types need a declared union, such as `(integer | string) dict`.
   `T dict` is written like `T[]` and `T set`, and `dict` alone holds any values ([§13](#13-explicit-types)).
 - **Missing keys:** reading or removing a key that the dict does not have is runtime error `TSR061`, which names the
-  check, such as `Dictionary has no key "collar". Check toys.contains(name) first.` A missing key is visible to the
-  compiler only for a literal dict, so `dict{ a: 1 }["b"]` is a compile error; for any other dict, check
-  `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key. As for a list
+  check, such as `Dictionary has no key "collar". Check toys.contains(name) first.` A missing key that the compiler can
+  see is reported at compile time ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)):
+  `dict{ a: 1 }["b"]` is a compile error. Where a key may be missing, check `contains(key)` first or read with `get`.
+  `get(key, default: value)` gives `value` for a missing key. As for a list
   ([§16](#reading-an-element-with-a-default)), its `default:` is required and has the value type or is `null`: on an
   `integer dict`, `default: 0` gives an `integer` and `default: null` an `integer?`, and on a `string[] dict`,
   `default: []` gives a `string[]`; `default: "none"` is a compile error unless the value lands directly in a place with
