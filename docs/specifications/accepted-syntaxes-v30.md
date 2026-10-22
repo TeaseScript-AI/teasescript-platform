@@ -1156,10 +1156,9 @@ picks.add("three")    // compile error
   declared type, such as `integer`, `integer[]`, or `integer set`, stays strict. A read sees what the variable holds at
   that point: where it can have received only whole numbers so far, it is an `integer` there. A value that may not be
   whole at an integer-only use, such as a list index, a `removeAt` position, or a repeat count, is a compile error where
-  the compiler has a simple proof that every run reaching the use brings such a value, as `items[j]` after `let j = 0`
-  and `j = j / 2`; `floor`, `round`, or `toInteger` makes it whole. Without such a proof, as where only a particular run
-  brings such a value there, such as one arm of an `askBoolean` or a later round of a loop, or where a called function
-  stores it, the use gives a warning, and the value is checked to be whole when the script runs
+  the compiler can prove that such a value reaches the use, as `items[j]` after `let j = 0` and `j = j / 2`; `floor`,
+  `round`, or `toInteger` makes it whole. Where the compiler cannot tell whether such a value reaches the use, the use
+  gives a warning, and the value is checked to be whole when the script runs
   ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)):
 
   ```text
@@ -1172,10 +1171,6 @@ picks.add("three")    // compile error
   i = i / 2             // i may not be whole from here on, so a later items[i] is a compile error
   let prices = [1, 2]
   prices.add(2.5)       // prices is a number[]
-  let n = 1
-  function reset() { n = 1.5 }
-  reset()
-  repeat n { say "Round" }   // warning, and the count is checked when the script runs
   ```
 
 - An empty list or set takes its element type from the first element added or assigned. In a list or set literal,
@@ -1203,9 +1198,10 @@ picks.add("three")    // compile error
   An arithmetic operator on such a value may also give a value of unknown type. A place with a written type, or one
   that a value decided earlier in the source, still rejects it at compile time when no result of that operator could
   fit, as in `let y: string = x / 4` or `y += x / 4` after `let y = "a"`, because `/` never gives text. Where only a
-  later value decides the place, as in `ys.add(x / 4)` after `let ys = []` and before `ys.add("a")`, the store is
-  accepted, the compiler warns that no result of the operator could fit, and the value is checked when it runs. With
-  `x` from a `load` on line 1 and `ys.add("a")` on line 4, the warning reads:
+  later value decides the place, as in `ys.add(x / 4)` after `let ys = []` and before `ys.add("a")`, a compile error
+  needs a check of the store against that later value. Where the compiler does not make it, the store is accepted, the
+  compiler warns that no result of the operator could fit, and the value is checked when it runs. With `x` from a
+  `load` on line 1 and `ys.add("a")` on line 4, the warning reads:
 
   ```text
   'x / 4' cannot be text, but 'ys' holds text since line 4. 'x' has no known type (it comes from 'load' on line 1),
@@ -1219,9 +1215,9 @@ picks.add("three")    // compile error
   after `let state = { n: "s", divisor: null }`, `state = { n: hostValue / state.divisor, divisor: 4 }` divides by the
   `null` that `divisor` still holds, which is a compile error. Where the value comes from a function that reads a part
   of the place that no earlier value decided, as in `state = rebuild()` when `rebuild` reads `state.divisor`, the
-  compiler cannot settle that part before the store: the store is accepted, the compiler warns, and the value is
-  checked when it runs. The warning advises writing a type on the place, one type or a union, such as
-  `let score: number? = null`, so that the compiler has more to go on.
+  compiler must follow that read into the function to settle the part before the store. Where it does not settle it,
+  the store is accepted, the compiler warns, and the value is checked when it runs. The warning advises writing a type
+  on the place, one type or a union, such as `let score: number? = null`, so that the compiler has more to go on.
 
 ### Global variables
 
@@ -1531,7 +1527,7 @@ if box.n != null {
 ```
 
 ### Compile errors, warnings, and checks when the script runs
-**Status:** Accepted (owner decisions, 2026-10-19 and 2026-10-21)
+**Status:** Accepted (owner decisions, 2026-10-19, 2026-10-21, and 2026-10-23)
 
 Valid code always compiles. Valid code meets the language's syntax, type, and required-check rules, and a compile
 error names a violation of one of them, such as a value that may be `null` used without any check. Where the compiler
@@ -1540,13 +1536,18 @@ the check moves to the runtime: the code compiles, the value is checked there wh
 gives a warning that names the place and says how to let the compiler check it now. The compiler catches as much as it
 can at compile time; a check when the script runs is the exception.
 
-The compiler gives an exact answer, a compile error or acceptance without a warning, only where it has a simple proof.
-Everywhere else it gives the warning, and the value is checked when the script runs. It never reports a compile error
-for valid code and never silently accepts code that may fail, so a compile error means that the code is certainly
-wrong, and a warning that it may go wrong. Where the compiler can prove simply that every value reaching a use fits
-there, that use compiles without a warning. In complex code the compiler warns more often: where conditions depend on
-each other, where one function is called with different state, or where a timer, media, or button block changes state
-through a function. This script compiles with a warning, and the copy is checked when the script runs:
+The compiler gives an exact answer, a compile error or acceptance without a warning, only where it can prove that
+answer. Everywhere else it gives the warning, and the value is checked when the script runs. It never reports a compile
+error for valid code and never silently accepts code that may fail, so a compile error means that the code is certainly
+wrong, and a warning that it may go wrong. Which uses the compiler can prove is a property of the compiler, not a rule
+of the language, and the compiler catches more over time: as its proofs improve, a warning becomes a compile error
+where the code is certainly wrong, or disappears where the code is certainly fine.
+
+A value that a run makes unfit for a later use, through branches, calls, or buttons, is a compile error only where that
+run can really happen, never for a path that exists only in the compiler's analysis, and only where the compiler can
+prove the run. After an unconditional `backpack.add("key")` before `let copy = backpack`, `copy.add(3)` is a compile
+error. In this script, a run that adds the key and then makes the copy exists only in the compiler's analysis, so it is
+never a compile error:
 
 ```text
 let hasKey = askBoolean "Do you have the key?"
@@ -1560,26 +1561,8 @@ if not hasKey {
 }
 ```
 
-No run both adds the key and makes the copy, but the compiler does not follow that `not hasKey` excludes `hasKey`, so
-it warns instead of giving a false error.
-
-A value that a run makes unfit for a later use, through branches, calls, or buttons, is a compile error only where that
-run can really happen, never for a path that exists only in the compiler's analysis, and only where the compiler can
-prove the run simply. Where it proves simply that every run that reaches the use makes the value unfit, as after an
-unconditional `backpack.add("key")` before `let copy = backpack`, `copy.add(3)` is a compile error. A failure that needs
-a particular run, such as one answer to an `askBoolean`, a button pressed during a `wait`, or the second round of a
-`repeat`, gives the warning, and so does one that comes from a write in a called function, such as `n = 1.5` in a
-`reset()` called before `repeat n` ([§12](#12-variable-declarations)). Here the copy is checked when the script runs:
-
-```text
-let backpack = []
-showPermanentButton "Take the key" {
-    backpack.add("key")
-}
-wait 5 s
-let copy = backpack
-copy.add(3)
-```
+To accept it without a warning, the compiler must follow that `not hasKey` excludes `hasKey`. Where it does not, it
+warns instead of giving a false error, and the copy is checked when the script runs.
 
 The required-check rules are not affected: a use that needs a check and has none on some route stays a compile error,
 as `n + 1` does after `let n = 1` and `if askBoolean "Clear?" { n = null }` ([narrowing](#type-tests-and-narrowing)).
@@ -2393,9 +2376,9 @@ Runtime behavior:
 - `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
   raises the same runtime error as indexing.
 - `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`. Reading an
-  element of a list for which the compiler sees no possible element at that read, such as `.first` of `let xs = []`
-  when nothing is ever added to `xs`, or right after `xs.clear()`, gives a warning, and the read is checked when the
-  script runs; a list that may be empty keeps the runtime error.
+  element of a list that the compiler sees is empty at that read, as right after `xs.clear()`, is reported at compile
+  time ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)); a list that may be empty keeps the runtime
+  error.
 - `add(value)`, `addAll(other)`, `remove(value)`, `clear()`, `sort()`, `shuffle()`, and `reverse()` return `null`.
   Set `remove(value)` of an absent value is a no-op: the set stays unchanged and execution continues without an error
   or warning.

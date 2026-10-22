@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Decision source:** Owner decisions in issues #504 and #536 (dicts) (2026-10-04); §6: Owner decision, 2026-10-07; the
-rules for the new type checker (O4): Owner decisions of 2026-10-19 to 2026-10-22
+rules for the new type checker (O4): Owner decisions of 2026-10-19 to 2026-10-23
 
 The current compiler and runtime still apply the rules this file held before the O4 decisions until the compiler
 switches to the new type checker, as V30's transition note says.
@@ -21,7 +21,7 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
 In October 2026 the Owner simplified the rules for a new type checker: object properties come from their literal, no
 union holds a whole collection, a fallback has the type it stands in for, each place keeps the type its earliest value
 in source order settles, whatever order the checker meets the code in, and the compiler gives an error only where it
-can simply prove one, and otherwise a warning with a check when the script runs.
+can prove one, starting with simple proofs, and otherwise a warning with a check when the script runs.
 
 ## Decision
 
@@ -47,9 +47,8 @@ can simply prove one, and otherwise a warning with a check when the script runs.
    `integer[]`, or `integer set`. A read sees what the variable holds at that point: after `let i = 0`, `items[i]`
    before `i = i / 2` is valid, because `i` can have received only whole numbers there. A value that may not be whole at
    an integer-only use, such as a list index, a `removeAt` position, or a repeat count, is a compile error where the
-   compiler proves simply that every run reaching the use brings it, as `items[i]` after `i = i / 2`; without such a
-   proof, as where only a particular run brings it there, such as one arm of an `askBoolean` or a later round of a loop,
-   or where a called function stores it, the use is warned and the value checked when the script runs (rule 1.10).
+   compiler proves that it reaches the use, as `items[i]` after `i = i / 2`; where the compiler cannot tell whether it
+   does, the use is warned and the value checked when the script runs (rule 1.10).
 3. An empty list or set takes its element type from the earliest element added or assigned. A list or set literal has
    one element type: integers and numbers together are numbers, and `null` elements make it optional. Elements of
    different types are an error that points to a declared union such as `(string | number)[]`, and the earliest
@@ -101,14 +100,15 @@ can simply prove one, and otherwise a warning with a check when the script runs.
 10. Valid code always compiles: a compile error names a violation of a syntax, type, or required-check rule. Where the
     compiler cannot prove at reasonable cost that a written check still holds, or a check is impractical at compile
     time, the check moves to the runtime, and the compiler warns at that place, saying how to let the compiler check it
-    now. The compiler gives an exact answer, an error or acceptance without a warning, only where it has a simple
-    proof, and warns everywhere else, so it never gives a false error and never accepts silently: an error means that
-    the code is certainly wrong, and a warning that it may go wrong. A run that makes a value unfit for a later use is
-    an error only where the run can really happen and the compiler proves it simply, as for `items[i]` after an
-    unconditional `i = i / 2` (rule 1.2); a failure that needs a particular answer, a button pressed during a `wait`, or
-    a later round of a loop, that depends on conditions that exclude each other, or that comes from a write in a called
-    function, is warned. The required-check rules stay: a use that needs a check and has none on some route is an error
-    (rules 1.9 and 5.6).
+    now. The compiler gives an exact answer, an error or acceptance without a warning, only where it has a proof, and
+    warns everywhere else, so it never gives a false error and never accepts silently: an error means that the code is
+    certainly wrong, and a warning that it may go wrong. A run that makes a value unfit for a later use is an error only
+    where the run can really happen and the compiler proves it, as for `items[i]` after an unconditional `i = i / 2`
+    (rule 1.2). Which cases the compiler proves is its quality, not a language rule: the checker starts as a coarse
+    sound core that gives an exact answer only where it has a simple proof, and precision rules are added one at a
+    time, each with its own review and performance check, so that a warning becomes an error where the code is
+    certainly wrong, or disappears where it is certainly fine. The required-check rules stay: a use that needs a check
+    and has none on some route is an error (rules 1.9 and 5.6).
     The temporary work budget follows this rule: a place over it, and the checks that need what it would have found, are
     checked when the script runs, with a warning there; every other use, also of the same variable or function, stays
     checked at compile time, and a known violation stays an error. A limit of the compiler is thus never reported as
@@ -286,9 +286,9 @@ union would be an inferred union (rule 3.4).
   same kinds, so precision comes one rule at a time instead.
 - A compile error for a store that reads its own place through a function: it needs another representation, with
   symbolic obligations, and a further design round.
-- Accepting, at an integer-only use, a value that may not be whole where the compiler proves simply that every run
-  reaching the use brings it (rule 1.2), with a check when the script runs as in Lua, or with a warning:
-  `items[score / 2]` would fail only when `score` is odd.
+- Accepting, at an integer-only use, a value that may not be whole where the compiler proves that it reaches the use
+  (rule 1.2), with a check when the script runs as in Lua, or with a warning: `items[score / 2]` would fail only when
+  `score` is odd.
 - A parameter typed from its default, as a `let` is from its start value (the earlier rule 1.5): `shake(0.5)` was an
   error for `function shake(times = 1)`, although an integer becomes a number where that is needed.
 - The button values of an `askChoice` in its answer's type, known until the variable changes (the earlier V30 §19
