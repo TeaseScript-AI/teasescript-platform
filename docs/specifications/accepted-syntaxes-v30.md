@@ -1154,10 +1154,11 @@ picks.add("three")    // compile error
 - A variable without a type whose type is `integer` is a `number` when any of its assignments can store a non-whole
   number, wherever that assignment is. The elements and properties inside such a variable widen by the same rule. A
   declared type, such as `integer`, `integer[]`, or `integer set`, stays strict. A read sees what the variable holds at
-  that point: where it can have received only whole numbers so far, it is an `integer` there. An integer-only use,
-  such as a list index, a `removeAt` position, or a repeat count, of a value that the code shows may not be whole is a
-  compile error; `floor`, `round`, or `toInteger` makes it whole. In a loop, a store in a later round counts too: a use
-  in the body before such a store gives a warning, and the value is checked when the script runs
+  that point: where it can have received only whole numbers so far, it is an `integer` there. A value that may not be
+  whole and reaches an integer-only use, such as a list index, a `removeAt` position, or a repeat count, on every run
+  is a compile error, as `items[j]` after `let j = 0` and `j = j / 2`; `floor`, `round`, or `toInteger` makes it
+  whole. Where only a particular run brings such a value there, such as one arm of an `askBoolean` or a later round of
+  a loop, the use gives a warning, and the value is checked to be whole when the script runs
   ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)):
 
   ```text
@@ -2387,8 +2388,9 @@ Runtime behavior:
 - `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
   raises the same runtime error as indexing.
 - `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`. Reading an
-  element of a list that the compiler can see is certainly empty there, such as `.first` of `let xs = []` when nothing
-  is ever added to `xs`, is a compile error; a list that may be empty keeps the runtime error.
+  element of a list into which the compiler sees no element stored, such as `.first` of `let xs = []` when nothing is
+  ever added to `xs`, gives a warning, and the read is checked when the script runs; a list that may be empty keeps
+  the runtime error.
 - `add(value)`, `addAll(other)`, `remove(value)`, `clear()`, `sort()`, `shuffle()`, and `reverse()` return `null`.
   Set `remove(value)` of an absent value is a no-op: the set stays unchanged and execution continues without an error
   or warning.
