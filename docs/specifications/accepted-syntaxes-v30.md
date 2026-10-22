@@ -2375,9 +2375,8 @@ Runtime behavior:
 - `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
   raises the same runtime error as indexing.
 - `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`. Reading an
-  element of a list that the compiler sees is empty at that read, as right after `xs.clear()`, is reported at compile
-  time ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)); a list that may be empty keeps the runtime
-  error.
+  element of a list that the compiler can prove is empty at that read is a compile error
+  ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)); a list that may be empty keeps the runtime error.
 - `add(value)`, `addAll(other)`, `remove(value)`, `clear()`, `sort()`, `shuffle()`, and `reverse()` return `null`.
   Set `remove(value)` of an absent value is a no-op: the set stays unchanged and execution continues without an error
   or warning.
@@ -6361,8 +6360,8 @@ for name, toy in toys { ... }           // the keys with a copy of each value
   `T dict` is written like `T[]` and `T set`, and `dict` alone holds any values ([§13](#13-explicit-types)).
 - **Missing keys:** reading or removing a key that the dict does not have is runtime error `TSR061`, which names the
   check, such as `Dictionary has no key "collar". Check toys.contains(name) first.` A missing key that the compiler can
-  see is reported at compile time ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)):
-  `dict{ a: 1 }["b"]` is a compile error. Where a key may be missing, check `contains(key)` first or read with `get`.
+  prove is missing is a compile error ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)), as in
+  `dict{ a: 1 }["b"]`. Where a key may be missing, check `contains(key)` first or read with `get`.
   `get(key, default: value)` gives `value` for a missing key. As for a list
   ([§16](#reading-an-element-with-a-default)), its `default:` is required and has the value type or is `null`: on an
   `integer dict`, `default: 0` gives an `integer` and `default: null` an `integer?`, and on a `string[] dict`,
