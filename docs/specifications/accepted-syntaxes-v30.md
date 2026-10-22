@@ -1537,10 +1537,10 @@ can at compile time; a check when the script runs is the exception.
 The compiler gives an exact answer, a compile error or acceptance without a warning, only where it has a simple proof.
 Everywhere else it gives the warning, and the value is checked when the script runs. It never reports a compile error
 for valid code and never silently accepts code that may fail, so a compile error means that the code is certainly
-wrong, and a warning that it may go wrong. Code in which every value that can reach a use fits there compiles without
-a warning. In complex code the compiler warns more often: where conditions depend on each other, where one function is
-called with different state, or where a timer, media, or button block changes state through a function. This script
-compiles with a warning, and the copy is checked when the script runs:
+wrong, and a warning that it may go wrong. Where the compiler can prove simply that every value reaching a use fits
+there, that use compiles without a warning. In complex code the compiler warns more often: where conditions depend on
+each other, where one function is called with different state, or where a timer, media, or button block changes state
+through a function. This script compiles with a warning, and the copy is checked when the script runs:
 
 ```text
 let hasKey = askBoolean "Do you have the key?"
@@ -1573,6 +1573,9 @@ wait 5 s
 let copy = backpack
 copy.add(3)
 ```
+
+The required-check rules are not affected: a use that needs a check and has none on some route stays a compile error,
+as `n + 1` does after `let n = 1` and `if askBoolean "Clear?" { n = null }` ([narrowing](#type-tests-and-narrowing)).
 
 The compiler never hangs. It has a temporary work budget: where a place exceeds it, that place, and the checks that
 need what it would have found, are checked when the script runs, with a compiler warning there. Every other use, also

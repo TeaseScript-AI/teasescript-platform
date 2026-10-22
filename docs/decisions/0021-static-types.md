@@ -104,7 +104,8 @@ can simply prove one, and otherwise a warning with a check when the script runs.
     the code is certainly wrong, and a warning that it may go wrong. A run that makes a value unfit for a later use is
     an error only where the run can really happen and the compiler proves it simply, as when every run that reaches the
     use makes the value unfit; a failure that needs a particular answer, a button pressed during a `wait`, or a later
-    round of a loop, or that depends on conditions that exclude each other, is warned.
+    round of a loop, or that depends on conditions that exclude each other, is warned. The required-check rules stay:
+    a use that needs a check and has none on some route is an error (rules 1.9 and 5.6).
     The temporary work budget follows this rule: a place over it, and the checks that need what it would have found, are
     checked when the script runs, with a warning there; every other use, also of the same variable or function, stays
     checked at compile time, and a known violation stays an error. A limit of the compiler is thus never reported as
