@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Decision source:** Owner decisions in issues #504 and #536 (dicts) (2026-10-04); §6: Owner decision, 2026-10-07; the
-rules for the new type checker (O4): Owner decisions of 2026-10-19, 2026-10-20, and 2026-10-21
+rules for the new type checker (O4): Owner decisions of 2026-10-19 to 2026-10-22
 
 The current compiler and runtime still apply the rules this file held before the O4 decisions until the compiler
 switches to the new type checker, as V30's transition note says.
@@ -290,6 +290,9 @@ union would be an inferred union (rule 3.4).
   error for `function shake(times = 1)`, although an integer becomes a number where that is needed.
 - The button values of an `askChoice` in its answer's type, known until the variable changes (the earlier V30 §19
   rule): it carried literal value sets through the type system for one warning.
+- An `integer` from `pow` for an `integer` base and a whole exponent of at least 0 that the compiler can see (the
+  earlier V30 §13 rule): it needed the exponent's value followed through variables. `pow` returns a `number`, as in
+  Java, C#, Swift, Kotlin, and Go, and `round`, `floor`, or `ceil` makes it whole.
 - Typing computed keys by prefix, such as `"toys.${id}"`: prefixes overlap, so a family needs its own explicit form.
 - Typing a computed-key load by its default: it gives data the compiler cannot know a fixed type.
 - Widening an inferred `integer` place to `number` for a non-whole value from data the compiler cannot know: every

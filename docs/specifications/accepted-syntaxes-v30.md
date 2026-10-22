@@ -1926,7 +1926,7 @@ short step that locks or opens is not interrupted; a due block runs once it is d
 or password field never becomes a script value.
 
 ### Numeric functions
-**Status:** Accepted (Owner decision, 2026-10-07)
+**Status:** Accepted (Owner decision, 2026-10-07; `pow` always returns a `number`: Owner decision, 2026-10-22)
 
 These functions take numbers and return a number:
 
@@ -1950,10 +1950,9 @@ round(2.675, decimals: 2)        // 2.68
 round(pi * 2 * 2, decimals: 2)   // 12.57
 ```
 
-- `abs`, `mod`, and `clamp` return an `integer` when every argument is one, and `sign` always does. `sqrt` and
-  `round(value, decimals: n)` return a `number`, also when the result is whole. `pow` returns an `integer` when its base
-  is an `integer` and its exponent a whole number of at least 0 that the compiler can see, as in `pow(side, 2)`, and a
-  `number` otherwise. `round`, `floor`, or `ceil` makes another result whole.
+- `abs`, `mod`, and `clamp` return an `integer` when every argument is one, and `sign` always does. `sqrt`, `pow`, and
+  `round(value, decimals: n)` return a `number`, also when the result is whole. `round`, `floor`, or `ceil` makes
+  another result whole, as in `round(pow(side, 2))`.
 - `round(value, decimals: n)` rounds the number as it is written, a half away from zero, to `n` decimal places, a whole
   number of at least 0: `round(2.675, decimals: 2)` is `2.68`, although the nearest binary number to 2.675 lies slightly
   below it. Without `decimals:`, `round` returns an `integer` as described above.
