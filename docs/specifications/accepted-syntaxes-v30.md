@@ -56,9 +56,10 @@ This table is generated from the current section order.
 **Type rules ahead of the compiler (owner decision, 2026-10-19):** the type rules decided for the new type checker (O4)
 are written in this document: [§8](#regexes), [§11](#11-function-definitions), [§12](#12-variable-declarations),
 [§13](#13-explicit-types), [§15](#15-objects), [§16](#16-lists), [§17](#17-return-statements),
-[§18](#18-null-and-optional-values), [§25](#25-persistent-storage-and-keys), [§32](#32-switch-statements),
-[§33](#stored-files), [§34](#34-runtime-warnings-and-recoverable-values), and [§40](#40-dictionaries). The current
-compiler and runtime still apply the earlier rules until the compiler switches to that checker.
+[§18](#18-null-and-optional-values), [§19](#19-choices), [§25](#25-persistent-storage-and-keys),
+[§32](#32-switch-statements), [§33](#stored-files), [§34](#34-runtime-warnings-and-recoverable-values), and
+[§40](#40-dictionaries). The current compiler and runtime still apply the earlier rules until the compiler switches to
+that checker.
 
 ## Delimiter roles
 **Status:** Accepted
@@ -1046,20 +1047,17 @@ Rules:
 - Default values use `name = value`.
 - Required parameters must come before parameters with defaults.
 - An annotated parameter keeps its type; every argument and default must fit it.
-- A parameter with a default but no annotation takes the default's type by the same rule as `let`
-  ([§12](#12-variable-declarations)): with `times = 1`, `times` is an `integer`, and a call that passes `0.5` is a compile
-  error that suggests `times: number = 1`. Only an assignment in the body can make it a `number`, by the §12 rule for
-  non-whole numbers.
-- A parameter whose default leaves its type open, `= null` or `= []`, is treated like one without an annotation or a
-  default (below), and an omitted argument counts as the default. The default is checked once, at the function,
-  against what the body needs: `function shout(name = null) { say name.length }` is a compile error in the function,
-  not at each `shout()`.
-- A parameter without an annotation or a default needs no type. The compiler works out once, from the body, what the
-  function requires of each such parameter, what it returns, and what it changes, and checks every call against
-  that. The calls are never combined into one parameter type: inside each call's use of the body, the parameter and the
-  variables that depend on it follow [§12](#12-variable-declarations) for that call's arguments. Where the compiler
-  cannot show that a call fits, such as whether `x / 4` is an integer, the call compiles and the value is checked when
-  the script runs:
+- A parameter without an annotation needs no type, also when it has a default. A default is only the value used when
+  the argument is omitted: an omitted argument counts as the default, and the default is checked once, at the
+  function, against what the body needs, so `function shout(name = null) { say name.length }` is a compile error in the
+  function, not at each `shout()`.
+- The compiler works out once, from the body, what the function requires of each parameter without an annotation, what
+  it returns, and what it changes, and checks every call against that. Each call types such a parameter from its
+  argument, a `null` argument included, and the calls are never combined into one parameter type: inside each call's
+  use of the body, the parameter and the variables that depend on it follow [§12](#12-variable-declarations) for that
+  call's arguments. With `function shake(times = 1)`, `shake(0.5)` is valid, and `times` is a `number` in that call.
+  Where the compiler cannot show that a call fits, such as whether `x / 4` is an integer, the call compiles and the
+  value is checked when the script runs:
 
   ```text
   function dec(x) {
@@ -1155,22 +1153,29 @@ picks.add("three")    // compile error
   check or `otherwise`. The compiler infers no other combination of types.
 - A variable without a type whose type is `integer` is a `number` when any of its assignments can store a non-whole
   number, wherever that assignment is. The elements and properties inside such a variable widen by the same rule. A
-  declared type, such as `integer`, `integer[]`, or `integer set`, stays strict, and an integer-only use of a widened
-  value, such as a list index, `removeAt`, or a repeat count, is a compile error:
+  declared type, such as `integer`, `integer[]`, or `integer set`, stays strict. A read sees what the variable holds at
+  that point: where it can have received only whole numbers so far, it is an `integer` there. An integer-only use,
+  such as a list index, a `removeAt` position, or a repeat count, of a value that the code shows may not be whole is a
+  compile error; `floor`, `round`, or `toInteger` makes it whole. In a loop, a store in a later round counts too: a use
+  in the body before such a store gives a warning, and the value is checked when the script runs
+  ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)):
 
   ```text
   let speed = 1
-  speed = speed * 1.5   // speed is a number, also on the lines above
+  speed = speed * 1.5   // speed is a number from here on
   let count = 0
   count += 1            // count stays an integer
   let i = 0
-  i = i / 2             // i is a number, so items[i] is a compile error
+  say items[i]          // valid: i holds only whole numbers here
+  i = i / 2             // i may not be whole from here on, so a later items[i] is a compile error
   let prices = [1, 2]
   prices.add(2.5)       // prices is a number[]
   ```
 
 - An empty list or set takes its element type from the first element added or assigned. In a list or set literal,
-  integers and numbers together are numbers, and `null` elements make the element type optional.
+  integers and numbers together are numbers, and `null` elements make the element type optional. Elements of different
+  types are a compile error that names the union to declare ([§13](#union-types)), and the earliest element's type
+  counts for the later uses, as with a store of another type (below).
 - A place without a written type takes its type from its declaration's start value when that value settles it, and
   otherwise from the earliest value stored into it in source order: the files in project order, `main.tease` first and
   then the others by path, each from top to bottom, wherever the store is, also in a function body or in a timer,
@@ -1179,12 +1184,13 @@ picks.add("three")    // compile error
 - A store of another type is a compile error at that store. It names the line and the type that decided the place, for
   a variable that started without a type also its declaration, and it suggests a written union. The place keeps its
   type: the compiler ignores the rejected value, and later uses are checked against the decided type.
-- The decided type holds wherever the place is read, also before the value that decided it, such as in a function body
-  or in another file. A copy is a new value: `let b = a`, `a.toSet()`, or a property read into a variable starts with
-  what the source holds at that moment and then takes its type from its own stores, so after `let a = []` and
-  `let b = a`, both `b.add(1)` and `a.add("s")` are valid. A copy of a source with contents carries them: after
-  `let a = [1]` and `let b = a`, `b.add("s")` is a compile error, as after `let b = [1]`. A copy of a variable with a
-  written type keeps that type: after `let a: integer | string = 1` and `let b = a`, `b = "text"` is valid.
+- The decided type holds wherever the place is used, also before the value that decided it, such as in a function body
+  or in another file. A read inside an expression sees the value at that point of evaluation, as the runtime does. A
+  copy is a new value: `let b = a`, `a.toSet()`, or a property read into a variable starts with what the source holds
+  at that moment and then takes its type from its own stores, so after `let a = []` and `let b = a`, both `b.add(1)`
+  and `a.add("s")` are valid. A copy of a source with contents carries them: after `let a = [1]` and `let b = a`,
+  `b.add("s")` is a compile error, as after `let b = [1]`. A copy of a variable with a written type keeps that type:
+  after `let a: integer | string = 1` and `let b = a`, `b = "text"` is valid.
 - A value whose type the compiler cannot know, such as untyped storage or host data, decides nothing and is not
   rejected at compile time. Where a place of known type takes it, also through a place that no other value decided,
   such as `let box = { t: null }` set only from such a value, it is checked when it runs.
@@ -1203,6 +1209,13 @@ picks.add("three")    // compile error
   The warning names the source of the unknown value. When that source is not such a `load`, as for host data,
   `fromJson(…, default: null)`, or a computed key, it names that source instead and advises only a written type for
   the place.
+- A value stored into a place may read a part of that place, and the read sees the part as it is before the store:
+  after `let state = { n: "s", divisor: null }`, `state = { n: hostValue / state.divisor, divisor: 4 }` divides by the
+  `null` that `divisor` still holds, which is a compile error. Where the value comes from a function that reads a part
+  of the place that no earlier value decided, as in `state = rebuild()` when `rebuild` reads `state.divisor`, the
+  compiler cannot settle that part before the store: the store is accepted, the compiler warns, and the value is
+  checked when it runs. The warning advises writing a type on the place, one type or a union, such as
+  `let score: number? = null`, so that the compiler has more to go on.
 
 ### Global variables
 
@@ -1482,6 +1495,8 @@ let level: integer = saved   // valid: saved is an integer here
 - Code that may run and a loop's start never drop a check on a constant or on a path inside one
   ([§12](#constants)), since nothing assigns a constant or changes its ordinary value. A path that goes through a
   speaker or a handle is the exception: after `const p = player`, a timer can still change `p.mood`.
+- Inside a [`noInterrupts` block](#nointerrupts-blocks), a timer, media, or button block cannot drop a check, because
+  it waits until the block ends; the other causes above still apply.
 - At the start of a loop, the compiler accounts for both the values from before the loop and the values an earlier
   round left, and repeats this until what it knows no longer changes. A write in the loop body drops a check only when
   the written value can make the check false.
@@ -1494,7 +1509,8 @@ let level: integer = saved   // valid: saved is an integer here
   function in between, or an analysis limit, compiles with a compiler warning at that use, and the value is checked
   there when the script runs; a failed check reports that use. The check uses the value just read and does not
   evaluate the expression again. This holds for plain variables too: a check that a timer, media, or button block may
-  undo during a `say`, `wait`, or interaction gives the warning and the check when the script runs.
+  undo during a `say`, `wait`, or interaction gives the warning and the check when the script runs. Once
+  `noInterrupts` blocks are implemented, that warning also suggests putting the code in one.
 - Narrowing never creates a property, widens a declared type, or proves that an index or key exists: the
   missing-property, missing-key, and bounds rules still apply. A null check is not a key check; use `contains` or
   `get` ([§40](#40-dictionaries)).
@@ -1509,7 +1525,7 @@ if box.n != null {
 ```
 
 ### Compile errors, warnings, and checks when the script runs
-**Status:** Accepted (owner decisions, 2026-10-19)
+**Status:** Accepted (owner decisions, 2026-10-19 and 2026-10-21)
 
 Valid code always compiles. Valid code meets the language's syntax, type, and required-check rules, and a compile
 error names a violation of one of them, such as a value that may be `null` used without any check. Where the compiler
@@ -1518,9 +1534,52 @@ the check moves to the runtime: the code compiles, the value is checked there wh
 gives a warning that names the place and says how to let the compiler check it now. The compiler catches as much as it
 can at compile time; a check when the script runs is the exception.
 
-The compiler has a temporary work budget. Where a place exceeds it, that place, and the checks that need what it would
-have found, are checked when the script runs, with a compiler warning there. Every other use, also of the same variable
-or function, is still checked at compile time, and a known violation of a rule stays a compile error.
+The compiler gives an exact answer, a compile error or acceptance without a warning, only where it has a simple proof.
+Everywhere else it gives the warning, and the value is checked when the script runs. It never reports a compile error
+for valid code and never silently accepts code that may fail, so a compile error means that the code is certainly
+wrong, and a warning that it may go wrong. Code in which every value that can reach a use fits there compiles without
+a warning. In complex code the compiler warns more often: where conditions depend on each other, where one function is
+called with different state, or where a timer, media, or button block changes state through a function. This script
+compiles with a warning, and the copy is checked when the script runs:
+
+```text
+let hasKey = askBoolean "Do you have the key?"
+let backpack = []
+if hasKey {
+    backpack.add("key")
+}
+if not hasKey {
+    let copy = backpack
+    copy.add(3)
+}
+```
+
+No run both adds the key and makes the copy, but the compiler does not follow that `not hasKey` excludes `hasKey`, so
+it warns instead of giving a false error.
+
+A value that a run makes unfit for a later use, through branches, calls, or buttons, is a compile error only where that
+run can really happen, never for a path that exists only in the compiler's analysis, and only where the compiler can
+prove the run simply. When every run that reaches the use makes the value unfit, as after an unconditional
+`backpack.add("key")` before `let copy = backpack`, `copy.add(3)` is a compile error. A failure that needs a particular
+run, such as one answer to an `askBoolean`, a button pressed during a `wait`, or the second round of a `repeat`, gives
+the warning. Here the copy is checked when the script runs:
+
+```text
+let backpack = []
+showPermanentButton "Take the key" {
+    backpack.add("key")
+}
+wait 5 s
+let copy = backpack
+copy.add(3)
+```
+
+The compiler never hangs. It has a temporary work budget: where a place exceeds it, that place, and the checks that
+need what it would have found, are checked when the script runs, with a compiler warning there. Every other use, also
+of the same variable or function, is still checked at compile time, and a known violation of a rule stays a compile
+error. A shape that is very unrealistic for a real script, now or in the future, stops with a compile error instead,
+the one case in which code that meets the rules does not compile; the limit leaves generous room above realistic
+scripts, also larger future ones.
 
 ### Implicit conversions
 
@@ -2549,11 +2608,14 @@ function calculateDamage(
 `void` is not required for functions without a returned value.
 
 A function's result type comes from its `return` values, so callers keep it like any other value
-([§12](#12-variable-declarations)). Integers and numbers together give a `number`. Returns of different types are a
-compile error that names both. A function that can end without returning a value, by reaching its end or through a
-bare `return`, returns `null` there, so its result may be `null`. A returned value that depends on a parameter without
-a type follows each call ([§11](#11-function-definitions)): `id(1)` is an integer and `id("a")` text. A returned value
-of unknown type, such as stored data, makes the result unknown; the other returned values must still agree.
+([§12](#12-variable-declarations)). A recursive call has that result type too: with
+`function countdown(n: integer) { if n == 0 { return 1 } return countdown(n - 1) }`, the result is an `integer`, so
+`countdown(3).length` is a compile error. Integers and numbers together give a `number`. Returns of different types
+are a compile error that names both. A function that can end without returning a value, by reaching its end or
+through a bare `return`, returns `null` there, so its result may be `null`. A returned value that depends on a
+parameter without a type follows each call ([§11](#11-function-definitions)): `id(1)` is an integer and `id("a")`
+text. A returned value of unknown type, such as stored data, makes the result unknown; the other returned values must
+still agree.
 
 With a return-type annotation, every returned value must fit the annotation, and a function that can end without a
 value needs an optional result type such as `number?`.
@@ -2737,14 +2799,15 @@ Rules:
   let other = askChoice "None", [5, 10]                      // compile error: declare 'let other: string | integer'
   ```
 
-- When the source shows every button's value, the result is known to be one of them until the variable is assigned
-  again or a call or suspension may change it ([ADR 0021](../decisions/0021-static-types.md) rule 5.5), and comparing
-  it with a value that no button returns, also as a literal `case` value ([§32](#32-switch-statements)), is a compiler
-  warning:
+- Comparing the answer of a compact `askChoice` whose button values are all written in it with a value that no button
+  returns, also as a literal `case` value ([§32](#32-switch-statements)), is a compiler warning. This is a simple check
+  apart from the types. It covers `switch askChoice ...` and a variable that only ever holds such answers. With several
+  such `askChoice` assignments to one variable, the values are those of all their buttons, wherever the comparison
+  stands; any other assignment to the variable ends the check for it:
 
   ```text
   let answer = askChoice "spank", "lines"
-  if answer == "Open" { ... }   // warning: 'answer' is always "spank" or "lines" here
+  if answer == "Open" { ... }   // warning: 'answer' is always "spank" or "lines"
   ```
 
 - The elements of a list option are values or choice objects, not lists or sets.
@@ -4770,7 +4833,7 @@ function describe(answer: integer | string?) {
     range on text.
 - Compile warnings: a case that can never match because of what the switched value can hold, such as a type case that
   no value left by the cases above passes, `case 5` after `case is integer`, or `case "maybe"` on an `askChoice` that
-  only returns `"yes"` or `"no"`.
+  only returns `"yes"` or `"no"` ([§19](#19-choices)).
 
 ## 33. Browser API: file, folder, camera, and URL references
 **Status:** Accepted

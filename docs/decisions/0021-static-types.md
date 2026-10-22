@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Decision source:** Owner decisions in issues #504 and #536 (dicts) (2026-10-04); §6: Owner decision, 2026-10-07; the
-rules for the new type checker (O4): Owner decisions of 2026-10-19 and 2026-10-20
+rules for the new type checker (O4): Owner decisions of 2026-10-19, 2026-10-20, and 2026-10-21
 
 The current compiler and runtime still apply the rules this file held before the O4 decisions until the compiler
 switches to the new type checker, as V30's transition note says.
@@ -19,8 +19,9 @@ programming error it can see and explains it in plain language with the concrete
 the compiler cannot know. Experienced authors may opt into union types, type tests, and narrowing.
 
 In October 2026 the Owner simplified the rules for a new type checker: object properties come from their literal, no
-union holds a whole collection, a fallback has the type it stands in for, and each place keeps the type its earliest
-value in source order settles, whatever order the checker meets the code in.
+union holds a whole collection, a fallback has the type it stands in for, each place keeps the type its earliest value
+in source order settles, whatever order the checker meets the code in, and the compiler gives an error only where it
+can simply prove one, and otherwise a warning with a check when the script runs.
 
 ## Decision
 
@@ -32,24 +33,27 @@ value in source order settles, whatever order the checker meets the code in.
    collection settle nothing. Rule 2 widens an `integer` to a `number` where no type is written. Storing a value of
    another type is a compile error at that store that names the line that decided the type and suggests a written
    union. The compiler ignores the rejected value, so later uses are checked against the decided type and one mistake
-   gives one error. The decided type holds wherever the place is read, also before the value that decided it.
+   gives one error. The decided type holds wherever the place is used, also before the value that decided it, and a
+   read inside an expression sees the value at that point of evaluation, as the runtime does.
 2. `let x = null` without a type takes the type `T?` of the earliest non-null value stored into it. A different non-null
    type is an error that names both places. This is the ordinary rule applied to the first real value, not a general
    union inference. Storing `null` later also makes a place optional: after `let count = 1`, `count = null` makes
-   `count` an `integer?`. A variable without a type annotation (declared by `let`, as a parameter with a default, or
-   as a loop variable) whose type is `integer` is likewise inferred from all its assignments: it is a `number` when any
-   of them can store a non-whole number, wherever that assignment is. With `let speed = 1` and
-   `speed = speed * 1.5`, `speed` is a `number`; with `let count = 0` and `count += 1`, `count` stays an `integer`. The
-   elements and properties inside such a variable widen by the same rule: with `let prices = [1, 2]` and
-   `prices.add(2.5)`, `prices` is a `number[]`, and `hero.score = 2.5` after `let hero = { score: 0 }` is valid. A
-   declared type stays strict, such as `integer`, `integer[]`, or `integer set`, and an integer-only use of a widened
-   value, such as a list index, `removeAt`, or a repeat count, is a compile error.
+   `count` an `integer?`. A variable without a type annotation (declared by `let` or as a loop variable) whose type is
+   `integer` is likewise inferred from all its assignments: it is a `number` when any of them can store a non-whole
+   number, wherever that assignment is. With `let speed = 1` and `speed = speed * 1.5`, `speed` is a `number`; with
+   `let count = 0` and `count += 1`, `count` stays an `integer`. The elements and properties inside such a variable
+   widen by the same rule: with `let prices = [1, 2]` and `prices.add(2.5)`, `prices` is a `number[]`, and
+   `hero.score = 2.5` after `let hero = { score: 0 }` is valid. A declared type stays strict, such as `integer`,
+   `integer[]`, or `integer set`. A read sees what the variable holds at that point: after `let i = 0`, `items[i]`
+   before `i = i / 2` is valid, because `i` can have received only whole numbers there. An integer-only use, such as a
+   list index, a `removeAt` position, or a repeat count, of a value that the code shows may not be whole is a compile
+   error; in a loop, a store in a later round counts too, and a use before it in the body is warned (rule 1.10).
 3. An empty list or set takes its element type from the earliest element added or assigned. A list or set literal has
    one element type: integers and numbers together are numbers, and `null` elements make it optional. Elements of
-   different types are an error that points to a declared union such as `(string | number)[]`. The values of a dict
-   follow the same rules. A copy is a new value: `let b = a` starts with what `a` holds at that moment, so a copy of a
-   list with elements carries their type, and then takes its type from its own stores; a copy of a variable with a
-   written type keeps that type (V30 §12).
+   different types are an error that points to a declared union such as `(string | number)[]`, and the earliest
+   element's type counts for later uses. The values of a dict follow the same rules. A copy is a new value:
+   `let b = a` starts with what `a` holds at that moment, so a copy of a list with elements carries their type, and
+   then takes its type from its own stores; a copy of a variable with a written type keeps that type (V30 §12).
 4. An object property behaves like a variable: the object literal declares it once with a start value, and it keeps a
    type by rule 1.1. Storing a property that the literal lacks is a compile error that points to the literal, or to a
    dict for names known only when the script runs; `null` in the literal means "not known yet". Objects with different
@@ -57,16 +61,15 @@ value in source order settles, whatever order the checker meets the code in.
    store never adds a property. The compiler keeps, per property, whether it is certainly or only maybe present.
    Speakers keep their own rule (V30 §37). Fixed names give every property a type from its literal, as a declaration
    gives a variable one, and turn a misspelt property into an error at the store.
-5. A function's result type comes from its `return` values by rule 1.1; a return of another type is an error that
-   names both. A function that can end without returning a value has an optional result. Annotated parameters and
-   result types, written `function f(x: T): R`, are checked. An unannotated parameter with a default takes the
-   default's type by exactly the `let` rule, so `times = 1` is an `integer`, unless an assignment in the body widens it
-   by rule 2. A parameter without an annotation or a default, or with a default that leaves its type open (`= null`,
-   `= []`), needs no type: the compiler works out once, from the body, what the function requires of it, returns, and
-   changes, and checks every call against that. Calls are never combined into one parameter type, an omitted argument
-   counts as the default, and the default is checked once, at the function. Where the compiler cannot show that a call
-   fits, the value is checked when the script runs. A returned value of unknown type makes the result unknown; the
-   known returned values must still agree.
+5. A function's result type comes from its `return` values by rule 1.1, also through a recursive call; a return of
+   another type is an error that names both. A function that can end without returning a value has an optional
+   result. Annotated parameters and result types, written `function f(x: T): R`, are checked. A parameter without an
+   annotation needs no type, also when it has a default: the compiler works out once, from the body, what the function
+   requires of it, returns, and changes, and checks every call against that. Each call types the parameter from its
+   argument, a `null` argument included, so `shake(0.5)` is valid for `function shake(times = 1)`; calls are never
+   combined into one parameter type. A default is only the value used for an omitted argument, and it is checked once,
+   at the function. Where the compiler cannot show that a call fits, the value is checked when the script runs. A
+   returned value of unknown type makes the result unknown; the known returned values must still agree.
 6. "Earliest" is source order: the files in project order, `main.tease` first and then the others by path, each from
    top to bottom, wherever the store is, also in a function body or a timer, media, or button block. A declaration's
    start value comes before every other store into its place. Source order, never the order in which the compiler
@@ -75,7 +78,10 @@ value in source order settles, whatever order the checker meets the code in.
    decides nothing and is not rejected at compile time. When it is stored in a place of known type, it is checked at
    runtime with a source-located error. A place with a written type, or a type decided earlier in the source, still
    rejects at compile time a value none of whose possible types fits, as in `let y: string = x / 4`; where only a later
-   value decides the type, the compiler warns and the value is checked when it runs.
+   value decides the type, the compiler warns and the value is checked when it runs. The same holds for a store whose
+   value comes from a function that reads a part of the same place that no earlier value decided, and the warning
+   advises a written type on the place, one type or a union. Read directly in the stored value, the part is read as
+   it is before the store (rule 1.1).
 8. Operations are checked by the same principle: an operator, condition, index, member, or command operand of a known
    type that does not support it is a compile error, because it would fail at runtime. Type checks apply to all code,
    reachable or not. Conditions and the operands of `and`, `or`, and `not` must be `true` or `false`; there is no
@@ -93,11 +99,18 @@ value in source order settles, whatever order the checker meets the code in.
 10. Valid code always compiles: a compile error names a violation of a syntax, type, or required-check rule. Where the
     compiler cannot prove at reasonable cost that a written check still holds, or a check is impractical at compile
     time, the check moves to the runtime, and the compiler warns at that place, saying how to let the compiler check it
-    now.
+    now. The compiler gives an exact answer, an error or acceptance without a warning, only where it has a simple
+    proof, and warns everywhere else, so it never gives a false error and never accepts silently: an error means that
+    the code is certainly wrong, and a warning that it may go wrong. A run that makes a value unfit for a later use is
+    an error only where the run can really happen and the compiler proves it simply, as when every run that reaches the
+    use makes the value unfit; a failure that needs a particular answer, a button pressed during a `wait`, or a later
+    round of a loop, or that depends on conditions that exclude each other, is warned.
     The temporary work budget follows this rule: a place over it, and the checks that need what it would have found, are
     checked when the script runs, with a warning there; every other use, also of the same variable or function, stays
     checked at compile time, and a known violation stays an error. A limit of the compiler is thus never reported as
-    the author's mistake.
+    the author's mistake. The compiler never hangs: only a shape that is very unrealistic for a real script, now or in
+    the future, stops with a compile error at the compiler's limit, which leaves generous room above realistic
+    scripts.
 
 ### 2. Conversions
 
@@ -151,8 +164,10 @@ value in source order settles, whatever order the checker meets the code in.
    the test has no side effects.
 4. A right operand that is not a type is an error that explains that `is` checks a type and `==` compares values.
 5. The compiler warns about a test that is provably always true or always false, and only then. The same warning
-   covers `==` and `!=` with a value that the other side can never hold, such as an `askChoice` result compared with a
-   value no button returns (V30 §19).
+   covers `==` and `!=` with a value that the other side can never hold. Comparing the answer of a compact `askChoice`
+   whose button values are all written with a value no button returns is warned by a simple check outside the types,
+   for `switch askChoice` and for a variable that only ever holds such answers, with the buttons of all of them,
+   wherever the comparison stands (V30 §19).
 
 ### 5. Narrowing
 
@@ -169,14 +184,16 @@ value in source order settles, whatever order the checker meets the code in.
 5. A check is dropped by a change to the value, to any part of its path or to an index or key variable in it, by a
    change of a list or dict in the path, by a write through any reference to the same speaker, and by code that may run
    and change the path: a call, `say`, `wait`, an interaction, a storage write, a timer or media command or property
-   write, also through a local that a block shares and assigns (ADR 0024). Where the compiler cannot tell what code
+   write, also through a local that a block shares and assigns (ADR 0024). Inside a `noInterrupts` block (V30 §27),
+   timer, media, and button blocks wait until it ends and drop no check. Where the compiler cannot tell what code
    changes, it assumes it may. A loop's start joins the facts on entry with those at the end of the body until they no
    longer change, and a write in the body drops a fact only when the written value can break it. A function or handler
    body does not inherit the checks of the code around it.
 6. A use that needs a check is a compile error when some route to it has none, or when the compiler proves it invalid.
    A check on every route that the compiler cannot keep, because of a computed index, a possible write by a timer,
    media, or button block or a function in between, or an analysis limit, gives a compiler warning at that use and a
-   check there when the script runs (rule 1.10); this holds for plain variables too.
+   check there when the script runs (rule 1.10); this holds for plain variables too. Once `noInterrupts` blocks are
+   implemented, a warning about a timer, media, or button block also suggests one.
 
 ### 6. Storage keys
 
@@ -257,8 +274,20 @@ union would be an inferred union (rule 3.4).
 - An error or a warning for a JSON object default's `null` property: its only fix, such as `nick: ""`, turns "not set"
   into empty text, because a property's type cannot be written; if that pinches, the remedy is syntax for a type at a
   `null`.
-- A compile error for a place over the work budget, or for a written check the compiler cannot keep: it rejects valid
-  code for a limit of the compiler.
+- A compile error for a place over the work budget in a realistic script, or for a written check the compiler cannot
+  keep: it rejects valid code for a limit of the compiler.
+- A compile error for code that may go wrong, as mypy gives: clear at first sight, but a false error confuses beginners
+  most, and an error should always mean that the code is certainly wrong.
+- Exact answers everywhere through an ever more precise analysis: its plan reviews kept finding new blockers of the
+  same kinds, so precision comes one rule at a time instead.
+- A compile error for a store that reads its own place through a function: it needs another representation, with
+  symbolic obligations, and a further design round.
+- Accepting a value that may not be whole at an integer-only use, with a check when the script runs as in Lua, or with
+  a warning: `items[score / 2]` would fail only when `score` is odd.
+- A parameter typed from its default, as a `let` is from its start value (the earlier rule 1.5): `shake(0.5)` was an
+  error for `function shake(times = 1)`, although an integer becomes a number where that is needed.
+- The button values of an `askChoice` in its answer's type, known until the variable changes (the earlier V30 §19
+  rule): it carried literal value sets through the type system for one warning.
 - Typing computed keys by prefix, such as `"toys.${id}"`: prefixes overlap, so a family needs its own explicit form.
 - Typing a computed-key load by its default: it gives data the compiler cannot know a fixed type.
 - Widening an inferred `integer` place to `number` for a non-whole value from data the compiler cannot know: every
