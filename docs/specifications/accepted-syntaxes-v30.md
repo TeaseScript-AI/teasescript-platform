@@ -1155,10 +1155,11 @@ picks.add("three")    // compile error
   number, wherever that assignment is. The elements and properties inside such a variable widen by the same rule. A
   declared type, such as `integer`, `integer[]`, or `integer set`, stays strict. A read sees what the variable holds at
   that point: where it can have received only whole numbers so far, it is an `integer` there. A value that may not be
-  whole and reaches an integer-only use, such as a list index, a `removeAt` position, or a repeat count, on every run
-  is a compile error, as `items[j]` after `let j = 0` and `j = j / 2`; `floor`, `round`, or `toInteger` makes it
-  whole. Where only a particular run brings such a value there, such as one arm of an `askBoolean` or a later round of
-  a loop, the use gives a warning, and the value is checked to be whole when the script runs
+  whole at an integer-only use, such as a list index, a `removeAt` position, or a repeat count, is a compile error where
+  the compiler has a simple proof that every run reaching the use brings such a value, as `items[j]` after `let j = 0`
+  and `j = j / 2`; `floor`, `round`, or `toInteger` makes it whole. Without such a proof, as where only a particular run
+  brings such a value there, such as one arm of an `askBoolean` or a later round of a loop, or where a called function
+  stores it, the use gives a warning, and the value is checked to be whole when the script runs
   ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)):
 
   ```text
@@ -1171,6 +1172,10 @@ picks.add("three")    // compile error
   i = i / 2             // i may not be whole from here on, so a later items[i] is a compile error
   let prices = [1, 2]
   prices.add(2.5)       // prices is a number[]
+  let n = 1
+  function reset() { n = 1.5 }
+  reset()
+  repeat n { say "Round" }   // warning, and the count is checked when the script runs
   ```
 
 - An empty list or set takes its element type from the first element added or assigned. In a list or set literal,
@@ -1560,10 +1565,11 @@ it warns instead of giving a false error.
 
 A value that a run makes unfit for a later use, through branches, calls, or buttons, is a compile error only where that
 run can really happen, never for a path that exists only in the compiler's analysis, and only where the compiler can
-prove the run simply. When every run that reaches the use makes the value unfit, as after an unconditional
-`backpack.add("key")` before `let copy = backpack`, `copy.add(3)` is a compile error. A failure that needs a particular
-run, such as one answer to an `askBoolean`, a button pressed during a `wait`, or the second round of a `repeat`, gives
-the warning. Here the copy is checked when the script runs:
+prove the run simply. Where it proves simply that every run that reaches the use makes the value unfit, as after an
+unconditional `backpack.add("key")` before `let copy = backpack`, `copy.add(3)` is a compile error. A failure that needs
+a particular run, such as one answer to an `askBoolean`, a button pressed during a `wait`, or the second round of a
+`repeat`, gives the warning, and so does one that comes from a write in a called function, such as `n = 1.5` in a
+`reset()` called before `repeat n` ([§12](#12-variable-declarations)). Here the copy is checked when the script runs:
 
 ```text
 let backpack = []

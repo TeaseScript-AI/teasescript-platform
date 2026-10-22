@@ -45,10 +45,11 @@ can simply prove one, and otherwise a warning with a check when the script runs.
    widen by the same rule: with `let prices = [1, 2]` and `prices.add(2.5)`, `prices` is a `number[]`, and
    `hero.score = 2.5` after `let hero = { score: 0 }` is valid. A declared type stays strict, such as `integer`,
    `integer[]`, or `integer set`. A read sees what the variable holds at that point: after `let i = 0`, `items[i]`
-   before `i = i / 2` is valid, because `i` can have received only whole numbers there. A value that may not be whole
-   and reaches an integer-only use, such as a list index, a `removeAt` position, or a repeat count, on every run is a
-   compile error; where only a particular run brings it there, such as one arm of an `askBoolean` or a later round of
-   a loop, the use is warned and the value checked when the script runs (rule 1.10).
+   before `i = i / 2` is valid, because `i` can have received only whole numbers there. A value that may not be whole at
+   an integer-only use, such as a list index, a `removeAt` position, or a repeat count, is a compile error where the
+   compiler proves simply that every run reaching the use brings it, as `items[i]` after `i = i / 2`; without such a
+   proof, as where only a particular run brings it there, such as one arm of an `askBoolean` or a later round of a loop,
+   or where a called function stores it, the use is warned and the value checked when the script runs (rule 1.10).
 3. An empty list or set takes its element type from the earliest element added or assigned. A list or set literal has
    one element type: integers and numbers together are numbers, and `null` elements make it optional. Elements of
    different types are an error that points to a declared union such as `(string | number)[]`, and the earliest
@@ -103,10 +104,11 @@ can simply prove one, and otherwise a warning with a check when the script runs.
     now. The compiler gives an exact answer, an error or acceptance without a warning, only where it has a simple
     proof, and warns everywhere else, so it never gives a false error and never accepts silently: an error means that
     the code is certainly wrong, and a warning that it may go wrong. A run that makes a value unfit for a later use is
-    an error only where the run can really happen and the compiler proves it simply, as when every run that reaches the
-    use makes the value unfit; a failure that needs a particular answer, a button pressed during a `wait`, or a later
-    round of a loop, or that depends on conditions that exclude each other, is warned. The required-check rules stay:
-    a use that needs a check and has none on some route is an error (rules 1.9 and 5.6).
+    an error only where the run can really happen and the compiler proves it simply, as for `items[i]` after an
+    unconditional `i = i / 2` (rule 1.2); a failure that needs a particular answer, a button pressed during a `wait`, or
+    a later round of a loop, that depends on conditions that exclude each other, or that comes from a write in a called
+    function, is warned. The required-check rules stay: a use that needs a check and has none on some route is an error
+    (rules 1.9 and 5.6).
     The temporary work budget follows this rule: a place over it, and the checks that need what it would have found, are
     checked when the script runs, with a warning there; every other use, also of the same variable or function, stays
     checked at compile time, and a known violation stays an error. A limit of the compiler is thus never reported as
@@ -284,8 +286,9 @@ union would be an inferred union (rule 3.4).
   same kinds, so precision comes one rule at a time instead.
 - A compile error for a store that reads its own place through a function: it needs another representation, with
   symbolic obligations, and a further design round.
-- Accepting, at an integer-only use, a value that may not be whole on every run, with a check when the script runs as
-  in Lua, or with a warning: `items[score / 2]` would fail only when `score` is odd.
+- Accepting, at an integer-only use, a value that may not be whole where the compiler proves simply that every run
+  reaching the use brings it (rule 1.2), with a check when the script runs as in Lua, or with a warning:
+  `items[score / 2]` would fail only when `score` is odd.
 - A parameter typed from its default, as a `let` is from its start value (the earlier rule 1.5): `shake(0.5)` was an
   error for `function shake(times = 1)`, although an integer becomes a number where that is needed.
 - The button values of an `askChoice` in its answer's type, known until the variable changes (the earlier V30 §19
