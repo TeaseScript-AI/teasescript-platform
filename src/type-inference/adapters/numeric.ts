@@ -2,8 +2,8 @@ import type { ScalarTypeName } from "../../ast.js";
 import { LIST_FUNCTION_CONTRACTS } from "../../list-function-rules.js";
 import {
   NUMERIC_CONTRACTS,
-  type NumericArgument,
   type NumericFunction,
+  type NumericKind,
 } from "../../numeric-functions.js";
 import {
   ANGLE_TYPE,
@@ -40,35 +40,22 @@ import {
  */
 const scalar = (name: ScalarTypeName): StaticType => ({ kind: "scalar", name });
 
-const UNKNOWN_ARGUMENT: NumericArgument = Object.freeze({ type: "unknown", known: undefined });
-
 /** The non-null part of a type, as the legacy uses it; a value that is only null stays null. */
 function nonNullTypeForUse(type: StaticType): StaticType {
   const value = nonNullType(type);
   return value.kind === "never" ? resolved(type) : value;
 }
 
-/** What the result rule knows about an argument (`NumericArgument`): its kind when it is numeric, and its value. */
-function prepared(view: OperandView, angles: boolean): NumericArgument {
-  const known = angles
-    ? typeof view.known === "object" && view.known?.kind === "angle"
-      ? view.known.degrees
-      : undefined
-    : typeof view.known === "number"
-      ? view.known
-      : undefined;
+/** What the result rule knows about an argument: its kind when it is numeric. */
+function prepared(view: OperandView, angles: boolean): NumericKind {
   const type = closedType(view);
-  if (angles || view.dynamic !== null || type === null) return { type: "unknown", known };
+  if (angles || view.dynamic !== null || type === null) return "unknown";
   const parts = members(nonNullTypeForUse(type));
-  return {
-    type:
-      parts.length === 0 || !parts.every(isNumeric)
-        ? "unknown"
-        : parts.every((part) => isScalar(part, "integer"))
-          ? "integer"
-          : "number",
-    known,
-  };
+  return parts.length === 0 || !parts.every(isNumeric)
+    ? "unknown"
+    : parts.every((part) => isScalar(part, "integer"))
+      ? "integer"
+      : "number";
 }
 
 /** Whether a call has the arguments the function takes: its positional number, and only its named ones. */
@@ -105,11 +92,9 @@ function relation(name: string, contract: NumericFunction): OperationRelation {
         ...contract.parameters.map((_, index) => inputs.arguments[index]),
         ...named.map(([, view]) => view),
       ];
-      const run = (kinds: ReadonlyMap<number, NumericArgument>) => {
-        const read = slots.map((view, slot) =>
-          view === undefined || !shaped
-            ? UNKNOWN_ARGUMENT
-            : (kinds.get(slot) ?? prepared(view, angles)),
+      const run = (kinds: ReadonlyMap<number, NumericKind>) => {
+        const read = slots.map((view, slot): NumericKind =>
+          view === undefined || !shaped ? "unknown" : (kinds.get(slot) ?? prepared(view, angles)),
         );
         const positional = read.slice(0, contract.parameters.length);
         const byName = Object.fromEntries(
@@ -132,12 +117,9 @@ function relation(name: string, contract: NumericFunction): OperationRelation {
       const results: StaticType[] = [];
       for (let combination = 0; combination < 2 ** dynamic.length; combination += 1) {
         const kinds = new Map(
-          dynamic.map(({ slot }, index): [number, NumericArgument] => [
+          dynamic.map(({ slot }, index): [number, NumericKind] => [
             slot,
-            {
-              type: NUMERIC_KINDS[(combination >> (dynamic.length - 1 - index)) & 1]!,
-              known: undefined,
-            },
+            NUMERIC_KINDS[(combination >> (dynamic.length - 1 - index)) & 1]!,
           ]),
         );
         const result = run(kinds);

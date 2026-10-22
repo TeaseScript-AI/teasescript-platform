@@ -1,5 +1,4 @@
 import type { StaticType } from "../../static-types.js";
-import type { KnownValue } from "../../static-evaluation.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { ContractRef, DynamicWhy, PlaceId, ProjectionStep, SyntaxEvidence } from "../graph.js";
 
@@ -16,13 +15,11 @@ export type OperandRef =
 /**
  * What the solver knows of an operand so far. `alternatives` lists the types the operand may have, as the solver has
  * them now (closed types, no open slots); `null` means no evidence yet (bottom), which is not a value. `dynamic` says
- * why the operand may hold data the compiler cannot know, beside any alternatives; `known` is its value from the
- * shared fold, when the contract's result depends on it.
+ * why the operand may hold data the compiler cannot know, beside any alternatives.
  */
 export interface OperandView {
   readonly alternatives: readonly StaticType[] | null;
   readonly dynamic: DynamicWhy | null;
-  readonly known: KnownValue | undefined;
 }
 
 export interface OperationInputs {

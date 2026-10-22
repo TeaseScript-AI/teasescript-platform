@@ -170,27 +170,19 @@ export function legacyOperation(
   };
 }
 
-/** A closed view: the alternatives of a type, nothing dynamic, no known value. */
+/** A closed view: the alternatives of a type, nothing dynamic. */
 export function closedView(type: StaticType): OperandView {
-  return { alternatives: members(type), dynamic: null, known: undefined };
+  return { alternatives: members(type), dynamic: null };
 }
 
 export function dynamicView(
   why: DynamicWhy,
   alternatives: readonly StaticType[] = [],
 ): OperandView {
-  return {
-    alternatives: alternatives.length === 0 ? null : alternatives,
-    dynamic: why,
-    known: undefined,
-  };
+  return { alternatives: alternatives.length === 0 ? null : alternatives, dynamic: why };
 }
 
-export const BOTTOM_VIEW: OperandView = Object.freeze({
-  alternatives: null,
-  dynamic: null,
-  known: undefined,
-});
+export const BOTTOM_VIEW: OperandView = Object.freeze({ alternatives: null, dynamic: null });
 
 export function inputsOf(parts: {
   readonly receiver?: OperandView;

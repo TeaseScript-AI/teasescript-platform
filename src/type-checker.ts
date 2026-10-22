@@ -6796,7 +6796,12 @@ export class TypeChecker {
         this.#report(typeCode.invalidOperand, result.failure, expression.span);
     }
     const result =
-      typeof numeric.result === "function" ? numeric.result(inputs, named) : numeric.result;
+      typeof numeric.result === "function"
+        ? numeric.result(
+            inputs.map((one) => one.type),
+            Object.fromEntries(Object.entries(named).map(([key, one]) => [key, one.type])),
+          )
+        : numeric.result;
     switch (result) {
       case "integer":
         return INTEGER_TYPE;

@@ -63,7 +63,7 @@ export function isBottom(view: OperandView): boolean {
 /** A view restricted to the alternatives of one kind, as the solver restricts a receiver for a `byReceiver` case. */
 export function restrictedTo(view: OperandView, kind: ValueKind): OperandView {
   const kept = viewMembers(view).filter((member) => valueKindOfType(member) === kind);
-  return { alternatives: kept, dynamic: view.dynamic, known: view.known };
+  return { alternatives: kept, dynamic: view.dynamic };
 }
 
 export const INVALID: OperationResult = Object.freeze({ kind: "invalid" });

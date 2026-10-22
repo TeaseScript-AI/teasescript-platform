@@ -35,7 +35,7 @@ import { OPERANDS } from "./helpers/adapter-operands.js";
 /**
  * Parity of the numeric functions and of the value form of `min` and `max` with the legacy checker (work note §5.3,
  * §5.3.1, §6.3): each function with each argument over an operand of every kind of the registry and the compound
- * shapes, the shapes of a call, known values, the named argument, the domains the checker sees, the bounded results
+ * shapes, the shapes of a call, the named argument, the domains the checker sees, the bounded results
  * of an input the compiler cannot know, and `min` of every pair of the kinds it orders and of the others.
  */
 function relation(family: "numeric" | "listFunction", name: string) {
@@ -53,12 +53,6 @@ const NUMBER = closedView(NUMBER_TYPE);
 const TEXT = closedView(STRING_TYPE);
 const ANGLE = closedView(ANGLE_TYPE);
 const HOST = dynamicView("host");
-/** A view whose value the fold knows, as a literal's. */
-const known = (type: StaticType, value: number): OperandView => ({
-  alternatives: [type],
-  dynamic: null,
-  known: value,
-});
 
 /** A bounded case: the legacy's unknown, the declared possibilities, and the dynamic input's provenance. */
 function assertBounded(
@@ -123,8 +117,7 @@ const FUNCTIONS: readonly (readonly [string, readonly string[], readonly Answer[
   ["abs", ["2"], ["argument's kind"]],
   ["sign", ["2"], [{ fixed: "integer" }]],
   ["sqrt", ["2"], [{ fixed: "number" }]],
-  // The exponent is a known 2: the base's kind decides; the base is a known 2, the exponent's value is not known.
-  ["pow", ["2", "2"], ["argument's kind", { fixed: "number" }]],
+  ["pow", ["2", "2"], [{ fixed: "number" }, { fixed: "number" }]],
   ["mod", ["2", "2"], ["argument's kind", "argument's kind"]],
   ["clamp", ["2", "1", "3"], ["argument's kind", "argument's kind", "argument's kind"]],
   ["exp", ["2"], [{ fixed: "number" }]],
@@ -143,11 +136,10 @@ const FUNCTIONS: readonly (readonly [string, readonly string[], readonly Answer[
 
 const ANGLE_FUNCTIONS = ["sin", "cos", "tan", "toDeg", "toRad"];
 
-/** The view of an argument as written, as the fold knows it. */
+/** The view of an argument as written. */
 function writtenView(written: string): OperandView {
   if (written.endsWith(" deg")) return ANGLE;
-  const value = Number(written);
-  return known(Number.isInteger(value) ? INTEGER_TYPE : NUMBER_TYPE, value);
+  return Number.isInteger(Number(written)) ? INTEGER : NUMBER;
 }
 
 test("each argument of a numeric function over every kind: the rule's kind, no value, or a bounded result", () => {
@@ -206,7 +198,7 @@ test("each argument of a numeric function over every kind: the rule's kind, no v
   for (const { label, view, declaration: source } of OPERANDS)
     assertCase(
       relation("numeric", "round"),
-      inputsOf({ arguments: [known(NUMBER_TYPE, 1.5)], named: { decimals: view } }),
+      inputsOf({ arguments: [NUMBER], named: { decimals: view } }),
       legacyOperation(`${declaration(label, source)}\nlet r = round(1.5, decimals: a)\nexit`),
       { fact: "number", errors: ["integer", "number", "host"].includes(label) ? [] : ["TSV043"] },
       "fact",
@@ -224,54 +216,17 @@ test("a call of another shape tells the rule nothing of its arguments: a fixed k
     string,
   ])[] = [
     ["abs", "abs()", [], {}, "unknown", "TSV020"],
-    ["abs", "abs(1, 2)", [known(INTEGER_TYPE, 1), known(INTEGER_TYPE, 2)], {}, "unknown", "TSV020"],
-    [
-      "abs",
-      "abs(1, foo: 2)",
-      [known(INTEGER_TYPE, 1)],
-      { foo: known(INTEGER_TYPE, 2) },
-      "unknown",
-      "TSV022",
-    ],
-    ["abs", "abs(hostValue, 1)", [HOST, known(INTEGER_TYPE, 1)], {}, "unknown", "TSV020"],
-    ["mod", "mod(1)", [known(INTEGER_TYPE, 1)], {}, "unknown", "TSV020"],
+    ["abs", "abs(1, 2)", [INTEGER, INTEGER], {}, "unknown", "TSV020"],
+    ["abs", "abs(1, foo: 2)", [INTEGER], { foo: INTEGER }, "unknown", "TSV022"],
+    ["abs", "abs(hostValue, 1)", [HOST, INTEGER], {}, "unknown", "TSV020"],
+    ["mod", "mod(1)", [INTEGER], {}, "unknown", "TSV020"],
     ["mod", "mod(hostValue)", [HOST], {}, "unknown", "TSV020"],
-    [
-      "mod",
-      "mod(1, 2, 3)",
-      [1, 2, 3].map((value) => known(INTEGER_TYPE, value)),
-      {},
-      "unknown",
-      "TSV020",
-    ],
-    [
-      "clamp",
-      "clamp(1, 2)",
-      [known(INTEGER_TYPE, 1), known(INTEGER_TYPE, 2)],
-      {},
-      "unknown",
-      "TSV020",
-    ],
+    ["mod", "mod(1, 2, 3)", [INTEGER, INTEGER, INTEGER], {}, "unknown", "TSV020"],
+    ["clamp", "clamp(1, 2)", [INTEGER, INTEGER], {}, "unknown", "TSV020"],
     ["round", "round()", [], {}, "integer", "TSV020"],
-    [
-      "round",
-      "round(1, 2)",
-      [known(INTEGER_TYPE, 1), known(INTEGER_TYPE, 2)],
-      {},
-      "integer",
-      "TSV020",
-    ],
-    [
-      "round",
-      "round(1, foo: 2)",
-      [known(INTEGER_TYPE, 1)],
-      { foo: known(INTEGER_TYPE, 2) },
-      "integer",
-      "TSV022",
-    ],
+    ["round", "round(1, 2)", [INTEGER, INTEGER], {}, "integer", "TSV020"],
+    ["round", "round(1, foo: 2)", [INTEGER], { foo: INTEGER }, "integer", "TSV022"],
     ["sqrt", "sqrt()", [], {}, "number", "TSV020"],
-    // Without its exponent's value the power is a number.
-    ["pow", "pow(2)", [known(INTEGER_TYPE, 2)], {}, "number", "TSV020"],
     ["sin", "sin()", [], {}, "number", "TSV020"],
     ["sin", "sin(1 deg, 2 deg)", [ANGLE, ANGLE], {}, "number", "TSV020"],
   ];
@@ -293,35 +248,17 @@ test("a domain the checker sees in the known arguments is checking-only", () => 
     Record<string, OperandView>,
     string,
   ])[] = [
-    ["sqrt", "sqrt(-1)", [known(INTEGER_TYPE, -1)], {}, "number"],
-    ["mod", "mod(1, 0)", [known(INTEGER_TYPE, 1), known(INTEGER_TYPE, 0)], {}, "integer"],
-    [
-      "clamp",
-      "clamp(1, 2, 1)",
-      [1, 2, 1].map((value) => known(INTEGER_TYPE, value)),
-      {},
-      "integer",
-    ],
-    ["ln", "ln(0)", [known(INTEGER_TYPE, 0)], {}, "number"],
-    ["asin", "asin(2)", [known(INTEGER_TYPE, 2)], {}, "angle"],
-    ["pow", "pow(0, -1)", [known(INTEGER_TYPE, 0), known(INTEGER_TYPE, -1)], {}, "number"],
-    ["pow", "pow(-8, 0.5)", [known(INTEGER_TYPE, -8), known(NUMBER_TYPE, 0.5)], {}, "number"],
-    [
-      "round",
-      "round(1.5, decimals: -1)",
-      [known(NUMBER_TYPE, 1.5)],
-      { decimals: known(INTEGER_TYPE, -1) },
-      "number",
-    ],
-    [
-      "round",
-      "round(1.5, decimals: 0.5)",
-      [known(NUMBER_TYPE, 1.5)],
-      { decimals: known(NUMBER_TYPE, 0.5) },
-      "number",
-    ],
+    ["sqrt", "sqrt(-1)", [INTEGER], {}, "number"],
+    ["mod", "mod(1, 0)", [INTEGER, INTEGER], {}, "integer"],
+    ["clamp", "clamp(1, 2, 1)", [INTEGER, INTEGER, INTEGER], {}, "integer"],
+    ["ln", "ln(0)", [INTEGER], {}, "number"],
+    ["asin", "asin(2)", [INTEGER], {}, "angle"],
+    ["pow", "pow(0, -1)", [INTEGER, INTEGER], {}, "number"],
+    ["pow", "pow(-8, 0.5)", [INTEGER, NUMBER], {}, "number"],
+    ["round", "round(1.5, decimals: -1)", [NUMBER], { decimals: INTEGER }, "number"],
+    ["round", "round(1.5, decimals: 0.5)", [NUMBER], { decimals: NUMBER }, "number"],
     ["tan", "tan(90 deg)", [ANGLE], {}, "number"],
-    ["exp", "exp(1000)", [known(INTEGER_TYPE, 1000)], {}, "number"],
+    ["exp", "exp(1000)", [INTEGER], {}, "number"],
   ];
   for (const [name, call, args, named, fact] of cases)
     assertCase(
@@ -335,7 +272,7 @@ test("a domain the checker sees in the known arguments is checking-only", () => 
   // A domain of the known arguments beside an input the compiler cannot know: the bounded answer stands.
   assertBounded(
     relation("numeric", "mod"),
-    inputsOf({ arguments: [HOST, known(INTEGER_TYPE, 0)] }),
+    inputsOf({ arguments: [HOST, INTEGER] }),
     "let r = mod(hostValue, 0)\nexit",
     [INTEGER_TYPE, NUMBER_TYPE],
     "host",
@@ -343,7 +280,7 @@ test("a domain the checker sees in the known arguments is checking-only", () => 
   );
   assertBounded(
     relation("numeric", "clamp"),
-    inputsOf({ arguments: [HOST, known(INTEGER_TYPE, 2), known(INTEGER_TYPE, 1)] }),
+    inputsOf({ arguments: [HOST, INTEGER, INTEGER] }),
     "let r = clamp(hostValue, 2, 1)\nexit",
     [INTEGER_TYPE, NUMBER_TYPE],
     "host",
@@ -351,7 +288,7 @@ test("a domain the checker sees in the known arguments is checking-only", () => 
   );
 });
 
-test("the rule reads the known exponent of a power, the presence of decimals:, and an argument's kinds", () => {
+test("the rule reads the presence of decimals: and an argument's kinds", () => {
   const cases: readonly (readonly [
     string,
     string,
@@ -360,100 +297,24 @@ test("the rule reads the known exponent of a power, the presence of decimals:, a
     string,
     readonly string[],
   ])[] = [
-    [
-      "pow",
-      "let r = pow(2, 3)",
-      [known(INTEGER_TYPE, 2), known(INTEGER_TYPE, 3)],
-      {},
-      "integer",
-      [],
-    ],
-    [
-      "pow",
-      "let r = pow(2.5, 3)",
-      [known(NUMBER_TYPE, 2.5), known(INTEGER_TYPE, 3)],
-      {},
-      "number",
-      [],
-    ],
-    [
-      "pow",
-      "let r = pow(2, 0.5)",
-      [known(INTEGER_TYPE, 2), known(NUMBER_TYPE, 0.5)],
-      {},
-      "number",
-      [],
-    ],
-    [
-      "pow",
-      "let r = pow(2, -1)",
-      [known(INTEGER_TYPE, 2), known(INTEGER_TYPE, -1)],
-      {},
-      "number",
-      [],
-    ],
-    [
-      "pow",
-      "let k = 3\nlet r = pow(2, k)",
-      [known(INTEGER_TYPE, 2), known(INTEGER_TYPE, 3)],
-      {},
-      "integer",
-      [],
-    ],
-    [
-      "pow",
-      "let k = -3\nlet r = pow(2, k)",
-      [known(INTEGER_TYPE, 2), known(INTEGER_TYPE, -3)],
-      {},
-      "number",
-      [],
-    ],
-    // The exponent's value decides without the base's kind; without a known exponent the power is a number.
-    ["pow", "let r = pow(hostValue, 2.5)", [HOST, known(NUMBER_TYPE, 2.5)], {}, "number", []],
-    ["pow", "let r = pow(hostValue, -1)", [HOST, known(INTEGER_TYPE, -1)], {}, "number", []],
-    ["pow", "let r = pow(2, hostValue)", [known(INTEGER_TYPE, 2), HOST], {}, "number", []],
-    ["pow", 'let r = pow(2, "x")', [known(INTEGER_TYPE, 2), TEXT], {}, "number", ["TSV043"]],
-    ["pow", 'let r = pow(hostValue, "x")', [HOST, TEXT], {}, "number", ["TSV043"]],
-    [
-      "round",
-      "let r = round(1.5, decimals: 1)",
-      [known(NUMBER_TYPE, 1.5)],
-      { decimals: known(INTEGER_TYPE, 1) },
-      "number",
-      [],
-    ],
+    ["round", "let r = round(1.5, decimals: 1)", [NUMBER], { decimals: INTEGER }, "number", []],
     [
       "round",
       "let r = round(1.5, decimals: hostValue)",
-      [known(NUMBER_TYPE, 1.5)],
+      [NUMBER],
       { decimals: HOST },
       "number",
       [],
     ],
-    [
-      "round",
-      "let r = round(hostValue, decimals: 1)",
-      [HOST],
-      { decimals: known(INTEGER_TYPE, 1) },
-      "number",
-      [],
-    ],
-    ["abs", "let r = abs(-1)", [known(INTEGER_TYPE, -1)], {}, "integer", []],
-    ["abs", "let r = abs(-1.5)", [known(NUMBER_TYPE, -1.5)], {}, "number", []],
+    ["round", "let r = round(hostValue, decimals: 1)", [HOST], { decimals: INTEGER }, "number", []],
+    ["abs", "let r = abs(-1)", [INTEGER], {}, "integer", []],
+    ["abs", "let r = abs(-1.5)", [NUMBER], {}, "number", []],
     ["sqrt", 'let r = sqrt("x")', [TEXT], {}, "number", ["TSV043"]],
     // Values a choice restricted are of their plain kind.
     [
       "abs",
       'let c = askChoice 1: "A", 2: "B"\nlet r = abs(c)',
       [closedView(withValues(INTEGER_TYPE, [1, 2]))],
-      {},
-      "integer",
-      [],
-    ],
-    [
-      "pow",
-      'let c = askChoice 1: "A", 2: "B"\nlet r = pow(c, 2)',
-      [closedView(withValues(INTEGER_TYPE, [1, 2])), known(INTEGER_TYPE, 2)],
       {},
       "integer",
       [],
@@ -478,7 +339,7 @@ test("the rule reads the known exponent of a power, the presence of decimals:, a
     [
       "mod",
       "let n: integer? = hostValue\nlet r = mod(n, 2)",
-      [closedView(optional(INTEGER_TYPE)), known(INTEGER_TYPE, 2)],
+      [closedView(optional(INTEGER_TYPE)), INTEGER],
       {},
       "integer",
       ["TSV043"],
@@ -486,7 +347,7 @@ test("the rule reads the known exponent of a power, the presence of decimals:, a
     [
       "mod",
       "let n: integer? = hostValue\nlet r = mod(n, 2.5)",
-      [closedView(optional(INTEGER_TYPE)), known(NUMBER_TYPE, 2.5)],
+      [closedView(optional(INTEGER_TYPE)), NUMBER],
       {},
       "number",
       ["TSV043"],
@@ -528,10 +389,9 @@ test("the rule reads the known exponent of a power, the presence of decimals:, a
       [closedView(union([INTEGER_TYPE, scalar("duration")]))],
     ],
     ["abs", 'let r = abs("x")', [TEXT]],
-    ["mod", 'let r = mod("x", 2)', [TEXT, known(INTEGER_TYPE, 2)]],
-    ["pow", 'let r = pow("x", 2)', [TEXT, known(INTEGER_TYPE, 2)]],
+    ["mod", 'let r = mod("x", 2)', [TEXT, INTEGER]],
     ["mod", 'let r = mod(hostValue, "x")', [HOST, TEXT]],
-    ["clamp", 'let r = clamp(hostValue, "x", 2)', [HOST, TEXT, known(INTEGER_TYPE, 2)]],
+    ["clamp", 'let r = clamp(hostValue, "x", 2)', [HOST, TEXT, INTEGER]],
   ] as const)
     assertCase(
       relation("numeric", name),
@@ -544,27 +404,11 @@ test("the rule reads the known exponent of a power, the presence of decimals:, a
 
 test("an input the compiler cannot know whose kind the rule needs: each numeric kind's result, also one alone", () => {
   for (const [name, source, args, types] of [
-    ["mod", "mod(hostValue, 1.5)", [HOST, known(NUMBER_TYPE, 1.5)], [NUMBER_TYPE]],
-    [
-      "clamp",
-      "clamp(hostValue, 1.5, 2)",
-      [HOST, known(NUMBER_TYPE, 1.5), known(INTEGER_TYPE, 2)],
-      [NUMBER_TYPE],
-    ],
-    [
-      "clamp",
-      "clamp(hostValue, 1, 2)",
-      [HOST, known(INTEGER_TYPE, 1), known(INTEGER_TYPE, 2)],
-      [INTEGER_TYPE, NUMBER_TYPE],
-    ],
+    ["mod", "mod(hostValue, 1.5)", [HOST, NUMBER], [NUMBER_TYPE]],
+    ["clamp", "clamp(hostValue, 1.5, 2)", [HOST, NUMBER, INTEGER], [NUMBER_TYPE]],
+    ["clamp", "clamp(hostValue, 1, 2)", [HOST, INTEGER, INTEGER], [INTEGER_TYPE, NUMBER_TYPE]],
     ["mod", "mod(hostValue, hostValue)", [HOST, HOST], [INTEGER_TYPE, NUMBER_TYPE]],
-    [
-      "clamp",
-      "clamp(hostValue, hostValue, 2.5)",
-      [HOST, HOST, known(NUMBER_TYPE, 2.5)],
-      [NUMBER_TYPE],
-    ],
-    ["pow", "pow(hostValue, 2)", [HOST, known(INTEGER_TYPE, 2)], [INTEGER_TYPE, NUMBER_TYPE]],
+    ["clamp", "clamp(hostValue, hostValue, 2.5)", [HOST, HOST, NUMBER], [NUMBER_TYPE]],
   ] as const)
     assertBounded(
       relation("numeric", name),
@@ -611,7 +455,7 @@ test("a relation answers from its inputs alone: an input the rule needs waits wh
   // A bottom and a dynamic input together wait; a rule that needs no input's kind does not.
   assert.equal(mod.result(inputsOf({ arguments: [BOTTOM_VIEW, HOST] })).kind, "unconstrained");
   assert.equal(mod.result(inputsOf({ arguments: [HOST, BOTTOM_VIEW] })).kind, "unconstrained");
-  assert.deepEqual(mod.result(inputsOf({ arguments: [INTEGER, known(INTEGER_TYPE, 2)] })), {
+  assert.deepEqual(mod.result(inputsOf({ arguments: [INTEGER, INTEGER] })), {
     kind: "type",
     type: INTEGER_TYPE,
   });
@@ -619,12 +463,6 @@ test("a relation answers from its inputs alone: an input the rule needs waits wh
     kind: "type",
     type: INTEGER_TYPE,
   });
-  assert.deepEqual(
-    relation("numeric", "pow").result(
-      inputsOf({ arguments: [BOTTOM_VIEW, known(NUMBER_TYPE, 0.5)] }),
-    ),
-    { kind: "type", type: NUMBER_TYPE },
-  );
 });
 
 /** The value form's operands: each kind `min` orders, and others, as written in a call and as their views hold them. */

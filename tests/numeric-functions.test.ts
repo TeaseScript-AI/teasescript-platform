@@ -139,18 +139,19 @@ test("mod takes the divisor's sign where % keeps the dividend's, sign gives -1, 
   );
 });
 
-test("abs keeps an integer whole, pow of a whole number to a known whole power is whole, and sqrt is a number", () => {
+test("abs keeps an integer whole, and sqrt and pow give a number that round, floor, or ceil makes whole", () => {
   assert.deepEqual(
     diagnostics(
       [
-        "function area(side: integer) {",
-        "    let whole: integer = pow(side, 2)",
+        "function area(side: integer, exponent: integer) {",
+        "    let whole: integer = round(pow(side, 2))",
+        "    let down: integer = floor(pow(side, exponent))",
+        "    let up: integer = ceil(sqrt(side))",
         "    let distance: integer = abs(side - 10)",
-        "    let none: integer = pow(side, 0)",
-        "    return whole + distance + none",
+        "    return whole + down + up + distance",
         "}",
         "let root: number = sqrt(9)",
-        "say area(3)",
+        "say area(3, 2)",
         "exit",
       ].join("\n"),
     ),
@@ -158,13 +159,16 @@ test("abs keeps an integer whole, pow of a whole number to a known whole power i
   );
   const cannot = (name: string) =>
     `'${name}' is declared as integer, so it cannot start as a number. Round it with floor(...), round(...), or ceil(...), or declare it as 'let ${name}: number = ...'.`;
+  // A power of whole numbers is a number, whether its exponent is written or a parameter.
   assert.deepEqual(
     diagnostics(
       [
-        "function shapes(power: integer, ratio: number) {",
+        "let power = pow(2, 3)",
+        "let count: integer = power",
+        "function shapes(exponent: integer, ratio: number) {",
         "    let root: integer = sqrt(9)",
-        "    let grown: integer = pow(2, power)",
-        "    let half: integer = pow(4, -1)",
+        "    let written: integer = pow(2, 3)",
+        "    let given: integer = pow(2, exponent)",
         "    let part: integer = pow(ratio, 2)",
         "    let size: integer = abs(ratio)",
         "}",
@@ -172,9 +176,10 @@ test("abs keeps an integer whole, pow of a whole number to a known whole power i
       ].join("\n"),
     ),
     [
+      ["TSV041", cannot("count"), "power"],
       ["TSV041", cannot("root"), "sqrt(9)"],
-      ["TSV041", cannot("grown"), "pow(2, power)"],
-      ["TSV041", cannot("half"), "pow(4, -1)"],
+      ["TSV041", cannot("written"), "pow(2, 3)"],
+      ["TSV041", cannot("given"), "pow(2, exponent)"],
       ["TSV041", cannot("part"), "pow(ratio, 2)"],
       ["TSV041", cannot("size"), "abs(ratio)"],
     ],

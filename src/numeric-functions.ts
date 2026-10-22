@@ -15,10 +15,12 @@ import {
 } from "./deterministic-math.js";
 import type { NumericFunctionName } from "./language-facts.js";
 
+/** The kind of a numeric argument: `integer` or `number` when it is known to be one, `unknown` otherwise. */
+export type NumericKind = "integer" | "number" | "unknown";
+
 /** What the compiler knows about one argument of a numeric function. */
 export interface NumericArgument {
-  /** `integer` or `number` when the argument is known to be one, `unknown` otherwise. */
-  readonly type: "integer" | "number" | "unknown";
+  readonly type: NumericKind;
   /** The argument's value when the compiler can see it: a number, or an angle's size in degrees. */
   readonly known: number | undefined;
 }
@@ -59,11 +61,11 @@ export interface NumberDomain {
   readonly code?: "TSR036";
 }
 
-/** The result type of a numeric function, from what the compiler knows about its arguments. */
+/** The result type of a numeric function, from the kinds of its arguments. */
 type ResultRule = (
-  inputs: readonly NumericArgument[],
-  named: Readonly<Record<string, NumericArgument>>,
-) => "integer" | "number" | "unknown";
+  inputs: readonly NumericKind[],
+  named: Readonly<Record<string, NumericKind>>,
+) => NumericKind;
 
 /**
  * A built-in function of numbers or angles (V30 §13): how it is called, what its arguments may be, what it gives, and
@@ -72,7 +74,7 @@ type ResultRule = (
 export interface NumericFunction extends NumberSignature {
   /** What the call does, for the editor's help. */
   readonly summary: string;
-  /** The result type, or how it follows from what the compiler knows about the arguments. */
+  /** The result type, or how it follows from the kinds of the arguments. */
   readonly result: "integer" | "number" | "angle" | ResultRule;
   readonly domains: readonly NumberDomain[];
   /**
@@ -154,9 +156,9 @@ function ofAngle(compute: (degrees: number) => number, summary: string): Numeric
 }
 
 /** `integer` when every input is one, `number` when every input is a number, and `unknown` otherwise. */
-function together(inputs: readonly NumericArgument[]): "integer" | "number" | "unknown" {
-  if (inputs.some((input) => input.type === "unknown")) return "unknown";
-  return inputs.every((input) => input.type === "integer") ? "integer" : "number";
+function together(inputs: readonly NumericKind[]): NumericKind {
+  if (inputs.includes("unknown")) return "unknown";
+  return inputs.every((input) => input === "integer") ? "integer" : "number";
 }
 
 /** Each numeric function's contract by its name, which `language-facts.ts` lists. */
@@ -193,7 +195,7 @@ export const NUMERIC_CONTRACTS = {
   abs: {
     takes: "numbers",
     parameters: ["value"],
-    result: ([value]) => value!.type,
+    result: ([value]) => value!,
     domains: [],
     apply: ([value]) => Math.abs(value!),
     summary: "Gives the distance of a number from 0: abs(-2.5) is 2.5.",
@@ -227,11 +229,7 @@ export const NUMERIC_CONTRACTS = {
   pow: {
     takes: "numbers",
     parameters: ["base", "exponent"],
-    // A whole number to a whole power of at least 0 is whole.
-    result: ([base, exponent]) =>
-      exponent!.known !== undefined && Number.isInteger(exponent!.known) && exponent!.known >= 0
-        ? base!.type
-        : "number",
+    result: "number",
     domains: [
       {
         reads: ["base", "exponent"],
