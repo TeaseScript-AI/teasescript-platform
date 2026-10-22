@@ -10497,6 +10497,24 @@ function operandFix(operand: StaticType, type: StaticType, statement: Assignment
 /** The fix for a number where a whole number is required; nothing truncates silently (ADR 0021 rule 2.2). */
 const ROUND_FIX = " Round it with floor(...), round(...), or ceil(...)";
 
+/** The fix for the numbers of a list, set, or dict where whole numbers are required (ADR 0021 rule 2.2). */
+const ROUND_NUMBERS_FIX = " Round the numbers with floor(...), round(...), or ceil(...)";
+
+/**
+ * Whether `value` is a list, set, or dict that does not fit `target` only because it holds numbers where `target`
+ * holds whole numbers, at any depth: `[1.5]` where an `integer[]` is required, or `[[1.5]]` where an `integer[][]` is.
+ */
+function holdsNumbersForIntegers(target: StaticType, value: StaticType): boolean {
+  let place = resolved(nonNullType(target));
+  let given = resolved(value);
+  if (!isCollection(place) || !isCollection(given)) return false;
+  while (isCollection(place) && isCollection(given) && place.kind === given.kind) {
+    place = resolved(nonNullType(place.element));
+    given = resolved(given.element);
+  }
+  return isScalar(place, "integer") && isScalar(given, "number");
+}
+
 /** How to turn a value into the kind a place needs, when a conversion is the likely intent. */
 function conversionFix(
   target: StaticType,
@@ -10505,6 +10523,7 @@ function conversionFix(
 ): string | undefined {
   const kept = resolved(nonNullType(target));
   if (isScalar(kept, "integer") && isScalar(value, "number")) return `${ROUND_FIX}.`;
+  if (holdsNumbersForIntegers(kept, value)) return `${ROUND_NUMBERS_FIX}.`;
   if (isScalar(kept, "duration") && isNumeric(value)) return ` ${unitFix(expression)}`;
   if (isScalar(kept, "angle") && isNumeric(value)) return ` ${unitFix(expression, "deg")}`;
   // Date and time values are written as ISO text and converted.
@@ -10610,9 +10629,13 @@ function typeFix(
     return declared === null
       ? `${ROUND_FIX}.`
       : `${ROUND_FIX}, or ${declareAs(declared, `number${nullable ? "?" : ""}`)}.`;
+  const both = union([target, value]);
+  if (holdsNumbersForIntegers(target, value))
+    return declared !== null && isAnnotatable(both)
+      ? `${ROUND_NUMBERS_FIX}, or ${declareAs(declared, typeName(both))}.`
+      : `${ROUND_NUMBERS_FIX}.`;
   const conversion = conversionFix(target, value, expression);
   if (conversion !== undefined) return conversion;
-  const both = union([target, value]);
   return declared !== null && isAnnotatable(both)
     ? ` To allow both, ${declareAs(declared, typeName(both))}.`
     : " Use a separate variable for a value of another type.";
@@ -10629,9 +10652,13 @@ function parameterFix(
   const kept = resolved(nonNullType(target));
   if (isScalar(kept, "integer") && isScalar(value, "number"))
     return `${ROUND_FIX}, or ${declareAs(declared, "number")}.`;
+  const both = union([target, value]);
+  if (holdsNumbersForIntegers(target, value))
+    return isAnnotatable(both)
+      ? `${ROUND_NUMBERS_FIX}, or ${declareAs(declared, typeName(both))}.`
+      : `${ROUND_NUMBERS_FIX}.`;
   const conversion = conversionFix(target, value, expression);
   if (conversion !== undefined) return conversion;
-  const both = union([target, value]);
   if (!isAnnotatable(both)) return " Use a value of the parameter's type.";
   return ` To allow both, ${declareAs(declared, typeName(both))}.`;
 }
@@ -10723,7 +10750,7 @@ function optionalResultFix(declared: StaticType): string {
 }
 
 /**
- * How to make a value fit a list or set: round a number or allow fractions, or allow both, where `declared` writes the
+ * How to make a value fit a list or set: round its numbers, allow fractions or both where `declared` writes the
  * collection's type, or keep other values in a separate collection.
  */
 function elementFix(
@@ -10733,15 +10760,21 @@ function elementFix(
   nullable: boolean,
 ): string {
   const optional = nullable ? "?" : "";
-  if (declared !== null && isScalar(collection.element, "integer") && isScalar(value, "number"))
-    return `${ROUND_FIX}, or ${declareAs(declared, `${typeName({ kind: collection.kind, element: NUMBER_TYPE })}${optional}`)}.`;
+  if (isScalar(collection.element, "integer") && isScalar(value, "number"))
+    return declared === null
+      ? `${ROUND_FIX}.`
+      : `${ROUND_FIX}, or ${declareAs(declared, `${typeName({ kind: collection.kind, element: NUMBER_TYPE })}${optional}`)}.`;
   if (isScalar(collection.element, "duration") && isNumeric(value))
     return " Give the number a unit, such as '5 s'.";
   if (isScalar(collection.element, "angle") && isNumeric(value))
     return " Give the number a unit, such as '90 deg'.";
   const both: StaticType = { kind: collection.kind, element: union([collection.element, value]) };
-  if (declared !== null && isAnnotatable(both))
-    return ` To allow both, ${declareAs(declared, `${typeName(both)}${optional}`)}.`;
+  const annotatable = declared !== null && isAnnotatable(both);
+  if (holdsNumbersForIntegers(collection.element, value))
+    return annotatable
+      ? `${ROUND_NUMBERS_FIX}, or ${declareAs(declared, `${typeName(both)}${optional}`)}.`
+      : `${ROUND_NUMBERS_FIX}.`;
+  if (annotatable) return ` To allow both, ${declareAs(declared, `${typeName(both)}${optional}`)}.`;
   return ` Use a separate ${collection.kind} for values of another type.`;
 }
 

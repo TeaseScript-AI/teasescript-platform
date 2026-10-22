@@ -338,6 +338,31 @@ test("compound assignment keeps the variable's type", () => {
   );
 });
 
+test("numbers where whole numbers are required name rounding, also inside lists", () => {
+  const nested =
+    "This list holds integer values (integer[]), so it cannot contain a number. Round it with floor(...), round(...), or ceil(...).";
+  assert.deepEqual(mismatches("let rows: integer[][] = [[2.5]]\nrows[0].add(0.5)\nexit"), [
+    ["TSV041", nested, "2.5"],
+    ["TSV041", nested, "0.5"],
+  ]);
+  const round = " Round the numbers with floor(...), round(...), or ceil(...)";
+  assert.deepEqual(
+    mismatches("let values: integer[] = [1]\nvalues += [2.5]\nexit").map(([, message]) => message),
+    [
+      `'values' holds a list (integer[]), so '+=' cannot make it a list (number[]).${round}, or declare it as 'let values: number[] = ...'.`,
+    ],
+  );
+  assert.deepEqual(
+    mismatches(
+      "let halves = [0.5]\nfunction count(items: integer[]): integer[] {\n    return halves\n}\nsay count(halves)\nexit",
+    ).map(([, message]) => message),
+    [
+      `'count' returns integer[], so it cannot return a list (number[]).${round}.`,
+      `'count' takes 'items' as a list (integer[]), so it cannot take a list (number[]).${round}, or declare the parameter as 'items: number[]'.`,
+    ],
+  );
+});
+
 test("null needs an optional type", () => {
   assert.deepEqual(mismatches("let name: string = null\nexit"), [
     [
