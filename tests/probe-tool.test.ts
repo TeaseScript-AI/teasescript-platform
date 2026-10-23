@@ -49,6 +49,35 @@ test("probe --run stops at a timer's button before a later deadline passes", () 
   assert.doesNotMatch(result.stdout, /after button|after wait/);
 });
 
+test("probe --run reads the given clock in the given time zone as script time passes", () => {
+  // Amsterdam keeps summer time (UTC+2) until 2026-10-25.
+  const result = runProbe('say "${getDateTime()}"\nwait 90 s\nsay "${getTime()}"\nexit\n', [
+    "--run",
+    "--clock",
+    "2026-10-04T16:30:00Z",
+    "--zone",
+    "Europe/Amsterdam",
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^say: 2026-10-04 18:30$/m);
+  assert.match(result.stdout, /^say: 18:31:30$/m);
+});
+
+test("probe refuses a clock or time zone it cannot use", () => {
+  for (const [option, value] of [
+    // Date.parse alone would move this on to March 2.
+    ["--clock", "2026-02-30T12:00:00Z"],
+    // Date.parse alone would read this in the host's own time zone.
+    ["--clock", "2026-10-04T18:30:00"],
+    ["--zone", "Mars/Base"],
+  ] as const) {
+    const result = runProbe("exit\n", ["--run", option, value]);
+    assert.equal(result.status, 2, `${option} ${value}`);
+    assert.ok(result.stderr.includes(value), result.stderr);
+    assert.equal(result.stdout, "");
+  }
+});
+
 test("probe --json output stays complete through a pipe", () => {
   // Enough events for more than one pipe buffer, so an early exit would cut the JSON off.
   const result = runProbe("for i in 1..=3000 { wait 1 ms }\nexit\n", ["--run", "--json"]);
