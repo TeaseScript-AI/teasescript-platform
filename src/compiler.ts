@@ -476,24 +476,27 @@ function referencedFiles(
       const pending = [root];
       for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
         if (node.kind === "storageLoad" && mayHoldScript(node.type)) return null;
-        pending.push(...expressionPlanChildren(node));
+        // One by one: an expression may have more children than a call takes arguments.
+        for (const child of expressionPlanChildren(node)) pending.push(child);
       }
     }
   return plan.files.flatMap((file, index) => (referenced.has(file.path) ? [index] : []));
 }
 
-/** Whether a loaded value of this type may hold a script reference; `null`, a type not known, may. */
+/**
+ * Whether a loaded value of this type may hold a script reference: `null`, a type not known, may, and so may an object,
+ * whose type checks only the properties it lists, so another property may hold anything.
+ */
 function mayHoldScript(type: TypePlan | null): boolean {
   if (type === null) return true;
   switch (type.kind) {
     case "script":
+    case "object":
       return true;
     case "list":
     case "set":
     case "dict":
       return mayHoldScript(type.element);
-    case "object":
-      return type.properties.some((property) => mayHoldScript(property.type));
     case "union":
       return type.members.some(mayHoldScript);
     default:

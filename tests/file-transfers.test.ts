@@ -509,6 +509,51 @@ test("a computed target may start only the files that a reference of the project
     );
 });
 
+test("an object that a load gives may hold a reference to any file", () => {
+  // A saved object holds a reference in a property that the reader's type does not list.
+  const scene = { "scene.tease": 'say "scene"\nend' };
+  const writer = compiled(project('save { next: script("scene.tease") } as "data"\nexit', scene));
+  const scriptStorage = run(writer, createImmediatePacingRuntimeSnapshot(writer)).snapshot
+    .scriptStorage;
+  const reader = project(
+    'let data: object = load "data", default: {}\nif data.next is script { goto (data.next) }\nexit',
+    scene,
+  );
+  assert.deepEqual(
+    outputs(
+      assertRuntimeResumeEquivalent(reader, {
+        scriptStorage,
+        warnings: ["TSV071"],
+        ending: "failed",
+      }).events,
+    ),
+    ["scene", "failure TSR066"],
+  );
+  // Also an object in a list, and an object whose type lists other properties.
+  for (const load of [
+    'let items: object[] = load "items", default: []',
+    'let data = load "data", default: { count: 0 }',
+  ])
+    assert.deepEqual(
+      compileProject(
+        project(`${load}\ncall "scene.tease"\nlet next = script("done.tease")\ngoto (next)`, {
+          ...scene,
+          "done.tease": "exit",
+        }),
+      ).diagnostics.map((diagnostic) => `${diagnostic.path} ${diagnostic.code}`),
+      ["scene.tease TSV071"],
+      load,
+    );
+});
+
+test("the files that references may name are found without a native argument limit", () => {
+  const result = compileProject(
+    project(`let values = [${"0, ".repeat(139_999)}0]\ncall "a.tease"\nexit`, { "a.tease": "end" }),
+  );
+  assert.deepEqual(result.diagnostics, []);
+  assert.notEqual(result.plan, null);
+});
+
 test("a fallback statement is no statement", () => {
   assert.deepEqual(
     compileProject(project('fallback "a.tease"\nexit', { "a.tease": "exit" })).diagnostics.map(
