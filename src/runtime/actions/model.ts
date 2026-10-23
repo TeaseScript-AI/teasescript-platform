@@ -507,8 +507,9 @@ export interface RuntimeDelayActionSettlementSnapshot {
 }
 
 /**
- * A completed interaction, or a button that reached its timeout. A timeout publishes no player transcript, so its
- * transcript sequence and text are `null`.
+ * A completed interaction, or a button or form that reached its timeout. A timeout, and the completion of a popup,
+ * `openUrl`, `exportText`, or `askPassword`, publishes no player transcript, so its transcript sequence and text are
+ * `null`.
  */
 export interface RuntimeInteractionActionSettlementSnapshot {
   readonly actionId: number;

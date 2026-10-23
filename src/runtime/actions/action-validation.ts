@@ -2331,7 +2331,8 @@ function validSettlementKindData(
     !isInteractionKind(settlement.interactionKind) ||
     !positiveSafeInteger(settlement.requestEventSequence) ||
     !positiveSafeInteger(settlement.completionEventSequence) ||
-    // A timed-out button or form, a closed popup or exportText, and an opened `openUrl` add nothing to the transcript.
+    // A timed-out button or form, a closed popup or exportText, an opened `openUrl`, and an answered password add
+    // nothing to the transcript.
     (timedOut || transcriptless(settlement.interactionKind)
       ? settlement.transcriptText !== null ||
         settlement.transcriptEventSequence !== null ||
