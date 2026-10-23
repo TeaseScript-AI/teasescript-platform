@@ -616,6 +616,11 @@ export const FLOW_PROGRAMS: readonly FlowProgram[] = [
       'say "A"\nlet k = load "k1", default: false\nlabel again\nsay "B"\nif k { goto again }\nsay "Z"\nexit\n',
   },
   {
+    name: "goto-out-of-loops",
+    files:
+      'let k = load "k1", default: false\nsay "A"\nrepeat 2 {\n  say "B"\n  repeat 3 {\n    say "C"\n    if k { goto after }\n  }\n  say "D"\n}\nsay "E"\nlabel after\nsay "F"\nexit\n',
+  },
+  {
     name: "parameters-written-order",
     files:
       'function first { say "B"\n return 1 }\nfunction second { say "C"\n return 2 }\nfunction use(a = first(), b = second()) { say "D"\n return a + b }\nsay "A"\nuse(b: second())\nsay "Z"\nexit\n',

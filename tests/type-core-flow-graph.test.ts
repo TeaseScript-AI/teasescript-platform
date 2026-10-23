@@ -14,16 +14,24 @@ import { FLOW_PROGRAMS, HOST_GLOBALS } from "./helpers/type-core-flow-programs.j
  */
 
 test("the flow graph agrees with the lowering on every program of the corpus", () => {
-  const mismatches: { program: string; unexpected: string[]; missing: string[] }[] = [];
+  // A report of the first few differences of the first few programs: a broken graph differs in thousands.
+  const report: string[] = [];
+  let failing = 0;
   for (const program of FLOW_PROGRAMS) {
     const found = flowDifferences(program);
     const listed = program.refinements?.differences ?? [];
     const unexpected = found.filter((difference) => !listed.includes(difference));
     const missing = listed.filter((difference) => !found.includes(difference));
-    if (unexpected.length > 0 || missing.length > 0)
-      mismatches.push({ program: program.name, unexpected, missing });
+    if (unexpected.length === 0 && missing.length === 0) continue;
+    failing += 1;
+    if (failing <= 5)
+      report.push(
+        `${program.name}:`,
+        ...unexpected.slice(0, 8).map((difference) => `  unexpected ${difference}`),
+        ...missing.slice(0, 8).map((difference) => `  missing ${difference}`),
+      );
   }
-  assert.deepEqual(mismatches, []);
+  assert.equal(failing, 0, `${failing} programs differ\n${report.join("\n")}`);
 });
 
 test("no marker that the flow graph finds dead runs", () => {
