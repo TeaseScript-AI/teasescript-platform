@@ -14,6 +14,7 @@ import type {
   CapturedMediaRepository,
   StoredCapturedMedia,
 } from "./captured-media.js";
+import type { KeptSessionStore, StoredKeptSession } from "./kept-sessions.js";
 import type { ScriptStorageProvider } from "./script-storage.js";
 
 // The Player's data on a server, for online mode (`player-data.ts`). The HTTP shapes are provisional: the temporary
@@ -29,13 +30,23 @@ import type { ScriptStorageProvider } from "./script-storage.js";
 //   it; `PUT` with `{ entries }` replaces them all; `DELETE` removes them all;
 // - `GET scripts/<scope>/media`: `{ references }`;
 // - `GET`, `PUT`, `DELETE scripts/<scope>/media/<reference>`: the media's bytes, with its other fields as the JSON
-//   header `X-Media-Record`; `PUT` never overwrites and answers 409 when the reference is stored already.
+//   header `X-Media-Record`; `PUT` never overwrites and answers 409 when the reference is stored already;
+// - `GET scripts/<scope>/session`: the kept session, `{ planJson, snapshotJson, events, marks }`, or 404; `PUT` with
+//   `{ planJson, snapshotJson, eventsFrom, events, marks }` keeps it as `KeptSessionStore.publish` does; `DELETE`
+//   discards it with its photos, which `scripts/<scope>/session-media` holds as `media` holds saved ones.
+//
+// Saved values and the kept session each have a revision, which every reply that reads or changes them names in
+// `X-Revision`, a missing session's 404 too. A change names the revision its Player last saw in `X-Base-Revision`, so
+// that the server notices another writer in between: it keeps a value written meanwhile and answers a kept session
+// with 409.
 //
 // A scope and a reference are each one path segment: the JSON string, percent-encoded, which keeps every text, also
 // `..` and a lone surrogate, apart from every other. A request that takes longer than `REQUEST_TIMEOUT_MS` fails.
 
 /** How long a request may take, sending media included, before it counts as failed. */
 const REQUEST_TIMEOUT_MS = 60_000;
+const REVISION = "X-Revision";
+const BASE_REVISION = "X-Base-Revision";
 
 /** The server and the token that signs in to it. */
 export interface OnlineServer {
@@ -76,26 +87,73 @@ export async function readOnlineAccount(
 /** The script storage of `scope` on the server; a write resolves only once the server acknowledged it. */
 export function onlineScriptStorage(server: OnlineServer, scope: string): ScriptStorageProvider {
   const path = `${scriptPath(scope)}/storage`;
+  // The revision of the values this provider last read or changed, which its changes name; `null` before it read them.
+  let revision: string | null = null;
+  const base = (): Readonly<Record<string, string>> =>
+    revision === null ? {} : { [BASE_REVISION]: revision };
+  const changed = (response: Response) => {
+    revision = response.headers.get(REVISION) ?? revision;
+  };
   return {
     scope,
     async load() {
-      const { entries } = await requestJson(server, path);
+      const response = await request(server, "GET", path);
+      const { entries } = await jsonReply(response);
       const problem = validateScriptStorageEntries(entries, "entries");
       if (problem !== null)
         throw new OnlineDataError(`The server's saved values are not valid: ${problem}`);
+      revision = response.headers.get(REVISION);
       // EVIDENCE: validation: validateScriptStorageEntries accepted `entries` as script storage entries.
       return entries as readonly RuntimeScriptStorageEntrySnapshot[];
     },
     async write(key: string, value: SerializableRuntimeValue) {
-      await request(server, "PATCH", path, jsonBody({ key, value }));
+      changed(await request(server, "PATCH", path, jsonBody({ key, value }, base())));
     },
     async replace(entries) {
       const problem = validateScriptStorageEntries(entries, "entries");
       if (problem !== null) throw new TypeError(problem);
-      await request(server, "PUT", path, jsonBody({ entries }));
+      changed(await request(server, "PUT", path, jsonBody({ entries }, base())));
     },
     async clear() {
-      await request(server, "DELETE", path);
+      changed(await request(server, "DELETE", path, { headers: base() }));
+    },
+  };
+}
+
+/**
+ * The sessions the Player keeps on the server, so that Continue works on another device. Keeping names the revision of
+ * the session this Player last read or kept; when another Player kept it meanwhile, the server refuses, so that two
+ * devices never mix their events, and the session kept first stays.
+ */
+export function onlineKeptSessions(server: OnlineServer): KeptSessionStore {
+  const revisions = new Map<string, string>();
+  const path = (scope: string) => `${scriptPath(scope)}/session`;
+  return {
+    async session(scope): Promise<StoredKeptSession | null> {
+      const response = await send(server, "GET", path(scope));
+      if (response.status === 404) {
+        revisions.set(scope, response.headers.get(REVISION) ?? "0");
+        return null;
+      }
+      const { planJson, snapshotJson, events, marks } = await jsonReply(checkStatus(response));
+      // `keptSession` checks every field before the session is continued.
+      if (!Array.isArray(events)) throw invalidReply();
+      revisions.set(scope, response.headers.get(REVISION) ?? "0");
+      return { planJson, snapshotJson, events, marks };
+    },
+    async publish(scope, update) {
+      const response = await request(
+        server,
+        "PUT",
+        path(scope),
+        jsonBody(update, { [BASE_REVISION]: revisions.get(scope) ?? "0" }),
+      );
+      revisions.set(scope, response.headers.get(REVISION) ?? "0");
+    },
+    media: onlineMediaRepository(server, "session-media"),
+    async discard(scope) {
+      const response = await request(server, "DELETE", path(scope));
+      revisions.set(scope, response.headers.get(REVISION) ?? "0");
     },
   };
 }
@@ -128,10 +186,16 @@ export function onlineSavedScripts(server: OnlineServer) {
   };
 }
 
-/** Captured and chosen media on the server, by namespace (the script's scope) and reference. */
-export function onlineMediaRepository(server: OnlineServer): CapturedMediaRepository {
+/**
+ * Captured and chosen media on the server, by namespace (the script's scope) and reference: the photos saved values
+ * reference, or with `session-media` those only a kept session uses.
+ */
+export function onlineMediaRepository(
+  server: OnlineServer,
+  kind: "media" | "session-media" = "media",
+): CapturedMediaRepository {
   const path = (namespace: string, reference: string) =>
-    `${scriptPath(namespace)}/media/${pathSegment(reference)}`;
+    `${scriptPath(namespace)}/${kind}/${pathSegment(reference)}`;
   return {
     async get(namespace, reference): Promise<StoredCapturedMedia | null> {
       const response = await send(server, "GET", path(namespace, reference));
@@ -167,7 +231,7 @@ export function onlineMediaRepository(server: OnlineServer): CapturedMediaReposi
       if (response.status !== 404) checkStatus(response);
     },
     async listReferences(namespace) {
-      const { references } = await requestJson(server, `${scriptPath(namespace)}/media`);
+      const { references } = await requestJson(server, `${scriptPath(namespace)}/${kind}`);
       if (
         !Array.isArray(references) ||
         !references.every((reference) => typeof reference === "string")
@@ -188,15 +252,15 @@ function pathSegment(text: string): string {
 
 /** What a request sends besides the token. */
 interface RequestBody {
-  readonly body: BodyInit;
+  readonly body?: BodyInit;
   readonly headers: Readonly<Record<string, string>>;
 }
 
 /** A JSON request body, written without recursion so that any value a script can save is sent. */
-function jsonBody(value: unknown): RequestBody {
+function jsonBody(value: unknown, headers: Readonly<Record<string, string>> = {}): RequestBody {
   return {
     body: serializeValidatedRuntimeJson(value),
-    headers: { "Content-Type": "application/json" },
+    headers: { ...headers, "Content-Type": "application/json" },
   };
 }
 
@@ -205,7 +269,11 @@ async function requestJson(
   server: OnlineServer,
   path: string,
 ): Promise<Readonly<Record<string, unknown>>> {
-  const response = await request(server, "GET", path);
+  return jsonReply(await request(server, "GET", path));
+}
+
+/** The JSON object `response` holds, its fields not yet checked; rejects for any other body. */
+async function jsonReply(response: Response): Promise<Readonly<Record<string, unknown>>> {
   let reply: unknown;
   try {
     reply = await response.json();
@@ -235,7 +303,7 @@ async function send(
   try {
     return await fetch(new URL(path, server.server), {
       method,
-      ...(body && { body: body.body }),
+      ...(body?.body !== undefined && { body: body.body }),
       headers: { ...body?.headers, Authorization: `Bearer ${server.token}` },
       cache: "no-store",
       // The server signs in by the token alone and never by a cookie. A proxy in front of it may still need its own

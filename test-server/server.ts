@@ -18,7 +18,7 @@ import { validateScriptStorageEntries } from "../src/runtime/host-data/script-st
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
 import { isPlainRecord } from "../src/runtime/values/plain-data.js";
 import { hostPage } from "./host-page.js";
-import { TestServerStore } from "./store.js";
+import { TestServerStore, type MediaTable, type RevisionKind } from "./store.js";
 
 // The temporary test server (README.md): the built Player, a stand-in for the website, and the provisional API of
 // online mode (`player/online-data.ts`), all on one origin, with a latency on every request and switches for faults.
@@ -74,7 +74,8 @@ export function testServer(options: TestServerOptions): {
     setTimeout(() => {
       void serve(request, response).catch((error: unknown) => {
         const tooLarge = error instanceof BodyTooLargeError;
-        if (!tooLarge) console.error(error);
+        // A browser that leaves the page aborts its requests.
+        if (!tooLarge && !request.destroyed) console.error(error);
         if (!response.headersSent)
           sendJson(response, tooLarge ? 413 : 500, {
             error: tooLarge ? error.message : "Server error.",
@@ -103,6 +104,7 @@ export function testServer(options: TestServerOptions): {
           latency,
           state,
           profile: store.profile(account.name),
+          conflicts: store.conflicts(account.name),
         }),
       );
       return;
@@ -182,15 +184,23 @@ export function testServer(options: TestServerOptions): {
       store.setName(user, scopeKey, JSON.stringify(body.name));
       return sendEmpty(response);
     }
-    // The switch fails the next write of saved values or media, not of a script's name.
+    // The switch fails the next write of saved values or their photos, not of a script's name or a kept session.
     const failsOnPurpose = () => {
       if (!state.failNextWrite) return false;
       state.failNextWrite = false;
       sendJson(response, 503, { error: "This write failed on purpose." });
       return true;
     };
+    // A change names the revision its Player last saw; another one means another writer came in between.
+    const base = request.headers["x-base-revision"];
+    const conflicting = (kind: RevisionKind) => {
+      if (typeof base !== "string" || base === String(store.revision(user, scopeKey, kind)))
+        return false;
+      store.conflict(user, scopeKey, kind);
+      options.log?.(`Two writers: ${kind} of ${scope}`);
+      return true;
+    };
     if (part === "storage" && reference === undefined) {
-      if (method !== "GET" && failsOnPurpose()) return;
       if (method === "GET")
         return sendJsonText(
           response,
@@ -199,11 +209,13 @@ export function testServer(options: TestServerOptions): {
             .entries(user, scopeKey)
             .map(({ key, value }) => `{"key":${key},"value":${value}}`)
             .join(",")}]}`,
+          revisionHeader(store.revision(user, scopeKey, "storage")),
         );
-      if (method === "DELETE") {
-        store.replace(user, scopeKey, []);
-        return sendEmpty(response);
-      }
+      if (failsOnPurpose()) return;
+      // A value written meanwhile is kept, last writer first: only noticed, not resolved.
+      conflicting("storage");
+      if (method === "DELETE")
+        return sendEmpty(response, 204, revisionHeader(store.replace(user, scopeKey, [])));
       const body = await readJson(request);
       if (method === "PATCH") {
         if (body === null || typeof body.key !== "string" || !("value" in body))
@@ -215,13 +227,13 @@ export function testServer(options: TestServerOptions): {
           );
           if (problem !== null) return sendJson(response, 400, { error: problem });
         }
-        store.write(
+        const revision = store.write(
           user,
           scopeKey,
           JSON.stringify(body.key),
           body.value === null ? null : serializeValidatedRuntimeJson(body.value),
         );
-        return sendEmpty(response);
+        return sendEmpty(response, 204, revisionHeader(revision));
       }
       if (method === "PUT") {
         const entries = body?.entries;
@@ -229,7 +241,7 @@ export function testServer(options: TestServerOptions): {
         if (problem !== null) return sendJson(response, 400, { error: problem });
         // EVIDENCE: validation: validateScriptStorageEntries accepted `entries` as script storage entries.
         const accepted = entries as readonly { readonly key: string; readonly value: unknown }[];
-        store.replace(
+        const revision = store.replace(
           user,
           scopeKey,
           accepted.map(({ key, value }) => ({
@@ -237,18 +249,73 @@ export function testServer(options: TestServerOptions): {
             value: serializeValidatedRuntimeJson(value),
           })),
         );
-        return sendEmpty(response);
+        return sendEmpty(response, 204, revisionHeader(revision));
       }
     }
-    if (part === "media" && reference === undefined && method === "GET")
-      return sendJson(response, 200, {
-        references: store.references(user, scopeKey).map((stored) => JSON.parse(stored)),
-      });
-    if (part === "media" && reference !== undefined && rest.length === 0) {
-      if (method !== "GET" && failsOnPurpose()) return;
+    if (part === "session" && reference === undefined) {
+      if (method === "GET") {
+        const session = store.session(user, scopeKey);
+        if (session === null)
+          return sendJsonText(
+            response,
+            404,
+            JSON.stringify({ error: "No session is kept." }),
+            revisionHeader(store.revision(user, scopeKey, "session")),
+          );
+        return sendJsonText(
+          response,
+          200,
+          `{"planJson":${JSON.stringify(session.plan)},"snapshotJson":${JSON.stringify(session.snapshot)},` +
+            `"events":[${session.events.join(",")}],"marks":${session.marks}}`,
+          revisionHeader(store.revision(user, scopeKey, "session")),
+        );
+      }
+      if (method === "DELETE")
+        return sendEmpty(response, 204, revisionHeader(store.discardSession(user, scopeKey)));
+      if (method === "PUT") {
+        // Two devices must not mix their events: the session kept first stays.
+        if (conflicting("session"))
+          return sendJson(response, 409, { error: "Another Player kept this session meanwhile." });
+        const body = await readJson(request);
+        const { planJson, snapshotJson, eventsFrom, events, marks } = body ?? {};
+        if (
+          !(planJson === null || typeof planJson === "string") ||
+          typeof snapshotJson !== "string" ||
+          typeof eventsFrom !== "number" ||
+          !Number.isSafeInteger(eventsFrom) ||
+          eventsFrom < 0 ||
+          !Array.isArray(events) ||
+          !isPlainRecord(marks)
+        )
+          return sendJson(response, 400, {
+            error: "Send { planJson, snapshotJson, eventsFrom, events, marks }.",
+          });
+        const result = store.publishSession(user, scopeKey, {
+          plan: planJson,
+          snapshot: snapshotJson,
+          marks: serializeValidatedRuntimeJson(marks),
+          eventsFrom,
+          events: events.map((event) => serializeValidatedRuntimeJson(event)),
+        });
+        if (typeof result !== "number")
+          return sendJson(response, 400, {
+            error: result === "gap" ? "The events leave a gap." : "No plan is kept or sent.",
+          });
+        return sendEmpty(response, 204, revisionHeader(result));
+      }
+    }
+    if ((part === "media" || part === "session-media") && rest.length === 0) {
+      const table: MediaTable = part === "media" ? "media" : "session_media";
+      if (reference === undefined) {
+        if (method === "GET")
+          return sendJson(response, 200, {
+            references: store.references(user, scopeKey, table).map((stored) => JSON.parse(stored)),
+          });
+        return sendJson(response, 404, { error: "Not found." });
+      }
       const referenceKey = JSON.stringify(reference);
       if (method === "GET") {
-        const media = store.media(user, scopeKey, referenceKey);
+        const media = store.media(user, scopeKey, referenceKey, table);
         if (media === null) return sendJson(response, 404, { error: "Not found." });
         response.writeHead(200, {
           "Content-Type": "application/octet-stream",
@@ -259,8 +326,9 @@ export function testServer(options: TestServerOptions): {
         response.end(media.data);
         return;
       }
+      if (table === "media" && failsOnPurpose()) return;
       if (method === "DELETE") {
-        store.deleteMedia(user, scopeKey, referenceKey);
+        store.deleteMedia(user, scopeKey, referenceKey, table);
         return sendEmpty(response);
       }
       if (method === "PUT") {
@@ -274,7 +342,7 @@ export function testServer(options: TestServerOptions): {
         const data = await readBody(request);
         if (typeof fields !== "string" || !isPlainRecord(parsed) || parsed.size !== data.byteLength)
           return sendJson(response, 400, { error: "Send the media's fields matching its bytes." });
-        if (!store.addMedia(user, scopeKey, referenceKey, { fields, data }))
+        if (!store.addMedia(user, scopeKey, referenceKey, { fields, data }, table))
           return sendJson(response, 409, { error: "The reference is stored already." });
         return sendEmpty(response, 201);
       }
@@ -291,8 +359,8 @@ function segmentText(segment: string): string | null {
     const text: unknown = JSON.parse(decodeURIComponent(segment));
     return typeof text === "string" ? text : null;
   } catch {
-    // `scripts`, `storage`, `media`, and `name` are plain words.
-    return /^[a-z]+$/u.test(segment) ? segment : null;
+    // `scripts`, `storage`, `media`, `session`, `session-media`, and `name` are plain words.
+    return /^[a-z-]+$/u.test(segment) ? segment : null;
   }
 }
 
@@ -349,8 +417,14 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   sendJsonText(response, status, JSON.stringify(body));
 }
 
-function sendJsonText(response: ServerResponse, status: number, text: string): void {
+function sendJsonText(
+  response: ServerResponse,
+  status: number,
+  text: string,
+  headers: Readonly<Record<string, string>> = {},
+): void {
   response.writeHead(status, {
+    ...headers,
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(text),
     "Cache-Control": "no-store",
@@ -358,10 +432,16 @@ function sendJsonText(response: ServerResponse, status: number, text: string): v
   response.end(text);
 }
 
-function sendEmpty(response: ServerResponse, status = 204): void {
-  response.writeHead(status, { "Cache-Control": "no-store" });
+function sendEmpty(
+  response: ServerResponse,
+  status = 204,
+  headers: Readonly<Record<string, string>> = {},
+): void {
+  response.writeHead(status, { ...headers, "Cache-Control": "no-store" });
   response.end();
 }
+
+const revisionHeader = (revision: number) => ({ "X-Revision": String(revision) });
 
 function sendHtml(response: ServerResponse, html: string): void {
   response.writeHead(200, {

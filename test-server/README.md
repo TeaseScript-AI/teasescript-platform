@@ -13,8 +13,8 @@ origin, so no CORS is needed. Routes:
 - `/player/` and `/dev-package/`: the built Player and the development packages, served by the playground's own server
   code. The default packages folder holds `server-check`, a script that shows a saved count and the profile's display
   name, and keeps a photo for the next visit.
-- `/api/`: the provisional API of the Player's online mode; [`player/online-data.ts`](../player/online-data.ts) lists
-  its shapes.
+- `/api/`: the provisional API of the Player's online mode, saved values, photos, and kept sessions;
+  [`player/online-data.ts`](../player/online-data.ts) lists its shapes.
 - `/test-server/state`: the switches and the profile as JSON, read with `GET` and changed with `POST`.
 
 ## Run
@@ -41,6 +41,14 @@ The default 40 ms is roughly a server elsewhere in Europe, so the Player never g
 every request, including the Player's own files. Each `/api/` request writes one line to standard output: method,
 path, status, time, and bytes received.
 
+## Two writers
+
+Each script's saved values and kept session have a revision, and every change names the revision its Player last saw.
+A change that names another, because another device or tab changed the data meanwhile, is listed under **Two writers**
+on the stand-in page and logged as `Two writers: …`. It is only noticed, not resolved. A kept session keeps the change
+that came first: the other Player plays on, but nothing more of its session is kept, and a reload continues the session
+kept first. A saved value keeps the change that came last.
+
 ## Switches
 
 On the stand-in page, or with `curl -k -X POST https://<host>:4181/test-server/state -d '<json>'`; send `false` to
@@ -48,8 +56,8 @@ turn a switch off, and set several in one object. `curl -k https://<host>:4181/t
 state.
 
 - `{"slow": true}`: every request waits `TEST_SERVER_SLOW_MS` instead of `TEST_SERVER_LATENCY_MS`.
-- `{"failNextWrite": true}`: the next write of saved values or media answers 503 without storing anything; the switch
-  then turns itself off.
+- `{"failNextWrite": true}`: the next write of saved values or their photos answers 503 without storing anything; the
+  switch then turns itself off. A kept session is not affected.
 - `{"down": true}`: every `/api/` request answers 503; the Player's files still load.
 
 ## Boundaries

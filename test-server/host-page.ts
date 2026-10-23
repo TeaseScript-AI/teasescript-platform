@@ -16,6 +16,11 @@ export function hostPage(page: {
   };
   readonly state: TestServerState;
   readonly profile: string;
+  readonly conflicts: readonly {
+    readonly at: string;
+    readonly scope: string;
+    readonly kind: string;
+  }[];
 }): string {
   const config = JSON.stringify({
     token: page.token,
@@ -23,6 +28,17 @@ export function hostPage(page: {
     state: page.state,
     profile: JSON.parse(page.profile),
   }).replaceAll("<", "\\u003c");
+  const conflicts =
+    page.conflicts.length === 0
+      ? `<p class="quiet">None so far.</p>`
+      : `<ul>${page.conflicts
+          .map(
+            ({ at, scope, kind }) =>
+              `<li>${escapeHtml(at.slice(0, 19).replace("T", " "))} UTC · ${
+                kind === "session" ? "kept session" : "saved values"
+              } · ${escapeHtml(JSON.parse(scope))}</li>`,
+          )
+          .join("")}</ul>`;
   const options = page.packages
     .map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`)
     .join("");
@@ -73,6 +89,12 @@ export function hostPage(page: {
 <button id="fail" type="button">Fail the next write</button>
 <span id="fail-status" role="status"></span>
 </div>
+</section>
+<section>
+<h2>Two writers</h2>
+<p class="quiet">Changes that came while another Player had changed the same data, newest first. A kept session keeps the
+first change; saved values keep the last.</p>
+${conflicts}
 </section>
 <section>
 <h2>Profile</h2>

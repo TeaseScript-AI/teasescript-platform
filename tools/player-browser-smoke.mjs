@@ -190,7 +190,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a data mode that cannot be opened, online mode on the test server, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a data mode that cannot be opened, online mode on the test server with Continue in another browser, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
       );
     } finally {
       cdp.close();
@@ -709,9 +709,10 @@ function play(mode) {
 }
 
 // Online mode on the temporary test server, opened from its stand-in page: saves reach the server and come back in a
-// later run, stand-alone keeps its own data, and a write that fails says so.
+// later run, the session the server keeps continues in a browser that kept nothing, stand-alone keeps its own data, and
+// a write that fails says so.
 async function onlineScenario(cdp, origin) {
-  const start = "[data-session-activation] button";
+  const activate = "[data-session-activation] button";
   const messages = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`;
   const said = (text) => `${messages}.some((message) => message.includes(${JSON.stringify(text)}))`;
   // The page's buttons open a package of the server's folder, here one the address names.
@@ -724,26 +725,50 @@ async function onlineScenario(cdp, origin) {
     8_000,
     "The page opens the package its address names",
   );
-  const open = async (mode) => {
+  // Opens the Player from the stand-in page in a browser that kept nothing, as another device would, and activates it.
+  const open = async (mode, activation = "Start") => {
     await navigate(cdp, `${origin}/`);
     await waitFor(cdp, `!!document.getElementById('${mode}')`);
-    // Each run starts anew instead of continuing the session online mode keeps.
     const names = await cdp.call("IndexedDB.requestDatabaseNames", { securityOrigin: origin });
     for (const databaseName of names.result.databaseNames)
       await cdp.call("IndexedDB.deleteDatabase", { securityOrigin: origin, databaseName });
     await value(cdp, play(mode));
-    await waitFor(cdp, `!!document.querySelector('${start}')`, 15_000, `${mode} shows Start`);
-    await physicalClick(cdp, start);
+    await waitFor(
+      cdp,
+      `document.querySelector('${activate}')?.textContent.trim() === '${activation}'`,
+      15_000,
+      `${mode} shows ${activation}`,
+    );
+    await physicalClick(cdp, activate);
     await waitFor(cdp, said("Some of her messages make you wait."), 15_000);
   };
+  const session = (method) =>
+    `fetch('/api/scripts/%22repository-demo%22/session', { method: '${method}', headers: { Authorization: 'Bearer ' + sessionStorage.getItem('teasescript-online-token') } }).then((reply) => reply.status)`;
+  // The session is kept on the server once it presents its first interaction.
+  const kept = async () => {
+    const deadline = Date.now() + 15_000;
+    while (
+      (await cdp.call("Runtime.evaluate", { expression: session("GET"), awaitPromise: true }))
+        .result.result.value !== 200
+    )
+      if (Date.now() > deadline) throw new Error("The server keeps the session");
+      else await new Promise((resolve) => setTimeout(resolve, 200));
+  };
+  // Ends the session the server keeps, so that the next run starts anew.
+  const discard = () =>
+    cdp.call("Runtime.evaluate", { expression: session("DELETE"), awaitPromise: true });
   await open("online");
   assertEqual(await value(cdp, said("Back again")), false, "The account's first visit");
+  await kept();
+  await open("online", "Continue");
+  await discard();
   await open("online");
   assertEqual(
     await value(cdp, said("Back again. Visit 2.")),
     true,
     "The save came back from the server",
   );
+  await discard();
   await open("standalone");
   assertEqual(await value(cdp, said("Back again")), false, "Stand-alone has data of its own");
   await cdp.call("Runtime.evaluate", {

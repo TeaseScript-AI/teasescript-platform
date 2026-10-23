@@ -13,6 +13,11 @@ export interface StoredMedia {
   readonly data: Uint8Array;
 }
 
+/** The table of the photos saved values reference, or of those only a kept session uses. */
+export type MediaTable = "media" | "session_media";
+/** What a revision counts the changes of: a scope's saved values or its kept session. */
+export type RevisionKind = "storage" | "session";
+
 export class TestServerStore {
   readonly #database: DatabaseSync;
 
@@ -35,6 +40,25 @@ export class TestServerStore {
       CREATE TABLE IF NOT EXISTS media (
         account TEXT NOT NULL, scope TEXT NOT NULL, reference TEXT NOT NULL, fields TEXT NOT NULL, data BLOB NOT NULL,
         PRIMARY KEY (account, scope, reference)
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS session_media (
+        account TEXT NOT NULL, scope TEXT NOT NULL, reference TEXT NOT NULL, fields TEXT NOT NULL, data BLOB NOT NULL,
+        PRIMARY KEY (account, scope, reference)
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS sessions (
+        account TEXT NOT NULL, scope TEXT NOT NULL, plan TEXT NOT NULL, snapshot TEXT NOT NULL, marks TEXT NOT NULL,
+        PRIMARY KEY (account, scope)
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS session_events (
+        account TEXT NOT NULL, scope TEXT NOT NULL, position INTEGER NOT NULL, event TEXT NOT NULL,
+        PRIMARY KEY (account, scope, position)
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS revisions (
+        account TEXT NOT NULL, scope TEXT NOT NULL, kind TEXT NOT NULL, revision INTEGER NOT NULL,
+        PRIMARY KEY (account, scope, kind)
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS conflicts (
+        at TEXT NOT NULL, account TEXT NOT NULL, scope TEXT NOT NULL, kind TEXT NOT NULL
       ) STRICT;
     `);
   }
@@ -92,8 +116,8 @@ export class TestServerStore {
       .map((row) => ({ key: String(row.key), value: String(row.value) }));
   }
 
-  /** Stores one value, or removes the key for `null`. */
-  write(account: string, scope: string, key: string, value: string | null): void {
+  /** Stores one value, or removes the key for `null`; returns the new revision. */
+  write(account: string, scope: string, key: string, value: string | null): number {
     if (value === null)
       this.#database
         .prepare("DELETE FROM storage WHERE account = ? AND scope = ? AND key = ?")
@@ -102,14 +126,16 @@ export class TestServerStore {
       this.#database
         .prepare("INSERT OR REPLACE INTO storage (account, scope, key, value) VALUES (?, ?, ?, ?)")
         .run(account, scope, key, value);
+    return this.#changed(account, scope, "storage");
   }
 
-  /** Replaces every value of the scope at once. */
+  /** Replaces every value of the scope at once; returns the new revision. */
   replace(
     account: string,
     scope: string,
     entries: readonly { readonly key: string; readonly value: string }[],
-  ): void {
+  ): number {
+    let revision = 0;
     this.#transaction(() => {
       this.#database
         .prepare("DELETE FROM storage WHERE account = ? AND scope = ?")
@@ -118,19 +144,23 @@ export class TestServerStore {
         "INSERT INTO storage (account, scope, key, value) VALUES (?, ?, ?, ?)",
       );
       for (const { key, value } of entries) insert.run(account, scope, key, value);
+      revision = this.#changed(account, scope, "storage");
     });
+    return revision;
   }
 
-  references(account: string, scope: string): string[] {
+  references(account: string, scope: string, table: MediaTable): string[] {
     return this.#database
-      .prepare("SELECT reference FROM media WHERE account = ? AND scope = ? ORDER BY reference")
+      .prepare(`SELECT reference FROM ${table} WHERE account = ? AND scope = ? ORDER BY reference`)
       .all(account, scope)
       .map((row) => String(row.reference));
   }
 
-  media(account: string, scope: string, reference: string): StoredMedia | null {
+  media(account: string, scope: string, reference: string, table: MediaTable): StoredMedia | null {
     const row = this.#database
-      .prepare("SELECT fields, data FROM media WHERE account = ? AND scope = ? AND reference = ?")
+      .prepare(
+        `SELECT fields, data FROM ${table} WHERE account = ? AND scope = ? AND reference = ?`,
+      )
       .get(account, scope, reference);
     if (row === undefined) return null;
     if (!(row.data instanceof Uint8Array)) throw new TypeError("Stored media holds no bytes.");
@@ -138,19 +168,145 @@ export class TestServerStore {
   }
 
   /** Stores the media unless the reference is stored already; returns whether it stored it. */
-  addMedia(account: string, scope: string, reference: string, media: StoredMedia): boolean {
+  addMedia(
+    account: string,
+    scope: string,
+    reference: string,
+    media: StoredMedia,
+    table: MediaTable,
+  ): boolean {
     const result = this.#database
       .prepare(
-        "INSERT OR IGNORE INTO media (account, scope, reference, fields, data) VALUES (?, ?, ?, ?, ?)",
+        `INSERT OR IGNORE INTO ${table} (account, scope, reference, fields, data) VALUES (?, ?, ?, ?, ?)`,
       )
       .run(account, scope, reference, media.fields, media.data);
     return result.changes === 1;
   }
 
-  deleteMedia(account: string, scope: string, reference: string): void {
+  deleteMedia(account: string, scope: string, reference: string, table: MediaTable): void {
     this.#database
-      .prepare("DELETE FROM media WHERE account = ? AND scope = ? AND reference = ?")
+      .prepare(`DELETE FROM ${table} WHERE account = ? AND scope = ? AND reference = ?`)
       .run(account, scope, reference);
+  }
+
+  /** The revision of the scope's saved values or kept session; 0 before the first change. */
+  revision(account: string, scope: string, kind: RevisionKind): number {
+    const row = this.#database
+      .prepare("SELECT revision FROM revisions WHERE account = ? AND scope = ? AND kind = ?")
+      .get(account, scope, kind);
+    return row === undefined ? 0 : Number(row.revision);
+  }
+
+  /** Counts one more change of the scope's saved values or kept session; returns the new revision. */
+  #changed(account: string, scope: string, kind: RevisionKind): number {
+    const revision = this.revision(account, scope, kind) + 1;
+    this.#database
+      .prepare(
+        "INSERT OR REPLACE INTO revisions (account, scope, kind, revision) VALUES (?, ?, ?, ?)",
+      )
+      .run(account, scope, kind, revision);
+    return revision;
+  }
+
+  /** Records that a change named a revision other than the current one: another writer came in between. */
+  conflict(account: string, scope: string, kind: RevisionKind): void {
+    this.#database
+      .prepare("INSERT INTO conflicts (at, account, scope, kind) VALUES (?, ?, ?, ?)")
+      .run(new Date().toISOString(), account, scope, kind);
+  }
+
+  /** The latest conflicts, newest first. */
+  conflicts(
+    account: string,
+  ): { readonly at: string; readonly scope: string; readonly kind: string }[] {
+    return this.#database
+      .prepare(
+        "SELECT at, scope, kind FROM conflicts WHERE account = ? ORDER BY rowid DESC LIMIT 20",
+      )
+      .all(account)
+      .map((row) => ({ at: String(row.at), scope: String(row.scope), kind: String(row.kind) }));
+  }
+
+  /** The kept session with its events, as JSON texts, or `null`. */
+  session(
+    account: string,
+    scope: string,
+  ): {
+    readonly plan: string;
+    readonly snapshot: string;
+    readonly marks: string;
+    readonly events: string[];
+  } | null {
+    const row = this.#database
+      .prepare("SELECT plan, snapshot, marks FROM sessions WHERE account = ? AND scope = ?")
+      .get(account, scope);
+    if (row === undefined) return null;
+    const events = this.#database
+      .prepare("SELECT event FROM session_events WHERE account = ? AND scope = ? ORDER BY position")
+      .all(account, scope)
+      .map((event) => String(event.event));
+    return {
+      plan: String(row.plan),
+      snapshot: String(row.snapshot),
+      marks: String(row.marks),
+      events,
+    };
+  }
+
+  /**
+   * Keeps the session as `KeptSessionStore.publish` does: the events before `eventsFrom` stay and the rest are replaced;
+   * `plan` is `null` to keep the stored plan. Returns the new revision, or why nothing changed.
+   */
+  publishSession(
+    account: string,
+    scope: string,
+    update: {
+      readonly plan: string | null;
+      readonly snapshot: string;
+      readonly marks: string;
+      readonly eventsFrom: number;
+      readonly events: readonly string[];
+    },
+  ): number | "no plan" | "gap" {
+    let result: number | "no plan" | "gap" = "no plan";
+    this.#transaction(() => {
+      const stored = this.session(account, scope);
+      const plan = update.plan ?? stored?.plan;
+      if (plan === undefined) return;
+      if (update.eventsFrom > (stored?.events.length ?? 0)) {
+        result = "gap";
+        return;
+      }
+      this.#database
+        .prepare(
+          "INSERT OR REPLACE INTO sessions (account, scope, plan, snapshot, marks) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(account, scope, plan, update.snapshot, update.marks);
+      this.#database
+        .prepare("DELETE FROM session_events WHERE account = ? AND scope = ? AND position >= ?")
+        .run(account, scope, update.eventsFrom);
+      const insert = this.#database.prepare(
+        "INSERT INTO session_events (account, scope, position, event) VALUES (?, ?, ?, ?)",
+      );
+      update.events.forEach((event, index) =>
+        insert.run(account, scope, update.eventsFrom + index, event),
+      );
+      result = this.#changed(account, scope, "session");
+    });
+    return result;
+  }
+
+  /** Discards the kept session and its photos at once; returns the new revision. */
+  discardSession(account: string, scope: string): number {
+    let revision = 0;
+    this.#transaction(() => {
+      for (const table of ["sessions", "session_events", "session_media"])
+        this.#database
+          .prepare(`DELETE FROM ${table} WHERE account = ? AND scope = ?`)
+          .run(account, scope);
+      revision = this.#changed(account, scope, "session");
+    });
+    return revision;
   }
 
   close(): void {

@@ -4,12 +4,15 @@ import type { AddressInfo } from "node:net";
 import test, { after, before } from "node:test";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
+import type { KeptSessionUpdate } from "../player/kept-sessions.js";
 import {
+  onlineKeptSessions,
   onlineMediaRepository,
   onlineSavedScripts,
   onlineScriptStorage,
   readOnlineAccount,
 } from "../player/online-data.js";
+import { createSourcePosition, createSourceSpan } from "../src/source.js";
 import { testServer } from "../test-server/server.js";
 
 // The temporary test server answers the Player's online client: this test goes when the test server goes.
@@ -140,4 +143,73 @@ test("the server refuses saved values that are not valid", async () => {
     body: JSON.stringify({ key: "visits", value: { kind: "nothing" } }),
   });
   assert.equal(response.status, 400);
+});
+
+test("a kept session continues on another device, and a stale Player cannot overwrite it", async () => {
+  const at = createSourcePosition(0, 0, 0);
+  const events = (...sequences: number[]): KeptSessionUpdate["events"] =>
+    sequences.map((sequence) => ({ kind: "exit", sequence, span: createSourceSpan(at, at) }));
+  const update = (eventsFrom: number, snapshotJson: string, ...sequences: number[]) => ({
+    planJson: eventsFrom === 0 ? "plan" : null,
+    snapshotJson,
+    eventsFrom,
+    events: events(...sequences),
+    marks: { editedWhileDebugging: null, rewoundWhileDebugging: null },
+  });
+  const phone = onlineKeptSessions(server);
+  const laptop = onlineKeptSessions(server);
+  assert.equal(await phone.session("kept"), null);
+  await phone.publish("kept", update(0, "one", 1));
+  await phone.publish("kept", update(1, "two", 2));
+  assert.deepEqual(await laptop.session("kept"), {
+    planJson: "plan",
+    snapshotJson: "two",
+    events: JSON.parse(JSON.stringify(events(1, 2))),
+    marks: { editedWhileDebugging: null, rewoundWhileDebugging: null },
+  });
+  // The phone plays on; the laptop continued from what it read before and is refused.
+  await phone.publish("kept", update(2, "three", 3));
+  await assert.rejects(laptop.publish("kept", update(2, "elsewhere", 3)), /HTTP 409/u);
+  assert.equal((await phone.session("kept"))?.snapshotJson, "three");
+  // Once it reads the session again, the laptop takes it over.
+  await laptop.session("kept");
+  await laptop.publish("kept", update(3, "four", 4));
+  await assert.rejects(phone.publish("kept", update(3, "stale", 4)), /HTTP 409/u);
+  await assert.rejects(laptop.publish("kept", update(9, "gap", 10)), /HTTP 400/u);
+  const photo = {
+    namespace: "kept",
+    reference,
+    kind: "image" as const,
+    mimeType: "image/png",
+    size: 1,
+    data: new Blob([new Uint8Array([7])], { type: "image/png" }),
+  };
+  await laptop.media.add(photo);
+  assert.notEqual(await phone.media.get("kept", reference), null);
+  // Saved photos are apart from a kept session's.
+  assert.equal(await onlineMediaRepository(server).get("kept", reference), null);
+  await phone.discard("kept");
+  assert.equal(await laptop.session("kept"), null);
+  assert.equal(await laptop.media.get("kept", reference), null);
+  // A new session after a discard is kept, by the Player that discarded and by one that found none.
+  await phone.publish("kept", update(0, "new", 1));
+  await phone.discard("kept");
+  assert.equal(await laptop.session("kept"), null);
+  await laptop.publish("kept", update(0, "newer", 1));
+  assert.equal((await phone.session("kept"))?.snapshotJson, "newer");
+});
+
+test("saved values written meanwhile by another Player are kept, and the stand-in page lists both writers", async () => {
+  const phone = onlineScriptStorage(server, "shared");
+  const laptop = onlineScriptStorage(server, "shared");
+  await phone.load();
+  await laptop.load();
+  await phone.write("level", 1);
+  await laptop.write("level", 2);
+  assert.deepEqual(await phone.load(), [{ key: "level", value: 2 }]);
+  // Having read the latest values, the phone is no second writer.
+  await phone.write("level", 3);
+  const page = await (await fetch(new URL("/", server.server))).text();
+  assert.equal(page.match(/saved values · shared/gu)?.length, 1);
+  assert.equal(page.match(/kept session · kept/gu)?.length, 2);
 });

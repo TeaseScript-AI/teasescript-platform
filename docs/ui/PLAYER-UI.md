@@ -456,15 +456,16 @@ diagnostics, each with its file, line, and message; when the data its host chose
 that does not answer, the Player names the problem instead. The player's activation of Start is the user activation that later
 audible media playback relies on, so scripts may play audio from their first statement without a separate unlock step.
 
-The Player keeps the session in this browser: at each interaction it newly presents, a lock's dialog or password field
+The Player keeps the session: at each interaction it newly presents, a lock's dialog or password field
 too, also one that asks again after a block, when it ends, and when the page
 is hidden, it stores the session's state, the events that led to it, and the photos only the session uses, which no
-save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/kept-sessions.ts`). Opening the script
-again, after a reload or with the browser closed in between, shows **Continue** on the start page instead of Start; it
-goes on from the last kept point, with those photos as session media again; a stored photo the kept session uses
-stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
+save stored, in this browser's IndexedDB database `teasescript-kept-sessions` (`player/kept-sessions.ts`), or online on
+the server ([persistence modes](../DATA-AND-API.md#player-session-persistence-modes)). Opening the script again, after a
+reload or with the browser closed in between, online also on another device, shows **Continue** on the start page
+instead of Start; it goes on from the last kept point, with those photos as session media again; a stored photo the
+kept session uses stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
 a kept session whose events the engine's `interpreterEventProblem` refuses, such as a message without its markup or an
-answer without its form, is not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
+answer without its form, is not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous, so a step after the last kept point, such as a reload in the
 moment after an answer, can be lost. A saved-data import of the script discards its kept session
 ([transfer](../DATA-AND-API.md#saved-data-transfer)). A script a host prepares without its plan, such as a development
 scenario, keeps none. The debug room has a start page of its own, with its restarts
@@ -478,8 +479,8 @@ does not silently substitute muted playback or report the audio as played: refus
 cues and settlement wait, and an **Enable audio** [player notice](#player-notices) retries playback from the user's
 click. In the Player the
 session is created only when Start is activated; Continue resumes a kept session. Keeping a session across browsers or
-devices, and reconciling a continued session's view of saved data with saves made meanwhile, such as in another tab,
-are tracked in #469.
+devices beyond online mode's development server, and reconciling a continued session's view of saved data with saves
+made meanwhile, such as in another tab, are tracked in #469.
 
 While a session plays, the Player keeps the screen on with the browser's screen wake lock, so a long wait without input
 does not let the screen dim, turn off, or lock. It asks for the lock at the Start or Continue click, also when a camera
