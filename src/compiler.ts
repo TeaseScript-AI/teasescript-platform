@@ -14,7 +14,15 @@ import type { Tag } from "./tags.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
 import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutable.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
-import type { PlanImage, PreparedFormShape, StorageTypePlan, TypeCheckPlan } from "./plan/model.js";
+import type {
+  PlanImage,
+  PreparedFormShape,
+  StorageTypePlan,
+  TypeCheckPlan,
+  TypePlan,
+} from "./plan/model.js";
+import { instructionExpressions } from "./plan/instruction-expressions.js";
+import { expressionPlanChildren } from "./plan/expression-children.js";
 import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
@@ -147,7 +155,9 @@ function compileProjectFiles(
     );
     // Which code can run, the endings, and the flow of speaker properties follow the plan, which runs exactly as the
     // session will (V30 §30, §37).
-    if (plan !== null) plan = checkFlow(files, plan, trace, checked);
+    // A host global or host function may give a script reference to any file (V30 §30).
+    const hostValues = (options.globals?.length ?? 0) > 0 || (options.builtins?.length ?? 0) > 0;
+    if (plan !== null) plan = checkFlow(files, plan, trace, checked, hostValues);
   }
   const results = files.map((file) => file.result);
   const result = Object.freeze({
@@ -372,6 +382,7 @@ function checkFlow(
   plan: InstructionPlan,
   trace: LoweringTrace,
   checked: CheckedProject,
+  hostValues: boolean,
 ): InstructionPlan | null {
   try {
     const ways = new DeadWays(new PlanControlFlow(plan), trace.origins, checked.ways);
@@ -383,9 +394,10 @@ function checkFlow(
     );
     const statementFlow = reachability.statementFlow();
     const endings = reachability.endingDiagnostics();
-    const returns = reachability.pendingCallDiagnostics(() =>
-      taggedPicks(plan, trace, checked.names),
-    );
+    const returns = reachability.pendingCallDiagnostics(() => ({
+      picks: taggedPicks(plan, trace, checked.names),
+      referenced: referencedFiles(plan, checked.names, hostValues),
+    }));
     const errors = files.map((_, index) => [
       // The initialization check at labels decides itself which functions and blocks run, by the calls and creations
       // in statements that can run (ADR 0022 §3.4).
@@ -443,6 +455,49 @@ function checkFlow(
       main.parsed?.diagnostics,
     );
     return null;
+  }
+}
+
+/**
+ * The files that a script reference may name where a computed target uses it, by index: those the project's
+ * `script(...)` calls and `findScripts(...)` lists may name (see `FileSemanticResult.referencedScripts`). `null` for any
+ * file: when one of them may name any file, when a `load` may give a reference, which an earlier session may have saved
+ * for any file, or when the host gives values.
+ */
+function referencedFiles(
+  plan: InstructionPlan,
+  names: readonly FileSemanticResult[],
+  hostValues: boolean,
+): readonly number[] | null {
+  const referenced = names[0]?.referencedScripts ?? null;
+  if (referenced === null || hostValues) return null;
+  for (const instruction of plan.instructions)
+    for (const root of instructionExpressions(instruction)) {
+      const pending = [root];
+      for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+        if (node.kind === "storageLoad" && mayHoldScript(node.type)) return null;
+        pending.push(...expressionPlanChildren(node));
+      }
+    }
+  return plan.files.flatMap((file, index) => (referenced.has(file.path) ? [index] : []));
+}
+
+/** Whether a loaded value of this type may hold a script reference; `null`, a type not known, may. */
+function mayHoldScript(type: TypePlan | null): boolean {
+  if (type === null) return true;
+  switch (type.kind) {
+    case "script":
+      return true;
+    case "list":
+    case "set":
+    case "dict":
+      return mayHoldScript(type.element);
+    case "object":
+      return type.properties.some((property) => mayHoldScript(property.type));
+    case "union":
+      return type.members.some(mayHoldScript);
+    default:
+      return false;
   }
 }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProject, type ProjectSourceFile } from "../src/compiler.js";
+import { compileProject, type CompileOptions, type ProjectSourceFile } from "../src/compiler.js";
 import { compileStableProject } from "../src/compiler/compile-program.js";
 import { parse } from "../src/parser.js";
 import type { InstructionPlan } from "../src/plan/model.js";
@@ -433,7 +433,7 @@ test("an end with no call to return to is an error on every way the compiler can
       [
         "scene.tease",
         "TSV071",
-        "The goto on line 2 of main.tease picks its file when it runs, so the compiler cannot tell whether a call waits for this end then. Without one, the end fails. Write call there to come back after it, or use exit or goto here instead of end.",
+        "The goto on line 2 of main.tease picks its file when it runs, so the compiler cannot tell whether a call waits for this end then. Without one, the end fails. If that goto can lead here, write call there to come back after it, or use exit or goto here instead of end.",
       ],
     ],
   );
@@ -442,6 +442,85 @@ test("an end with no call to return to is an error on every way the compiler can
     "scene",
     "failure TSR066",
   ]);
+});
+
+test("a computed target may start only the files that a reference of the project may name", () => {
+  const warnings = (files: ProjectSourceFile[], options: CompileOptions = {}): string[] =>
+    compileProject(files, options).diagnostics.map(
+      (diagnostic) => `${diagnostic.path} ${diagnostic.code}`,
+    );
+  // V30 §29: the called files' ends have a call waiting, and the reference names rooms/hall.tease only.
+  const called = {
+    "a.tease": 'say "a"\nend',
+    "b.tease": 'say "b"\nend',
+    "c.tease": 'say "c"\nend',
+    "rooms/hall.tease": 'say "hall"\nexit',
+  };
+  const example = project(
+    'call "a.tease"\ncall "b.tease"\ncall "c.tease"\nlet next = script("rooms/hall.tease")\ngoto (next)',
+    called,
+  );
+  assert.deepEqual(warnings(example), []);
+  assert.deepEqual(said(example), ["a", "b", "c", "hall", "exit"]);
+  // A text with ${...} names the files its texts allow; a load of a number gives no reference.
+  assert.deepEqual(
+    warnings(
+      project(
+        'call "a.tease"\nlet room = load "room", default: "hall"\ngoto script("rooms/${room}.tease")',
+        called,
+      ),
+    ),
+    [],
+  );
+  // ADR 0023: a pool of findScripts(...) names the files it may list; one of them that ends still warns.
+  const tagged = (tags: string, source: string) => `---\ntags: ${tags}\n---\n${source}`;
+  const pool = {
+    "scene.tease": 'say "scene"\nend',
+    "modules/strict.tease": tagged("punishment: 5", 'say "strict"\nexit'),
+    "modules/soft.tease": tagged("punishment: 1", 'say "soft"\nend'),
+    "modules/corner.tease": tagged("punishment: 4", 'say "corner"\nend'),
+    "fallback.tease": 'say "none"\nexit',
+  };
+  assert.deepEqual(
+    warnings(
+      project(
+        [
+          'call "scene.tease"',
+          'let pool = findScripts(from: "modules/*.tease", where: "punishment" > 3)',
+          'if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }',
+        ].join("\n"),
+        pool,
+      ),
+    ),
+    ["modules/corner.tease TSV071"],
+  );
+  // A reference that a load may give, which an earlier session may have saved, or a host value, may name any file.
+  for (const [main, options] of [
+    [
+      'call "a.tease"\nlet next = load "next", default: script("rooms/hall.tease")\ngoto (next)',
+      {},
+    ],
+    ['call "a.tease"\nlet next = script("rooms/hall.tease")\ngoto (next)', { globals: ["host"] }],
+  ] as const)
+    assert.deepEqual(
+      warnings(project(main, called), options),
+      ["a.tease TSV071", "b.tease TSV071", "c.tease TSV071"],
+      main,
+    );
+});
+
+test("a fallback statement is no statement", () => {
+  assert.deepEqual(
+    compileProject(project('fallback "a.tease"\nexit', { "a.tease": "exit" })).diagnostics.map(
+      (diagnostic) => [diagnostic.code, diagnostic.message],
+    ),
+    [
+      [
+        "TSP001",
+        "TeaseScript has no 'fallback': an end returns to the file that called this one. Use call to start a file that should come back here, and goto or exit where no call waits.",
+      ],
+    ],
+  );
 });
 
 test("a block of a file the session left sees that file's variables, and its goto brings that file back", () => {

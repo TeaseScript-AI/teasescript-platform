@@ -202,12 +202,16 @@ export class Reachability {
    * which file calls are waiting: a `call` makes one wait, and a `goto` keeps those that wait. An `end` that a way
    * reaches with none waiting is an error (TSV070), also when another way reaches it through a call. Where only a way
    * the compiler cannot follow leads there with none waiting, it is a warning (TSV071), and the `end` fails if that
-   * happens: a computed target, which may start any file, or the files `picks` gives for a tagged pick, by instruction;
-   * and a timer, media, or button block, which runs later, while the file that started it or a file it called runs, or
-   * after it. The `end` that closes a file's top level is the ending check's (TSV052).
+   * happens: a computed target, which may start a file that `targets` gives, the files its `picks` give for a tagged
+   * pick, by instruction, else those that any reference in the project may name, `referenced`, where `null` is every
+   * file; and a timer, media, or button block, which runs later, while the file that started it or a file it called
+   * runs, or after it. The `end` that closes a file's top level is the ending check's (TSV052).
    */
   public pendingCallDiagnostics(
-    picks: () => ReadonlyMap<number, readonly number[]>,
+    targets: () => {
+      readonly picks: ReadonlyMap<number, readonly number[]>;
+      readonly referenced: readonly number[] | null;
+    },
   ): Diagnostic[][] {
     const diagnostics = this.plan.files.map((): Diagnostic[] => []);
     const closing = new Set(this.plan.files.map((file) => file.rootEndInstruction - 1));
@@ -218,7 +222,8 @@ export class Reachability {
     )
       return diagnostics;
     const count = this.plan.instructions.length;
-    const ways = this.#computedWays(picks());
+    const { picks, referenced } = targets();
+    const ways = this.#computedWays(picks, referenced);
     const states = solveForward<CallsWaiting, string>(
       {
         nodeCount: count + ways.hubs.length,
@@ -272,7 +277,7 @@ export class Reachability {
             : state.none !== null
               ? `No call waits for this end when the goto on ${this.#where(state.none, file)} leads here, so there is nothing to return to. Write call there to come back after it, or ${fix}.`
               : this.plan.instructions[state.hidden!]!.kind === "transfer"
-                ? `The goto on ${this.#where(state.hidden!, file)} picks its file when it runs, so the compiler cannot tell whether a call waits for this end then. Without one, the end fails. Write call there to come back after it, or ${fix}.`
+                ? `The goto on ${this.#where(state.hidden!, file)} picks its file when it runs, so the compiler cannot tell whether a call waits for this end then. Without one, the end fails. If that goto can lead here, write call there to come back after it, or ${fix}.`
                 : `The block that ${this.#where(state.hidden!, file)} starts runs later, so the compiler cannot tell whether a call waits for this end when it runs. Without one, the end fails. If the block can run while no file call waits, ${fix}.`,
           planLocationToSourceSpan(instruction.span),
         ),
@@ -284,11 +289,14 @@ export class Reachability {
   /**
    * The way of each computed target for the check of waiting calls (see {@link pendingCallDiagnostics}). A
    * `script(...)` of a path written out names its file, which the check follows like a file target. Any other target
-   * leads to a node of its own after the instructions, a hub, with a way into each file it may start; targets that may
-   * start the same files share one, a list of files `picks` shares, so the ways grow with the files, not with the targets
-   * times the files.
+   * leads to a node of its own after the instructions, a hub, with a way into each file it may start: those of its
+   * tagged pick, or those any reference may name. Targets that may start the same files share one, by the list of files
+   * `picks` shares, so the ways grow with the files, not with the targets times the files.
    */
-  #computedWays(picks: ReadonlyMap<number, readonly number[]>): {
+  #computedWays(
+    picks: ReadonlyMap<number, readonly number[]>,
+    referenced: readonly number[] | null,
+  ): {
     readonly targets: ReadonlyMap<number, { readonly node: number; readonly edge: string }>;
     readonly hubs: readonly (readonly number[])[];
   } {
@@ -296,14 +304,14 @@ export class Reachability {
     const files = new Map(this.plan.files.map((file, index) => [file.path, index]));
     const targets = new Map<number, { readonly node: number; readonly edge: string }>();
     const hubs: (readonly number[])[] = [];
-    // By the list of files, which `picks` shares; `null` for every file.
+    // By the list of files, which `picks` shares; `null` for the files any other reference may name.
     const hubOf = new Map<readonly number[] | null, number>();
     const hub = (picked: readonly number[] | null): number => {
       let node = hubOf.get(picked);
       if (node === undefined) {
         node = count + hubs.length;
         hubs.push(
-          (picked ?? this.plan.files.map((_, file) => file)).map(
+          (picked ?? referenced ?? this.plan.files.map((_, file) => file)).map(
             (file) => this.plan.files[file]!.entryInstruction,
           ),
         );

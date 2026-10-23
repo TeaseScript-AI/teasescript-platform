@@ -205,6 +205,11 @@ export interface FileSemanticResult {
    * lists count as possibly true.
    */
   readonly taggedPicks: ReadonlyMap<Statement, readonly string[]>;
+  /**
+   * The files that the script references of the whole project may name, by its `script(...)` calls and
+   * `findScripts(...)` lists, or `null` for any file (see `ProjectNames.referencedScripts`).
+   */
+  readonly referencedScripts: ReadonlySet<string> | null;
   /** The variables each timer, media, or button block shares with the code that created it (V30 §14). */
   readonly captures: ReadonlyMap<Block, readonly string[]>;
   /** The declarations of the shared variables that a block assigns or changes in place, with how. */
@@ -349,6 +354,7 @@ export function validateProjectSemantics(
       diagnostics: Object.freeze([...diagnostics]),
       picks: validators[index]?.picks ?? new Map<FileTarget, readonly string[]>(),
       taggedPicks: validators[index]?.taggedPicks ?? new Map<Statement, readonly string[]>(),
+      referencedScripts: project.referencedScripts,
       captures: validators[index]?.captures ?? new Map<Block, readonly string[]>(),
       sharedWrites: validators[index]?.sharedWrites ?? new Map<VariableSite, Sharing>(),
       writtenLets: validators[index]?.writtenLets ?? new Set<LetStatement>(),
@@ -375,6 +381,65 @@ class ProjectNames {
 
   /** The files that tagged picks with the same facts may choose (see `#taggedCandidates`), by those facts. */
   readonly taggedPicks = new Map<string, readonly string[]>();
+
+  /**
+   * The files that the script references the project makes may name: those of its `script(...)` calls and
+   * `findScripts(...)` lists; `null` once one may name any file, as a `script(...)` of a path computed otherwise than in
+   * a text with `${...}`.
+   */
+  referencedScripts: Set<string> | null = new Set();
+
+  /** The lists of files already in `referencedScripts`, each added once. */
+  readonly #referred = new WeakSet<readonly string[]>();
+
+  /** The files each `script(...)` text with `${...}` may name, by the texts around its `${...}`. */
+  readonly #patterns = new Map<string, readonly string[]>();
+
+  /** Adds files that a script reference may name, or any file with `null` (see `referencedScripts`). */
+  public refer(paths: readonly string[] | null): void {
+    if (this.referencedScripts === null || this.#referred.has(paths ?? [])) return;
+    if (paths === null) {
+      this.referencedScripts = null;
+      return;
+    }
+    this.#referred.add(paths);
+    for (const path of paths) this.referencedScripts.add(path);
+  }
+
+  /**
+   * The files that a text with `${...}` may name: those whose path starts with its first text, ends with its last, and
+   * holds the ones between in order, whatever the values give between them. Each pattern is matched once.
+   */
+  public filesLike(texts: readonly string[]): readonly string[] {
+    const key = JSON.stringify(texts);
+    const known = this.#patterns.get(key);
+    if (known !== undefined) return known;
+    if (texts.length === 1) {
+      const files = this.labels.has(texts[0]!) ? [texts[0]!] : [];
+      this.#patterns.set(key, files);
+      return files;
+    }
+    const first = texts[0]!;
+    const last = texts.at(-1)!;
+    const files = [...this.labels.keys()].filter((path) => {
+      if (
+        path.length < first.length + last.length ||
+        !path.startsWith(first) ||
+        !path.endsWith(last)
+      )
+        return false;
+      let at = first.length;
+      const end = path.length - last.length;
+      for (const text of texts.slice(1, -1)) {
+        const found = path.indexOf(text, at);
+        if (found < 0 || found + text.length > end) return false;
+        at = found + text.length;
+      }
+      return true;
+    });
+    this.#patterns.set(key, files);
+    return files;
+  }
 
   readonly diagnostics: Diagnostic[][];
 
@@ -1346,7 +1411,26 @@ class SemanticValidator {
     if (positional.length !== 1) return;
     const pathArgument = positional[0]!.value;
     const path = literalText(pathArgument) ?? null;
-    if (path === null) return;
+    if (path === null) {
+      // A text with `${...}` names the files its texts allow; any other path, any file.
+      const written = unwrapParentheses(pathArgument);
+      this.project.refer(
+        written.kind === "stringLiteral"
+          ? this.project.filesLike(
+              written.parts.reduce<string[]>(
+                (texts, part) => {
+                  if (part.kind === "stringText") texts[texts.length - 1] += part.value;
+                  else texts.push("");
+                  return texts;
+                },
+                [""],
+              ),
+            )
+          : null,
+      );
+      return;
+    }
+    this.project.refer([path]);
     const transfer = this.#directTarget?.call === call ? this.#directTarget.transfer : null;
     const pathProblem = packagePathProblem(path);
     const problem = isPathGlob(path)
@@ -2019,6 +2103,9 @@ class SemanticValidator {
         for (const operand of tagQueryOperands(expression)) {
           yield* compileChild(this.#validateExpressionTask(operand, scope, contextualSpeaker));
         }
+        // `findScripts(...)` makes references to the files it may list.
+        if (expression.catalog === "scripts" && expression.select === "list")
+          this.project.refer(this.#taggedCandidates(expression));
         return;
     }
     expression satisfies never;
