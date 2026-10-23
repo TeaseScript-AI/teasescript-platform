@@ -264,7 +264,7 @@ call that fails the session or throws freezes the record, which keeps the state 
 threw, the state it started from, as the export's checkpoint, so that later observations, such as on hiding the page,
 cannot evict or outdate it; a call the recorder cannot copy, or a media store or random decision callback that throws
 during a call, marks it incomplete, and so does a state the session cannot export, such as one holding a list too long
-for the browser to enumerate, for which the record keeps no earlier state, only how the session failed there, if it
+for the browser to enumerate, for which the record keeps no end state but still how the session failed there, if it
 did. The recorder also lets the Player continue after a call throws, which ends the
 session's [runtime session](RUNTIME.md#runtime-sessions): the Player rebuilds the state it showed last from the recorded
 calls. For that, the recorder keeps logging calls after the record froze without changing the record, and after a call
