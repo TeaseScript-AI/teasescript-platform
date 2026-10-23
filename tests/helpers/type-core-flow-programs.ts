@@ -697,6 +697,50 @@ export const FLOW_PROGRAMS: readonly FlowProgram[] = [
     ],
   },
   {
+    name: "button-behind-call-that-cannot-return",
+    files: [
+      { path: "main.tease", source: 'say "START"\ncall "part.tease"\nsay "AFTER"\nexit\n' },
+      {
+        path: "part.tease",
+        source:
+          'function stop {\n  exit\n}\nsay "TARGET"\nstop()\nshowPermanentButton "Never" {\n  end\n}\nend\n',
+      },
+    ],
+  },
+  {
+    name: "button-after-call-of-exiting-file",
+    files: [
+      {
+        path: "main.tease",
+        source:
+          'say "START"\ncall "part.tease"\nshowPermanentButton "Never" {\n  end\n}\nsay "AFTER"\nexit\n',
+      },
+      { path: "part.tease", source: 'say "TARGET"\nexit\n' },
+    ],
+  },
+  {
+    name: "registering-function-after-call-of-exiting-file",
+    files: [
+      {
+        path: "main.tease",
+        source:
+          'function reg {\n  showPermanentButton "Never" {\n    end\n  }\n}\nsay "START"\ncall "part.tease"\nreg()\nsay "AFTER"\nexit\n',
+      },
+      { path: "part.tease", source: 'say "TARGET"\nexit\n' },
+    ],
+  },
+  {
+    name: "registering-function-before-call",
+    files: [
+      {
+        path: "main.tease",
+        source:
+          'function reg {\n  showPermanentButton "Stop" {\n    end\n  }\n}\nsay "START"\nreg()\ncall "part.tease"\nsay "AFTER"\nexit\n',
+      },
+      { path: "part.tease", source: 'say "TARGET"\nwait 1 s\nexit\n' },
+    ],
+  },
+  {
     name: "parameters-written-order",
     files:
       'function first { say "B"\n return 1 }\nfunction second { say "C"\n return 2 }\nfunction use(a = first(), b = second()) { say "D"\n return a + b }\nsay "A"\nuse(b: second())\nsay "Z"\nexit\n',

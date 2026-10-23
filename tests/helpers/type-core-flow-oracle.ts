@@ -120,10 +120,11 @@ function lower(
 /**
  * Which functions and files of the plan can return, by the rules of the graph's `#decideReturns`, on instructions: a
  * function returns at a `return`; a file at an `end` of its top level, at an `end` in a function it calls, through a
- * file it starts with `goto` that returns, or at an `end` of a block that some instruction the session can reach
- * registers; a function may end the running file at an `end`, through a function that may, a `goto` of a file that
- * returns, or a `goto` of a label whose continuation in its file's top level reaches such an ending (r4.25). A call
- * goes on only once its callee is found to return. Iterated until nothing changes.
+ * file it starts with `goto` that returns, or at an `end` of a block whose registering instruction the session reaches
+ * through the calls found to return so far (r4.26: never through a return that the block's own `end` would justify);
+ * a function may end the running file at an `end`, through a function that may, a `goto` of a file that returns, or a
+ * `goto` of a label whose continuation in its file's top level reaches such an ending (r4.25). A call goes on only once
+ * its callee is found to return. Iterated until nothing changes, the registered blocks found afresh each round.
  */
 function planReturns(lowered: Lowered): {
   readonly functions: Set<number>;
@@ -137,35 +138,6 @@ function planReturns(lowered: Lowered): {
   const labelEnds = new Set<number>();
   const root = (file: number) => (at: number) =>
     at >= plan.files[file]!.entryInstruction && at < plan.files[file]!.rootEndInstruction;
-  // The blocks that some instruction registers that the session reaches, every call returning.
-  const registered = new Set<number>();
-  {
-    const seen = new Set([plan.files[0]!.startInstruction]);
-    const work = [plan.files[0]!.startInstruction];
-    while (work.length > 0) {
-      const index = work.pop()!;
-      for (const handler of flow.handlersOf(index)) registered.add(handler);
-      const next = flow
-        .successors(index)
-        .filter(({ edge }) => lowered.ways.possible(index, edge.kind))
-        .flatMap(({ edge, target }) =>
-          edge.kind === "computed"
-            ? plan.files.map((file) => file.entryInstruction)
-            : target === null
-              ? []
-              : [target],
-        );
-      for (const handler of flow.handlersOf(index)) {
-        const definition = flow.functionById(handler);
-        if (definition !== undefined) next.push(definition.entryInstruction);
-      }
-      for (const target of next)
-        if (!seen.has(target)) {
-          seen.add(target);
-          work.push(target);
-        }
-    }
-  }
   const units: {
     readonly entry: number;
     readonly unit: (index: number) => boolean;
@@ -209,6 +181,12 @@ function planReturns(lowered: Lowered): {
   let changed = true;
   while (changed) {
     changed = false;
+    const registered = new Set<number>();
+    for (const index of reachable(
+      plan.files[0]!.startInstruction,
+      successorsGiven(lowered, { functions, files }),
+    ))
+      for (const handler of flow.handlersOf(index)) registered.add(handler);
     for (const unit of units) {
       let returns = false;
       let ends = false;
@@ -287,8 +265,15 @@ function planReturns(lowered: Lowered): {
 
 /** The lowering's control flow, as the graph summarizes calls, from the start of the session. */
 function planSuccessors(lowered: Lowered): (index: number) => number[] {
+  return successorsGiven(lowered, planReturns(lowered));
+}
+
+/** The lowering's control flow, a call going on after it only when its callee is one of `returns`. */
+function successorsGiven(
+  lowered: Lowered,
+  returns: { readonly functions: ReadonlySet<number>; readonly files: ReadonlySet<number> },
+): (index: number) => number[] {
   const { plan, flow, ways } = lowered;
-  const returns = planReturns(lowered);
   return (index) => {
     const instruction = plan.instructions[index];
     if (instruction === undefined) return [];

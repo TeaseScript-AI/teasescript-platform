@@ -503,6 +503,45 @@ test("code after a call that cannot return is dead, and after one that may retur
       false,
       never,
     );
+  // A block registered only behind a call that cannot return registers nothing, so its `end` cannot justify that
+  // call's return (r4.26): behind `stop()` in the called file, after the call in main, or in a function called there.
+  const exits = { path: "part.tease", source: 'say "TARGET"\nexit' };
+  const button = 'showPermanentButton "Never" {\n  end\n}\n';
+  assert.equal(
+    live([
+      { path: "main.tease", source: 'say "START"\ncall "part.tease"\nsay "R"\nexit' },
+      {
+        path: "part.tease",
+        source: `function stop {\n  exit\n}\nsay "TARGET"\nstop()\n${button}end`,
+      },
+    ]),
+    false,
+  );
+  assert.equal(
+    live([{ path: "main.tease", source: `call "part.tease"\n${button}say "R"\nexit` }, exits]),
+    false,
+  );
+  assert.equal(
+    live([
+      {
+        path: "main.tease",
+        source: `function reg {\n  ${button.replaceAll("\n", "\n  ")}}\ncall "part.tease"\nreg()\nsay "R"\nexit`,
+      },
+      exits,
+    ]),
+    false,
+  );
+  // A function entered before the call registers it, so its `end` may end the called file at its wait.
+  assert.equal(
+    live([
+      {
+        path: "main.tease",
+        source: `function reg {\n  ${button.replaceAll("\n", "\n  ")}}\nreg()\ncall "part.tease"\nsay "R"\nexit`,
+      },
+      { path: "part.tease", source: 'say "TARGET"\nwait 1 s\nexit' },
+    ]),
+    true,
+  );
   // A glob call returns when one of the files it may pick returns.
   const glob = (second: string) => [
     { path: "main.tease", source: 'call "parts/*.tease"\nsay "R"\nexit' },
