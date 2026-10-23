@@ -724,6 +724,38 @@ test("a fallback statement is no statement", () => {
   );
 });
 
+test("a function is no target of a call or goto", () => {
+  // V30 §10: a function runs by its name and '()', without 'call'.
+  const found = (main: string): [string, string, string][] =>
+    compileProject(project(main)).diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.message,
+      main.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
+    ]);
+  const scene = 'function scene(level = 1) { say "scene ${level}" }\n';
+  assert.deepEqual(found(`${scene}call scene()\nexit`), [
+    [
+      "TSP039",
+      "A call only starts a file, so it cannot run function 'scene'. Leave out 'call' to run it.",
+      "scene()",
+    ],
+  ]);
+  assert.deepEqual(found(`${scene}if true {\n    call scene(level: 2)\n}\nexit`), [
+    [
+      "TSP039",
+      "A call only starts a file, so it cannot run function 'scene'. Leave out 'call' to run it.",
+      "scene(level: 2)",
+    ],
+  ]);
+  assert.deepEqual(found(`${scene}goto scene()\nexit`), [
+    [
+      "TSP039",
+      "A 'goto' only goes to a label or a file, so it cannot run function 'scene'. Leave out 'goto' to run it.",
+      "scene()",
+    ],
+  ]);
+});
+
 test("a block of a file the session left sees that file's variables, and its goto brings that file back", () => {
   assert.deepEqual(
     said(

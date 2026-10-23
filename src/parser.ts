@@ -1391,6 +1391,23 @@ class Parser {
     }
     if (this.#check(TokenKind.Identifier)) {
       const label = this.#identifier(this.#advance());
+      // `call scene()`: a function runs by its name and `()`, without `call` or `goto` (V30 §10).
+      if (this.#check(TokenKind.LeftParenthesis)) {
+        const reported = this.#diagnostics.length;
+        const call = yield* parseChild(
+          this.#withinDelimiters(this.#finishCall(label, this.#advance())),
+        );
+        // A malformed call is reported first.
+        if (this.#diagnostics.length === reported)
+          this.#reportSpan(
+            parserDiagnosticCode.expectedLabelName,
+            keyword.lexeme === "call"
+              ? `A call only starts a file, so it cannot run function '${label.name}'. Leave out 'call' to run it.`
+              : `A 'goto' only goes to a label or a file, so it cannot run function '${label.name}'. Leave out 'goto' to run it.`,
+            call.span,
+          );
+        return null;
+      }
       return Object.freeze({ kind: "labelTarget", label, span: copySpan(label.span) });
     }
     const start = this.#peek();
