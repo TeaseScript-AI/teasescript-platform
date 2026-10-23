@@ -81,15 +81,15 @@ test("probe refuses a clock or time zone it cannot use", () => {
   }
 });
 
-test("probe --run reads the account a JSON file gives", () => {
-  const directory = mkdtempSync(join(tmpdir(), "probe-account-"));
+test("probe --run reads the player profile a JSON file gives", () => {
+  const directory = mkdtempSync(join(tmpdir(), "probe-player-profile-"));
   try {
-    const file = join(directory, "account.json");
+    const file = join(directory, "player-profile.json");
     writeFileSync(file, '{"firstName": "Alex", "gender": "female", "petNames": ["puppy", "pet"]}');
     const source =
-      'say "${account.firstName}, ${account.heShe}, ${account.petNames[1]}"\n' +
-      'player.copyFrom(account)\nsay "${player.firstName}"\nexit\n';
-    const result = runProbe(source, ["--run", "--account", file]);
+      'say "${playerProfile.firstName}, ${playerProfile.heShe}, ${playerProfile.petNames[1]}"\n' +
+      'player.copyFrom(playerProfile)\nsay "${player.firstName}"\nexit\n';
+    const result = runProbe(source, ["--run", "--player-profile", file]);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /^say: Alex, she, pet$/m);
     assert.match(result.stdout, /^say: Alex$/m);
@@ -98,20 +98,20 @@ test("probe --run reads the account a JSON file gives", () => {
   }
 });
 
-test("probe refuses an account it cannot use", () => {
-  const directory = mkdtempSync(join(tmpdir(), "probe-account-"));
+test("probe refuses a player profile it cannot use", () => {
+  const directory = mkdtempSync(join(tmpdir(), "probe-player-profile-"));
   try {
     for (const [name, content, reason] of [
       ["not-json.json", '{"firstName": "Alex",}', "JSON"],
       // The session's own check: a name list is a list of texts.
-      ["text-list.json", '{"petNames": "puppy"}', "account.petNames"],
+      ["text-list.json", '{"petNames": "puppy"}', "playerProfile.petNames"],
       ["missing.json", null, "ENOENT"],
     ] as const) {
       const file = join(directory, name);
       if (content !== null) writeFileSync(file, content);
-      const result = runProbe("exit\n", ["--run", "--account", file]);
+      const result = runProbe("exit\n", ["--run", "--player-profile", file]);
       assert.equal(result.status, 2, name);
-      assert.ok(result.stderr.includes(`--account ${file}: `), result.stderr);
+      assert.ok(result.stderr.includes(`--player-profile ${file}: `), result.stderr);
       assert.ok(result.stderr.includes(reason), result.stderr);
       assert.equal(result.stdout, "");
     }
