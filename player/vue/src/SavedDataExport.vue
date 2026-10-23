@@ -222,7 +222,7 @@ function sessionContents(read: SessionExport): string {
   const recordings = of(["audio", "video"]);
   const files = of(["file"]);
   return [
-    count(read.transfer.entries.length, "saved value", "saved values"),
+    count(read.transfer.entries.length, "value", "values"),
     count(of(["image"]), "photo", "photos"),
     ...(recordings > 0 ? [count(recordings, "recording", "recordings")] : []),
     ...(files > 0 ? [count(files, "file", "files")] : []),
@@ -247,7 +247,7 @@ function sessionContents(read: SessionExport): string {
           <span class="min-w-0">
             <span class="block font-medium">Saved data</span>
             <span class="block text-muted-foreground">
-              What the scripts this browser has played saved, with their saved photos.
+              What the scripts you play saved in this browser, with their photos.
             </span>
           </span>
         </label>
@@ -349,9 +349,10 @@ function sessionContents(read: SessionExport): string {
           </p>
           <p v-if="exportedSession.missing > 0">
             {{
-              count(exportedSession.missing, "reference names a photo or file", "references name photos or files")
+              exportedSession.missing === 1
+                ? "1 photo or file is missing from this browser, so the export cannot include it."
+                : `${exportedSession.missing} photos or files are missing from this browser, so the export cannot include them.`
             }}
-            this browser does not have. The export keeps them as text.
           </p>
           <p class="text-muted-foreground">
             The export contains the session's messages and answers and can contain private photos. Anyone who has it can
@@ -367,8 +368,7 @@ function sessionContents(read: SessionExport): string {
         <TabsContent value="file">
           <div class="grid gap-3 text-sm">
             <p v-if="kind === 'session'">
-              One file with the session, its saved data, and its photos. Import it in the Settings of this script's
-              Player in the other browser, then press Continue.
+              Open this script in the other browser, import this file in Settings, then press Continue.
             </p>
             <p v-else>One file with the values and photos. Import it in the Settings of the other Player.</p>
             <Button as-child class="min-h-11 justify-self-start">
@@ -377,14 +377,17 @@ function sessionContents(read: SessionExport): string {
                 Download file
               </a>
             </Button>
-            <p class="break-all text-muted-foreground">{{ prepared.fileName }} · {{ formatSize(prepared.size) }}</p>
+            <p class="text-muted-foreground">
+              <span class="break-all">{{ prepared.fileName }}</span> ·
+              <span class="whitespace-nowrap">{{ formatSize(prepared.size) }}</span>
+            </p>
             <p v-if="!gzip">This browser cannot compress, so the file is plain JSON.</p>
           </div>
         </TabsContent>
         <TabsContent value="text">
           <div class="grid gap-3 text-sm">
             <p v-if="kind === 'session'">
-              Copy this text and paste it into Import in the Settings of this script's Player in the other browser. With
+              Open this script in the other browser, paste this text into Import in Settings, then press Continue. With
               many photos, a file is easier to move.
             </p>
             <p v-else>

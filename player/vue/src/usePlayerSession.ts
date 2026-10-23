@@ -1460,7 +1460,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       restorePoint = createPlayerRuntimeRestorePoint(found.session);
     } catch {
       throw new StorageTransferError(
-        "This browser cannot write the session as it is now, for example because a list in it is too long, so it cannot be exported. It goes on here.",
+        "This browser cannot keep the session as it is now, so it cannot be exported. Play on and try again later.",
       );
     }
     let entries: readonly RuntimeScriptStorageEntrySnapshot[];
@@ -1555,7 +1555,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       scriptPlan === null ||
       scriptStorage === undefined
     )
-      throw new StorageTransferError("A session cannot be imported right now.");
+      throw new StorageTransferError(
+        "A session cannot be imported right now. Try again in a moment.",
+      );
     const { transfer } = review;
     const scope = keptScope;
     const plan = scriptPlan;

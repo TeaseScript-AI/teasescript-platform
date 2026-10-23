@@ -973,8 +973,8 @@ async function updateSidebarVisibility(open: boolean) {
                     >
                       <h3 class="font-medium">Saved data</h3>
                       <p>
-                        What the scripts you play saved in this browser. Export and import take every script at once,
-                        or the ones you tick, or the session you play, to continue it in another browser.
+                        What the scripts you play saved in this browser. Export and import also move a session to
+                        another browser.
                       </p>
                       <div class="flex flex-wrap gap-2">
                         <SavedDataExport :read="savedData.export" :session="savedData.session" />

@@ -368,7 +368,9 @@ test("a session whose state this browser cannot write is refused with the reason
     (error: unknown) =>
       error instanceof Error &&
       error.name === "StorageTransferError" &&
-      /cannot write the session as it is now, .* so it cannot be exported/.test(error.message),
+      /cannot keep the session as it is now, so it cannot be exported\. Play on and try again later\./.test(
+        error.message,
+      ),
   );
   // The point kept before would go on from before the list as if it were now, so it goes, and a notice says so.
   await until(async () => (await keptState()) === null, "the earlier kept point still stands in");

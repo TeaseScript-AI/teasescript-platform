@@ -186,7 +186,7 @@ function sessionContents(review: SessionImportReview): string {
   const recordings = of(["audio", "video"]);
   const files = of(["file"]);
   return [
-    count(review.transfer.entries.length, "saved value", "saved values"),
+    count(review.transfer.entries.length, "value", "values"),
     count(of(["image"]), "photo", "photos"),
     ...(recordings > 0 ? [count(recordings, "recording", "recordings")] : []),
     ...(files > 0 ? [count(files, "file", "files")] : []),
@@ -211,8 +211,7 @@ function sessionContents(review: SessionImportReview): string {
       <DialogHeader>
         <DialogTitle>Import</DialogTitle>
         <DialogDescription>
-          Brings saved data or a session exported from another browser or device, with its photos. Each script's data
-          goes into that script's own saved data, and a session continues this script.
+          Brings saved data or a session from another browser or device.
         </DialogDescription>
       </DialogHeader>
 
@@ -349,7 +348,7 @@ function sessionContents(review: SessionImportReview): string {
 
       <section v-else-if="reviewedSession" class="grid gap-3 text-sm" data-import-session-review>
         <h3 ref="heading" tabindex="-1" class="font-medium outline-none">
-          Continue this session in this browser? This cannot be undone.
+          Import this session? This cannot be undone.
         </h3>
         <p>
           <span class="block break-all font-medium">{{ reviewedSession.name ?? reviewedSession.transfer.scope }}</span>
@@ -361,8 +360,8 @@ function sessionContents(review: SessionImportReview): string {
               ? `It replaces this script's ${count(reviewedSession.currentValues, "saved value", "saved values")} and any session kept for it in this browser.`
               : "It replaces any session kept for this script in this browser."
           }}
-          To keep what is saved now, export it first.
         </p>
+        <p class="text-muted-foreground">To keep what is saved now, export it first.</p>
         <p v-if="sessionInProgress" data-import-ends-session>
           This ends the current session. Progress it has not saved is lost.
         </p>

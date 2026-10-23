@@ -275,7 +275,7 @@ export function restoreSessionTransfer(
 ): PlayerRuntimeSession {
   if (transfer.scope !== scope)
     throw new StorageTransferError(
-      `This session is of another script, ${transfer.name ?? transfer.scope}. Open that script and import it there.`,
+      `This session belongs to another script, ${transfer.name ?? transfer.scope}. Open that script and import it there.`,
     );
   let restored: PlayerRuntimeSession;
   try {
@@ -286,13 +286,13 @@ export function restoreSessionTransfer(
         "This session was exported by another version of the Player, so this Player cannot continue it. Continue it where it was exported.",
       );
     throw new StorageTransferError(
-      `This session is damaged, so it cannot continue: ${error instanceof Error ? error.message : String(error)}`,
+      `This session is damaged, so it cannot continue. Export it again where it runs. Details: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
   // A kept session goes on only with the plan it ran (`restoreKept`).
   if (JSON.stringify(restored.plan) !== JSON.stringify(plan))
     throw new StorageTransferError(
-      "This session is of another version of this script or of the Player, so it cannot continue here. Continue it where it was exported.",
+      "This session comes from another version of this script or of the Player, so it cannot continue here. Continue it where it was exported.",
     );
   if (restored.state.status === "halted" || restored.state.status === "failed")
     throw new StorageTransferError("This session has ended, so there is nothing to continue.");

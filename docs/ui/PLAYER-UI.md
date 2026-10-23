@@ -332,7 +332,7 @@ is imported or cleared.
 
 An exported session is taken only by the Player of its script outside the debug room. A session of another script, of
 another version of this script or of the Player, one that is damaged, and one that has ended are refused with that
-reason. Its review asks "Continue this session in this browser? This cannot be undone.", names the script with what the
+reason. Its review asks "Import this session? This cannot be undone.", names the script with what the
 session brings, says that it replaces this script's saved values and any session kept for it in this browser, and
 suggests exporting first. While a session of the script runs, waits for Continue, or is starting, the confirmation is
 **End session and import** and says that unsaved progress is lost; otherwise it is **Import session**. Confirming ends
