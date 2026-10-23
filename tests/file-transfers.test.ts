@@ -235,6 +235,17 @@ test("a call starts another file, so a label or a call that can start the runnin
       ],
     ],
   );
+  // Also where the call follows parameter defaults, which run only for an argument left out.
+  assert.deepEqual(
+    diagnostics(
+      project("exit", {
+        ...rooms,
+        "lib.tease": 'global function punish(level = 2) { call "rooms/*.tease" }',
+        "rooms/b.tease": "punish()\nexit",
+      }),
+    ).map(([path, code]) => `${path} ${code}`),
+    ["lib.tease TSV072"],
+  );
   for (const caller of ["exit\nrelay()", "function never { relay() }\nexit"])
     assert.deepEqual(
       diagnostics(project("relay()\nexit", { ...rooms, ...lib, "rooms/b.tease": caller }))
@@ -297,6 +308,27 @@ test("a call whose file only the run decides warns, and fails when it starts the
       "main.tease TSV073 The block that line 1 starts runs later, so the compiler cannot tell whether the file this call starts is running then. A call starts another file, so the call fails if it is. If the block can run while that file runs, put what the call should run in a function and call that instead.",
     ],
   );
+  // A call of a global function that runs only on some ways through the function, by a test or in a parameter
+  // default, warns where a calling file may be the running file then.
+  const guard = (argument: string) =>
+    project('visit(false)\nsay "back"\nexit', {
+      "b.tease": `visit(${argument})\nsay "b"\nend`,
+      "lib.tease":
+        'global function visit(alreadyThere: boolean) {\n    if not alreadyThere { call "b.tease" }\n}',
+    });
+  assert.deepEqual(warned(guard("true")), [
+    "lib.tease TSV073 This call can start 'b.tease', which calls global function 'visit', but the compiler cannot tell whether the call runs while 'b.tease' runs. A call starts another file, so the call fails if it does. If it can, call 'visit' only from other files, or put what it starts in a function.",
+  ]);
+  assert.deepEqual(said(guard("true"), { warnings: ["TSV073"] }), ["b", "back", "exit"]);
+  assert.deepEqual(failure(guard("false")), [message("b.tease")]);
+  const supplied = project('display("provided")\nexit', {
+    "lib.tease":
+      'global function visit {\n    call "main.tease"\n    return "done"\n}\nglobal function display(text = visit()) { say text }',
+  });
+  assert.deepEqual(warned(supplied), [
+    "lib.tease TSV073 This call can start 'main.tease', which calls global function 'visit', but the compiler cannot tell whether the call runs while 'main.tease' runs. A call starts another file, so the call fails if it does. If it can, call 'visit' only from other files, or put what it starts in a function.",
+  ]);
+  assert.deepEqual(said(supplied, { warnings: ["TSV073"] }), ["provided", "exit"]);
   // Where the known values rule the running file out, and references name only other files, the call runs.
   assert.deepEqual(
     said(
