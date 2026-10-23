@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -75,6 +78,45 @@ test("probe refuses a clock or time zone it cannot use", () => {
     assert.equal(result.status, 2, `${option} ${value}`);
     assert.ok(result.stderr.includes(value), result.stderr);
     assert.equal(result.stdout, "");
+  }
+});
+
+test("probe --run reads the player profile a JSON file gives", () => {
+  const directory = mkdtempSync(join(tmpdir(), "probe-player-profile-"));
+  try {
+    const file = join(directory, "player-profile.json");
+    writeFileSync(file, '{"firstName": "Alex", "gender": "female", "petNames": ["puppy", "pet"]}');
+    const source =
+      'say "${playerProfile.firstName}, ${playerProfile.heShe}, ${playerProfile.petNames[1]}"\n' +
+      'player.copyFrom(playerProfile)\nsay "${player.firstName}"\nexit\n';
+    const result = runProbe(source, ["--run", "--player-profile", file]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^say: Alex, she, pet$/m);
+    assert.match(result.stdout, /^say: Alex$/m);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("probe refuses a player profile it cannot use", () => {
+  const directory = mkdtempSync(join(tmpdir(), "probe-player-profile-"));
+  try {
+    for (const [name, content, reason] of [
+      ["not-json.json", '{"firstName": "Alex",}', "JSON"],
+      // The session's own check: a name list is a list of texts.
+      ["text-list.json", '{"petNames": "puppy"}', "playerProfile.petNames"],
+      ["missing.json", null, "ENOENT"],
+    ] as const) {
+      const file = join(directory, name);
+      if (content !== null) writeFileSync(file, content);
+      const result = runProbe("exit\n", ["--run", "--player-profile", file]);
+      assert.equal(result.status, 2, name);
+      assert.ok(result.stderr.includes(`--player-profile ${file}: `), result.stderr);
+      assert.ok(result.stderr.includes(reason), result.stderr);
+      assert.equal(result.stdout, "");
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 

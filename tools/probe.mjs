@@ -7,7 +7,11 @@
 // --clock gives the run a wall clock, a UTC date and time such as 2026-10-04T18:30:00Z (seconds and milliseconds are
 // optional), which moves with the script's clock; without one, reading the current time fails with TSR064. --zone gives
 // the player's IANA time zone, such as Europe/Amsterdam, instead of UTC. Dates and times keep their locale-neutral text.
-// Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>]] [--json] <file.tease | ->
+// --player-profile gives the player's profile: a JSON file with the person fields a host gives, such as
+// {"firstName": "Alex", "gender": "male", "petNames": ["puppy", "pet"]}; without one, playerProfile has no fields, so
+// reading one fails with TSR017.
+// Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>] [--player-profile <file.json>]]
+//   [--json] <file.tease | ->
 // (- or no file reads standard input)
 // For JSON consumers, call `node tools/probe.mjs --json …` or `npm --silent run probe -- --json …`, so npm prints no
 // banner. Needs `npm run build:typescript` first: the probe loads dist/, so rebuild after changing the source.
@@ -18,9 +22,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const usage =
-  "Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>]] [--json] <file.tease | ->";
+  "Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>] [--player-profile <file.json>]] [--json] <file.tease | ->";
 const maxClockMoves = 10_000;
-const options = { run: false, json: false, clock: undefined, zone: undefined };
+const options = {
+  run: false,
+  json: false,
+  clock: undefined,
+  zone: undefined,
+  playerProfile: undefined,
+};
 const files = [];
 const args = process.argv.slice(2);
 while (args.length > 0) {
@@ -29,6 +39,8 @@ while (args.length > 0) {
   else if (arg === "--json") options.json = true;
   else if (arg === "--clock") options.clock = args.shift() ?? fail("--clock needs a value.");
   else if (arg === "--zone") options.zone = args.shift() ?? fail("--zone needs a value.");
+  else if (arg === "--player-profile")
+    options.playerProfile = args.shift() ?? fail("--player-profile needs a value.");
   else if (arg === "-h" || arg === "--help") {
     console.log(usage);
     process.exit(0);
@@ -36,8 +48,11 @@ while (args.length > 0) {
   else files.push(arg);
 }
 if (files.length > 1) fail("One source at a time.");
-if (!options.run && (options.clock !== undefined || options.zone !== undefined))
-  fail("--clock and --zone apply to --run only.");
+if (
+  !options.run &&
+  (options.clock !== undefined || options.zone !== undefined || options.playerProfile !== undefined)
+)
+  fail("--clock, --zone, and --player-profile apply to --run only.");
 const file = files[0] ?? "-";
 const entry = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "src", "index.js");
 if (!existsSync(entry)) {
@@ -48,6 +63,7 @@ const {
   captureTemporalContext,
   compileSource,
   createFreshRuntimeSession,
+  createFreshRuntimeSnapshot,
   DEFAULT_TEMPORAL_CONTEXT,
   runtimeTimedWork,
 } = await import(pathToFileURL(entry).href);
@@ -55,6 +71,8 @@ const {
 const sessionOptions = { baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 };
 if (options.clock !== undefined) sessionOptions.wallClockMs = clockMs(options.clock);
 if (options.zone !== undefined) sessionOptions.temporalContext = zoneContext(options.zone);
+if (options.playerProfile !== undefined)
+  sessionOptions.playerProfile = playerProfileInput(options.playerProfile);
 let source;
 try {
   source = readFileSync(file === "-" ? 0 : file, "utf8");
@@ -185,6 +203,25 @@ function zoneContext(timeZone) {
     if (!(error instanceof RangeError)) throw error;
     fail(`--zone: ${error.message}`);
   }
+}
+
+// The player profile in the JSON file, checked as a fresh session checks the profile its host gives, which names the
+// first field the file gives wrongly. The check needs a plan, and any compiled plan will do, so a wrong profile is
+// refused before the source is read, as a wrong --clock or --zone is.
+function playerProfileInput(file) {
+  let playerProfile;
+  try {
+    playerProfile = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    fail(`--player-profile ${file}: ${error.message}`);
+  }
+  try {
+    createFreshRuntimeSnapshot(compileSource("exit\n").plan, { playerProfile });
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    fail(`--player-profile ${file}: ${error.message}`);
+  }
+  return playerProfile;
 }
 
 // Spans count lines and columns from 0; editors count from 1.
