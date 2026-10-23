@@ -28,8 +28,8 @@ test("a repeated condition replaces its notice in place and dismissal removes it
   assert.deepEqual(notices.list, []);
   // Dismissing an absent notice and changes after unsubscribing publish nothing.
   assert.deepEqual(published, [
-    ["This browser does not keep saved progress, so the next run starts fresh."],
-    ["This browser does not keep saved progress, so the next run starts fresh.", "Camera stopped."],
+    ["Progress cannot be saved, so the next run starts fresh."],
+    ["Progress cannot be saved, so the next run starts fresh.", "Camera stopped."],
     ["Again.", "Camera stopped."],
     ["Again."],
   ]);

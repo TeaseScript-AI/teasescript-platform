@@ -84,10 +84,10 @@ which appears when the host persists script storage.
   value set, or a message shown, inside an `if`, `switch`, `while`, or similar branch lists the **Branch condition**
   that took that branch after its other causes, with the condition's value and statement; it opens to the condition's
   own causes.
-- **Storage** lists what the script saved in this browser: every key in UTF-16 order, its value's type, and the
+- **Storage** lists what the script saved: every key in UTF-16 order, its value's type, and the
   value in the notation Variables shows, which keys and dict keys use too, and, once expanded, a list, set, object, or
   dict's members, 20 at a time, as one flat outline. Text stays text: when it has the exact shape of a photo
-  reference, a thumbnail beside it shows the photo this browser saved under it, read only once it is in view, or says
+  reference, a thumbnail beside it shows the photo saved under it, read only once it is in view, or says
   No saved photo. Each such reference also appears once under Photo references with the keys whose values contain it.
   The tab reads the saved values freshly when it opens, after this Player saved, cleared, or imported them, after
   another tab of this browser changed this script's values, and on Refresh. The running session keeps the copy it
@@ -96,7 +96,7 @@ which appears when the host persists script storage.
     Advanced: the stored JSON form), checked before it is stored. An Advanced value whose stored form would be longer
     than a text can be opens with an empty field and says so; it can still be replaced or deleted. A draft that long
     keeps its type when Advanced is chosen and says so too. A value changed meanwhile, as `==` compares it, is
-    reported, not overwritten. The edit is stored in this browser first, showing
+    reported, not overwritten. The edit is stored first, showing
     Saving…; only once that succeeded does a running
     session take it through `applyExternalStorageEdit`, so its next `load` reads it like any saved value, which ignores
     a value of another type than the load's (V30 §25), while values it already loaded stay; when storing fails, nothing
