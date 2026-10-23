@@ -2,6 +2,7 @@ import type {
   AssignmentStatement,
   CallArgument,
   CallExpression,
+  Expression,
   FunctionParameter,
   GlobalStatement,
   Identifier,
@@ -22,6 +23,7 @@ import type {
 } from "../plan/model.js";
 import type { VariableSite } from "../semantic.js";
 import type { SpeakerFlowInput } from "../speaker-flow.js";
+import type { KnownValue } from "../static-evaluation.js";
 import type { WayFacts } from "../way-facts.js";
 import type { OperationRelations } from "./adapters/relation.js";
 import type { RegistryView } from "./registry-view.js";
@@ -125,6 +127,8 @@ export interface TypeCheckResult {
    * which a saved value has to fit when the script runs (ADR 0021 §6), sorted by key.
    */
   readonly storageTypes: readonly { readonly key: string; readonly type: TypePlan }[];
+  /** The value an expression of the source is known to have, for the checks that follow the plan (see `KnownValues`). */
+  readonly known: (expression: Expression) => KnownValue | undefined;
 }
 
 /**

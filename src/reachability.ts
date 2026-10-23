@@ -12,6 +12,7 @@ import { solveForward } from "./plan/dataflow.js";
 import type { InstructionPlan } from "./plan/model.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { runsOnItsOwn } from "./project-globals.js";
+import type { FileCallTarget } from "./semantic.js";
 import { CORE_RUNTIME_BUILTINS } from "./language-facts.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import type { DeadWays } from "./way-facts.js";
@@ -22,8 +23,9 @@ import type { DeadWays } from "./way-facts.js";
  * a call that can run reaches it; and in a timer, media, or button block where code that can run creates it (ADR 0022
  * §3.4). A call counts as returning, also of a function that never returns, so the ending after it is still written out
  * (ADR 0022 §4.3). The checks that follow it: the endings of files and of the session (TSV052, TSV053), an `end` with
- * no file call to return to (TSV070, TSV071), loops with no way out (TSV058), code that never runs (TSV065, TSV066),
- * and the flow of statements that the check of variables at labels follows (TSV054).
+ * no file call to return to (TSV070, TSV071), a `call` that can start the running file (TSV072, TSV073), loops with no
+ * way out (TSV058), code that never runs (TSV065, TSV066), and the flow of statements that the check of variables at
+ * labels follows (TSV054).
  */
 
 /**
@@ -39,6 +41,18 @@ export interface ConstantTest {
 export interface StatementFlow {
   readonly unreachable: ReadonlySet<Statement>;
   readonly continuing: ReadonlySet<Statement>;
+}
+
+/**
+ * A `call` of a file, for the check of the running file (see {@link Reachability.runningFileDiagnostics}): how it names
+ * its file, the files it may start by index or `null` for any file, and for one of them whether the call can start it:
+ * `true` for certain, `false` when it cannot after all, or `null` where only the run decides.
+ */
+export interface FileCall {
+  readonly form: FileCallTarget["form"];
+  readonly files: readonly number[] | null;
+  readonly starts: (file: number) => boolean | null;
+  readonly span: SourceSpan;
 }
 
 const NO_WAY_OUT =
@@ -342,6 +356,102 @@ export class Reachability {
     return { targets, hubs };
   }
 
+  /**
+   * A `call` starts another file, so a call that can start the running file is an error (TSV072, V30 §29). Code runs in
+   * the file whose top level runs it, also through the functions it calls where it can run: a function of the file, or a
+   * global function, which runs in every file whose code calls it where it can run. A call is checked also where it
+   * cannot run itself, as a call of the file it stands in is an error anywhere. It is an error where it can start one of
+   * the files its code runs in for certain, and a warning (TSV073) where only the run decides: where its tagged pick or
+   * reference decides, or where a timer, media, or button block runs its code, which runs later, while the file that
+   * started it or a file it called runs, or after it. The runtime checks every call (TSR069). `calls` holds each call by
+   * its transfer instruction.
+   */
+  public runningFileDiagnostics(calls: ReadonlyMap<number, FileCall>): Diagnostic[][] {
+    const diagnostics = this.plan.files.map((): Diagnostic[] => []);
+    if (calls.size === 0) return diagnostics;
+    // A function or block by its id, a file's top level by `-1 - file`.
+    const region = (index: number): number =>
+      this.#flow.functionOf(index)?.id ?? -1 - this.#flow.fileOf(index);
+    const callees = new Map<number, number[]>();
+    // The files each region runs in, and an instruction that starts a block from which it runs later. A pair is found
+    // once, then passed on to the functions the region calls: a file as itself, a block's start as `-1 - start`.
+    const running = new Map<number, Set<number>>();
+    const later = new Map<number, number>();
+    const work: (readonly [number, number])[] = [];
+    const runs = (node: number, file: number): void => {
+      const files = running.get(node) ?? new Set<number>();
+      if (files.has(file)) return;
+      files.add(file);
+      running.set(node, files);
+      work.push([node, file]);
+    };
+    const runsLater = (node: number, start: number): void => {
+      if (later.has(node)) return;
+      later.set(node, start);
+      work.push([node, -1 - start]);
+    };
+    this.plan.instructions.forEach((instruction, index) => {
+      if (this.#reached[index] === 0) return;
+      if (instruction.kind === "callFunction") {
+        const caller = region(index);
+        const list = callees.get(caller);
+        if (list === undefined) callees.set(caller, [instruction.functionId]);
+        else list.push(instruction.functionId);
+      }
+      for (const handler of this.#flow.handlersOf(index)) runsLater(handler, index);
+    });
+    this.plan.files.forEach((_, file) => runs(-1 - file, file));
+    for (let pair = work.pop(); pair !== undefined; pair = work.pop()) {
+      const [node, fact] = pair;
+      for (const callee of callees.get(node) ?? [])
+        if (fact >= 0) runs(callee, fact);
+        else runsLater(callee, -1 - fact);
+    }
+    for (const [index, call] of calls) {
+      const node = region(index);
+      const files = running.get(node) ?? new Set<number>();
+      let certain: number | undefined;
+      let possible: number | undefined;
+      for (const file of call.files ?? [...files].sort((left, right) => left - right)) {
+        if (!files.has(file)) continue;
+        const starts = call.starts(file);
+        if (starts === true) {
+          certain = file;
+          break;
+        }
+        if (starts === null) possible ??= file;
+      }
+      const start = later.get(node);
+      if (certain === undefined && possible === undefined && start === undefined) continue;
+      const definition = this.#flow.functionOf(index);
+      const global =
+        definition?.global === true && definition.handler === null ? definition.name : null;
+      const file = this.#flow.fileOf(index);
+      const path = (target: number): string => this.plan.files[target]!.path;
+      diagnostics[file]!.push(
+        certain !== undefined
+          ? createDiagnostic(
+              DiagnosticSeverity.Error,
+              "TSV072",
+              calledFileMessage(path(certain), call.form, global),
+              call.span,
+            )
+          : createDiagnostic(
+              DiagnosticSeverity.Warning,
+              "TSV073",
+              possible !== undefined
+                ? pickedFileMessage(path(possible), call.form, global)
+                : laterCallMessage(
+                    this.#where(start!, file),
+                    call.form === "path" && call.files?.length === 1 ? path(call.files[0]!) : null,
+                  ),
+              call.span,
+            ),
+      );
+    }
+    return diagnostics;
+  }
+
   /** Whether the blocks that the instruction at `index` creates may run after the file entry that created them ended. */
   #outlivesItsFile(index: number): boolean {
     const instruction = this.plan.instructions[index];
@@ -526,6 +636,51 @@ interface CallsWaiting {
 
 /** The start of the session, which runs `main.tease` with no call waiting. */
 const SESSION_START = -1;
+
+/**
+ * The running file a call may start, `path`: the file it stands in, or for a call in a global function, a file that
+ * calls the function.
+ */
+function runningFileText(path: string, global: string | null): string {
+  return global === null
+    ? `'${path}', the file it is in`
+    : `'${path}', which calls global function '${global}' and so is the running file then`;
+}
+
+/** Why a call may not start `path`, the running file (V30 §29): a call starts another file. */
+function calledFileMessage(path: string, form: FileCall["form"], global: string | null): string {
+  const fix =
+    form === "glob"
+      ? "Change the pattern so that it matches only other files."
+      : form === "tagged"
+        ? `Limit the candidates with 'from:', or with a tag that '${path}' does not have.`
+        : global === null
+          ? "To run a part of this file and come back, put it in a function and call that, or use goto with a label of this file to continue there."
+          : `Call '${global}' only from other files, or put what it starts in a function.`;
+  return `A call starts another file, but this call can start ${runningFileText(path, global)}. ${fix}`;
+}
+
+/** Why a call whose tagged pick or reference decides its file when it runs may start `path`, the running file. */
+function pickedFileMessage(path: string, form: FileCall["form"], global: string | null): string {
+  const running = runningFileText(path, global);
+  if (form === "tagged")
+    return `This call picks its file when it runs, so the compiler cannot tell whether it picks ${running}. A call starts another file, so the call fails if it does. Limit the candidates with 'from:', or with a tag that '${path}' does not have.`;
+  const fix =
+    global === null
+      ? "put the part to run in a function and call that instead"
+      : `call '${global}' only from other files, or put what it starts in a function`;
+  return `This call starts the file its reference names when it runs, so the compiler cannot tell whether that is ${running}. A call starts another file, so the call fails if it is. If the reference can name '${path}', ${fix}.`;
+}
+
+/**
+ * Why a call that a block runs later may start the running file: the block runs while the file that started it or a
+ * file it called runs, or after it. `path` is the file the call names, `null` when it picks one.
+ */
+function laterCallMessage(where: string, path: string | null): string {
+  return path !== null
+    ? `The block that ${where} starts runs later, so the compiler cannot tell whether '${path}' is running when this call starts it. A call starts another file, so the call fails if it is. If the block can run while '${path}' runs, put what the call should run in a function and call that instead.`
+    : `The block that ${where} starts runs later, so the compiler cannot tell whether the file this call starts is running then. A call starts another file, so the call fails if it is. If the block can run while that file runs, put what the call should run in a function and call that instead.`;
+}
 
 /** For each index, how many of the entries before it are set; one more count at the end, for all of them. */
 function countsBefore(set: Uint8Array): Int32Array {

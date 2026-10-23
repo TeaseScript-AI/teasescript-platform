@@ -41,8 +41,11 @@ function outputs(events: readonly InterpreterEvent[]): string[] {
 }
 
 /** Runs a project to its end, also stepwise with a checkpoint at every boundary, and returns what it said. */
-function said(files: readonly ProjectSourceFile[]): string[] {
-  return outputs(assertRuntimeResumeEquivalent(files).events);
+function said(
+  files: readonly ProjectSourceFile[],
+  options: Parameters<typeof assertRuntimeResumeEquivalent>[1] = {},
+): string[] {
+  return outputs(assertRuntimeResumeEquivalent(files, options).events);
 }
 
 function compiled(files: readonly ProjectSourceFile[]): InstructionPlan {
@@ -129,7 +132,7 @@ test("a goto in a called file replaces it, and the call still returns", () => {
   );
 });
 
-test("a call starts another file, so a label or a file that may be running is an error", () => {
+test("a call starts another file, so a label or a call that can start the running file is an error", () => {
   const diagnostics = (files: ProjectSourceFile[]): [string, string, string][] =>
     compileProject(files).diagnostics.map((diagnostic) => [
       diagnostic.path,
@@ -146,23 +149,27 @@ test("a call starts another file, so a label or a file that may be running is an
   const ownFile =
     "A call starts another file, but this call can start 'main.tease', the file it is in. To run a part of this file and come back, put it in a function and call that, or use goto with a label of this file to continue there.";
   // Every spelling of the file, also where the call never runs.
-  for (const call of [
-    'call "main.tease"',
-    'call script("main.tease")',
-    'if false { call "main.tease" }',
-  ])
+  for (const call of ['call "main.tease"', 'call script("main.tease")'])
     assert.deepEqual(
       diagnostics(project(`${call}\nexit`)),
-      [["main.tease", "TSV057", ownFile]],
+      [["main.tease", "TSV072", ownFile]],
       call,
     );
+  assert.deepEqual(diagnostics(project('if false { call "main.tease" }\nexit')), [
+    [
+      "main.tease",
+      "TSV065",
+      "This code never runs, because the condition on line 1 is never true. Remove it, or change the condition.",
+    ],
+    ["main.tease", "TSV072", ownFile],
+  ]);
   const rooms = { "rooms/a.tease": "exit", "rooms/b.tease": "exit" };
   assert.deepEqual(
     diagnostics(project("exit", { ...rooms, "rooms/a.tease": 'call "rooms/*.tease"\nexit' })),
     [
       [
         "rooms/a.tease",
-        "TSV057",
+        "TSV072",
         "A call starts another file, but this call can start 'rooms/a.tease', the file it is in. Change the pattern so that it matches only other files.",
       ],
     ],
@@ -175,25 +182,31 @@ test("a call starts another file, so a label or a file that may be running is an
     [
       [
         "a.tease",
-        "TSV057",
+        "TSV072",
         "A call starts another file, but this call can start 'a.tease', the file it is in. Limit the candidates with 'from:', or with a tag that 'a.tease' does not have.",
       ],
     ],
   );
-  // A comparison is false for a file without a number for its tag, and decided by a constant bound.
+  // A comparison is false for a file without a number for its tag, and a bound or a tag list is decided by its known
+  // value; where none is known, the call only warns (V30 §13, §41).
   const scenes = { "scene.tease": '---\ntags: punishment: 4\n---\nsay "scene"\nend' };
-  for (const [header, pick, can] of [
-    ["", '"punishment" > minimum', false],
-    ['---\ntags: "punishment"\n---\n', '"punishment" > minimum', false],
-    ["---\ntags: punishment: 1\n---\n", '"punishment" > 3', false],
-    ["---\ntags: punishment: 4\n---\n", '"punishment" > 3', true],
-    ["---\ntags: punishment: 1\n---\n", '"punishment" > minimum', true],
+  const values = 'let minimum = 3\nlet wanted = ["punishment"]\nlet lowest = 3\nlowest = 0\n';
+  for (const [header, pick, codes] of [
+    ["", '"punishment" > lowest', []],
+    ['---\ntags: "punishment"\n---\n', '"punishment" > lowest', []],
+    ["---\ntags: punishment: 1\n---\n", '"punishment" > 3', []],
+    ["---\ntags: punishment: 4\n---\n", '"punishment" > 3', ["TSV072"]],
+    ["---\ntags: punishment: 1\n---\n", '"punishment" > minimum', []],
+    ["---\ntags: punishment: 4\n---\n", '"punishment" > minimum', ["TSV072"]],
+    ["---\ntags: punishment: 1\n---\n", '"punishment" > lowest', ["TSV073"]],
+    ["", "all: wanted", []],
+    ['---\ntags: "punishment"\n---\n', "all: wanted", ["TSV072"]],
   ] as const)
     assert.deepEqual(
-      diagnostics(
-        project(`${header}let minimum = 3\ncall tagged ${pick}\nsay "back"\nexit`, scenes),
-      ).map(([path, code]) => `${path} ${code}`),
-      can ? ["main.tease TSV057"] : [],
+      diagnostics(project(`${header}${values}call tagged ${pick}\nsay "back"\nexit`, scenes)).map(
+        ([path, code]) => `${path} ${code}`,
+      ),
+      codes.map((code) => `main.tease ${code}`),
       `${header}${pick}`,
     );
   // A tag test or `from:` that leaves the file out allows the call.
@@ -206,7 +219,7 @@ test("a call starts another file, so a label or a file that may be running is an
     ),
     [],
   );
-  // A global function runs in the file that called it, directly or through another global function.
+  // A global function runs in the file whose code that can run calls it, directly or through another global function.
   const lib = {
     "lib.tease":
       'global function relay { punish() }\nglobal function punish { call "rooms/*.tease" }',
@@ -217,39 +230,86 @@ test("a call starts another file, so a label or a file that may be running is an
     [
       [
         "lib.tease",
-        "TSV057",
+        "TSV072",
         "A call starts another file, but this call can start 'rooms/b.tease', which calls global function 'punish' and so is the running file then. Change the pattern so that it matches only other files.",
       ],
     ],
   );
+  for (const caller of ["exit\nrelay()", "function never { relay() }\nexit"])
+    assert.deepEqual(
+      diagnostics(project("relay()\nexit", { ...rooms, ...lib, "rooms/b.tease": caller }))
+        .filter(([, code]) => code !== "TSV065")
+        .map(([path, code]) => `${path} ${code}`),
+      [],
+      caller,
+    );
 });
 
-test("a call that would start the running file fails when it runs", () => {
+test("a call whose file only the run decides warns, and fails when it starts the running file", () => {
+  const warned = (files: ProjectSourceFile[]): string[] =>
+    compileProject(files).diagnostics.map(
+      (diagnostic) => `${diagnostic.path} ${diagnostic.code} ${diagnostic.message}`,
+    );
   const failure = (files: ProjectSourceFile[]): readonly string[] =>
-    assertRuntimeResumeEquivalent(files, { ending: "failed" }).events.flatMap((event) =>
-      event.kind === "runtimeFailure" ? [`${event.code} ${event.message}`] : [],
+    assertRuntimeResumeEquivalent(files, { ending: "failed", warnings: ["TSV073"] }).events.flatMap(
+      (event) => (event.kind === "runtimeFailure" ? [`${event.code} ${event.message}`] : []),
     );
   const message = (path: string) =>
     `TSR069 This call would start '${path}', the file that is running, but a call starts another file. To run a part of a file and come back, put it in a function and call that.`;
+  const later = (where: string, path: string) =>
+    `The block that ${where} starts runs later, so the compiler cannot tell whether '${path}' is running when this call starts it. A call starts another file, so the call fails if it is. If the block can run while '${path}' runs, put what the call should run in a function and call that instead.`;
   // A computed target.
-  assert.deepEqual(
-    failure(
-      project('call "a.tease"\nexit', { "a.tease": 'let me = script("a.tease")\ncall (me)\nend' }),
-    ),
-    [message("a.tease")],
+  const computed = project('call "a.tease"\nexit', {
+    "a.tease": 'let me = script("a.tease")\ncall (me)\nend',
+  });
+  assert.deepEqual(warned(computed), [
+    "a.tease TSV073 This call starts the file its reference names when it runs, so the compiler cannot tell whether that is 'a.tease', the file it is in. A call starts another file, so the call fails if it is. If the reference can name 'a.tease', put the part to run in a function and call that instead.",
+  ]);
+  assert.deepEqual(failure(computed), [message("a.tease")]);
+  // A tagged pick whose bound only the run knows.
+  const picked = project(
+    '---\ntags: punishment: 4\n---\nlet lowest = 3\nlowest = 2\ncall tagged "punishment" > lowest\nexit',
+    { "scene.tease": '---\ntags: punishment: 1\n---\nsay "scene"\nend' },
   );
-  // A block of main.tease that fires while the file main.tease called runs.
+  assert.deepEqual(warned(picked), [
+    "main.tease TSV073 This call picks its file when it runs, so the compiler cannot tell whether it picks 'main.tease', the file it is in. A call starts another file, so the call fails if it does. Limit the candidates with 'from:', or with a tag that 'main.tease' does not have.",
+  ]);
+  assert.deepEqual(failure(picked), [message("main.tease")]);
+  // A block of main.tease that fires while main.tease, or the file it called, runs, also through a function.
+  const own = project('timer async 1 s { call "main.tease" }\nwait 2 s\nexit');
+  assert.deepEqual(warned(own), [`main.tease TSV073 ${later("line 1", "main.tease")}`]);
+  assert.deepEqual(failure(own), [message("main.tease")]);
+  const called = project('timer async 1 s { call "b.tease" }\ncall "b.tease"\nexit', {
+    "b.tease": "wait 2 s\nend",
+  });
+  assert.deepEqual(warned(called), [`main.tease TSV073 ${later("line 1", "b.tease")}`]);
+  assert.deepEqual(failure(called), [message("b.tease")]);
+  const through = project("timer async 1 s { punish() }\nwait 2 s\nexit", {
+    "lib.tease": 'global function punish { call "main.tease" }',
+  });
+  assert.deepEqual(warned(through), [
+    `lib.tease TSV073 ${later("line 1 of main.tease", "main.tease")}`,
+  ]);
+  assert.deepEqual(failure(through), [message("main.tease")]);
   assert.deepEqual(
-    failure(
-      project('timer async 1 s { call "b.tease" }\ncall "b.tease"\nexit', {
-        "b.tease": "wait 2 s\nend",
-      }),
+    warned(project('timer async 1 s { call "rooms/*.tease" }\nexit', { "rooms/a.tease": "end" })),
+    [
+      "main.tease TSV073 The block that line 1 starts runs later, so the compiler cannot tell whether the file this call starts is running then. A call starts another file, so the call fails if it is. If the block can run while that file runs, put what the call should run in a function and call that instead.",
+    ],
+  );
+  // Where the known values rule the running file out, and references name only other files, the call runs.
+  assert.deepEqual(
+    said(
+      project(
+        '---\ntags: punishment: 1\n---\nlet minimum = 3\ncall tagged "punishment" > minimum\nlet next = [script("scene.tease")]\ncall (next[0])\nexit',
+        { "scene.tease": '---\ntags: punishment: 4\n---\nsay "scene"\nend' },
+      ),
     ),
-    [message("b.tease")],
+    ["scene", "scene", "exit"],
   );
 });
 
-test("a block runs later, so its end only warns and its call of a file is checked when it runs", () => {
+test("a block runs later, so its end and its call of a file only warn and are checked when they run", () => {
   const press = (plan: InstructionPlan, snapshot: RuntimeSnapshot) => {
     const pressed = pressPermanentButton(plan, snapshot, 1);
     assert.equal(pressed.outcome.kind, "pressed");
@@ -277,14 +337,20 @@ test("a block runs later, so its end only warns and its call of a file is checke
     "back",
     "exit",
   ]);
-  // A Replay button that a called file shows calls that file again once main.tease runs.
-  const replay = compiled(
+  // A Replay button that a called file shows calls that file again once main.tease runs. Pressed while the file
+  // runs, it would fail, so the call warns.
+  const replayed = compileProject(
     project('call "scene.tease"\nwait 2 s\nexit', {
       "scene.tease": 'say "scene"\nsetup()\nend',
       "lib.tease":
         'global function setup {\n    let replay = showPermanentButton "Replay", persist: true { call "scene.tease" }\n}',
     }),
   );
+  assert.deepEqual(
+    replayed.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    [["lib.tease", "TSV073"]],
+  );
+  const replay = replayed.plan!;
   // A persistent block, or a media block, may run after the file that started it has returned.
   assert.deepEqual(
     compileProject(
@@ -916,6 +982,8 @@ test("a block changes the variables of a file the session left, also across a fi
         ].join("\n"),
         { "wait.tease": "wait 5 s\nexit", "pause.tease": "wait 1 s\nend" },
       ),
+      // The timer runs `later`, whose call of pause.tease would fail if the timer fired while pause.tease runs.
+      { warnings: ["TSV073"] },
     ),
     ["9 9", "exit"],
   );

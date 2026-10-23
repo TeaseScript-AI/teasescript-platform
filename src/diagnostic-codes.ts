@@ -294,6 +294,13 @@ export const DIAGNOSTIC_CODES = {
     "`end` that may have no call to return to",
     DOCS.values,
   ),
+  TSV072: entry(["plan analysis"], "error", "`call` of the running file", DOCS.values),
+  TSV073: entry(
+    ["plan analysis"],
+    "warning",
+    "`call` that may start the running file",
+    DOCS.values,
+  ),
 
   TST001: entry(["parser"], "error", "Invalid tag query", DOCS.tags),
   TST002: entry(["type checker"], "error", "Tag query that matches nothing", DOCS.tags),

@@ -201,11 +201,10 @@ export interface FileSemanticResult {
   readonly diagnostics: readonly Diagnostic[];
   /** The files each glob target may pick, in project order. */
   readonly picks: ReadonlyMap<FileTarget, readonly string[]>;
-  /**
-   * The files each `goto tagged` or `call tagged` may pick, by the tags of their headers; comparisons and computed tag
-   * lists count as possibly true.
-   */
+  /** The files each `goto tagged` or `call tagged` may pick, by the tags of their headers (see `#taggedCandidates`). */
   readonly taggedPicks: ReadonlyMap<Statement, readonly string[]>;
+  /** How each `call` of a file names it, for the check of the running file that follows the plan. */
+  readonly fileCalls: ReadonlyMap<Statement, FileCallTarget>;
   /**
    * The files that the script references of the whole project may name, by its `script(...)` calls and
    * `findScripts(...)` lists, or `null` for any file (see `ProjectNames.referencedScripts`).
@@ -225,6 +224,19 @@ export interface FileSemanticResult {
   checkInitialization(flow: StatementFlow): readonly Diagnostic[];
 }
 
+/**
+ * How a `call` names the file it starts (V30 §29): a path written out, also in `script(...)`, a glob, a tagged pick, or
+ * another computed target. `paths` holds the files it may start: the one it names, those the glob may pick, those the
+ * tagged pick may match by `taggedPicks`, or `null` for a computed target, which may start any file a reference names.
+ */
+export interface FileCallTarget {
+  readonly form: "path" | "glob" | "tagged" | "computed";
+  readonly paths: readonly string[] | null;
+  /** The tagged pick, whose bounds and computed lists the check that follows the plan reads by their known values. */
+  readonly query: TagQueryExpression | null;
+  readonly span: SourceSpan;
+}
+
 /** A file of a project by its package path, in project order: `main.tease` first, then the others by path. */
 export interface ProjectProgram {
   readonly path: string;
@@ -234,55 +246,6 @@ export interface ProjectProgram {
    * `undefined` when the tags are not known.
    */
   readonly tags?: readonly Tag[] | null;
-}
-
-/**
- * A call that may start the running file is an error (V30 §29). Code runs in the file whose top level runs it, also
- * through the functions it calls: a function of the file, or a global function, which runs in every file that calls
- * it. A timer, media, or button block runs later, while that file or a file it called runs, or after it, so the running
- * file of a block's code is known only when it runs, which checks it then.
- */
-function reportFileCalls(
-  project: ProjectNames,
-  validators: readonly (SemanticValidator | null)[],
-): void {
-  if (!validators.some((validator) => (validator?.fileCalls.length ?? 0) > 0)) return;
-  // The functions that each node of the call graph calls where it runs, not in a block.
-  const calls = new Map<string, string[]>();
-  for (const validator of validators)
-    for (const { caller, callee } of validator?.callEdges() ?? []) {
-      const callees = calls.get(caller);
-      if (callees === undefined) calls.set(caller, [callee]);
-      else callees.push(callee);
-    }
-  // The files that each node runs in: each pair is found once, then passed on to what it calls.
-  const running = new Map<string, Set<number>>();
-  const work: (readonly [string, number])[] = [];
-  const add = (node: string, file: number): void => {
-    const files = running.get(node) ?? new Set<number>();
-    if (files.has(file)) return;
-    files.add(file);
-    running.set(node, files);
-    work.push([node, file]);
-  };
-  validators.forEach((validator, file) => {
-    if (validator !== null) add(`${file}:`, file);
-  });
-  for (let pair = work.pop(); pair !== undefined; pair = work.pop())
-    for (const callee of calls.get(pair[0]) ?? []) add(callee, pair[1]);
-  const fileByPath = new Map(project.files.map((file, index) => [file.path, index]));
-  for (const [file, validator] of validators.entries())
-    for (const call of validator?.fileCalls ?? []) {
-      const files = running.get(call.node) ?? new Set<number>();
-      const own = call.paths.find((path) => files.has(fileByPath.get(path) ?? -1));
-      if (own !== undefined)
-        project.report(
-          file,
-          semanticCode.invalidFileTarget,
-          calledFileMessage(own, call.form, call.global),
-          call.span,
-        );
-    }
 }
 
 /**
@@ -306,30 +269,6 @@ function fileLabelMessage(
 }
 
 /**
- * Why a call may not start `path`, the running file (V30 §29): a call starts another file. `global` is the global
- * function the call is in, which runs in the file that called it.
- */
-function calledFileMessage(
-  path: string,
-  form: "path" | "glob" | "tagged",
-  global: string | null,
-): string {
-  const running =
-    global === null
-      ? `'${path}', the file it is in`
-      : `'${path}', which calls global function '${global}' and so is the running file then`;
-  const fix =
-    form === "path"
-      ? global === null
-        ? "To run a part of this file and come back, put it in a function and call that, or use goto with a label of this file to continue there."
-        : `Call '${global}' only from other files, or put what it starts in a function.`
-      : form === "glob"
-        ? "Change the pattern so that it matches only other files."
-        : `Limit the candidates with 'from:', or with a tag that '${path}' does not have.`;
-  return `A call starts another file, but this call can start ${running}. ${fix}`;
-}
-
-/**
  * Validates the names of a project's files together. Globals, global functions, and speakers belong to the whole
  * project (ADR 0022 §3, §6); every other name belongs to its file. `validate` selects the files whose statements are
  * validated; the others only contribute their project names, for example while they have syntax errors. `onFile` hears
@@ -349,12 +288,12 @@ export function validateProjectSemantics(
     validator.validate(file.program);
     return validator;
   });
-  reportFileCalls(project, validators);
   return project.diagnostics.map((diagnostics, index) =>
     Object.freeze({
       diagnostics: Object.freeze([...diagnostics]),
       picks: validators[index]?.picks ?? new Map<FileTarget, readonly string[]>(),
       taggedPicks: validators[index]?.taggedPicks ?? new Map<Statement, readonly string[]>(),
+      fileCalls: validators[index]?.fileCalls ?? new Map<Statement, FileCallTarget>(),
       referencedScripts: project.referencedScripts,
       captures: validators[index]?.captures ?? new Map<Block, readonly string[]>(),
       sharedWrites: validators[index]?.sharedWrites ?? new Map<VariableSite, Sharing>(),
@@ -731,7 +670,7 @@ class SemanticValidator {
   /** The `script(...)` call that a transfer statement being checked names directly, as in `goto script("a.tease")`. */
   #directTarget: {
     readonly call: Expression;
-    readonly transfer: "gotoStatement" | "callFileStatement";
+    readonly statement: Extract<Statement, { kind: "gotoStatement" | "callFileStatement" }>;
   } | null = null;
 
   readonly #gotos: {
@@ -739,9 +678,6 @@ class SemanticValidator {
     readonly context: FlowContext;
     readonly statement: Statement;
   }[] = [];
-
-  /** Every call of an author function, also of another file's global function, by its call-graph node. */
-  readonly #callEdges: { readonly callee: string; readonly context: FlowContext }[] = [];
 
   readonly #calls: {
     readonly name: string;
@@ -1287,25 +1223,37 @@ class SemanticValidator {
         const target = statement.target;
         if (target.kind === "scriptTarget") {
           const expression = unwrapParentheses(target.expression);
-          this.#directTarget = { call: expression, transfer: statement.kind };
+          this.#directTarget = { call: expression, statement };
           this.#validateExpression(target.expression, scope, null);
           this.#directTarget = null;
           if (expression.kind === "tagQueryExpression" && expression.catalog === "scripts") {
             const candidates = this.#taggedCandidates(expression);
             this.taggedPicks.set(statement, candidates);
             if (statement.kind === "callFileStatement")
-              this.#checkCalledFiles(candidates, "tagged", target.span);
-          }
+              this.fileCalls.set(statement, {
+                form: "tagged",
+                paths: candidates,
+                query: expression,
+                span: target.span,
+              });
+          } else if (statement.kind === "callFileStatement" && !this.fileCalls.has(statement))
+            this.fileCalls.set(statement, {
+              form: "computed",
+              paths: null,
+              query: null,
+              span: target.span,
+            });
           return;
         }
         if (!this.#validateTransferTarget(target, statement.kind)) return;
         if (target.kind === "fileTarget") {
           if (statement.kind === "callFileStatement")
-            this.#checkCalledFiles(
-              this.picks.get(target) ?? [target.path],
-              isPathGlob(target.path) ? "glob" : "path",
-              target.pathSpan,
-            );
+            this.fileCalls.set(statement, {
+              form: isPathGlob(target.path) ? "glob" : "path",
+              paths: this.picks.get(target) ?? [target.path],
+              query: null,
+              span: target.pathSpan,
+            });
         } else {
           // A goto to a label of the same file keeps the file's variables.
           this.#gotos.push({
@@ -1395,8 +1343,9 @@ class SemanticValidator {
     const label = call.arguments.find(
       (argument) => argument.kind === "namedArgument" && argument.name.name === "label",
     )?.value;
+    const direct = this.#directTarget?.call === call ? this.#directTarget.statement : null;
+    const transfer = direct?.kind ?? null;
     if (label !== undefined) {
-      const transfer = this.#directTarget?.call === call ? this.#directTarget.transfer : null;
       this.#report(
         semanticCode.invalidFileTarget,
         fileLabelMessage(
@@ -1433,7 +1382,6 @@ class SemanticValidator {
       return;
     }
     this.project.refer([path]);
-    const transfer = this.#directTarget?.call === call ? this.#directTarget.transfer : null;
     const pathProblem = packagePathProblem(path);
     const problem = isPathGlob(path)
       ? `A glob cannot be inside script(...). To pick a random file, write ${transfer === "callFileStatement" ? "call" : "goto"} ${JSON.stringify(path)} directly.`
@@ -1448,7 +1396,13 @@ class SemanticValidator {
       this.#report(semanticCode.invalidFileTarget, problem, pathArgument.span);
       return;
     }
-    if (transfer === "callFileStatement") this.#checkCalledFiles([path], "path", pathArgument.span);
+    if (direct?.kind === "callFileStatement")
+      this.fileCalls.set(direct, {
+        form: "path",
+        paths: [path],
+        query: null,
+        span: pathArgument.span,
+      });
   }
 
   /**
@@ -1484,9 +1438,10 @@ class SemanticValidator {
   /**
    * The files a tagged pick may choose by the tags of their headers: those that run something, within its `from:`,
    * whose tags its tag tests, literal tag lists, and comparisons do not rule out. A comparison is false for a file
-   * without a number for its tag, and decided by its bound where the bound is a constant (V30 §41). None when the tags
-   * are not known, or the `from:` is not a path or glob, which the type check reports. Picks with the same facts share
-   * one list, found once.
+   * without a number for its tag, as when the script runs, and decided by a bound of constant numbers; another bound
+   * or a computed list counts as possibly true here, and the check of the running file decides it by its known value
+   * where it can. None when the tags are not known, or the `from:` is not a path or glob, which the type check
+   * reports. Picks with the same facts share one list, found once.
    */
   #taggedCandidates(query: TagQueryExpression): readonly string[] {
     const from = query.from?.pattern ?? null;
@@ -1517,38 +1472,11 @@ class SemanticValidator {
     return picks;
   }
 
-  /**
-   * A call starts another file (V30 §29): a call that may start the file it runs in is an error. Which files code runs in
-   * follows the calls of every file, so the calls are checked once every file is known (see `reportFileCalls`).
-   */
-  #checkCalledFiles(
-    paths: readonly string[],
-    form: "path" | "glob" | "tagged",
-    span: SourceSpan,
-  ): void {
-    // A block runs later, in a file that only the runtime knows.
-    if (this.#context.kind === "handler") return;
-    this.fileCalls.push({
-      node: this.#codeNode(this.#context),
-      paths,
-      form,
-      span,
-      global: this.#globalFunction?.name.name ?? null,
-    });
-  }
-
   /** The files that each `goto tagged` or `call tagged` may pick, by its tag tests and literal tag lists. */
   readonly taggedPicks = new Map<Statement, readonly string[]>();
 
-  /** The calls of files outside blocks, by the node of the call graph whose code makes them. */
-  readonly fileCalls: {
-    readonly node: string;
-    readonly paths: readonly string[];
-    readonly form: "path" | "glob" | "tagged";
-    readonly span: SourceSpan;
-    /** The global function the call is in, which runs in the files that call it. */
-    readonly global: string | null;
-  }[] = [];
+  /** How each `call` of a file names it (see `FileSemanticResult.fileCalls`). */
+  readonly fileCalls = new Map<Statement, FileCallTarget>();
 
   #validateFunction(declaration: FunctionDeclaration): void {
     this.#globalFunction = declaration.global ? declaration : null;
@@ -1973,10 +1901,6 @@ class SemanticValidator {
             // The initialization check follows the calls of this file's functions.
             if (this.#functions.get(name) === binding.declaration)
               this.#calls.push({ name, context: this.#context, statement: this.#statement! });
-            this.#callEdges.push({
-              callee: binding.declaration.global ? `global:${name}` : `${this.file}:${name}`,
-              context: this.#context,
-            });
             this.#validateFunctionCall(expression, binding.declaration);
           } else if (this.#builtins.has(name)) {
             // The type check checks the arguments of the core built-ins it knows.
@@ -2542,24 +2466,6 @@ class SemanticValidator {
     ) {
       this.#rootAccesses.push({ name, span, context: this.#context, statement: this.#statement });
     }
-  }
-
-  /** The node of the call graph that code outside blocks runs in: a file's top level, or a function. */
-  #codeNode(context: Exclude<FlowContext, { kind: "handler" }>): string {
-    if (context.kind === "root") return `${this.file}:`;
-    return this.#functions.get(context.name)?.global === true
-      ? `global:${context.name}`
-      : `${this.file}:${context.name}`;
-  }
-
-  /**
-   * The calls of author functions as written, outside blocks, as edges between the code that calls and the function
-   * called. A block runs later, so the code that creates it does not run what the block calls.
-   */
-  callEdges(): readonly { readonly caller: string; readonly callee: string }[] {
-    return this.#callEdges.flatMap(({ callee, context }) =>
-      context.kind === "handler" ? [] : [{ caller: this.#codeNode(context), callee }],
-    );
   }
 
   /**
