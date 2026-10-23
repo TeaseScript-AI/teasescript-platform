@@ -4,6 +4,7 @@
     "src/index.ts",
     "playground/browser.ts",
     "playground/server.ts",
+    "test-server/server.ts",
     "player/vue/index.html",
     "editor/vue/index.html",
     "player/vue/src/lib/utils.ts",
@@ -20,6 +21,7 @@
   "project": [
     "src/**/*.ts",
     "playground/**/*.ts",
+    "test-server/**/*.ts",
     "player/theme/**/*.ts",
     "player/encryption/**/*.ts",
     "player/lock-service.ts",

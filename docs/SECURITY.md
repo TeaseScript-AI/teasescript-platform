@@ -75,6 +75,12 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
   script only into the storage scope it names, turns into photos only the references that script lists as its own,
   and gets media references only from the trusted media store.
 
+## Temporary test server
+
+[`test-server/`](../test-server/README.md) is a separate, temporary, development-only process that answers the Player's
+online mode. It accepts writes and uploads with no real authentication from any client that can reach it, so it listens
+on a trusted network only. It is neither the playground nor a public backend, and it goes when the real backend exists.
+
 ## Accepted pending-action boundary
 
 ADR 0016 adds these requirements:
