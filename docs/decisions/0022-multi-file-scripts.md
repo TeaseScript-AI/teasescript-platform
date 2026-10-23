@@ -1,7 +1,8 @@
 # ADR 0022 — Multi-file scripts: goto and call across files, globals, and explicit endings
 
 **Status:** Accepted
-**Decision source:** Owner decisions in issue #570 (2026-10-04)
+**Decision source:** Owner decisions in issue #570 (2026-10-04); files entered only at their top, `call` of another
+file, and no `fallback` (owner, 2026-10-22 and 2026-10-23)
 
 ## Context
 
@@ -23,44 +24,42 @@ calls, and shared state between files.
 ```tease
 goto intro                                    // label in this file
 goto "punishments/strict.tease"               // another file, from its top
-goto "punishments/strict.tease" start         // another file, at a label
 goto "punishments/*.tease"                    // a random file from the glob
-goto "punishments/*.tease" start              // a random file among those that have label start
-call "corner-time/*.tease"                    // the same targets; returns when the file ends
+call "corner-time/*.tease"                    // another file; returns when the file ends
 goto script("rooms/${room}.tease")            // dynamic: an explicit conversion, validated at runtime
-goto script("rooms/${room}.tease", label: "start")
 ```
 
-1. `goto` and `call` accept the same targets. A missing file or label is a compile error.
+1. `goto` and `call` accept the same file targets, and a file is entered only at its top: a file target, a glob, a
+   tagged pick, and a script reference take no label. A missing file is a compile error. A `call` starts another file,
+   so a `call` that can start the running file is a compile error, and a runtime error where a computed target or a
+   block hides it (V30 §29). A local `goto label` stays within its file; a function is the returning part of a file.
 2. A glob uses `*` for any characters within one folder or file name. Globs are expanded at compile time. A glob only
-   picks files that do something: the matched files that have the label, when one is given, and do not hold
-   declarations only. It is a compile error only when no such file remains.
-3. Each time a glob target runs, one draw from the session random generator picks the file; a glob `fallback` draws
-   each time the fallback is used. Restoring a checkpoint never draws again.
-4. `script(path, label:)` returns a script reference, of type `script`. Plain text is not a jump target. References can
-   be stored in lists, dicts, and globals. A bare variable as a target is grouped: `goto (next)`. A missing file or label
-   is a compile error when known, otherwise a runtime error. A reference names its file by path, so it keeps its meaning
-   when saved; a transfer checks it when it runs, and a computed `fallback` when the statement runs.
+   picks files that do something: the matched files that do not hold declarations only. It is a compile error only
+   when no such file remains.
+3. Each time a glob target runs, one draw from the session random generator picks the file. Restoring a checkpoint
+   never draws again.
+4. `script(path)` returns a script reference, of type `script`. Plain text is not a jump target. References can be
+   stored in lists, dicts, and globals. A bare variable as a target is grouped: `goto (next)`. A missing file is a
+   compile error when known, otherwise a runtime error. A reference names its file by path, so it keeps its meaning when
+   saved; a transfer checks it when it runs.
 5. `run` is removed. There is no automatic rotation or category selection; composition logic is visible in the script.
 
 ### 3. Labels, file-local names, global functions, and speakers
 
 1. A label stands only in a file's outer scope, not inside `if`, loops, functions, or handlers. A `goto` may appear
-   anywhere.
+   anywhere, but not a bare `goto label` in a global function (rule 5).
 2. Functions and labels are local to their file. Two files may use the same function or label names. A regular function
    may read its file's top-level `let`s and is callable only from its own file.
-3. A `goto` back to an earlier label runs the top-level `let`s after it again, which set their variables anew.
+3. Top-level `let`s are not hoisted. A `goto` back to an earlier label runs the top-level `let`s after it again, which
+   set their variables anew.
 4. A variable of the file may be used after a label only when every way to the label has run its `let`; otherwise it
    is a compile error. A goto has run what came before the statement it stands in, or before the call of its function
-   or the start of its handler. The ways are those of the ending check (§4.3), so a goto that cannot run is no way; a
-   transfer that enters a file afresh at a label has run nothing of that file before it. Whether code can run is
-   decided per statement and per function or handler context: a statement that can run, in the file's top level, in
-   a function that a call which can run reaches, or in a block started where code can run. A call in such a statement
-   counts, even in an operand that a constant `and` or `or` skips, or in a parameter default that every call supplies.
-   Globals and speakers are not variables of a file: they have their values from the start of the session (§6).
-   Which labels a `script(...)` reference may enter, the compiler reads from the source alone, by whether its path and
-   label are literal text (V30 §29), where the reference can run; other early uses, such as after a label that a
-   reference from `load` entered, are runtime errors when they run.
+   or the start of its handler. The ways are those of the ending check (§4.3), so a goto that cannot run is no way.
+   Whether code can run is decided per statement and per function or handler context: a statement that can run, in
+   the file's top level, in a function that a call which can run reaches, or in a block started where code can run. A
+   call in such a statement counts, even in an operand that a constant `and` or `or` skips, or in a parameter default
+   that every call supplies. Globals and speakers are not variables of a file: they have their values from the start of
+   the session (§6). Other early uses, such as in a function called before the `let`, are runtime errors when they run.
 5. A `global function` is callable from every file, without an import:
 
    ```tease
@@ -72,9 +71,10 @@ goto script("rooms/${room}.tease", label: "start")
 
    It may use only globals, its parameters, and its own locals, not its file's top-level `let`s, and may call only
    other global functions and built-ins. Breaking either rule is a compile error whose fix is to make the name a global
-   or pass it as a parameter. Interactions, `goto`, `call`, `end`, `exit`, and recursion work in it normally; a bare
-   label means a label of the file where the function is written, like `goto "helpers.tease" start`. Such a goto
-   enters that file afresh, so for rule 4 none of its top-level `let`s has run there.
+   or pass it as a parameter. Interactions, `goto`, `call`, `end`, `exit`, and recursion work in it normally. It runs in
+   the file that called it, so a bare `goto label` in it, or in a block it creates, is a compile error: the part after
+   the label belongs in a file of its own, which the function may `goto`, or in a function that does the work and
+   returns.
 
 6. Speakers are always global: `speaker vera { … }`, declared anywhere in any file, is known in every file and is set up
    at session start under the rules for globals (§6). There is no `global speaker`. `speaker vera`, which sets the
@@ -86,7 +86,8 @@ goto script("rooms/${room}.tease", label: "start")
 
 1. `exit` is the only normal way to finish the session, and it is always required, in `main.tease` too: the author marks
    the end of a script deliberately. A project with no reachable `exit` does not compile.
-2. `end` ends the current file and returns to the file that `call`ed it.
+2. `end` ends the current file and returns to the file that `call`ed it. There is no `fallback`: `call` covers every
+   returning use, as a hub that calls its scenes, or `main.tease` that calls the whole story and then exits.
 3. A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file, with a friendly
    message. Branches that all end or transfer need nothing extra, and loops and recursion are fine. A file of
    declarations only (functions, global functions, speakers, and globals without `default:`) runs nothing on its own,
@@ -94,18 +95,9 @@ goto script("rooms/${room}.tease", label: "start")
    The compiler follows the statements, with constant conditions, loops that certainly run once or never,
    `while true`, and branches that all end; a call counts as returning, also of a function that always ends the
    session, so the ending after such a call is still written out.
-4. Reaching `end` with no caller continues at the fallback destination when one is set, and is an error otherwise. The
-   fallback is never implicit.
-5. `fallback` sets the fallback destination. It takes the same target forms as `goto`:
-
-   ```tease
-   fallback "menu.tease"
-   fallback "menu.tease" start
-   if chapter > 3 { fallback script("chapters/${chapter}.tease", label: "recap") }
-   ```
-
-   It may run any number of times, anywhere, including inside `if`; the latest one executed wins. It is session state
-   and is checkpointed, not metadata. `fallback none` clears it again.
+4. An `end` that a way the compiler can follow reaches with no pending `call` is a compile error, also when another way
+   reaches it through a `call`, like the error of rule 3. Where a computed target hides the way, it is a warning, and
+   reaching `end` with no pending `call` is a runtime error (V30 §30).
 
 ### 5. Transfers
 
@@ -157,9 +149,9 @@ global level = load "level", default: 1
 
 6. Types follow the `let` rules of ADR 0021, with one type environment for all files; ADR 0021 rule 6 gives the
    checking order across files. When the project holds a file `call`, what is known about a global that some file's
-   top level assigns does not outlast a file or function call; when some file holds a `goto`, `call`, or `fallback`
-   that may enter `main.tease` at its top (a glob that may pick it or a computed target counts), `main.tease` starts
-   without what its start values stored. Both rules look at the source as written, including code that cannot run.
+   top level assigns does not outlast a file or function call; when some file holds a `goto` or `call` that may enter
+   `main.tease` (a glob that may pick it or a computed target counts), `main.tease` starts without what its start values
+   stored. Both rules look at the source as written, including code that cannot run.
 7. Values are checkpointed and live for the session. `save` and `load` give persistence beyond it.
 
 ## Consequences
@@ -171,8 +163,11 @@ global level = load "level", default: 1
 ## Alternatives considered
 
 - Keeping `run` with engine rotation: less to write, but the flow between files is hidden from the author.
-- Requiring every file of a glob to have the requested label: catches typos, but forces placeholder labels into files
-  that do not take part.
+- Entering another file at a label, by `goto`, `call`, glob, or reference: more scenes in one file, but a second public
+  address beside the file, and an entry that skips the `let`s above the label. A separate file, a function, or a local
+  `goto` covers each use.
+- A `fallback` destination for an `end` without a caller: less to write for a hub, but hidden session state where a
+  `call` already says where to return.
 - Plain text as a jump target: one form less, but a text meant as an image path or message could be passed by mistake,
   and a typo is found only when that path runs.
 - Globals only in `main.tease`: one place to read them, but shared state cannot sit next to the file that uses it.

@@ -181,6 +181,8 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV067` | Change of a copy that no variable holds | error | type checker |
 | `TSV068` | Invalid timer display | error | type checker |
 | `TSV069` | Blocking media handle, or `finish` twice | error | name pass |
+| `TSV070` | `end` with no call to return to | error | plan analysis |
+| `TSV071` | `end` that may have no call to return to | warning | plan analysis |
 
 ## Tags (TST)
 

@@ -1064,10 +1064,10 @@ punish(3)
 - A global function may use only globals, its parameters, and its own locals, not the top-level `let` variables of its
   file, and may call only other global functions and built-ins. Using a name of its file is a compile error whose fix is
   to make that name a global, or to pass it as a parameter.
-- Interactions, timers, media, `goto`, `call`, `end`, `exit`, and recursion work in it as in any function. A bare label
-  in it means a label of the file where it is written, like `goto "helpers.tease" start`: the goto enters that file
-  afresh, so a variable of the file used after the label needs its `let` after the label too ([§26](#26-labels-and-goto)),
-  where a call that can run reaches the function.
+- Interactions, timers, media, `goto`, `call`, `end`, `exit`, and recursion work in it as in any function. It may run
+  in any file, so a bare `goto label` in it, also in a block it creates, is a compile error: put the part after the
+  label in a file of its own and `goto` that file, or in a function that does the work and returns. A `goto` to a file
+  starts that file at its top ([§29](#29-script-files-and-paths)).
 - Its name is unique in the package, like that of a global ([§12](#global-variables)).
 
 ## 12. Variable declarations
@@ -3961,14 +3961,14 @@ goto tooLate
 Rules:
 
 - A label stands only in a file's outer scope, not inside `if`, loops, functions, or handlers. A `goto` may appear
-  anywhere.
-- Labels are local to their file; `goto label` moves within the current file. [§29](#29-script-files-and-paths)
-  defines `goto` to another file.
+  anywhere, but not a bare `goto label` in a global function ([§11](#global-functions)).
+- Labels are local to their file; `goto label` moves within the current file. Another file is entered only at its top
+  ([§29](#29-script-files-and-paths)).
 - Unknown labels and duplicate labels in one file are compile errors.
 - A `goto` discards the current function, loop, and block continuations.
-- A `goto` back to an earlier label runs the top-level `let`s after it again, which set their variables anew. A variable
-  of the file may be used after a label only when every way to the label has run its `let`; otherwise it is a compile
-  error.
+- Top-level `let`s are not hoisted: a `let` sets its variable when it runs. A `goto` back to an earlier label runs the
+  top-level `let`s after it again, which set their variables anew. A variable of the file may be used after a label only
+  when every way to the label has run its `let`; otherwise it is a compile error.
 - A `goto` triggered by an event aborts the current execution path and does not return.
 
 ## 27. Timers
@@ -4285,34 +4285,29 @@ Paths are relative to the package root and separate folders with `/`. A file may
 and tags it, and `goto tagged`, `call tagged`, and `findScripts` pick files by those tags
 ([§41](#tagged-selection)).
 
-Go to another file, from its top or at a label:
+Go to another file, which starts at its top:
 
 ```text
 goto "punishments/strict.tease"
-goto "punishments/strict.tease" start
 ```
 
-Call another file, from its top or at a label; execution continues after the `call` when that file reaches `end`:
+Call another file, which starts at its top; execution continues after the `call` when that file reaches `end`:
 
 ```text
 call "corner-time/short.tease"
-call "corner-time/short.tease" start
-call start                          // a label of this file, entered afresh
 ```
 
 A glob pattern picks one matching file at random:
 
 ```text
 goto "punishments/*.tease"
-goto "punishments/*.tease" start    // only files that have label start
 call "corner-time/*.tease"
 ```
 
-A computed target needs the explicit conversion `script(path, label:)`:
+A computed target needs the explicit conversion `script(path)`:
 
 ```text
 goto script("rooms/${room}.tease")
-goto script("rooms/${room}.tease", label: "start")
 let next = script("rooms/hall.tease")
 goto (next)
 ```
@@ -4323,9 +4318,15 @@ Rules:
   function, loop, and block continuations are discarded.
 - `call` keeps the current position, including an enclosing function or loop, and resumes after the `call` when the
   called file reaches `end`.
-- Each entry into a file, by `goto` or `call` naming it, by `call` of a label, or by the fallback, starts with fresh
-  top-level variables of that file. A `goto` to a label of the file continues with the variables of the entry it runs
-  in.
+- A file is entered only at its top. A label after a file target, a glob, or a tagged pick, and `label:` in
+  `script(...)`, are compile errors: use a local `goto label` within a file, a function for a part that returns, or a
+  separate file.
+- A `call` starts another file, so a `call` that can start the running file is a compile error: `call label`, a `call`
+  of the file it stands in, a glob or tagged pick that can choose that file, and in a global function a `call` that can
+  start a file that calls the function. A `call` that starts the running file as it runs, through a computed target or
+  from a block, is a runtime error.
+- Each entry into a file, by a `goto` or `call` naming it, starts at its top with fresh top-level variables of that
+  file. A `goto` to a label of the file continues with the variables of the entry it runs in.
 - A function sees the top-level variables of the entry that called it, and a timer, media, or button block those of the
   entry that created it, also after the session has left that entry. A block also keeps the local variables it shares
   ([§14](#variables-in-timer-media-and-button-blocks)), although a transfer discards the function, loop, and block
@@ -4335,26 +4336,23 @@ Rules:
 - A `goto label` in a block of an entry other than the running one continues that entry at the label, with its own
   variables. If that entry called the running file, the calls above it are abandoned and its own callers stay; if the
   session had left that entry, it takes the place of the running one.
-- A path that leaves the package, a missing file, and a missing label are compile errors.
+- A path that leaves the package and a missing file are compile errors.
 - In a glob, `*` stands for any characters within one folder or file name. Globs are expanded at compile time. A glob
-  only picks files that do something: the matched files that have the label, when one is given, and do not hold
-  declarations only. A glob with no such file is a compile error. A glob may pick the file it stands in.
-- Each time a glob target runs, one draw from the session random generator picks the file; a glob `fallback` draws
-  each time the fallback is used. Restoring a checkpoint never draws again.
-- `script(path)` returns a `script` reference to a file, and `script(path, label: name)` one to a label in it; the path
-  and the name are text. Plain text is not a jump target. A reference is a value: it can be stored in variables, lists,
-  dicts, sets, and globals, saved with `save`, and compared with `==` by path and label. It shows as the call that makes
-  it, such as `script("rooms/hall.tease", label: "start")`, has no properties or methods, and is not an `askChoice`
-  value. A computed target, a `script(...)` call or a grouped expression such as `goto (next)`, must be a reference.
+  only picks files that do something: the matched files that do not hold declarations only. A glob with no such file
+  is a compile error. A `goto` glob may pick the file it stands in.
+- Each time a glob target runs, one draw from the session random generator picks the file. Restoring a checkpoint never
+  draws again.
+- `script(path)` returns a `script` reference to a file; the path is text. Plain text is not a jump target. A reference
+  is a value: it can be stored in variables, lists, dicts, sets, and globals, saved with `save`, and compared with `==`
+  by path. It shows as the call that makes it, such as `script("rooms/hall.tease")`, has no properties or methods, and
+  is not an `askChoice` value. A computed target, a `script(...)` call or a grouped expression such as `goto (next)`,
+  must be a reference.
 - A `script(...)` whose path is literal, quoted text without `${...}`, is checked like a file target: a path that leaves
-  the package, a missing file, a missing literal label, a glob, and a `goto` or `fallback` to a file of declarations
-  only are compile errors. Any other reference is checked when a transfer uses it, a computed `fallback` when the
-  statement runs: a missing file or label, or a `goto` or `fallback` to a file of declarations only, is a runtime error.
-- For the check of variables after labels ([§26](#26-labels-and-goto)), the compiler reads from the source alone which
-  labels references may enter afresh: a `script(...)` with a literal label enters that label of its file, or with a
-  computed path that label of every file that has it, and one with a computed label every label of its file, or of
-  every file. Reading or assigning a variable of the file whose `let` has not run in this entry into the file, as
-  after a label that a reference from `load` entered, or in a function called before the `let`, is a runtime error.
+  the package, a missing file, a glob, and a `goto` to a file of declarations only are compile errors. Any other
+  reference is checked when a transfer uses it: a missing file, or a `goto` to a file of declarations only, is a runtime
+  error.
+- Reading or assigning a variable of the file whose `let` has not run in this entry into the file, as in a function
+  called before the `let`, is a runtime error.
 - Functions and labels are local to their file.
 - There is no `run` and no automatic selection of a next file; the script states every transfer.
 
@@ -4373,24 +4371,17 @@ Finish the session:
 exit
 ```
 
-Set the destination for an `end` without a caller, with the same targets as `goto` ([§29](#29-script-files-and-paths)):
-
-```text
-fallback "menu.tease"
-fallback "menu.tease" start
-if chapter > 3 { fallback script("chapters/${chapter}.tease", label: "recap") }
-```
-
 Behavior:
 
 - `exit` is the only normal way to finish the session, and it is always required, in `main.tease` too. It works
   anywhere, including in a called file or a function, and never returns. A project with no reachable `exit` does not
   compile.
 - `end` ends the current file, also from inside a function or block, and returns to the file that `call`ed it.
-- Reaching `end` with no caller continues at the fallback destination when one is set, and is an error otherwise. The
-  fallback is never implicit.
-- `fallback` may run any number of times, anywhere, including inside `if`; the latest one executed wins. It is session
-  state and is checkpointed. `fallback none` clears it again.
+- An `end` that a way the compiler can follow, through files written out and globs, reaches with no pending `call` is a
+  compile error, also when another way reaches the same `end` through a `call`, as in
+  `if pick { call "scene.tease" } else { goto "scene.tease" }`. The message points to `call`, `goto`, or `exit`. Where a
+  computed target, such as a reference in a variable or a tagged pick, hides the way, it is a warning (`TSV071`), and
+  reaching that `end` with no pending `call` is a runtime error.
 - A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. A file of
   declarations only (functions, global functions, speakers, and globals without `default:`) runs nothing on its own
   and needs no ending; a `goto` into such a file is a compile error. A call
@@ -5397,7 +5388,7 @@ Custom-property rules:
 - A conditionally assigned property is not considered definitely available after the condition unless every path assigns it.
 - The compiler follows a speaker through its name and through `speaker` under `as`. Reads through a variable, a
   parameter, an element, or `speaker` without `as`, reads in timer, media, and button blocks, and reads that only a
-  computed target or a fallback reaches are checked when the script runs. A block or a called file counts as assigning
+  computed target reaches are checked when the script runs. A block or a called file counts as assigning
   whatever it may assign. A recursive function, and a function that creates a timer, media, or button block, count as
   assigning every property.
 - The inferred or declared property type remains fixed.
@@ -5779,7 +5770,6 @@ goto
 call
 end
 exit
-fallback
 global
 tagged
 save
@@ -6177,21 +6167,20 @@ if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }
   passes every candidate. They join with `and` too, and take computed names: `findImages(all: wanted)`.
 - `findImages` takes the same parts as named arguments `where:`, `all:`, `none:`, and `any:`, and returns the paths of
   all matching images in path order, as a `string[]`, which may be empty. Without arguments it returns every image.
-- `goto tagged`, `call tagged`, and `fallback tagged` pick a file of the project by the tags of its header
-  ([File header](#file-header)) and enter it at its top, as `goto (reference)` does
-  ([§29](#29-script-files-and-paths)). Every file that runs something is a candidate, `main.tease` and the current
-  file too; a file of declarations only runs nothing on its own and is skipped, as for a glob
-  ([§29](#29-script-files-and-paths)). The option `from:` limits the candidates to a path or glob written out in quotes, as
+- `goto tagged` and `call tagged` pick a file of the project by the tags of its header ([File header](#file-header))
+  and enter it at its top, as `goto (reference)` does ([§29](#29-script-files-and-paths)). Every file that runs
+  something is a candidate, `main.tease` and the current file too, but a `call tagged` that can pick the running file
+  is a compile error ([§29](#29-script-files-and-paths)); a file of declarations only runs nothing on its own and is
+  skipped, as for a glob. The option `from:` limits the candidates to a path or glob written out in quotes, as
   for `goto`; one that names no file that runs something is a compile error. `findScripts` takes `where:`, `all:`,
   `none:`, `any:`, and `from:` as named arguments and returns `script` references to all matching candidates in path
-  order, as a `script[]`. A pick, too, chooses among the candidates in path order. A `fallback tagged` picks its file
-  when the statement runs.
+  order, as a `script[]`. A pick, too, chooses among the candidates in path order.
 - Comparison bounds and tag lists are evaluated once, in written order, before any candidate is matched. Matching draws
-  no random number. A pick (`showImage tagged`, `goto tagged`, `call tagged`, `fallback tagged`) draws once from the
-  session random generator, and restoring a checkpoint never draws again.
-- A `goto tagged`, `call tagged`, or `fallback tagged` whose tag tests and literal tag lists match no candidate, within
-  its `from:`, is a compile error: every file's header is known when the project compiles. Comparisons and computed lists
-  are not evaluated for this.
+  no random number. A pick (`showImage tagged`, `goto tagged`, `call tagged`) draws once from the session random
+  generator, and restoring a checkpoint never draws again.
+- A `goto tagged` or `call tagged` whose tag tests and literal tag lists match no candidate, within its `from:`, is a
+  compile error: every file's header is known when the project compiles. Comparisons and computed lists are not
+  evaluated for this.
 - When the compilation is given the package images and no file takes photos with tags, a `showImage tagged` whose tag
   tests and literal tag lists match none of them is a compile error; comparisons and computed lists are not evaluated
   for this. Any other pick that finds no image is a runtime error.

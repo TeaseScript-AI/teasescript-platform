@@ -388,13 +388,13 @@ The implementation includes:
   value in a fresh iteration scope; restore validation requires each loop of a call context to stand in deeper scopes
   than the loop around it;
 - explicit function definitions, parameter prologues, calls, serializable call frames, returns, and recursion;
-- labels, `goto`, `call`, `end`, and `fallback` within and across files, under [Files and
-  activations](#files-and-activations): a `goto` leaves every function, block, loop, and interrupt frame of its
-  activation, abandons an interrupted action, and continues at a label or a file's entry; a top-level `let` that runs
-  again sets its existing variable. Plan validation accepts a label only where the code that follows needs no open
+- labels, `goto`, `call`, and `end` within and across files, under [Files and activations](#files-and-activations): a
+  `goto` leaves every function, block, loop, and interrupt frame of its activation, abandons an interrupted action, and
+  continues at a label of its file or at another file's entry; a top-level `let` that runs again sets its existing
+  variable. Plan validation accepts a label only where the code that follows needs no open
   block, active loop, or temporary from before it;
 - explicit endings: the compiler closes each file's root region with an `end`, so a session halts only through `exit`;
-  `end` without a calling file or a fallback fails with `TSR066`;
+  `end` without a calling file fails with `TSR066`;
 - checkpoint restore inside loops, calls, defaults, and across RNG/event boundaries;
 - source-order-preserving temporaries and checkpoint-safe prepared references;
 - full suspended-caller live-temporary validation;
@@ -542,41 +542,39 @@ identity, observation, event, and checkpoint infrastructure. Their timer-specifi
 ## Files and activations
 
 ADR 0022 and V30 §29 define transfers between files. Each entry into a file is an activation with its own top-level
-variables in a root scope; the root names its file (`file`) and where the activation started (`entry`: the file's entry
-or one of its labels, which a `goto` to a label keeps), and every other scope has `file: null` and `entry: null`. The
-base activation's root is `frames[0]`.
+variables in a root scope; the root names its file (`file`) and where the activation started (`entry`: the file's
+entry, which a `goto` to a label keeps), and every other scope has `file: null` and `entry: null`. The base
+activation's root is `frames[0]`.
 
 - `call` pushes a file call frame (`kind: "file"`) onto the one ordered call stack, with the caller's temporaries, its
   scope and loop depths, and the position after the `call`; the called activation's root is the scope at its
   `scopeBaseDepth`. `end` ends the innermost activation, also from one of its functions or blocks, and returns there.
-  Without a file call, `end` continues at the snapshot's `fallback` (a file and its entry or label, or `null`) as a
-  fresh activation, or fails with `TSR066`.
-- A `goto` naming a file, `call` of a label, and the fallback replace or add an activation with a fresh root; a `goto`
-  to a label keeps the activation it runs in. A glob destination (`{ pick: [...] }`) draws one of its files from the
-  session random generator each time it runs, a glob fallback each time it is used. A goto leaves the functions, blocks, loops, and temporaries above its
-  activation's root; when that activation is lower on the stack, the file calls above it go too.
-- A computed destination (`{ value }`) evaluates to a script reference (`{ kind: "script", path, label }`, `label`
-  `null` for the file's top) each time it runs, and is resolved by path and label against the plan's files. A value
-  that is not a reference fails with `TSR058`; a missing file or label, or a `goto` or fallback to a file whose root
-  region holds nothing after its entry but its closing `end`, fails with `TSR069`. A computed `fallback` stores the resolved file and target.
-- Reading or assigning a top-level variable of the file whose `let` has not run in the activation fails with `TSR070`,
-  which names the label at the root's `entry` unless the activation started at the file's entry.
+  Without a file call, `end` fails with `TSR066`.
+- A `goto` or `call` naming a file replaces or adds an activation with a fresh root at the file's entry; a `goto` to a
+  label keeps the activation it runs in. A `call` whose destination is the innermost activation's file fails with
+  `TSR069`. A glob destination (`{ pick: [...] }`) draws one of its files from the session random generator each time
+  it runs. A goto leaves the functions, blocks, loops, and temporaries above its activation's root; when that activation
+  is lower on the stack, the file calls above it go too.
+- A computed destination (`{ value }`) evaluates to a script reference (`{ kind: "script", path }`) each time it runs,
+  and is resolved by path against the plan's files. A value that is not a reference fails with `TSR058`; a missing
+  file, or a `goto` to a file whose root region holds nothing after its entry but its closing `end`, fails with
+  `TSR069`.
+- Reading or assigning a top-level variable of the file whose `let` has not run in the activation fails with `TSR070`.
 - A function frame (`kind: "function"`) records `rootScopeId`, the root of the activation it runs for: its caller's,
   or for an expiry, cue, or finish block the one that started the timer or media. Timers record that root as
   `rootScopeId`, media with blocks as `handlerRootScopeId`, and queued blocks as `rootScopeId`. A root that leaves the
   stack stays in `retainedScopes` while such a block can still run, and is dropped at the next transfer after that; a
   `goto` from such a block brings its activation back in place of the innermost one.
 - A transfer that leaves an activation removes its non-persistent timers, as [Timers and scene
-  time](#timers-and-scene-time) describes; `exit` also clears activations, retained roots, and the fallback.
+  time](#timers-and-scene-time) describes; `exit` also clears activations and retained roots.
 
 Restore validation checks that roots stand exactly at the bottom and above each file call, that a file's entry is the
 start of its root region, that each file call returns after a `call`, that each loop belongs to the call context that
 runs it (so a recursive call runs its own instance of a loop) and is active exactly where that context stands in its
 body, that each function frame, and each timer, media, and queued block with a block to run, names an
 existing activation root of that function's or block's file, that every position lies in the region of the code
-running there, that each root's `entry` is its file's entry or one of its labels, and that the fallback is the
-destination of one of the plan's `fallback` statements or, when the plan has a computed `fallback`, a label of a file
-or the entry of a file that runs something. Script references elsewhere in the state are checked for their shape only.
+running there, and that each root's `entry` is its file's entry. Script references elsewhere in the state are checked
+for their shape only.
 
 ### Shared block variables
 
@@ -1082,7 +1080,7 @@ not language; without it every draw is natural and costs one more check.
 - **Draws.** A draw is one random operation as the script sees it: `random()`, `chance`, `randomInteger`, list and set
   `.random`, the element `${...}` selects from a list, a tagged image or script pick, `randomWeighted`, `randomNormal`,
   `randomBeta`, `randomPert`, a `shuffle()` of two or more items, a timer's ranged duration and each next round of a
-  repeating ranged timer, and a glob destination of `goto`, `call`, or the fallback at `end`. Its `kind` is the debug
+  repeating ranged timer, and a glob destination of `goto` or `call`. Its `kind` is the debug
   trace's operation name; its `site` is `path:line:column` in its file, counted from 1 (a timer round uses its timer's
   duration, a glob its statement), and `listRandomSites(plan)` lists every site with its kinds and `endLine` and
   `endColumn`, where the draw's source ends, exclusive, so a host can mark it; a site with several kinds ends where its
@@ -1140,8 +1138,8 @@ not language; without it every draw is natural and costs one more check.
 - **Undoing a unit.** The engine restores the generator, the event sequence, scene time, and the loop frames, and drops
   the unit's events and trace records. A unit that can change other state before one of its draws keeps a copy of the
   state while control can pause: an instruction with a list, set, dict, timer, media, message, or permanent-button
-  method, or a `timer.remaining` assignment followed by a draw; an `end` that leaves its activation before drawing a
-  glob fallback; and the return from a timer, media, or button block, whose catch-up may draw.
+  method, or a `timer.remaining` assignment followed by a draw; and the return from a timer, media, or button block,
+  whose catch-up may draw.
 - **Restore.** Validation checks a pending draw's support and outcomes, its site among the plan's sites, its natural
   result sampled again from its `drawId`, and a continuation that fits the state. If executing the unit again does not
   reach the draw as recorded, at its site and with its natural result, which only data the engine did not make can
@@ -1490,9 +1488,8 @@ Fresh-session creation rejects a host global with the name of a script global or
 scopes of the running function or root, then for a timer, media, or button block among the variables it shares
 ([Shared block variables](#shared-block-variables)), then, unless the running function or block is global, in the root
 of the activation it runs for, and then among the globals. Start values are evaluated without random selection: a list of
-unknown type reaching `.random` or `${...}` there fails with `TSR067`. A bare-label `goto` in a global function or its
-blocks is a transfer to that label of the function's file, which it enters afresh. A file's entry, also `main.tease`'s,
-follows the startup prefix, so no transfer runs the start values again.
+unknown type reaching `.random` or `${...}` there fails with `TSR067`. A file's entry, also `main.tease`'s, follows the
+startup prefix, so no transfer runs the start values again.
 
 Snapshot validation requires exactly the host globals followed by the script globals and speakers before the next
 instruction while the prefix runs, and all of them after it, with no scope binding of a global's name and a speaker
@@ -1880,9 +1877,9 @@ restart, and report the failure with its debug export. Every code is registered 
 | `TSR063` | A date or time that cannot be computed or shown, such as a year outside the supported range. | Use a date and time in the range the message gives. |
 | `TSR064` | The current time, when the host supplied no clock. | Run the script in a host with a clock. |
 | `TSR065` | A calendar duration where a duration is needed. | Use a duration, such as `24 h` or `1 day`. |
-| `TSR066` | A file ended without a calling file to return to. | Use `exit` where the session should finish. |
+| `TSR066` | A file ended without a calling file to return to. | Start the file with `call` where it should come back, or use `exit` where the session should finish. |
 | `TSR067` | A start value that selects at random. | Select at random once the story runs. |
-| `TSR069` | A `goto`, `call`, or `fallback` target that does not exist. | Name an existing file or label. |
+| `TSR069` | A `goto` or `call` target that does not exist, a `goto` to a file of declarations only, or a `call` of the running file. | Name an existing file that runs something; put a part of the running file that returns in a function. |
 | `TSR070` | A variable read before its `let` ran. | Give the variable a value before it is used. |
 | `TSR071` | `speaker` in a message that names no speaker with `as` while no default speaker is set. | Give the message a speaker with `as`, or set a default speaker with `speaker name` before it. |
 | `TSR080` | A tag's number compared with something other than a number. | Compare it with a number. |
@@ -2005,8 +2002,8 @@ host that needs the order and every occurrence uses the [instruction observer](#
     instructions: `instruction + 1` when the condition was true, otherwise its `target`;
   - `loopStart`, which runs before each round of a `repeat`, `for`, or `while`: `instruction + 1` for a round, its
     `target` when the loop ends;
-  - `transfer`, a `goto` or `call` naming a file or a `call label`, and `end`: where execution continued, such as the
-    file a glob or computed target picked, the fallback, or the instruction after the `call` that `end` returns to.
+  - `transfer`, a `goto` or `call` naming a file, and `end`: where execution continued, such as the file a glob or
+    computed target picked, or the instruction after the `call` that `end` returns to.
 
 The other operations execute no instruction: they settle actions, set where execution continues, or queue blocks, which
 the next run or step executes and traces. The trace is not part of snapshots, events, or checkpoints and changes no
@@ -2040,9 +2037,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 100 | Public keys (owner decisions, 2026-10-13 and 2026-10-14): a `lock` instruction has `publicKey` and `key` operands, each `null` or a temporary or literal, `publicKey` for an encrypt call and `key` for a decrypt call, which it previously lacked. |
-| Runtime snapshot | 88 | One copy per supplied argument (#512, runtime R1): binding a supplied parameter moves the call's copy of the argument into the binding, so the call frame's argument keeps `parameterName` and `supplied: true` without `value` once the prologue has bound it; previously the argument kept its value for the whole call. |
-| Checkpoint | 124 | The single-argument-copy snapshot contract. |
+| Instruction plan | 101 | Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `setFallback` instruction, and a `transfer` destination names a file's entry, never a label; plan validation previously accepted both. |
+| Runtime snapshot | 89 | Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `fallback` field, a script reference is `{ kind: "script", path }` without `label`, and an activation root's `entry` is its file's entry, never a label; validation previously accepted all three. |
+| Checkpoint | 125 | The plan and snapshot contracts of files entered at their top. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -2074,6 +2071,9 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Instruction plan history
 
+- Revision 100: Public keys (owner decisions, 2026-10-13 and 2026-10-14): a `lock` instruction has `publicKey` and
+  `key` operands, each `null` or a temporary or literal, `publicKey` for an encrypt call and `key` for a decrypt call,
+  which it previously lacked.
 - Revision 99: `askPassword` (owner decisions, 2026-10-13 and 2026-10-14): an interaction may be of kind `password`,
   prepared from the temporary of its hint, which plan validation previously rejected; a `lock` instruction has
   `passwordField`, `null` or `{ hint }` with a temporary or literal hint, which it previously lacked.
@@ -2270,6 +2270,9 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Runtime snapshot history
 
+- Revision 88: One copy per supplied argument (#512, runtime R1): binding a supplied parameter moves the call's copy of
+  the argument into the binding, so the call frame's argument keeps `parameterName` and `supplied: true` without
+  `value` once the prologue has bound it; previously the argument kept its value for the whole call.
 - Revision 87: Public keys (owner decisions, 2026-10-13 and 2026-10-14): a `lock` action has `publicKeys`, the encrypt
   call's at most 594 public keys, each an `age1…` recipient or an `ssh-ed25519` key without surrounding white space,
   and `key`, the decrypt call's written key or `null`, and its `notice` and answer handoff may be `"wrongKey"`;
@@ -2429,6 +2432,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 124: The single-argument-copy snapshot contract.
 - Revision 123: the public key plan and snapshot contracts.
 - Revision 122: the `askPassword` plan and snapshot contracts.
 - Revision 121: the encryption plan and snapshot contracts.
