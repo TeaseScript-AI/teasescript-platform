@@ -1257,7 +1257,7 @@ and changes nothing else; setting the value it has changes nothing. A value that
 reproduces it, and replaying the recorded input from an earlier anchor reaches the same state. In the
 [value trace](#debug-trace) a read has no recorded origin.
 
-## The player and the account
+## The player and the player profile
 
 The built-in speaker `player` ([V30 §37](specifications/accepted-syntaxes-v30.md#37-dynamic-speaker-terms)) comes first:
 when a file of the project names `player`, the startup prefix begins with a `declareSpeaker` of `player` without
@@ -1268,15 +1268,15 @@ A `playerTranscript` event carries `presentation`, that of `player` when the ans
 message without options. A completion cannot fail, so options that would fail that message with `TSR050` give the
 answer the Player's defaults.
 
-`FreshRuntimeOptions.account` gives the person fields of the account: `title`, `shortTitle`, `firstName`, `lastName`,
-`displayName`, `alias`, `gender`, the terms, and the name lists, each text or, for a name list, a list of at least one
-text. Another field or value is refused with a `TypeError`; without the option the account has no fields. The snapshot
-keeps them as `account`, in that order, and restore checks them again. `account.<field>` lowers to the leaf
-`{ kind: "accountField", name }`, which reads the field as a speaker reads its own, so a term follows the account's
-`gender`, and fails with `TSR017` when the account lacks it; in the [value trace](#debug-trace) a read has no recorded
-origin. `player.copyFrom(account)` lowers to the `copyAccount` instruction. It gives `player` a copy of each person field
-the account has and removes each one it lacks, in place, after freezing the prepared references to the player's person
-fields.
+`FreshRuntimeOptions.playerProfile` gives the person fields of the player profile: `title`, `shortTitle`, `firstName`,
+`lastName`, `displayName`, `alias`, `gender`, the terms, and the name lists, each text or, for a name list, a list of at
+least one text. Another field or value is refused with a `TypeError`; without the option the profile has no fields. The
+snapshot keeps them as `playerProfile`, in that order, and restore checks them again. `playerProfile.<field>` lowers to
+the leaf `{ kind: "playerProfileField", name }`, which reads the field as a speaker reads its own, so a term follows the
+profile's `gender`, and fails with `TSR017` when the profile lacks it; in the [value trace](#debug-trace) a read has no
+recorded origin. `player.copyFrom(playerProfile)` lowers to the `copyPlayerProfile` instruction. It gives `player` a
+copy of each person field the profile has and removes each one it lacks, in place, after freezing the prepared
+references to the player's person fields.
 
 ## Camera capture
 
@@ -2038,9 +2038,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 101 | Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `setFallback` instruction, a `transfer` destination names a file's entry, never a label, and no `goto` stands in a global function or its blocks; plan validation previously accepted all three. |
-| Runtime snapshot | 89 | Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `fallback` field, a script reference is `{ kind: "script", path }` without `label`, and an activation root's `entry` is its file's entry, never a label; validation previously accepted all three. |
-| Checkpoint | 125 | The plan and snapshot contracts of files entered at their top. |
+| Instruction plan | 102 | Player profile (owner decision, 2026-10-23): the instruction that copies the player profile into `player` is `copyPlayerProfile`, and a read of one of its person fields is `{ kind: "playerProfileField", name }`; plan validation previously accepted `copyAccount` and `accountField` instead. |
+| Runtime snapshot | 90 | Player profile (owner decision, 2026-10-23): the person fields the host gave at the start are kept as `playerProfile`; previously they were kept as `account`. |
+| Checkpoint | 126 | The player-profile plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -2072,6 +2072,9 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Instruction plan history
 
+- Revision 101: Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `setFallback` instruction, a
+  `transfer` destination names a file's entry, never a label, and no `goto` stands in a global function or its blocks;
+  plan validation previously accepted all three.
 - Revision 100: Public keys (owner decisions, 2026-10-13 and 2026-10-14): a `lock` instruction has `publicKey` and
   `key` operands, each `null` or a temporary or literal, `publicKey` for an encrypt call and `key` for a decrypt call,
   which it previously lacked.
@@ -2271,6 +2274,9 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Runtime snapshot history
 
+- Revision 89: Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `fallback` field, a script
+  reference is `{ kind: "script", path }` without `label`, and an activation root's `entry` is its file's entry, never a
+  label; validation previously accepted all three.
 - Revision 88: One copy per supplied argument (#512, runtime R1): binding a supplied parameter moves the call's copy of
   the argument into the binding, so the call frame's argument keeps `parameterName` and `supplied: true` without
   `value` once the prologue has bound it; previously the argument kept its value for the whole call.
@@ -2433,6 +2439,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 125: The plan and snapshot contracts of files entered at their top.
 - Revision 124: The single-argument-copy snapshot contract.
 - Revision 123: the public key plan and snapshot contracts.
 - Revision 122: the `askPassword` plan and snapshot contracts.

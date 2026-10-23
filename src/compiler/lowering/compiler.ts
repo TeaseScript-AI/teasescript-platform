@@ -63,7 +63,7 @@ import type {
 import { DEFAULT_OPEN_URL_BUTTON_TEXT, DEFAULT_POPUP_BUTTON_TEXT } from "../../plan/model.js";
 import { canonicalWebUrl } from "../../web-url.js";
 import { canonicalRegexFlags } from "../../regex.js";
-import { copiesAccount } from "../../project-globals.js";
+import { copiesPlayerProfile } from "../../project-globals.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import {
   isAskImageCall,
@@ -526,8 +526,8 @@ export class InstructionCompiler {
         return;
       }
       case "expressionStatement": {
-        if (copiesAccount(statement.expression)) {
-          this.instructions.push({ kind: "copyAccount", span: copySpan(statement.span) });
+        if (copiesPlayerProfile(statement.expression)) {
+          this.instructions.push({ kind: "copyPlayerProfile", span: copySpan(statement.span) });
           return;
         }
         const lowered = this.#lowerExpression(statement.expression);
@@ -1495,10 +1495,10 @@ export class InstructionCompiler {
         };
       }
       case "propertyAccessExpression": {
-        if (isAccount(expression.object))
+        if (isPlayerProfile(expression.object))
           return {
             plan: {
-              kind: "accountField",
+              kind: "playerProfileField",
               name: expression.property.name,
               span: copySpan(expression.span),
             },
@@ -3400,10 +3400,10 @@ interface LoweredExpression {
   readonly temporaryIds: readonly number[];
 }
 
-/** Whether `expression` is the protected `account`, which no binding can have as its name. */
-function isAccount(expression: Expression): boolean {
+/** Whether `expression` is the protected `playerProfile`, which no binding can have as its name. */
+function isPlayerProfile(expression: Expression): boolean {
   const node = unwrapParentheses(expression);
-  return node.kind === "identifier" && node.name === "account";
+  return node.kind === "identifier" && node.name === "playerProfile";
 }
 
 function unwrapParentheses(expression: Expression): Expression {
@@ -3717,9 +3717,9 @@ function assembleExpression(
         span: copySpan(expression.span),
       };
     case "propertyAccessExpression":
-      if (isAccount(expression.object))
+      if (isPlayerProfile(expression.object))
         return {
-          kind: "accountField",
+          kind: "playerProfileField",
           name: expression.property.name,
           span: copySpan(expression.span),
         };

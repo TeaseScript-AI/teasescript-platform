@@ -545,7 +545,7 @@ function askBooleans(inputs: OperationInputs): OperationResult {
 }
 
 function speakerField(name: string): OperationRelation {
-  const property = name.replace(/^account\./, "");
+  const property = name.replace(/^playerProfile\./, "");
   return {
     contract: { family: "speakerField", name },
     result: () =>

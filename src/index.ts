@@ -318,9 +318,9 @@ export {
 export { validateRuntimeSnapshot } from "./runtime/snapshot/snapshot-validation.js";
 export { createFreshRuntimeSnapshot } from "./runtime/snapshot/snapshot-construction.js";
 export type {
-  RuntimeAccountFieldSnapshot,
-  RuntimeAccountInput,
-} from "./runtime/host-data/account.js";
+  RuntimePlayerProfileFieldSnapshot,
+  RuntimePlayerProfileInput,
+} from "./runtime/host-data/player-profile.js";
 export type {
   CaptureUnavailableReason,
   RuntimeActionSettlementSnapshot,

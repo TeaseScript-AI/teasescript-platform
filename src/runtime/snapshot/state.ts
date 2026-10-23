@@ -13,7 +13,10 @@ import type {
 } from "../actions/model.js";
 import type { RuntimeInterruptibleActionSnapshot } from "../actions/interrupts.js";
 import type { ChatPacingSettings } from "../../chat-pacing.js";
-import type { RuntimeAccountFieldSnapshot, RuntimeAccountInput } from "../host-data/account.js";
+import type {
+  RuntimePlayerProfileFieldSnapshot,
+  RuntimePlayerProfileInput,
+} from "../host-data/player-profile.js";
 import type { PlanTag } from "../../plan/model.js";
 import { interactionStringFits } from "../../interaction-limits.js";
 import type { ExternalDataFailureKind } from "../../external-data-capture.js";
@@ -41,7 +44,7 @@ import type { RuntimeScriptStorageEntrySnapshot } from "../host-data/script-stor
 import { isPlainRecord } from "../values/plain-data.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 89;
+export const RUNTIME_SNAPSHOT_VERSION = 90;
 export const DEFAULT_MAX_CALL_DEPTH = 1024;
 export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -352,8 +355,8 @@ export interface RuntimeSnapshot {
   readonly liveMessages: RuntimeLiveMessageSnapshot[];
   /** What the protected `debugMode` reads: whether the host runs the session in Debug. Only the host changes it. */
   debugMode: boolean;
-  /** The read-only account that the host gave at the start: the person fields `account` reads (V30 §37). */
-  readonly account: RuntimeAccountFieldSnapshot[];
+  /** The player profile the host gave at the start: the person fields `playerProfile` reads (V30 §37). */
+  readonly playerProfile: RuntimePlayerProfileFieldSnapshot[];
   /**
    * Controlled randomness (docs/RUNTIME.md#controlled-randomness): how many chosen outcomes this state's history
    * accepted, and a draw the engine paused at; `null` until a host chooses an outcome or pauses.
@@ -376,8 +379,8 @@ export interface FreshRuntimeOptions {
   readonly persistentScriptStorage?: boolean;
   /** What the protected `debugMode` reads at first; `false` without one. `setDebugMode` changes it later. */
   readonly debugMode?: boolean;
-  /** The person fields of the player's account, which `account` reads (V30 §37); without them it has none. */
-  readonly account?: RuntimeAccountInput;
+  /** The person fields of the player's profile, which `playerProfile` reads (V30 §37); without them it has none. */
+  readonly playerProfile?: RuntimePlayerProfileInput;
   /**
    * The references of stored files that the stored values hold, which the host's file store vouches for, so that
    * `toJson` and `fileToBase64` know them as files (V30 §33).

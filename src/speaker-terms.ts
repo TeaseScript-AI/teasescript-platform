@@ -41,8 +41,8 @@ export const SPEAKER_NAME_LISTS: ReadonlySet<string> = new Set([
 export const PLAYER = "player";
 
 /**
- * The person fields of a speaker and of the account: the name fields, `alias`, `gender`, the terms of
- * {@link GENDER_TERMS}, and the name lists. `player.copyFrom(account)` copies them; the account has no others.
+ * The person fields of a speaker and of the player profile: the name fields, `alias`, `gender`, the terms of
+ * {@link GENDER_TERMS}, and the name lists. `player.copyFrom(playerProfile)` copies them; the profile has no others.
  */
 export const PERSON_FIELDS: ReadonlySet<string> = new Set([
   "title",

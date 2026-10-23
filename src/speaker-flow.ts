@@ -177,7 +177,7 @@ class SpeakerFlow {
   #allStores = 0n;
   /** The properties that speaker declarations give, which hold from the start of the session. */
   #declared = 0n;
-  /** The instructions that store each `speaker.property`, and the copies of the account, in order. */
+  /** The instructions that store each `speaker.property`, and the copies of the player profile, in order. */
   readonly #storesOf = new Map<string, number[]>();
   readonly #copies: number[] = [];
   readonly #reads = new Map<number, Read[]>();
@@ -255,7 +255,7 @@ class SpeakerFlow {
         for (const property of instruction.properties)
           stores |= this.#bit(instruction.name, property.name);
         this.#declared |= stores;
-      } else if (instruction.kind === "copyAccount") {
+      } else if (instruction.kind === "copyPlayerProfile") {
         this.#copies.push(index);
         for (const field of PERSON_FIELDS) stores |= this.#noteStore(PLAYER, field, index);
       }
@@ -869,9 +869,9 @@ class SpeakerFlow {
   }
 
   /**
-   * The message for a read that no way to it gives a source of the property first. It names one store: for the
-   * player's field a copy of the account, else an assignment of a source, preferring one that runs, and says whether
-   * it comes later, runs only on a way that does not reach the read, or never runs.
+   * The message for a read that no way to it gives a source of the property first. It names one store: for the player's
+   * field a copy of the player profile, else an assignment of a source, preferring one that runs, and says whether it
+   * comes later, runs only on a way that does not reach the read, or never runs.
    */
   #tooEarly(read: SpeakerFlowRead, node: number, file: number): string {
     const { speaker, name, field, sources } = read;

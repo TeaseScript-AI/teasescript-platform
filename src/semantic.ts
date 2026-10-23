@@ -41,6 +41,7 @@ import {
   protectedNameMessage,
   RENAMED_BUILTINS,
   RENAMED_METHODS,
+  RENAMED_VALUES,
   TEASESCRIPT_GRAMMAR_KEYWORDS,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./language-facts.js";
@@ -1652,12 +1653,16 @@ class SemanticValidator {
       target.kind === "identifier" ? "assigns" : "changes",
     );
     if (target.kind === "identifier") {
-      if (target.name === "debugMode" || target.name === "account") {
+      if (target.name === "debugMode") {
         this.#report(
           semanticCode.invalidAssignment,
-          `Cannot assign to '${target.name}', which is read-only.`,
+          "Cannot assign to 'debugMode', which is read-only.",
           target.span,
         );
+        return;
+      }
+      if (target.name === "playerProfile") {
+        this.#reportPlayerProfileChange(target, true);
         return;
       }
       const binding = scope.resolve(target.name);
@@ -1685,8 +1690,8 @@ class SemanticValidator {
       return;
     }
 
-    if (rootName(target) === "account") {
-      this.#reportAccountChange(target, true);
+    if (rootName(target) === "playerProfile") {
+      this.#reportPlayerProfileChange(target, true);
       return;
     }
     this.#validateExpression(target.object, scope, null);
@@ -1696,10 +1701,10 @@ class SemanticValidator {
   }
 
   /**
-   * Reports a store into the read-only account at `place` (`store`), or a change of one of its lists through it
-   * (V30 §37).
+   * Reports a store into the player profile at `place` (`store`), or a change of one of its lists through it: a script
+   * changes the profile only through `askProfileChange(...)` (V30 §37).
    */
-  #reportAccountChange(place: Expression, store: boolean): void {
+  #reportPlayerProfileChange(place: Expression, store: boolean): void {
     let field = unwrapParentheses(place);
     while (
       (field.kind === "propertyAccessExpression" || field.kind === "indexExpression") &&
@@ -1707,13 +1712,15 @@ class SemanticValidator {
     )
       field = unwrapParentheses(field.object);
     const name = field.kind === "propertyAccessExpression" ? field.property.name : null;
-    // An assignment of a field itself, as opposed to a change inside it.
-    const assigned = store && name !== null && field === unwrapParentheses(place);
-    const label = name === null ? "account" : `account.${name}`;
-    const instead = name === null ? "its field" : `'player.${name}'`;
+    // An assignment of the profile or one of its fields itself, as opposed to a change inside it.
+    const assigned =
+      store && field === unwrapParentheses(place) && (name !== null || field.kind === "identifier");
+    const label = name === null ? "playerProfile" : `playerProfile.${name}`;
+    const instead =
+      name !== null ? `'player.${name}'` : assigned ? "the player's fields" : "its field";
     this.#report(
       semanticCode.invalidAssignment,
-      `Cannot ${assigned ? "assign to" : "change"} '${label}': the account is read-only. Copy it into the player with 'player.copyFrom(account)' and ${assigned ? "assign" : "change"} ${instead} instead.`,
+      `Cannot ${assigned ? "assign to" : "change"} '${label}': the player profile changes only through 'askProfileChange(...)', which the player approves. Copy it into the player with 'player.copyFrom(playerProfile)' and ${assigned ? "assign" : "change"} ${instead} instead.`,
       place.span,
     );
   }
@@ -1783,10 +1790,10 @@ class SemanticValidator {
         }
         // Protected, so never a binding: the engine reads it from the session.
         if (expression.name === "debugMode") return;
-        if (expression.name === "account") {
+        if (expression.name === "playerProfile") {
           this.#report(
             semanticCode.functionValue,
-            "'account' is not a value of its own. Read one of its fields, as in 'account.firstName', or copy it into the player with 'player.copyFrom(account)'.",
+            "'playerProfile' is not a value of its own. Read one of its fields, as in 'playerProfile.firstName', or copy it into the player with 'player.copyFrom(playerProfile)'.",
             expression.span,
           );
           return;
@@ -1808,9 +1815,10 @@ class SemanticValidator {
               expression.span,
             );
           } else if (!this.#reportFileName(expression.name, expression.span)) {
+            const renamed = RENAMED_VALUES.get(expression.name);
             this.#report(
               semanticCode.unknownVariable,
-              `Unknown variable '${expression.name}'.`,
+              `Unknown variable '${expression.name}'.${renamed === undefined ? "" : ` Use '${renamed}'.`}`,
               expression.span,
             );
           }
@@ -1840,8 +1848,8 @@ class SemanticValidator {
         }
         return;
       case "propertyAccessExpression":
-        // The account is read by its fields, which the type check knows.
-        if (isAccount(expression.object)) return;
+        // The player profile is read by its fields, which the type check knows.
+        if (isPlayerProfile(expression.object)) return;
         yield* compileChild(
           this.#validateExpressionTask(expression.object, scope, contextualSpeaker),
         );
@@ -1901,17 +1909,17 @@ class SemanticValidator {
         if (!authorFunction) this.#validateDistinctNamedArguments(expression);
         // Grouping a method does not detach it from its receiver: `(text.trim)()` calls `text.trim()`.
         const method = unwrapParentheses(expression.callee);
-        // A list or dict of the account changes in place as one of anything else does, also when a list is reordered; a
-        // text of the account reverses into a new text.
+        // A list or dict of the player profile changes in place as one of anything else does, also when a list is
+        // reordered; a text of the player profile reverses into a new text.
         const changes =
           method.kind === "propertyAccessExpression" &&
           (changesElements(method.property.name) || changesEntries(method.property.name));
         if (
           method.kind === "propertyAccessExpression" &&
-          rootName(method.object) === "account" &&
-          (changes || (reordersList(method.property.name) && isAccountList(method.object)))
+          rootName(method.object) === "playerProfile" &&
+          (changes || (reordersList(method.property.name) && isPlayerProfileList(method.object)))
         ) {
-          this.#reportAccountChange(method.object, false);
+          this.#reportPlayerProfileChange(method.object, false);
           return;
         }
         if (method.kind === "propertyAccessExpression" && changes)
@@ -2060,11 +2068,11 @@ class SemanticValidator {
         }
         const argumentSpeaker = isAskImageCall(expression) ? "speaker" : contextualSpeaker;
         for (const argument of expression.arguments) {
-          // `copyFrom` takes the account as a whole; the type check reports any other form of it.
+          // `copyFrom` takes the player profile as a whole; the type check reports any other form of it.
           if (
             method.kind === "propertyAccessExpression" &&
             method.property.name === "copyFrom" &&
-            isAccount(argument.value)
+            isPlayerProfile(argument.value)
           )
             continue;
           yield* compileChild(this.#validateExpressionTask(argument.value, scope, argumentSpeaker));
@@ -2858,20 +2866,20 @@ function findFirstInteraction(
   return null;
 }
 
-/** Whether `expression` is a name list of the account, as `account.petNames`. */
-function isAccountList(expression: Expression): boolean {
+/** Whether `expression` is a name list of the player profile, as `playerProfile.petNames`. */
+function isPlayerProfileList(expression: Expression): boolean {
   const node = unwrapParentheses(expression);
   return (
     node.kind === "propertyAccessExpression" &&
-    isAccount(node.object) &&
+    isPlayerProfile(node.object) &&
     SPEAKER_NAME_LISTS.has(node.property.name)
   );
 }
 
-/** Whether `expression` is the protected `account`, which no binding can have as its name. */
-function isAccount(expression: Expression): boolean {
+/** Whether `expression` is the protected `playerProfile`, which no binding can have as its name. */
+function isPlayerProfile(expression: Expression): boolean {
   const node = unwrapParentheses(expression);
-  return node.kind === "identifier" && node.name === "account";
+  return node.kind === "identifier" && node.name === "playerProfile";
 }
 
 function unwrapParentheses(expression: Expression): Expression {

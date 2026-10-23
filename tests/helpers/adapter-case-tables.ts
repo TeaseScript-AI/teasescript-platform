@@ -1186,8 +1186,8 @@ const COMMAND_TEMPLATES: readonly Template[] = [
   {
     id: "speaker-field",
     *variants() {
-      for (const name of PERSON_FIELD_NAMES) yield variant(name, [], `account.${name}`);
-      yield variant("bogus", [], "account.bogus");
+      for (const name of PERSON_FIELD_NAMES) yield variant(name, [], `playerProfile.${name}`);
+      yield variant("bogus", [], "playerProfile.bogus");
     },
   },
 ];

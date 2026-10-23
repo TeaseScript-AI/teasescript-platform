@@ -4,7 +4,7 @@ import {
   type ProjectSourceFile,
 } from "../../src/compiler.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
-import type { RuntimeAccountInput } from "../../src/runtime/host-data/account.js";
+import type { RuntimePlayerProfileInput } from "../../src/runtime/host-data/player-profile.js";
 import type { RuntimeLockActionSnapshot } from "../../src/runtime/actions/model.js";
 import { runtimeTimedWork } from "../../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSession, type RuntimeSessionView } from "../../src/runtime/session.js";
@@ -62,7 +62,7 @@ const MAX_CLOCK_MOVES = 100;
 export function compileAndRunVariants(
   files: readonly ProjectSourceFile[],
   knobs: readonly FlowKnob[],
-  account: RuntimeAccountInput = {},
+  playerProfile: RuntimePlayerProfileInput = {},
   answer: string | null = null,
   lock: FlowLockAnswer | null = null,
   pressButtons = false,
@@ -73,7 +73,7 @@ export function compileAndRunVariants(
     for (let subset = 0; subset < 1 << knobs.length; subset += 1) {
       const stored = knobs.filter((_, index) => (subset & (1 << index)) !== 0);
       const session = createFreshRuntimeSession(compiled.plan, {
-        account,
+        playerProfile,
         scriptStorage: stored.map((knob) => ({ key: knob.key, value: knob.value ?? true })),
         baseDelayMs: 0,
         delayPerWordMs: 0,

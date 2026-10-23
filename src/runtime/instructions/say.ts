@@ -289,7 +289,7 @@ function selectiveSayStagingClone(
     // Records are never changed in place; a shown message adds one.
     liveMessages: givesHandle ? [...snapshot.liveMessages] : snapshot.liveMessages,
     debugMode: snapshot.debugMode,
-    account: snapshot.account,
+    playerProfile: snapshot.playerProfile,
     // A say changes no control state; the operation's control keeps it.
     randomControl: snapshot.randomControl,
     maxCallDepth: snapshot.maxCallDepth,

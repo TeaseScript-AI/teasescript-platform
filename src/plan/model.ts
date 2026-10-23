@@ -6,7 +6,7 @@ import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 import type { PlainKind, ScalarKind } from "../value-kinds.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 101;
+export const INSTRUCTION_PLAN_VERSION = 102;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -128,7 +128,7 @@ export type Instruction =
   | DeclareGlobalInstruction
   | DeclareSpeakerInstruction
   | SetDefaultSpeakerInstruction
-  | CopyAccountInstruction
+  | CopyPlayerProfileInstruction
   | EnterScopeInstruction
   | LeaveScopeInstruction
   | DeclareBindingInstruction
@@ -205,11 +205,11 @@ export interface SetDefaultSpeakerInstruction extends InstructionBase {
 }
 
 /**
- * `player.copyFrom(account)`: gives the player each person field of the account, and takes away each one the account
- * lacks (V30 §37).
+ * `player.copyFrom(playerProfile)`: gives the player each person field of the player profile, and takes away each one
+ * the player profile lacks (V30 §37).
  */
-export interface CopyAccountInstruction extends InstructionBase {
-  readonly kind: "copyAccount";
+export interface CopyPlayerProfileInstruction extends InstructionBase {
+  readonly kind: "copyPlayerProfile";
 }
 
 export interface EnterScopeInstruction extends InstructionBase {
@@ -1113,7 +1113,7 @@ export type ExpressionPlan =
   | CalendarDurationExpressionPlan
   | IdentifierExpressionPlan
   | DebugModeExpressionPlan
-  | AccountFieldExpressionPlan
+  | PlayerProfileFieldExpressionPlan
   | ListExpressionPlan
   | ObjectExpressionPlan
   | SetExpressionPlan
@@ -1174,9 +1174,9 @@ export interface DebugModeExpressionPlan extends ExpressionPlanBase {
   readonly kind: "debugMode";
 }
 
-/** A read of a person field of the read-only account, which the host gives the session at its start (V30 §37). */
-export interface AccountFieldExpressionPlan extends ExpressionPlanBase {
-  readonly kind: "accountField";
+/** A read of a person field of the player profile, which the host gives at the start (V30 §37). */
+export interface PlayerProfileFieldExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "playerProfileField";
   readonly name: string;
 }
 

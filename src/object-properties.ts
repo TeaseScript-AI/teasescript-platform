@@ -80,14 +80,16 @@ export function missingSpeakerPropertyMessage(
       sources.length === 0
         ? "nothing assigns it"
         : player
-          ? `nothing copies the account or assigns ${quoted}`
+          ? `nothing copies the player profile or assigns ${quoted}`
           : `nothing assigns ${quoted}`;
     return `Speaker '${speaker}' has no '${name}' yet here: ${missing} before this line runs.${gap.late}${fix}`;
   }
   if (sources.length > 0) {
     const subject =
       speaker === null ? `No speaker has '${name}'` : `Speaker '${speaker}' has no '${name}'`;
-    const gives = player ? "no assignment or copy of the account" : "no declaration or assignment";
+    const gives = player
+      ? "no assignment or copy of the player profile"
+      : "no declaration or assignment";
     const needed = sources.length === 1 ? "one" : alternatives(sources);
     return `${subject}: ${gives} gives ${speaker === null ? "a speaker" : "it"} ${needed}.${fix}`;
   }
@@ -112,7 +114,7 @@ function speakerPropertyFix({ speaker, name, sources, example }: SpeakerProperty
   if (speaker === PLAYER)
     return sources.length === 0
       ? `Assign it before this line, as in 'player.${name} = ...'.`
-      : `Copy the account before this line, as in 'player.copyFrom(account)' at the start of the script, or assign ${sources.includes("gender") ? `'player.gender' or 'player.${name}'` : `'player.${name}'`} first.`;
+      : `Copy the player profile before this line, as in 'player.copyFrom(playerProfile)' at the start of the script, or assign ${sources.includes("gender") ? `'player.gender' or 'player.${name}'` : `'player.${name}'`} first.`;
   const whom = speaker === null ? "a speaker" : "it";
   return sources.includes("gender")
     ? `Give ${whom} a gender, as in 'speaker ${example} { gender: "female" }', or assign '${speaker === null ? "" : `${speaker}.`}${name}' before this line.`

@@ -149,7 +149,7 @@ test("loops copy the iteration value, addAll stores elements, and get keeps its 
   rejectLine(lines, /^store @139#\d+ /);
 });
 
-test("speaker stores name the speaker, stores through a parameter project, and the account copy seeds the player", () => {
+test("speaker stores name the speaker, stores through a parameter project, and the player profile copy seeds the player", () => {
   const { lines } = collect(
     [
       "speaker vera {",
@@ -157,7 +157,7 @@ test("speaker stores name the speaker, stores through a parameter project, and t
       "}",
       'vera.mood = "glad"',
       'function cheer(who) { who.mood = "x" }',
-      "player.copyFrom(account)",
+      "player.copyFrom(playerProfile)",
       "say vera.mood",
       "exit",
     ].join("\n"),

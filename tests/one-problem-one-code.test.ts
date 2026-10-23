@@ -404,17 +404,17 @@ test("a speaker property that a read may miss has one text, from the type checke
     ],
   ]);
   const copy =
-    "Copy the account before this line, as in 'player.copyFrom(account)' at the start of the script, or assign 'player.firstName' first.";
+    "Copy the player profile before this line, as in 'player.copyFrom(playerProfile)' at the start of the script, or assign 'player.firstName' first.";
   assert.deepEqual(diagnostics("say player.firstName"), [
     [
       "TSV043",
-      `Speaker 'player' has no 'firstName': no assignment or copy of the account gives it one. ${copy}`,
+      `Speaker 'player' has no 'firstName': no assignment or copy of the player profile gives it one. ${copy}`,
     ],
   ]);
   assert.deepEqual(diagnostics('say player.firstName\nplayer.firstName = "Sam"'), [
     [
       "TSV043",
-      `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. Line 2 assigns it, but only later. ${copy}`,
+      `Speaker 'player' has no 'firstName' yet here: nothing copies the player profile or assigns 'firstName' before this line runs. Line 2 assigns it, but only later. ${copy}`,
     ],
   ]);
 });
