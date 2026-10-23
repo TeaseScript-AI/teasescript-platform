@@ -102,7 +102,7 @@ checker, lowering, plan, runtime and editor cannot drift apart.
   in the type checker. One problem gets one code, whichever pass, path, or form of the source finds it.
 - A compile-time value check uses the shared known-value fold, so a constant expression counts like the
   literal it equals. The compile-time and runtime checks of one domain use one predicate and one message.
-- Type discovery may follow the checking order of ADR 0021 §1.6, but a fact that depends on what has run
+- Type discovery may follow the source order of ADR 0021 §1.6, but a fact that depends on what has run
   before (narrowing, what a call or ask may change, definite assignment) follows evaluation order through
   the shared order helpers (`src/expression-children.ts`).
 - Where the lowering has a lazy path and an instruction path for one construct, both use one

@@ -24,8 +24,8 @@ chose one shared variable instead.
    holds each shared variable by its ID, in checkpointed, validated state (ADR 0015, ADR 0016). A scope that its code
    leaves while a block still shares it is retained with only the variables a block shares, and dropped once nothing
    shares it.
-5. Types follow ADR 0021 rule 5.5: a wait or other suspension cancels what is known about a local that a block shares
-   and assigns, and a block starts without the narrowing of the code around it.
+5. Types follow ADR 0021 rule 5.5: a wait or other suspension outside a `noInterrupts` block cancels what is known
+   about a local that a block shares and assigns, and a block starts without the narrowing of the code around it.
 
 ## Consequences
 

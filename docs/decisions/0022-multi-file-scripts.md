@@ -148,8 +148,8 @@ global level = load "level", default: 1
    a local value is a compile error that names the global, explains that it needs a value from the start of the session,
    and shows both fixes: adding `, default: 0`, or writing `global attempts = 0` and later `attempts = localCount`.
 
-6. Types follow the `let` rules of ADR 0021, with one type environment for all files; ADR 0021 rule 6 gives the
-   checking order across files. When the project holds a file `call`, what is known about a global that some file's
+6. Types follow the `let` rules of ADR 0021, with one type environment for all files; ADR 0021 rule 1.6 gives the
+   source order across files. When the project holds a file `call`, what is known about a global that some file's
    top level assigns does not outlast a file or function call; when some file holds a `goto` or `call` that may enter
    `main.tease` (a glob that may pick it or a computed target counts), `main.tease` starts without what its start values
    stored. Both rules look at the source as written, including code that cannot run.
