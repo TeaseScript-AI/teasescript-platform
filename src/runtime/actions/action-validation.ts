@@ -34,6 +34,7 @@ import {
   DEFAULT_EXPORT_TITLE,
   DEFAULT_OPEN_URL_BUTTON_TEXT,
   DEFAULT_POPUP_BUTTON_TEXT,
+  INTERACTION_KINDS,
 } from "../../plan/model.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -2330,7 +2331,8 @@ function validSettlementKindData(
     !isInteractionKind(settlement.interactionKind) ||
     !positiveSafeInteger(settlement.requestEventSequence) ||
     !positiveSafeInteger(settlement.completionEventSequence) ||
-    // A timed-out button or form, a closed popup or exportText, and an opened `openUrl` add nothing to the transcript.
+    // A timed-out button or form, a closed popup or exportText, an opened `openUrl`, and an answered password add
+    // nothing to the transcript.
     (timedOut || transcriptless(settlement.interactionKind)
       ? settlement.transcriptText !== null ||
         settlement.transcriptEventSequence !== null ||
@@ -2469,12 +2471,12 @@ function validSettlementKindData(
     : interactionUiEqual(instruction.ui, settlement.ui);
 }
 
-/** A popup, an `openUrl`, or an `exportText`: an interaction that adds nothing to the transcript. */
 /** An interaction that adds no player line to the transcript: a silent one, or a password, which is never shown. */
 function transcriptless(kind: unknown): boolean {
   return silentInteraction(kind) || kind === "password";
 }
 
+/** A popup, an `openUrl`, or an `exportText`: the player gives no answer, and nothing enters the transcript. */
 function silentInteraction(kind: unknown): boolean {
   return kind === "popup" || kind === "url" || kind === "export";
 }
@@ -2489,20 +2491,8 @@ function elapsedInteraction(kind: unknown): boolean {
   return kind === "button" || kind === "popup";
 }
 
-function isInteractionKind(value: unknown): value is InteractionKind {
-  return isOneOf(value, [
-    "button",
-    "text",
-    "number",
-    "choice",
-    "temporal",
-    "password",
-    "image",
-    "form",
-    "popup",
-    "url",
-    "export",
-  ]);
+export function isInteractionKind(value: unknown): value is InteractionKind {
+  return isOneOf(value, INTERACTION_KINDS);
 }
 
 /** A form's answers: an object, dict, or list of runtime values. Its recorded UI decides which. */

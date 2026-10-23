@@ -583,18 +583,21 @@ export const DEFAULT_EXPORT_TITLE = "Copy or download";
 /** The name of the file that `exportText` downloads when it gives no `fileName:` (V30 §31). */
 export const DEFAULT_EXPORT_FILE_NAME = "text.txt";
 
-export type InteractionKind =
-  | "button"
-  | "text"
-  | "number"
-  | "choice"
-  | "temporal"
-  | "password"
-  | "image"
-  | "form"
-  | "popup"
-  | "url"
-  | "export";
+/** Every interaction kind: plan, state, and completion validation check a kind against this one list. */
+export const INTERACTION_KINDS = [
+  "button",
+  "text",
+  "number",
+  "choice",
+  "temporal",
+  "password",
+  "image",
+  "form",
+  "popup",
+  "url",
+  "export",
+] as const;
+export type InteractionKind = (typeof INTERACTION_KINDS)[number];
 /**
  * `choice` is the value of the selected choice option; a button or popup used as a value yields a `duration`;
  * `temporal` is the date, time, or date and time the UI asks for; `form` is the object, dict, or boolean list of a form's

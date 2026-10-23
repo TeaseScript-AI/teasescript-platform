@@ -38,7 +38,7 @@ export type ResolvedInteraction =
   | {
       readonly ok: true;
       readonly result: InteractionResultValue;
-      /** `null` for a popup, an `openUrl`, and an `exportText`, which add nothing to the transcript. */
+      /** `null` for a popup, `openUrl`, `exportText`, or `askPassword`, which add nothing to the transcript. */
       readonly transcriptText: string | null;
       /** Only a form's: the options its cycles showed, `null` when it returns `null`. */
       readonly shownOptions?: readonly (number | null)[] | null;

@@ -33,6 +33,7 @@ import { lazyDefaultArgumentIndex, lazyDefaultCallOperation } from "./expression
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
+  INTERACTION_KINDS,
   type InstructionPlan,
   type PreparedFormShape,
 } from "./model.js";
@@ -1526,21 +1527,7 @@ function validateInteractionInstruction(
     errors.push(planError("TSC002", "Interaction instruction contains unsupported fields.", path));
   }
   const kind = value.interactionKind;
-  if (
-    !isOneOf(kind, [
-      "button",
-      "text",
-      "number",
-      "choice",
-      "temporal",
-      "password",
-      "image",
-      "form",
-      "popup",
-      "url",
-      "export",
-    ])
-  ) {
+  if (!isOneOf(kind, INTERACTION_KINDS)) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
   }
   // A form reads its fields when it opens, and `exportText` its text, so both are always prepared.

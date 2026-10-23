@@ -35,6 +35,7 @@ import {
 import { resolveFileStoreCompletion } from "../actions/file-store.js";
 import { resolveLockCompletion } from "../actions/lock.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
+import { isInteractionKind } from "../actions/action-validation.js";
 import { addStoredFile, addStoredFiles } from "../host-data/stored-files.js";
 import { createCapturedSerializableList } from "../values/serializable-values.js";
 import { formShownOptions, timedOutFormResult } from "../actions/form.js";
@@ -579,19 +580,9 @@ function completeInteraction(
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   if (request.interactionKind !== action.interactionKind) {
     const receivedInteractionKind = request.interactionKind;
-    const receivedActionKind =
-      receivedInteractionKind === "button" ||
-      receivedInteractionKind === "text" ||
-      receivedInteractionKind === "number" ||
-      receivedInteractionKind === "choice" ||
-      receivedInteractionKind === "temporal" ||
-      receivedInteractionKind === "image" ||
-      receivedInteractionKind === "form" ||
-      receivedInteractionKind === "popup" ||
-      receivedInteractionKind === "url" ||
-      receivedInteractionKind === "export"
-        ? `interaction:${receivedInteractionKind}`
-        : "<invalid>";
+    const receivedActionKind = isInteractionKind(receivedInteractionKind)
+      ? `interaction:${receivedInteractionKind}`
+      : "<invalid>";
     return pendingResult(current, [], {
       kind: "wrongActionKind",
       actionId: action.actionId,
@@ -608,7 +599,8 @@ function completeInteraction(
   if (!resolved.ok) {
     return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
   }
-  // A popup, an `openUrl`, or an `exportText` adds nothing to the transcript, so only its completion takes a sequence.
+  // A popup, an `openUrl`, an `exportText`, or an `askPassword` adds nothing to the transcript, so only its completion
+  // takes a sequence.
   const transcriptText = resolved.transcriptText;
   assertEventSequenceCapacity(current, transcriptText === null ? 1 : 2);
   const transcriptSequence =
