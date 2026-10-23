@@ -2,7 +2,7 @@ import type { ValueKind } from "../../value-kinds.js";
 import type { SourceSite } from "../graph.js";
 import {
   firstContext,
-  REASON,
+  ownContext,
   type ContextWord,
   type Item,
   type ItemTag,
@@ -79,19 +79,12 @@ export function outcomeOf(diagnostics: readonly CoreDiagnostic[]): CoreOutcome {
   return diagnostics.length > 0 ? "warning-runtime-check" : "valid";
 }
 
-/** The word of an unknown's reasons (§3.4): `unmodelled`, then `missing`, then `deferred-parameter`, else `unknown`. */
-export function reasonContext(reasons: number): ContextWord {
-  if ((reasons & REASON.opaque) !== 0) return "unmodelled";
-  if ((reasons & REASON.missing) !== 0) return "missing";
-  if ((reasons & REASON.deferred) !== 0) return "deferred-parameter";
-  return "unknown";
-}
-
-/** The context word of a warning about `item` (§3.4): its own, a null's ingress word, or its reason's. */
+/**
+ * The context word of a warning about `item` (§3.4): an unknown's reason word, or an earlier word of its own; for any
+ * other item its own word, a null's ingress word, or `unknown`.
+ */
 export function contextOf(item: Item): ContextWord {
-  return (
-    item.context ?? item.word ?? (item.tag === "unknown" ? reasonContext(item.reasons) : "unknown")
-  );
+  return ownContext(item) ?? item.word ?? "unknown";
 }
 
 /**

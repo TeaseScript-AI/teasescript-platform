@@ -69,7 +69,7 @@ export interface IngressCell {
 export interface Item {
   readonly tag: ItemTag;
   readonly cert: Certainty;
-  /** The `REASON` bits of an `unknown`; 0 for every other kind. */
+  /** The `REASON` bits the item carries: an unknown's own, or those an operation's result took from its operands. */
   readonly reasons: number;
   readonly writer: Writer | null;
   readonly context: ContextWord | null;
@@ -116,6 +116,24 @@ function contextRank(context: ContextWord | null): number {
 /** Of two context words, the one a warning names first (§3.4); no word comes last. */
 export function firstContext(a: ContextWord | null, b: ContextWord | null): ContextWord | null {
   return contextRank(b) < contextRank(a) ? b : a;
+}
+
+/** The word of an unknown's reasons (§3.4): `unmodelled`, then `missing`, then `deferred-parameter`, else `unknown`. */
+export function reasonContext(reasons: number): ContextWord {
+  if ((reasons & REASON.opaque) !== 0) return "unmodelled";
+  if ((reasons & REASON.missing) !== 0) return "missing";
+  if ((reasons & REASON.deferred) !== 0) return "deferred-parameter";
+  return "unknown";
+}
+
+/**
+ * The word an item brings where words meet (§3.4): its own, except that an unknown's reason word comes before any
+ * condition's word it took, since the reasons are decided first.
+ */
+export function ownContext(item: Item): ContextWord | null {
+  return item.tag === "unknown"
+    ? firstContext(item.context, reasonContext(item.reasons))
+    : item.context;
 }
 
 /**

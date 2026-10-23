@@ -340,6 +340,12 @@ test("an operation's result follows the runtime's rows (F16)", () => {
     quotient.every((item) => item.fan === "assignment@0:20" && item.writer === host.writer),
   );
   assert.ok(quotient.every((item) => item.reasons === REASON.external));
+  // the unknown's reason word explains its rows, not a known operand's condition word: `hostValue / divisor()`
+  const called = makeItem("integer", writer("literal", 25), { cert: "pos", context: "call" });
+  assert.deepEqual(
+    operationItems("/", [[host], [called]], scope, SITE).map((item) => item.context),
+    ["unknown", "unknown", "unknown", "unknown"],
+  );
   // `x + 2.5`: the rows with a number on the right give a number only
   assert.deepEqual(kinds(operationItems("+", [[host], [makeItem("number")]], scope, SITE)), [
     "number pos",

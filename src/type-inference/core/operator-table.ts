@@ -6,6 +6,7 @@ import {
   firstWriter,
   makeItem,
   mergeItems,
+  ownContext,
   REASON,
   type ContextWord,
   type Item,
@@ -147,7 +148,8 @@ export function operatorRow(
  *   deferred parameters, stays unknown;
  * - a result kind is definite when no operand is unknown, every operand item is definite, and every combination that
  *   succeeds gives that kind by a row that needs no check by value.
- * The reasons and the first context word of a combination's items go to its result; a guarded operand marks it (§3.2).
+ * The reasons and the first context word of a combination's items go to its result, an unknown bringing its reason's
+ * word (`ownContext`); a guarded operand marks it (§3.2).
  * `operation` is the operation's site, the identity of an unknown operand without a writer; `writer` explains a result
  * whose operands have no writer.
  */
@@ -172,8 +174,9 @@ export function operationItems(
   for (const combination of combinations) {
     scope.work.charge("operatorSteps", rows.length + 1);
     const reasons = combination.reduce((all, item) => all | item.reasons, 0);
+    // an unknown operand's reason word comes before any condition's word (`hostValue / divisor()`: `unknown`, not `call`)
     const context = combination.reduce<ContextWord | null>(
-      (first, item) => firstContext(first, item.context),
+      (first, item) => firstContext(first, ownContext(item)),
       null,
     );
     const shared = {

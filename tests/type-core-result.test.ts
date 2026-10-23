@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   makeItem,
+  reasonContext,
   REASON,
   type Item,
   type ItemFields,
@@ -17,7 +18,6 @@ import {
   offendingKinds,
   outcomeOf,
   provenanceOf,
-  reasonContext,
   targetName,
   type CoreDiagnostic,
   type CoreResult,
@@ -43,13 +43,15 @@ const writer = (kind: string, start: number, file = 0): Writer => ({
 const unknown = (reasons: number, at: number, fields: ItemFields = {}): Item =>
   makeItem("unknown", writer("assignment", at), { cert: "pos", reasons, ...fields });
 
-test("a warning's word is its item's own, a null's ingress word, or its reason's, the reasons' words first", () => {
+test("a warning's word: an unknown's reason word first, else the item's own or a null's ingress word", () => {
   assert.equal(reasonContext(REASON.opaque | REASON.missing | REASON.deferred), "unmodelled");
   assert.equal(reasonContext(REASON.missing | REASON.deferred | REASON.external), "missing");
   assert.equal(reasonContext(REASON.deferred | REASON.external), "deferred-parameter");
   assert.equal(reasonContext(REASON.external), "unknown");
   assert.equal(contextOf(unknown(REASON.opaque, 1)), "unmodelled");
-  assert.equal(contextOf(unknown(REASON.opaque, 1, { context: "call" })), "call");
+  // a condition's word an unknown took comes after its reason's; an earlier reason word of its own stays
+  assert.equal(contextOf(unknown(REASON.opaque, 1, { context: "call" })), "unmodelled");
+  assert.equal(contextOf(unknown(REASON.external, 1, { context: "missing" })), "missing");
   assert.equal(contextOf(makeItem("null", null, { cert: "pos", word: "unknown" })), "unknown");
   assert.equal(contextOf(makeItem("integer", null, { cert: "pos", context: "branch" })), "branch");
 });
@@ -60,10 +62,11 @@ test("an unknown whose word comes first explains an obligation, and its writer i
   const opaque = unknown(REASON.opaque, 9);
   assert.equal(explainingItem([known, opaque, external]), opaque);
   assert.equal(explainingItem([known, makeItem("string")]), known);
-  // the reasons' words come before a condition's that an unknown took, and of two alike the first explains
+  // a condition's word an unknown took does not put it first, and of two alike the first explains
+  const missing = unknown(REASON.missing, 3);
   assert.equal(
-    explainingItem([external, unknown(REASON.deferred, 3, { context: "loop" })]),
-    external,
+    explainingItem([missing, unknown(REASON.external, 4, { context: "loop" })]),
+    missing,
   );
   assert.equal(explainingItem([external, unknown(REASON.external, 7)]), external);
   assert.equal(explainingItem([]), undefined);
