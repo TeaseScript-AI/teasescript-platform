@@ -230,7 +230,12 @@ export class PlayerRuntimeEngine {
         (admission) => {
           const result = invoke(runtime, admission);
           const view = runtime.view();
-          return { ...result, status: view.status, pausedAt: view.randomDraw?.drawId ?? null };
+          return {
+            ...result,
+            status: view.status,
+            failure: view.failure,
+            pausedAt: view.randomDraw?.drawId ?? null,
+          };
         },
         continuation,
       );
@@ -358,7 +363,12 @@ export class PlayerRuntimeEngine {
         () => {
           const result = invoke(runtime);
           const view = runtime.view();
-          return { ...result, status: view.status, pausedAt: view.randomDraw?.drawId ?? null };
+          return {
+            ...result,
+            status: view.status,
+            failure: view.failure,
+            pausedAt: view.randomDraw?.drawId ?? null,
+          };
         },
         continuation,
       );

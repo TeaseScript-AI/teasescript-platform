@@ -83,6 +83,7 @@ function candidate(
     session: {
       plan: session.plan,
       snapshot: playerRuntimeSnapshot(session),
+      failure: session.state.failure,
       events: session.events,
       transcriptEntries: session.transcriptEntries,
     },
@@ -435,7 +436,7 @@ test("a state that cannot be checkpointed is exported as the last good state, wh
   const frozen: DebugExportCandidate = {
     ...candidate(session, recorder),
     // A Player defect left a state the engine's validation refuses.
-    recording: { ...recording, endSnapshot: { ...recording.endSnapshot, nextInstruction: -1 } },
+    recording: { ...recording, endSnapshot: { ...recording.endSnapshot!, nextInstruction: -1 } },
     hostError: "TypeError",
   };
   const { exported } = await assembleDebugExport(frozen, all(frozen));

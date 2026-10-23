@@ -81,7 +81,7 @@ async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
     },
     omissions: [],
     // The export checkpoints the state the recorded calls reach.
-    checkpoint: createCheckpoint(recording.plan, recording.endSnapshot),
+    checkpoint: createCheckpoint(recording.plan, recording.endSnapshot!),
     checkpointRole: "current",
     replay: {
       anchorSnapshot: recording.anchorSnapshot,
@@ -382,7 +382,7 @@ test("a failure freezes the recording, from the first run on, and a too large ca
   assert.equal((await replay(small)).kind, "incomplete");
 });
 
-test("a failed state the session cannot export leaves the recording incomplete, and the failure still shows", (context) => {
+test("a state the session cannot export leaves the recording incomplete without an earlier state in its place, and the failure still shows", (context) => {
   // V8 cannot enumerate the keys of a list of about 134 million elements, so a snapshot that holds one cannot be
   // exported; a list of 1,500 stands for it.
   const ownKeys = Reflect.ownKeys;
@@ -392,16 +392,28 @@ test("a failed state the session cannot export leaves the recording incomplete, 
     return ownKeys(target);
   });
   const recorder = new DebugRecorder();
-  const failed = createPlayerRuntimeSession(
-    "let xs = (1..=1500).toList()\nlet zero = dynamic(0)\nlet result = 1 / zero\nexit\nfunction dynamic(value) {\n    return value\n}",
+  const waiting = createPlayerRuntimeSession(
+    "let xs = (1..=1500).toList()\nwait 1 s\nlet zero = dynamic(0)\nlet result = 1 / zero\nexit\nfunction dynamic(value) {\n    return value\n}",
     { recorder },
   );
+  // A debug export asked for meanwhile has no current state, which a later one may export again.
+  const running = recorder.recording()!;
+  assert.deepEqual(
+    [running.complete, running.reason, running.endSnapshot, running.endFailure],
+    [false, "The current state could not be exported.", null, null],
+  );
+  const failed = advancePlayerRuntimeTime(waiting, 5_000);
   context.mock.restoreAll();
   assert.equal(failed.state.status, "failed");
   const recording = recorder.recording()!;
   assert.deepEqual(
     [recording.complete, recording.reason, recording.endSnapshot],
-    [false, "The state at the error could not be exported.", recording.anchorSnapshot],
+    [false, "The state at the error could not be exported.", null],
+  );
+  // Division by zero, in the source's fourth line.
+  assert.deepEqual(
+    [recording.endFailure?.code, recording.endFailure?.path, recording.endFailure?.span.start.line],
+    ["TSR036", "main.tease", 3],
   );
 });
 
@@ -901,7 +913,7 @@ async function exportedRecording(recorder: DebugRecorder): Promise<DebugExport> 
         player: false,
       },
       omissions: [],
-      checkpoint: createCheckpoint(recording.plan, recording.endSnapshot),
+      checkpoint: createCheckpoint(recording.plan, recording.endSnapshot!),
       checkpointRole: "current",
       replay: {
         anchorSnapshot: recording.anchorSnapshot,
