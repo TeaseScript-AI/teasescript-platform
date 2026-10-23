@@ -18,6 +18,13 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "playground/**/*.ts", "player/**/*.ts", "editor/**/*.ts"],
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "playground/**/*.ts",
+    "player/**/*.ts",
+    "editor/**/*.ts",
+    "test-server/**/*.ts"
+  ],
   "exclude": ["player/vue/**/*.ts", "editor/vue/**/*.ts"]
 }

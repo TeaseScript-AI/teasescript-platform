@@ -1,0 +1,24 @@
+---
+title: "Server check"
+---
+// A check of online mode: a saved count, the profile's display name, and a photo kept on the server for the next visit.
+speaker vera {
+    title: "Mistress"
+    firstName: "Vera"
+}
+player.copyFrom(playerProfile)
+speaker vera
+let visits = load("check.visits", default: 0) + 1
+save visits as "check.visits"
+say "Visit ${visits}, ${player.displayName}."
+let previous: string? = load "check.photo", default: null
+if previous != null {
+    showImage previous
+    say "This is the photo you gave me last time."
+}
+let photo = askImage("Show me a photo to keep")
+showImage photo
+save photo as "check.photo"
+say "Kept. It will be here next time."
+showButton "Done"
+exit

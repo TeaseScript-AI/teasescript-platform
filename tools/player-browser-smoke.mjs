@@ -1,4 +1,5 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { crc32, deflateSync, gunzipSync, inflateSync } from "node:zlib";
 import Color from "colorjs.io";
 import { createPlaygroundServer } from "../dist/playground/server.js";
+import { testServer } from "../dist/test-server/server.js";
 import { findChromium } from "./find-chromium.mjs";
 import { fromBase64, openAge, x25519Identity } from "../dist/tests/helpers/age-keyholder.js";
 
@@ -77,6 +79,18 @@ async function main() {
   const address = server.address();
   if (typeof address !== "object" || address === null) throw new Error("No server address.");
   const origin = `http://127.0.0.1:${address.port}`;
+  // The temporary test server (test-server/README.md), for online mode; this goes when it goes.
+  const online = testServer({
+    data: ":memory:",
+    account: "smoke",
+    latency: { normalMs: 0, slowMs: 0, jitterMs: 0 },
+  });
+  const onlineServer = createHttpServer(online.listener);
+  await new Promise((resolve, reject) => {
+    onlineServer.once("error", reject);
+    onlineServer.listen(0, "127.0.0.1", resolve);
+  });
+  const onlineOrigin = `http://127.0.0.1:${onlineServer.address().port}`;
   const debugPort = await reservePort();
   const profile = `/tmp/teasescript-player-chromium-${process.pid}`;
   await mkdir(profile, { recursive: true });
@@ -129,6 +143,7 @@ async function main() {
         ],
         ["scriptStorage", () => scriptStorageScenario(cdp, origin)],
         ["dataMode", () => dataModeScenario(cdp, origin)],
+        ["online", () => onlineScenario(cdp, onlineOrigin)],
         ["demo", () => demoScenario(cdp, origin)],
         ["insecureOrigin", () => insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`)],
         ["package", () => packageScenario(cdp, origin)],
@@ -175,7 +190,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a data mode that cannot be opened, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a data mode that cannot be opened, online mode on the test server, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
       );
     } finally {
       cdp.close();
@@ -187,6 +202,8 @@ async function main() {
     try {
       await terminateBrowser(browser, browserClosed);
       await new Promise((resolve) => server.close(resolve));
+      await new Promise((resolve) => onlineServer.close(resolve));
+      online.close();
       // Chromium helper processes can finish profile writes just after the
       // main browser process closes. Node's bounded recursive retry handles
       // that transient ENOTEMPTY window without hiding persistent cleanup failures.
@@ -679,6 +696,68 @@ async function dataModeScenario(cdp, origin) {
   } finally {
     await value(cdp, `sessionStorage.removeItem('teasescript-online-token')`);
   }
+}
+
+// What the stand-in page's buttons do, without a package: the repository demo, which the page does not list.
+function play(mode) {
+  return `(() => {
+    const config = JSON.parse(document.getElementById('config').textContent);
+    if ('${mode}' === 'online') sessionStorage.setItem(config.tokenItem, config.token);
+    else sessionStorage.removeItem(config.tokenItem);
+    location.href = '${mode}' === 'online' ? '/player/?data=online&server=/api/' : '/player/';
+  })()`;
+}
+
+// Online mode on the temporary test server, opened from its stand-in page: saves reach the server and come back in a
+// later run, stand-alone keeps its own data, and a write that fails says so.
+async function onlineScenario(cdp, origin) {
+  const start = "[data-session-activation] button";
+  const messages = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`;
+  const said = (text) => `${messages}.some((message) => message.includes(${JSON.stringify(text)}))`;
+  // The page's buttons open a package of the server's folder, here one the address names.
+  await navigate(cdp, `${origin}/?package=house`);
+  await waitFor(cdp, `document.getElementById('online')?.disabled === false`);
+  await value(cdp, `document.getElementById('online').click()`);
+  await waitFor(
+    cdp,
+    `location.pathname === '/player/' && location.search === '?data=online&server=/api/&package=house'`,
+    8_000,
+    "The page opens the package its address names",
+  );
+  const open = async (mode) => {
+    await navigate(cdp, `${origin}/`);
+    await waitFor(cdp, `!!document.getElementById('${mode}')`);
+    // Each run starts anew instead of continuing the session online mode keeps.
+    const names = await cdp.call("IndexedDB.requestDatabaseNames", { securityOrigin: origin });
+    for (const databaseName of names.result.databaseNames)
+      await cdp.call("IndexedDB.deleteDatabase", { securityOrigin: origin, databaseName });
+    await value(cdp, play(mode));
+    await waitFor(cdp, `!!document.querySelector('${start}')`, 15_000, `${mode} shows Start`);
+    await physicalClick(cdp, start);
+    await waitFor(cdp, said("Some of her messages make you wait."), 15_000);
+  };
+  await open("online");
+  assertEqual(await value(cdp, said("Back again")), false, "The account's first visit");
+  await open("online");
+  assertEqual(
+    await value(cdp, said("Back again. Visit 2.")),
+    true,
+    "The save came back from the server",
+  );
+  await open("standalone");
+  assertEqual(await value(cdp, said("Back again")), false, "Stand-alone has data of its own");
+  await cdp.call("Runtime.evaluate", {
+    expression: `fetch('/test-server/state', { method: 'POST', body: '{"failNextWrite":true}' })`,
+    awaitPromise: true,
+  });
+  await open("online");
+  await physicalClick(cdp, "[data-notification-bell]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-player-notification-panel]')?.textContent.includes('Some progress could not be saved.')`,
+    8_000,
+    "A failed write says so",
+  );
 }
 
 // Plays the repository demo on the maintained /player/ route of the built Player with trusted input, so the Start
