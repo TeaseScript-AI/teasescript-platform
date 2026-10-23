@@ -17,7 +17,6 @@ import type {
   GlobalStatement,
   FunctionParameter,
   CallFileStatement,
-  FallbackStatement,
   GotoStatement,
   TransferTarget,
   Identifier,
@@ -571,7 +570,6 @@ class Parser {
         return this.#parseLabelStatement();
       case "goto":
       case "call":
-      case "fallback":
         return yield* parseChild(this.#parseTransferStatement());
       case "end":
         return Object.freeze({ kind: "endStatement", span: copySpan(this.#advance().span) });
@@ -1352,19 +1350,12 @@ class Parser {
     return Object.freeze({ kind: "labelStatement", name, span: spanFrom(keyword.span, name.span) });
   }
 
-  /** `goto`, `call`, or `fallback`, followed by a label, or by a quoted file path and an optional label. */
-  *#parseTransferStatement(): ParseTask<
-    GotoStatement | CallFileStatement | FallbackStatement | null
-  > {
+  /**
+   * `goto` or `call`, followed by a label, or by a quoted file path. A label after the path is read too, so that the
+   * name pass can report it (V30 §29).
+   */
+  *#parseTransferStatement(): ParseTask<GotoStatement | CallFileStatement | null> {
     const keyword = this.#advance();
-    if (keyword.lexeme === "fallback" && this.#checkIdentifier("none")) {
-      const none = this.#advance();
-      return Object.freeze({
-        kind: "fallbackStatement",
-        target: null,
-        span: spanFrom(keyword.span, none.span),
-      });
-    }
     const tagged = this.#checkIdentifier("tagged");
     const target = yield* parseChild(this.#parseTransferTarget(keyword));
     if (target === null) {
@@ -1377,14 +1368,9 @@ class Parser {
       return null;
     }
     const span = spanFrom(keyword.span, target.span);
-    switch (keyword.lexeme) {
-      case "goto":
-        return Object.freeze({ kind: "gotoStatement", target, span });
-      case "call":
-        return Object.freeze({ kind: "callFileStatement", target, span });
-      default:
-        return Object.freeze({ kind: "fallbackStatement", target, span });
-    }
+    return keyword.lexeme === "goto"
+      ? Object.freeze({ kind: "gotoStatement", target, span })
+      : Object.freeze({ kind: "callFileStatement", target, span });
   }
 
   *#parseTransferTarget(keyword: Token): ParseTask<TransferTarget | null> {
@@ -3448,7 +3434,10 @@ class Parser {
       if (expression.kind === "identifier") {
         this.#reportSpan(
           parserDiagnosticCode.expectedStatement,
-          "Expected a supported TeaseScript statement.",
+          // `fallback` was a statement until an end always returned to a call.
+          expression.name === "fallback"
+            ? "TeaseScript has no 'fallback': an end returns to the file that called this one. Start a file that should come back here with call, and use goto or exit where no call waits."
+            : "Expected a supported TeaseScript statement.",
           expression.span,
         );
         this.#synchronizeStatement();

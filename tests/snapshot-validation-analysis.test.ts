@@ -31,7 +31,6 @@ import { classifyCapturedRuntimeSnapshot } from "../src/runtime/snapshot/snapsho
 const SCENARIO = [
   'speaker vera { title: "Miss" }',
   "label again",
-  "fallback again",
   'let record = { total: 0, items: ["", ""] }',
   'function pause(seconds, note = "pause ${seconds}") {',
   "  wait seconds s",
@@ -191,12 +190,6 @@ function corruptions(snapshot: RuntimeSnapshot): Mutable<RuntimeSnapshot>[] {
       copy.frames[index]!.entry = frame.entry! + 1;
     });
   });
-  const fallback = snapshot.fallback;
-  if (fallback !== null && "target" in fallback) {
-    variant((copy) => {
-      copy.fallback = { file: fallback.file, target: fallback.target + 1 };
-    });
-  }
   return variants;
 }
 
@@ -227,7 +220,6 @@ test("a validated plan's kept analysis judges corrupted snapshots like a fresh a
     "contain malformed prepared-reference state",
     "contain malformed prepared-say state.",
     "Runtime scope frame is malformed.",
-    "Runtime fallback is malformed.",
   ]) {
     assert.ok(
       rejections.some((error) => error.includes(rule)),

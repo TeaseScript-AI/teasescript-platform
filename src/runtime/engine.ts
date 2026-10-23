@@ -76,12 +76,7 @@ import {
   type RandomRootOperation,
   type RuntimePendingRandomDrawSnapshot,
 } from "./random/random-control.js";
-import {
-  executeEnd,
-  executeGoto,
-  executeSetFallback,
-  executeTransfer,
-} from "./operations/transfers.js";
+import { executeEnd, executeGoto, executeTransfer } from "./operations/transfers.js";
 import { contextRootId } from "./scopes/activations.js";
 import { loweredLogicalOperator } from "./evaluation/lowered-operands.js";
 import { withDebugTrace, type RuntimeDebugContext, type TraceStore } from "./debug/debug-trace.js";
@@ -1046,7 +1041,6 @@ function executePlannedInstruction(
       snapshot.loopFrames.length = 0;
       snapshot.callFrames.length = 0;
       snapshot.retainedScopes.length = 0;
-      snapshot.fallback = null;
       snapshot.temporaries.length = 0;
       snapshot.status = "halted";
       snapshot.nextInstruction += 1;
@@ -1086,10 +1080,7 @@ function executePlannedInstruction(
       executeTransfer(plan, instruction, snapshot, evaluator, events);
       return;
     case "end":
-      executeEnd(plan, instruction, snapshot, events, evaluator.trace, evaluator.control);
-      return;
-    case "setFallback":
-      executeSetFallback(plan, instruction, snapshot, evaluator);
+      executeEnd(instruction, snapshot, events);
       return;
   }
   instruction satisfies never;

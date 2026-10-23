@@ -396,9 +396,7 @@ interface PlanValidationIndex {
   readonly owners: readonly (InstructionExecutionRegion | undefined)[];
   readonly functionsById: ReadonlyMap<number, ValidatedFunctionRange>;
   readonly files: readonly PlanFileBoundaries[];
-  /**
-   * Gotos, transfers, and fallbacks leave their region, so any of them that lands inside a prepared value bypasses it.
-   */
+  /** Gotos and transfers leave their region, so any of them that lands inside a prepared value bypasses it. */
   readonly gotoSources: ReadonlySet<number>;
 }
 
@@ -436,12 +434,7 @@ function createPlanValidationIndex(
   }
   const gotoSources = new Set<number>();
   instructions.forEach((instruction, index) => {
-    if (
-      isRecord(instruction) &&
-      (instruction.kind === "goto" ||
-        instruction.kind === "transfer" ||
-        instruction.kind === "setFallback")
-    )
+    if (isRecord(instruction) && (instruction.kind === "goto" || instruction.kind === "transfer"))
       gotoSources.add(index);
   });
   return { owners, functionsById, files, gotoSources };
@@ -505,17 +498,15 @@ function validateInstructionControlFlowRegions(
         }
         return;
       case "transfer":
-      case "setFallback":
         // A computed destination is resolved, and checked, when it runs.
         if (
-          instruction.destination !== null &&
           !(isRecord(instruction.destination) && "value" in instruction.destination) &&
           !isFileDestination(index, instruction.destination)
         ) {
           errors.push(
             planError(
               "TSC002",
-              "A transfer must enter a file at its entry or at one of its labels.",
+              "A transfer must enter a file at its entry.",
               `${instructionPath}.destination`,
             ),
           );
@@ -1004,7 +995,7 @@ interface PreparedSayRanges {
   readonly explicitIncomingSources: readonly (readonly number[])[];
   /** The ascending indices of the instructions that clear each temporary. */
   readonly clears: ReadonlyMap<number, readonly number[]>;
-  /** At `i + 1`: how many instructions up to `i` are the target of a `goto`, transfer, or fallback. */
+  /** At `i + 1`: how many instructions up to `i` are the target of a `goto` or transfer. */
   readonly gotoTargets: Int32Array;
   /** At `i`: how many instructions up to `i` have another owner than the one before. */
   readonly ownerChanges: Int32Array;
@@ -1137,8 +1128,8 @@ function collectExplicitIncomingSources(
 }
 
 /**
- * Whether an instruction after the producer, up to the say, is the target of a `goto`, transfer, or fallback, or of a
- * jump from outside that range in the same region.
+ * Whether an instruction after the producer, up to the say, is the target of a `goto` or transfer, or of a jump from
+ * outside that range in the same region.
  */
 function preparedSayCanBeBypassed(
   ranges: PreparedSayRanges,
@@ -1379,7 +1370,6 @@ function explicitInstructionTargets(instruction: Record<string, unknown>): reado
     case "goto":
       return [instruction.target];
     case "transfer":
-    case "setFallback":
       // A computed destination names no instruction.
       if (!isRecord(instruction.destination) || "value" in instruction.destination) return [];
       return Array.isArray(instruction.destination.pick)
@@ -1574,10 +1564,7 @@ function isPlainFileDestination(index: PlanValidationIndex, destination: unknown
   const { file, target } = destination;
   if (typeof file !== "number" || typeof target !== "number") return false;
   const boundaries = index.files[file];
-  return (
-    boundaries !== undefined &&
-    (target === boundaries.entryInstruction || boundaries.labelInstructions.has(target))
-  );
+  return boundaries !== undefined && target === boundaries.entryInstruction;
 }
 
 /**

@@ -93,7 +93,6 @@ test("a way out anywhere in the loop that can run, also nested, silences the war
       `${QUIT}while true {\n    for n in 1..3 {\n        switch n {\n            case 2 { if answer == "Play" { exit } }\n        }\n    }\n}`,
       {},
     ],
-    [`${QUIT}while true {\n    if answer == "Play" { end }\n}`, {}],
     ["function wander {\n    while true { return }\n}\nwander()\nexit", {}],
     // A call of an author, host, or library function may end the session.
     [`function rest { wait 1 s }\n${QUIT}while true { rest() }`, {}],
@@ -107,6 +106,14 @@ test("a way out anywhere in the loop that can run, also nested, silences the war
     projectReport({
       "main.tease": `${QUIT}while true { call "chapter.tease" }`,
       "chapter.tease": "wait 1 s\nend",
+    }),
+    [],
+  );
+  // An end, in a file that a call waits for.
+  assert.deepEqual(
+    projectReport({
+      "main.tease": 'call "game.tease"\nexit',
+      "game.tease": `${QUIT}while true {\n    if answer == "Play" { end }\n}`,
     }),
     [],
   );

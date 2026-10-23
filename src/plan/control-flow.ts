@@ -26,7 +26,7 @@ export type FlowEdge =
   | { readonly kind: "return" }
   /** `goto label` of the same file. */
   | { readonly kind: "goto" }
-  /** A `goto` or `call` of a file, into its entry or a label: one edge per file a glob may pick. */
+  /** A `goto` or `call` of a file, into its entry: one edge per file a glob may pick. */
   | { readonly kind: "transfer"; readonly mode: "goto" | "call"; readonly file: number }
   /** A `goto` or `call` of a computed destination, which the plan cannot name. */
   | { readonly kind: "computed"; readonly mode: "goto" | "call" }
@@ -171,7 +171,6 @@ export class PlanControlFlow {
       case "capture":
       case "fileStore":
       case "lock":
-      case "setFallback":
         return [{ edge: NEXT, target: index + 1 }];
     }
     instruction satisfies never;

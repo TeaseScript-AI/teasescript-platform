@@ -75,10 +75,7 @@ test("each saved value is previewed by its type", () => {
     photo: null,
     size: null,
   });
-  assert.equal(
-    storagePreview({ kind: "script", path: "rooms/hall.tease", label: null }).type,
-    "Script",
-  );
+  assert.equal(storagePreview({ kind: "script", path: "rooms/hall.tease" }).type, "Script");
   assert.equal(storagePreview({ kind: "regex", source: "\\d+", flags: "i" }).type, "Regex");
   // Text shaped like a photo reference stays text; the store decides whether it names a saved photo.
   assert.deepEqual(storagePreview(saved.get("photo")!), {
@@ -103,7 +100,7 @@ test("a saved value and a dict key show in TeaseScript notation, as Variables sh
     ["instantValue", 'toAbsoluteDateTime("2026-10-06T19:30:00Z")'],
     ["durationValue", "1.5 s"],
     ["angleValue", "1 rad"],
-    ["scriptValue", 'script("rooms/hall.tease", label: "start")'],
+    ["scriptValue", 'script("rooms/hall.tease")'],
     ["listValue", "[1, 2, 3]"],
     ["setValue", 'set["a", "b"]'],
     ["objectValue", '{ level: 2, tags: ["a"] }'],
@@ -138,7 +135,7 @@ test("a saved value and a dict key show in TeaseScript notation, as Variables sh
   assert.equal(text("textValue"), '"a\\${b}"');
   assert.equal(text("quotedValue"), '"say \\"hi\\"\\n"');
   assert.equal(text("rangeValue"), "1..5");
-  assert.equal(text("scriptValue"), 'script("rooms/hall.tease", label: "start")');
+  assert.equal(text("scriptValue"), 'script("rooms/hall.tease")');
   assert.equal(text("dateValue"), "<date 2026-10-04>");
   assert.deepEqual(
     storageMembers(saved.get("dictValue")!).map((member) => member.label),

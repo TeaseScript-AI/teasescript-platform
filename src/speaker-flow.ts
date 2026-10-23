@@ -20,8 +20,8 @@ import { placeKey, type DeadWays } from "./way-facts.js";
  * field. It follows the compiled plan, which runs exactly as the session will, with the generic control flow of
  * `plan/control-flow.ts` and the solver of `plan/dataflow.ts`; what it takes from the type check is listed in
  * `SpeakerFlowInput`, and which ways run in `DeadWays`. Its own choices: what the compiler cannot follow counts as stored (a timer, media, or button
- * block, a called file, a computed target, a fallback), a call counts for what every way through the function assigns,
- * and a function's start is the meet of its calls.
+ * block, a called file, a computed target), a call counts for what every way through the function assigns, and a
+ * function's start is the meet of its calls.
  */
 
 /** A read of a speaker's property through the speaker's name, or as `speaker` where `as` names it. */
@@ -70,10 +70,8 @@ type Mode = "must" | "may";
 /** An edge of the check's graph: the plan's, or one through a hub of ways the plan cannot name. */
 type Edge =
   | FlowEdge
-  /** From the hub of computed destinations to every file entry and label. */
-  | { readonly kind: "anywhere" }
-  /** From the hub of `end`s without a caller to every fallback destination. */
-  | { readonly kind: "fallback" };
+  /** From the hub of computed destinations to every file entry. */
+  | { readonly kind: "anywhere" };
 
 interface Successor {
   readonly node: number;
@@ -194,10 +192,8 @@ class SpeakerFlow {
   readonly #instructionCount: number;
   #nodeCount: number;
   readonly #anywhere: number;
-  readonly #fallback: number;
   readonly #returnSink: number;
   readonly #anywhereTargets: number[] = [];
-  readonly #fallbackTargets: number[] = [];
   #must: (bigint | null)[] = [];
   #may: (bigint | null)[] = [];
   #incoming: { from: number; edge: Edge }[][] | null = null;
@@ -225,9 +221,8 @@ class SpeakerFlow {
     this.#nodeCount = this.#instructionCount;
     this.#allocateClones();
     this.#anywhere = this.#nodeCount;
-    this.#fallback = this.#nodeCount + 1;
-    this.#returnSink = this.#nodeCount + 2;
-    this.#nodeCount += 3;
+    this.#returnSink = this.#nodeCount + 1;
+    this.#nodeCount += 2;
     this.#collectHubs();
     this.#allocateRoutines();
   }
@@ -339,20 +334,7 @@ class SpeakerFlow {
   }
 
   #collectHubs(): void {
-    this.#plan.files.forEach((file) => {
-      this.#anywhereTargets.push(file.entryInstruction);
-      for (const label of file.labels) this.#anywhereTargets.push(label.instruction);
-    });
-    let anyFallback = false;
-    for (const instruction of this.#plan.instructions) {
-      if (instruction.kind !== "setFallback" || instruction.destination === null) continue;
-      const { destination } = instruction;
-      if ("value" in destination) anyFallback = true;
-      else
-        for (const option of "pick" in destination ? destination.pick : [destination])
-          this.#fallbackTargets.push(option.target);
-    }
-    if (anyFallback) for (const target of this.#anywhereTargets) this.#fallbackTargets.push(target);
+    for (const file of this.#plan.files) this.#anywhereTargets.push(file.entryInstruction);
   }
 
   #allocateRoutines(): void {
@@ -457,11 +439,6 @@ class SpeakerFlow {
           node: target,
           edge: { kind: "anywhere" },
         }));
-      if (node === this.#fallback)
-        return this.#fallbackTargets.map((target) => ({
-          node: target,
-          edge: { kind: "fallback" },
-        }));
       return [];
     }
     const { index, clone } = this.#decode(node);
@@ -478,12 +455,11 @@ class SpeakerFlow {
         case "computed":
           out.push({ node: this.#anywhere, edge });
           break;
-        case "end":
-          out.push({ node: this.#fallback, edge });
-          break;
         case "return":
           out.push({ node: this.#returnSink, edge });
           break;
+        // An `end` returns after the file call, which the call's `resume` way continues.
+        case "end":
         case "exit":
           break;
         case "goto":
@@ -531,7 +507,7 @@ class SpeakerFlow {
   /**
    * Whether the way along `edge` from `node` is one the check follows in `mode`, apart from what it carries: not a
    * branch or loop way the type check rules out, not a default of a parameter the call supplies, not the continuation
-   * of a call of a function that never returns, and for `must` not a computed target or a fallback.
+   * of a call of a function that never returns, and for `must` not a computed target.
    */
   #possible(mode: Mode, node: number, edge: Edge): boolean {
     if (node >= this.#anywhere) return mode === "may";
@@ -557,8 +533,8 @@ class SpeakerFlow {
         return summary !== null && summary.returns;
       }
       case "computed":
-      case "end":
         return mode === "may";
+      case "end":
       case "exit":
         return false;
       case "next":
@@ -570,7 +546,6 @@ class SpeakerFlow {
       case "transfer":
       case "return":
       case "anywhere":
-      case "fallback":
         return true;
     }
   }
@@ -1140,7 +1115,6 @@ class SpeakerFlow {
       case "end":
       case "exit":
       case "anywhere":
-      case "fallback":
         return null;
     }
     return null;

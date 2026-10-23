@@ -95,10 +95,10 @@ test("a run of code that never runs is reported once, on its first statement", (
     codes('exit\nsay "a"\nif true {\n    say "b"\n}\nexit\nrepeat 0 {\n    say "c"\n}'),
     ["2 TSV065"],
   );
-  // A label can be reached, so it ends the run; declarations, which run nothing where they stand, do not.
+  // A label that a goto leads to ends the run; declarations, which run nothing where they stand, do not.
   assert.deepEqual(
     codes(
-      'exit\nfunction f { say "f" }\nspeaker vera {}\nsay "a"\nlabel later\nsay "b"\nexit\nsay "c"',
+      'goto later\nfunction f { say "f" }\nspeaker vera {}\nsay "a"\nlabel later\nsay "b"\nexit\nsay "c"',
     ),
     ["4 TSV065", "8 TSV065"],
   );
@@ -156,7 +156,7 @@ test("the endings follow which code can run", () => {
   // An exit that no way reaches does not end the session: one in a function that nothing calls, or in a block that
   // code which never runs creates.
   for (const source of [
-    'function finish {\n    exit\n}\nsay "a"\nend',
+    'function finish {\n    exit\n}\nsay "a"\ngoto "main.tease"',
     "if false {\n    timer async 1 s { exit }\n}\nwhile true {\n    wait 1 s\n}",
   ])
     assert.ok(

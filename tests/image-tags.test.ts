@@ -499,8 +499,8 @@ test("after an incomplete tagged query, a statement on the next line is kept", (
   }
 });
 
-test("after an incomplete tag query, a label, goto, call, fallback, or end on the next line is kept", () => {
-  for (const line of ["label next", "goto next", 'call "b.tease"', "fallback none", "end"]) {
+test("after an incomplete tag query, a label, goto, call, or end on the next line is kept", () => {
+  for (const line of ["label next", "goto next", 'call "b.tease"', "end"]) {
     const parsed = parse(`showImage tagged "bedroom",\n${line}\nexit`);
     assert.equal(parsed.program.statements.length, 2, line);
     assert.notEqual(parsed.program.statements[0]!.kind, "exitStatement", line);

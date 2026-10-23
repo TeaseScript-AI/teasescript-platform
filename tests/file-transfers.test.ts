@@ -50,12 +50,12 @@ function compiled(files: readonly ProjectSourceFile[]): InstructionPlan {
   return result.plan!;
 }
 
-test("goto naming a file starts it afresh, from its top or at a label", () => {
+test("goto naming a file starts it afresh from its top", () => {
   assert.deepEqual(
     said(
       project('let mood = "main"\ngoto "rooms/hall.tease"', {
-        "rooms/hall.tease": 'let mood = "hall"\nsay mood\ngoto "rooms/yard.tease" back\n',
-        "rooms/yard.tease": 'say "skipped"\nlabel back\nsay "yard"\nexit',
+        "rooms/hall.tease": 'let mood = "hall"\nsay mood\ngoto "rooms/yard.tease"\n',
+        "rooms/yard.tease": 'let mood = "yard"\nsay mood\nexit',
       }),
     ),
     ["hall", "yard", "exit"],
@@ -128,42 +128,243 @@ test("a goto in a called file replaces it, and the call still returns", () => {
   );
 });
 
-test("call of a label runs this file afresh from there and returns at its end", () => {
+test("a call starts another file, so a label or a file that may be running is an error", () => {
+  const diagnostics = (files: ProjectSourceFile[]): [string, string, string][] =>
+    compileProject(files).diagnostics.map((diagnostic) => [
+      diagnostic.path,
+      diagnostic.code,
+      diagnostic.message,
+    ]);
+  assert.deepEqual(diagnostics(project('call greeting\nexit\nlabel greeting\nsay "hi"\nend')), [
+    [
+      "main.tease",
+      "TSV057",
+      "A call starts another file at its top, so it cannot go to label 'greeting' of this file. Use 'goto greeting' to continue at the label, or put that part in a function and call the function.",
+    ],
+  ]);
+  const ownFile =
+    "A call starts another file, but this call can start 'main.tease', the file it is in. To run a part of this file and come back, put it in a function and call that, or use goto with a label of this file to continue there.";
+  // Every spelling of the file, also where the call never runs.
+  for (const call of [
+    'call "main.tease"',
+    'call script("main.tease")',
+    'if false { call "main.tease" }',
+  ])
+    assert.deepEqual(
+      diagnostics(project(`${call}\nexit`)),
+      [["main.tease", "TSV057", ownFile]],
+      call,
+    );
+  const rooms = { "rooms/a.tease": "exit", "rooms/b.tease": "exit" };
   assert.deepEqual(
-    said(
-      project(
-        ['let name = "outer"', "call greeting", 'say "after ${name}"', "exit"].join("\n") +
-          '\nlabel greeting\nlet greeted = "inner"\nsay "hello ${greeted}"\nend',
-      ),
+    diagnostics(project("exit", { ...rooms, "rooms/a.tease": 'call "rooms/*.tease"\nexit' })),
+    [
+      [
+        "rooms/a.tease",
+        "TSV057",
+        "A call starts another file, but this call can start 'rooms/a.tease', the file it is in. Change the pattern so that it matches only other files.",
+      ],
+    ],
+  );
+  const tagged = (source: string) => `---\ntags: "scene"\n---\n${source}`;
+  assert.deepEqual(
+    diagnostics(
+      project('call tagged "scene"\nexit', { "a.tease": tagged('call tagged "scene"\nend') }),
     ),
-    ["hello inner", "after outer", "exit"],
+    [
+      [
+        "a.tease",
+        "TSV057",
+        "A call starts another file, but this call can start 'a.tease', the file it is in. Limit the candidates with 'from:', or with a tag that 'a.tease' does not have.",
+      ],
+    ],
+  );
+  // A tag test or `from:` that leaves the file out allows the call.
+  assert.deepEqual(
+    diagnostics(
+      project('call tagged "scene"\nexit', {
+        "a.tease": tagged('call tagged "scene", from: "b.tease"\nend'),
+        "b.tease": tagged("end"),
+      }),
+    ),
+    [],
+  );
+  // A global function runs in the file that called it, directly or through another global function.
+  const lib = {
+    "lib.tease":
+      'global function relay { punish() }\nglobal function punish { call "rooms/*.tease" }',
+  };
+  assert.deepEqual(diagnostics(project("relay()\nexit", { ...rooms, ...lib })), []);
+  assert.deepEqual(
+    diagnostics(project("exit", { ...rooms, ...lib, "rooms/b.tease": "relay()\nexit" })),
+    [
+      [
+        "lib.tease",
+        "TSV057",
+        "A call starts another file, but this call can start 'rooms/b.tease', which calls global function 'punish' and so is the running file then. Change the pattern so that it matches only other files.",
+      ],
+    ],
   );
 });
 
-test("end without a caller continues at the fallback, which fallback none clears", () => {
-  const files = project(
-    [
-      "fallback menu",
-      'goto "task.tease"',
-      "label menu",
-      'say "menu"',
-      'fallback "last.tease"',
-      'goto "task.tease"',
-    ].join("\n"),
-    {
-      "task.tease": 'say "task"\nend',
-      "last.tease":
-        'say "last"\nfallback none\nlet done = false\nif done { exit }\ngoto "task.tease"',
-    },
+test("a call that would start the running file fails when it runs", () => {
+  const failure = (files: ProjectSourceFile[]): readonly string[] =>
+    assertRuntimeResumeEquivalent(files, { ending: "failed" }).events.flatMap((event) =>
+      event.kind === "runtimeFailure" ? [`${event.code} ${event.message}`] : [],
+    );
+  const message = (path: string) =>
+    `TSR069 This call would start '${path}', the file that is running, but a call starts another file. To run a part of a file and come back, put it in a function and call that.`;
+  // A computed target.
+  assert.deepEqual(
+    failure(
+      project('call "a.tease"\nexit', { "a.tease": 'let me = script("a.tease")\ncall (me)\nend' }),
+    ),
+    [message("a.tease")],
   );
-  const plan = compiled(files);
-  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
-  assert.deepEqual(outputs(result.events), [
-    "task",
-    "menu",
-    "task",
-    "last",
-    "task",
+  // A block of main.tease that fires while the file main.tease called runs.
+  assert.deepEqual(
+    failure(
+      project('timer async 1 s { call "b.tease" }\ncall "b.tease"\nexit', {
+        "b.tease": "wait 2 s\nend",
+      }),
+    ),
+    [message("b.tease")],
+  );
+});
+
+test("a file target names no label, and a global function goes to no label of its file", () => {
+  const diagnostics = (main: string, others: Record<string, string> = {}): [string, string][] =>
+    compileProject(project(main, others)).diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.message,
+    ]);
+  const rooms = { "rooms/hall.tease": "label start\nexit", "rooms/yard.tease": "exit" };
+  for (const [main, message] of [
+    [
+      'goto "rooms/hall.tease" start',
+      `A goto to 'rooms/hall.tease' starts it at its top, so it cannot go to label 'start'. Write 'goto "rooms/hall.tease"', or put the part after 'start' in a file of its own and goto that file.`,
+    ],
+    [
+      'if false { call "rooms/hall.tease" start }\nexit',
+      "A call starts 'rooms/hall.tease' at its top, so it cannot go to label 'start'. Put the part after 'start' in a file of its own and call that file, or in a global function.",
+    ],
+    [
+      'goto "rooms/*.tease" start',
+      "A goto starts the file it picks at its top, so it cannot go to label 'start'. Put the part after 'start' in a file of its own and goto that file.",
+    ],
+    [
+      'let next = script("rooms/hall.tease", label: "start")\ngoto (next)',
+      "A script reference starts its file at its top, so it takes no 'label:'. Put the part after 'start' in a file of its own and name that file.",
+    ],
+    [
+      'let name = "start"\ncall script("rooms/hall.tease", label: name)\nexit',
+      "A call starts the file it picks at its top, so it cannot go to a label. Put the part after the label in a file of its own and call that file.",
+    ],
+  ] as const)
+    assert.deepEqual(diagnostics(main, rooms), [["TSV057", message]], main);
+  // Whether or not anything calls the function.
+  for (const main of ["exit", "skip()\nexit"])
+    assert.deepEqual(
+      diagnostics(main, { "lib.tease": "label later\nexit\nglobal function skip { goto later }" }),
+      [
+        [
+          "TSV051",
+          "A global function can run in any file, so it cannot go to label 'later' of 'lib.tease'. Put the part after the label in a file of its own and goto that file, or in a function that does the work and returns.",
+        ],
+      ],
+      main,
+    );
+  // A file of its own, which it starts at the top.
+  assert.deepEqual(
+    said(
+      project("skip()\nexit", {
+        "lib.tease": 'global function skip { goto "later.tease" }',
+        "later.tease": 'say "later"\nexit',
+      }),
+    ),
+    ["later", "exit"],
+  );
+});
+
+test("an end with no call to return to is an error on every way the compiler can follow", () => {
+  const diagnostics = (
+    main: string,
+    others: Record<string, string> = {},
+  ): [string, string, string][] =>
+    compileProject(project(main, others)).diagnostics.map((diagnostic) => [
+      diagnostic.path,
+      diagnostic.code,
+      diagnostic.message,
+    ]);
+  assert.deepEqual(diagnostics('let stop = askBoolean "Stop?"\nif stop { end }\nexit'), [
+    [
+      "main.tease",
+      "TSV070",
+      "No call waits for this end, because the session starts in main.tease without one, so there is nothing to return to. Use exit to finish the session, or goto to continue in another file.",
+    ],
+  ]);
+  const scene = { "scene.tease": 'say "scene"\nend' };
+  const noCall =
+    "No call waits for this end when the goto on line 2 of main.tease leads here, so there is nothing to return to. Write call there to come back after it, or use exit or goto here instead of end.";
+  // Also when another way calls the file, and in a function that the file calls.
+  for (const [main, others] of [
+    ['say "start"\ngoto "scene.tease"', scene],
+    [
+      'let pick = askBoolean "Call it?"\nif pick { call "scene.tease" } else { goto "scene.tease" }\nexit',
+      scene,
+    ],
+    ['say "start"\ngoto "scene.tease"', { "scene.tease": "leave()\nexit\nfunction leave { end }" }],
+  ] as const) {
+    const found = diagnostics(main, others).filter(([, code]) => code === "TSV070");
+    assert.deepEqual(
+      found.map(([path, code]) => [path, code]),
+      [["scene.tease", "TSV070"]],
+      main,
+    );
+    assert.equal(found[0]![2], noCall);
+  }
+  // A script(...) of a path written out names its file, like a file target.
+  assert.deepEqual(
+    diagnostics('goto script("scene.tease")', scene).map(([path, code]) => [path, code]),
+    [["scene.tease", "TSV070"]],
+  );
+  // A tagged pick may start only the files whose tags it may match.
+  const tagged = (tags: string, source: string) => `---\ntags: "${tags}"\n---\n${source}`;
+  assert.deepEqual(
+    diagnostics('goto tagged "finale"', {
+      "finale.tease": tagged("finale", "exit"),
+      "scene.tease": tagged("scene", "end"),
+    }),
+    [],
+  );
+  // A goto keeps the call that waits for the file it leaves.
+  assert.deepEqual(
+    said(
+      project('call "a.tease"\nsay "back"\nexit', {
+        "a.tease": 'goto "b.tease"',
+        "b.tease": 'say "b"\nend',
+      }),
+    ),
+    ["b", "back", "exit"],
+  );
+  // A computed target hides the way: a warning, and the end fails if no call waits when it runs.
+  const files = project('let next = script("scene.tease")\ngoto (next)', {
+    "scene.tease": 'say "scene"\nend',
+    "done.tease": "exit",
+  });
+  assert.deepEqual(
+    diagnostics(files[0]!.source, { "scene.tease": files[1]!.source, "done.tease": "exit" }),
+    [
+      [
+        "scene.tease",
+        "TSV071",
+        "The goto on line 2 of main.tease picks its file when it runs, so the compiler cannot tell whether a call waits for this end then. Without one, the end fails. Write call there to come back after it, or use exit or goto here instead of end.",
+      ],
+    ],
+  );
+  const plan = compileProject(files).plan!;
+  assert.deepEqual(outputs(run(plan, createImmediatePacingRuntimeSnapshot(plan)).events), [
+    "scene",
     "failure TSR066",
   ]);
 });
@@ -293,19 +494,21 @@ test("a non-persistent timer goes when the file entry that started it is left; a
 });
 
 test("calling files without end is bounded by the call depth", () => {
-  const plan = compiled(project('call "main.tease"\nexit'));
+  const plan = compiled(
+    project('call "a.tease"\nexit', {
+      "a.tease": 'call "b.tease"\nend',
+      "b.tease": 'call "a.tease"\nend',
+    }),
+  );
   const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { maxCallDepth: 8 }));
   assert.deepEqual(outputs(result.events), ["failure TSR047"]);
 });
 
-test("restore validation checks activations, file calls, retained roots, and the fallback", () => {
+test("restore validation checks activations, file calls, and retained roots", () => {
   const files = project(
     [
-      "fallback menu",
       'let t = timer(duration: 9 s, async: true, display: "hidden", persist: true) { say "t" }',
       'call "inner.tease"',
-      "exit",
-      "label menu",
       "exit",
     ].join("\n"),
     { "inner.tease": "function pause { wait 5 s }\npause()\nend" },
@@ -324,10 +527,16 @@ test("restore validation checks activations, file calls, retained roots, and the
     change(snapshot);
     return validateRuntimeSnapshot(snapshot, plan).errors;
   };
-  // The called file's root names the file its call names.
+  // The called file's root names the file its call names, and starts at its top.
   assert.notDeepEqual(
     broken((snapshot) => {
       snapshot.frames[1]!.file = 0;
+    }),
+    [],
+  );
+  assert.notDeepEqual(
+    broken((snapshot) => {
+      snapshot.frames[1]!.entry = plan.files[1]!.entryInstruction + 1;
     }),
     [],
   );
@@ -368,19 +577,6 @@ test("restore validation checks activations, file calls, retained roots, and the
     }),
     [],
   );
-  // The fallback is the destination of a fallback statement: here main's label, not another file's.
-  assert.notDeepEqual(
-    broken((snapshot) => {
-      snapshot.fallback = { file: 1, target: plan.files[0]!.labels[0]!.instruction };
-    }),
-    [],
-  );
-  assert.notDeepEqual(
-    broken((snapshot) => {
-      snapshot.fallback = { file: 1, target: plan.files[1]!.entryInstruction };
-    }),
-    [],
-  );
 });
 
 type Mutable<T> = T extends readonly [infer First, infer Second]
@@ -391,7 +587,7 @@ type Mutable<T> = T extends readonly [infer First, infer Second]
       ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
       : T;
 
-test("a goto, call, or fallback names a file and label that exist", () => {
+test("a goto or call names a file that exists", () => {
   const codes = (main: string, others: Record<string, string> = {}): [string, string][] =>
     compileProject(project(main, others)).diagnostics.map((diagnostic) => [
       diagnostic.code,
@@ -407,8 +603,11 @@ test("a goto, call, or fallback names a file and label that exist", () => {
       "The project has no file 'rooms/yard.tease'. Paths start at the package root, such as \"rooms/hall.tease\".",
     ],
   ]);
-  assert.deepEqual(codes('call "rooms/hall.tease" finish\nexit', others), [
-    ["TSV051", "'rooms/hall.tease' has no label 'finish'."],
+  assert.deepEqual(codes('call "rooms/main.tease"\nexit', others), [
+    [
+      "TSV057",
+      "The project has no file 'rooms/main.tease'. Paths start at the package root, such as \"rooms/hall.tease\".",
+    ],
   ]);
   assert.deepEqual(codes('goto "helpers.tease"', others), [
     [
@@ -435,15 +634,11 @@ test("a glob picks only files that do something, and needs one", () => {
       }),
     ).diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]);
   assert.deepEqual(codes('goto "rooms/*.tease"'), []);
-  assert.deepEqual(codes('call "rooms/*.tease" start\nexit'), []);
   assert.deepEqual(codes('goto "cellar/*.tease"'), [
     [
       "TSV057",
       "No file of the project matches 'cellar/*.tease'. Paths start at the package root, such as \"rooms/*.tease\".",
     ],
-  ]);
-  assert.deepEqual(codes('goto "rooms/*.tease" finish'), [
-    ["TSV057", "No file matching 'rooms/*.tease' has label 'finish'."],
   ]);
   // Calling a file of declarations only would do nothing, so a glob never picks one.
   assert.deepEqual(codes('call "lib/*.tease"\nexit'), [
@@ -452,7 +647,7 @@ test("a glob picks only files that do something, and needs one", () => {
       "Every file matching 'lib/*.tease' holds declarations only and runs nothing, so there is nothing to pick.",
     ],
   ]);
-  assert.deepEqual(codes('fallback "rooms/*"\nexit'), [
+  assert.deepEqual(codes('call "rooms/*"\nexit'), [
     ["TSV057", "'rooms/*' is not a pattern of package file paths: it does not name a .tease file."],
   ]);
   const plan = compiled(
@@ -472,7 +667,7 @@ test("a glob picks only files that do something, and needs one", () => {
 
 test("each glob target that runs draws its file once; restore never draws again", () => {
   const files = project(
-    ["repeat 8 {", '    call "rooms/*.tease"', "}", 'fallback "ends/*.tease"', "end"].join("\n"),
+    ["repeat 8 {", '    call "rooms/*.tease"', "}", 'goto "ends/*.tease"'].join("\n"),
     {
       "rooms/a.tease": 'say "a"\nend',
       "rooms/b.tease": 'say "b"\nend',
@@ -489,38 +684,10 @@ test("each glob target that runs draws its file once; restore never draws again"
   assert.ok(texts.slice(0, 8).every((text) => ["a", "b", "c"].includes(text)));
   assert.ok(["calm end", "strict end"].includes(texts[8]!));
   assert.equal(texts[9], "exit");
-  // Eight calls and the fallback draw once each; setting the fallback draws nothing.
-  // A stored glob fallback is exactly the destination of a fallback statement.
-  const plan = compiled(files);
-  const set = result.boundaries.find((snapshot) => snapshot.fallback !== null)!;
-  assert.deepEqual(validateRuntimeSnapshot(set, plan).errors, []);
-  const narrowed = structuredClone(set);
-  if (narrowed.fallback !== null && "pick" in narrowed.fallback) {
-    narrowed.fallback = { pick: narrowed.fallback.pick.slice(1) };
-  }
-  assert.deepEqual(validateRuntimeSnapshot(narrowed, plan).errors, [
-    "Runtime fallback is malformed.",
-  ]);
+  // Eight calls and the goto draw once each.
   const expected = createXorShift32State(seed);
   for (let draw = 0; draw < 9; draw += 1) nextXorShift32(expected);
   assert.equal(result.finalSnapshot.rng.state, expected.state);
-});
-
-test("a label that a file is entered at sees none of the variables set before it", () => {
-  const result = compileProject(
-    project('let x = 1\nlabel again\nsay x\ngoto "other.tease"', {
-      "other.tease": 'goto "main.tease" again',
-    }),
-  );
-  assert.deepEqual(
-    result.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
-    [
-      [
-        "TSV054",
-        "This line can be reached without running 'let x' first, through a goto, call, or fallback to a label after it, so x may have no value here. Set x after that label, or make it a global.",
-      ],
-    ],
-  );
 });
 
 test("a block changes the variables of a file the session left, also across a file call", () => {
@@ -550,7 +717,12 @@ test("a block changes the variables of a file the session left, also across a fi
 
 test("a loop of a calling file stays with its call while the called file runs", () => {
   // The same loop of a recursive call is another loop, so the call depth limit ends the recursion.
-  const recursive = compiled(project('repeat 1 { call "main.tease" }\nexit'));
+  const recursive = compiled(
+    project('call "a.tease"\nexit', {
+      "a.tease": 'repeat 1 { call "b.tease" }\nend',
+      "b.tease": 'repeat 1 { call "a.tease" }\nend',
+    }),
+  );
   const result = run(
     recursive,
     createImmediatePacingRuntimeSnapshot(recursive, { maxCallDepth: 4 }),
@@ -637,26 +809,6 @@ test("a timer block may change a loop condition while a called file runs", () =>
   );
 });
 
-test("a transfer that cannot run enters no label", () => {
-  for (const transfer of [
-    'goto "b.tease" start',
-    'call "b.tease" start',
-    'fallback "b.tease" start',
-  ]) {
-    const result = compileProject(
-      project(`if false { ${transfer} }\nexit`, {
-        "b.tease": "let x = 1\nlabel start\nsay x\nend",
-      }),
-    );
-    // The branch is reported as code that never runs, and the label needs no value of x.
-    assert.deepEqual(
-      result.diagnostics.map((diagnostic) => diagnostic.code),
-      ["TSV065"],
-      transfer,
-    );
-  }
-});
-
 test("a timer names an issued activation, also after that activation is gone", () => {
   const plan = compiled(
     project(
@@ -677,24 +829,6 @@ test("a timer names an issued activation, also after that activation is gone", (
     if (action.kind === "timer") action.timer.rootScopeId = unissued.nextScopeId + 10;
   }
   assert.equal(validateRuntimeSnapshot(unissued, plan).valid, false);
-});
-
-test("a transfer in a function never called or a block never started enters no label", () => {
-  const codes = (main: string): string[] =>
-    compileProject(
-      project(main, { "b.tease": "let x = 1\nlabel start\nsay x\nend" }),
-    ).diagnostics.map((diagnostic) => diagnostic.code);
-  // A branch that never runs is reported as such; a function that nothing calls is not.
-  for (const [main, expected] of [
-    ['if false { timer async 1 s { goto "b.tease" start } }\nexit', ["TSV065"]],
-    ['function never { goto "b.tease" start }\nexit', []],
-    ['function f { call "b.tease" start }\nif false { f() }\nexit', ["TSV065"]],
-    ['function f { fallback "b.tease" start }\nfunction g { f() }\nexit', []],
-  ] as const) {
-    assert.deepEqual(codes(main), expected, main);
-  }
-  // One that can run still enters its label afresh.
-  assert.deepEqual(codes('function f { goto "b.tease" start }\nf()\nexit'), ["TSV054"]);
 });
 
 test("restore checks a timer's activation against its file and walks only real loop partitions", () => {
@@ -726,38 +860,19 @@ test("restore checks a timer's activation against its file and walks only real l
 });
 
 test("lowering appends many transfer destinations without a native argument limit", () => {
-  const parsed = parse("fallback done\nexit\nlabel done\nexit").program;
-  const fallback = parsed.statements[0]!;
+  const parsed = parse('call "b.tease"\nexit').program;
+  const call = parsed.statements[0]!;
   const program = {
     ...parsed,
-    statements: [...Array.from({ length: 150_000 }, () => fallback), ...parsed.statements.slice(1)],
+    statements: [...Array.from({ length: 150_000 }, () => call), ...parsed.statements.slice(1)],
   };
-  const plan = compileStableProject([{ path: "main.tease", program }]);
+  const plan = compileStableProject([
+    { path: "main.tease", program },
+    { path: "b.tease", program: parse("end").program },
+  ]);
   assert.equal(
-    plan.instructions.filter((instruction) => instruction.kind === "setFallback").length,
+    plan.instructions.filter((instruction) => instruction.kind === "transfer").length,
     150_000,
-  );
-});
-
-test("a goto in a global function enters its file afresh where a call that can run reaches it", () => {
-  const codes = (files: ProjectSourceFile[]): string[] =>
-    compileProject(files).diagnostics.map((diagnostic) => diagnostic.code);
-  const main = "let x = 1\nlabel later\nsay x\nexit\nglobal function skip { goto later }";
-  // Nothing calls it, so its goto enters nothing.
-  assert.deepEqual(codes(project(main)), []);
-  // A call through another file's global function reaches it, so `later` is entered afresh.
-  assert.deepEqual(
-    codes(project(`indirect()\n${main}`, { "lib.tease": "global function indirect { skip() }" })),
-    ["TSV054"],
-  );
-  // And it runs as a transfer to its own file, which starts at the label.
-  assert.deepEqual(
-    said(
-      project("reset()\nexit", {
-        "lib.tease": 'label again\nsay "again"\nexit\nglobal function reset { goto again }',
-      }),
-    ),
-    ["again", "exit"],
   );
 });
 
@@ -881,15 +996,13 @@ test("a photo taken in a called file or a global function of another file surviv
 
 test("destinations compare by their values, and a pick holds plain destinations only", () => {
   const plan = compiled(
-    project('fallback "ends/*.tease"\nend', { "ends/a.tease": "exit", "ends/b.tease": "exit" }),
+    project('goto "ends/*.tease"', { "ends/a.tease": "exit", "ends/b.tease": "exit" }),
   );
   // The same destinations written with their keys in another order.
   const reordered: InstructionPlan = {
     ...plan,
     instructions: plan.instructions.map((instruction) =>
-      instruction.kind === "setFallback" &&
-      instruction.destination !== null &&
-      "pick" in instruction.destination
+      instruction.kind === "transfer" && "pick" in instruction.destination
         ? {
             ...instruction,
             destination: {
@@ -900,8 +1013,8 @@ test("destinations compare by their values, and a pick holds plain destinations 
     ),
   };
   assert.deepEqual(validateInstructionPlan(reordered).errors, []);
-  const set = executeInstruction(reordered, createImmediatePacingRuntimeSnapshot(reordered));
-  assert.deepEqual(validateRuntimeSnapshot(set.snapshot, reordered).errors, []);
+  const entered = executeInstruction(reordered, createImmediatePacingRuntimeSnapshot(reordered));
+  assert.deepEqual(validateRuntimeSnapshot(entered.snapshot, reordered).errors, []);
 
   // A pick nested in a pick is malformed, however deep.
   type Nested = { readonly file: number; readonly target: number } | { readonly pick: Nested[] };
@@ -910,7 +1023,7 @@ test("destinations compare by their values, and a pick holds plain destinations 
   const deep = {
     ...plan,
     instructions: plan.instructions.map((instruction) =>
-      instruction.kind === "setFallback" ? { ...instruction, destination: nested } : instruction,
+      instruction.kind === "transfer" ? { ...instruction, destination: nested } : instruction,
     ),
   };
   assert.equal(validateInstructionPlan(deep).valid, false);

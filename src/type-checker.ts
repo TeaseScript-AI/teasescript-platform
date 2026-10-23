@@ -28,7 +28,6 @@ import type {
   SwitchTypeTest,
   Statement,
   TagQueryExpression,
-  TagQueryStep,
   TimerParts,
   TransferTarget,
   TypeAnnotation,
@@ -84,12 +83,11 @@ import {
   IMAGE_NO_SOURCE_MESSAGE,
   imageFilterTextProblem,
 } from "./image-input.js";
-import { evaluateTagSteps, passesTagList } from "./tag-query.js";
+import { mayMatchTags } from "./tag-query.js";
 import {
   addTag,
   CONFLICTING_TAG_CODE,
   conflictingTagMessage,
-  normalizeTagName,
   notATagMessage,
   readTagText,
   type Tag,
@@ -2262,10 +2260,6 @@ export class TypeChecker {
         // The called file runs until its end, like any suspension.
         this.#suspend();
         return true;
-      case "fallbackStatement":
-        if (statement.target !== null)
-          yield* compileChild(this.#targetTask(statement.target, "fallback", scope));
-        return true;
       case "labelStatement":
         // A goto from anywhere in the file may arrive here, so nothing narrowed before the label still holds.
         this.#flow = new Flow();
@@ -2279,11 +2273,7 @@ export class TypeChecker {
   }
 
   /** A computed target, such as `goto (next)`, is a script reference; plain text is not a jump target (V30 §29). */
-  *#targetTask(
-    target: TransferTarget,
-    keyword: "goto" | "call" | "fallback",
-    scope: Scope,
-  ): CompileTask<void> {
+  *#targetTask(target: TransferTarget, keyword: "goto" | "call", scope: Scope): CompileTask<void> {
     if (target.kind !== "scriptTarget") return;
     const type = yield* compileChild(this.#expressionTask(target.expression, scope));
     this.#reportUnless(
@@ -5175,22 +5165,7 @@ export class TypeChecker {
           this.#capturesTaggedPhotos
           ? null
           : this.#imageTags;
-    if (candidates === null) return;
-    // Each literal tag list is read once for all candidates.
-    const lists = new Map<TagQueryStep, readonly string[] | null>();
-    for (const step of query.steps) {
-      if (step.kind === "tagList") lists.set(step, literalTagNames(step.value));
-    }
-    const test = (step: TagQueryStep, tags: ReadonlyMap<string, number | null>) => {
-      if (step.kind === "tag") return tags.has(step.name);
-      if (step.kind !== "tagList") return null;
-      const names = lists.get(step)!;
-      return names === null ? null : passesTagList(step.option, names, tags);
-    };
-    if (
-      candidates.some((tags) => evaluateTagSteps(query.steps, (step) => test(step, tags)) !== false)
-    )
-      return;
+    if (candidates === null || candidates.some(mayMatchTags(query.steps))) return;
     this.#report(
       typeCode.emptyTagQuery,
       query.catalog === "scripts"
@@ -7214,7 +7189,7 @@ export class TypeChecker {
           );
         return STRING_TYPE;
       case "script": {
-        // `script(path)` or `script(path, label: name)`, both text (V30 §29).
+        // `script(path)`, with the path as text (V30 §29).
         const positional = expression.arguments.filter(
           (item) => item.kind === "positionalArgument",
         ).length;
@@ -7225,20 +7200,18 @@ export class TypeChecker {
             expression.span,
           );
         for (const [index, item] of expression.arguments.entries()) {
-          if (item.kind === "namedArgument" && item.name.name !== "label")
+          if (item.kind === "namedArgument")
             this.#report(
               typeCode.unknownNamedArgument,
-              unknownNamedArgumentMessage("script", item.name.name, ["label"]),
+              unknownNamedArgumentMessage("script", item.name.name, []),
               item.name.span,
             );
-          else if (item.kind === "namedArgument" || positional === 1)
+          else if (positional === 1)
             this.#reportUnless(
               values[index]!,
               (member) => isScalar(member, "string"),
               item.value,
-              item.kind === "namedArgument"
-                ? "label: takes the name of a label as text (string)"
-                : "script(...) takes the path of a file as text (string)",
+              "script(...) takes the path of a file as text (string)",
             );
         }
         return SCRIPT_TYPE;
@@ -10854,26 +10827,4 @@ function scalarType(name: ScalarTypeName): StaticType {
 function unwrapGrouping(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;
-}
-
-/** The tag names of a list literal of quoted names, or `null` for anything else, which only runtime knows. */
-function literalTagNames(written: Expression): readonly string[] | null {
-  // Grouping changes nothing: `(["a"])` and `[("a")]` are literal lists too.
-  const value = unwrapGrouping(written);
-  if (value.kind !== "listLiteral") return null;
-  const names: string[] = [];
-  for (const item of value.elements) {
-    const element = unwrapGrouping(item);
-    if (
-      element.kind !== "stringLiteral" ||
-      element.parts.some((part) => part.kind !== "stringText")
-    )
-      return null;
-    const name = normalizeTagName(
-      element.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join(""),
-    );
-    if (name === null) return null;
-    names.push(name);
-  }
-  return names;
 }

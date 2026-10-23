@@ -34,10 +34,7 @@ export function instructionExpressions(instruction: Instruction): readonly Expre
     case "callFunction":
       return instruction.arguments.map((argument) => argument.value);
     case "transfer":
-    case "setFallback":
-      return instruction.destination !== null && "value" in instruction.destination
-        ? [instruction.destination.value]
-        : [];
+      return "value" in instruction.destination ? [instruction.destination.value] : [];
     case "say":
       return [
         ...(typeof instruction.textTemporary === "number" ? [] : [instruction.value]),

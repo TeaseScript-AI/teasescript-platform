@@ -5,7 +5,6 @@ import type {
   CompiledFunctionDefinition,
   ExpressionPlan,
   InstructionPlan,
-  PlanTransferDestination,
 } from "../../plan/model.js";
 import { isValidatedImmutableInstructionPlan } from "../../plan/validated-immutable.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
@@ -49,12 +48,6 @@ export interface SnapshotValidationAnalysis {
   readonly preparedReferenceTemporaries: ReadonlyMap<number, boolean>;
   readonly preparedSayTemporaryOwnership: PreparedSayTemporaryOwnership;
   readonly loops: ReadonlyMap<number, PlannedLoop>;
-  /** The destinations that `fallback` statements of the plan name directly. */
-  readonly fallbackDestinations: readonly PlanTransferDestination[];
-  /** Whether a `fallback` statement of the plan computes its destination. */
-  readonly computedFallback: boolean;
-  /** Where an activation of each file may start: its entry and its labels. */
-  readonly fileEntries: readonly ReadonlySet<number>[];
   /** The variables each timer, media, or button block shares, as the instruction that creates its resource names them. */
   readonly handlerCaptures: ReadonlyMap<number, readonly string[]>;
 }
@@ -113,8 +106,6 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
   }
   const defaultBindingPositions = new Map<string, number>();
   const loops = new Map<number, PlannedLoop>();
-  const fallbackDestinations: PlanTransferDestination[] = [];
-  let computedFallback = false;
   const handlerCaptures = new Map<number, readonly string[]>();
   for (let index = 0; index < plan.instructions.length; index += 1) {
     const instruction = plan.instructions[index];
@@ -143,10 +134,6 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
         continueStart: instruction.continueTarget,
         target: instruction.target,
       });
-    } else if (instruction?.kind === "setFallback" && instruction.destination !== null) {
-      // A computed destination holds an expression, never a stored fallback.
-      if ("value" in instruction.destination) computedFallback = true;
-      else fallbackDestinations.push(instruction.destination);
     }
   }
   // A media block's self-handle is bound on entry, like a parameter.
@@ -171,11 +158,6 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     preparedReferenceTemporaries: collectPreparedReferenceTemporaries(plan),
     preparedSayTemporaryOwnership: collectPreparedSayTemporaryOwnership(plan),
     loops,
-    fallbackDestinations,
-    computedFallback,
-    fileEntries: plan.files.map(
-      (file) => new Set([file.entryInstruction, ...file.labels.map((label) => label.instruction)]),
-    ),
     handlerCaptures,
   };
 }

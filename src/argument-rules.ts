@@ -175,14 +175,9 @@ export const FIXED_PARAMETERS: ReadonlyMap<string, readonly string[]> = new Map(
   ["escapeMarkup", ["text"]],
 ]);
 
-/** The argument count message of `script(...)`, which takes a path, and a label only by name (V30 §29). */
+/** The argument count message of `script(...)`, which takes a path (V30 §29). */
 export function scriptArgumentCountMessage(received: number): string {
-  return argumentCountMessage(
-    "script",
-    "1 argument (path)",
-    received,
-    `Name a label with 'label:', as in 'script("rooms/hall.tease", label: "start")'.`,
-  );
+  return argumentCountMessage("script", "1 argument (path)", received);
 }
 
 /** What `get` reads with a `default:`: an index of a list, a key of a dict, or either, where the compiler knows neither. */

@@ -20,7 +20,7 @@ import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS, PROTECTED_NAME_CODE } from "./language-facts.js";
 import { PlanControlFlow } from "./plan/control-flow.js";
-import { Reachability, type ConstantTest, type StatementFlow } from "./reachability.js";
+import { Reachability, type ConstantTest } from "./reachability.js";
 import {
   stopsTypeCheck,
   validateProjectSemantics,
@@ -227,15 +227,6 @@ function projectDiagnostic(path: string, message: string): ProjectDiagnostic {
   });
 }
 
-/** The labels of a file's outer scope. */
-function fileLabels(program: Program): ReadonlySet<string> {
-  return new Set(
-    program.statements.flatMap((statement) =>
-      statement.kind === "labelStatement" ? [statement.name.name] : [],
-    ),
-  );
-}
-
 function parseFile(path: string, source: string): CompiledProjectFile {
   let parsed: ReturnType<typeof parse>;
   try {
@@ -292,7 +283,11 @@ function checkProject(
   };
   try {
     const names = validateProjectSemantics(
-      files.map((file) => ({ path: file.result.path, program: file.result.program })),
+      files.map((file) => ({
+        path: file.result.path,
+        program: file.result.program,
+        tags: scriptTags(file.result),
+      })),
       options,
       (index) =>
         files[index]!.parsed !== null && !hasErrors(files[index]!.result.parserDiagnostics),
@@ -387,16 +382,14 @@ function checkFlow(
       ways,
     );
     const statementFlow = reachability.statementFlow();
-    const freshLabels = enteredLabels(files, checked.names, statementFlow);
     const endings = reachability.endingDiagnostics();
-    const errors = files.map((file, index) => [
+    const returns = reachability.pendingCallDiagnostics();
+    const errors = files.map((_, index) => [
       // The initialization check at labels decides itself which functions and blocks run, by the calls and creations
       // in statements that can run (ADR 0022 §3.4).
-      ...checked.names[index]!.checkInitialization(
-        freshLabels.get(file.result.path) ?? new Set(),
-        statementFlow,
-      ),
+      ...checked.names[index]!.checkInitialization(statementFlow),
       ...endings[index]!,
+      ...returns[index]!.filter((diagnostic) => diagnostic.severity === DiagnosticSeverity.Error),
     ]);
     if (!errors.some((diagnostics) => diagnostics.length > 0) && !reachability.reachesExit()) {
       const main = files[0]!.result.program;
@@ -423,9 +416,13 @@ function checkFlow(
     files.forEach((file, index) =>
       addSemanticDiagnostics(
         file,
-        [...warnings[index]!, ...errors[index]!].sort(
-          (left, right) => left.span.start.offset - right.span.start.offset,
-        ),
+        [
+          ...warnings[index]!,
+          ...returns[index]!.filter(
+            (diagnostic) => diagnostic.severity === DiagnosticSeverity.Warning,
+          ),
+          ...errors[index]!,
+        ].sort((left, right) => left.span.start.offset - right.span.start.offset),
       ),
     );
     if (errors.some((diagnostics) => diagnostics.length > 0)) return null;
@@ -450,36 +447,6 @@ function checkFlow(
 /** What a TSV046 warning says its test always gives, by its words: `null` for a case that never matches or an empty range. */
 function constantTestValue(message: string): boolean | null {
   return message.endsWith("always true.") ? true : message.endsWith("always false.") ? false : null;
-}
-
-/**
- * The labels of each file that a transfer or script reference that can run enters afresh, which has then run nothing
- * of its file. As the source shows it, a computed path stands for every file and a computed label for every label.
- */
-function enteredLabels(
-  files: readonly CompiledProjectFile[],
-  names: readonly FileSemanticResult[],
-  flow: StatementFlow,
-): ReadonlyMap<string, ReadonlySet<string>> {
-  const labels = new Map(files.map((file) => [file.result.path, fileLabels(file.result.program)]));
-  const freshLabels = new Map<string, Set<string>>();
-  const marked = new Set<string>();
-  for (const result of names) {
-    for (const { path, label } of result.reachableEntries(flow)) {
-      // Many references mark the same labels; each mark is followed once.
-      const mark = JSON.stringify([path, label]);
-      if (label === null || marked.has(mark)) continue;
-      marked.add(mark);
-      for (const entered of path === null ? labels.keys() : [path]) {
-        const known = labels.get(entered) ?? new Set<string>();
-        const fresh = freshLabels.get(entered) ?? new Set<string>();
-        if (label === true) for (const name of known) fresh.add(name);
-        else if (known.has(label)) fresh.add(label);
-        freshLabels.set(entered, fresh);
-      }
-    }
-  }
-  return freshLabels;
 }
 
 /**

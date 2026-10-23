@@ -827,9 +827,9 @@ test("an operation that would make a text longer than any text can be fails with
       `Text too long: say would make a text longer than a text can hold, which is about 536 million characters.`,
     ],
     [
-      `${doubled(28, "\\n")}\nlet t = "\${script("main.tease", label: s)}"\nexit`,
+      `${doubled(28, "\\n")}\nlet t = "\${script(s)}"\nexit`,
       5,
-      `Text too long: script(…) would make about 536,870,943 characters, ${limit}`,
+      `Text too long: script(…) would make about 536,870,922 characters, ${limit}`,
     ],
     [
       `${doubled(28, "\\n")}\nlet t = timer(duration: 1 s, async: true, label: s)\nsay t, instant\nexit`,
@@ -864,18 +864,14 @@ test("an error message cuts the script's text it quotes, and a text no check for
   );
   const path = `${"d".repeat(2_000)}.tease`;
   const project = compileProject([
-    {
-      path: "main.tease",
-      source: `let target = "${path}"\ncall script(target, label: "missing")\nexit`,
-    },
-    { path, source: "exit" },
+    { path: "main.tease", source: `let target = "${path}"\ncall script(target)\nexit` },
   ]);
   assert.ok(project.plan !== null);
-  const unlabeled = run(project.plan, createImmediatePacingRuntimeSnapshot(project.plan)).snapshot
+  const noFile = run(project.plan, createImmediatePacingRuntimeSnapshot(project.plan)).snapshot
     .failure;
   assert.equal(
-    unlabeled?.message,
-    `This call names label 'missing' of '${"d".repeat(1_024)}…', but that file has no such label.`,
+    noFile?.message,
+    `This call names the file '${"d".repeat(1_024)}…', but the project has no such file. Paths start at the package root, such as "rooms/hall.tease".`,
   );
   // V8 says that a text is too long with this error.
   context.mock.method(String.prototype, "toUpperCase", () => {

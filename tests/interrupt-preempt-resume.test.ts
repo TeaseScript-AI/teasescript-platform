@@ -129,9 +129,8 @@ test("a goto or exit in a block cancels the interrupted action of each kind", ()
           wait,
           'say "Done.", instant',
           "exit",
-          "label away",
-          'say "Away.", instant',
-          "exit",
+          // Only the goto leads to the label.
+          ...(leave === "exit" ? [] : ["label away", 'say "Away.", instant', "exit"]),
         ].join("\n"),
       );
       const before = story.said();

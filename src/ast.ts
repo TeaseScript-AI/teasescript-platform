@@ -32,7 +32,6 @@ export type Statement =
   | LabelStatement
   | GotoStatement
   | CallFileStatement
-  | FallbackStatement
   | LetStatement
   | GlobalStatement
   | AssignmentStatement
@@ -352,7 +351,7 @@ export interface LoadExpression {
 
 /**
  * A tag query (ADR 0023): `showImage tagged …` picks one matching image and `findImages(…)` lists the matches;
- * `goto tagged …`, `call tagged …`, and `fallback tagged …` pick one matching file and `findScripts(…)` lists them. The
+ * `goto tagged …` and `call tagged …` pick one matching file and `findScripts(…)` lists them. The
  * steps are in postfix order; every bound and tag list appears in written order, which is also its evaluation order.
  * A candidate matches when the steps yield true; without steps, every candidate matches.
  */
@@ -407,28 +406,21 @@ export interface LabelStatement {
   readonly span: SourceSpan;
 }
 
-/** `goto target`: continues at a label of this file, or enters a file (ADR 0022). */
+/** `goto target`: continues at a label of this file, or starts a file at its top (ADR 0022). */
 export interface GotoStatement {
   readonly kind: "gotoStatement";
   readonly target: TransferTarget;
   readonly span: SourceSpan;
 }
 
-/** `call target`: enters a file and continues after the call when that file reaches `end`. */
+/** `call target`: starts another file at its top and continues after the call when that file reaches `end`. */
 export interface CallFileStatement {
   readonly kind: "callFileStatement";
   readonly target: TransferTarget;
   readonly span: SourceSpan;
 }
 
-/** `fallback target` sets where an `end` without a caller continues; `fallback none` clears it. */
-export interface FallbackStatement {
-  readonly kind: "fallbackStatement";
-  readonly target: TransferTarget | null;
-  readonly span: SourceSpan;
-}
-
-/** Where a `goto`, `call`, or `fallback` continues: a label of this file, or a file from its top or at a label. */
+/** Where a `goto` or `call` continues: a label of this file, or a file from its top. */
 export type TransferTarget = LabelTarget | FileTarget | ScriptTarget;
 
 /** A target computed at runtime: a `script(...)` call or a grouped expression of type `script`, as in `goto (next)`. */
@@ -449,6 +441,7 @@ export interface FileTarget {
   /** The quoted path, relative to the package root. */
   readonly path: string;
   readonly pathSpan: SourceSpan;
+  /** A label written after the path. A file starts at its top, so the name pass reports it (V30 §29). */
   readonly label: Identifier | null;
   readonly span: SourceSpan;
 }

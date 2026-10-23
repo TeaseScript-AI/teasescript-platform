@@ -145,12 +145,8 @@ test("media keeps playing across a goto", () => {
   assert.ok(beforeExit.backgroundActions.some((action) => action.kind === "media"));
 });
 
-test("end without a calling file is a runtime error", () => {
-  const plan = compileValidPlan('say "start"\nlet n = 1\nif n > 0 { end }\nexit');
-  assert.deepEqual(outputs(run(plan, createImmediatePacingRuntimeSnapshot(plan)).events), [
-    "say start",
-    "failure TSR066",
-  ]);
+test("an end that runs before any file is called is a compile error", () => {
+  assert.deepEqual(codes('say "start"\nlet n = 1\nif n > 0 { end }\nexit'), [["TSV070", 3]]);
 });
 
 test("labels stand in a file's outer scope, with unique names", () => {
@@ -181,7 +177,14 @@ test("every file says how it ends, and the project reaches an exit", () => {
     diagnostics("let n = 1\nif n > 0 { exit } else { goto again }\nlabel again\nexit"),
     [],
   );
-  assert.deepEqual(diagnostics('exit\nlabel later\nsay "later"').map(format), [runsOff]);
+  // Nothing leads to a label that no goto names after an exit, so the code after it never runs.
+  assert.deepEqual(diagnostics('exit\nlabel later\nsay "later"'), [
+    [
+      "TSV065",
+      3,
+      "This code never runs, because no goto leads to label 'later' on line 2, and the code before it never continues there. Remove it, or add a goto to the label.",
+    ],
+  ]);
   assert.deepEqual(diagnostics("let n = 0\nwhile true { n += 1 }"), [
     [
       "TSV058",
@@ -194,11 +197,12 @@ test("every file says how it ends, and the project reaches an exit", () => {
       "The script never reaches exit, so the session has no end. Add exit where the session should finish.",
     ],
   ]);
+  // An end in main.tease has no call to return to, which says why no exit runs.
   assert.deepEqual(diagnostics("end"), [
     [
-      "TSV053",
+      "TSV070",
       1,
-      "The script never reaches exit, so the session has no end. Add exit where the session should finish.",
+      "No call waits for this end, because the session starts in main.tease without one, so there is nothing to return to. Use exit to finish the session, or goto to continue in another file.",
     ],
   ]);
 });

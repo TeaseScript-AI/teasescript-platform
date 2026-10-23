@@ -130,23 +130,11 @@ test("goto tagged and call tagged pick one matching file with one draw, entering
   assert.deepEqual(said('call tagged "chastity"\nsay "back"\nexit', "end"), ["strict", "back"]);
 });
 
-test("fallback tagged picks the file when the statement runs", () => {
-  const files: ProjectSourceFile[] = [
-    { path: "main.tease", source: 'fallback tagged "finale"\nsay "main"\nend' },
-    { path: "finale.tease", source: '---\ntags: "finale"\n---\nsay "finale"\nexit' },
-  ];
-  assert.deepEqual(says(assertRuntimeResumeEquivalent(files).events), ["main", "finale"]);
-});
-
 test("a pick whose literal tags match no file is a compile error; one that only may match fails at runtime", () => {
   assert.deepEqual(errors('goto tagged "attic"'), [["TST002", NO_FILE]]);
   assert.deepEqual(errors('goto tagged "public", from: "rooms/s*.tease"'), [["TST002", NO_FILE]]);
   // Grouping keeps a written list literal, in every transfer form.
-  for (const main of [
-    'goto tagged all: (["absent"])',
-    'call tagged all: [("absent")]\nexit',
-    'fallback tagged "punishment", none: (["punishment"])\nexit',
-  ]) {
+  for (const main of ['goto tagged all: (["absent"])', 'call tagged all: [("absent")]\nexit']) {
     assert.deepEqual(errors(main), [["TST002", NO_FILE]], main);
   }
   const plan = compiled('let minimum = 9\ngoto tagged "punishment" > minimum');

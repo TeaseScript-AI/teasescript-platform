@@ -15,5 +15,5 @@ The host operations on a session's state, and what they share.
 - `support.ts`: capture, result, and event-sequence helpers the operations and the engine share.
 - `timer-handlers.ts`: starting and returning from expiry, cue, and button blocks.
 - `timer-lifecycle.ts`: which queued block may run, timer expiry, overruns, and stopping timers.
-- `transfers.ts`: `goto`, transfers, `end`, and the fallback.
+- `transfers.ts`: `goto`, transfers, and `end`.
 - `update-interaction.ts`: editing a pending form without settling it.

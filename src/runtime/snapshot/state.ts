@@ -14,7 +14,7 @@ import type {
 import type { RuntimeInterruptibleActionSnapshot } from "../actions/interrupts.js";
 import type { ChatPacingSettings } from "../../chat-pacing.js";
 import type { RuntimeAccountFieldSnapshot, RuntimeAccountInput } from "../host-data/account.js";
-import type { PlanTag, PlanTransferDestination } from "../../plan/model.js";
+import type { PlanTag } from "../../plan/model.js";
 import { interactionStringFits } from "../../interaction-limits.js";
 import type { ExternalDataFailureKind } from "../../external-data-capture.js";
 import type { SourceSpan } from "../../source.js";
@@ -41,7 +41,7 @@ import type { RuntimeScriptStorageEntrySnapshot } from "../host-data/script-stor
 import { isPlainRecord } from "../values/plain-data.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 88;
+export const RUNTIME_SNAPSHOT_VERSION = 89;
 export const DEFAULT_MAX_CALL_DEPTH = 1024;
 export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -281,8 +281,6 @@ export interface RuntimeSnapshot {
   readonly callFrames: RuntimeFrameSnapshot[];
   /** Roots of activations that were left but whose timer or media blocks can still run. */
   readonly retainedScopes: RuntimeScopeFrameSnapshot[];
-  /** Where an `end` without a calling file continues, set by `fallback`. */
-  fallback: PlanTransferDestination | null;
   nextEventSequence: number;
   nextScopeId: number;
   nextSpeakerId: number;

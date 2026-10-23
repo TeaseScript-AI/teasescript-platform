@@ -157,6 +157,53 @@ export function evaluateTagSteps<Step extends { readonly kind: string }>(
   return steps.length === 0 ? true : values[0]!;
 }
 
+/**
+ * Whether a candidate with these tags may match a query's steps by their tag tests and literal tag lists alone: a
+ * comparison or a computed list counts as possibly true, as a check that does no value reasoning needs (ADR 0023). Each
+ * literal tag list is read once, for all candidates.
+ */
+export function mayMatchTags(
+  steps: readonly TagQueryStep[],
+): (tags: ReadonlyMap<string, number | null>) => boolean {
+  const lists = new Map<TagQueryStep, readonly string[] | null>();
+  for (const step of steps)
+    if (step.kind === "tagList") lists.set(step, literalTagNames(step.value));
+  return (tags) =>
+    evaluateTagSteps(steps, (step) => {
+      if (step.kind === "tag") return tags.has(step.name);
+      if (step.kind !== "tagList") return null;
+      const names = lists.get(step)!;
+      return names === null ? null : passesTagList(step.option, names, tags);
+    }) !== false;
+}
+
+/** The tag names of a list literal of quoted names, or `null` for anything else, which only runtime knows. */
+function literalTagNames(written: Expression): readonly string[] | null {
+  // Grouping changes nothing: `(["a"])` and `[("a")]` are literal lists too.
+  const value = unwrapGrouping(written);
+  if (value.kind !== "listLiteral") return null;
+  const names: string[] = [];
+  for (const item of value.elements) {
+    const element = unwrapGrouping(item);
+    if (
+      element.kind !== "stringLiteral" ||
+      element.parts.some((part) => part.kind !== "stringText")
+    )
+      return null;
+    const name = normalizeTagName(
+      element.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join(""),
+    );
+    if (name === null) return null;
+    names.push(name);
+  }
+  return names;
+}
+
+function unwrapGrouping(expression: Expression): Expression {
+  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
+  return expression;
+}
+
 /** Whether tags with these names and numbers pass a tag list option; an empty list passes every candidate. */
 export function passesTagList(
   option: TagListOption,

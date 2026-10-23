@@ -200,13 +200,14 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
       ].join("\n"),
     ),
   }),
-  /** Glob transfers, and a glob fallback at an end that first stops the timer of the file it leaves. */
+  /** Glob transfers: a call, and a goto that stops the timer of the file it leaves. */
   transfers: () => ({
     stepMs: 2000,
-    plan: project('fallback "rooms/*.tease"\ncall "rooms/*.tease"\nend', {
+    plan: project('timer async 5 s { say "late" }\ncall "rooms/*.tease"\ngoto "ends/*.tease"', {
       "rooms/a.tease": 'timer async 5 s { say "late" }\nsay "a ${random()}"\nend',
       "rooms/b.tease": 'say "b"\nend',
-      "rooms/c.tease": 'say "c"\nexit',
+      "ends/c.tease": 'say "c"\nexit',
+      "ends/d.tease": 'say "d ${random()}"\nexit',
     }),
   }),
   /** Repeating ranged rounds during catch-up, and `remaining = 0` ending a round at once. */

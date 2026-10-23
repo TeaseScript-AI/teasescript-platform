@@ -638,13 +638,14 @@ test("reads that every followed way prepares compile and run", () => {
     ),
     ["calm"],
   );
-  // A file that calls itself once more before it assigns, and a called file that goes on to a computed file.
+  // A file called once more, by a file it calls, before it assigns, and a called file that goes on to a computed file.
   assert.deepEqual(
     runs(
       `${VERA}\nglobal visited = false\nglobal target = "inner.tease"\ncall "setup.tease"\nsay vera.mood\ncall "hall.tease"\nsay vera.place\nexit`,
       {
         "setup.tease":
-          'if not visited {\n    visited = true\n    call "setup.tease"\n}\nvera.mood = "calm"\nend',
+          'if not visited {\n    visited = true\n    call "again.tease"\n}\nvera.mood = "calm"\nend',
+        "again.tease": 'call "setup.tease"\nend',
         "hall.tease": "goto script(target)",
         "inner.tease": 'vera.place = "inner"\nend',
       },
@@ -736,7 +737,6 @@ test("the check follows deep and wide sources without native recursion", () => {
     assert.deepEqual(lines(head+'let value = '+'('.repeat(2000)+'vera.mood'+')'.repeat(2000)+'\nvera.mood = "x"\nexit'),['TSV043:4']);
     assert.deepEqual(lines(head+'vera.mood = "x"\nlet value = '+'not '.repeat(10000)+'(vera.mood == "x")\nexit'),[]);
     assert.deepEqual(lines(head+'vera.mood = "x"\n'+'say "a"\n'.repeat(40000)+'say vera.mood\nexit'),[]);
-    assert.deepEqual(lines(head+'vera.mood = "x"\nsay vera.mood\nlet path = "main.tease"\nfallback script(path)\nexit\n'+Array.from({length:40000},(_,i)=>'label mark'+i+'\nexit\n').join('')),[]);
     console.log('deep speaker reads checked');
   `;
   const child = spawnSync(

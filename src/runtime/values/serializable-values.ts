@@ -130,14 +130,13 @@ export interface SerializableCameraViewHandle {
 }
 
 /**
- * A reference to a file of the project, at its top or at a label, as `script(path, label:)` makes it. It names the file by
- * path, so it keeps its meaning across sessions and plans; whether that file and label exist is checked where a transfer
+ * A reference to a file of the project, which a transfer starts at its top, as `script(path)` makes it. It names the
+ * file by path, so it keeps its meaning across sessions and plans; whether that file exists is checked where a transfer
  * uses it.
  */
 export interface SerializableScriptReference {
   readonly kind: "script";
   readonly path: string;
-  readonly label: string | null;
 }
 
 /**
@@ -749,7 +748,7 @@ function leafKey(value: SerializableRuntimeValue): string | undefined {
     case "cameraView":
       return "c;";
     case "script":
-      return `x${textKey(value.path)}${value.label === null ? "z" : textKey(value.label)}`;
+      return `x${textKey(value.path)}`;
     case "regex":
       return `e${textKey(value.source)}${textKey(value.flags)}`;
     default:
@@ -896,7 +895,7 @@ function equalsOrDefer(
     case "speakerReference":
       return right.kind === "speakerReference" && right.speakerId === left.speakerId;
     case "script":
-      return right.kind === "script" && right.path === left.path && right.label === left.label;
+      return right.kind === "script" && right.path === left.path;
     case "regex":
       return right.kind === "regex" && right.source === left.source && right.flags === left.flags;
   }
@@ -1122,11 +1121,7 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
       continue;
     }
     if (current.kind === "script") {
-      if (
-        !hasOnlyKeys(current, ["kind", "path", "label"]) ||
-        typeof current.path !== "string" ||
-        (current.label !== null && typeof current.label !== "string")
-      )
+      if (!hasOnlyKeys(current, ["kind", "path"]) || typeof current.path !== "string")
         return `${path()} contains a malformed script reference.`;
       continue;
     }

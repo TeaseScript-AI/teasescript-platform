@@ -287,6 +287,13 @@ export const DIAGNOSTIC_CODES = {
   TSV067: entry(["type checker"], "error", "Change of a copy that no variable holds", DOCS.values),
   TSV068: entry(["type checker"], "error", "Invalid timer display", DOCS.values),
   TSV069: entry(["name pass"], "error", "Blocking media handle, or `finish` twice", DOCS.values),
+  TSV070: entry(["plan analysis"], "error", "`end` with no call to return to", DOCS.values),
+  TSV071: entry(
+    ["plan analysis"],
+    "warning",
+    "`end` that may have no call to return to",
+    DOCS.values,
+  ),
 
   TST001: entry(["parser"], "error", "Invalid tag query", DOCS.tags),
   TST002: entry(["type checker"], "error", "Tag query that matches nothing", DOCS.tags),
@@ -439,7 +446,7 @@ export const DIAGNOSTIC_CODES = {
   TSR065: entry(["runtime"], "error", "Calendar duration where a duration is needed", DOCS.runtime),
   TSR066: entry(["runtime"], "error", "File end without a calling file", DOCS.runtime),
   TSR067: entry(["runtime"], "error", "Start value that selects at random", DOCS.runtime),
-  TSR069: entry(["runtime"], "error", "Missing `goto`, `call`, or `fallback` target", DOCS.runtime),
+  TSR069: entry(["runtime"], "error", "Invalid `goto` or `call` target", DOCS.runtime),
   TSR070: entry(["runtime"], "error", "Variable read before its `let` ran", DOCS.runtime),
   TSR071: entry(["runtime"], "error", "`speaker` without a speaker", DOCS.runtime),
   TSR080: entry(["runtime"], "error", "Tag number compared with something else", DOCS.runtime),

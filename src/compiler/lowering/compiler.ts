@@ -26,12 +26,10 @@ import type {
   TypeTestExpression,
   UnitExpression,
   FileTarget,
-  LabelTarget,
-  TransferTarget,
+  ScriptTarget,
 } from "../../ast.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { InstructionCompilationError } from "../errors.js";
-import { MAIN_FILE_PATH } from "../../project-paths.js";
 import type {
   AssignmentTargetPlan,
   CompiledFunctionDefinition,
@@ -127,12 +125,11 @@ export type LoopStatement = Extract<
   { kind: "repeatStatement" | "forStatement" | "whileStatement" }
 >;
 
-/** A transfer or fallback at `instruction` whose destination is a file, from its entry or at a label. */
+/** A transfer at `instruction` whose destination is a file, from its entry. */
 export interface PendingDestination {
   readonly instruction: number;
   /** The file, or for a glob the files to pick from. */
   readonly paths: readonly string[];
-  readonly label: string | null;
   readonly pick: boolean;
 }
 
@@ -188,29 +185,15 @@ export class InstructionCompiler {
   /** Gotos whose target is set by {@link resolveGotos} once every label of the file has its instruction. */
   readonly #gotos: { readonly instruction: number; readonly label: string }[] = [];
 
-  /** Transfers and fallbacks naming a file or a label, resolved once every file of the project is compiled. */
+  /** Transfers naming a file, resolved once every file of the project is compiled. */
   readonly #destinations: PendingDestination[] = [];
 
-  /** The pending file destinations of this file's transfers and fallbacks. */
+  /** The pending file destinations of this file's transfers. */
   public get destinations(): readonly PendingDestination[] {
     return this.#destinations;
   }
 
-  #destinationOf(
-    target: LabelTarget | FileTarget,
-  ): Pick<PendingDestination, "paths" | "label" | "pick"> {
-    if (target.kind === "labelTarget") {
-      return { paths: [this.path], label: target.label.name, pick: false };
-    }
-    const picks = this.picks.get(target);
-    return {
-      paths: picks ?? [target.path],
-      label: target.label?.name ?? null,
-      pick: picks !== undefined,
-    };
-  }
-
-  #emitTransfer(mode: "goto" | "call", target: TransferTarget, span: SourceSpan): void {
+  #emitTransfer(mode: "goto" | "call", target: FileTarget | ScriptTarget, span: SourceSpan): void {
     if (target.kind === "scriptTarget") {
       const lowered = this.#lowerExpression(target.expression);
       this.instructions.push({
@@ -223,9 +206,11 @@ export class InstructionCompiler {
       if (mode === "call") this.#emitTemporaryCleanup(lowered.temporaryIds, span);
       return;
     }
+    const picks = this.picks.get(target);
     this.#destinations.push({
       instruction: this.instructions.length,
-      ...this.#destinationOf(target),
+      paths: picks ?? [target.path],
+      pick: picks !== undefined,
     });
     this.instructions.push({
       kind: "transfer",
@@ -249,8 +234,6 @@ export class InstructionCompiler {
     public readonly functions: CompiledFunctionDefinition[] = [],
     private readonly counters: LoweringCounters = { nextLoopId: 1, nextTemporaryId: 1 },
     private readonly project: ProjectFunctions = { global: new Map(), foreignCalls: [] },
-    /** The file's path, which a label alone in a `call` or `fallback` names. */
-    private readonly path: string = MAIN_FILE_PATH,
     /** The files each glob target may pick, from semantic validation. */
     private readonly picks: ReadonlyMap<FileTarget, readonly string[]> = new Map(),
     /** The variables each timer, media, or button block shares with the code that created it. */
@@ -469,9 +452,7 @@ export class InstructionCompiler {
         this.labels.push({ name: statement.name.name, instruction: this.instructions.length });
         return;
       case "gotoStatement":
-        // In a global function or its blocks, a label alone names that label of the function's file, entered
-        // afresh like `goto "file.tease" label` (ADR 0022 §3.5).
-        if (statement.target.kind === "labelTarget" && !this.#global) {
+        if (statement.target.kind === "labelTarget") {
           this.#gotos.push({
             instruction: this.instructions.length,
             label: statement.target.label.name,
@@ -482,36 +463,10 @@ export class InstructionCompiler {
         this.#emitTransfer("goto", statement.target, statement.span);
         return;
       case "callFileStatement":
+        // The name pass rejects a call of a label: a call starts another file (V30 §29).
+        if (statement.target.kind === "labelTarget")
+          throw new TypeError("Semantically invalid call reached compilation.");
         this.#emitTransfer("call", statement.target, statement.span);
-        return;
-      case "fallbackStatement":
-        if (statement.target === null) {
-          this.instructions.push({
-            kind: "setFallback",
-            destination: null,
-            span: copySpan(statement.span),
-          });
-          return;
-        }
-        if (statement.target.kind === "scriptTarget") {
-          const lowered = this.#lowerExpression(statement.target.expression);
-          this.instructions.push({
-            kind: "setFallback",
-            destination: { value: lowered.plan },
-            span: copySpan(statement.span),
-          });
-          this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
-          return;
-        }
-        this.#destinations.push({
-          instruction: this.instructions.length,
-          ...this.#destinationOf(statement.target),
-        });
-        this.instructions.push({
-          kind: "setFallback",
-          destination: { file: -1, target: -1 },
-          span: copySpan(statement.span),
-        });
         return;
       case "letStatement": {
         const initializer = unwrapParentheses(statement.initializer);

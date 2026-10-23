@@ -551,18 +551,6 @@ test("a global function is callable from every file and sees only globals, its p
   const [lib] = plan.functions.filter((definition) => definition.name === "countdown");
   assert.equal(lib?.global, true);
 
-  // A goto in a global function means a label of its own file, which it enters afresh, like `goto "lib.tease" top`.
-  const jumping = compiledPlan([
-    { path: "main.tease", source: "leave()\nexit" },
-    {
-      path: "lib.tease",
-      source: 'label top\nsay "in lib"\nexit\nglobal function leave {\n  goto top\n}',
-    },
-  ]);
-  const jumped = runToEnd(jumping);
-  assert.deepEqual(said(jumped.events), ["in lib"]);
-  assert.equal(jumped.snapshot.status, "halted");
-
   assert.deepEqual(
     messages([
       {
@@ -691,7 +679,7 @@ test("speakers are global: declared anywhere in any file and known in every file
   );
 });
 
-test("the label check follows where a global's assignment runs, and a global function's goto enters afresh", () => {
+test("the label check follows where a global's assignment runs", () => {
   // A `global ... default:` assigns only when its declaration runs, so an unreachable one adds no way to a label and
   // reads nothing.
   const said1 = (source: string, warnings: readonly string[] = []) =>
@@ -724,24 +712,6 @@ test("the label check follows where a global's assignment runs, and a global fun
       ...warnings,
       ["main.tease", "TSV054", 4],
     ]);
-
-  // A global function may run from any file, and its bare label means that label of its own file, entered afresh, so
-  // nothing of the file has run there: here main.tease calls lib.tease, which calls back into main.tease's goto.
-  assert.deepEqual(
-    diagnostics([
-      {
-        path: "main.tease",
-        source:
-          "indirect()\nlet x = 1\nlabel later\nsay x\nexit\nglobal function skip { goto later }",
-      },
-      { path: "lib.tease", source: "global function indirect { skip() }" },
-    ]),
-    [["main.tease", "TSV054", 4]],
-  );
-  assert.deepEqual(
-    said1("label later\nlet x = 1\nsay x\nexit\nglobal function skip { goto later }"),
-    ["1"],
-  );
 });
 
 test("checkpoints restore in the middle of startup and after it", () => {

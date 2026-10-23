@@ -119,8 +119,8 @@ function plainScalarText(value: SerializableRuntimeValue, span: SourceSpan): str
 }
 
 /**
- * A script reference as the call that makes it: `script("rooms/hall.tease", label: "start")`. A `limit` cuts its texts
- * before they are quoted. Notation longer than any text can be fails with `TSR084` for `script(…)`.
+ * A script reference as the call that makes it: `script("rooms/hall.tease")`. A `limit` cuts its path before it is
+ * quoted. Notation longer than any text can be fails with `TSR084` for `script(…)`.
  */
 function scriptNotation(
   value: SerializableScriptReference,
@@ -128,17 +128,12 @@ function scriptNotation(
   limit = Infinity,
 ): string {
   const path = prefix(value.path, limit);
-  const label = value.label === null ? null : prefix(value.label, limit);
-  // `script(`, `)`, and `, label: ` around the quoted texts.
-  const around = 8 + (label === null ? 0 : 9);
-  // Quoting adds two quotes and at most one escape for each character, so only texts that could get too long are measured.
-  if ((path.length + (label?.length ?? 0)) * 2 + 4 + around > MAX_TEXT_LENGTH)
-    checkTextLength(
-      quotedLength(path) + (label === null ? 0 : quotedLength(label)) + around,
-      "script(…)",
-      span,
-    );
-  return `script(${quotedText(path)}${label === null ? "" : `, label: ${quotedText(label)}`})`;
+  // `script(` and `)` around the quoted path.
+  const around = 8;
+  // Quoting adds two quotes and at most one escape for each character, so only a path that could get too long is measured.
+  if (path.length * 2 + 2 + around > MAX_TEXT_LENGTH)
+    checkTextLength(quotedLength(path) + around, "script(…)", span);
+  return `script(${quotedText(path)})`;
 }
 
 /**
