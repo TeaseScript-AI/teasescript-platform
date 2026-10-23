@@ -488,20 +488,25 @@ function referencedFiles(
  * whose type checks only the properties it lists, so another property may hold anything.
  */
 function mayHoldScript(type: TypePlan | null): boolean {
-  if (type === null) return true;
-  switch (type.kind) {
-    case "script":
-    case "object":
-      return true;
-    case "list":
-    case "set":
-    case "dict":
-      return mayHoldScript(type.element);
-    case "union":
-      return type.members.some(mayHoldScript);
-    default:
-      return false;
+  // A worklist, so that a type nested as deep as its source allows does not deepen the native stack.
+  const pending = [type];
+  for (let part = pending.pop(); part !== undefined; part = pending.pop()) {
+    if (part === null) return true;
+    switch (part.kind) {
+      case "script":
+      case "object":
+        return true;
+      case "list":
+      case "set":
+      case "dict":
+        pending.push(part.element);
+        break;
+      case "union":
+        for (const member of part.members) pending.push(member);
+        break;
+    }
   }
+  return false;
 }
 
 /**

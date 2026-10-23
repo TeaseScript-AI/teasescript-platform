@@ -546,12 +546,15 @@ test("an object that a load gives may hold a reference to any file", () => {
     );
 });
 
-test("the files that references may name are found without a native argument limit", () => {
-  const result = compileProject(
-    project(`let values = [${"0, ".repeat(139_999)}0]\ncall "a.tease"\nexit`, { "a.tease": "end" }),
-  );
-  assert.deepEqual(result.diagnostics, []);
-  assert.notEqual(result.plan, null);
+test("the files that references may name are found without a native argument or stack limit", () => {
+  for (const main of [
+    `let values = [${"0, ".repeat(139_999)}0]`,
+    `let data: integer${"[]".repeat(10_000)} = load "data", default: []`,
+  ]) {
+    const result = compileProject(project(`${main}\ncall "a.tease"\nexit`, { "a.tease": "end" }));
+    assert.deepEqual(result.diagnostics, [], main.slice(0, 40));
+    assert.notEqual(result.plan, null, main.slice(0, 40));
+  }
 });
 
 test("a fallback statement is no statement", () => {
