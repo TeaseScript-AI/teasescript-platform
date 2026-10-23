@@ -761,6 +761,19 @@ test("a function is no target of a call or goto", () => {
       "scene()",
     ],
   ]);
+  // The statement ends after the call, also at the `}` of a compact block, so the statements around it stay.
+  const compact = `${scene}if true { call scene() } else { goto scene() }\nexit`;
+  assert.deepEqual(
+    found(compact).map(([code, , text]) => [code, text]),
+    [
+      ["TSP039", "scene()"],
+      ["TSP039", "scene()"],
+    ],
+  );
+  assert.deepEqual(
+    parse(compact).program.statements.map((statement) => statement.kind),
+    ["functionDeclaration", "ifStatement", "exitStatement"],
+  );
 });
 
 test("a block of a file the session left sees that file's variables, and its goto brings that file back", () => {
