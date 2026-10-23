@@ -430,7 +430,8 @@ class ProjectNames {
         return false;
       let at = first.length;
       const end = path.length - last.length;
-      for (const text of texts.slice(1, -1)) {
+      for (let index = 1; index < texts.length - 1; index += 1) {
+        const text = texts[index]!;
         const found = path.indexOf(text, at);
         if (found < 0 || found + text.length > end) return false;
         at = found + text.length;
