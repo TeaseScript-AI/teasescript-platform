@@ -263,7 +263,9 @@ than a script limit), it starts again from the state before the Player's next ca
 call that fails the session or throws freezes the record, which keeps the state that call reached, or for a call that
 threw, the state it started from, as the export's checkpoint, so that later observations, such as on hiding the page,
 cannot evict or outdate it; a call the recorder cannot copy, or a media store or random decision callback that throws
-during a call, marks it incomplete. The recorder also lets the Player continue after a call throws, which ends the
+during a call, marks it incomplete, and so does a state the session cannot export, such as one holding a list too long
+for the browser to enumerate, for which the record keeps no end state but still how the session failed there, if it
+did. The recorder also lets the Player continue after a call throws, which ends the
 session's [runtime session](RUNTIME.md#runtime-sessions): the Player rebuilds the state it showed last from the recorded
 calls. For that, the recorder keeps logging calls after the record froze without changing the record, and after a call
 it cannot copy, it starts that log again at the Player's next call.
@@ -271,8 +273,8 @@ it cannot copy, it starts that log again at the Player's next call.
 The Player assembles an export when its dialog opens ([Player UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
 session, the record, and the photos frozen then (`player/debug-export-assembly.ts`), so play may continue meanwhile. The
 technical report carries the build and its revisions, the package's storage scope and a SHA-256 of its compiled plan
-where the browser can hash, the incident as the session's actual state shows it, the storage editor's and the rewind's
-marks, the sequence and kind of the last 256 events, and what the Player itself observed, as Debug's Now view and the notices show it: the
+where the browser can hash, the incident as the session's actual state shows it, also a state it cannot export, the
+storage editor's and the rewind's marks, the sequence and kind of the last 256 events, and what the Player itself observed, as Debug's Now view and the notices show it: the
 Stage image's status (such as an unresolved path or a failed load), each playing medium's kind, load, and state, and
 each notice's kind and level, such as blocked audio. These describe this browser; a replay of the engine calls does not
 reproduce them. Saved values add the session's storage view; answers add the recorded interaction completions with their `input`; session
@@ -283,8 +285,8 @@ transcript text, and button labels always, but the details of requests, settleme
 saved values, answers, or storage keys, only when saved values and answers are chosen too, and never a lock step's text,
 file, or password ([`ENCRYPTION.md`](ENCRYPTION.md#what-is-stored-and-recorded)); replay data adds the
 checkpoint of the state a complete record reaches (of the actual state when the record is incomplete), or of its anchor
-as the last good state when that state cannot be checkpointed; photos add the chosen originals of the photos the export
-refers to and their uses (a recorded image answer or capture, or a saved value; none for one it holds only otherwise,
+as the last good state when that state cannot be exported or checkpointed; photos add the chosen originals of the
+photos the export refers to and their uses (a recorded image answer or capture, or a saved value; none for one it holds only otherwise,
 such as in a variable of the replay's state), where a state's `storedFiles`, which names every stored file the session
 knew, does not count as referring to one; Player and browser details add the presentation settings, screen
 geometry, pointer, language, and user agent. Text that looks like a credential, or a rooted, drive, or network file path

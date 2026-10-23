@@ -489,6 +489,62 @@ test("after a Player error, a debug export keeps the recording up to the error t
   );
 });
 
+test("a debug export of a failed state the session cannot export names the failure and carries the last good state", async (context) => {
+  stubBrowser(context);
+  const host = mount(context, () => usePlayerSession({ capabilities: { camera: false } }));
+  // V8 cannot enumerate the keys of a list of about 134 million elements, so a state that holds one cannot be exported;
+  // a list of 1,500 stands for it.
+  const ownKeys = Reflect.ownKeys;
+  context.mock.method(Reflect, "ownKeys", (target: Parameters<typeof Reflect.ownKeys>[0]) => {
+    if (Array.isArray(target) && target.length > 1_000)
+      throw new RangeError("Too many properties to enumerate");
+    return ownKeys(target);
+  });
+  host.prepare(({ recorder }) =>
+    runtime.createPlayerRuntimeSession(
+      'say "Counting", instant\nlet xs = (1..=1500).toList()\nlet zero = dynamic(0)\nlet result = 1 / zero\nexit\nfunction dynamic(value) {\n    return value\n}',
+      { recorder },
+    ),
+  );
+  await host.activate();
+  assert.equal(host.session.value?.state.status, "failed");
+  const candidate = await host.debugExportCandidate(shown);
+  context.mock.restoreAll();
+  let choices = NO_PERSONAL_CONTENT;
+  for (const category of ["savedValues", "answers", "sessionText", "replay"] as const)
+    choices = chooseDebugCategory(choices, candidate, category, true);
+  const exported = async (frozen: DebugExportCandidate) =>
+    parseDebugExport(
+      await (
+        await debugExportFile((await assembleDebugExport(frozen, choices)).exported, false)
+      ).text(),
+    );
+  const read = await exported(candidate);
+  // The division by zero in the fourth line, as the error dialog names it.
+  assert.deepEqual(
+    [read.incident.kind, read.incident.code, read.incident.path, read.incident.line],
+    ["runtimeFailure", "TSR036", "main.tease", 4],
+  );
+  // The checkpoint is the recording's anchor, the last good state, and no earlier state stands in for the one shown.
+  assert.equal(read.checkpointRole, "lastGood");
+  assert.equal(read.replay?.anchorSnapshot, null);
+  assert.equal(read.sections["storage"], undefined);
+  assert.equal(replayDebugExport(read).kind, "incomplete");
+  // What the player saw stays.
+  const events = read.sections["eventsTail"];
+  assert.ok(Array.isArray(events));
+  assert.deepEqual(
+    events.map((event: { kind?: unknown }) => event.kind),
+    ["say", "runtimeFailure"],
+  );
+  // Once the session is no longer shown, its recording still names the failure.
+  const ended = await exported({ ...candidate, session: null });
+  assert.deepEqual(
+    [ended.incident.code, ended.incident.path, ended.incident.line, ended.checkpointRole],
+    ["TSR036", "main.tease", 4, "lastGood"],
+  );
+});
+
 test("a debug export offers a photo only the replay saves, also after a Player error and Back, and replays with it", async (context) => {
   stubBrowser(context);
   const photo = "captured-media:44444444-4444-4444-8444-444444444444:1";

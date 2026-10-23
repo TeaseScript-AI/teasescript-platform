@@ -3,6 +3,7 @@ import {
   type InstructionPlan,
   type InterpreterEvent,
   type RuntimeCheckpoint,
+  type RuntimeFailureSnapshot,
   type RuntimeSnapshot,
 } from "../src/index.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
@@ -35,7 +36,10 @@ export interface DebugExportCandidate {
   readonly package: Pick<DebugPackage, "id" | "version">;
   readonly session: {
     readonly plan: InstructionPlan;
-    readonly snapshot: RuntimeSnapshot;
+    /** The session's state, or `null` when it cannot be exported, such as one with a list too long to enumerate. */
+    readonly snapshot: RuntimeSnapshot | null;
+    /** How the session failed, as it shows it, also when its state cannot be exported; `null` when it did not. */
+    readonly failure: RuntimeFailureSnapshot | null;
     readonly events: readonly InterpreterEvent[];
     readonly transcriptEntries: readonly PlayerTranscriptEntryPresentation[];
   } | null;
@@ -178,10 +182,10 @@ export async function assembleDebugExport(
   const { session, recording } = candidate;
   const parts: DebugExportPart[] = [];
   const omissions: string[] = [];
-  const { snapshot, replaySnapshot } = exportedStates(candidate);
+  const { snapshot, failure, replaySnapshot } = exportedStates(candidate);
   const plan = recording?.plan ?? session?.plan ?? null;
   const incident = describeIncident(
-    snapshot,
+    failure,
     candidate.hostError === null ? null : scrub(candidate.hostError),
   );
   parts.push({
@@ -229,7 +233,8 @@ export async function assembleDebugExport(
       name: "Saved script values",
       detail: `${snapshot.scriptStorage.length} saved key(s)`,
     });
-  }
+  } else if (choices.savedValues)
+    omissions.push("Saved values were left out because the session's state could not be exported.");
   if (choices.answers) {
     const answers = recordedAnswers(recording);
     sections["answers"] = removeSecrets(answers);
@@ -247,7 +252,7 @@ export async function assembleDebugExport(
   let checkpoint: RuntimeCheckpoint | null = null;
   let checkpointRole: DebugExport["checkpointRole"] = null;
   let replay: DebugReplay | null = null;
-  if (choices.replay && plan !== null && replaySnapshot !== null) {
+  if (choices.replay && plan !== null) {
     ({ checkpoint, checkpointRole, replay } = replayData(
       plan,
       replaySnapshot,
@@ -318,17 +323,23 @@ export async function assembleDebugExport(
   return { exported, parts };
 }
 
-/** The states an export carries: the state shown, and the state its replay data checkpoints. */
+/**
+ * The states an export carries: the state shown and how the session failed there, and the state its replay data
+ * checkpoints.
+ */
 function exportedStates({
   session,
   recording,
 }: Pick<DebugExportCandidate, "session" | "recording">) {
-  // The session's actual state describes what happened; a recording that stopped early ends at an earlier state.
-  const snapshot = session?.snapshot ?? recording?.endSnapshot ?? null;
+  // The session's actual state describes what happened, and without a session, the state its recording reaches; a
+  // recording that stopped early ends at an earlier state. A state that cannot be exported is not shown, but how the
+  // session failed there still is.
+  const snapshot = session === null ? (recording?.endSnapshot ?? null) : session.snapshot;
+  const failure = session === null ? (recording?.endFailure ?? null) : session.failure;
   // The state replay data checkpoints: where a complete recording's calls lead, which a failed session reached before
   // any later observation of time. An incomplete recording does not replay, so the actual state is the most useful.
   const replaySnapshot = recording?.complete === true ? recording.endSnapshot : snapshot;
-  return { snapshot, replaySnapshot };
+  return { snapshot, failure, replaySnapshot };
 }
 
 /**
@@ -350,10 +361,9 @@ function transcriptTail(entries: readonly PlayerTranscriptEntryPresentation[]) {
 }
 
 function describeIncident(
-  snapshot: RuntimeSnapshot | null,
+  failure: RuntimeFailureSnapshot | null,
   hostError: string | null,
 ): DebugIncident {
-  const failure = snapshot?.failure ?? null;
   if (failure !== null)
     return {
       kind: "runtimeFailure",
@@ -373,10 +383,13 @@ function describeIncident(
   };
 }
 
-/** The checkpoint and recorded calls, or the last good state when the current one cannot be checkpointed. */
+/**
+ * The checkpoint and recorded calls, or the last good state when the current one cannot be checkpointed, also when it
+ * could not be exported (`null`).
+ */
 function replayData(
   plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
+  snapshot: RuntimeSnapshot | null,
   recording: DebugRecording | null,
   omissions: string[],
 ): Pick<DebugExport, "checkpoint" | "checkpointRole" | "replay"> {
@@ -390,25 +403,36 @@ function replayData(
           reason: recording.reason,
         };
   if (recording === null) omissions.push("No engine calls were recorded for this session.");
-  try {
+  const current = snapshot === null ? null : checkpointOrNull(plan, snapshot);
+  if (current !== null)
     return {
-      checkpoint: createCheckpoint(plan, snapshot),
+      checkpoint: current,
       checkpointRole: "current",
       replay: calls(recording?.anchorSnapshot ?? null),
     };
+  if (recording === null) {
+    omissions.push("The current state could not be checkpointed.");
+    return { checkpoint: null, checkpointRole: null, replay: null };
+  }
+  omissions.push(
+    "The current state could not be checkpointed; the export carries the last good state instead.",
+  );
+  return {
+    checkpoint: createCheckpoint(plan, recording.anchorSnapshot),
+    checkpointRole: "lastGood",
+    replay: calls(null),
+  };
+}
+
+/** A checkpoint of `snapshot`, or `null` when the engine's validation refuses the state. */
+function checkpointOrNull(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+): RuntimeCheckpoint | null {
+  try {
+    return createCheckpoint(plan, snapshot);
   } catch {
-    if (recording === null) {
-      omissions.push("The current state could not be checkpointed.");
-      return { checkpoint: null, checkpointRole: null, replay: null };
-    }
-    omissions.push(
-      "The current state could not be checkpointed; the export carries the last good state instead.",
-    );
-    return {
-      checkpoint: createCheckpoint(plan, recording.anchorSnapshot),
-      checkpointRole: "lastGood",
-      replay: calls(null),
-    };
+    return null;
   }
 }
 

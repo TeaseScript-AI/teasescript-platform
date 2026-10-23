@@ -1977,19 +1977,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     ): Promise<DebugExportCandidate> {
       // Everything is taken before the first photo is read, so play continuing meanwhile cannot mix in later state.
       const current = session.value;
-      // The shown state, after a call that threw rebuilt from the recorded calls; without it, the export has no session
-      // state, so it never presents an earlier state as the one shown.
+      // The shown state, after a call that threw rebuilt from the recorded calls, or `null` when it cannot be exported, so
+      // that the export never presents an earlier state as the one shown; how the session failed is known either way.
       const snapshot = current === null ? null : playerRuntimeSnapshotOrNull(current);
       const recording = exportedRecording();
       const frozen = {
         build: playerBuildIdentity,
         package: options.debugPackage ?? { id: null, version: null },
         session:
-          current === null || snapshot === null
+          current === null
             ? null
             : {
                 plan: current.plan,
                 snapshot,
+                failure: current.state.failure,
                 events: [...current.events],
                 transcriptEntries: [...current.transcriptEntries],
               },

@@ -3,6 +3,7 @@ import type {
   InstructionPlan,
   InterpreterEvent,
   RandomChoiceReceipt,
+  RuntimeFailureSnapshot,
   RuntimeSession,
   RuntimeSnapshot,
   RuntimeStatus,
@@ -27,9 +28,12 @@ export interface DebugRecording {
   /**
    * The state the recorded calls reach: the session's state, or, once the recording froze, the state at its last call,
    * although the session may have observed more time since. After a call that threw, it is the state before that call,
-   * rebuilt from the anchor and the calls before it.
+   * rebuilt from the anchor and the calls before it. `null` when it could not be exported or rebuilt, which leaves the
+   * recording incomplete: an earlier state never stands in for it.
    */
-  readonly endSnapshot: RuntimeSnapshot;
+  readonly endSnapshot: RuntimeSnapshot | null;
+  /** How the session had failed at that state, also when it could not be exported; `null` when it had not. */
+  readonly endFailure: RuntimeFailureSnapshot | null;
   /** Whether every call since the anchor is recorded; otherwise `reason` says why not. */
   readonly complete: boolean;
   readonly reason: string | null;
@@ -41,16 +45,22 @@ interface CallResult {
   readonly outcome?: { readonly kind: string };
   /** The session status after the call. */
   readonly status: RuntimeStatus;
+  /** How the session failed, as it shows it after the call, or `null`. */
+  readonly failure: RuntimeFailureSnapshot | null;
   readonly randomChoices?: readonly RandomChoiceReceipt[];
   /** The ID of the random draw the session stands paused at after the call, or `null`. */
   readonly pausedAt: number | null;
 }
 
-/** A recording that froze: the log then, and the state at its last call, `null` until it is rebuilt after a throw. */
+/**
+ * A recording that froze: the log then; the state at its last call, `undefined` until it is rebuilt after a throw, and
+ * `null` when it could not be exported or rebuilt; and how the session had failed there.
+ */
 interface FrozenRecording {
   readonly anchor: RuntimeSnapshot;
   readonly operations: readonly DebugOperation[];
-  end: RuntimeSnapshot | null;
+  end: RuntimeSnapshot | null | undefined;
+  readonly failure: RuntimeFailureSnapshot | null;
 }
 
 /**
@@ -242,13 +252,24 @@ export class DebugRecorder {
     };
     if (this.#plan === null || log.anchor === null || log.current === null) return null;
     const frozen = log.frozen;
+    const end = frozen === null ? exportedOrNull(log.current) : this.#frozenEnd(frozen);
+    // A failed state the session could not export left the recording incomplete when it froze; the current state, and
+    // the state before a throw, are taken only now.
+    const reason =
+      log.problem ??
+      (end !== null
+        ? null
+        : frozen === null
+          ? "The current state could not be exported."
+          : "The state before the error could not be rebuilt from the recorded calls.");
     return {
       plan: this.#plan,
       anchorSnapshot: frozen?.anchor ?? log.anchor,
       operations: frozen === null ? log.operations.slice(0, log.count) : [...frozen.operations],
-      endSnapshot: frozen === null ? log.current() : this.#frozenEnd(frozen),
-      complete: log.problem === null,
-      reason: log.problem,
+      endSnapshot: end,
+      endFailure: end === null ? (frozen?.failure ?? null) : end.failure,
+      complete: reason === null,
+      reason,
     };
   }
 
@@ -386,7 +407,7 @@ export class DebugRecorder {
       randomChoices: [...paused.randomChoices, ...(result.randomChoices ?? [])],
       pausedAt: result.pausedAt,
     });
-    if (result.status === "failed") this.#freezeFailed();
+    if (result.status === "failed") this.#freezeFailed(result.failure);
   }
 
   /** The copied arguments to log, or `null` when this call is not logged. */
@@ -466,27 +487,28 @@ export class DebugRecorder {
     this.#broken = true;
     if (this.#frozen !== null) return;
     this.#problem ??= problem;
-    this.#freeze(input === null ? null : input());
+    this.#freeze(input === null ? undefined : input(), null);
   }
 
-  #freeze(end: RuntimeSnapshot | null): void {
-    this.#frozen ??= { anchor: this.#anchor!, operations: [...this.#operations], end };
+  #freeze(end: RuntimeSnapshot | null | undefined, failure: RuntimeFailureSnapshot | null): void {
+    this.#frozen ??= { anchor: this.#anchor!, operations: [...this.#operations], end, failure };
   }
 
   /**
-   * Freezes, unless frozen, at the state of the session that failed. A state the session cannot export, such as one
-   * with a list too long for the host to enumerate, leaves the recording incomplete, ending where it starts.
+   * Freezes, unless frozen, at the state of the session that failed as `failure` says. A state the session cannot
+   * export, such as one with a list too long for the host to enumerate, leaves the recording incomplete, with only how
+   * the session failed.
    */
-  #freezeFailed(): void {
+  #freezeFailed(failure: RuntimeFailureSnapshot | null): void {
     if (this.#frozen !== null) return;
-    let end: RuntimeSnapshot;
+    let end: RuntimeSnapshot | null;
     try {
       end = this.#current!();
     } catch {
       this.#problem ??= "The state at the error could not be exported.";
-      end = this.#anchor!;
+      end = null;
     }
-    this.#freeze(end);
+    this.#freeze(end, failure);
   }
 
   #add(
@@ -512,21 +534,32 @@ export class DebugRecorder {
       input: kind === "completeAction" ? this.#input : null,
     });
     // A failed session still holds its state, so the end is taken now; after a throw it is rebuilt when needed.
-    if (thrown !== null) this.#freeze(null);
-    else if (status === "failed") this.#freezeFailed();
+    if (thrown !== null) this.#freeze(undefined, null);
+    else if (result?.status === "failed") this.#freezeFailed(result.failure);
   }
 
-  /** The state at the call that froze the recording; after a throw, rebuilt from the calls before it. */
-  #frozenEnd(frozen: FrozenRecording): RuntimeSnapshot {
-    if (frozen.end !== null) return frozen.end;
+  /**
+   * The state at the call that froze the recording, or `null` when it could not be exported; after a throw, rebuilt
+   * from the calls before it, or `null` when it cannot be.
+   */
+  #frozenEnd(frozen: FrozenRecording): RuntimeSnapshot | null {
+    if (frozen.end !== undefined) return frozen.end;
     const before = frozen.operations.filter((operation) => operation.thrown === null);
     try {
       frozen.end = rebuildRecordedSession(this.#plan!, frozen.anchor, before).exportSnapshot();
     } catch {
-      this.#problem ??= "The state before the error could not be rebuilt from the recorded calls.";
-      frozen.end = frozen.anchor;
+      frozen.end = null;
     }
     return frozen.end;
+  }
+}
+
+/** The state `current` exports, or `null` when it cannot be exported. */
+function exportedOrNull(current: () => RuntimeSnapshot): RuntimeSnapshot | null {
+  try {
+    return current();
+  } catch {
+    return null;
   }
 }
 
