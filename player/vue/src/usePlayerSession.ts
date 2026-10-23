@@ -70,6 +70,7 @@ import {
   capturedMediaReferencesIn,
   keptPhotoReferences,
   keptSession,
+  KeptSessionTakenOverError,
   memoryKeptRoomStore,
   memoryKeptSessionStore,
   type KeptRoomStore,
@@ -1170,6 +1171,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Continue is discarded, and any late answer belongs to an older session generation and is ignored.
    */
   function endSession() {
+    forgetTakeover();
     activationToken++;
     openingCamera.value = false;
     activation.value = null;
@@ -1192,8 +1194,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // Starts or restores a session; its scene time continues from the persisted observation, so a
   // gap while no Player ran is not consumed. A state Debug's rewind restored is published `paused` for inspection.
   function start(next: PlayerRuntimeSession, paused = false) {
-    // A failed write concerns the run it happened in.
+    // A failed write concerns the run it happened in, and so does another Player's takeover.
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
+    forgetTakeover();
     reportedMedia = new Set();
     debugEdits.value = null;
     inspecting.value = paused;
@@ -1245,6 +1248,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   } = { plan: false, count: 0, last: null };
   let keeping: Promise<void> | null = null;
   let keepAgain = false;
+  // Whether another Player, on another device or in another tab, kept the normal room's session shown since this one
+  // did (PLAYER-UI "Session start and user activation"): its progress here is no longer kept, until the player continues
+  // here what the other left.
+  let takenOver = false;
+  function noticeTakeover() {
+    takenOver = true;
+    notices.publish(playerNotices.sessionTakenOver(() => void continueHere()));
+  }
+  function forgetTakeover() {
+    takenOver = false;
+    notices.dismiss(playerNoticeKeys.sessionTakenOver);
+  }
   /**
    * Keeps the shown session, where a reload continues it, together with the photos only it uses. One write runs at a
    * time; a request meanwhile keeps the session as it is once that is done. A state Debug's rewind shows for inspection
@@ -1268,7 +1283,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const current = session.value;
     // Only a script a host prepared with `prepareScript` keeps its session.
     if (keptScope === null || scriptPlan === null || current === null) return;
-    if (inspecting.value || activation.value !== null) return;
+    if (inspecting.value || activation.value !== null || takenOver) return;
     // Taken before anything waits: later operations change the session.
     let snapshotJson: string;
     try {
@@ -1289,6 +1304,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const references = capturedMediaReferencesIn(snapshotJson, added);
     const inDebugRoom = room.value === "debug";
     const store = keptStore();
+    const shown = generation.value;
     // The room's saved data are in use once storage reached it.
     await storageRoute;
     if (disposed || (room.value === "debug") !== inDebugRoom) return;
@@ -1313,8 +1329,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       });
       kept = { plan: true, count, last };
       if (inDebugRoom) debugRoom.value = { session: true };
-    } catch {
-      // The session kept before stays; a reload continues from there.
+    } catch (error) {
+      // The session kept before stays; a reload continues from there, and so does another Player that kept it meanwhile.
+      if (error instanceof KeptSessionTakenOverError && !disposed && generation.value === shown)
+        noticeTakeover();
     }
   }
   /** Keeps the shown session as it is now and waits until it is kept. */
@@ -1342,8 +1360,41 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     "visibilitychange",
     () => {
       if (document.visibilityState === "hidden") keepSessionLater();
+      else void checkTakeover();
     },
   );
+  /**
+   * Tells the player, when the page shows again, that another Player kept the session meanwhile, before anything is
+   * played here that would not be kept. A keep finds out by itself.
+   */
+  async function checkTakeover() {
+    if (keptScope === null || room.value !== "normal" || !sessionLive.value || takenOver) return;
+    const shown = generation.value;
+    const changed = await keptSessions.changedElsewhere?.(keptScope).catch(() => false);
+    if (changed === true && !disposed && !takenOver && generation.value === shown) noticeTakeover();
+  }
+  /**
+   * Continues here, from the player's click, the session another Player took over, as the store keeps it now: this
+   * Player keeps it from then on, and the other one is told in turn. Without a session that goes on, such as one that
+   * ended there, Start shows. Nothing changes while the store cannot be read.
+   */
+  let continuingHere = false;
+  async function continueHere(): Promise<void> {
+    if (!takenOver || continuingHere || scriptPlan === null) return;
+    continuingHere = true;
+    try {
+      // The keep that found the session taken over finishes first.
+      while (keeping !== null) await keeping;
+      const shown = generation.value;
+      const continued = await restoreKept(scriptPlan).catch(() => undefined);
+      if (continued === undefined || disposed || !takenOver || generation.value !== shown) return;
+      endSession();
+      showKept(continued);
+      if (activation.value?.kind === "continue") await activate();
+    } finally {
+      continuingHere = false;
+    }
+  }
   /**
    * Prepares a session of `plan`, which `create` starts: Continue when the script keeps a session that can go on, else
    * Start. Call it instead of `prepare` once the stored values are loaded.
@@ -1360,7 +1411,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   /** Shows Continue when the script keeps a session that can go on, else Start. */
   async function prepareKept(): Promise<void> {
-    const continued = scriptPlan === null ? null : await restoreKept(scriptPlan);
+    showKept(scriptPlan === null ? null : await restoreKept(scriptPlan).catch(() => null));
+  }
+  /** Shows Continue for a kept session that goes on, else Start. */
+  function showKept(continued: Awaited<ReturnType<typeof restoreKept>>) {
     if (disposed) return;
     if (continued !== null) {
       kept = {
@@ -1373,7 +1427,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   /**
    * The kept session, restored, when it runs `plan` and has not ended; else `null`. The photos only it uses are its
-   * session media again.
+   * session media again. Rejects when the store cannot be read.
    */
   async function restoreKept(
     plan: InstructionPlan,
@@ -1381,7 +1435,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (keptScope === null) return null;
     await storageRoute;
     const store = keptStore();
-    const stored = await store.session(keptScope).catch(() => null);
+    const stored = await store.session(keptScope);
     const found = stored === null ? null : keptSession(stored);
     if (found === null || found.planJson !== JSON.stringify(plan)) return null;
     let restored: PlayerRuntimeSession;
@@ -1524,6 +1578,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         const making = live || debugRoom.value === null;
         const replacing = live && debugRoom.value !== null;
         room.value = "debug";
+        // The debug room keeps its session in this browser.
+        forgetTakeover();
         kept = { plan: false, count: 0, last: null };
         keptPresentation = null;
         await switchStorage(async () => {

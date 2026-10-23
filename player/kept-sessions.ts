@@ -24,16 +24,29 @@ export interface KeptSessionStore {
   session(scope: string): Promise<StoredKeptSession | null>;
   /**
    * Stores the scope's session at once. The stored events before `eventsFrom` stay, the rest are replaced by `events`;
-   * `planJson` is `null` to keep the stored plan. Rejects without a plan, or with a gap in the events.
+   * `planJson` is `null` to keep the stored plan. Rejects without a plan, or with a gap in the events, and with a
+   * `KeptSessionTakenOverError` from a store that other Players also keep sessions in, such as a server, when one kept or
+   * discarded the session since this store last read or kept it.
    */
   publish(scope: string, session: KeptSessionUpdate): Promise<void>;
   /** The photos of every kept session, with the scope as namespace. */
   readonly media: CapturedMediaRepository;
   /**
    * Deletes the scope's session and its photos, at once. With `replacing`, this Player starts a new session over the one
-   * it found: a store that other Players also keep sessions in, such as a server, refuses when one kept it meanwhile.
+   * it found, and the store refuses like `publish` when another Player kept it meanwhile.
    */
   discard(scope: string, replacing?: boolean): Promise<void>;
+  /**
+   * Whether another Player kept or discarded the scope's session since this store last read or kept it, so that keeping
+   * it would be refused; the store does not read the session, and keeping it still names what this store saw. A store
+   * that only this Player keeps sessions in has none.
+   */
+  changedElsewhere?(scope: string): Promise<boolean>;
+}
+
+/** Another Player kept or discarded the session since this one read or kept it, so the store did not change it. */
+export class KeptSessionTakenOverError extends Error {
+  override readonly name = "KeptSessionTakenOverError";
 }
 
 /**

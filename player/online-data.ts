@@ -14,7 +14,11 @@ import type {
   CapturedMediaRepository,
   StoredCapturedMedia,
 } from "./captured-media.js";
-import type { KeptSessionStore, StoredKeptSession } from "./kept-sessions.js";
+import {
+  KeptSessionTakenOverError,
+  type KeptSessionStore,
+  type StoredKeptSession,
+} from "./kept-sessions.js";
 import type { ScriptStorageProvider } from "./script-storage.js";
 
 // The Player's data on a server, for online mode (`player-data.ts`). The HTTP shapes are provisional: the temporary
@@ -31,15 +35,17 @@ import type { ScriptStorageProvider } from "./script-storage.js";
 // - `GET scripts/<scope>/media`: `{ references }`;
 // - `GET`, `PUT`, `DELETE scripts/<scope>/media/<reference>`: the media's bytes, with its other fields as the JSON
 //   header `X-Media-Record`; `PUT` never overwrites and answers 409 when the reference is stored already;
-// - `GET scripts/<scope>/session`: the kept session, `{ planJson, snapshotJson, events, marks }`, or 404; `PUT` with
-//   `{ planJson, snapshotJson, eventsFrom, events, marks }` keeps it as `KeptSessionStore.publish` does; `DELETE`
-//   discards it with its photos, which `scripts/<scope>/session-media` holds as `media` holds saved ones.
+// - `GET scripts/<scope>/session`: the kept session, `{ planJson, snapshotJson, events, marks }`, or 404; `HEAD` answers
+//   the same without the body; `PUT` with `{ planJson, snapshotJson, eventsFrom, events, marks }` keeps it as
+//   `KeptSessionStore.publish` does; `DELETE` discards it with its photos, which `scripts/<scope>/session-media` holds as
+//   `media` holds saved ones.
 //
 // Saved values and the kept session each have a revision, which every reply that reads or changes them names in
 // `X-Revision`, a missing session's 404 too. A change names the revision its Player last saw in `X-Base-Revision`, so
 // that the server notices another writer in between: it writes a saved value anyway, so the last one stays, and
 // refuses to keep a session, or to discard it for a new one, with 409. A change of data this Player has not read names
-// none and is not checked, such as an import's discard of a kept session.
+// none and is not checked, such as an import's discard of a kept session. A Player learns that another kept its session
+// from that 409, or sooner from a `HEAD` of the session that names a newer revision.
 //
 // A scope and a reference are each one path segment: the JSON string, percent-encoded, which keeps every text, also
 // `..` and a lone surrogate, apart from every other. A request that takes longer than `REQUEST_TIMEOUT_MS` fails.
@@ -124,7 +130,7 @@ export function onlineScriptStorage(server: OnlineServer, scope: string): Script
 /**
  * The sessions the Player keeps on the server, so that Continue works on another device. Keeping names the revision of
  * the session this Player last read or kept; when another Player kept it meanwhile, the server refuses, so that two
- * devices never mix their events, and the session kept first stays.
+ * devices never mix their events, and the session kept first stays. A refusal rejects with a `KeptSessionTakenOverError`.
  */
 export function onlineKeptSessions(server: OnlineServer): KeptSessionStore {
   const revisions = new Map<string, string>();
@@ -147,6 +153,22 @@ export function onlineKeptSessions(server: OnlineServer): KeptSessionStore {
     }
     return references;
   };
+  // The changes this store has begun and those under way: the server may count one before its reply names the new
+  // revision, so a revision read meanwhile is not taken for another Player's.
+  let begun = 0;
+  let underWay = 0;
+  const change = async (method: string, scope: string, body?: RequestBody) => {
+    begun++;
+    underWay++;
+    try {
+      const response = await send(server, method, path(scope), body);
+      if (response.status === 409)
+        throw new KeptSessionTakenOverError("Another Player kept this session meanwhile.");
+      revisions.set(scope, checkStatus(response).headers.get(REVISION) ?? "0");
+    } finally {
+      underWay--;
+    }
+  };
   return {
     async session(scope): Promise<StoredKeptSession | null> {
       const response = await send(server, "GET", path(scope));
@@ -161,8 +183,7 @@ export function onlineKeptSessions(server: OnlineServer): KeptSessionStore {
       return { planJson, snapshotJson, events, marks };
     },
     async publish(scope, update) {
-      const response = await request(server, "PUT", path(scope), jsonBody(update, base(scope)));
-      revisions.set(scope, response.headers.get(REVISION) ?? "0");
+      await change("PUT", scope, jsonBody(update, base(scope)));
     },
     media: {
       ...media,
@@ -180,14 +201,17 @@ export function onlineKeptSessions(server: OnlineServer): KeptSessionStore {
       },
     },
     async discard(scope, replacing) {
-      const response = await request(
-        server,
-        "DELETE",
-        path(scope),
-        replacing ? { headers: base(scope) } : undefined,
-      );
-      revisions.set(scope, response.headers.get(REVISION) ?? "0");
+      await change("DELETE", scope, replacing ? { headers: base(scope) } : undefined);
       kept.delete(scope);
+    },
+    async changedElsewhere(scope) {
+      if (underWay > 0) return false;
+      const before = begun;
+      const response = await send(server, "HEAD", path(scope));
+      if (response.status !== 404) checkStatus(response);
+      const seen = revisions.get(scope);
+      const current = response.headers.get(REVISION);
+      return begun === before && seen !== undefined && current !== null && current !== seen;
     },
   };
 }

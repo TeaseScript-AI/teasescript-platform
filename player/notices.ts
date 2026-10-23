@@ -60,6 +60,7 @@ export const playerNoticeKeys = {
   imageNeedsCamera: "image-needs-camera",
   sessionError: "session-error",
   rewindNotAdopted: "rewind-not-adopted",
+  sessionTakenOver: "session-taken-over",
 } as const;
 
 const mediaNames = { image: "Image", audio: "Audio", video: "Video" } as const;
@@ -92,6 +93,17 @@ export const playerNotices = {
     level: "warning",
     message:
       "The saved data of this earlier state could not be restored, so the session did not go on from it.",
+  }),
+  /**
+   * Another Player, on another device or in another tab, kept this session since this one did, so progress here is no
+   * longer kept; the action continues the session here from where the other left it.
+   */
+  sessionTakenOver: (continueHere: () => void): PlayerNotice => ({
+    key: playerNoticeKeys.sessionTakenOver,
+    level: "warning",
+    message: "This session continues on another device.",
+    action: { label: "Continue here", run: continueHere },
+    dismissible: false,
   }),
   /** `skip` is the label of the request's skip control, which still answers it, or `null` without one. */
   imageNeedsCamera: (skip: string | null): PlayerNotice => ({

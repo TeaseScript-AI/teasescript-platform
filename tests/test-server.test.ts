@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { createServer, request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
-import test, { after, before } from "node:test";
+import test, { after, before, type TestContext } from "node:test";
 import { effectScope } from "vue";
 
 import { CapturedMediaStore, type CapturedMediaRepository } from "../player/captured-media.js";
 import type { CapturedMediaLocks } from "../player/captured-media-persistence.js";
 import type { DebugRecorder } from "../player/debug-recorder.js";
-import type { KeptSessionStore, KeptSessionUpdate } from "../player/kept-sessions.js";
+import {
+  KeptSessionTakenOverError,
+  type KeptSessionStore,
+  type KeptSessionUpdate,
+} from "../player/kept-sessions.js";
+import type { PlayerNotice } from "../player/notices.js";
 import { uncoordinatedCapturedMediaLocks } from "../player/captured-media-persistence.js";
 import {
   onlineKeptSessions,
@@ -18,6 +23,7 @@ import {
 } from "../player/online-data.js";
 import {
   activatePlayerRuntimeButton,
+  activePlayerRuntimeInteraction,
   createPlayerRuntimeSession,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
@@ -184,12 +190,15 @@ test("a kept session continues on another device, and a stale Player cannot over
   });
   // The phone plays on; the laptop continued from what it read before and is refused.
   await phone.publish("kept", update(2, "three", 3));
-  await assert.rejects(laptop.publish("kept", update(2, "elsewhere", 3)), /HTTP 409/u);
+  await assert.rejects(
+    laptop.publish("kept", update(2, "elsewhere", 3)),
+    KeptSessionTakenOverError,
+  );
   assert.equal((await phone.session("kept"))?.snapshotJson, "three");
   // Once it reads the session again, the laptop takes it over.
   await laptop.session("kept");
   await laptop.publish("kept", update(3, "four", 4));
-  await assert.rejects(phone.publish("kept", update(3, "stale", 4)), /HTTP 409/u);
+  await assert.rejects(phone.publish("kept", update(3, "stale", 4)), KeptSessionTakenOverError);
   await assert.rejects(laptop.publish("kept", update(9, "gap", 10)), /HTTP 400/u);
   const photo = {
     namespace: "kept",
@@ -205,7 +214,7 @@ test("a kept session continues on another device, and a stale Player cannot over
   assert.equal(await onlineMediaRepository(server).get("kept", reference), null);
   // A Player that found the session cannot replace it with a new one once another kept it meanwhile.
   await laptop.publish("kept", update(4, "five", 5));
-  await assert.rejects(phone.discard("kept", true), /HTTP 409/u);
+  await assert.rejects(phone.discard("kept", true), KeptSessionTakenOverError);
   assert.equal((await laptop.session("kept"))?.snapshotJson, "five");
   // A discard that is no new session, such as an import's, goes ahead.
   await phone.discard("kept");
@@ -325,8 +334,10 @@ test("a session photo is still sent when the listing of the session's photos fai
   assert.notEqual(await onlineKeptSessions(server).media.get("listing-fails", reference), null);
 });
 
-test("a Player that starts over a session another Player kept meanwhile leaves that session, and the server notices", async (context) => {
-  // EVIDENCE: validation: Vite loaded the real source module; this test uses only these members of its host API.
+// The real Player session on the test server, each Player with its own client as on its own device, in a page that is
+// shown.
+async function sessionPlayers(context: TestContext, scope: string, source: string) {
+  // EVIDENCE: validation: Vite loaded the real source module; these tests use only these members of its host API.
   const { usePlayerSession } = (await loadPlayerModule("player/vue/src/usePlayerSession.ts")) as {
     usePlayerSession(options: {
       readonly scriptStorage: ScriptStorageProvider;
@@ -337,6 +348,7 @@ test("a Player that starts over a session another Player kept meanwhile leaves t
       };
     }): {
       readonly session: { readonly value: PlayerRuntimeSession | null };
+      readonly notices: { readonly value: readonly PlayerNotice[] };
       loadScriptStorage(): Promise<void>;
       scriptStorageOptions(): PlayerRuntimeSessionOptions;
       prepareScript(
@@ -346,6 +358,13 @@ test("a Player that starts over a session another Player kept meanwhile leaves t
       activate(): void;
       update(session: PlayerRuntimeSession): void;
     };
+  };
+  // The Player's stores come from the same bundle, so that it knows their refusals.
+  // EVIDENCE: validation: Vite loaded the real source module; these tests use only these members of it.
+  const online = (await loadPlayerModule("player/online-data.ts")) as {
+    onlineScriptStorage: typeof onlineScriptStorage;
+    onlineKeptSessions: typeof onlineKeptSessions;
+    onlineMediaRepository: typeof onlineMediaRepository;
   };
   // Event targets are the browser surface a session that only shows buttons uses.
   for (const name of ["document", "window"]) {
@@ -357,17 +376,16 @@ test("a Player that starts over a session another Player kept meanwhile leaves t
       else Reflect.deleteProperty(globalThis, name);
     });
   }
-  const source = 'showButton "First"\nshowButton "Second"\nexit';
   const plan = createPlayerRuntimeSession(source).plan;
   const open = async () => {
-    const scope = effectScope();
-    context.after(() => scope.stop());
+    const effects = effectScope();
+    context.after(() => effects.stop());
     const locks = uncoordinatedCapturedMediaLocks();
-    const player = scope.run(() =>
+    const player = effects.run(() =>
       usePlayerSession({
-        scriptStorage: onlineScriptStorage(server, "two-starts"),
-        keptSessions: onlineKeptSessions(server),
-        capturedMedia: { repository: onlineMediaRepository(server), locks },
+        scriptStorage: online.onlineScriptStorage(server, scope),
+        keptSessions: online.onlineKeptSessions(server),
+        capturedMedia: { repository: online.onlineMediaRepository(server), locks },
       }),
     )!;
     await player.loadScriptStorage();
@@ -376,14 +394,23 @@ test("a Player that starts over a session another Player kept meanwhile leaves t
     );
     return player;
   };
-  const kept = onlineKeptSessions(server);
-  const until = async (done: () => Promise<boolean>) => {
+  const until = async (done: () => boolean | Promise<boolean>) => {
     const deadline = Date.now() + 4000;
     while (!(await done())) {
       assert.ok(Date.now() < deadline, "Timed out");
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   };
+  return { open, until };
+}
+
+test("a Player that starts over a session another Player kept meanwhile leaves that session, and the server notices", async (context) => {
+  const { open, until } = await sessionPlayers(
+    context,
+    "two-starts",
+    'showButton "First"\nshowButton "Second"\nexit',
+  );
+  const kept = onlineKeptSessions(server);
   // Both Players show Start; the first starts and plays on, then the second starts too.
   const first = await open();
   const second = await open();
@@ -397,4 +424,134 @@ test("a Player that starts over a session another Player kept meanwhile leaves t
   second.activate();
   await until(async () => log.includes("Two writers: kept session of two-starts"));
   assert.deepEqual(await kept.session("two-starts"), before);
+});
+
+test("a Player tells another Player's keep from its own without reading the session, also while its own is under way", async (context) => {
+  const at = createSourcePosition(0, 0, 0);
+  const update = (eventsFrom: number, sequence: number) => ({
+    planJson: eventsFrom === 0 ? "plan" : null,
+    snapshotJson: String(sequence),
+    eventsFrom,
+    events: [{ kind: "exit" as const, sequence, span: createSourceSpan(at, at) }],
+    marks: { editedWhileDebugging: null, rewoundWhileDebugging: null },
+  });
+  const phone = onlineKeptSessions(server);
+  const laptop = onlineKeptSessions(server);
+  // A Player that has not read the session has nothing to compare.
+  assert.equal(await phone.changedElsewhere!("own"), false);
+  assert.equal(await phone.session("own"), null);
+  await phone.publish("own", update(0, 1));
+  assert.equal(await phone.changedElsewhere!("own"), false);
+  // The server counts the phone's keep before its reply arrives, and the phone's check comes in between; then the
+  // phone's check gets its reply only after another keep of its own.
+  const realFetch = globalThis.fetch;
+  // The next request of `method` waits, once the server answered it, until the test releases it.
+  let hold: { method: string; reached: boolean; release(): void; released: Promise<void> } | null =
+    null;
+  const holdNext = (method: string) => {
+    let release = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    const next = { method, reached: false, release, released };
+    hold = next;
+    return next;
+  };
+  context.mock.method(globalThis, "fetch", async (input: string | URL, init?: RequestInit) => {
+    const response = await realFetch(input, init);
+    const current = hold;
+    if (current !== null && current.method === init?.method && !current.reached) {
+      current.reached = true;
+      await current.released;
+    }
+    return response;
+  });
+  const reached = async (held: { readonly reached: boolean }) => {
+    while (!held.reached) await new Promise((resolve) => setTimeout(resolve, 5));
+  };
+  const put = holdNext("PUT");
+  const keeping = phone.publish("own", update(1, 2));
+  await reached(put);
+  assert.equal(await phone.changedElsewhere!("own"), false);
+  put.release();
+  await keeping;
+  const head = holdNext("HEAD");
+  const checking = phone.changedElsewhere!("own");
+  await reached(head);
+  await phone.publish("own", update(2, 3));
+  head.release();
+  assert.equal(await checking, false);
+  context.mock.restoreAll();
+  // Another Player keeps it: the phone learns so, and the other Player, which kept it last, does not.
+  await laptop.session("own");
+  await laptop.publish("own", update(3, 4));
+  assert.equal(await phone.changedElsewhere!("own"), true);
+  assert.equal(await laptop.changedElsewhere!("own"), false);
+  await assert.rejects(phone.publish("own", update(3, 4)), KeptSessionTakenOverError);
+  // So does a discard elsewhere.
+  await phone.session("own");
+  await laptop.discard("own");
+  assert.equal(await phone.changedElsewhere!("own"), true);
+});
+
+test("a Player whose session another Player continued says so, and continues the other's session here on request", async (context) => {
+  const { open, until } = await sessionPlayers(
+    context,
+    "taken-over",
+    'showButton "One"\nshowButton "Two"\nshowButton "Three"\nshowButton "Four"\nexit',
+  );
+  const kept = onlineKeptSessions(server);
+  type Player = Awaited<ReturnType<typeof open>>;
+  const press = (player: Player) =>
+    player.update(activatePlayerRuntimeButton(player.session.value!)!.session);
+  const notice = (player: Player) =>
+    player.notices.value.find(({ key }) => key === "session-taken-over");
+  const shown = (player: Player) =>
+    activePlayerRuntimeInteraction(player.session.value!.state)?.actionId;
+  const keptFrom = (player: Player) => async () =>
+    (await kept.session("taken-over"))?.events.length === player.session.value?.events.length;
+  const refusals = () =>
+    log.filter((line) => line === "Two writers: kept session of taken-over").length;
+  // The phone plays; the laptop continues the session and plays on.
+  const phone = await open();
+  phone.activate();
+  press(phone);
+  await until(keptFrom(phone));
+  const laptop = await open();
+  laptop.activate();
+  press(laptop);
+  press(laptop);
+  await until(keptFrom(laptop));
+  // The phone's page shows again: it says that the session continues on another device, and keeps nothing more.
+  assert.equal(notice(phone), undefined);
+  document.dispatchEvent(new Event("visibilitychange"));
+  await until(() => notice(phone) !== undefined);
+  assert.equal(notice(laptop), undefined);
+  assert.deepEqual(
+    { ...notice(phone), action: notice(phone)?.action?.label },
+    {
+      key: "session-taken-over",
+      level: "warning",
+      message: "This session continues on another device.",
+      action: "Continue here",
+      dismissible: false,
+    },
+  );
+  const laptopKept = await kept.session("taken-over");
+  press(phone);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(await kept.session("taken-over"), laptopKept);
+  assert.equal(refusals(), 0);
+  // Continue here: the phone goes on from where the laptop is, and keeps the session again.
+  assert.notEqual(shown(phone), shown(laptop));
+  notice(phone)!.action!.run();
+  await until(async () => notice(phone) === undefined && (await keptFrom(phone)()));
+  assert.equal(shown(phone), shown(laptop));
+  // The laptop's next keep is refused, so the laptop says so in turn and can take the session back.
+  press(laptop);
+  await until(() => notice(laptop) !== undefined);
+  assert.equal(refusals(), 1);
+  assert.equal(await keptFrom(phone)(), true);
+  notice(laptop)!.action!.run();
+  await until(async () => notice(laptop) === undefined && (await keptFrom(laptop)()));
+  assert.equal(laptop.session.value?.state.status, "waiting");
+  assert.equal(shown(laptop), shown(phone));
 });

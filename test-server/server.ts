@@ -260,7 +260,8 @@ export function testServer(options: TestServerOptions): {
       }
     }
     if (part === "session" && reference === undefined) {
-      if (method === "GET") {
+      // `HEAD` tells a Player whether another kept the session meanwhile; Node leaves out its body.
+      if (method === "GET" || method === "HEAD") {
         const session = store.session(user, scopeKey);
         if (session === null)
           return sendJsonText(
