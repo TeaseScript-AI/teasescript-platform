@@ -101,6 +101,27 @@ test("a password answer must be a SHA-256 in lowercase hexadecimal digits, never
     );
 });
 
+test("a password answer to another ask is refused as a password answer and changes nothing", () => {
+  const plan = compileValidPlan('let name = askText("Name?")\nexit');
+  const started = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  const action = started.snapshot.foregroundAction;
+  assert.ok(action?.kind === "interaction" && action.interactionKind === "text");
+  const refused = completeAction(plan, started.snapshot, {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: "password",
+    payload: { kind: "submittedPassword", hash: sha256("corner") },
+  });
+  assert.deepEqual(refused.outcome, {
+    kind: "wrongActionKind",
+    actionId: action.actionId,
+    expectedActionKind: "interaction",
+    receivedActionKind: "interaction:password",
+  });
+  assert.deepEqual(refused.events, []);
+  assert.deepEqual(refused.snapshot, started.snapshot);
+});
+
 test("askPassword takes no prefill:, as a password is never suggested", () => {
   assert.deepEqual(diagnostics('let typed = askPassword("Code?", prefill: "corner")'), [
     [
