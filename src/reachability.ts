@@ -424,6 +424,7 @@ export class Reachability {
           certain = file;
           break;
         }
+        // In a global function, which is the only code with a certain target left here.
         if (starts === true) guarded ??= file;
         else if (starts === null) possible ??= file;
       }
@@ -442,14 +443,14 @@ export class Reachability {
           ? createDiagnostic(
               DiagnosticSeverity.Error,
               "TSV072",
-              calledFileMessage(path(certain), call.form, null),
+              calledFileMessage(path(certain), call.form),
               call.span,
             )
           : createDiagnostic(
               DiagnosticSeverity.Warning,
               "TSV073",
               guarded !== undefined
-                ? guardedCallMessage(path(guarded), call.form, global)
+                ? guardedCallMessage(path(guarded), call.form, global!)
                 : possible !== undefined
                   ? pickedFileMessage(path(possible), call.form, global)
                   : laterCallMessage(
@@ -660,9 +661,9 @@ function runningFileText(path: string, global: string | null): string {
     : `'${path}', which calls global function '${global}' and so is the running file then`;
 }
 
-/** Why a call may not start `path`, the running file (V30 §29): a call starts another file. */
-function calledFileMessage(path: string, form: FileCall["form"], global: string | null): string {
-  return `A call starts another file, but this call can start ${runningFileText(path, global)}. ${calledFileFix(path, form, global)}`;
+/** Why a call may not start `path`, the file it stands in (V30 §29): a call starts another file. */
+function calledFileMessage(path: string, form: FileCall["form"]): string {
+  return `A call starts another file, but this call can start '${path}', the file it is in. ${calledFileFix(path, form, null)}`;
 }
 
 /** What to do about a call that can start `path`, a running file, by how it names its file. */
@@ -680,8 +681,7 @@ function calledFileFix(path: string, form: FileCall["form"], global: string | nu
  * Why a call in a global function, `global`, may start `path`, a file that calls the function, where the compiler cannot
  * tell whether the call runs while that file runs.
  */
-function guardedCallMessage(path: string, form: FileCall["form"], global: string | null): string {
-  if (global === null) return calledFileMessage(path, form, global);
+function guardedCallMessage(path: string, form: FileCall["form"], global: string): string {
   const fix = calledFileFix(path, form, global);
   return `This call can start '${path}', which calls global function '${global}', but the compiler cannot tell whether the call runs while '${path}' runs. A call starts another file, so the call fails if it does. If it can, ${fix[0]!.toLowerCase()}${fix.slice(1)}`;
 }
