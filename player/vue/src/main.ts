@@ -47,7 +47,8 @@ const app =
   stores === null
     ? createApp({
         setup: () => {
-          const player = usePlayerSession();
+          // Without its data the Player touches no browser storage, not even to tidy Debug's rewind histories.
+          const player = usePlayerSession({ debugHistorySpill: async () => null });
           return () => h(PlayerApp, { player, failure: dataFailure });
         },
       })

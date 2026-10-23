@@ -329,7 +329,7 @@ When the host persists the shown script's storage, the section also offers **Cle
 after a confirmation, only the values this script saved for later runs; Player Settings, checkpoints, account data, and
 other scripts are unaffected, and the next new session starts without them. It is available before Start and after the
 session has ended, but not while a session runs or waits for Continue, because a running session keeps its own view of
-the saved values, and not when this browser's storage could not be read. The dialogs fit narrow screens, and their own
+the saved values, and not when the saved data could not be read. The dialogs fit narrow screens, and their own
 controls and rows are at least 44px tall.
 
 ## Left tools area

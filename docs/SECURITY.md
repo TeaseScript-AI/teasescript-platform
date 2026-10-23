@@ -65,8 +65,9 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
   category choice and the preview the dialog asks the player to check.
 - In online mode ([persistence modes](DATA-AND-API.md#player-session-persistence-modes)) the Player sends saved values
   and the photos they reference to the server its host names, which must be on the Player's own origin, with the
-  host's token as a bearer header, never a cookie, and validates every reply as external data before use. The consent
-  ADR 0023 requires before private photos are uploaded is still open.
+  host's token as a bearer header, never signing in with a cookie, and validates every reply as external data before
+  use. A proxy in front of the server may still need its own login cookie, which the browser sends to that origin. The
+  consent ADR 0023 requires before private photos are uploaded is still open.
 - Otherwise saved script data moves between browsers only by the player's own hand ([transfer](DATA-AND-API.md#saved-data-transfer)):
   an export stays in the browser until the player downloads or copies it, with no upload, URL, or clipboard read. It is
   neither encrypted nor signed and can contain private photos, which the Player says when exporting. An import is

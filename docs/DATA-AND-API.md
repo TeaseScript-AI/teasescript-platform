@@ -178,7 +178,7 @@ state. The document is UTF-8 JSON with exactly these fields:
 ```
 
 Each script's `entries` are its stored values in their `SerializableRuntimeValue` representation, one per line; its
-`name` is the title of its `main.tease` header when a Player showed it, remembered in browser storage, or `null`; its
+`name` is the title of its `main.tease` header when a Player showed it, remembered with the saved data, or `null`; its
 `photos` are the references in its values that resolved to its own stored photos. `images` holds the original bytes of
 each such photo, once per reference, also when scripts share it. Any other reference, including one naming another
 script's photo, stays ordinary text and is only counted. An export reads each scope

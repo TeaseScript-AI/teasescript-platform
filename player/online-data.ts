@@ -18,8 +18,9 @@ import type { ScriptStorageProvider } from "./script-storage.js";
 
 // The Player's data on a server, for online mode (`player-data.ts`). The HTTP shapes are provisional: the temporary
 // test server answers them until the real backend's contract is decided (DATA-AND-API "Player session persistence
-// modes"). Every request carries the token as a bearer token, never a cookie, and every reply is external data,
-// checked here or by the store that reads it before anything uses it. Paths are relative to the server's base URL:
+// modes"). Every request signs in with the token as a bearer token, never with a cookie, and every reply is external
+// data, checked here or by the store that reads it before anything uses it. Paths are relative to the server's base
+// URL:
 //
 // - `GET account`: `{ account, profile }`, the account's name and the person fields of its player profile;
 // - `GET scripts`: `{ scripts: [{ scope, name }] }`, every script with saved data and its title or `null`;
@@ -237,6 +238,9 @@ async function send(
       ...(body && { body: body.body }),
       headers: { ...body?.headers, Authorization: `Bearer ${server.token}` },
       cache: "no-store",
+      // The server signs in by the token alone and never by a cookie. A proxy in front of it may still need its own
+      // login cookie, such as the owner's Pangolin route, so this origin's cookies go along as the browser keeps them.
+      credentials: "same-origin",
       // A redirect could lead the token away from the server the host named.
       redirect: "error",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
