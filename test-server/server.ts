@@ -197,7 +197,9 @@ export function testServer(options: TestServerOptions): {
       if (typeof base !== "string" || base === String(store.revision(user, scopeKey, kind)))
         return false;
       store.conflict(user, scopeKey, kind);
-      options.log?.(`Two writers: ${kind} of ${scope}`);
+      options.log?.(
+        `Two writers: ${kind === "session" ? "kept session" : "saved values"} of ${scope}`,
+      );
       return true;
     };
     if (part === "storage" && reference === undefined) {
@@ -212,7 +214,7 @@ export function testServer(options: TestServerOptions): {
           revisionHeader(store.revision(user, scopeKey, "storage")),
         );
       if (failsOnPurpose()) return;
-      // A value written meanwhile is kept, last writer first: only noticed, not resolved.
+      // A value is written even if another was written meanwhile, so the last one stays.
       conflicting("storage");
       if (method === "DELETE")
         return sendEmpty(response, 204, revisionHeader(store.replace(user, scopeKey, [])));

@@ -43,11 +43,11 @@ path, status, time, and bytes received.
 
 ## Two writers
 
-Each script's saved values and kept session have a revision, and every change names the revision its Player last saw.
-A change that names another, because another device or tab changed the data meanwhile, is listed under **Two writers**
-on the stand-in page and logged as `Two writers: …`. It is only noticed, not resolved. A kept session keeps the change
-that came first: the other Player plays on, but nothing more of its session is kept, and a reload continues the session
-kept first. A saved value keeps the change that came last.
+Each script's saved values and kept session have a revision, and every change sends the revision its Player last saw.
+When that is older, because another device or tab changed the data in between, the change is listed under **Two
+writers** on the stand-in page and logged as `Two writers: …`. Nothing is merged. A kept-session change is refused: the
+other Player plays on, but its progress is no longer kept, so a reload continues the session the first Player kept. A
+saved-values change is stored anyway, so the last change to a value stays.
 
 ## Switches
 
@@ -56,8 +56,9 @@ turn a switch off, and set several in one object. `curl -k https://<host>:4181/t
 state.
 
 - `{"slow": true}`: every request waits `TEST_SERVER_SLOW_MS` instead of `TEST_SERVER_LATENCY_MS`.
-- `{"failNextWrite": true}`: the next write of saved values or their photos answers 503 without storing anything; the
-  switch then turns itself off. A kept session is not affected.
+- `{"failNextWrite": true}` (**Fail the next save**): the next write of saved values or their photos, such as a script's
+  `save`, answers 503 without storing anything; the switch then turns itself off. Keeping a session neither fails nor
+  uses up the switch.
 - `{"down": true}`: every `/api/` request answers 503; the Player's files still load.
 
 ## Boundaries

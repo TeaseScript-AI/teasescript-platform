@@ -37,8 +37,8 @@ import type { ScriptStorageProvider } from "./script-storage.js";
 //
 // Saved values and the kept session each have a revision, which every reply that reads or changes them names in
 // `X-Revision`, a missing session's 404 too. A change names the revision its Player last saw in `X-Base-Revision`, so
-// that the server notices another writer in between: it keeps a value written meanwhile and answers a kept session
-// with 409.
+// that the server notices another writer in between: it writes a saved value anyway, so the last one stays, and
+// refuses to keep a session with 409.
 //
 // A scope and a reference are each one path segment: the JSON string, percent-encoded, which keeps every text, also
 // `..` and a lone surrogate, apart from every other. A request that takes longer than `REQUEST_TIMEOUT_MS` fails.

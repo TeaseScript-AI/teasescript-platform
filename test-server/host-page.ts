@@ -86,14 +86,14 @@ export function hostPage(page: {
 </fieldset>
 <label><input type="checkbox" id="down"> Server down</label>
 <div class="row">
-<button id="fail" type="button">Fail the next write</button>
+<button id="fail" type="button">Fail the next save</button>
 <span id="fail-status" role="status"></span>
 </div>
 </section>
 <section>
 <h2>Two writers</h2>
-<p class="quiet">Changes that came while another Player had changed the same data, newest first. A kept session keeps the
-first change; saved values keep the last.</p>
+<p class="quiet">Changes from a Player that had missed another Player's change to the same data; the latest 20, newest
+first. A kept-session change was refused; a saved-values change was stored anyway.</p>
 ${conflicts}
 </section>
 <section>
@@ -151,7 +151,7 @@ function show(state) {
     radio.checked = radio.value === (state.slow ? "slow" : "normal");
   element("down").checked = state.down;
   element("fail").disabled = state.failNextWrite;
-  element("fail-status").textContent = state.failNextWrite ? "Waiting for the next write." : "";
+  element("fail-status").textContent = state.failNextWrite ? "Waiting for the next save." : "";
   clearInterval(polling);
   if (state.failNextWrite)
     polling = setInterval(() => fetch("/test-server/state").then((reply) => reply.json()).then(show), 2000);
