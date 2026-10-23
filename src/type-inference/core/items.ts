@@ -21,7 +21,7 @@ export type Certainty = "def" | "pos";
 /**
  * Why a value is `unknown` (TABLE §1): host data, a typeless load or `fromJson` (`external`); a reference's member or an
  * operation the core does not model (`opaque`); a parameter with several call sites (`deferred`); a source of a record
- * without the property (`missing`); a place over its allowance (`budget`). An item holds a set of them as bits.
+ * without the property (`missing`); a demand over its allowance (`budget`, B1). An item holds a set of them as bits.
  */
 export const REASON = { external: 1, opaque: 2, deferred: 4, missing: 8, budget: 16 } as const;
 
@@ -118,22 +118,25 @@ export function firstContext(a: ContextWord | null, b: ContextWord | null): Cont
   return contextRank(b) < contextRank(a) ? b : a;
 }
 
-/** The word of an unknown's reasons (§3.4): `unmodelled`, then `missing`, then `deferred-parameter`, else `unknown`. */
+/**
+ * The word of one unknown's reasons (TABLE §1 r4.23): the first present in the rank `external` (`unknown`), `opaque`
+ * (`unmodelled`), `deferred` (`deferred-parameter`), `missing` (`missing`); `budget` comes last and has no word of its
+ * own yet (B1, the budget's fallback), nor has an unknown without reasons: both say `unknown`.
+ */
 export function reasonContext(reasons: number): ContextWord {
+  if ((reasons & REASON.external) !== 0) return "unknown";
   if ((reasons & REASON.opaque) !== 0) return "unmodelled";
-  if ((reasons & REASON.missing) !== 0) return "missing";
   if ((reasons & REASON.deferred) !== 0) return "deferred-parameter";
+  if ((reasons & REASON.missing) !== 0) return "missing";
   return "unknown";
 }
 
 /**
- * The word an item brings where words meet (§3.4): its own, except that an unknown's reason word comes before any
- * condition's word it took, since the reasons are decided first.
+ * The word an item brings where words meet: an unknown its reasons' word, whatever word it carries, since its reasons
+ * name it (TABLE §1) and come before any condition's word (§3.4); any other item its own word.
  */
 export function ownContext(item: Item): ContextWord | null {
-  return item.tag === "unknown"
-    ? firstContext(item.context, reasonContext(item.reasons))
-    : item.context;
+  return item.tag === "unknown" ? reasonContext(item.reasons) : item.context;
 }
 
 /**

@@ -2,8 +2,9 @@
  * The work budget of the coarse core (checkpoint 9, TABLE §8): every unit of work the analysis does is charged to one
  * counter as it runs, and the charged total is checked against the program's allowance at each charge, so an analysis
  * stops at the unit that crosses it. The allowance is the larger of a fixed floor and a coefficient per syntax node;
- * statement nesting has its own limit. What the analysis does with a place over its share of the allowance (TABLE B1)
- * is not part of this module yet: here the allowance is only the emergency stop.
+ * statement nesting has its own limit. The fallback of a demand over its own allowance (TABLE B1: that read and the
+ * reads that waited on it take the contract with the reason `budget`, while independent demands of the same key keep
+ * their proofs) is not part of this module yet: here the allowance is only the emergency stop.
  */
 
 /** The allowance every program has, however small (TABLE §8). */

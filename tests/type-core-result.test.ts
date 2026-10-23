@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   makeItem,
+  mergeItems,
   reasonContext,
   REASON,
   type Item,
@@ -43,15 +44,26 @@ const writer = (kind: string, start: number, file = 0): Writer => ({
 const unknown = (reasons: number, at: number, fields: ItemFields = {}): Item =>
   makeItem("unknown", writer("assignment", at), { cert: "pos", reasons, ...fields });
 
-test("a warning's word: an unknown's reason word first, else the item's own or a null's ingress word", () => {
-  assert.equal(reasonContext(REASON.opaque | REASON.missing | REASON.deferred), "unmodelled");
-  assert.equal(reasonContext(REASON.missing | REASON.deferred | REASON.external), "missing");
-  assert.equal(reasonContext(REASON.deferred | REASON.external), "deferred-parameter");
-  assert.equal(reasonContext(REASON.external), "unknown");
-  assert.equal(contextOf(unknown(REASON.opaque, 1)), "unmodelled");
-  // a condition's word an unknown took comes after its reason's; an earlier reason word of its own stays
-  assert.equal(contextOf(unknown(REASON.opaque, 1, { context: "call" })), "unmodelled");
-  assert.equal(contextOf(unknown(REASON.external, 1, { context: "missing" })), "missing");
+test("one unknown's word is its first reason's in the rank external, opaque, deferred, missing (TABLE §1)", () => {
+  const { external, opaque, deferred, missing, budget } = REASON;
+  for (const [reasons, word] of [
+    [external, "unknown"],
+    [opaque, "unmodelled"],
+    [deferred, "deferred-parameter"],
+    [missing, "missing"],
+    [external | opaque, "unknown"],
+    [external | deferred, "unknown"],
+    [external | missing, "unknown"],
+    [opaque | deferred | missing, "unmodelled"],
+    [deferred | missing, "deferred-parameter"],
+    [missing | budget, "missing"],
+    [budget, "unknown"],
+    [0, "unknown"],
+  ] as const)
+    assert.equal(reasonContext(reasons), word, `reasons ${reasons}`);
+  // the reasons name an unknown whatever word it carries: a condition's, or a reason word the rank overrides
+  assert.equal(contextOf(unknown(opaque, 1, { context: "call" })), "unmodelled");
+  assert.equal(contextOf(unknown(external | missing, 1, { context: "missing" })), "unknown");
   assert.equal(contextOf(makeItem("null", null, { cert: "pos", word: "unknown" })), "unknown");
   assert.equal(contextOf(makeItem("integer", null, { cert: "pos", context: "branch" })), "branch");
 });
@@ -253,6 +265,37 @@ const RECORDS: readonly {
     },
   },
 ];
+
+test("an external ingress merged with an opaque unknown keeps both reasons and records external's word", () => {
+  const scope = itemScope();
+  const ingress = unknown(REASON.external, 10, {
+    ingress: scope.ingress.leaf(writer("assignment", 10)),
+    context: "unknown",
+  });
+  const member = unknown(REASON.opaque, 20, { context: "unmodelled" });
+  for (const order of [
+    [ingress, member],
+    [member, ingress],
+  ]) {
+    const [merged] = mergeItems(order, scope);
+    assert.equal(merged?.reasons, REASON.external | REASON.opaque);
+    assert.ok(merged?.ingress !== undefined);
+    assert.equal(provenanceOf(merged!).context, "unknown");
+    const record = coreRecord(
+      result([
+        warning("operator", merged!, {
+          kind: "operand",
+          target: "value",
+          against: ["integer", "number"],
+          on: "check the operand of + when it runs",
+          site: at(30, 35),
+        }),
+      ]),
+      ["main.tease"],
+    );
+    assert.equal(record.diagnostics[0]?.provenance?.context, "unknown");
+  }
+});
 
 test("a result's record has the expectation set's shape, survives JSON, and compares as the set's records do", () => {
   for (const { name, paths, result: analysed, expected } of RECORDS) {
