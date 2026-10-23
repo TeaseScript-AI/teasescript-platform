@@ -4,7 +4,11 @@
 // `wait`, an authored reading time, a timer), one moment at a time, so a timer's button or ask appears at its own time.
 // The run stops when the script ends, fails (the runtime's own limits apply, such as its step limit for a busy loop),
 // waits for the player (an answer, a button, also a timed button), or after 10,000 clock moves.
-// Usage: npm run probe -- [--run] [--json] <file.tease | ->   (- or no file reads standard input)
+// --clock gives the run a wall clock, a UTC date and time such as 2026-10-04T18:30:00Z (seconds and milliseconds are
+// optional), which moves with the script's clock; without one, reading the current time fails with TSR064. --zone gives
+// the player's IANA time zone, such as Europe/Amsterdam, instead of UTC. Dates and times keep their locale-neutral text.
+// Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>]] [--json] <file.tease | ->
+// (- or no file reads standard input)
 // For JSON consumers, call `node tools/probe.mjs --json …` or `npm --silent run probe -- --json …`, so npm prints no
 // banner. Needs `npm run build:typescript` first: the probe loads dist/, so rebuild after changing the source.
 // Exit status: 0 no error (also when the run stops waiting), 1 compile errors, 3 runtime failure, 2 usage, missing
@@ -13,14 +17,18 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "Usage: npm run probe -- [--run] [--json] <file.tease | ->";
+const usage =
+  "Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>]] [--json] <file.tease | ->";
 const maxClockMoves = 10_000;
-const options = { run: false, json: false };
+const options = { run: false, json: false, clock: undefined, zone: undefined };
 const files = [];
 const args = process.argv.slice(2);
-for (const arg of args) {
+while (args.length > 0) {
+  const arg = args.shift();
   if (arg === "--run") options.run = true;
   else if (arg === "--json") options.json = true;
+  else if (arg === "--clock") options.clock = args.shift() ?? fail("--clock needs a value.");
+  else if (arg === "--zone") options.zone = args.shift() ?? fail("--zone needs a value.");
   else if (arg === "-h" || arg === "--help") {
     console.log(usage);
     process.exit(0);
@@ -28,15 +36,25 @@ for (const arg of args) {
   else files.push(arg);
 }
 if (files.length > 1) fail("One source at a time.");
+if (!options.run && (options.clock !== undefined || options.zone !== undefined))
+  fail("--clock and --zone apply to --run only.");
 const file = files[0] ?? "-";
 const entry = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "src", "index.js");
 if (!existsSync(entry)) {
   console.error(`No build at ${entry}. Run npm run build:typescript first.`);
   process.exit(2);
 }
-const { compileSource, createFreshRuntimeSession, runtimeTimedWork } = await import(
-  pathToFileURL(entry).href
-);
+const {
+  captureTemporalContext,
+  compileSource,
+  createFreshRuntimeSession,
+  DEFAULT_TEMPORAL_CONTEXT,
+  runtimeTimedWork,
+} = await import(pathToFileURL(entry).href);
+// Zero reading time, so a `say` does not wait for the player's reading.
+const sessionOptions = { baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 };
+if (options.clock !== undefined) sessionOptions.wallClockMs = clockMs(options.clock);
+if (options.zone !== undefined) sessionOptions.temporalContext = zoneContext(options.zone);
 let source;
 try {
   source = readFileSync(file === "-" ? 0 : file, "utf8");
@@ -71,12 +89,7 @@ if (options.json) {
 process.exitCode = compileFailed ? 1 : run?.status === "failed" ? 3 : 0;
 
 function runScript(plan) {
-  // Zero reading time, so a `say` does not wait for the player's reading.
-  const session = createFreshRuntimeSession(plan, {
-    baseDelayMs: 0,
-    delayPerWordMs: 0,
-    delayPerCharacterMs: 0,
-  });
+  const session = createFreshRuntimeSession(plan, sessionOptions);
   const events = [];
   let instructions = 0;
   let clockMoves = 0;
@@ -150,6 +163,28 @@ function describe(event) {
 function actionKind(action) {
   if (action === null || action === undefined) return "the host";
   return action.interactionKind ?? action.kind ?? "an action";
+}
+
+// The epoch milliseconds of a UTC date and time such as 2026-10-04T18:30:00Z, with seconds and milliseconds optional.
+function clockMs(value) {
+  const ms = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?Z$/.test(value)
+    ? Date.parse(value)
+    : NaN;
+  // Date.parse moves an impossible date or time, such as February 30, on to a later one, so the fields must read back.
+  if (Number.isNaN(ms) || !new Date(ms).toISOString().startsWith(value.slice(0, -1)))
+    fail(`--clock takes a UTC date and time such as 2026-10-04T18:30:00Z, not ${value}.`);
+  return ms;
+}
+
+// The zone's rules from this host's time-zone data. Dates and times keep their locale-neutral text, as without --zone,
+// so the locale the capture is given does not matter.
+function zoneContext(timeZone) {
+  try {
+    return { ...DEFAULT_TEMPORAL_CONTEXT, zone: captureTemporalContext(timeZone, "en").zone };
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    fail(`--zone: ${error.message}`);
+  }
 }
 
 // Spans count lines and columns from 0; editors count from 1.
