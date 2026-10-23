@@ -13,7 +13,10 @@ For local inspection, run `npm run dev:player -- --host 0.0.0.0` and open `/play
 development preview. The default build, served on `/player/` by `npm run playground`, plays the repository demo in
 [`examples/demo/`](../examples/demo/demo.tease) behind Start and loads preview fixtures only when `?dev` is selected.
 With a development package root, `?package=<id>` plays that package instead (see the repository `README.md`), and
-`?dev&package=<id>` plays it in the development preview.
+`?dev&package=<id>` plays it in the development preview. The player's data stays in this browser unless the address
+chooses online mode: `?data=online&server=<path>`, with the token the host leaves in the tab's session storage, keeps
+it on a server of the same origin
+([persistence modes](../docs/DATA-AND-API.md#player-session-persistence-modes)).
 This is a local inspection route, not the production cross-origin Player/host protocol.
 
 ## Implementation seams
@@ -24,6 +27,9 @@ This is a local inspection route, not the production cross-origin Player/host pr
   [`PLAYER-UI.md`](../docs/ui/PLAYER-UI.md#player-notices).
 - `script-storage.ts` contains the asynchronous script-storage provider boundary and its browser-local
   implementation; see [`DATA-AND-API.md`](../docs/DATA-AND-API.md#script-storage-in-the-browser).
+- `player-data.ts` reads the data mode the host chose, `online-data.ts` keeps online mode's data on its server, and
+  `vue/src/playerStores.ts` opens every store of the chosen mode once
+  ([persistence modes](../docs/DATA-AND-API.md#player-session-persistence-modes)).
 - `vue/src/` contains the Player composition, components, shared layout/theme CSS, demo host, and development preview;
   its [component map](vue/src/README.md) records responsibility boundaries.
 - `model.ts` and `presentation.ts` contain shared presentation shapes and timer formatting helpers.

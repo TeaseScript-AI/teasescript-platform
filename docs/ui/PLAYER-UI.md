@@ -297,9 +297,12 @@ stored: every load in the normal room starts with it off, so a tester who opens 
 accident, and every load in the debug room with it on; the development preview's `?dev` starts it on.
 
 Player Settings also contains a **Saved data** section, on every Player page whatever script it shows. Saved data
-belongs to the player, like an account's: **Export…** and **Import…** take the saved data of every script this browser
+belongs to the player, like an account's: **Export…** and **Import…** take the saved data of every script the player
 has played at once, or of the scripts the player keeps ticked ([format](../DATA-AND-API.md#saved-data-transfer)). It is
-not a session checkpoint.
+not a session checkpoint. When the data is in this browser
+([stand-alone](../DATA-AND-API.md#player-session-persistence-modes)), the section says so, and whether the browser keeps
+it until the player deletes it or may delete it when the device runs low on storage, in which case it suggests an
+export to keep a copy.
 
 **Export…** reads every script's saved data freshly, also during a session, so saves already stored count. It lists each
 script that has saved values, by its title when a Player has shown it, otherwise by its storage scope, with its values,
@@ -327,7 +330,7 @@ When the host persists the shown script's storage, the section also offers **Cle
 after a confirmation, only the values this script saved for later runs; Player Settings, checkpoints, account data, and
 other scripts are unaffected, and the next new session starts without them. It is available before Start and after the
 session has ended, but not while a session runs or waits for Continue, because a running session keeps its own view of
-the saved values, and not when this browser's storage could not be read. The dialogs fit narrow screens, and their own
+the saved values, and not when the saved data could not be read. The dialogs fit narrow screens, and their own
 controls and rows are at least 44px tall.
 
 ## Left tools area
@@ -449,7 +452,8 @@ The Player does not run a script on page load. It opens on the start page: the m
 middle the `title` and "by" `author` of the script's `main.tease` header, either alone when only it is given and
 neither without them, above an explicit **Start** control, which takes focus. The transcript, composer, and Stage stay
 hidden until a session is shown. A script that does not compile cannot start: instead of Start, the Player lists its
-diagnostics, each with its file, line, and message. The player's activation of Start is the user activation that later
+diagnostics, each with its file, line, and message; when the data its host chose cannot be opened, such as on a server
+that does not answer, the Player names the problem instead. The player's activation of Start is the user activation that later
 audible media playback relies on, so scripts may play audio from their first statement without a separate unlock step.
 
 The Player keeps the session in this browser: at each interaction it newly presents, a lock's dialog or password field
@@ -546,8 +550,8 @@ focused control, focus moves to the nearest remaining control; with none left, t
 the bell. A notice whose action is the only way to continue, such as **Enable audio** while the script waits for that
 audio, is labelled **Needs action**, offers no dismiss control, and disappears once its condition resolves.
 
-The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
-(info: saved progress is not kept), a failed script-storage write (warning, for the run it happened in; a new
+The current conditions are blocked audio (warning, with **Enable audio**), saved data unavailable at session start
+(info: progress is not saved), a failed script-storage write (warning, for the run it happened in; a new
 Start withdraws it), an image request that allows only the camera where no camera can be used (warning,
 withdrawn when the request ends), a media file the script refers to that the Player cannot use (warning, see
 [Stage and media presentation](#stage-and-media-presentation)), and a session stopped by an error (error, with

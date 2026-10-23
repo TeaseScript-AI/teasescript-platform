@@ -15,6 +15,7 @@ import {
   capturedMediaReferences,
   capturedMediaStorage,
   withCapturedMedia,
+  type CapturedMediaLocks,
   type CapturedMediaStorage,
 } from "../../captured-media-persistence.js";
 import {
@@ -145,9 +146,13 @@ export interface PlayerSessionOptions {
    * Without a repository, they stay session media, and a persistent save that references one fails. A host with
    * persistent script storage passes it, also without a repository, so that no saved reference outlives its media.
    */
-  capturedMedia?: { readonly repository: CapturedMediaRepository | null };
+  capturedMedia?: {
+    readonly repository: CapturedMediaRepository | null;
+    /** How the Players of a scope agree when stored media may be swept; this browser's Web Locks by default. */
+    readonly locks?: CapturedMediaLocks;
+  };
   /**
-   * The saved data of every script this browser keeps, which export and import of saved data read and write as the
+   * The saved data of every script the player keeps, which export and import of saved data read and write as the
    * player's own; without it they cover only the script this Player shows.
    */
   savedData?: SavedDataHost;
@@ -242,7 +247,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       ? capturedMediaStorage(
           options.scriptStorage,
           capturedMedia,
-          browserCapturedMediaLocks(),
+          options.capturedMedia?.locks ?? browserCapturedMediaLocks(),
           keptPhotoReferences(options.keptSessions),
         )
       : undefined;
@@ -905,7 +910,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const sessionChanged = () => failed("The session changed meanwhile; open the editor again.");
     if (retired()) return sessionChanged();
     if (!scriptStorage || storedEntries.value === null)
-      return failed("This browser's saved data cannot be read.");
+      return failed("The saved data cannot be read.");
     if (
       importing.value ||
       clearing.value ||
@@ -923,7 +928,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     try {
       current = await scriptStorage.load();
     } catch {
-      return failed("This browser's saved data cannot be read.");
+      return failed("The saved data cannot be read.");
     }
     if (retired()) return sessionChanged();
     const now = current.find((entry) => entry.key === key)?.value;
@@ -937,7 +942,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       try {
         await scriptStorage.write(key, value);
       } catch {
-        return failed("The change could not be saved in this browser. Nothing changed.");
+        return failed("The change could not be saved. Nothing changed.");
       }
       savedDataRevision.value++;
       while (
@@ -994,13 +999,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
   }
 
-  /** The saved data of every script this browser keeps, for an export; scripts without values are left out. */
+  /** The scripts the host keeps saved data for, each with its title or `null`; none without a host. */
+  async function savedScriptNames(): Promise<Map<string, string | null>> {
+    const scripts = (await options.savedData?.scripts()) ?? [];
+    return new Map(scripts.map(({ scope, name }) => [scope, name]));
+  }
+  /** The saved data of every script the player keeps, for an export; scripts without values are left out. */
   async function savedScripts(): Promise<readonly SavedScript[]> {
-    const scopes = new Set(options.savedData?.scopes() ?? []);
-    if (scriptStorage) scopes.add(scriptStorage.scope);
+    const names = await savedScriptNames();
+    if (scriptStorage && !names.has(scriptStorage.scope)) names.set(scriptStorage.scope, null);
     const saved: SavedScript[] = [];
-    for (const scope of [...scopes].sort()) {
-      const name = options.savedData?.name(scope) ?? null;
+    for (const [scope, name] of [...names].sort(([left], [right]) => (left < right ? -1 : 1))) {
       let script: SavedScript;
       // This Player's script is read through its own storage, after the saves its session issued; the debug room is
       // never exported.
@@ -1033,6 +1042,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   async function reviewSavedDataImport(bundle: StorageBundle): Promise<SavedDataImportReview> {
     const images = await checkStorageTransferImages(bundle.images, decodeImage);
+    // Titles only name the scripts; without them the review lists their scopes.
+    const names = await savedScriptNames().catch(() => new Map<string, string | null>());
     const scripts: SavedDataImportScript[] = [];
     for (const script of bundle.scripts) {
       const own = script.scope === scriptStorage?.scope;
@@ -1047,12 +1058,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           : await options.savedData!.provider(script.scope).load();
       } catch {
         throw new StorageTransferError(
-          "This browser's saved data cannot be read, so nothing can be imported.",
+          "The saved data cannot be read, so nothing can be imported.",
         );
       }
       scripts.push({
         scope: script.scope,
-        name: script.name ?? options.savedData?.name(script.scope) ?? null,
+        name: script.name ?? names.get(script.scope) ?? null,
         values: script.entries.length,
         photos: script.photos.length,
         currentValues: current.length,
@@ -1943,7 +1954,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       void mediaRevision.value;
       return capturedMedia.resolve(reference, "image");
     },
-    /** Whether the Player offers saved data: of every script this browser keeps, or at least of the shown one. */
+    /** Whether the Player offers saved data: of every script the player keeps, or at least of the shown one. */
     hasSavedData: options.savedData !== undefined || scriptStorage !== undefined,
     savedScripts,
     /** Remembers the shown script's title for listing its saved data among other scripts'. */

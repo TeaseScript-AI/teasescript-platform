@@ -79,19 +79,19 @@ export const playerNotices = {
   storageUnavailable: (): PlayerNotice => ({
     key: playerNoticeKeys.storageUnavailable,
     level: "info",
-    message: "This browser does not keep saved progress, so the next run starts fresh.",
+    message: "Progress cannot be saved, so the next run starts fresh.",
   }),
   storageWriteFailed: (): PlayerNotice => ({
     key: playerNoticeKeys.storageWriteFailed,
     level: "warning",
-    message: "Some progress could not be saved in this browser.",
+    message: "Some progress could not be saved.",
   }),
   /** Debug's rewind could not adopt the inspected state: its saved data could not replace the browser's. */
   rewindNotAdopted: (): PlayerNotice => ({
     key: playerNoticeKeys.rewindNotAdopted,
     level: "warning",
     message:
-      "The saved data of this earlier state could not be restored in this browser, so the session did not go on from it.",
+      "The saved data of this earlier state could not be restored, so the session did not go on from it.",
   }),
   /** `skip` is the label of the request's skip control, which still answers it, or `null` without one. */
   imageNeedsCamera: (skip: string | null): PlayerNotice => ({

@@ -85,7 +85,7 @@ async function refreshNow() {
           Saved data · {{ saved.entries.length }} {{ saved.entries.length === 1 ? "key" : "keys" }}
         </template>
         <template v-else-if="saved.state === 'loading'">Reading saved data…</template>
-        <template v-else>This browser's saved data cannot be read.</template>
+        <template v-else>The saved data cannot be read.</template>
       </p>
       <Button
         variant="outline"
@@ -100,8 +100,8 @@ async function refreshNow() {
       </Button>
     </div>
     <p class="text-muted-foreground">
-      What this script saved in this browser. An edit is stored here first; a running session's next load then returns
-      it, while values the script already loaded stay as they are.
+      What this script saved. An edit is saved right away, and a running session's next load returns it. Values the script
+      already loaded stay as they are.
     </p>
     <div class="flex min-w-0 flex-wrap items-center gap-2">
       <Button

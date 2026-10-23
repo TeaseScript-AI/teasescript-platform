@@ -119,6 +119,15 @@ Both modes use the same canonical engine/checkpoint model. Storage location does
 format. Production preferences will select local-only versus server-backed behavior through typed platform contracts;
 the exact records, encryption, retention, synchronization, conflict, and migration policy remain open.
 
+The Player's host chooses the mode; until a host frame passes it, the page address names it and the host leaves online
+mode's token in the tab's session storage (`player/player-data.ts`). The Player opens every store for that mode once,
+before it mounts (`player/vue/src/playerStores.ts`), and the two modes never share data: a choice it cannot use opens
+no data at all. Stand-alone keeps everything in this browser and asks the browser to keep it persistent. Online keeps
+saved values, the photos they reference, and the saved-data list on a server of the Player's own origin and takes the
+player profile from the server's account (`player/online-data.ts`, whose HTTP shapes are provisional); it never sweeps
+the server's photos, since it cannot see the account's other devices. Its kept sessions and debug rooms stay in this
+browser, in databases of that account alone.
+
 ### Script storage in the browser
 
 The Player persists TeaseScript `save`/`load`/`delete` values ([§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys))
@@ -155,7 +164,7 @@ can be added there.
 
 ### Saved-data transfer
 
-A player moves the saved data of every script this browser has played, or of the scripts they tick, with its saved
+A player moves the saved data of every script they have played, or of the scripts they tick, with its saved
 photos, by hand and offline to another browser or device through Player Settings
 ([Player UI](ui/PLAYER-UI.md#player-settings)); `player/storage-transfer.ts` owns the format and `player/saved-data.ts`
 lists and opens the scopes. It is not a session checkpoint and carries no session position, timers, transcript, or RNG
@@ -169,7 +178,7 @@ state. The document is UTF-8 JSON with exactly these fields:
 ```
 
 Each script's `entries` are its stored values in their `SerializableRuntimeValue` representation, one per line; its
-`name` is the title of its `main.tease` header when a Player showed it, remembered in browser storage, or `null`; its
+`name` is the title of its `main.tease` header when a Player showed it, remembered with the saved data, or `null`; its
 `photos` are the references in its values that resolved to its own stored photos. `images` holds the original bytes of
 each such photo, once per reference, also when scripts share it. Any other reference, including one naming another
 script's photo, stays ordinary text and is only counted. An export reads each scope
