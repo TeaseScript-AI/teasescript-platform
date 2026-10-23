@@ -75,7 +75,7 @@ reference adapter are implemented. The production cross-origin player/host integ
 One discriminated pending-action family must carry JSON-safe data equivalent to:
 
 ```text
-kind: button | text | number | temporal | image | choice | form | popup | url | export
+kind: button | text | number | temporal | password | image | choice | form | popup | url | export
 action identity
 owning and continuation instruction positions
 scene time when it appeared, and a button's timeout when set
@@ -205,19 +205,21 @@ UTF-8 size. Over-limit data is rejected without truncation, clamping, or partial
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The grammar of an identifier choice value is the current ASCII TeaseScript identifier form. Choice completion matching uses one linear option pass.
 
 Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second, except for a
-popup, an `openUrl`, and an `exportText`, which publish no transcript. Both receive
-monotonic sequences, and the bounded settlement retains both sequences, the canonical result, transcript text,
-destination temporary, owning call-frame identity, and the UI the player answered, for duplicate replay. The separate
-single-use handoff, not that settlement, is the persisted authority for the still-unconsumed destination. A pending
-action's prepared dynamic UI is checked against its preparation temporaries; for `askChoice`, the captured option values
-are expanded again and must give the same buttons. A retained settlement is checked against
-its recorded UI and the plan instead, because cleanup clears those temporaries and a later run of the same instruction
-prepares them anew; for `askChoice` options that all have written values, the buttons must return those values in
-written order. Snapshot validation does not authenticate the historical dynamic-UI evaluation itself: a recorded
-UI and transcript edited together consistently are accepted, in line with the general snapshot-history rule below. Delay creation preflights its request plus future completion sequence; interaction creation preflights its
-request plus future transcript and completion sequences. Interaction completion rechecks both required sequences and
-validates the complete destination mutation before publishing any write, handoff, settlement, event, or continuation
-change. Continuation execution remains eligible only through a later normal runtime entry.
+popup, an `openUrl`, an `exportText`, and an `askPassword`, which, like a timeout, publish only `actionCompleted`. Each
+published event receives a monotonic sequence. For duplicate replay, the bounded settlement retains the completion
+sequence, the transcript sequence and text, both `null` without a transcript, the canonical result, the destination
+temporary, the owning call-frame identity, and the UI the player answered. The separate single-use handoff, not that
+settlement, is the persisted authority for the still-unconsumed destination. A pending action's prepared dynamic UI is
+checked against its preparation temporaries; for `askChoice`, the captured option values are expanded again and must
+give the same buttons. A retained settlement is checked against its recorded UI and the plan instead, because cleanup
+clears those temporaries and a later run of the same instruction prepares them anew; for `askChoice` options that all
+have written values, the buttons must return those values in written order. Snapshot validation does not authenticate
+the historical dynamic-UI evaluation itself: a recorded UI and transcript edited together consistently are accepted, in
+line with the general snapshot-history rule below. Delay creation preflights its request plus future completion
+sequence; interaction creation preflights its request plus two future sequences, room for a transcript and a
+completion, also when its completion will publish no transcript. Interaction completion rechecks room for the events it
+publishes and validates the complete destination mutation before publishing any write, handoff, settlement, event, or
+continuation change. Continuation execution remains eligible only through a later normal runtime entry.
 
 ### Standard composer and dynamic choice presentation
 
@@ -1414,8 +1416,8 @@ The settlement records the definition, and validation checks its result and show
 option has its field's answer as value) and its transcript as text, since a later capture may change the presentation;
 the result handoff is checked against the plan's shape.
 A form with `timeout` and `onTimeout` carries its limit in its UI as `timeout: { milliseconds, onTimeout }` and as the
-action's `timeoutMs`; like a button's timeout, reaching `createdAtMs + timeoutMs` is a time settlement (`timedOut`,
-no transcript) whose result is the answers as they stand, without the draft, or `null`.
+action's `timeoutMs`; like a button's timeout, reaching `createdAtMs + pausedMs + timeoutMs` is a time settlement
+(`timedOut`, no transcript) whose result is the answers as they stand, without the draft, or `null`.
 `completeAction` with `payload: { kind: "cancel" }` cancels a form that has a cancel button, also while text that is
 not an answer is being edited: it drops every edit and settles with `null` and the cancel button's text as the
 transcript.
@@ -1496,10 +1498,8 @@ instruction while the prefix runs, and all of them after it, with no scope bindi
 registry of exactly the set-up speakers. While the prefix runs, a snapshot holds nothing else: no call, loop,
 temporary, action, timer, media, queued block, settlement, top-level variable, default speaker, or
 Stage image, and none of their identities allocated; after it, no saved instruction position lies inside it. Restore
-never runs a start value again. A snapshot may refer to the
-instructions, functions, and blocks of `main.tease` and to global functions of any file with their blocks; any other
-file's code is malformed until `goto` and `call` can enter it. A runtime failure, in the snapshot's `failure` and the
-`runtimeFailure` event, carries the `path` of the file whose source its span is in.
+never runs a start value again. A runtime failure, in the snapshot's `failure` and the `runtimeFailure` event, carries
+the `path` of the file whose source its span is in.
 
 When a message's speaker, other than `player`, has no `displayName` and the name derived from its name fields
 ([V30 §37](specifications/accepted-syntaxes-v30.md#names-titles-and-presentation)) is empty, the message shows the
