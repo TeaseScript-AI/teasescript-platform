@@ -7,7 +7,11 @@
 // --clock gives the run a wall clock, a UTC date and time such as 2026-10-04T18:30:00Z (seconds and milliseconds are
 // optional), which moves with the script's clock; without one, reading the current time fails with TSR064. --zone gives
 // the player's IANA time zone, such as Europe/Amsterdam, instead of UTC. Dates and times keep their locale-neutral text.
-// Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>]] [--json] <file.tease | ->
+// --account gives the player's account: a JSON file with the person fields a host gives, such as
+// {"firstName": "Alex", "gender": "male", "petNames": ["puppy", "pet"]}; without one, the account has no fields, so
+// reading one fails with TSR017.
+// Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>] [--account <file.json>]] [--json]
+//   <file.tease | ->
 // (- or no file reads standard input)
 // For JSON consumers, call `node tools/probe.mjs --json …` or `npm --silent run probe -- --json …`, so npm prints no
 // banner. Needs `npm run build:typescript` first: the probe loads dist/, so rebuild after changing the source.
@@ -18,9 +22,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const usage =
-  "Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>]] [--json] <file.tease | ->";
+  "Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>] [--account <file.json>]] [--json] <file.tease | ->";
 const maxClockMoves = 10_000;
-const options = { run: false, json: false, clock: undefined, zone: undefined };
+const options = { run: false, json: false, clock: undefined, zone: undefined, account: undefined };
 const files = [];
 const args = process.argv.slice(2);
 while (args.length > 0) {
@@ -29,6 +33,7 @@ while (args.length > 0) {
   else if (arg === "--json") options.json = true;
   else if (arg === "--clock") options.clock = args.shift() ?? fail("--clock needs a value.");
   else if (arg === "--zone") options.zone = args.shift() ?? fail("--zone needs a value.");
+  else if (arg === "--account") options.account = args.shift() ?? fail("--account needs a value.");
   else if (arg === "-h" || arg === "--help") {
     console.log(usage);
     process.exit(0);
@@ -36,8 +41,11 @@ while (args.length > 0) {
   else files.push(arg);
 }
 if (files.length > 1) fail("One source at a time.");
-if (!options.run && (options.clock !== undefined || options.zone !== undefined))
-  fail("--clock and --zone apply to --run only.");
+if (
+  !options.run &&
+  (options.clock !== undefined || options.zone !== undefined || options.account !== undefined)
+)
+  fail("--clock, --zone, and --account apply to --run only.");
 const file = files[0] ?? "-";
 const entry = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "src", "index.js");
 if (!existsSync(entry)) {
@@ -48,6 +56,7 @@ const {
   captureTemporalContext,
   compileSource,
   createFreshRuntimeSession,
+  createFreshRuntimeSnapshot,
   DEFAULT_TEMPORAL_CONTEXT,
   runtimeTimedWork,
 } = await import(pathToFileURL(entry).href);
@@ -55,6 +64,7 @@ const {
 const sessionOptions = { baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 };
 if (options.clock !== undefined) sessionOptions.wallClockMs = clockMs(options.clock);
 if (options.zone !== undefined) sessionOptions.temporalContext = zoneContext(options.zone);
+if (options.account !== undefined) sessionOptions.account = accountInput(options.account);
 let source;
 try {
   source = readFileSync(file === "-" ? 0 : file, "utf8");
@@ -185,6 +195,25 @@ function zoneContext(timeZone) {
     if (!(error instanceof RangeError)) throw error;
     fail(`--zone: ${error.message}`);
   }
+}
+
+// The account in the JSON file, checked as a fresh session checks the account its host gives, which names the first
+// field the file gives wrongly. The check needs a plan, and any compiled plan will do, so a wrong account is refused
+// before the source is read, as a wrong --clock or --zone is.
+function accountInput(file) {
+  let account;
+  try {
+    account = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    fail(`--account ${file}: ${error.message}`);
+  }
+  try {
+    createFreshRuntimeSnapshot(compileSource("exit\n").plan, { account });
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    fail(`--account ${file}: ${error.message}`);
+  }
+  return account;
 }
 
 // Spans count lines and columns from 0; editors count from 1.

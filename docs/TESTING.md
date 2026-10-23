@@ -54,7 +54,8 @@ after `npm run build:typescript`: it prints the diagnostics and, with `--run`, t
 messages, runtime failure, or first player interaction (see `tools/probe.mjs`).
 A run reads the current time only when `--clock 2026-10-04T18:30:00Z` gives it a UTC
 wall clock, and `--zone Europe/Amsterdam` replaces UTC with that IANA time zone.
-It is a developer aid, not a test.
+It reads the player's account only when `--account account.json` gives one, a JSON object of person fields such as
+`{"firstName": "Alex", "petNames": ["puppy"]}`. The probe is a developer aid, not a test.
 `npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
 
 For a compiler change meant to preserve behaviour, such as a refactor,
