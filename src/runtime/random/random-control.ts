@@ -275,12 +275,6 @@ function randomSitesOf(plan: InstructionPlan): PlanRandomSites {
     }
     site.kinds.add(kind);
   };
-  const globFallback = plan.instructions.some(
-    (instruction) =>
-      instruction.kind === "setFallback" &&
-      instruction.destination !== null &&
-      "pick" in instruction.destination,
-  );
   plan.instructions.forEach((instruction, index) => {
     const file =
       instruction.kind === "declareGlobal" || instruction.kind === "declareSpeaker"
@@ -304,7 +298,6 @@ function randomSitesOf(plan: InstructionPlan): PlanRandomSites {
     }
     if (instruction.kind === "transfer" && "pick" in instruction.destination)
       add(file, instruction.span, "glob");
-    if (instruction.kind === "end" && globFallback) add(file, instruction.span, "glob");
   });
   const sites = [...found.entries()]
     .sort(
@@ -411,9 +404,7 @@ function analyseChangesBeforeDraw(instruction: Instruction): boolean {
       return operandsChangeBeforeDraw(instruction, drawsTimerDuration(instruction));
     // A glob destination is drawn before the transfer changes anything.
     case "transfer":
-    // An `end` that continues at a glob fallback, and a return from a block, draw after their own work, which
-    // `unitNeedsStateCopy` decides from the state.
-    case "end":
+    // A return from a block draws after its own work, which `unitNeedsStateCopy` decides from the state.
     case "returnVoid":
     case "returnValue":
     // The others draw nothing after their own work, which follows their operands.
@@ -429,7 +420,6 @@ function analyseChangesBeforeDraw(instruction: Instruction): boolean {
     case "jumpIfFalse":
     case "loopStart":
     case "callFunction":
-    case "setFallback":
     case "showPermanentButton":
     case "showImage":
     case "capture":
@@ -457,6 +447,7 @@ function analyseChangesBeforeDraw(instruction: Instruction): boolean {
     case "hideCamera":
     case "stopAudio":
     case "goto":
+    case "end":
     case "exit":
       return operandsChangeBeforeDraw(instruction, false);
     default:
@@ -524,9 +515,8 @@ function analyseExpression(root: ExpressionPlan): {
 }
 
 /**
- * Whether instruction `index` needs a state copy to be undone: it may change state before a draw, it is an `end` that
- * continues at a glob fallback after leaving its activation, or it returns from a timer, media, or button block, whose
- * catch-up after the return may draw.
+ * Whether instruction `index` needs a state copy to be undone: it may change state before a draw, or it returns from a
+ * timer, media, or button block, whose catch-up after the return may draw.
  */
 export function unitNeedsStateCopy(
   plan: InstructionPlan,
@@ -535,12 +525,6 @@ export function unitNeedsStateCopy(
 ): boolean {
   const instruction = plan.instructions[index]!;
   if (mayChangeBeforeDraw(instruction)) return true;
-  if (instruction.kind === "end")
-    return (
-      snapshot.fallback !== null &&
-      "pick" in snapshot.fallback &&
-      !snapshot.callFrames.some((frame) => frame.kind === "file")
-    );
   if (instruction.kind === "returnVoid" || instruction.kind === "returnValue") {
     const top = snapshot.callFrames.at(-1);
     return top?.kind === "function" && top.timerInterruption !== null;

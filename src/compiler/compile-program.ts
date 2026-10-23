@@ -96,7 +96,6 @@ export function compileStableProject(
       functions,
       counters,
       project,
-      path,
       picks,
       captures,
       formShapes,
@@ -144,22 +143,19 @@ export function compileStableProject(
       throw new TypeError("A call of a global function lost its target during compilation.");
     instructions[instruction] = { ...call, functionId: globalIds.get(name)! };
   }
-  // Every file has its entry and labels now, so transfers and fallbacks can name any of them.
+  // Every file has its entry now, so transfers can name any of them.
   const fileIndexByPath = new Map(files.map((file, index) => [file.path, index]));
-  for (const { instruction, paths, label, pick } of destinations) {
+  for (const { instruction, paths, pick } of destinations) {
     const options = paths.map((path) => {
       const file = fileIndexByPath.get(path) ?? -1;
-      const target =
-        label === null
-          ? files[file]?.entryInstruction
-          : files[file]?.labels.find((candidate) => candidate.name === label)?.instruction;
+      const target = files[file]?.entryInstruction;
       if (target === undefined) {
         throw new TypeError("Semantically invalid transfer reached compilation.");
       }
       return { file, target };
     });
     const pending = instructions[instruction];
-    if (pending?.kind !== "transfer" && pending?.kind !== "setFallback") {
+    if (pending?.kind !== "transfer") {
       throw new TypeError("Semantically invalid transfer reached compilation.");
     }
     instructions[instruction] = { ...pending, destination: pick ? { pick: options } : options[0]! };

@@ -289,8 +289,7 @@ export function statementExpressions(statement: Statement): readonly Expression[
       return statement.value === null ? [] : [statement.value];
     case "gotoStatement":
     case "callFileStatement":
-    case "fallbackStatement":
-      return statement.target?.kind === "scriptTarget" ? [statement.target.expression] : [];
+      return statement.target.kind === "scriptTarget" ? [statement.target.expression] : [];
     default:
       return [];
   }

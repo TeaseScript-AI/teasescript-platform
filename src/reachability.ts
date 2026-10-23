@@ -10,6 +10,7 @@ import {
 import { PlanControlFlow, type FlowEdge } from "./plan/control-flow.js";
 import { solveForward } from "./plan/dataflow.js";
 import type { InstructionPlan } from "./plan/model.js";
+import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { runsOnItsOwn } from "./project-globals.js";
 import { CORE_RUNTIME_BUILTINS } from "./language-facts.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
@@ -17,12 +18,12 @@ import type { DeadWays } from "./way-facts.js";
 
 /*
  * Which code can run, from the compiled plan: the ways of `plan/control-flow.ts` that the type check does not rule out
- * (`DeadWays`), solved with `plan/dataflow.ts`. Code can run in a file's top level, from its start or a label; in a
- * function where a call that can run reaches it; and in a timer, media, or button block where code that can run
- * creates it (ADR 0022 §3.4). A call counts as returning, also of a function that never returns, so the ending after
- * it is still written out (ADR 0022 §4.3). The checks that follow it: the endings of files and of the session (TSV052,
- * TSV053), loops with no way out (TSV058), code that never runs (TSV065, TSV066), and the flow of statements that the
- * check of variables at labels follows (TSV054).
+ * (`DeadWays`), solved with `plan/dataflow.ts`. Code can run in a file's top level, from its start; in a function where
+ * a call that can run reaches it; and in a timer, media, or button block where code that can run creates it (ADR 0022
+ * §3.4). A call counts as returning, also of a function that never returns, so the ending after it is still written out
+ * (ADR 0022 §4.3). The checks that follow it: the endings of files and of the session (TSV052, TSV053), an `end` with
+ * no file call to return to (TSV070, TSV071), loops with no way out (TSV058), code that never runs (TSV065, TSV066),
+ * and the flow of statements that the check of variables at labels follows (TSV054).
  */
 
 /**
@@ -61,7 +62,7 @@ const ONWARD_EDGES: ReadonlySet<string> = new Set<FlowEdge["kind"]>([
 /** Which instructions of a plan can run, and how that reads back as the source's statements. */
 export class Reachability {
   readonly #flow: PlanControlFlow;
-  /** The code that can run: from the start of a file or a label, with the functions and blocks it reaches. */
+  /** The code that can run: from the start of a file, with the functions and blocks it reaches. */
   readonly #reached: Uint8Array;
   /** For each instruction, how many before it {@link #reached} holds. */
   readonly #reachedBefore: Int32Array;
@@ -79,11 +80,9 @@ export class Reachability {
     private readonly ways: DeadWays,
   ) {
     this.#flow = new PlanControlFlow(plan);
+    // A file starts at its top, so a label is reached only by the code before it or a goto (V30 §26, §29).
     const starts: number[] = [];
-    for (const file of plan.files) {
-      starts.push(file.startInstruction, file.entryInstruction);
-      for (const label of file.labels) starts.push(label.instruction);
-    }
+    for (const file of plan.files) starts.push(file.startInstruction, file.entryInstruction);
     this.#reached = this.#solve(starts);
     this.#local = this.#solve([
       ...starts,
@@ -196,6 +195,166 @@ export class Reachability {
         ),
       ];
     });
+  }
+
+  /**
+   * An `end` returns to the file that called the running one (V30 §30). The ways from the start of the session follow
+   * which file calls are waiting: a `call` makes one wait, and a `goto` keeps those that wait. An `end` that a way
+   * reaches with none waiting is an error (TSV070), also when another way reaches it through a call. Where only a way
+   * the compiler cannot follow leads there with none waiting, it is a warning (TSV071), and the `end` fails if that
+   * happens: a computed target, which may start a file that `targets` gives, the files its `picks` give for a tagged
+   * pick, by instruction, else those that any reference in the project may name, `referenced`, where `null` is every
+   * file; and a timer, media, or button block, which runs later, while the file that started it or a file it called
+   * runs, or after it. The `end` that closes a file's top level is the ending check's (TSV052).
+   */
+  public pendingCallDiagnostics(
+    targets: () => {
+      readonly picks: ReadonlyMap<number, readonly number[]>;
+      readonly referenced: readonly number[] | null;
+    },
+  ): Diagnostic[][] {
+    const diagnostics = this.plan.files.map((): Diagnostic[] => []);
+    const closing = new Set(this.plan.files.map((file) => file.rootEndInstruction - 1));
+    if (
+      !this.plan.instructions.some(
+        (instruction, index) => instruction.kind === "end" && !closing.has(index),
+      )
+    )
+      return diagnostics;
+    const count = this.plan.instructions.length;
+    const { picks, referenced } = targets();
+    const ways = this.#computedWays(picks, referenced);
+    const states = solveForward<CallsWaiting, string>(
+      {
+        nodeCount: count + ways.hubs.length,
+        successors: (node) => {
+          if (node >= count)
+            return ways.hubs[node - count]!.map((entry) => ({ node: entry, edge: "hub" }));
+          const out = this.#successors(node);
+          const computed = ways.targets.get(node);
+          if (computed !== undefined) out.push(computed);
+          return out;
+        },
+        join: (left, right) => ({
+          none: left.none ?? right.none,
+          hidden: left.hidden ?? right.hidden,
+        }),
+        equals: (left, right) => left.none === right.none && left.hidden === right.hidden,
+        transfer: (node, edge, state) => {
+          const waitsForNone = state.none !== null || state.hidden !== null;
+          // A block runs later: a non-persistent timer's or button's while the file that started it, or one it called,
+          // runs, so with the calls that wait there; a persistent one's or a media block also after that file ended.
+          if (edge === "handler")
+            return waitsForNone || this.#outlivesItsFile(node)
+              ? { none: null, hidden: node }
+              : state;
+          const instruction = this.plan.instructions[node];
+          if (instruction?.kind !== "transfer" || (edge !== "transfer" && edge !== "computed"))
+            return state;
+          if (instruction.mode === "call") return { none: null, hidden: null };
+          // A goto keeps the calls that wait; with none, the file it starts has none either.
+          if (edge === "transfer")
+            return { none: state.none === null ? null : node, hidden: state.hidden };
+          return { none: null, hidden: waitsForNone ? node : null };
+        },
+      },
+      [[this.plan.files[0]!.startInstruction, { none: SESSION_START, hidden: null }]],
+    );
+    for (let index = 0; index < count; index += 1) {
+      const state = states[index];
+      const instruction = this.plan.instructions[index]!;
+      if (state === null || state === undefined || instruction.kind !== "end" || closing.has(index))
+        continue;
+      if (state.none === null && state.hidden === null) continue;
+      const file = this.#flow.fileOf(index);
+      const fix = "use exit or goto here instead of end";
+      diagnostics[file]!.push(
+        createDiagnostic(
+          state.none !== null ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
+          state.none !== null ? "TSV070" : "TSV071",
+          state.none === SESSION_START
+            ? "No call waits for this end, because the session starts in main.tease without one, so there is nothing to return to. Use exit to finish the session, or goto to continue in another file."
+            : state.none !== null
+              ? `No call waits for this end when the goto on ${this.#where(state.none, file)} leads here, so there is nothing to return to. Write call there to come back after it, or ${fix}.`
+              : this.plan.instructions[state.hidden!]!.kind === "transfer"
+                ? `The goto on ${this.#where(state.hidden!, file)} picks its file when it runs, so the compiler cannot tell whether a call waits for this end then. Without one, the end fails. If that goto can lead here, write call there to come back after it, or ${fix}.`
+                : `The block that ${this.#where(state.hidden!, file)} starts runs later, so the compiler cannot tell whether a call waits for this end when it runs. Without one, the end fails. If the block can run while no file call waits, ${fix}.`,
+          planLocationToSourceSpan(instruction.span),
+        ),
+      );
+    }
+    return diagnostics;
+  }
+
+  /**
+   * The way of each computed target for the check of waiting calls (see {@link pendingCallDiagnostics}). A
+   * `script(...)` of a path written out names its file, which the check follows like a file target. Any other target
+   * leads to a node of its own after the instructions, a hub, with a way into each file it may start: those of its
+   * tagged pick, or those any reference may name. Targets that may start the same files share one, by the list of files
+   * `picks` shares, so the ways grow with the files, not with the targets times the files.
+   */
+  #computedWays(
+    picks: ReadonlyMap<number, readonly number[]>,
+    referenced: readonly number[] | null,
+  ): {
+    readonly targets: ReadonlyMap<number, { readonly node: number; readonly edge: string }>;
+    readonly hubs: readonly (readonly number[])[];
+  } {
+    const count = this.plan.instructions.length;
+    const files = new Map(this.plan.files.map((file, index) => [file.path, index]));
+    const targets = new Map<number, { readonly node: number; readonly edge: string }>();
+    const hubs: (readonly number[])[] = [];
+    // By the list of files, which `picks` shares; `null` for the files any other reference may name.
+    const hubOf = new Map<readonly number[] | null, number>();
+    const hub = (picked: readonly number[] | null): number => {
+      let node = hubOf.get(picked);
+      if (node === undefined) {
+        node = count + hubs.length;
+        hubs.push(
+          (picked ?? referenced ?? this.plan.files.map((_, file) => file)).map(
+            (file) => this.plan.files[file]!.entryInstruction,
+          ),
+        );
+        hubOf.set(picked, node);
+      }
+      return node;
+    };
+    this.plan.instructions.forEach((instruction, index) => {
+      if (instruction.kind !== "transfer" || !("value" in instruction.destination)) return;
+      const value = instruction.destination.value;
+      const path =
+        value.kind === "call" &&
+        value.callee.kind === "identifier" &&
+        value.callee.name === "script" &&
+        value.arguments.length === 1 &&
+        value.arguments[0]!.value.kind === "literal"
+          ? value.arguments[0]!.value.value
+          : undefined;
+      if (path !== undefined) {
+        const file = typeof path === "string" ? files.get(path) : undefined;
+        if (file !== undefined)
+          targets.set(index, { node: this.plan.files[file]!.entryInstruction, edge: "transfer" });
+        return;
+      }
+      const node = hub((value.kind === "tagQuery" ? picks.get(index) : undefined) ?? null);
+      targets.set(index, { node, edge: "computed" });
+    });
+    return { targets, hubs };
+  }
+
+  /** Whether the blocks that the instruction at `index` creates may run after the file entry that created them ended. */
+  #outlivesItsFile(index: number): boolean {
+    const instruction = this.plan.instructions[index];
+    return instruction?.kind === "startTimer" || instruction?.kind === "showPermanentButton"
+      ? instruction.persist
+      : true;
+  }
+
+  /** Where the instruction at `index` stands, as seen from the file `from`: `line 3` or `line 3 of main.tease`. */
+  #where(index: number, from: number): string {
+    const file = this.#flow.fileOf(index);
+    const line = `line ${this.plan.instructions[index]!.span.sl + 1}`;
+    return file === from ? line : `${line} of ${this.plan.files[file]!.path}`;
   }
 
   /** Whether an `exit` can run, which the project needs (TSV053, ADR 0022 §4.1). */
@@ -355,6 +514,19 @@ export class Reachability {
   }
 }
 
+/**
+ * Whether a way reaches code with no file call waiting: `none` names one by the `goto` that started the running file
+ * without a call, or `SESSION_START`, and `hidden` one by the computed `goto` that may have done so. Both `null`: every
+ * way there has a call waiting. The first way found names each.
+ */
+interface CallsWaiting {
+  readonly none: number | null;
+  readonly hidden: number | null;
+}
+
+/** The start of the session, which runs `main.tease` with no call waiting. */
+const SESSION_START = -1;
+
 /** For each index, how many of the entries before it are set; one more count at the end, for all of them. */
 function countsBefore(set: Uint8Array): Int32Array {
   const counts = new Int32Array(set.length + 1);
@@ -450,12 +622,14 @@ class UnreachableCode {
     ];
     for (let item = work.pop(); item !== undefined; item = work.pop()) {
       const { statements, owner } = item;
-      // The last statement before, since the start of the list or a label, that can run.
+      // The last statement before, since the start of the list or a label, that can run, and that label.
       let previous: Statement | null = null;
+      let label: Extract<Statement, { kind: "labelStatement" }> | null = null;
       let inRun = false;
       for (const statement of statements) {
         if (statement.kind === "labelStatement") {
           previous = null;
+          label = statement;
           inRun = false;
           continue;
         }
@@ -467,6 +641,7 @@ class UnreachableCode {
         if (runs === null) continue;
         if (runs) {
           previous = statement;
+          label = null;
           inRun = false;
           for (const [list, way] of ownedLists(statement))
             work.push({ statements: list, owner: way });
@@ -475,7 +650,17 @@ class UnreachableCode {
         }
         if (inRun) continue;
         inRun = true;
-        const reason = previous === null ? this.#branchReason(owner) : this.#afterReason(previous);
+        const reason =
+          previous !== null
+            ? this.#afterReason(previous)
+            : label !== null
+              ? {
+                  // A file starts at its top, so only the code before a label or a goto leads to it (V30 §26).
+                  because: `no goto leads to label '${label.name.name}' on line ${label.span.start.line + 1}, and the code before it never continues there`,
+                  fix: "Remove it, or add a goto to the label.",
+                  after: false,
+                }
+              : this.#branchReason(owner);
         if (reason === null) continue;
         this.diagnostics.push(
           statement.kind === "exitStatement"

@@ -83,7 +83,7 @@ export function tagQuery(
     }
     // Plan files start with main.tease; picks and lists see path order, as for images.
     paths.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
-    for (const path of paths) found.push({ kind: "script", path, label: null });
+    for (const path of paths) found.push({ kind: "script", path });
   } else {
     // The package images in path order, then the photos taken with tags in capture order.
     for (const image of evaluator.plan.images)

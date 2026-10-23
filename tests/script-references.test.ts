@@ -14,6 +14,7 @@ import {
   type RuntimeResumeEquivalenceOptions,
 } from "./helpers/runtime-equivalence.js";
 import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
+import { validateScriptStorageEntries } from "../src/runtime/host-data/script-storage.js";
 
 function project(main: string, others: Record<string, string> = {}): ProjectSourceFile[] {
   return [
@@ -56,36 +57,36 @@ function diagnostics(files: readonly ProjectSourceFile[]): [string, string, stri
   ]);
 }
 
-const HALL = { "rooms/hall.tease": 'say "hall"\nlabel start\nsay "hall start"\nexit' };
+const HALL = { "rooms/hall.tease": 'say "hall"\nexit' };
 
-test("a script reference is a value that shows as the call that makes it and compares by path and label", () => {
+test("a script reference is a value that shows as the call that makes it and compares by path", () => {
   assert.deepEqual(
     said(
       project(
         [
           'let hall = script("rooms/hall.tease")',
-          'let start: script = script("rooms/hall.tease", label: "start")',
+          'let yard: script = script("rooms/yard.tease")',
           "say hall",
-          'say "next: ${start}"',
-          "say toString(start)",
-          "say [hall, start]",
+          'say "next: ${yard}"',
+          "say toString(yard)",
+          "say [hall, yard]",
           'say hall == script("rooms/hall.tease")',
-          "say hall == start",
-          'say set[hall, start, script("rooms/hall.tease")].length',
-          'let kept = dict{ "next": start }',
+          "say hall == yard",
+          'say set[hall, yard, script("rooms/hall.tease")].length',
+          'let kept = dict{ "next": yard }',
           'save kept["next"] as "next"',
           'let loaded = load "ne" + "xt", default: null',
-          "say loaded is script and loaded == start",
+          "say loaded is script and loaded == yard",
           "exit",
         ].join("\n"),
-        HALL,
+        { ...HALL, "rooms/yard.tease": 'say "yard"\nexit' },
       ),
     ),
     [
       'script("rooms/hall.tease")',
-      'next: script("rooms/hall.tease", label: "start")',
-      'script("rooms/hall.tease", label: "start")',
-      '[script("rooms/hall.tease"), script("rooms/hall.tease", label: "start")]',
+      'next: script("rooms/yard.tease")',
+      'script("rooms/yard.tease")',
+      '[script("rooms/hall.tease"), script("rooms/yard.tease")]',
       "true",
       "false",
       "2",
@@ -95,78 +96,70 @@ test("a script reference is a value that shows as the call that makes it and com
   );
 });
 
-test("goto, call, and fallback go where a reference in a variable, list, or dict names", () => {
+test("goto and call go where a reference in a variable, list, or dict names", () => {
   assert.deepEqual(
     said(
       project(
         [
-          'let rooms = [script("rooms/a.tease"), script("rooms/b.tease", label: "back")]',
+          'let rooms = [script("rooms/a.tease"), script("rooms/b.tease")]',
           'let ends = dict{ "calm": script("ends/calm.tease") }',
           "for room in rooms {",
           "    call (room)",
           "}",
-          'fallback (ends["calm"])',
-          'let next = script("rooms/hall.tease", label: "start")',
-          "goto (next)",
+          'let next = script("rooms/hall.tease")',
+          "call (next)",
+          'goto (ends["calm"])',
         ].join("\n"),
         {
           "rooms/a.tease": 'say "a"\nend',
-          "rooms/b.tease": 'say "b, skipped"\nlabel back\nsay "b"\nend',
-          "rooms/hall.tease": 'say "hall, skipped"\nlabel start\nsay "hall"\nend',
+          "rooms/b.tease": 'say "b"\nend',
+          "rooms/hall.tease": 'say "hall"\nend',
           "ends/calm.tease": 'say "calm end"\nexit',
         },
       ),
+      // The goto's file is known only when it runs, so the compiler cannot tell that no end follows it.
+      { warnings: ["TSV071", "TSV071", "TSV071"] },
     ),
     ["a", "b", "hall", "calm end", "exit"],
   );
 });
 
-test("a reference saved in one session goes to its label in the next; a let skipped there has no value yet", () => {
-  // The session that saves the reference shows its label; the one that loads it only sees `load`.
-  const room =
-    'let mood = "calm"\nlabel late\nsay "late"\nlet count = 3\nsay "count ${count}"\nexit';
+test("a reference saved in one session starts its file in the next", () => {
+  const room = 'say "room"\nexit';
   const writer = compiled(
-    project('save script("room.tease", label: "late") as "next"\nexit', { "room.tease": room }),
+    project('save script("room.tease") as "next"\nexit', { "room.tease": room }),
   );
   const saved = run(writer, createImmediatePacingRuntimeSnapshot(writer)).snapshot.scriptStorage;
-  assert.deepEqual(saved, [
-    { key: "next", value: { kind: "script", path: "room.tease", label: "late" } },
-  ]);
+  assert.deepEqual(saved, [{ key: "next", value: { kind: "script", path: "room.tease" } }]);
   const reader = 'let next = load "ne" + "xt", default: null\ngoto (next)';
   assert.deepEqual(said(project(reader, { "room.tease": room }), { scriptStorage: saved }), [
-    "late",
-    "count 3",
+    "room",
     "exit",
   ]);
-  // The compiler cannot see that a loaded reference enters at the label, so reading `mood` fails when it runs.
-  const skipped = project(reader, { "room.tease": room.replace('say "late"', "say mood") });
-  assert.deepEqual(said(skipped, { scriptStorage: saved, ending: "failed" }), [
-    "failure TSR070: 'mood' has no value yet: this file was started at label 'late', and its 'let mood' has not run since. Give mood a value after the label, or make it a global.",
-  ]);
-  // From the top of a file, the message names no label.
+  // A reference saved with a label names no place a file starts at now, so it is not read as one.
+  assert.equal(
+    validateScriptStorageEntries(
+      [{ key: "next", value: { kind: "script", path: "room.tease", label: "late" } }],
+      "storage",
+    ),
+    "storage[0].value contains a malformed script reference.",
+  );
+  // A function called before its file's let runs.
   const early = project("function show { say level }\nshow()\nlet level = 1\nexit");
   assert.deepEqual(said(early, { ending: "failed" }), [
     "failure TSR070: 'level' has no value yet: its 'let level' has not run. Give level a value before it is used.",
   ]);
 });
 
-test("a computed target that names no file, no label, or a file that runs nothing fails when it runs", () => {
+test("a computed target that names no file, or a file that runs nothing, fails when it runs", () => {
   const others = { ...HALL, "helpers.tease": 'function greet { say "hi" }' };
   const failure = (main: string): string[] => said(project(main, others), { ending: "failed" });
   assert.deepEqual(failure('let room = "cellar"\ngoto script("rooms/${room}.tease")'), [
     `failure TSR069: This goto names the file 'rooms/cellar.tease', but the project has no such file. Paths start at the package root, such as "rooms/hall.tease".`,
   ]);
-  assert.deepEqual(
-    failure('let name = "finish"\ncall script("rooms/hall.tease", label: name)\nexit'),
-    [
-      "failure TSR069: This call names label 'finish' of 'rooms/hall.tease', but that file has no such label.",
-    ],
-  );
-  for (const transfer of ["goto (next)", "fallback (next)\nend"]) {
-    assert.deepEqual(failure(`let path = "helpers.tease"\nlet next = script(path)\n${transfer}`), [
-      "failure TSR069: 'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.",
-    ]);
-  }
+  assert.deepEqual(failure('let path = "helpers.tease"\nlet next = script(path)\ngoto (next)'), [
+    "failure TSR069: 'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.",
+  ]);
   // Calling such a file runs nothing and returns at once.
   assert.deepEqual(
     said(project('let path = "helpers.tease"\ncall script(path)\nsay "back"\nexit', others)),
@@ -194,32 +187,25 @@ test("a script(...) with literal text is checked like a file target, and a compu
       "'/rooms/hall.tease' is not a package file path: it has an empty folder name. Separate folders with a single '/'.",
     ],
   ]);
-  assert.deepEqual(check('let next = script("rooms/hall.tease", label: "finish")\nexit'), [
-    ["TSV051", "'rooms/hall.tease' has no label 'finish'."],
-  ]);
   assert.deepEqual(check('let next = script("rooms/*.tease")\nexit'), [
     [
       "TSV057",
       'A glob cannot be inside script(...). To pick a random file, write goto "rooms/*.tease" directly.',
     ],
   ]);
-  assert.deepEqual(check('call script("rooms/*.tease", label: "start")\nexit'), [
+  assert.deepEqual(check('call script("rooms/*.tease")\nexit'), [
     [
       "TSV057",
-      'A glob cannot be inside script(...). To pick a random file, write call "rooms/*.tease" start directly.',
+      'A glob cannot be inside script(...). To pick a random file, write call "rooms/*.tease" directly.',
     ],
   ]);
   // Going to a file of declarations only would end nowhere; calling it is fine, as for a literal target.
-  for (const transfer of [
-    'goto script("helpers.tease")',
-    'fallback (script("helpers.tease"))\nexit',
-  ])
-    assert.deepEqual(check(transfer), [
-      [
-        "TSV057",
-        "'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.",
-      ],
-    ]);
+  assert.deepEqual(check('goto script("helpers.tease")'), [
+    [
+      "TSV057",
+      "'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.",
+    ],
+  ]);
   assert.deepEqual(
     check('call script("helpers.tease")\nlet later = script("helpers.tease")\nexit'),
     [],
@@ -237,17 +223,14 @@ test("a script(...) with literal text is checked like a file target, and a compu
     ],
   ]);
   assert.deepEqual(check('let next = script("rooms/hall.tease", "start")\nexit'), [
-    [
-      "TSV020",
-      "script() takes 1 argument (path), received 2. Name a label with 'label:', as in 'script(\"rooms/hall.tease\", label: \"start\")'.",
-    ],
+    ["TSV020", "script() takes 1 argument (path), received 2."],
   ]);
   assert.deepEqual(check('let next = script(1, at: "start")\nexit'), [
     [
       "TSV043",
       "script(...) takes the path of a file as text (string), but this is a whole number (integer).",
     ],
-    ["TSV022", "script() has no parameter 'at'. Its only named argument is 'label:'."],
+    ["TSV022", "script() takes its arguments without names. Remove 'at:'."],
   ]);
   // A button cannot return a reference, also through its text; with a value written before ':' it may show one.
   const noReturn =
@@ -280,7 +263,7 @@ test("a button shows a script reference only when a written value is what it ret
   );
   // A loaded reference is known only when the choice is prepared.
   const scriptStorage = [
-    { key: "next", value: { kind: "script" as const, path: "rooms/hall.tease", label: null } },
+    { key: "next", value: { kind: "script" as const, path: "rooms/hall.tease" } },
   ];
   assert.deepEqual(
     said(
@@ -296,61 +279,27 @@ test("a button shows a script reference only when a written value is what it ret
   );
 });
 
-test("script(...) marks the labels it may enter afresh by whether its path and label are literal text", () => {
-  // Main reads x after label again, so x has no value when main is entered there.
-  const main = 'let x = 1\nlabel again\nsay x\ngoto "other.tease"';
-  const codes = (other: string): string[] =>
-    diagnostics(project(main, { "other.tease": other, "else.tease": "label again\nexit" })).map(
-      ([path, code]) => `${path} ${code}`,
-    );
-  // A literal path and label enter that label.
-  assert.deepEqual(codes('let next = script("main.tease", label: "again")\nexit'), [
-    "main.tease TSV054",
-  ]);
-  // A literal path alone enters the file's top.
-  assert.deepEqual(codes('let next = script("main.tease")\nexit'), []);
-  // A computed path with a literal label enters that label of every file that has it.
-  assert.deepEqual(
-    codes('let path = "else.tease"\nlet next = script(path, label: "again")\nexit'),
-    ["main.tease TSV054"],
-  );
-  // A computed label enters every label of the files the path names: here only else.tease, then any file.
-  const name = 'let name = "again"\n';
-  assert.deepEqual(codes(`${name}let next = script("else.tease", label: name)\nexit`), []);
-  assert.deepEqual(codes(`${name}let next = script("main.tease", label: name)\nexit`), [
-    "main.tease TSV054",
-  ]);
-  assert.deepEqual(codes(`${name}let path = "x"\nlet next = script(path, label: name)\nexit`), [
-    "main.tease TSV054",
-  ]);
-  // A grouped target adds nothing by itself: its reference came from a script(...) or from load.
-  assert.deepEqual(codes('let next = load "next", default: script("main.tease")\ngoto (next)'), []);
-  // A reference in code that cannot run marks nothing; a global's start value always runs.
-  const again = 'script("main.tease", label: "again")';
-  assert.deepEqual(codes(`function never { let next = ${again} }\nexit`), []);
-  assert.deepEqual(codes(`if false { global next = ${again} }\nexit`), ["main.tease TSV054"]);
-});
-
 test("a global holds a reference from the start of the session or from a later assignment, in every file", () => {
   assert.deepEqual(
     said(
       project(
         [
-          'global next = script("rooms/hall.tease", label: "start")',
+          'global next = script("rooms/hall.tease")',
           'global after = script("rooms/a.tease")',
           'call "rooms/setup.tease"',
           "call (after)",
-          "goto (next)",
+          "call (next)",
+          "exit",
         ].join("\n"),
         {
           "rooms/setup.tease": 'after = script("rooms/yard.tease")\nend',
           "rooms/a.tease": 'say "a"\nend',
           "rooms/yard.tease": 'say "yard"\nend',
-          "rooms/hall.tease": 'say "skipped"\nlabel start\nsay "hall ${next}"\nexit',
+          "rooms/hall.tease": 'say "hall ${next}"\nexit',
         },
       ),
     ),
-    ["yard", 'hall script("rooms/hall.tease", label: "start")', "exit"],
+    ["yard", 'hall script("rooms/hall.tease")', "exit"],
   );
 });
 
@@ -395,28 +344,13 @@ test("plan and restore validation check the expression of a computed target", ()
   );
 });
 
-test("restore accepts a fallback that a computed fallback resolved to, and checks where each activation started", () => {
-  const files = project(
-    [
-      'let next = script("rooms/hall.tease", label: "start")',
-      "fallback (next)",
-      'call "rooms/hall.tease"',
-      "end",
-    ].join("\n"),
-    {
-      "rooms/hall.tease": "wait 1 s\nend\nlabel start\nexit",
-      "helpers.tease": 'function greet { say "hi" }',
-    },
+test("restore checks that each activation started at the top of its file", () => {
+  const plan = compiled(
+    project('call "rooms/hall.tease"\nexit', { "rooms/hall.tease": "wait 1 s\nlabel later\nend" }),
   );
-  const plan = compiled(files);
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
   assert.equal(waiting.status, "waiting");
   const hall = plan.files.findIndex((file) => file.path === "rooms/hall.tease");
-  const helpers = plan.files.findIndex((file) => file.path === "helpers.tease");
-  assert.deepEqual(waiting.fallback, {
-    file: hall,
-    target: plan.files[hall]!.labels[0]!.instruction,
-  });
   assert.deepEqual(
     waiting.frames.flatMap((frame) => (frame.file === null ? [] : [[frame.file, frame.entry]])),
     [
@@ -425,72 +359,31 @@ test("restore accepts a fallback that a computed fallback resolved to, and check
     ],
   );
   assert.deepEqual(validateRuntimeSnapshot(waiting, plan).errors, []);
-  const errors = (change: (snapshot: Mutable<RuntimeSnapshot>) => void): readonly string[] => {
-    // EVIDENCE: structuredClone preserves the runtime snapshot shape while each fixture breaks one field.
+  // Not at a label, nor at the end that closes the file's top level.
+  for (const entry of [
+    plan.files[hall]!.labels[0]!.instruction,
+    plan.files[hall]!.rootEndInstruction - 1,
+    null,
+  ]) {
+    // EVIDENCE: structuredClone preserves the runtime snapshot shape while the fixture moves one entry.
     const snapshot = structuredClone(waiting) as Mutable<RuntimeSnapshot>;
-    change(snapshot);
-    return validateRuntimeSnapshot(snapshot, plan).errors;
-  };
-  // A computed fallback may have resolved to any file's entry or label, but not into a file that runs nothing.
-  assert.deepEqual(
-    errors((snapshot) => {
-      snapshot.fallback = { file: 0, target: plan.files[0]!.entryInstruction };
-    }),
-    [],
-  );
-  // The closing end of a file's root region is neither its entry nor a label.
-  const inside = plan.files[hall]!.rootEndInstruction - 1;
-  for (const fallback of [
-    { file: helpers, target: plan.files[helpers]!.entryInstruction },
-    { file: hall, target: inside },
-  ])
-    assert.deepEqual(
-      errors((snapshot) => {
-        snapshot.fallback = fallback;
-      }),
-      ["Runtime fallback is malformed."],
-    );
-  // An activation starts at its file's entry or one of its labels.
-  assert.deepEqual(
-    errors((snapshot) => {
-      snapshot.frames[1]!.entry = plan.files[hall]!.labels[0]!.instruction;
-    }),
-    [],
-  );
-  for (const entry of [inside, null])
-    assert.deepEqual(
-      errors((snapshot) => {
-        snapshot.frames[1]!.entry = entry;
-      }),
-      ["Runtime scope frame is malformed."],
-    );
-  // Without a computed fallback, the fallback is still exactly the destination of a fallback statement.
-  const literal = compiled(
-    project('fallback "rooms/hall.tease" start\ncall "rooms/hall.tease"\nend', {
-      "rooms/hall.tease": "wait 1 s\nend\nlabel start\nexit",
-    }),
-  );
-  const literalWaiting = run(literal, createImmediatePacingRuntimeSnapshot(literal)).snapshot;
-  assert.deepEqual(validateRuntimeSnapshot(literalWaiting, literal).errors, []);
-  assert.deepEqual(
-    validateRuntimeSnapshot(
-      { ...literalWaiting, fallback: { file: 0, target: literal.files[0]!.entryInstruction } },
-      literal,
-    ).errors,
-    ["Runtime fallback is malformed."],
-  );
+    snapshot.frames[1]!.entry = entry;
+    assert.deepEqual(validateRuntimeSnapshot(snapshot, plan).errors, [
+      "Runtime scope frame is malformed.",
+    ]);
+  }
 });
 
-test("restore checks a deeply nested computed fallback target without walking it", () => {
-  // The compiler and runtime take deep expressions; the stored fallback is resolved, so restore needs no expression.
+test("restore checks a plan with a deeply nested computed target without walking it", () => {
+  // The compiler and runtime take deep expressions, and restore checks the plan and the waiting session.
   const depth = 6_000;
   const path = `${"toString(".repeat(depth)}"room.tease"${")".repeat(depth)}`;
   const plan = compiled([
-    { path: "main.tease", source: `fallback script(${path})\nwait 1 s\nend` },
+    { path: "main.tease", source: `wait 1 s\ngoto script(${path})` },
     { path: "room.tease", source: 'say "room"\nexit' },
   ]);
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
-  assert.deepEqual(waiting.fallback, { file: 1, target: plan.files[1]!.entryInstruction });
+  assert.equal(waiting.status, "waiting");
   assert.deepEqual(validateRuntimeSnapshot(waiting, plan).errors, []);
   const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, waiting)));
   assert.deepEqual(

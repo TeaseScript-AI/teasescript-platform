@@ -4,7 +4,6 @@ import { isPlainRecord } from "../values/plain-data.js";
 import {
   startupDeclarations,
   type InstructionPlan,
-  type PlanTransferDestination,
   type InteractionUiPayload,
 } from "../../plan/model.js";
 import {
@@ -177,7 +176,6 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     frames: [{ id: 0, file: 0, entry: plan.files[0]!.entryInstruction, bindings: [] }],
     globals: hostGlobals,
     retainedScopes: [],
-    fallback: null,
     speakers: [],
     defaultSpeaker: null,
     contextualSpeaker: null,
@@ -246,7 +244,6 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     frames: snapshot.frames.map(cloneScopeFrame),
     globals: snapshot.globals.map(cloneBinding),
     retainedScopes: snapshot.retainedScopes.map(cloneScopeFrame),
-    fallback: snapshot.fallback === null ? null : cloneTransferDestination(snapshot.fallback),
     speakers: snapshot.speakers.map((speaker) => ({
       id: speaker.id,
       identifier: speaker.identifier,
@@ -337,14 +334,6 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
 
 function cloneBinding(binding: RuntimeBindingSnapshot): RuntimeBindingSnapshot {
   return { name: binding.name, value: cloneCapturedSerializableValue(binding.value) };
-}
-
-export function cloneTransferDestination(
-  destination: PlanTransferDestination,
-): PlanTransferDestination {
-  return "pick" in destination
-    ? { pick: destination.pick.map((option) => ({ file: option.file, target: option.target })) }
-    : { file: destination.file, target: destination.target };
 }
 
 function cloneScopeFrame(frame: RuntimeScopeFrameSnapshot): RuntimeScopeFrameSnapshot {

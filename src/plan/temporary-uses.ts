@@ -58,9 +58,7 @@ export function requiredInstructionTemporaries(
       );
       break;
     case "transfer":
-    case "setFallback":
-      if (instruction.destination !== null && "value" in instruction.destination)
-        collect(instruction.destination.value);
+      if ("value" in instruction.destination) collect(instruction.destination.value);
       break;
     case "setDefaultSpeaker":
     case "copyAccount":

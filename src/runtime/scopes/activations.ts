@@ -53,6 +53,11 @@ function currentRootDepth(snapshot: Pick<RuntimeSnapshot, "callFrames">): number
   return call?.kind === "file" ? call.scopeBaseDepth : 0;
 }
 
+/** The file of the running activation, which an `end` ends and a `call` may not start (V30 §29). */
+export function runningFile(snapshot: Pick<RuntimeSnapshot, "callFrames" | "frames">): number {
+  return snapshot.frames[currentRootDepth(snapshot)]!.file!;
+}
+
 /** The root whose top-level names the running code sees. */
 export function contextRootId(snapshot: Pick<RuntimeSnapshot, "callFrames" | "frames">): number {
   const top = snapshot.callFrames.at(-1);

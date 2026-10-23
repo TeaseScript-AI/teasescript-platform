@@ -14,13 +14,21 @@ import type { Tag } from "./tags.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
 import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutable.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
-import type { PlanImage, PreparedFormShape, StorageTypePlan, TypeCheckPlan } from "./plan/model.js";
+import type {
+  PlanImage,
+  PreparedFormShape,
+  StorageTypePlan,
+  TypeCheckPlan,
+  TypePlan,
+} from "./plan/model.js";
+import { instructionExpressions } from "./plan/instruction-expressions.js";
+import { expressionPlanChildren } from "./plan/expression-children.js";
 import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS, PROTECTED_NAME_CODE } from "./language-facts.js";
 import { PlanControlFlow } from "./plan/control-flow.js";
-import { Reachability, type ConstantTest, type StatementFlow } from "./reachability.js";
+import { Reachability, type ConstantTest } from "./reachability.js";
 import {
   stopsTypeCheck,
   validateProjectSemantics,
@@ -147,7 +155,9 @@ function compileProjectFiles(
     );
     // Which code can run, the endings, and the flow of speaker properties follow the plan, which runs exactly as the
     // session will (V30 §30, §37).
-    if (plan !== null) plan = checkFlow(files, plan, trace, checked);
+    // A host global or host function may give a script reference to any file (V30 §30).
+    const hostValues = (options.globals?.length ?? 0) > 0 || (options.builtins?.length ?? 0) > 0;
+    if (plan !== null) plan = checkFlow(files, plan, trace, checked, hostValues);
   }
   const results = files.map((file) => file.result);
   const result = Object.freeze({
@@ -227,15 +237,6 @@ function projectDiagnostic(path: string, message: string): ProjectDiagnostic {
   });
 }
 
-/** The labels of a file's outer scope. */
-function fileLabels(program: Program): ReadonlySet<string> {
-  return new Set(
-    program.statements.flatMap((statement) =>
-      statement.kind === "labelStatement" ? [statement.name.name] : [],
-    ),
-  );
-}
-
 function parseFile(path: string, source: string): CompiledProjectFile {
   let parsed: ReturnType<typeof parse>;
   try {
@@ -292,7 +293,11 @@ function checkProject(
   };
   try {
     const names = validateProjectSemantics(
-      files.map((file) => ({ path: file.result.path, program: file.result.program })),
+      files.map((file) => ({
+        path: file.result.path,
+        program: file.result.program,
+        tags: scriptTags(file.result),
+      })),
       options,
       (index) =>
         files[index]!.parsed !== null && !hasErrors(files[index]!.result.parserDiagnostics),
@@ -377,6 +382,7 @@ function checkFlow(
   plan: InstructionPlan,
   trace: LoweringTrace,
   checked: CheckedProject,
+  hostValues: boolean,
 ): InstructionPlan | null {
   try {
     const ways = new DeadWays(new PlanControlFlow(plan), trace.origins, checked.ways);
@@ -387,16 +393,17 @@ function checkFlow(
       ways,
     );
     const statementFlow = reachability.statementFlow();
-    const freshLabels = enteredLabels(files, checked.names, statementFlow);
     const endings = reachability.endingDiagnostics();
-    const errors = files.map((file, index) => [
+    const returns = reachability.pendingCallDiagnostics(() => ({
+      picks: taggedPicks(plan, trace, checked.names),
+      referenced: referencedFiles(plan, checked.names, hostValues),
+    }));
+    const errors = files.map((_, index) => [
       // The initialization check at labels decides itself which functions and blocks run, by the calls and creations
       // in statements that can run (ADR 0022 §3.4).
-      ...checked.names[index]!.checkInitialization(
-        freshLabels.get(file.result.path) ?? new Set(),
-        statementFlow,
-      ),
+      ...checked.names[index]!.checkInitialization(statementFlow),
       ...endings[index]!,
+      ...returns[index]!.filter((diagnostic) => diagnostic.severity === DiagnosticSeverity.Error),
     ]);
     if (!errors.some((diagnostics) => diagnostics.length > 0) && !reachability.reachesExit()) {
       const main = files[0]!.result.program;
@@ -423,9 +430,13 @@ function checkFlow(
     files.forEach((file, index) =>
       addSemanticDiagnostics(
         file,
-        [...warnings[index]!, ...errors[index]!].sort(
-          (left, right) => left.span.start.offset - right.span.start.offset,
-        ),
+        [
+          ...warnings[index]!,
+          ...returns[index]!.filter(
+            (diagnostic) => diagnostic.severity === DiagnosticSeverity.Warning,
+          ),
+          ...errors[index]!,
+        ].sort((left, right) => left.span.start.offset - right.span.start.offset),
       ),
     );
     if (errors.some((diagnostics) => diagnostics.length > 0)) return null;
@@ -447,39 +458,94 @@ function checkFlow(
   }
 }
 
-/** What a TSV046 warning says its test always gives, by its words: `null` for a case that never matches or an empty range. */
-function constantTestValue(message: string): boolean | null {
-  return message.endsWith("always true.") ? true : message.endsWith("always false.") ? false : null;
+/**
+ * The files that a script reference may name where a computed target uses it, by index: those the project's
+ * `script(...)` calls and `findScripts(...)` lists may name (see `FileSemanticResult.referencedScripts`). `null` for any
+ * file: when one of them may name any file, when a `load` may give a reference, which an earlier session may have saved
+ * for any file, or when the host gives values.
+ */
+function referencedFiles(
+  plan: InstructionPlan,
+  names: readonly FileSemanticResult[],
+  hostValues: boolean,
+): readonly number[] | null {
+  const referenced = names[0]?.referencedScripts ?? null;
+  if (referenced === null || hostValues) return null;
+  for (const instruction of plan.instructions)
+    for (const root of instructionExpressions(instruction)) {
+      const pending = [root];
+      for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+        if (node.kind === "storageLoad" && mayHoldScript(node.type)) return null;
+        // One by one: an expression may have more children than a call takes arguments.
+        for (const child of expressionPlanChildren(node)) pending.push(child);
+      }
+    }
+  return plan.files.flatMap((file, index) => (referenced.has(file.path) ? [index] : []));
 }
 
 /**
- * The labels of each file that a transfer or script reference that can run enters afresh, which has then run nothing
- * of its file. As the source shows it, a computed path stands for every file and a computed label for every label.
+ * Whether a loaded value of this type may hold a script reference: `null`, a type not known, may, and so may an object,
+ * whose type checks only the properties it lists, so another property may hold anything.
  */
-function enteredLabels(
-  files: readonly CompiledProjectFile[],
-  names: readonly FileSemanticResult[],
-  flow: StatementFlow,
-): ReadonlyMap<string, ReadonlySet<string>> {
-  const labels = new Map(files.map((file) => [file.result.path, fileLabels(file.result.program)]));
-  const freshLabels = new Map<string, Set<string>>();
-  const marked = new Set<string>();
-  for (const result of names) {
-    for (const { path, label } of result.reachableEntries(flow)) {
-      // Many references mark the same labels; each mark is followed once.
-      const mark = JSON.stringify([path, label]);
-      if (label === null || marked.has(mark)) continue;
-      marked.add(mark);
-      for (const entered of path === null ? labels.keys() : [path]) {
-        const known = labels.get(entered) ?? new Set<string>();
-        const fresh = freshLabels.get(entered) ?? new Set<string>();
-        if (label === true) for (const name of known) fresh.add(name);
-        else if (known.has(label)) fresh.add(label);
-        freshLabels.set(entered, fresh);
-      }
+function mayHoldScript(type: TypePlan | null): boolean {
+  // A worklist, so that a type nested as deep as its source allows does not deepen the native stack.
+  const pending = [type];
+  for (let part = pending.pop(); part !== undefined; part = pending.pop()) {
+    if (part === null) return true;
+    switch (part.kind) {
+      case "script":
+      case "object":
+        return true;
+      case "list":
+      case "set":
+      case "dict":
+        pending.push(part.element);
+        break;
+      case "union":
+        for (const member of part.members) pending.push(member);
+        break;
     }
   }
-  return freshLabels;
+  return false;
+}
+
+/**
+ * The files that each tagged pick of the plan may start, by its transfer instruction (see `FileSemanticResult`). Picks
+ * that share their list of paths share one list of files.
+ */
+function taggedPicks(
+  plan: InstructionPlan,
+  trace: LoweringTrace,
+  names: readonly FileSemanticResult[],
+): ReadonlyMap<number, readonly number[]> {
+  const files = new Map(plan.files.map((file, index) => [file.path, index]));
+  const shared = new Map<readonly string[], readonly number[]>();
+  const picks = new Map<number, readonly number[]>();
+  for (const result of names)
+    for (const [statement, paths] of result.taggedPicks) {
+      const range = trace.statements.get(statement);
+      if (range === undefined) continue;
+      let indices = shared.get(paths);
+      if (indices === undefined) {
+        indices = paths.flatMap((path) => {
+          const file = files.get(path);
+          return file === undefined ? [] : [file];
+        });
+        shared.set(paths, indices);
+      }
+      // The transfer comes last, after the tag tests and lists.
+      for (let index = range.end - 1; index >= range.start; index -= 1)
+        if (plan.instructions[index]!.kind === "transfer") {
+          picks.set(index, indices);
+          break;
+        }
+    }
+  return picks;
+}
+
+/** What a TSV046 warning says its test always gives, by its words: `null` for a case that never matches or an empty range. */
+function constantTestValue(message: string): boolean | null {
+  return message.endsWith("always true.") ? true : message.endsWith("always false.") ? false : null;
 }
 
 /**

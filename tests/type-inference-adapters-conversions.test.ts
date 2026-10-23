@@ -650,18 +650,6 @@ test("a call that takes no default gives its result, whatever its shape problems
   }
   for (const [call, args, named, errors] of [
     [
-      'script(hostText, label: "start")',
-      [dynamicView("host")],
-      { label: closedView(STRING_TYPE) },
-      [],
-    ],
-    [
-      "script(hostText, label: 1)",
-      [dynamicView("host")],
-      { label: closedView(INTEGER_TYPE) },
-      ["TSV043"],
-    ],
-    [
       "script(hostText, foo: 1)",
       [dynamicView("host")],
       { foo: closedView(INTEGER_TYPE) },

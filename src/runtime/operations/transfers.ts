@@ -6,11 +6,10 @@ import type {
   PlanDestination,
   PlanTransferDestination,
   PlanSourceLocation,
-  SetFallbackInstruction,
   TransferInstruction,
 } from "../../plan/model.js";
 import { runsNothing } from "../scopes/activation-validation.js";
-import { innermostFileCallIndex } from "../scopes/activations.js";
+import { innermostFileCallIndex, runningFile } from "../scopes/activations.js";
 import { leaveScopes, sweepRetainedScopes } from "../scopes/captures.js";
 import { RuntimeFault } from "../errors.js";
 import { messageText } from "../values/text-length.js";
@@ -34,7 +33,6 @@ import {
 } from "../background/permanent-buttons.js";
 import { describeValue } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
-import { cloneTransferDestination } from "../snapshot/snapshot-construction.js";
 
 /*
  * Transfers (ADR 0022 §5). Each entry into a file is an activation with its own top-level variables, in a root scope.
@@ -75,7 +73,11 @@ export function executeGoto(
   sweepRetainedScopes(snapshot, true);
 }
 
-/** `goto` or `call` naming a file, or `call label`: a fresh activation of the destination's file. */
+/**
+ * `goto` or `call` naming a file: a fresh activation of the destination's file, from its top. A call may not start the
+ * running file (V30 §29); the compiler rejects every call it can see doing so, and this check covers the rest, such as
+ * a computed target or a block that runs while another file is running.
+ */
 export function executeTransfer(
   plan: InstructionPlan,
   instruction: TransferInstruction,
@@ -110,6 +112,13 @@ export function executeTransfer(
           evaluator.trace,
           evaluator.control,
         );
+  if (instruction.mode === "call" && destination.file === runningFile(snapshot)) {
+    throw new RuntimeFault(
+      "TSR069",
+      `This call would start '${messageText(plan.files[destination.file]!.path)}', the file that is running, but a call starts another file. To run a part of a file and come back, put it in a function and call that.`,
+      copySpan(instruction.span),
+    );
+  }
   const root = freshRoot(snapshot, destination);
   if (instruction.mode === "goto") {
     const left = activationRootsFrom(snapshot, innermostFileCallIndex(snapshot));
@@ -135,72 +144,42 @@ export function executeTransfer(
 }
 
 /**
- * `end` ends the current activation, also from one of its functions or blocks. It returns after the `call` of the file,
- * or without one continues at the fallback destination.
+ * `end` ends the current activation, also from one of its functions or blocks, and returns after the `call` of its
+ * file. Without one it fails: the compiler reports every such `end` it can follow, and warns where a computed target
+ * hides the way (V30 §30).
  */
 export function executeEnd(
-  plan: InstructionPlan,
   instruction: EndInstruction,
   snapshot: RuntimeSnapshot,
   events: InterpreterEvent[],
-  trace: TraceStore | null,
-  control: RandomControl | null,
 ): void {
   const index = innermostFileCallIndex(snapshot);
-  if (index < 0 && snapshot.fallback === null) {
+  if (index < 0) {
     throw new RuntimeFault(
       "TSR066",
-      "This file ended, but no file called it, so there is nothing to return to. Use exit where the session should finish.",
+      "This file ended, but no file called it, so there is nothing to return to. Use call where this file should be started and come back, or use exit where the session should finish.",
       copySpan(instruction.span),
     );
   }
-  if (index < 0) assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
   removeNonPersistentWork(snapshot, activationRootsFrom(snapshot, index), instruction.span, events);
-  if (index < 0) {
-    // A glob fallback draws its file each time it is used.
-    const fallback = drawDestination(plan, snapshot, snapshot.fallback!, trace, control);
-    replaceCurrentRoot(snapshot, freshRoot(snapshot, fallback));
-    snapshot.nextInstruction = fallback.target;
-  } else {
-    const call = fileCall(snapshot, index);
-    resetActivation(snapshot, index);
-    snapshot.retainedScopes.push(snapshot.frames[call.scopeBaseDepth]!);
-    snapshot.frames.length = call.scopeBaseDepth;
-    snapshot.callFrames.length = index;
-    for (const temporary of call.callerTemporaries) snapshot.temporaries.push({ ...temporary });
-    snapshot.nextInstruction = call.returnInstruction;
-  }
+  const call = fileCall(snapshot, index);
+  resetActivation(snapshot, index);
+  snapshot.retainedScopes.push(snapshot.frames[call.scopeBaseDepth]!);
+  snapshot.frames.length = call.scopeBaseDepth;
+  snapshot.callFrames.length = index;
+  for (const temporary of call.callerTemporaries) snapshot.temporaries.push({ ...temporary });
+  snapshot.nextInstruction = call.returnInstruction;
   sweepRetainedScopes(snapshot, true);
 }
 
 /**
- * `fallback target` and `fallback none`: the latest one executed wins. A computed target is resolved now, so the
- * fallback always names a file and its entry or label.
- */
-export function executeSetFallback(
-  plan: InstructionPlan,
-  instruction: SetFallbackInstruction,
-  snapshot: RuntimeSnapshot,
-  evaluator: Evaluator,
-): void {
-  const destination = instruction.destination;
-  snapshot.fallback =
-    destination === null
-      ? null
-      : "value" in destination
-        ? resolveComputed(plan, destination, "fallback", evaluator, instruction.span)
-        : cloneTransferDestination(destination);
-  snapshot.nextInstruction += 1;
-}
-
-/**
- * A computed target goes where its script reference names, checked against the plan each time it runs (ADR 0022
- * §2.4): the file must exist and have the label, and a `goto` or fallback needs a file that runs something.
+ * A computed target starts the file its script reference names, at its top, checked against the plan each time it
+ * runs (ADR 0022 §2.4): the file must exist, and a `goto` needs a file that runs something.
  */
 function resolveComputed(
   plan: InstructionPlan,
   destination: PlanComputedDestination,
-  keyword: "goto" | "call" | "fallback",
+  keyword: "goto" | "call",
   evaluator: Evaluator,
   span: PlanSourceLocation,
 ): PlanDestination {
@@ -212,29 +191,21 @@ function resolveComputed(
       copySpan(span),
     );
   }
-  const { path, label } = value;
+  const { path } = value;
   const file = plan.files.findIndex((candidate) => candidate.path === path);
-  const target =
-    file < 0
-      ? undefined
-      : label === null
-        ? plan.files[file]!.entryInstruction
-        : plan.files[file]!.labels.find((candidate) => candidate.name === label)?.instruction;
   const problem =
     file < 0
       ? `This ${keyword} names the file '${messageText(path)}', but the project has no such file. Paths start at the package root, such as "rooms/hall.tease".`
-      : target === undefined
-        ? `This ${keyword} names label '${messageText(label!)}' of '${messageText(path)}', but that file has no such label.`
-        : keyword !== "call" && runsNothing(plan, file)
-          ? `'${messageText(path)}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`
-          : null;
+      : keyword === "goto" && runsNothing(plan, file)
+        ? `'${messageText(path)}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`
+        : null;
   if (problem !== null) throw new RuntimeFault("TSR069", problem, copySpan(span));
-  return { file, target: target! };
+  return { file, target: plan.files[file]!.entryInstruction };
 }
 
 /**
  * A glob target picks one of its files with one draw from the session random generator, each time it runs. Its site is
- * the `goto`, `call`, or `end` that runs.
+ * the `goto` or `call` that runs.
  */
 function drawDestination(
   plan: InstructionPlan,

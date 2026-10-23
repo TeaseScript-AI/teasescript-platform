@@ -45,7 +45,6 @@ import {
   serializedScopes,
   serializedTopContext,
   contextHoldsInstruction,
-  runsNothing,
 } from "../scopes/activation-validation.js";
 import {
   validatePendingActionState,
@@ -62,18 +61,14 @@ import { isOneOf } from "../../plan/validation-support.js";
 import { isCameraPlacement } from "../../handle-rules.js";
 import type { ChatPacingSettings } from "../../chat-pacing.js";
 import { validateCapturedSerializableValue } from "../values/serializable-values.js";
-import {
-  startupDeclarations,
-  type InstructionPlan,
-  type PlanTransferDestination,
-} from "../../plan/model.js";
+import { startupDeclarations, type InstructionPlan } from "../../plan/model.js";
 import { packagePathProblem } from "../../project-paths.js";
 import { identityRootValues } from "./record-collection.js";
 import { interactionStringFits } from "../../interaction-limits.js";
 import { isCanonicalTagList } from "../../tags.js";
 
 // Capturing a runtime snapshot from outside the engine and validating it: the order of every check, and the checks of
-// the session-wide state: status, startup, globals, scopes, speakers, fallback, failure, messages, files, and images.
+// the session-wide state: status, startup, globals, scopes, speakers, failure, messages, files, and images.
 
 const RUNTIME_SNAPSHOT_KEYS = [
   "format",
@@ -90,7 +85,6 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "temporaries",
   "callFrames",
   "retainedScopes",
-  "fallback",
   "nextEventSequence",
   "nextScopeId",
   "nextSpeakerId",
@@ -243,7 +237,6 @@ function validateCapturedRuntimeSnapshotDetails(
   }
   validateScopes(value.frames, value.retainedScopes, analysis, errors);
   validateRootPlacement(value.frames, value.callFrames, errors);
-  validateFallback(value.fallback, analysis, errors);
   const speakerIds = validateSpeakers(value.speakers, errors);
   validateGlobals(value, plan, errors);
   validateStartupPhase(value, plan, errors);
@@ -517,7 +510,6 @@ function validateStatusConsistency(
         isPlainRecord(value.frames[0]) &&
         value.frames[0].file !== 0) ||
       retained !== 0 ||
-      value.fallback !== null ||
       value.failure !== null ||
       // A session that has not started has taken no photos.
       !(Array.isArray(value.capturedImages) && value.capturedImages.length === 0)
@@ -537,7 +529,6 @@ function validateStatusConsistency(
       temporaries !== 0 ||
       scopes !== 1 ||
       retained !== 0 ||
-      value.fallback !== null ||
       value.failure !== null
     ) {
       errors.push("Halted runtime state retains active execution state.");
@@ -793,9 +784,9 @@ function validateScopes(
   }
 }
 
-/** Whether an activation of a file may start at an instruction: the file's entry or one of its labels. */
+/** Whether an activation of a file may start at an instruction: only at the file's entry, its top (V30 §29). */
 function isFileEntry(analysis: SnapshotValidationAnalysis, file: number, entry: number): boolean {
-  return analysis.fileEntries[file]?.has(entry) === true;
+  return analysis.plan.files[file]?.entryInstruction === entry;
 }
 
 /** An activation's root stands at the bottom of the stack and above each file call; no other scope is a root. */
@@ -817,68 +808,6 @@ function validateRootPlacement(frames: unknown, callFrames: unknown, errors: str
   ) {
     errors.push("Runtime activation roots are out of place.");
   }
-}
-
-/** Destinations are equal by their files and targets; a glob's files in the same order, which its draws index. */
-function sameTransferDestination(planned: PlanTransferDestination, stored: unknown): boolean {
-  const samePlain = (left: { file: number; target: number }, right: unknown): boolean =>
-    isPlainRecord(right) && right.file === left.file && right.target === left.target;
-  if (!("pick" in planned)) return samePlain(planned, stored);
-  const options: unknown = isPlainRecord(stored) ? stored.pick : undefined;
-  return (
-    Array.isArray(options) &&
-    options.length === planned.pick.length &&
-    planned.pick.every((option, index) => samePlain(option, options[index]))
-  );
-}
-
-/**
- * `fallback` holds the destination of a `fallback` statement: a file's entry or label, or a glob's files. A computed
- * `fallback` resolves when it runs, so with one in the plan it may also be any label, or the entry of a file that runs
- * something.
- */
-function validateFallback(
-  value: unknown,
-  analysis: SnapshotValidationAnalysis | undefined,
-  errors: string[],
-): void {
-  if (value === null) return;
-  const destination = (candidate: unknown): boolean =>
-    isPlainRecord(candidate) &&
-    hasExactKeys(candidate, ["file", "target"]) &&
-    nonNegativeSafeInteger(candidate.file) &&
-    nonNegativeSafeInteger(candidate.target);
-  const shaped =
-    destination(value) ||
-    (isPlainRecord(value) &&
-      hasExactKeys(value, ["pick"]) &&
-      isCanonicalJsonArray(value.pick) &&
-      value.pick.length > 0 &&
-      value.pick.every(destination));
-  if (
-    !shaped ||
-    (analysis !== undefined &&
-      !analysis.fallbackDestinations.some((destination) =>
-        sameTransferDestination(destination, value),
-      ) &&
-      !(isPlainRecord(value) && resolvedFallbackFits(value, analysis)))
-  ) {
-    errors.push("Runtime fallback is malformed.");
-  }
-}
-
-/** Whether a fallback is one that a computed `fallback` of the plan may have resolved to. */
-function resolvedFallbackFits(
-  value: Record<string, unknown>,
-  analysis: SnapshotValidationAnalysis,
-): boolean {
-  return (
-    analysis.computedFallback &&
-    nonNegativeSafeInteger(value.file) &&
-    nonNegativeSafeInteger(value.target) &&
-    isFileEntry(analysis, value.file, value.target) &&
-    !runsNothing(analysis.plan, value.file)
-  );
 }
 
 function validateSpeakers(value: unknown, errors: string[]): Set<number> {

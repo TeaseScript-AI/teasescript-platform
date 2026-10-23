@@ -374,8 +374,8 @@ const FILE_FIELDS = [
 const LABEL_FIELDS = ["name", "instruction"];
 
 /**
- * A file and its entry or label, for a glob a non-empty list of them to pick from, or a computed target's expression.
- * A destination's file and target must also name that file's entry or a label; the stream analysis checks that.
+ * A file and its entry, for a glob a non-empty list of them to pick from, or a computed target's expression. A
+ * destination's file and target must also name that file's entry; the stream analysis checks that.
  */
 function validateDestinationShape(
   value: unknown,
@@ -579,7 +579,6 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["end"],
   ["goto", "target"],
   ["transfer", "mode", "destination"],
-  ["setFallback", "destination"],
   ["declareBinding", "name", "value", "typeCheck"],
   ["prepareReference", "expression", "destinationTemporary"],
   ["validateAssignmentTarget", "target"],
@@ -716,11 +715,6 @@ function validateInstruction(
         errors.push(planError("TSC002", "Transfer mode is invalid.", `${path}.mode`));
       }
       validateDestinationShape(value.destination, `${path}.destination`, errors, temporaryCount);
-      return;
-    case "setFallback":
-      if (value.destination !== null) {
-        validateDestinationShape(value.destination, `${path}.destination`, errors, temporaryCount);
-      }
       return;
     case "declareBinding":
       requireString(value.name, `${path}.name`, errors);

@@ -234,10 +234,7 @@ function programEffects(program: Program, file: number, dead: DeadCode): Program
     if (runs && statement.kind === "callFileStatement") callsFiles = true;
     if (
       runs &&
-      (statement.kind === "gotoStatement" ||
-        statement.kind === "callFileStatement" ||
-        statement.kind === "fallbackStatement") &&
-      statement.target !== null &&
+      (statement.kind === "gotoStatement" || statement.kind === "callFileStatement") &&
       entersMainAtTop(statement.target)
     )
       entersMain = true;
@@ -301,8 +298,7 @@ function programEffects(program: Program, file: number, dead: DeadCode): Program
  */
 function entersMainAtTop(target: TransferTarget): boolean {
   if (target.kind === "labelTarget") return false;
-  if (target.kind === "fileTarget")
-    return target.label === null && globMatches(target.path, [MAIN_FILE_PATH]).length > 0;
+  if (target.kind === "fileTarget") return globMatches(target.path, [MAIN_FILE_PATH]).length > 0;
   const reference = unwrap(target.expression);
   const path =
     reference.kind === "callExpression" &&

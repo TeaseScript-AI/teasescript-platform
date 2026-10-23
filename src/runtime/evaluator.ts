@@ -1301,24 +1301,16 @@ export class Evaluator {
 
   /**
    * The compiler resolves every name, so a top-level variable of the file that the running code cannot find has a `let`
-   * that has not run in this activation: one entered at a label after the `let`, or code that runs before it, such as a
-   * function called earlier (ADR 0022 §3.4). The message names the label the activation started at. Another name, such
-   * as a configured global the host did not supply, gives `null`.
+   * that has not run in this activation: code runs before it, such as a function called earlier (ADR 0022 §3.4).
+   * Another name, such as a configured global the host did not supply, gives `null`.
    */
   public unsetVariable(name: string, span: SourceSpan): RuntimeFault | null {
     const root = findRoot(this.snapshot, contextRootId(this.snapshot));
     if (root?.file === null || root === undefined || !declaresTopLevel(this.plan, root.file, name))
       return null;
-    const file = this.plan.files[root.file]!;
-    const label =
-      root.entry === file.entryInstruction
-        ? undefined
-        : file.labels.find((candidate) => candidate.instruction === root.entry)?.name;
     return fault(
       "TSR070",
-      label === undefined
-        ? `'${name}' has no value yet: its 'let ${name}' has not run. Give ${name} a value before it is used.`
-        : `'${name}' has no value yet: this file was started at label '${label}', and its 'let ${name}' has not run since. Give ${name} a value after the label, or make it a global.`,
+      `'${name}' has no value yet: its 'let ${name}' has not run. Give ${name} a value before it is used.`,
       span,
     );
   }
@@ -1825,7 +1817,7 @@ function declaresTopLevel(plan: InstructionPlan, file: number, name: string): bo
   return false;
 }
 
-/** `script(path, label:)`: a reference to a file or one of its labels, which a transfer checks when it uses it. */
+/** `script(path)`: a reference to a file, from its top, which a transfer checks when it uses it. */
 function scriptReference(
   positional: readonly SerializableRuntimeValue[],
   named: Readonly<Record<string, SerializableRuntimeValue>>,
@@ -1834,22 +1826,17 @@ function scriptReference(
   // The number first, then a name, as the compiler reports them.
   if (positional.length !== 1)
     throw fault("TSR028", scriptArgumentCountMessage(positional.length), span);
-  const unknown = Object.keys(named).find((name) => name !== "label");
+  const unknown = Object.keys(named)[0];
   if (unknown !== undefined)
-    throw fault("TSR028", unknownNamedArgumentMessage("script", unknown, ["label"]), span);
-  const text = (value: SerializableRuntimeValue, part: string): string => {
-    if (typeof value === "string") return value;
+    throw fault("TSR028", unknownNamedArgumentMessage("script", unknown, []), span);
+  const path = positional[0]!;
+  if (typeof path !== "string")
     throw fault(
       "TSR058",
-      `script(...) takes ${part} as text (string), not ${describeValue(value)}.`,
+      `script(...) takes the file path as text (string), not ${describeValue(path)}.`,
       span,
     );
-  };
-  return {
-    kind: "script",
-    path: text(positional[0]!, "the file path"),
-    label: Object.hasOwn(named, "label") ? text(named.label!, "the label") : null,
-  };
+  return { kind: "script", path };
 }
 
 /**

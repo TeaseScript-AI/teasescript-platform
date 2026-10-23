@@ -340,27 +340,28 @@ test("transfers report where each goto, call, and end went, also across files", 
   const plan = compile(
     [
       "global visits = 0",
-      'fallback "rooms/*.tease"',
-      'call "rooms/a.tease"',
+      "label again",
+      'call "rooms/*.tease"',
       "goto later",
       'say "skipped"',
       "label later",
-      "end",
+      "goto again",
     ].join("\n"),
     { "rooms/a.tease": room("a"), "rooms/b.tease": room("b") },
     ["TSV065"],
   );
   const from = fresh(plan);
   const [trace] = traced(plan, [], from);
-  const said = run(plan, from)
-    .events.flatMap((event) => (event.kind === "say" ? [event.text] : []))
-    .slice(1);
+  const said = run(plan, from).events.flatMap((event) =>
+    event.kind === "say" ? [event.text] : [],
+  );
   const transfers = outcomes(plan, trace!).filter((outcome) => outcome.includes("->"));
-  assert.ok(transfers.includes("main.tease:3 -> rooms/a.tease:1"), "the call");
-  assert.ok(transfers.includes("rooms/a.tease:4 -> main.tease:4"), "the end that returns");
-  // Every other end continues at a room the fallback drew, as the messages of the rooms show.
+  const first = `rooms/${said[0]!}.tease`;
+  assert.ok(transfers.includes(`main.tease:3 -> ${first}:1`), "the call");
+  assert.ok(transfers.includes(`${first}:4 -> main.tease:4`), "the end that returns");
+  // Each call continues at a room the glob drew, as the messages of the rooms show.
   const drawn = trace!.branches.flatMap(([index, next]) =>
-    plan.instructions[index]!.kind === "end" && fileOf(plan, next).startsWith("rooms/")
+    plan.instructions[index]!.kind === "transfer" && fileOf(plan, next).startsWith("rooms/")
       ? [fileOf(plan, next).slice("rooms/".length, -".tease".length)]
       : [],
   );

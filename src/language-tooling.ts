@@ -1964,8 +1964,7 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
       return;
     case "gotoStatement":
     case "callFileStatement":
-    case "fallbackStatement":
-      if (statement.target?.kind === "scriptTarget")
+      if (statement.target.kind === "scriptTarget")
         children.push({ kind: "expression", node: statement.target.expression });
       return;
     case "hideImageStatement":

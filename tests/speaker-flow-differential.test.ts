@@ -642,11 +642,6 @@ const TEMPLATES: readonly Template[] = [
     main: (k) => ["wait 1 ms", `say ${k.expr} // READ`, k.set],
   },
   {
-    name: "a fallback that an end continues at after the store",
-    main: (k) => ['fallback "room.tease"', k.set, "end"],
-    others: (k) => ({ "room.tease": [`say ${k.expr} // READ`] }),
-  },
-  {
     name: "an exit on a branch",
     knobs: [undefined],
     main: (k) => [KNOB(1), "if k1 {", k.set, "    exit", "}", `say ${k.expr} // READ`],
@@ -668,17 +663,18 @@ const TEMPLATES: readonly Template[] = [
     others: (k) => ({ "setup.tease": [k.set, "end"] }),
   },
   {
-    name: "a file that calls itself once more before the store",
+    name: "a file that a file it calls calls once more before the store",
     main: (k) => ["global visited = false", 'call "setup.tease"', `say ${k.expr} // READ`],
     others: (k) => ({
       "setup.tease": [
         "if not visited {",
         "    visited = true",
-        '    call "setup.tease"',
+        '    call "again.tease"',
         "}",
         k.set,
         "end",
       ],
+      "again.tease": ['call "setup.tease"', "end"],
     }),
   },
   {

@@ -75,7 +75,7 @@ const entries: RuntimeScriptStorageEntrySnapshot[] = [
     key: "absoluteDateTime",
     value: { kind: "absoluteDateTime", epochMilliseconds: 1_790_000_000_000 },
   },
-  { key: "script", value: { kind: "script", path: "rooms/cellar.tease", label: null } },
+  { key: "script", value: { kind: "script", path: "rooms/cellar.tease" } },
   { key: "unresolved", value: "captured-media:33333333-3333-4333-8333-333333333333:1" },
 ];
 
@@ -386,7 +386,7 @@ test("an import remaps a photo reference wherever a value can hold one, and noth
         name: "named",
         value: { kind: "dict", entries: [{ key: photo, value: { kind: "list", items: [photo] } }] },
       },
-      { name: "script", value: { kind: "script", path: photo, label: null } },
+      { name: "script", value: { kind: "script", path: photo } },
     ],
   };
   const original = structuredClone(value);
@@ -403,7 +403,7 @@ test("an import remaps a photo reference wherever a value can hold one, and noth
         value: { kind: "dict", entries: [{ key: fresh, value: { kind: "list", items: [fresh] } }] },
       },
       // A script path is no place for a photo reference.
-      { name: "script", value: { kind: "script", path: photo, label: null } },
+      { name: "script", value: { kind: "script", path: photo } },
     ],
   });
   assert.deepEqual(value, original, "the imported value is not changed in place");

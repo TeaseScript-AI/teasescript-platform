@@ -6,7 +6,7 @@ import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 import type { PlainKind, ScalarKind } from "../value-kinds.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 100;
+export const INSTRUCTION_PLAN_VERSION = 101;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -172,7 +172,6 @@ export type Instruction =
   | LockInstruction
   | GotoInstruction
   | TransferInstruction
-  | SetFallbackInstruction
   | EndInstruction
   | ExitInstruction;
 
@@ -1059,7 +1058,7 @@ export interface GotoInstruction extends InstructionBase {
   readonly target: number;
 }
 
-/** A file and where it starts: its entry or one of its labels. */
+/** A file and where it starts: its entry. */
 export interface PlanDestination {
   readonly file: number;
   readonly target: number;
@@ -1074,29 +1073,20 @@ export type PlanTransferDestination = PlanDestination | PlanPick;
 
 /**
  * A computed target, such as `goto (next)`: each time it runs, `value` evaluates to a script reference, which names the
- * destination by path and label.
+ * destination by its path.
  */
 export interface PlanComputedDestination {
   readonly value: ExpressionPlan;
 }
 
 /**
- * `goto` or `call` naming a file, or `call label`: enters `destination` with fresh top-level variables. A `goto`
- * leaves the current file like a `goto label`; a `call` continues after it once that file reaches `end`.
+ * `goto` or `call` naming a file: starts `destination` at its entry with fresh top-level variables. A `goto` leaves the
+ * current file like a `goto label`; a `call` continues after it once that file reaches `end`.
  */
 export interface TransferInstruction extends InstructionBase {
   readonly kind: "transfer";
   readonly mode: "goto" | "call";
   readonly destination: PlanTransferDestination | PlanComputedDestination;
-}
-
-/**
- * `fallback target` sets where an `end` without a caller continues; `fallback none` clears it with `null`. A computed
- * target is resolved when the statement runs, so the fallback it sets is a file and its entry or label.
- */
-export interface SetFallbackInstruction extends InstructionBase {
-  readonly kind: "setFallback";
-  readonly destination: PlanTransferDestination | PlanComputedDestination | null;
 }
 
 /** `end`, and the end the compiler adds after the last statement of a file's root region. */

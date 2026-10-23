@@ -261,7 +261,6 @@ function selectiveSayStagingClone(
       : snapshot.temporaries,
     callFrames: snapshot.callFrames,
     retainedScopes: snapshot.retainedScopes,
-    fallback: snapshot.fallback,
     nextEventSequence: snapshot.nextEventSequence,
     nextScopeId: snapshot.nextScopeId,
     nextSpeakerId: snapshot.nextSpeakerId,

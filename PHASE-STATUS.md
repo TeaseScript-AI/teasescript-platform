@@ -30,8 +30,8 @@ accept syntax, architecture, or implementation details.
   `addAll`, `sort`/`shuffle`/`reverse` and set
   operations, top-level user-defined functions, labels and `goto`, and explicit endings with a required `exit`
   (ADR 0022). Projects of several `.tease` files compile into one plan, with globals, global functions, and speakers
-  shared by all files, `goto`, `call`, and `end` between files with a `fallback`, glob targets, and computed targets
-  from `script(...)` references.
+  shared by all files, `goto` and `call` that start another file at its top, `end` that returns to the calling file,
+  glob targets, and computed targets from `script(...)` references.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, defensive restore validation, and
   [engine-owned runtime sessions](docs/RUNTIME.md#runtime-sessions) that validate only new host input between snapshot

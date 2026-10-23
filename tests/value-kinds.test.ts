@@ -91,7 +91,7 @@ const VALUES: Readonly<Record<ValueKind, SerializableRuntimeValue>> = {
     millisecond: 0,
   },
   absoluteDateTime: { kind: "absoluteDateTime", epochMilliseconds: 0 },
-  script: { kind: "script", path: "main.tease", label: null },
+  script: { kind: "script", path: "main.tease" },
   regex: { kind: "regex", source: "x+", flags: "i" },
   range: { kind: "range", start: 1, end: 3, inclusive: true },
   list: { kind: "list", items: [] },

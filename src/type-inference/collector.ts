@@ -642,8 +642,7 @@ class Collector {
         return;
       case "gotoStatement":
       case "callFileStatement":
-      case "fallbackStatement":
-        if (statement.target?.kind === "scriptTarget")
+        if (statement.target.kind === "scriptTarget")
           yield* compileChild(this.#expression(statement.target.expression, scope));
         return;
       default:
