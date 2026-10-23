@@ -217,9 +217,9 @@ test("damaged files and text are refused with a message", async () => {
   await rejects(readStorageTransferText(`${text}==`), /damaged or incomplete/);
   await rejects(readStorageTransferText(`TSST1.gzip.+${text.slice(12)}`), /damaged or incomplete/);
   await rejects(readStorageTransferText("TSST1.gzip.AAAA"), /damaged or incomplete/);
-  await rejects(readStorageTransferText("TSST2.gzip.AAAA"), /not exported saved data/);
-  await rejects(readStorageTransferText("hello"), /not exported saved data/);
-  await rejects(readStorageTransferText(""), /not exported saved data/);
+  await rejects(readStorageTransferText("TSST2.gzip.AAAA"), /not saved data or a session exported/);
+  await rejects(readStorageTransferText("hello"), /not saved data or a session exported/);
+  await rejects(readStorageTransferText(""), /not saved data or a session exported/);
 });
 
 test("a document that is not valid saved data is refused with a message naming the problem", async () => {
@@ -244,8 +244,8 @@ test("a document that is not valid saved data is refused with a message naming t
     entries: [{ key: "album", value: photo }],
   });
   const cases: [unknown, RegExp][] = [
-    [[], /not exported saved data/],
-    [null, /not exported saved data/],
+    [[], /not saved data or a session exported/],
+    [null, /not saved data or a session exported/],
     [{ ...base, format: "teasescript-checkpoint" }, /not exported saved data/],
     [{ ...base, version: 3 }, /format version/],
     [{ ...base, version: "1" }, /format version/],

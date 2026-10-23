@@ -33,6 +33,7 @@ import {
   completePlayerRuntimeStorageWrite,
   applyPlayerRuntimeStorageEdit,
   continuePlayerRuntimeSession,
+  createPlayerRuntimeRestorePoint,
   playerTemporalContext,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeCameraView,
@@ -49,6 +50,7 @@ import {
   setPlayerRuntimeDebugMode,
   setPlayerRuntimeRandomControl,
   withPlayerRuntimeDebugTrace,
+  type PlayerRuntimeRestorePoint,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
@@ -89,6 +91,13 @@ import {
   type StorageBundleScript,
 } from "../../storage-transfer.js";
 import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../../session-camera.js";
+import {
+  restoreSessionTransfer,
+  sessionMediumRecord,
+  sessionTransferMedium,
+  type SessionTransfer,
+  type SessionTransferMedium,
+} from "../../session-transfer.js";
 import {
   PlayerNotices,
   playerNoticeKeys,
@@ -184,6 +193,8 @@ type Activation = {
   readonly begin: () => PlayerRuntimeSession;
   /** The marks a continued session had, which it keeps. */
   readonly marks?: DebugHistoryMarks;
+  /** The restored session Continue goes on with. */
+  readonly restored?: PlayerRuntimeSession;
 };
 
 /**
@@ -1402,6 +1413,185 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
 
   /**
+   * The session an export of the session takes (PLAYER-UI "Player Settings"): the shown one while it runs or waits, or the
+   * one Continue goes on with; or why there is none. A debug room's session stays in its browser.
+   */
+  const exportableSession = computed(
+    (): { readonly session: PlayerRuntimeSession } | { readonly unavailable: string } => {
+      if (keptScope === null || scriptStorage === undefined)
+        return { unavailable: "This Player does not keep sessions." };
+      if (room.value === "debug") return { unavailable: "A debug session stays in this browser." };
+      if (clearing.value || importing.value)
+        return { unavailable: "Not while saved data changes." };
+      const pending = activation.value;
+      if (pending?.kind === "continue" && pending.restored !== undefined)
+        return { session: pending.restored };
+      if (liveSession() && !inspecting.value) return { session: session.value! };
+      return { unavailable: "Available while a session runs or waits for Continue." };
+    },
+  );
+  /**
+   * The session for an export, as it is now: its checkpoint and events, the script's saved values read after the saves it
+   * issued, and every photo, recording, or file they use that this browser holds. Rejects with a `StorageTransferError`
+   * saying why it cannot be exported.
+   */
+  async function exportSession(): Promise<SessionExport> {
+    const found = exportableSession.value;
+    if ("unavailable" in found) throw new StorageTransferError(found.unavailable);
+    let restorePoint: PlayerRuntimeRestorePoint;
+    try {
+      restorePoint = createPlayerRuntimeRestorePoint(found.session);
+    } catch {
+      throw new StorageTransferError(
+        "This browser cannot write the session as it is now, for example because a list in it is too long, so it cannot be exported. It goes on here.",
+      );
+    }
+    let entries: readonly RuntimeScriptStorageEntrySnapshot[];
+    try {
+      // Issued at once, so storage reads it after the saves the session issued until its state was taken.
+      entries = await scriptStorage!.load();
+    } catch {
+      throw new StorageTransferError(
+        "This browser's saved data cannot be read, so the session cannot be exported.",
+      );
+    }
+    const references = capturedMediaReferencesIn(restorePoint.checkpointJson, restorePoint.events);
+    for (const entry of entries)
+      for (const reference of storedValueReferences([entry])) references.add(reference);
+    const media: SessionTransferMedium[] = [];
+    let missing = 0;
+    for (const reference of references) {
+      const record = await capturedMedia.read(reference);
+      if (record === null) missing += 1;
+      else media.push(await sessionTransferMedium(record));
+    }
+    return {
+      transfer: {
+        scope: keptScope!,
+        name: options.savedData?.name(keptScope!) ?? null,
+        session: restorePoint,
+        entries,
+        media,
+      },
+      missing,
+    };
+  }
+  /**
+   * Checks an exported session for an import into the script this Player shows, all of it; nothing changes yet. Rejects
+   * with a `StorageTransferError` saying why it cannot continue here.
+   */
+  async function reviewSessionImport(transfer: SessionTransfer): Promise<SessionImportReview> {
+    if (room.value === "debug")
+      throw new StorageTransferError(
+        "A session cannot be imported into the debug room. Open this script outside the debug room and import it there.",
+      );
+    if (keptScope === null || scriptPlan === null || scriptStorage === undefined)
+      throw new StorageTransferError(
+        "This Player does not keep sessions, so it cannot import one.",
+      );
+    const restored = restoreSessionTransfer(transfer, keptScope, scriptPlan);
+    const saved = new Set(storedValueReferences(transfer.entries));
+    // Without durable captured media, a saved value's photo would not outlive this page.
+    if (
+      capturedMediaPersistence === undefined &&
+      transfer.media.some((medium) => saved.has(medium.reference))
+    )
+      throw new StorageTransferError(
+        "This Player cannot keep saved photos or files, so it cannot import this session.",
+      );
+    // A reference this browser already holds keeps its record, which must be the same, so no reference silently names
+    // other media.
+    for (const [index, medium] of transfer.media.entries()) {
+      const held = await capturedMedia.read(medium.reference);
+      if (held !== null && !(await sameMedium(held, medium)))
+        throw new StorageTransferError(
+          `This browser keeps another photo or file under the reference of photo or file ${index + 1}, so this session cannot be imported.`,
+        );
+    }
+    let current: readonly RuntimeScriptStorageEntrySnapshot[];
+    try {
+      current = await scriptStorage.load();
+    } catch {
+      throw new StorageTransferError(
+        "This browser's saved data cannot be read, so nothing can be imported.",
+      );
+    }
+    return {
+      transfer,
+      snapshotJson: playerRuntimeSnapshotJson(restored),
+      name: transfer.name ?? options.savedData?.name(keptScope) ?? null,
+      currentValues: current.length,
+    };
+  }
+  /**
+   * Imports a reviewed session. A session of this script in progress ends first; the session's saved values replace the
+   * script's at once, their photos and files stored first; then the session becomes the one this browser keeps for the
+   * script, with the photos and files only it uses, and Continue is offered. Rejects with a `StorageTransferError` saying
+   * what was imported when this browser could not store it.
+   */
+  async function importSession(review: SessionImportReview): Promise<void> {
+    if (
+      importing.value ||
+      clearing.value ||
+      room.value === "debug" ||
+      keptScope === null ||
+      scriptPlan === null ||
+      scriptStorage === undefined
+    )
+      throw new StorageTransferError("A session cannot be imported right now.");
+    const { transfer } = review;
+    const scope = keptScope;
+    const plan = scriptPlan;
+    importing.value = true;
+    let failure: string | null = null;
+    try {
+      if (sessionInProgress.value || inspecting.value) endSession();
+      // Debug's rewind could restore this script's earlier saved data over the import, so its history ends.
+      rewindRetirements.value++;
+      // A session being kept is kept before the import replaces it.
+      while (keeping !== null) await keeping;
+      // Each photo and file is held under the reference the session and the values hold, as a restored kept session's
+      // are; a value's is stored when the values are. One held already is the same (`reviewSessionImport`).
+      const added = transfer.media.filter((medium) => !capturedMedia.knows(medium.reference));
+      for (const medium of added)
+        capturedMedia.restoreSessionMedia(medium.reference, sessionMediumRecord(medium, scope));
+      try {
+        await scriptStorage.replace(transfer.entries);
+      } catch {
+        for (const medium of added) capturedMedia.discard(medium.reference);
+        failure =
+          "Nothing was imported: this browser could not save the session's data, for example because storage is full.";
+      }
+      if (failure === null)
+        try {
+          kept = { plan: false, count: 0, last: null };
+          await keptSessions.discard(scope);
+          const references = capturedMediaReferencesIn(
+            review.snapshotJson,
+            transfer.session.events,
+          );
+          for (const photo of capturedMedia.sessionRecords(references))
+            await keptSessions.media.add(photo).catch(() => {});
+          await keptSessions.publish(scope, {
+            planJson: JSON.stringify(plan),
+            snapshotJson: review.snapshotJson,
+            eventsFrom: 0,
+            events: transfer.session.events,
+            marks: { editedWhileDebugging: null, rewoundWhileDebugging: null },
+          });
+        } catch {
+          failure =
+            "The session's saved data was imported, but this browser could not keep the session, for example because storage is full. Start begins a new session with that data.";
+        }
+    } finally {
+      await loadScriptStorage();
+      importing.value = false;
+      await prepareKept();
+    }
+    if (failure !== null) throw new StorageTransferError(failure);
+  }
+
+  /**
    * Turns Debug on or off for the script. On in the normal room, play goes on in the debug room (`copyToDebugRoom`). Off,
    * play goes on where it is. A running session reads the change from its next statement on.
    */
@@ -1789,6 +1979,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         return continuePlayerRuntimeSession(continued, temporalCapture()).session;
       },
       ...(marks === undefined ? {} : { marks }),
+      restored,
     };
   }
   /**
@@ -1958,6 +2149,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     scriptScope: scriptStorage?.scope ?? null,
     reviewSavedDataImport,
     importSavedData,
+    /** Why the session cannot be exported now, or `null` when it can. */
+    sessionExportUnavailable: computed(() => {
+      const found = exportableSession.value;
+      return "unavailable" in found ? found.unavailable : null;
+    }),
+    exportSession,
+    reviewSessionImport,
+    importSession,
     /**
      * The current or last session's recorded engine calls for a debug export, after a Player error those up to it until
      * the next Start, or `null` before any Start.
@@ -2189,6 +2388,17 @@ async function replaceScript(
   }
 }
 
+/** Whether a held record is the medium of an import: the same kind, type, and bytes. */
+async function sameMedium(
+  record: CapturedMediaRecord,
+  medium: SessionTransferMedium,
+): Promise<boolean> {
+  if (record.kind !== medium.kind || record.mimeType !== medium.type) return false;
+  if (record.size !== medium.bytes.length) return false;
+  const bytes = new Uint8Array(await record.data.arrayBuffer());
+  return bytes.every((byte, index) => byte === medium.bytes[index]);
+}
+
 function usesImages(script: StorageBundleScript): boolean {
   return script.photos.length > 0;
 }
@@ -2209,6 +2419,22 @@ export interface SavedDataImportScript {
   readonly currentValues: number;
   /** Whether it is the script this Player shows, whose session an import ends. */
   readonly shown: boolean;
+}
+
+/** A session to export, and how many references in it name no photo or file this browser holds. */
+export interface SessionExport {
+  readonly transfer: SessionTransfer;
+  readonly missing: number;
+}
+
+/** A checked session import, shown before the player confirms it. */
+export interface SessionImportReview {
+  readonly transfer: SessionTransfer;
+  /** The restored state, as the kept session stores it. */
+  readonly snapshotJson: string;
+  readonly name: string | null;
+  /** How many values the script has saved now, which the import replaces. */
+  readonly currentValues: number;
 }
 
 /** What a Debug storage edit did: saved (and taken by the running session when `live`), not saved, or overtaken. */

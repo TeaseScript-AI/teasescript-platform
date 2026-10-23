@@ -607,7 +607,7 @@ that skips pacing or presses a `showButton`, Stage images, audible sounds, and s
 also starts over plain HTTP on a local-network name.
 It opens fixture packages by URL in the Player, playground, and editor, including one that does not compile; checks
 script storage, a session kept across a reload with an image the script asked for, saved data exported and imported into
-a fresh profile, the debug export after a script error, the rewind history's IndexedDB store, readable text once photo
+a fresh profile, a session exported from one fresh profile and continued in another, the debug export after a script error, the rewind history's IndexedDB store, readable text once photo
 colours and the vignette have settled, a photo shown again from the Player's cache with its colour, the reading position
 while messages change and enter, and the camera with Chromium's two fake cameras, also the camera view's mirror and
 Switch camera buttons clicked on a phone-sized screen. Firefox captures camera frames differently: after

@@ -15,16 +15,19 @@ import DialogTrigger from "@/components/ui/dialog/DialogTrigger.vue";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  readStorageTransferFile,
-  readStorageTransferText,
-  StorageTransferError,
-  type StorageBundle,
-} from "../../storage-transfer.js";
-import type { SavedDataImportReview } from "./usePlayerSession";
+  readPlayerTransferFile,
+  readPlayerTransferText,
+  type PlayerTransfer,
+  type SessionTransfer,
+  type SessionTransferMedium,
+} from "../../session-transfer.js";
+import { StorageTransferError, type StorageBundle } from "../../storage-transfer.js";
+import type { SavedDataImportReview, SessionImportReview } from "./usePlayerSession";
 
-// Imports saved data exported from another Player, as a file or pasted text: every script in it, or the ones the player
-// keeps ticked, each into its own scope. Everything is read and checked before the player confirms; only the
-// confirmation replaces saved data, and it ends a session in progress first when its script is among them.
+// Imports saved data or a session exported from another Player, as a file or pasted text. Saved data goes into the
+// scope of each script in it, or of the ones the player keeps ticked; a session continues the script this Player shows.
+// Everything is read and checked before the player confirms; only the confirmation replaces saved data, and it ends a
+// session in progress first when its script is among them.
 const props = defineProps<{
   /** Whether an import can begin now. */
   available: boolean;
@@ -32,6 +35,8 @@ const props = defineProps<{
   sessionInProgress: boolean;
   review: (bundle: StorageBundle) => Promise<SavedDataImportReview>;
   commit: (review: SavedDataImportReview, chosen: ReadonlySet<string>) => Promise<void>;
+  reviewSession: (transfer: SessionTransfer) => Promise<SessionImportReview>;
+  commitSession: (review: SessionImportReview) => Promise<void>;
 }>();
 
 const open = ref(false);
@@ -43,7 +48,9 @@ type Step =
   | { readonly kind: "reading" }
   | { readonly kind: "review"; readonly review: SavedDataImportReview; readonly problem: string | null }
   | { readonly kind: "importing"; readonly review: SavedDataImportReview }
-  | { readonly kind: "done" };
+  | { readonly kind: "sessionReview"; readonly review: SessionImportReview; readonly problem: string | null }
+  | { readonly kind: "sessionImporting"; readonly review: SessionImportReview }
+  | { readonly kind: "done"; readonly session: boolean };
 const step = shallowRef<Step>({ kind: "input", problem: null });
 const fileInput = ref<HTMLInputElement | null>(null);
 const heading = ref<HTMLElement | null>(null);
@@ -60,6 +67,9 @@ watch(open, () => {
 const reviewed = computed(() =>
   step.value.kind === "review" || step.value.kind === "importing" ? step.value.review : null,
 );
+const reviewedSession = computed(() =>
+  step.value.kind === "sessionReview" || step.value.kind === "sessionImporting" ? step.value.review : null,
+);
 // The scripts to import; all of them unless the player unticks some.
 const chosen = shallowRef<ReadonlySet<string>>(new Set());
 const endsSession = computed(
@@ -74,27 +84,33 @@ function choose(scope: string, on: boolean) {
   chosen.value = next;
 }
 
-async function read(load: () => Promise<StorageBundle>) {
+async function read(load: () => Promise<PlayerTransfer>) {
   const current = ++attempt;
   step.value = { kind: "reading" };
   try {
-    const review = await props.review(await load());
-    if (current !== attempt) return;
-    chosen.value = new Set(review.scripts.map((script) => script.scope));
-    step.value = { kind: "review", review, problem: null };
+    const transfer = await load();
+    if (transfer.kind === "session") {
+      const review = await props.reviewSession(transfer.session);
+      if (current !== attempt) return;
+      step.value = { kind: "sessionReview", review, problem: null };
+    } else {
+      const review = await props.review(transfer.bundle);
+      if (current !== attempt) return;
+      chosen.value = new Set(review.scripts.map((script) => script.scope));
+      step.value = { kind: "review", review, problem: null };
+    }
     await nextTick();
     heading.value?.focus();
   } catch (error) {
     if (current !== attempt) return;
     step.value = {
       kind: "input",
-      problem:
-        error instanceof StorageTransferError ? error.message : "This saved data could not be read.",
+      problem: error instanceof StorageTransferError ? error.message : "This file or text could not be read.",
     };
   }
 }
 function readFile(file: File) {
-  void read(async () => readStorageTransferFile(new Uint8Array(await file.arrayBuffer())));
+  void read(async () => readPlayerTransferFile(new Uint8Array(await file.arrayBuffer())));
 }
 function chooseFile(event: Event) {
   const input = event.target instanceof HTMLInputElement ? event.target : null;
@@ -116,7 +132,7 @@ function drop(event: DragEvent) {
   readFile(files[0]!);
 }
 function reviewText() {
-  void read(() => readStorageTransferText(pasted.value));
+  void read(() => readPlayerTransferText(pasted.value));
 }
 function cancelReview() {
   attempt++;
@@ -129,7 +145,7 @@ async function confirm() {
   step.value = { kind: "importing", review: current.review };
   try {
     await props.commit(current.review, chosen.value);
-    if (confirmed === attempt) step.value = { kind: "done" };
+    if (confirmed === attempt) step.value = { kind: "done", session: false };
   } catch (error) {
     if (confirmed !== attempt) return;
     step.value = {
@@ -143,7 +159,39 @@ async function confirm() {
   }
 }
 
+async function confirmSession() {
+  const current = step.value;
+  if (current.kind !== "sessionReview") return;
+  const confirmed = ++attempt;
+  step.value = { kind: "sessionImporting", review: current.review };
+  try {
+    await props.commitSession(current.review);
+    if (confirmed === attempt) step.value = { kind: "done", session: true };
+  } catch (error) {
+    if (confirmed !== attempt) return;
+    step.value = {
+      kind: "sessionReview",
+      review: current.review,
+      problem: error instanceof StorageTransferError ? error.message : "The import of the session failed.",
+    };
+  }
+}
+
 const count = (amount: number, one: string, many: string) => `${amount} ${amount === 1 ? one : many}`;
+/** The session's values, photos, recordings, and files, as counts. */
+function sessionContents(review: SessionImportReview): string {
+  const media = review.transfer.media;
+  const of = (kinds: readonly SessionTransferMedium["kind"][]) =>
+    media.filter((medium) => kinds.includes(medium.kind)).length;
+  const recordings = of(["audio", "video"]);
+  const files = of(["file"]);
+  return [
+    count(review.transfer.entries.length, "saved value", "saved values"),
+    count(of(["image"]), "photo", "photos"),
+    ...(recordings > 0 ? [count(recordings, "recording", "recordings")] : []),
+    ...(files > 0 ? [count(files, "file", "files")] : []),
+  ].join(" · ");
+}
 </script>
 
 <template>
@@ -161,10 +209,10 @@ const count = (amount: number, one: string, many: string) => `${amount} ${amount
       @drop.prevent
     >
       <DialogHeader>
-        <DialogTitle>Import saved data</DialogTitle>
+        <DialogTitle>Import</DialogTitle>
         <DialogDescription>
-          Brings saved data exported from another browser or device, with its saved photos; each script's data goes into
-          that script's own saved data.
+          Brings saved data or a session exported from another browser or device, with its photos. Each script's data
+          goes into that script's own saved data, and a session continues this script.
         </DialogDescription>
       </DialogHeader>
 
@@ -172,7 +220,7 @@ const count = (amount: number, one: string, many: string) => `${amount} ${amount
         <Alert v-if="step.kind === 'input' && step.problem" variant="destructive" data-import-problem>
           <AlertDescription>{{ step.problem }}</AlertDescription>
         </Alert>
-        <p v-if="step.kind === 'reading'" role="status" class="text-sm">Checking the saved data…</p>
+        <p v-if="step.kind === 'reading'" role="status" class="text-sm">Checking what was exported…</p>
         <Tabs v-model="tab">
           <TabsList class="h-auto w-full">
             <TabsTrigger value="file" class="min-h-11" data-import-tab="file">File</TabsTrigger>
@@ -214,7 +262,7 @@ const count = (amount: number, one: string, many: string) => `${amount} ${amount
               <Textarea
                 v-model="pasted"
                 rows="6"
-                aria-label="Exported saved data as text"
+                aria-label="Exported saved data or session as text"
                 placeholder="Paste the exported text here"
                 class="max-h-48 break-all"
                 data-import-text
@@ -299,8 +347,63 @@ const count = (amount: number, one: string, many: string) => `${amount} ${amount
         </div>
       </section>
 
-      <section v-else class="grid gap-3 text-sm" data-import-done>
-        <p role="status">Saved data imported. Each script uses it from its next Start.</p>
+      <section v-else-if="reviewedSession" class="grid gap-3 text-sm" data-import-session-review>
+        <h3 ref="heading" tabindex="-1" class="font-medium outline-none">
+          Continue this session in this browser? This cannot be undone.
+        </h3>
+        <p>
+          <span class="block break-all font-medium">{{ reviewedSession.name ?? reviewedSession.transfer.scope }}</span>
+          <span class="block text-muted-foreground">{{ sessionContents(reviewedSession) }}</span>
+        </p>
+        <p data-import-session-replaces>
+          {{
+            reviewedSession.currentValues > 0
+              ? `It replaces this script's ${count(reviewedSession.currentValues, "saved value", "saved values")} and any session kept for it in this browser.`
+              : "It replaces any session kept for this script in this browser."
+          }}
+          To keep what is saved now, export it first.
+        </p>
+        <p v-if="sessionInProgress" data-import-ends-session>
+          This ends the current session. Progress it has not saved is lost.
+        </p>
+        <Alert v-if="step.kind === 'sessionReview' && step.problem" variant="destructive" data-import-problem>
+          <AlertDescription>{{ step.problem }}</AlertDescription>
+        </Alert>
+        <div class="flex flex-wrap gap-2">
+          <Button
+            variant="destructive"
+            class="min-h-11"
+            :disabled="step.kind === 'sessionImporting'"
+            data-import-confirm
+            @click="confirmSession"
+          >
+            {{
+              step.kind === "sessionImporting"
+                ? "Importing…"
+                : sessionInProgress
+                  ? "End session and import"
+                  : "Import session"
+            }}
+          </Button>
+          <Button
+            variant="outline"
+            class="min-h-11"
+            :disabled="step.kind === 'sessionImporting'"
+            @click="cancelReview"
+          >
+            Cancel
+          </Button>
+        </div>
+      </section>
+
+      <section v-else-if="step.kind === 'done'" class="grid gap-3 text-sm" data-import-done>
+        <p role="status">
+          {{
+            step.session
+              ? "Session imported. Continue goes on where it was exported."
+              : "Saved data imported. Each script uses it from its next Start."
+          }}
+        </p>
         <Button class="min-h-11 justify-self-start" @click="open = false">Close</Button>
       </section>
     </DialogContent>

@@ -59,7 +59,7 @@ export class StorageTransferError extends Error {
   override readonly name = "StorageTransferError";
 }
 
-const FORMAT = "teasescript-script-storage";
+export const STORAGE_TRANSFER_FORMAT = "teasescript-script-storage";
 // 2: several scripts, each with its scope, name, own photos, and values. 1: one script's scope, entries, and images.
 const VERSION = 2;
 const TEXT_PREFIX = "TSST1.gzip.";
@@ -163,19 +163,31 @@ export async function storageTransferText(
 }
 
 /** `storageTransferText` with `limit` as the longest text it writes; tests give a small one. */
-export async function storageTransferTextWithin(
+export function storageTransferTextWithin(
   bundle: StorageBundle,
   gzip: boolean,
   limit: number,
 ): Promise<string> {
+  return transferTextWithin(pieces(bundle), gzip, limit);
+}
+
+/**
+ * The text of a document the Player exports, written from `pieces`: `TSST1.gzip.` plus base64url, or the plain JSON
+ * without `gzip`, also for an exported session. Text longer than `limit` fails with `TSK004` before it is built.
+ */
+export async function transferTextWithin(
+  pieces: Iterable<string>,
+  gzip: boolean,
+  limit: number,
+): Promise<string> {
   if (!gzip) {
-    const parts = [...pieces(bundle)];
+    const parts = [...pieces];
     let length = 0;
     for (const part of parts) length += part.length;
     if (length > limit) throw stateTooLarge();
     return parts.join("");
   }
-  const bytes = new Uint8Array(await (await storageTransferFile(bundle, true)).arrayBuffer());
+  const bytes = new Uint8Array(await (await jsonFile(pieces, true)).arrayBuffer());
   // Unpadded base64url has four characters for every three bytes, and two or three for one or two left over.
   if (TEXT_PREFIX.length + Math.ceil((bytes.length * 4) / 3) > limit) throw stateTooLarge();
   return TEXT_PREFIX + encodeBase64url(bytes);
@@ -183,19 +195,23 @@ export async function storageTransferTextWithin(
 
 /** The file name for an export: the name, such as the one script's, kept to safe characters. */
 export function storageTransferFileName(name: string, gzip = gzipSupported()): string {
+  return transferFileName(name, "saved-data.teasestorage", gzip);
+}
+
+/** The file name of a document the Player exports: the name kept to safe characters, then `ending` and the type. */
+export function transferFileName(name: string, ending: string, gzip: boolean): string {
   const safe = name
     .replace(/[^A-Za-z0-9._-]+/gu, "-")
     .replace(/^[-.]+|[-.]+$/gu, "")
     .slice(0, 80);
-  return `${safe || "script"}-saved-data.teasestorage.json${gzip ? ".gz" : ""}`;
+  return `${safe || "script"}-${ending}.json${gzip ? ".gz" : ""}`;
 }
 
 /** Reads an exported file; its contents decide whether it is gzip or plain JSON, not its name or type. */
 export async function readStorageTransferFile(
   bytes: Uint8Array<ArrayBuffer>,
 ): Promise<StorageBundle> {
-  const json = isGzip(bytes) ? await gunzip(bytes) : utf8(bytes);
-  return parseStorageTransfer(json);
+  return parseStorageTransfer(await transferFileJson(bytes));
 }
 
 /**
@@ -203,25 +219,51 @@ export async function readStorageTransferFile(
  * after editing it by hand.
  */
 export async function readStorageTransferText(text: string): Promise<StorageBundle> {
+  return parseStorageTransfer(await transferTextJson(text));
+}
+
+/** The JSON of a file the Player exported, saved data or a session; its contents decide whether it is gzip. */
+export async function transferFileJson(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  return isGzip(bytes) ? gunzip(bytes) : utf8(bytes);
+}
+
+/** The JSON of text the Player exported, saved data or a session, as `readStorageTransferText` reads it. */
+export async function transferTextJson(text: string): Promise<string> {
   const trimmed = text.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/gu, "");
-  if (trimmed.startsWith("{")) return parseStorageTransfer(trimmed);
+  if (trimmed.startsWith("{")) return trimmed;
   if (!trimmed.startsWith(TEXT_PREFIX))
-    throw new StorageTransferError("This text is not exported saved data.");
+    throw new StorageTransferError(
+      "This text is not saved data or a session exported from a Player.",
+    );
   const bytes = decodeBase64url(trimmed.slice(TEXT_PREFIX.length).replace(/[\t\n\f\r ]+/gu, ""));
   if (bytes === null || !isGzip(bytes))
-    throw new StorageTransferError("This text is damaged or incomplete; copy all of it again.");
-  return parseStorageTransfer(await gunzip(bytes));
+    throw new StorageTransferError("This text is damaged or incomplete. Copy all of it again.");
+  return gunzip(bytes);
 }
 
 /** Validates the whole document, every script's values and every photo's bytes, before anything uses it. */
 export function parseStorageTransfer(json: string): StorageBundle {
+  return storageBundle(parseTransferJson(json));
+}
+
+/** The document of an export's JSON, a JSON object, whose `format` says what it holds. */
+export function parseTransferJson(json: string): Readonly<Record<string, unknown>> {
   let document: unknown;
   try {
     document = JSON.parse(json);
   } catch {
-    throw new StorageTransferError("This is not exported saved data: it is not valid JSON.");
+    throw new StorageTransferError(
+      "This is not saved data or a session exported from a Player: it is not valid JSON.",
+    );
   }
-  if (!isRecord(document) || document["format"] !== FORMAT)
+  if (!isRecord(document))
+    throw new StorageTransferError("This is not saved data or a session exported from a Player.");
+  return document;
+}
+
+/** `parseStorageTransfer` for the document its JSON holds. */
+export function storageBundle(document: Readonly<Record<string, unknown>>): StorageBundle {
+  if (document["format"] !== STORAGE_TRANSFER_FORMAT)
     throw new StorageTransferError("This is not exported saved data.");
   let scripts: StorageBundleScript[];
   if (document["version"] === 1) {
@@ -421,7 +463,7 @@ function parseImage(
 
 /** The document in pieces, with one saved value per line; photo data is encoded slice by slice. */
 function* pieces(bundle: StorageBundle): Generator<string> {
-  yield `{"format":${JSON.stringify(FORMAT)},"version":${VERSION},\n"scripts":[`;
+  yield `{"format":${JSON.stringify(STORAGE_TRANSFER_FORMAT)},"version":${VERSION},\n"scripts":[`;
   for (const [index, script] of bundle.scripts.entries()) {
     yield `${index === 0 ? "\n" : ",\n"}{"scope":${JSON.stringify(script.scope)},"name":${JSON.stringify(script.name)},"photos":${JSON.stringify(script.photos)},"entries":[`;
     // An entry's JSON is a piece of its own, which may be as long as a text can be.
@@ -443,14 +485,14 @@ function* pieces(bundle: StorageBundle): Generator<string> {
 async function gunzip(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   if (!gzipSupported())
     throw new StorageTransferError(
-      "This browser cannot unpack compressed saved data; update it or use another browser.",
+      "This browser cannot unpack compressed data. Update it or use another browser.",
     );
   let decompressed: Uint8Array;
   try {
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
     decompressed = new Uint8Array(await new Response(stream).arrayBuffer());
   } catch {
-    throw new StorageTransferError("This saved data is damaged or incomplete.");
+    throw new StorageTransferError("This file or text is damaged or incomplete.");
   }
   return utf8(decompressed);
 }
@@ -459,7 +501,9 @@ function utf8(bytes: Uint8Array): string {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    throw new StorageTransferError("This is not exported saved data: it is not UTF-8 text.");
+    throw new StorageTransferError(
+      "This is not saved data or a session exported from a Player: it is not UTF-8 text.",
+    );
   }
 }
 
