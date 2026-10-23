@@ -655,6 +655,48 @@ export const FLOW_PROGRAMS: readonly FlowProgram[] = [
     ],
   },
   {
+    name: "goto-label-from-function-exit",
+    files: [
+      { path: "main.tease", source: 'say "START"\ncall "part.tease"\nsay "AFTER"\nexit\n' },
+      {
+        path: "part.tease",
+        source: 'function f {\n  goto done\n}\nf()\nlabel done\nsay "TARGET"\nexit\n',
+      },
+    ],
+  },
+  {
+    name: "goto-label-from-function-end",
+    files: [
+      { path: "main.tease", source: 'say "START"\ncall "part.tease"\nsay "AFTER"\nexit\n' },
+      {
+        path: "part.tease",
+        source: 'function f {\n  goto done\n}\nf()\nlabel done\nsay "TARGET"\nend\n',
+      },
+    ],
+  },
+  {
+    name: "unregistered-button-in-dead-code",
+    files: [
+      {
+        path: "main.tease",
+        source:
+          'if false {\n  showPermanentButton "Never" {\n    end\n  }\n}\nsay "START"\ncall "part.tease"\nsay "AFTER"\nexit\n',
+      },
+      { path: "part.tease", source: 'say "TARGET"\nexit\n' },
+    ],
+  },
+  {
+    name: "unregistered-button-in-uncalled-function",
+    files: [
+      {
+        path: "main.tease",
+        source:
+          'function unused {\n  showPermanentButton "Never" {\n    end\n  }\n}\nsay "START"\ncall "part.tease"\nsay "AFTER"\nexit\n',
+      },
+      { path: "part.tease", source: 'say "TARGET"\nexit\n' },
+    ],
+  },
+  {
     name: "parameters-written-order",
     files:
       'function first { say "B"\n return 1 }\nfunction second { say "C"\n return 2 }\nfunction use(a = first(), b = second()) { say "D"\n return a + b }\nsay "A"\nuse(b: second())\nsay "Z"\nexit\n',

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 
-import type { Program } from "../../src/ast.js";
 import { CORE_RUNTIME_BUILTINS } from "../../src/compiler.js";
 import { compileStableProject, type LoweringTrace } from "../../src/compiler/compile-program.js";
 import { staticText } from "../../src/expression-children.js";
@@ -13,6 +12,7 @@ import { dominators } from "../../src/type-inference/core/dominators.js";
 import {
   buildFlowGraph,
   type FlowGraph,
+  type FlowGraphFile,
   type FlowNode,
 } from "../../src/type-inference/core/flow-graph.js";
 import { checkTypes } from "../../src/type-inference/index.js";
@@ -33,7 +33,7 @@ import { HOST_GLOBALS, type FlowProgram } from "./type-core-flow-programs.js";
  */
 
 interface Lowered {
-  readonly programs: readonly { readonly path: string; readonly program: Program }[];
+  readonly programs: readonly FlowGraphFile[];
   readonly plan: InstructionPlan;
   readonly flow: PlanControlFlow;
   readonly ways: DeadWays;
@@ -56,13 +56,15 @@ function lower(
   name: string,
   files: readonly { readonly path: string; readonly source: string }[],
 ): Lowered {
-  const programs = files.map((file) => {
+  const parsed = files.map((file) => {
     const result = parse(file.source);
     assert.deepEqual(result.diagnostics, [], `${name}: ${file.path} parses`);
     return { path: file.path, program: result.program };
   });
   const options = { builtins: CORE_RUNTIME_BUILTINS, globals: HOST_GLOBALS };
-  const names = validateProjectSemantics(programs, options);
+  const names = validateProjectSemantics(parsed, options);
+  // The graph takes the name pass's picks of glob targets, as the lowering does.
+  const programs = parsed.map((file, index) => ({ ...file, picks: names[index]!.picks }));
   const errors = (
     diagnostics: readonly {
       readonly severity: string;
@@ -118,9 +120,10 @@ function lower(
 /**
  * Which functions and files of the plan can return, by the rules of the graph's `#decideReturns`, on instructions: a
  * function returns at a `return`; a file at an `end` of its top level, at an `end` in a function it calls, through a
- * file it starts with `goto` that returns, or at an `end` of any block; a function may end the running file at an
- * `end`, through a function that may, a `goto` of a file that returns, or a `goto` of a label. A call goes on only
- * once its callee is found to return. Iterated until nothing changes.
+ * file it starts with `goto` that returns, or at an `end` of a block that some instruction the session can reach
+ * registers; a function may end the running file at an `end`, through a function that may, a `goto` of a file that
+ * returns, or a `goto` of a label whose continuation in its file's top level reaches such an ending (r4.25). A call
+ * goes on only once its callee is found to return. Iterated until nothing changes.
  */
 function planReturns(lowered: Lowered): {
   readonly functions: Set<number>;
@@ -131,10 +134,42 @@ function planReturns(lowered: Lowered): {
   const files = new Set<number>();
   const ending = new Set<number>();
   let blockEnds = false;
+  const labelEnds = new Set<number>();
+  const root = (file: number) => (at: number) =>
+    at >= plan.files[file]!.entryInstruction && at < plan.files[file]!.rootEndInstruction;
+  // The blocks that some instruction registers that the session reaches, every call returning.
+  const registered = new Set<number>();
+  {
+    const seen = new Set([plan.files[0]!.startInstruction]);
+    const work = [plan.files[0]!.startInstruction];
+    while (work.length > 0) {
+      const index = work.pop()!;
+      for (const handler of flow.handlersOf(index)) registered.add(handler);
+      const next = flow
+        .successors(index)
+        .filter(({ edge }) => lowered.ways.possible(index, edge.kind))
+        .flatMap(({ edge, target }) =>
+          edge.kind === "computed"
+            ? plan.files.map((file) => file.entryInstruction)
+            : target === null
+              ? []
+              : [target],
+        );
+      for (const handler of flow.handlersOf(index)) {
+        const definition = flow.functionById(handler);
+        if (definition !== undefined) next.push(definition.entryInstruction);
+      }
+      for (const target of next)
+        if (!seen.has(target)) {
+          seen.add(target);
+          work.push(target);
+        }
+    }
+  }
   const units: {
     readonly entry: number;
     readonly unit: (index: number) => boolean;
-    readonly kind: "function" | "handler" | "file";
+    readonly kind: "function" | "handler" | "file" | "label";
     readonly id: number;
   }[] = [
     ...plan.functions.map((definition) => ({
@@ -145,10 +180,23 @@ function planReturns(lowered: Lowered): {
     })),
     ...plan.files.map((file, index) => ({
       entry: file.entryInstruction,
-      unit: (at: number) => at >= file.entryInstruction && at < file.rootEndInstruction,
+      unit: root(index),
       kind: "file" as const,
       id: index,
     })),
+    // The continuation of each label that a function or block jumps to, in its file's top level.
+    ...plan.instructions.flatMap((instruction, index) =>
+      instruction.kind === "goto" && flow.functionOf(index) !== null
+        ? [
+            {
+              entry: instruction.target,
+              unit: root(flow.fileOf(instruction.target)),
+              kind: "label" as const,
+              id: instruction.target,
+            },
+          ]
+        : [],
+    ),
   ];
   const targetsOf = (index: number): number[] => {
     const instruction = plan.instructions[index]!;
@@ -176,7 +224,12 @@ function planReturns(lowered: Lowered): {
           returns = true;
         if (instruction.kind === "end") ends = true;
         if (instruction.kind === "callFunction" && ending.has(instruction.functionId)) ends = true;
-        if (instruction.kind === "goto" && unit.kind !== "file") ends = true;
+        if (
+          instruction.kind === "goto" &&
+          flow.functionOf(index) !== null &&
+          labelEnds.has(instruction.target)
+        )
+          ends = true;
         if (
           instruction.kind === "transfer" &&
           instruction.mode === "goto" &&
@@ -218,7 +271,12 @@ function planReturns(lowered: Lowered): {
           files.add(unit.id);
           changed = true;
         }
-      } else if (ends && !blockEnds) {
+      } else if (unit.kind === "label") {
+        if (ends && !labelEnds.has(unit.id)) {
+          labelEnds.add(unit.id);
+          changed = true;
+        }
+      } else if (ends && !blockEnds && registered.has(unit.id)) {
         blockEnds = true;
         changed = true;
       }
@@ -625,8 +683,16 @@ export function flowDifferences(program: FlowProgram): string[] {
 
 /** Whether the graph finds each marker of a program live, by its text. */
 export function markerLiveness(program: FlowProgram): ReadonlyMap<string, boolean> {
+  const parsed = filesOf(program).map((file) => ({
+    path: file.path,
+    program: parse(file.source).program,
+  }));
+  const names = validateProjectSemantics(parsed, {
+    builtins: CORE_RUNTIME_BUILTINS,
+    globals: HOST_GLOBALS,
+  });
   const graph = buildFlowGraph(
-    filesOf(program).map((file) => ({ path: file.path, program: parse(file.source).program })),
+    parsed.map((file, index) => ({ ...file, picks: names[index]!.picks })),
   );
   const live = new Map<string, boolean>();
   for (const node of graph.nodes) {

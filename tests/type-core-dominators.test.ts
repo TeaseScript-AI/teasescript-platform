@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { CORE_RUNTIME_BUILTINS } from "../src/compiler.js";
 import { staticText } from "../src/expression-children.js";
 import { parse } from "../src/parser.js";
+import { validateProjectSemantics } from "../src/semantic.js";
 import {
   dominators,
   insideLoopsOf,
@@ -14,7 +16,7 @@ import {
   type FlowNode,
 } from "../src/type-inference/core/flow-graph.js";
 import { filesOf } from "./helpers/type-core-flow-oracle.js";
-import { FLOW_PROGRAMS } from "./helpers/type-core-flow-programs.js";
+import { FLOW_PROGRAMS, HOST_GLOBALS } from "./helpers/type-core-flow-programs.js";
 
 /*
  * The dominators of the coarse core's flow graph (the coarse-core table's §3.1): Lengauer and Tarjan's algorithm
@@ -33,13 +35,21 @@ function analyse(files: string | readonly { readonly path: string; readonly sour
   readonly graph: FlowGraph;
   readonly dom: Dominators;
   readonly at: (marker: string) => FlowNode;
+  /** The node of the expression written as `text`, its first occurrence in `main.tease`. */
+  readonly expression: (text: string) => FlowNode;
 } {
+  const sources = filesOf({ name: "shape", files });
+  const parsed = sources.map((file) => {
+    const result = parse(file.source);
+    assert.deepEqual(result.diagnostics, [], file.source);
+    return { path: file.path, program: result.program };
+  });
+  const names = validateProjectSemantics(parsed, {
+    builtins: CORE_RUNTIME_BUILTINS,
+    globals: HOST_GLOBALS,
+  });
   const graph = buildFlowGraph(
-    filesOf({ name: "shape", files }).map((file) => {
-      const result = parse(file.source);
-      assert.deepEqual(result.diagnostics, [], file.source);
-      return { path: file.path, program: result.program };
-    }),
+    parsed.map((file, index) => ({ ...file, picks: names[index]!.picks })),
   );
   const markers = new Map<string, FlowNode>();
   for (const node of graph.nodes)
@@ -53,6 +63,12 @@ function analyse(files: string | readonly { readonly path: string; readonly sour
     at: (marker) => {
       const node = markers.get(marker);
       assert.notEqual(node, undefined, `marker ${marker}`);
+      return node!;
+    },
+    expression: (text) => {
+      const start = sources[0]!.source.indexOf(text);
+      const node = graph.expressionAt({ file: 0, start, end: start + text.length });
+      assert.notEqual(node, undefined, `expression ${text}`);
       return node!;
     },
   };
@@ -126,20 +142,31 @@ test("the dominators agree with the iterative algorithm on every graph of the co
           dom.dfsIn(above) < dom.dfsIn(node) && dom.dfsOut(node) < dom.dfsOut(above),
           `${program.name}: the interval of node ${node.id} lies in its dominator's`,
         );
-      // The nearest boundary and block entry are found up the tree.
-      let boundary: FlowNode | null = null;
+      // The nearest boundary and block entry are found up the tree. A boundary is X4's: a function's entry, a file's
+      // entry that something other than the session's start enters, a label that some `goto` enters.
+      const boundary = (candidate: FlowNode): boolean =>
+        candidate.kind === "function-entry" ||
+        (candidate.kind === "file-entry" &&
+          candidate.predecessors.some(
+            (before) => before.kind !== "startup-exit" && counts(before, candidate),
+          )) ||
+        (candidate.statement?.kind === "labelStatement" &&
+          candidate.predecessors.some(
+            (before) => before !== candidate.fallthrough && counts(before, candidate),
+          ));
+      let nearest: FlowNode | null = null;
       let block: FlowNode | null = null;
       for (
         let up: FlowNode | null = node;
         up !== null;
         up = up === graph.program.entry ? null : idom.get(up)!
       ) {
-        if (boundary === null && dom.edom(up) === up) boundary = up;
+        if (nearest === null && boundary(up)) nearest = up;
         if (block === null && up.kind === "handler-entry") block = up;
       }
       assert.equal(
         id(dom.edom(node)),
-        id(boundary),
+        id(nearest),
         `${program.name}: the boundary of node ${node.id}`,
       );
       assert.equal(
@@ -346,6 +373,73 @@ test("a callable that calls and file transfers may run twice at once is recursiv
   );
 });
 
+test("operands run in written order, each call before the next, across summarized calls (V30 order, F21)", () => {
+  const helpers =
+    'function left {\n  say "LEFT"\n  return 1\n}\nfunction right {\n  say "RIGHT"\n  return 2\n}\nfunction pair(a, b) {\n  return a\n}\n';
+  for (const [use, first, second] of [
+    ["let p = pair(left(), right())", "left()", "right()"],
+    ["let p = pair(b: right(), a: left())", "right()", "left()"],
+    ["let p = left() + right()", "left()", "right()"],
+    ["let p = [left(), right()]", "left()", "right()"],
+    ["let p = [left()].get(right(), default: 0)", "left()", "right()"],
+  ] as const) {
+    const { dom, expression } = analyse(`${use}\n${helpers}exit`);
+    assert.equal(dom.dominates(expression(first), expression(second)), true, use);
+    assert.equal(dom.dominates(expression(second), expression(first)), false, use);
+  }
+  const { dom, expression } = analyse(`let p = pair(left(), right())\n${helpers}exit`);
+  assert.equal(dom.dominates(expression("right()"), expression("pair(left(), right())")), true);
+});
+
+test("each parameter has its own binding node, in order, after its default (F21, F22)", () => {
+  const { graph, dom, at, expression } = analyse(
+    'function f(a, b = g(), c: integer = 3) {\n  say "BODY"\n}\nfunction g {\n  return 1\n}\nf(1)\nf(1, 2)\nexit',
+  );
+  const f = graph.regions.find(
+    (region) => region.kind === "function" && region.declaration.name.name === "f",
+  );
+  assert.equal(f?.kind, "function");
+  const bindings = ["a", "b", "c"].map((name) =>
+    f?.kind === "function" ? f.parameters.get(name) : undefined,
+  );
+  assert.deepEqual(
+    bindings.map((node) => node?.kind),
+    ["parameter", "parameter", "parameter"],
+  );
+  assert.equal(new Set(bindings.map(id)).size, 3);
+  const a = bindings[0]!;
+  const b = bindings[1]!;
+  const c = bindings[2]!;
+  assert.equal(dom.dominates(f!.entry, a), true);
+  assert.equal(dom.dominates(a, b) && dom.dominates(b, c) && dom.dominates(c, at("BODY")), true);
+  // `b`'s default runs after `a` is bound, and only where a call leaves `b` out.
+  assert.equal(dom.dominates(a, expression("g()")), true);
+  assert.equal(dom.dominates(expression("g()"), b), false);
+});
+
+test("a global with a default has a session-start store and an executable store, each with its own lookup (F1a)", () => {
+  const source =
+    'say "BEFORE"\nglobal n = 1, default: 0\nsay "AFTER"\nspeaker vera { mood: "calm" }\nexit';
+  const { graph, dom, at } = analyse(source);
+  const site = (text: string) => {
+    const start = source.indexOf(text);
+    return { file: 0, start, end: start + text.length };
+  };
+  const global = site("global n = 1, default: 0");
+  const start = graph.startupAt(global);
+  const store = graph.statementAt(global);
+  assert.deepEqual(
+    [start, store].map((node) => (node === undefined ? null : graph.regions[node.region]!.kind)),
+    ["startup", "file"],
+  );
+  assert.equal(dom.dominates(start!, at("BEFORE")), true);
+  assert.equal(dom.dominates(at("BEFORE"), store!), true);
+  // A speaker is set up at session start and runs nothing where it stands.
+  const speaker = site('speaker vera { mood: "calm" }');
+  assert.equal(graph.regions[graph.startupAt(speaker)!.region]!.kind, "startup");
+  assert.equal(graph.statementAt(speaker), undefined);
+});
+
 test("code after a call that cannot return is dead, and after one that may return it is not (L10)", () => {
   const live = (files: Parameters<typeof analyse>[0]): boolean => !analyse(files).at("R").dead;
   assert.equal(live('function stop {\n  exit\n}\nstop()\nsay "R"\nexit'), false);
@@ -386,6 +480,29 @@ test("code after a call that cannot return is dead, and after one that may retur
     ]),
     true,
   );
+  // A `goto` out of a function to a label returns the file only through the label's continuation (r4.25).
+  const leave = (ending: string) => [
+    { path: "main.tease", source: 'say "START"\ncall "part.tease"\nsay "R"\nexit' },
+    {
+      path: "part.tease",
+      source: `function f {\n  goto done\n}\nf()\nlabel done\nsay "TARGET"\n${ending}`,
+    },
+  ];
+  assert.equal(live(leave("exit")), false);
+  assert.equal(live(leave("end")), true);
+  // Only a block whose registration can run may end a running file: not one in dead code or an uncalled function.
+  for (const never of [
+    'if false {\n  showPermanentButton "Never" {\n    end\n  }\n}\n',
+    'function unused {\n  showPermanentButton "Never" {\n    end\n  }\n}\n',
+  ])
+    assert.equal(
+      live([
+        { path: "main.tease", source: `${never}call "part.tease"\nsay "R"\nexit` },
+        { path: "part.tease", source: 'say "TARGET"\nwait 1 s\nexit' },
+      ]),
+      false,
+      never,
+    );
   // A glob call returns when one of the files it may pick returns.
   const glob = (second: string) => [
     { path: "main.tease", source: 'call "parts/*.tease"\nsay "R"\nexit' },
