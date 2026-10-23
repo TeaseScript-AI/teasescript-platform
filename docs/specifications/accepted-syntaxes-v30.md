@@ -3256,7 +3256,8 @@ answers.
 
 ### Prefilled answers
 
-Every single-field input accepts an optional named `prefill:` answer, a starting answer that the player still confirms:
+The single-field inputs listed below accept an optional named `prefill:` answer, a starting answer that the player
+still confirms:
 
 ```text
 let name = askText("What is your name?", prefill: "Ada")
@@ -4199,9 +4200,9 @@ Rules:
 - The complete string is treated as one key.
 
 Storage currently supports strings, finite numbers, booleans, lists, objects, sets, dicts, ranges, durations, angles,
-date and time values, and `script` references ([§29](#29-script-files-and-paths)), including nested `null`. Wider
-persistent-data support is not yet implemented; this subset is not a permanent language limit. The compiler rejects a
-default whose type is known and does not fit the declared type. Replacement-value recovery under
+date and time values, `script` references ([§29](#29-script-files-and-paths)), and regexes ([§8](#regexes)), including
+nested `null`. Wider persistent-data support is not yet implemented; this subset is not a permanent language limit. The
+compiler rejects a default whose type is known and does not fit the declared type. Replacement-value recovery under
 [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
 
 Examples:
@@ -5892,7 +5893,6 @@ History is queried with `getPlayerHistory(...)`, which returns a filtered list o
 ```text
 let recent = getPlayerHistory(
     type: "orgasmOutcome",
-    since: getDateTime() - 30 days,
     order: "newest",
     limit: 5
 )
@@ -6439,8 +6439,9 @@ if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }
 - In `tagged`, commas join complete predicates with `and`. The options `all:`, `none:`, and `any:` follow them, each at
   most once, with a list of tag names that a candidate must have all of, none of, or at least one of; an empty list
   passes every candidate. They join with `and` too, and take computed names: `findImages(all: wanted)`.
-- `findImages` takes the same parts as named arguments `where:`, `all:`, `none:`, and `any:`, and returns the paths of
-  all matching images in path order, as a `string[]`, which may be empty. Without arguments it returns every image.
+- `findImages` takes the same parts as named arguments `where:`, `all:`, `none:`, and `any:`, and returns all matching
+  images as a `string[]`, which may be empty: each package image by its path and each photo by its reference, in the
+  order that tag queries search them ([Image tags](#image-tags)). Without arguments it returns every image.
 - `goto tagged` and `call tagged` pick a file of the project by the tags of its header ([File header](#file-header))
   and enter it at its top, as `goto (reference)` does ([§29](#29-script-files-and-paths)). Every file that runs
   something is a candidate, `main.tease` and the current file too, but a `call tagged` that can pick the running file
@@ -6467,8 +6468,8 @@ if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }
   a tag name, or a name and a number such as `punishment: 4`, with the rules of [Tags](#tags). Another keyword is
   ignored with a warning. A repeated tag counts once without a warning, because photo tools often keep `punishment`
   beside `punishment: 4`; two different numbers for one tag are an error.
-- The catalog that tag queries search is generated from the images when the project compiles. It is part of the plan,
-  so a checkpoint keeps it and a restored session searches the same images.
+- The catalog that tag queries search is generated from the package images when the project compiles. It is part of
+  the plan, so a checkpoint keeps it and a restored session searches the same images.
 - A photo taken with `takePhoto(tags: [...])` joins the catalog with these tags, under the reference `takePhoto`
   returns ([§33](#33-browser-api-file-folder-camera-and-url-references)):
 
