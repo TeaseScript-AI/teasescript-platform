@@ -23,6 +23,12 @@ import { FLOW_PROGRAMS } from "./helpers/type-core-flow-programs.js";
  * transfers (L11), blocks, early leaves (F5a), and calls that cannot return (L10).
  */
 
+/**
+ * A node by its id. Assertions compare ids, never nodes: a failing assertion prints its values in full, and a node reaches
+ * the whole graph through its edges, once per way through it.
+ */
+const id = (node: FlowNode | null | undefined): number | null => node?.id ?? null;
+
 function analyse(files: string | readonly { readonly path: string; readonly source: string }[]): {
   readonly graph: FlowGraph;
   readonly dom: Dominators;
@@ -109,8 +115,8 @@ test("the dominators agree with the iterative algorithm on every graph of the co
     }
     for (const node of graph.nodes) {
       assert.equal(
-        dom.idom(node),
-        idom.get(node),
+        id(dom.idom(node)),
+        id(idom.get(node)),
         `${program.name}: the dominator of node ${node.id}`,
       );
       const above = idom.get(node)!;
@@ -131,8 +137,8 @@ test("the dominators agree with the iterative algorithm on every graph of the co
         if (boundary === null && dom.edom(up) === up) boundary = up;
         if (block === null && up.kind === "handler-entry") block = up;
       }
-      assert.equal(dom.edom(node), boundary, `${program.name}: the boundary of node ${node.id}`);
-      assert.equal(dom.hdom(node), block, `${program.name}: the block entry of node ${node.id}`);
+      assert.equal(id(dom.edom(node)), id(boundary), `${program.name}: the boundary of node ${node.id}`);
+      assert.equal(id(dom.hdom(node)), id(block), `${program.name}: the block entry of node ${node.id}`);
     }
   }
 });
@@ -204,17 +210,17 @@ test("every loop around a read must enclose its definition (X5)", () => {
 test("a label that some `goto` enters is a boundary, one that only the code before it reaches is not (X4)", () => {
   // L2: the label before both, the `goto` after both: the same boundary.
   const before = analyse('label again\nsay "D"\nsay "N"\nif hostFlag { goto again }\nexit');
-  assert.equal(before.dom.edom(before.at("D")), before.dom.edom(before.at("N")));
+  assert.equal(id(before.dom.edom(before.at("D"))), id(before.dom.edom(before.at("N"))));
   assert.equal(before.dom.edom(before.at("N"))?.statement?.kind, "labelStatement");
   // L3, L4: the label between them, entered by a `goto`, also behind another label.
   for (const labels of ["label again", "label again\nlabel next"]) {
     const between = analyse(`say "D"\n${labels}\nsay "N"\nif hostFlag { goto again }\nexit`);
-    assert.equal(between.dom.edom(between.at("D")), null, labels);
-    assert.notEqual(between.dom.edom(between.at("N")), null, labels);
+    assert.equal(id(between.dom.edom(between.at("D"))), null, labels);
+    assert.notEqual(id(between.dom.edom(between.at("N"))), null, labels);
   }
   // L5: a label that no `goto` enters.
   const unused = analyse('say "D"\nlabel again\nsay "N"\nexit');
-  assert.equal(unused.dom.edom(unused.at("N")), null);
+  assert.equal(id(unused.dom.edom(unused.at("N"))), null);
 });
 
 test("a function's entry and the entry of a file that something enters are boundaries (X4)", () => {
@@ -225,12 +231,12 @@ test("a function's entry and the entry of a file that something enters are bound
     },
     { path: "part.tease", source: 'say "PART"\nend' },
   ]);
-  assert.equal(dom.edom(at("MAIN")), null);
+  assert.equal(id(dom.edom(at("MAIN"))), null);
   assert.equal(dom.edom(at("F"))?.kind, "function-entry");
   const part = graph.regions.find(
     (region) => region.kind === "file" && region.path === "part.tease",
   )!;
-  assert.equal(dom.edom(at("PART")), part.entry);
+  assert.equal(id(dom.edom(at("PART"))), id(part.entry));
   // The file the session starts in becomes a boundary once a transfer may enter it again.
   const again = analyse([
     { path: "main.tease", source: 'say "MAIN"\ncall "part.tease"\nexit' },
@@ -267,9 +273,9 @@ test("code in a block has its block's entry as the nearest block entry", () => {
   const { dom, at } = analyse(
     'say "OUT"\nshowPermanentButton "Go" {\n  say "IN"\n  let t = timer(duration: 1 s, async: true) {\n    say "NESTED"\n  }\n}\nwait 1 s\nexit',
   );
-  assert.equal(dom.hdom(at("OUT")), null);
+  assert.equal(id(dom.hdom(at("OUT"))), null);
   assert.equal(dom.hdom(at("IN"))?.kind, "handler-entry");
-  assert.notEqual(dom.hdom(at("NESTED")), dom.hdom(at("IN")));
+  assert.notEqual(id(dom.hdom(at("NESTED"))), id(dom.hdom(at("IN"))));
   assert.equal(dom.dominates(dom.hdom(at("IN"))!, at("NESTED")), true);
 });
 
