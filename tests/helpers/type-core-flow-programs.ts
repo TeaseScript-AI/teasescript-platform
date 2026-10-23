@@ -621,6 +621,40 @@ export const FLOW_PROGRAMS: readonly FlowProgram[] = [
       'let k = load "k1", default: false\nsay "A"\nrepeat 2 {\n  say "B"\n  repeat 3 {\n    say "C"\n    if k { goto after }\n  }\n  say "D"\n}\nsay "E"\nlabel after\nsay "F"\nexit\n',
   },
   {
+    name: "get-negative-index",
+    files:
+      'function fallback {\n  say "FALLBACK"\n  return 9\n}\nlet result = [1].get(-1, default: fallback())\nsay "AFTER"\nexit\n',
+    refinements: {
+      reason:
+        "a `get` on a list literal with a negative literal index: the list has no such position, so the graph always runs the default, the lowering's facts do not know",
+      differences: ["way main.tease:5 default skipped: lowering=true graph=false"],
+    },
+  },
+  {
+    name: "uncalled-self-recursion",
+    files: 'function spin {\n  say "DEAD"\n  spin()\n}\nsay "A"\nexit\n',
+  },
+  {
+    name: "unentered-files-goto-each-other",
+    files: [
+      { path: "main.tease", source: 'say "A"\nexit\n' },
+      { path: "a.tease", source: 'say "B"\ngoto "b.tease"\n' },
+      { path: "b.tease", source: 'say "C"\ngoto "a.tease"\n' },
+    ],
+  },
+  {
+    name: "recursion-through-file-goto",
+    files: [
+      { path: "main.tease", source: 'global depth = 0\ncall "b.tease"\nexit\n' },
+      {
+        path: "a.tease",
+        source:
+          'global function visit(n) {\n  say "ENTER"\n  if n < 2 {\n    depth = n + 1\n    call "a.tease"\n  }\n  say "LEAVE"\n}\ngoto "b.tease"\n',
+      },
+      { path: "b.tease", source: "visit(depth)\nend\n" },
+    ],
+  },
+  {
     name: "parameters-written-order",
     files:
       'function first { say "B"\n return 1 }\nfunction second { say "C"\n return 2 }\nfunction use(a = first(), b = second()) { say "D"\n return a + b }\nsay "A"\nuse(b: second())\nsay "Z"\nexit\n',

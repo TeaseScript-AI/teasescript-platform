@@ -314,6 +314,38 @@ test("the way past a branch that always leaves dominates the code after it, and 
     assert.deepEqual(left(body), [false, false], body);
 });
 
+test("a callable that calls and file transfers may run twice at once is recursive (F21's condition)", () => {
+  const recursive = (files: Parameters<typeof analyse>[0]): string[] => {
+    const { graph } = analyse(files);
+    return graph.callables
+      .filter((callable) => graph.recursive.has(callable))
+      .map((callable) =>
+        callable.kind === "function" ? callable.declaration.name.name : callable.path,
+      )
+      .sort();
+  };
+  assert.deepEqual(recursive('function once {\n  say "x"\n}\nonce()\nexit'), []);
+  assert.deepEqual(recursive('label top\nsay "x"\nif hostFlag { goto top }\nexit'), []);
+  assert.deepEqual(recursive("function f(n) {\n  if n > 0 { f(n - 1) }\n}\nf(2)\nexit"), ["f"]);
+  assert.deepEqual(
+    recursive("function f {\n  g()\n}\nfunction g {\n  if hostFlag { f() }\n}\nf()\nexit"),
+    ["f", "g"],
+  );
+  // One call of `visit`, which calls a file that starts, by a `goto`, the file that calls `visit` again.
+  assert.deepEqual(
+    recursive([
+      { path: "main.tease", source: 'global depth = 0\ncall "b.tease"\nexit' },
+      {
+        path: "a.tease",
+        source:
+          'global function visit(n) {\n  if n < 2 {\n    depth = n + 1\n    call "a.tease"\n  }\n}\ngoto "b.tease"',
+      },
+      { path: "b.tease", source: "visit(depth)\nend" },
+    ]),
+    ["a.tease", "b.tease", "visit"],
+  );
+});
+
 test("code after a call that cannot return is dead, and after one that may return it is not (L10)", () => {
   const live = (files: Parameters<typeof analyse>[0]): boolean => !analyse(files).at("R").dead;
   assert.equal(live('function stop {\n  exit\n}\nstop()\nsay "R"\nexit'), false);
