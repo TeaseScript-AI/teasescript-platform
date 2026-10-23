@@ -727,7 +727,7 @@ async function demoScenario(cdp, origin) {
           audio: window.__played.map((element) => ({ time: element.currentTime, audible: !element.muted && element.volume > 0 })),
           texts: entries.map((element) => element.textContent),
           buttons: [...document.querySelectorAll('[data-foreground-controls] button')].map((button) => button.textContent.trim()),
-          placeholder: input && !input.disabled ? input.placeholder : null,
+          field: input && !input.disabled ? input.getAttribute('aria-label') : null,
         };
       })()`,
     );
@@ -741,7 +741,7 @@ async function demoScenario(cdp, origin) {
       await physicalClick(cdp, "[data-foreground-controls] button:last-of-type");
     } else if (
       !inputOwnershipChecked &&
-      state.placeholder !== null &&
+      state.field !== null &&
       state.texts.some((text) => text.includes("Some of her messages make you wait."))
     ) {
       // The first skippable message: its pacing is still pending while the composer is enabled.
@@ -749,7 +749,7 @@ async function demoScenario(cdp, origin) {
       await pacingInputOwnershipCheck(cdp);
     } else if (
       !spaceSkipChecked &&
-      state.placeholder !== null &&
+      state.field !== null &&
       state.texts.some((text) => text.includes("Twenty seconds less. Don't thank me yet."))
     ) {
       spaceSkipChecked = true;
@@ -768,11 +768,11 @@ async function demoScenario(cdp, origin) {
     } else if (state.buttons.length === 1) {
       finished = state.buttons[0] === "Finish";
       await physicalClick(cdp, "[data-foreground-controls] button");
-    } else if (state.placeholder === "What you call her") {
+    } else if (state.field === "Answer") {
       await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
       await cdp.call("Input.insertText", { text: "Mistress" });
       await physicalClick(cdp, ".composer-send");
-    } else if (state.placeholder !== null) {
+    } else if (state.field !== null) {
       // A skippable pacing gate: Space in the empty composer hurries the message along.
       await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
       await pressSpace(cdp);
