@@ -37,7 +37,7 @@ export function playerDataContext(address: URL, token: string | null): PlayerDat
   const path = address.searchParams.get("server");
   if (path === null || path === "")
     throw new PlayerDataContextError(
-      "Online mode needs the server's address. Add 'server=' with its path, such as 'server=/api/'.",
+      "Online mode needs the server's path in the address, such as 'server=/api/'.",
     );
   let server: URL | null;
   try {
@@ -47,11 +47,11 @@ export function playerDataContext(address: URL, token: string | null): PlayerDat
   }
   if (server?.origin !== address.origin)
     throw new PlayerDataContextError(
-      "Online mode takes only a server on the Player's own origin. Give its path, such as 'server=/api/'.",
+      "The server must be on the Player's own origin. Give only its path, such as 'server=/api/'.",
     );
   if (token === null || token === "")
     throw new PlayerDataContextError(
-      "Online mode needs a token from the Player's host. Open the Player from its host page.",
+      "The Player is not signed in to the server. Open it again from its website.",
     );
   const pathname = server.pathname.endsWith("/") ? server.pathname : `${server.pathname}/`;
   return { mode: "online", server: `${server.origin}${pathname}`, token };

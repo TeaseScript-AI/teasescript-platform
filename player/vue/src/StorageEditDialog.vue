@@ -216,10 +216,10 @@ async function submit() {
         <DialogTitle class="break-all">{{ title }}</DialogTitle>
         <DialogDescription>
           <template v-if="live">
-            Stored first; the running session's next load then returns it. Values the script already loaded do not
+            Saved right away. The running session's next load returns it. Values the script already loaded do not
             change.
           </template>
-          <template v-else>The next Start loads it.</template>
+          <template v-else>Saved right away. The next Start loads it.</template>
         </DialogDescription>
       </DialogHeader>
       <form class="grid gap-4 text-sm" novalidate @submit.prevent="submit">

@@ -667,7 +667,7 @@ async function dataModeScenario(cdp, origin) {
     await navigate(cdp, `${origin}/player/?data=online&server=/no-server/`);
     await waitFor(
       cdp,
-      `document.querySelector('[data-script-failure]')?.textContent.includes('The Player cannot open its data')`,
+      `document.querySelector('[data-script-failure]')?.textContent.includes('The Player cannot open your data')`,
       8_000,
       "An online server that cannot be reached shows why instead of Start",
     );

@@ -100,8 +100,8 @@ async function refreshNow() {
       </Button>
     </div>
     <p class="text-muted-foreground">
-      What this script saved. An edit is stored first; a running session's next load then returns it, while values the
-      script already loaded stay as they are.
+      What this script saved. An edit is saved right away, and a running session's next load returns it. Values the script
+      already loaded stay as they are.
     </p>
     <div class="flex min-w-0 flex-wrap items-center gap-2">
       <Button

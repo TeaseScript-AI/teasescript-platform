@@ -80,7 +80,7 @@ test("a failed or refused write rejects, so the session keeps the previous value
   const storage = onlineScriptStorage(server, "repository-demo");
   await assert.rejects(storage.write("visits", 2), /HTTP 503/u);
   status = 401;
-  await assert.rejects(storage.write("visits", 2), /did not accept the token/u);
+  await assert.rejects(storage.write("visits", 2), /did not accept the sign-in/u);
   t.mock.method(globalThis, "fetch", async () => {
     throw new TypeError("fetch failed");
   });

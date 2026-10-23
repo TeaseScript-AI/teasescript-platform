@@ -981,7 +981,7 @@ async function updateSidebarVisibility(open: boolean) {
                       >
                         {{
                           savedData.persistent === true
-                            ? "Stored in this browser, which keeps it until you delete it."
+                            ? "Stored in this browser until you delete it."
                             : savedData.persistent === false
                               ? "Stored in this browser, which may delete it when space runs low."
                               : "Stored in this browser."

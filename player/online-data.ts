@@ -242,7 +242,9 @@ async function send(
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
-    throw new OnlineDataError("The server did not answer.", { cause: error });
+    throw new OnlineDataError("The server did not answer. Reload the page to try again.", {
+      cause: error,
+    });
   }
 }
 
@@ -250,8 +252,8 @@ function checkStatus(response: Response): Response {
   if (response.ok) return response;
   throw new OnlineDataError(
     response.status === 401 || response.status === 403
-      ? "The server did not accept the token."
-      : `The server answered with an error (HTTP ${response.status}).`,
+      ? "The server did not accept the sign-in. Open the Player again from its website."
+      : `The server answered with an error (HTTP ${response.status}). Reload the page to try again.`,
   );
 }
 

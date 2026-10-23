@@ -33,7 +33,7 @@ const { stores, dataFailure } = await Promise.resolve()
     (error: unknown) => ({
       stores: null,
       dataFailure: {
-        title: "The Player cannot open its data",
+        title: "The Player cannot open your data",
         problems: [{ message: error instanceof Error ? error.message : String(error) }],
       } satisfies ScriptFailure,
     }),
