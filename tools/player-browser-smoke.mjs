@@ -698,12 +698,32 @@ async function dataModeScenario(cdp, origin) {
   }
 }
 
+// What the stand-in page's buttons do, without a package: the repository demo, which the page does not list.
+function play(mode) {
+  return `(() => {
+    const config = JSON.parse(document.getElementById('config').textContent);
+    if ('${mode}' === 'online') sessionStorage.setItem(config.tokenItem, config.token);
+    else sessionStorage.removeItem(config.tokenItem);
+    location.href = '${mode}' === 'online' ? '/player/?data=online&server=/api/' : '/player/';
+  })()`;
+}
+
 // Online mode on the temporary test server, opened from its stand-in page: saves reach the server and come back in a
 // later run, stand-alone keeps its own data, and a write that fails says so.
 async function onlineScenario(cdp, origin) {
   const start = "[data-session-activation] button";
   const messages = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`;
   const said = (text) => `${messages}.some((message) => message.includes(${JSON.stringify(text)}))`;
+  // The page's buttons open a package of the server's folder, here one the address names.
+  await navigate(cdp, `${origin}/?package=house`);
+  await waitFor(cdp, `document.getElementById('online')?.disabled === false`);
+  await value(cdp, `document.getElementById('online').click()`);
+  await waitFor(
+    cdp,
+    `location.pathname === '/player/' && location.search === '?data=online&server=/api/&package=house'`,
+    8_000,
+    "The page opens the package its address names",
+  );
   const open = async (mode) => {
     await navigate(cdp, `${origin}/`);
     await waitFor(cdp, `!!document.getElementById('${mode}')`);
@@ -711,7 +731,7 @@ async function onlineScenario(cdp, origin) {
     const names = await cdp.call("IndexedDB.requestDatabaseNames", { securityOrigin: origin });
     for (const databaseName of names.result.databaseNames)
       await cdp.call("IndexedDB.deleteDatabase", { securityOrigin: origin, databaseName });
-    await value(cdp, `document.getElementById('${mode}').click()`);
+    await value(cdp, play(mode));
     await waitFor(cdp, `!!document.querySelector('${start}')`, 15_000, `${mode} shows Start`);
     await physicalClick(cdp, start);
     await waitFor(cdp, said("Some of her messages make you wait."), 15_000);

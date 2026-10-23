@@ -55,7 +55,7 @@ export function hostPage(page: {
 <h1>TeaseScript test server</h1>
 <section>
 <h2>Play</h2>
-<label>Script <select id="script"><option value="">Repository demo</option>${options}</select></label>
+<label>Script <select id="script"><option value="" disabled selected>Choose a script</option>${options}</select></label>
 <div class="row">
 <button id="standalone" type="button">Stand-alone</button>
 <button id="online" type="button">Online (as ${escapeHtml(page.account)})</button>
@@ -90,7 +90,20 @@ const config = JSON.parse(document.getElementById("config").textContent);
 const element = (id) => document.getElementById(id);
 const script = () => element("script").value;
 const address = (...parts) => "/player/?" + parts.filter(Boolean).join("&");
-const packagePart = () => (script() === "" ? "" : "package=" + encodeURIComponent(script()));
+const packagePart = () => "package=" + encodeURIComponent(script());
+// ?package=<id> chooses that package, also one the folder does not list.
+const named = new URLSearchParams(location.search).get("package");
+if (named) {
+  const list = element("script");
+  let option = [...list.options].find((candidate) => candidate.value === named);
+  if (!option) list.add((option = new Option(named, named)), 1);
+  option.selected = true;
+}
+const chosen = () => {
+  element("standalone").disabled = element("online").disabled = script() === "";
+};
+element("script").onchange = chosen;
+chosen();
 element("standalone").onclick = () => {
   sessionStorage.removeItem(config.tokenItem);
   location.href = address(packagePart());

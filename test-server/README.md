@@ -7,8 +7,9 @@ behaves when its data lives on a server, and what the real backend will need.
 One Node process (`node:http`/`node:https` and the built-in `node:sqlite`, no dependency) serves everything from one
 origin, so no CORS is needed. Routes:
 
-- `/`: stands in for the website (which, in the product, owns accounts and the choice of mode). It opens the Player
-  stand-alone or online as the one account, flips the switches below, and edits the account's player profile.
+- `/`: stands in for the website (which, in the product, owns accounts and the choice of mode). It opens a package of
+  the packages folder in the Player, stand-alone or online as the one account, flips the switches below, and edits the
+  account's player profile. `/?package=<id>` chooses that package, for example an id from the importer's catalog.
 - `/player/` and `/dev-package/`: the built Player and the development packages, served by the playground's own server
   code. The default packages folder holds `server-check`, a script that shows a saved count and the profile's display
   name, and keeps a photo for the next visit.

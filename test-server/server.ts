@@ -296,14 +296,14 @@ function segmentText(segment: string): string | null {
   }
 }
 
-/** The ids of the packages folder's packages, in name order. */
+/** The ids of the packages folder's packages, in alphabetical order. */
 function packageIds(folder: string | undefined): string[] {
   if (folder === undefined) return [];
   try {
     return readdirSync(folder, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && isPackageId(entry.name))
       .map((entry) => entry.name)
-      .sort();
+      .sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" }));
   } catch {
     return [];
   }
