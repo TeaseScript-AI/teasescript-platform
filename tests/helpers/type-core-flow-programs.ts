@@ -780,31 +780,16 @@ export const FLOW_PROGRAMS: readonly FlowProgram[] = [
     name: "for-empty",
     files:
       'let xs = load "xs", default: [1, 2]\nsay "A"\nfor x in [] { say "B"\n say "C" }\nsay "Z"\nexit\n',
-    refinements: {
-      reason:
-        "lowering only: the type check knows that a `for` over an empty literal never runs its body; the graph proves literal `repeat` counts only (P7), and F5a decides held iterables",
-      differences: [
-        "live B: lowering=false graph=true",
-        "live C: lowering=false graph=true",
-        "reach A->B: lowering=false graph=true",
-        "reach A->C: lowering=false graph=true",
-        "way main.tease:3 loop body: lowering=false graph=true",
-      ],
-    },
   },
   {
     name: "for-once",
     files:
       'let xs = load "xs", default: [1, 2]\nsay "A"\nfor x in [1] { say "B"\n say "C" }\nsay "Z"\nexit\n',
-    refinements: {
-      reason:
-        "lowering only: the type check knows that a `for` over a non-empty literal runs its body; the graph proves literal `repeat` counts only (P7), and F5a decides held iterables",
-      differences: [
-        "dom B->Z: lowering=true graph=false",
-        "dom C->Z: lowering=true graph=false",
-        "way main.tease:3 loop no-run: lowering=false graph=true",
-      ],
-    },
+  },
+  {
+    name: "for-literal-range-and-dict",
+    files:
+      'say "A"\nfor i in 1..=2 { say "B" }\nsay "C"\nfor j in 3..3 { say "D" }\nfor k in dict {} { say "E" }\nfor v in dict { a: 1 } { say "F" }\nsay "G"\nexit\n',
   },
   {
     name: "otherwise-nonnull-210",

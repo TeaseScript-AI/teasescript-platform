@@ -137,8 +137,16 @@ test("the dominators agree with the iterative algorithm on every graph of the co
         if (boundary === null && dom.edom(up) === up) boundary = up;
         if (block === null && up.kind === "handler-entry") block = up;
       }
-      assert.equal(id(dom.edom(node)), id(boundary), `${program.name}: the boundary of node ${node.id}`);
-      assert.equal(id(dom.hdom(node)), id(block), `${program.name}: the block entry of node ${node.id}`);
+      assert.equal(
+        id(dom.edom(node)),
+        id(boundary),
+        `${program.name}: the boundary of node ${node.id}`,
+      );
+      assert.equal(
+        id(dom.hdom(node)),
+        id(block),
+        `${program.name}: the block entry of node ${node.id}`,
+      );
     }
   }
 });
@@ -157,6 +165,13 @@ test("a literal count of one or more runs the body before the loop is left (P7)"
   assert.equal(forever.dom.dominates(forever.at("B"), forever.at("R")), true);
   const maybe = analyse('while hostFlag {\n  say "B"\n}\nsay "R"\nexit');
   assert.equal(maybe.dom.dominates(maybe.at("B"), maybe.at("R")), false);
+  // A `for` over a literal collection: an empty one never runs its body, a non-empty one runs it first (r4.22).
+  const filled = analyse('for item in [1, 2] {\n  say "D"\n}\nsay "R"\nexit');
+  assert.equal(filled.dom.dominates(filled.at("D"), filled.at("R")), true);
+  const empty = analyse('for item in [] {\n  say "B"\n}\nsay "R"\nexit');
+  assert.deepEqual([empty.at("B").dead, empty.at("R").dead], [true, false]);
+  const host = analyse('for item in hostList {\n  say "D"\n}\nsay "R"\nexit');
+  assert.equal(host.dom.dominates(host.at("D"), host.at("R")), false);
 });
 
 test("a literal count of one has no second round, and a `continue` ends it (P7)", () => {
