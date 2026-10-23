@@ -1225,12 +1225,18 @@ class FlowGraphBuilder {
   #resolveTransfers(): void {
     const byPath = new Map(this.#fileRegions.map((region) => [region.path, region]));
     const paths = this.#fileRegions.map((region) => region.path);
-    const runs = (region: FileRegion): boolean =>
-      this.files[region.file]!.program.statements.some(runsOnItsOwn);
+    // Each fact once per build, as the name pass keeps it: whether a file runs something, the files each glob picks,
+    // and the entries of each list of files, which transfers to the same files share.
+    const runs = this.#fileRegions.map((region) =>
+      this.files[region.file]!.program.statements.some(runsOnItsOwn),
+    );
+    const everyFile: readonly FileRegion[] = this.#fileRegions;
+    const picks = new Map<string, readonly FileRegion[]>();
+    const entriesOf = new Map<readonly FileRegion[], readonly FlowNode[]>();
     for (const transfer of this.#pendingTransfers) {
       const target = transfer.target;
-      let files: FileRegion[];
-      let entries: FlowNode[];
+      let files: readonly FileRegion[];
+      let entries: readonly FlowNode[];
       let uncertain = false;
       if (target.kind === "labelTarget") {
         const label = this.#labels.get(`${transfer.file}:${target.label.name}`);
@@ -1239,18 +1245,28 @@ class FlowGraphBuilder {
         entries = label === undefined ? [] : [label];
       } else {
         if (target.kind === "scriptTarget") {
-          files = [...this.#fileRegions];
+          files = everyFile;
           uncertain = true;
         } else if (isPathGlob(target.path)) {
-          files = globMatches(target.path, paths)
-            .map((path) => byPath.get(path)!)
-            .filter(runs);
+          let picked = picks.get(target.path);
+          if (picked === undefined) {
+            picked = globMatches(target.path, paths)
+              .map((path) => byPath.get(path)!)
+              .filter((region) => runs[region.file] === true);
+            picks.set(target.path, picked);
+          }
+          files = picked;
           uncertain = true;
         } else {
           const file = byPath.get(target.path);
           files = file === undefined ? [] : [file];
         }
-        entries = files.map((file) => file.entry);
+        let shared = entriesOf.get(files);
+        if (shared === undefined) {
+          shared = files.map((file) => file.entry);
+          entriesOf.set(files, shared);
+        }
+        entries = shared;
       }
       if (transfer.callOut === null) {
         for (const entry of entries) this.#link(transfer.node, entry);
