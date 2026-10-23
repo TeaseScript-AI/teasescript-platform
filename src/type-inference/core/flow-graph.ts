@@ -1235,7 +1235,7 @@ class FlowGraphBuilder {
    */
   #resolveTransfers(): void {
     const byPath = new Map(this.#fileRegions.map((region) => [region.path, region]));
-    // A computed target shares one list of every file, and transfers to the same files share their entries.
+    // Computed targets share one list of every file and its entries.
     const everyFile: readonly FileRegion[] = this.#fileRegions;
     const entriesOf = new Map<readonly FileRegion[], readonly FlowNode[]>();
     for (const transfer of this.#pendingTransfers) {
@@ -1292,16 +1292,20 @@ class FlowGraphBuilder {
   }
 
   /**
-   * Which calls can return (G1(a), L10, L11), by one least fixpoint that carries two facts backward over each region's
-   * own nodes, each node taking each fact once: it can reach its function's exit (a `return`), or it can reach an `end`
-   * of the running file. A file's exit (its `end` statements, and its end, which the compiler's closing `end` reaches)
-   * and every `end` in a function or block have the second. A call has a fact of the node after it once a callee
-   * returns, and the second fact also once a function it calls may end the running file; a `goto` of files has the
-   * second once one of them returns, since a started file's `end` returns to the running file's caller; a `goto` from a
-   * function or block to a label has it once the label's own continuation has it (r4.25). A function returns when its
-   * entry has the first fact and may end the running file when its entry has the second; a file returns when its entry
-   * has the second, or when a block whose registration can run has it: such a block may run while any file runs (G1(b);
-   * a registration in dead code or in a function nothing calls registers nothing, r4.25). Each dependency waits in one
+   * Which calls can return (G1(a)(b), L10, L11), by one least fixpoint over three facts, each node taking each fact
+   * once. Two are carried backward over each region's own nodes: a node can reach its function's exit (a `return`), or
+   * it can reach an `end` of the running file. A file's exit (its `end` statements, and its end, which the compiler's
+   * closing `end` reaches) and every `end` in a function or block have the second. A call has a fact of the node after
+   * it once a callee returns, and the second fact also once a function it calls may end the running file; a `goto` of
+   * files has the second once one of them returns, since a started file's `end` returns to the running file's caller; a
+   * `goto` from a function or block to a label has it once the label's own continuation has it (r4.25). A function
+   * returns when its entry has the first fact and may end the running file when its entry has the second; a file
+   * returns when its entry has the second.
+   *
+   * The third fact is carried forward from the session's start: the node is reached, crossing a call's summary edge
+   * only once a callee is known to return. A block that may end a running file makes every file return (it may run
+   * while any file runs), but only once its entry has the second fact and its registration is reached (r4.26): so a
+   * block registered after a call that cannot return never justifies that call's return. Each dependency waits in one
    * list, registered once and woken once. A summary edge whose callees cannot return is dead.
    */
   #decideReturns(): void {
@@ -1309,39 +1313,65 @@ class FlowGraphBuilder {
     const RETURN = 0;
     const END = 1;
     const facts = [new Uint8Array(this.#nodes.length), new Uint8Array(this.#nodes.length)] as const;
+    const reached = new Uint8Array(this.#nodes.length);
     const returns = new Uint8Array(regions.length);
     const ends = new Uint8Array(regions.length);
     let blockEnds = false;
-    const registered = this.#reachedIfEveryCallReturns();
     const siteByCallOut = new Map<FlowNode, CallSite>();
-    for (const site of this.#sites) siteByCallOut.set(site.callOut, site);
+    const siteByCallIn = new Map<FlowNode, CallSite>();
+    for (const site of this.#sites) {
+      siteByCallOut.set(site.callOut, site);
+      siteByCallIn.set(site.callIn, site);
+    }
+    const created = new Map<FlowNode, HandlerRegion[]>();
+    for (const handler of this.#handlers) {
+      const list = created.get(handler.creation);
+      if (list === undefined) created.set(handler.creation, [handler]);
+      else list.push(handler);
+    }
     /** A fact that a node takes once a callable returns, or once a function may end the running file. */
     type Waiting = { readonly node: FlowNode; readonly fact: typeof RETURN | typeof END };
     const onReturn = new Map<number, Waiting[]>();
     const onEnd = new Map<number, Waiting[]>();
     const onLabel = new Map<FlowNode, FlowNode[]>();
-    const wait = <K>(lists: Map<K, Waiting[]>, key: K, waiting: Waiting): void => {
+    /** The node after a call that the forward search reaches once one of its callees returns. */
+    const reachOnReturn = new Map<number, FlowNode[]>();
+    const wait = <K, V>(lists: Map<K, V[]>, key: K, waiting: V): void => {
       const list = lists.get(key);
       if (list === undefined) lists.set(key, [waiting]);
       else list.push(waiting);
     };
-    const work: Waiting[] = [];
+    const backward: Waiting[] = [];
+    const forward: BuildNode[] = [];
     const give = (node: FlowNode, fact: typeof RETURN | typeof END): void => {
       if (facts[fact][node.id] === 1) return;
       facts[fact][node.id] = 1;
-      work.push({ node, fact });
+      backward.push({ node, fact });
+    };
+    const reach = (node: FlowNode): void => {
+      if (reached[node.id] === 1) return;
+      reached[node.id] = 1;
+      forward.push(this.#built(node));
     };
     const markReturns = (region: number): void => {
       if (returns[region] === 1) return;
       returns[region] = 1;
       for (const waiting of onReturn.get(region) ?? []) give(waiting.node, waiting.fact);
       onReturn.delete(region);
+      for (const after of reachOnReturn.get(region) ?? []) reach(after);
+      reachOnReturn.delete(region);
     };
     const markEnds = (region: number): void => {
       if (ends[region] === 1) return;
       ends[region] = 1;
       for (const waiting of onEnd.get(region) ?? []) give(waiting.node, waiting.fact);
       onEnd.delete(region);
+    };
+    /** A registered block may end the running file: every file returns. */
+    const markBlockEnds = (): void => {
+      if (blockEnds) return;
+      blockEnds = true;
+      for (const file of this.#fileRegions) markReturns(file.id);
     };
     for (const site of this.#sites)
       for (const callee of site.callees)
@@ -1350,17 +1380,27 @@ class FlowGraphBuilder {
       if (jump.kind === "file")
         for (const file of jump.files) wait(onReturn, file.id, { node: jump.node, fact: END });
       else if (regions[jump.node.region]!.kind !== "file")
-        for (const label of jump.targets) {
-          const list = onLabel.get(label);
-          if (list === undefined) onLabel.set(label, [jump.node]);
-          else list.push(jump.node);
-        }
+        for (const label of jump.targets) wait(onLabel, label, jump.node);
     for (const region of regions)
       if (region.kind === "function") give(region.exit, RETURN);
       else if (region.kind === "file") give(region.exit, END);
     for (const node of this.#ends) give(node, END);
-    while (work.length > 0) {
-      const { node, fact } = work.pop()!;
+    reach(this.#program.entry);
+    while (backward.length > 0 || forward.length > 0) {
+      if (forward.length > 0) {
+        const node = forward.pop()!;
+        for (const handler of created.get(node) ?? [])
+          if (facts[END][handler.entry.id] === 1) markBlockEnds();
+        const site = siteByCallIn.get(node);
+        for (const next of node.successors) {
+          if (this.#deadEdges.has(edgeKey(node, next))) continue;
+          if (site === undefined || next !== site.callOut) reach(next);
+          else if (site.callees.some((callee) => returns[callee.id] === 1)) reach(next);
+          else for (const callee of site.callees) wait(reachOnReturn, callee.id, next);
+        }
+        continue;
+      }
+      const { node, fact } = backward.pop()!;
       const region = regions[node.region]!;
       if (node === region.entry)
         if (region.kind === "function") {
@@ -1368,15 +1408,8 @@ class FlowGraphBuilder {
           else markEnds(region.id);
         } else if (region.kind === "file") {
           if (fact === END) markReturns(region.id);
-        } else if (
-          region.kind === "handler" &&
-          fact === END &&
-          !blockEnds &&
-          registered[region.creation.id] === 1
-        ) {
-          blockEnds = true;
-          for (const file of this.#fileRegions) markReturns(file.id);
-        }
+        } else if (region.kind === "handler" && fact === END && reached[region.creation.id] === 1)
+          markBlockEnds();
       if (fact === END) for (const from of onLabel.get(node) ?? []) give(from, END);
       const site = siteByCallOut.get(node);
       for (const before of node.predecessors) {
@@ -1389,22 +1422,6 @@ class FlowGraphBuilder {
     for (const site of this.#sites)
       if (!site.callees.some((callee) => returns[callee.id] === 1))
         this.#deadEdges.add(edgeKey(site.callIn, site.callOut));
-  }
-
-  /** The nodes that some way over edges that are not dead reaches from the program's entry, every call returning. */
-  #reachedIfEveryCallReturns(): Uint8Array {
-    const reached = new Uint8Array(this.#nodes.length);
-    const work: BuildNode[] = [this.#program.entry];
-    reached[this.#program.entry.id] = 1;
-    while (work.length > 0) {
-      const node = work.pop()!;
-      for (const next of node.successors)
-        if (reached[next.id] === 0 && !this.#deadEdges.has(edgeKey(node, next))) {
-          reached[next.id] = 1;
-          work.push(next);
-        }
-    }
-    return reached;
   }
 
   /**
