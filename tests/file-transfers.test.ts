@@ -288,6 +288,28 @@ test("a call whose file only the run decides warns, and fails when it starts the
       "main.tease TSV073 This call runs later, from the timer on line 1, so the compiler cannot tell whether the file it starts is already running then. If it is, the call fails. If that can happen, stop the timer while such a file runs.",
     ],
   );
+  // A button's block runs when the button is pressed, and a media block from the media.
+  assert.deepEqual(
+    warned(
+      project('let b = showPermanentButton "Punish" { call "punish.tease" }\nwait 5 s\nexit', {
+        "punish.tease": "wait 2 s\nend",
+      }),
+    ),
+    [
+      "main.tease TSV073 This call runs later, when the button on line 1 is pressed, so the compiler cannot tell whether 'punish.tease' is already running then. If it is, the call fails. If that can happen, remove the button while 'punish.tease' runs, or put what 'punish.tease' does in a function and write the function's name with '()' instead.",
+    ],
+  );
+  assert.deepEqual(
+    warned(
+      project(
+        'let music = playAudio async "music.mp3" {\n    at 1 s {\n        call "b.tease"\n    }\n}\ncall "b.tease"\nexit',
+        { "b.tease": "wait 2 s\nend" },
+      ),
+    ),
+    [
+      "main.tease TSV073 This call runs later, from the media on line 1, so the compiler cannot tell whether 'b.tease' is already running then. If it is, the call fails. If that can happen, stop the media while 'b.tease' runs, or put what 'b.tease' does in a function and write the function's name with '()' instead.",
+    ],
+  );
   // A global function's call of a file whose code calls the function, directly or through another global function:
   // whether the call runs while that file runs depends on the run, by a test or a default here or in a caller.
   const relayed = project('call "rooms/b.tease"\nexit', {
@@ -553,10 +575,14 @@ test("an end with no call to return to is an error on every way the compiler can
     ],
   );
   const plan = compileProject(files).plan!;
-  assert.deepEqual(outputs(run(plan, createImmediatePacingRuntimeSnapshot(plan)).events), [
-    "scene",
-    "failure TSR066",
-  ]);
+  const ended = run(plan, createImmediatePacingRuntimeSnapshot(plan)).events;
+  assert.deepEqual(outputs(ended), ["scene", "failure TSR066"]);
+  assert.deepEqual(
+    ended.flatMap((event) => (event.kind === "runtimeFailure" ? [event.message] : [])),
+    [
+      "This 'end' has no call to return to, because no file called this one. Start this file with 'call' where it should come back, or use 'exit' where the session should finish.",
+    ],
+  );
 });
 
 test("a computed target may start only the files that a reference of the project may name", () => {
