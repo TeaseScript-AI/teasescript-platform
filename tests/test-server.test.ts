@@ -72,7 +72,9 @@ test("saved values round-trip exactly, per scope, also for texts a path could no
   assert.deepEqual(await storage.load(), [{ key: "level", value: "high" }]);
   const listing = onlineSavedScripts(server);
   listing.rememberName("development-package:house", "House");
-  // The name is stored in the background; a listing after the next request sees it.
+  // A script with a name but no saved values is not listed.
+  listing.rememberName("named only", "Nothing saved");
+  // The names are stored in the background; a listing after the next request sees them.
   await storage.load();
   assert.deepEqual(await listing.scripts(), [
     { scope: "..", name: null },
@@ -80,6 +82,7 @@ test("saved values round-trip exactly, per scope, also for texts a path could no
   ]);
   await storage.clear();
   assert.deepEqual(await storage.load(), []);
+  assert.deepEqual(await listing.scripts(), [{ scope: "..", name: null }]);
 });
 
 test("a photo goes up once and comes back as a record the media store accepts", async () => {

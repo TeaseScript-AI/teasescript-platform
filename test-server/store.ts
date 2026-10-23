@@ -63,13 +63,12 @@ export class TestServerStore {
     this.#database.prepare("UPDATE accounts SET profile = ? WHERE name = ?").run(profile, account);
   }
 
-  /** The scopes with saved values or a remembered name, each with the name or `null`, as JSON texts. */
+  /** The scopes with saved values, each with its remembered name or `null`, as JSON texts. */
   scripts(account: string): { readonly scope: string; readonly name: string | null }[] {
     return this.#database
       .prepare(
         `SELECT scope, (SELECT name FROM names n WHERE n.account = s.account AND n.scope = s.scope) AS name
-         FROM (SELECT DISTINCT account, scope FROM storage WHERE account = ?1
-               UNION SELECT account, scope FROM names WHERE account = ?1) s
+         FROM (SELECT DISTINCT account, scope FROM storage WHERE account = ?) s
          ORDER BY scope`,
       )
       .all(account)
