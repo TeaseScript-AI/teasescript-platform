@@ -61,7 +61,7 @@ export function requiredInstructionTemporaries(
       if ("value" in instruction.destination) collect(instruction.destination.value);
       break;
     case "setDefaultSpeaker":
-    case "copyAccount":
+    case "copyPlayerProfile":
     case "prepareInteractionSpeaker":
     case "enterScope":
     case "leaveScope":

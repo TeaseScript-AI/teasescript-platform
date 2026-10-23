@@ -65,7 +65,7 @@ import { formSummaryOf, type FormSummaryLine } from "../src/runtime/actions/form
 import { instructionSourcePath } from "../src/plan/model.js";
 import { evaluateTagSteps } from "../src/tag-query.js";
 import { PLAYER } from "../src/speaker-terms.js";
-import type { RuntimeAccountInput } from "../src/runtime/host-data/account.js";
+import type { RuntimePlayerProfileInput } from "../src/runtime/host-data/player-profile.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
 import {
   mediaTerminalProgressMs,
@@ -463,8 +463,8 @@ export interface PlayerRuntimeSessionOptions {
   readonly randomControl?: RandomControlOptions;
   /** The references of the stored files the stored values hold, which the host's file store vouches for (V30 §33). */
   readonly storedFiles?: readonly string[];
-  /** The person fields of the player's account, which the script reads as `account` (V30 §37); none by default. */
-  readonly account?: RuntimeAccountInput;
+  /** The player's person fields, which the script reads as `playerProfile` (V30 §37); none by default. */
+  readonly playerProfile?: RuntimePlayerProfileInput;
 }
 
 /**
@@ -567,7 +567,7 @@ export function createPlayerRuntimeSession(
     ...(options.wallClockMs === undefined ? {} : { wallClockMs: options.wallClockMs }),
     ...(options.debugMode === undefined ? {} : { debugMode: options.debugMode }),
     ...(options.storedFiles === undefined ? {} : { storedFiles: options.storedFiles }),
-    ...(options.account === undefined ? {} : { account: options.account }),
+    ...(options.playerProfile === undefined ? {} : { playerProfile: options.playerProfile }),
   });
   const recorder = options.recorder ?? null;
   const debugTrace = options.debugTrace ?? null;

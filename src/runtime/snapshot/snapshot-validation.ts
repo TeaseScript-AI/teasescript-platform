@@ -55,7 +55,7 @@ import { validateMediaState } from "../background/media-validation.js";
 import { validatePermanentButtonState } from "../background/permanent-button-validation.js";
 import { validateCaptureState } from "../scopes/capture-validation.js";
 import { validateScriptStorageEntries } from "../host-data/script-storage.js";
-import { accountProblem } from "../host-data/account.js";
+import { playerProfileProblem } from "../host-data/player-profile.js";
 import { validateRandomControl } from "../random/random-control.js";
 import { isOneOf } from "../../plan/validation-support.js";
 import { isCameraPlacement } from "../../handle-rules.js";
@@ -112,7 +112,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextPermanentButtonId",
   "liveMessages",
   "debugMode",
-  "account",
+  "playerProfile",
   "randomControl",
   "maxCallDepth",
   "status",
@@ -409,8 +409,8 @@ function validateCapturedRuntimeSnapshotDetails(
     errors.push("Runtime scriptStoragePersistent must be a boolean.");
   }
   if (typeof value.debugMode !== "boolean") errors.push("Runtime debugMode must be a boolean.");
-  const accountFailure = accountProblem(value.account);
-  if (accountFailure !== null) errors.push(accountFailure);
+  const playerProfileFailure = playerProfileProblem(value.playerProfile);
+  if (playerProfileFailure !== null) errors.push(playerProfileFailure);
   validateRandomControl(value.randomControl, value, plan, errors);
   validateInteractionResultHandoffState(value, plan, errors);
   if (!isOneOf(value.status, ["ready", "running", "waiting", "halted", "failed"])) {

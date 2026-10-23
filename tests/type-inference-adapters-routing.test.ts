@@ -82,7 +82,7 @@ const SOURCE = [
   "let photo = takePhoto()",
   'let images = findImages(where: "heat" > 1)',
   'let stop = showPermanentButton "Stop" { exit }',
-  "let first = account.firstName",
+  "let first = playerProfile.firstName",
   "hostFn(1)",
   "switch n {\ncase 1 {\nsay 1\n}\n}",
   "exit",

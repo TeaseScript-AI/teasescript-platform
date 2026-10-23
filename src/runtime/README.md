@@ -26,5 +26,5 @@ Folders:
 - `background/`: timers, media, and permanent buttons.
 - `scopes/`: activations, the variables blocks share, and prepared references.
 - `random/`: the generator and controlled randomness.
-- `host-data/`: the account, the player's clock, script storage, and the file store.
+- `host-data/`: the player profile, the player's clock, script storage, and the file store.
 - `debug/`: the debug trace, inspection, and the instruction trace.

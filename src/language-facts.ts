@@ -230,8 +230,8 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "drawLine",
   "drawText",
   "removeDrawing",
-  "account",
-  "askAccountChange",
+  "playerProfile",
+  "askProfileChange",
   "publishGlobal",
   "getGlobal",
   "loadFromScript",
@@ -273,11 +273,21 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "script",
 ] as const);
 
-/** The earlier names of core built-ins, whose calls are compile errors that name the fix (ADR 0026). */
+/**
+ * The earlier names of core built-ins, whose calls are compile errors that name the fix (ADR 0026, and
+ * `askAccountChange` by the owner's decision of 2026-10-23).
+ */
 export const RENAMED_BUILTINS: ReadonlyMap<string, string> = new Map([
   ["getTimestamp", "getAbsoluteDateTime"],
   ["toTimestamp", "toAbsoluteDateTime"],
+  ["askAccountChange", "askProfileChange"],
 ]);
+
+/**
+ * The earlier names of engine values, whose reads are compile errors that name the fix while no declaration takes the
+ * name (owner decision, 2026-10-23).
+ */
+export const RENAMED_VALUES: ReadonlyMap<string, string> = new Map([["account", "playerProfile"]]);
 
 /** The earlier names of methods, whose calls are compile errors that name the fix on any value (ADR 0026). */
 export const RENAMED_METHODS: ReadonlyMap<string, string> = new Map([

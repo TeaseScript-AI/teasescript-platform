@@ -573,7 +573,7 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["declareGlobal", "name", "value", "typeCheck", "file"],
   ["declareSpeaker", "name", "properties", "file"],
   ["setDefaultSpeaker", "name"],
-  ["copyAccount"],
+  ["copyPlayerProfile"],
   ["enterScope"],
   ["leaveScope"],
   ["exit"],
@@ -641,7 +641,7 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["regex", "source", "flags"],
   ["identifier", "name"],
   ["debugMode"],
-  ["accountField", "name"],
+  ["playerProfileField", "name"],
   ["temporary", "temporaryId"],
   ["preparedReference", "temporaryId"],
   ["list", "elements"],
@@ -700,7 +700,7 @@ function validateInstruction(
     case "setDefaultSpeaker":
       requireString(value.name, `${path}.name`, errors);
       return;
-    case "copyAccount":
+    case "copyPlayerProfile":
     case "enterScope":
     case "leaveScope":
     case "exit":
@@ -2473,9 +2473,11 @@ function validateExpressionNode(
       return;
     case "debugMode":
       return;
-    case "accountField":
+    case "playerProfileField":
       if (typeof value.name !== "string" || !PERSON_FIELDS.has(value.name))
-        errors.push(planError("TSC002", "Account field is not a person field.", `${path}.name`));
+        errors.push(
+          planError("TSC002", "Player profile field is not a person field.", `${path}.name`),
+        );
       return;
     case "temporary":
     case "preparedReference":

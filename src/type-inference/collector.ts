@@ -36,7 +36,7 @@ import { lazyDefaultArgument } from "../lazy-defaults.js";
 import { isListFunction } from "../list-function-rules.js";
 import { listMethod } from "../list-methods.js";
 import { isNumericFunction } from "../numeric-functions.js";
-import { accountCopy, sessionDeclarations, someNode } from "../project-globals.js";
+import { playerProfileCopy, sessionDeclarations, someNode } from "../project-globals.js";
 import { isRandomFunction } from "../random-functions.js";
 import type { SourceSpan } from "../source.js";
 import { staticChoiceValue, staticVisibleText } from "../static-evaluation.js";
@@ -192,7 +192,7 @@ class Collector {
             statement,
             this.#declareFunction(statement, file, this.#project),
           );
-    const copy = accountCopy(programs);
+    const copy = playerProfileCopy(programs);
     const copyFile =
       copy === undefined
         ? -1
@@ -476,13 +476,13 @@ class Collector {
   ): CompileTask<void> {
     const name = declaration.name.name;
     this.#project.declare(name, { kind: "speaker", name });
-    // A copy of the account anywhere gives the player each person field from the start, with its terms and name
+    // A copy of the player profile anywhere gives the player each person field from the start, with its terms and name
     // lists as text (V30 §37); the copy itself stores them again where it stands (see `#call`). The seeds are sited
     // at the copy, in its own file.
     if (copy !== undefined && name === PLAYER) {
       const file = this.#file;
       this.#file = copy.file;
-      this.#accountFields(copy.call, "start value");
+      this.#playerProfileFields(copy.call, "start value");
       this.#file = file;
     }
     for (const property of declaration.properties) {
@@ -497,8 +497,8 @@ class Collector {
     }
   }
 
-  /** The person fields that `player.copyFrom(account)` gives the player, each as text or a list of text. */
-  #accountFields(copy: CallExpression, role: Role): void {
+  /** The person fields that `player.copyFrom(playerProfile)` gives the player, each as text or a list of text. */
+  #playerProfileFields(copy: CallExpression, role: Role): void {
     for (const field of PERSON_FIELDS) {
       const place = this.#place(copy, `${PLAYER}.${field}`, { kind: "value", node: "copyFrom" });
       this.#has(
@@ -942,11 +942,11 @@ class Collector {
         const object = unwrap(expression.object);
         if (
           object.kind === "identifier" &&
-          object.name === "account" &&
-          scope.resolve("account") === undefined
+          object.name === "playerProfile" &&
+          scope.resolve("playerProfile") === undefined
         )
           return this.#operation(
-            { family: "speakerField", name: `account.${name}` },
+            { family: "speakerField", name: `playerProfile.${name}` },
             null,
             [],
             [],
@@ -1317,12 +1317,13 @@ class Collector {
     const method = callee.property.name;
     const speaker = this.#speakerName(callee.object, scope);
     if (method === "copyFrom" && speaker === PLAYER) {
-      // `player.copyFrom(account)` stores each person field into the player, as `#speaker` seeds them at the start.
+      // `player.copyFrom(playerProfile)` stores each person field into the player, as `#speaker` seeds them
+      // at the start.
       yield* compileChild(this.#expression(callee.object, scope));
       yield* compileChild(this.#arguments(expression, scope));
       const result = this.#value(expression);
       this.#has(result, { kind: "atom", name: "null" }, expression, "call");
-      this.#accountFields(expression, "assignment");
+      this.#playerProfileFields(expression, "assignment");
       return result;
     }
     const receiver = yield* compileChild(this.#expression(callee.object, scope));

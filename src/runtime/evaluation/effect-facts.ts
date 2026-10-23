@@ -78,7 +78,7 @@ export function expressionEffects(node: ExpressionPlan): EffectFacts {
     case "calendarDuration":
     case "identifier":
     case "debugMode":
-    case "accountField":
+    case "playerProfileField":
     case "list":
     case "object":
     case "set":

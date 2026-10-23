@@ -48,7 +48,7 @@ import { type SourceSpan, fault } from "./support.js";
 import type { Evaluator } from "../evaluator.js";
 import { copySpan } from "../../plan/source-location.js";
 
-// Speakers, the account, and the text a say shows: a speaker's output, interpolation, and handle notation.
+// Speakers, the player profile, and the text a say shows: a speaker's output, interpolation, and handle notation.
 
 export function speakerByName(
   evaluator: Evaluator,
@@ -87,10 +87,10 @@ function speakerText(
 }
 
 /**
- * `player.copyFrom(account)` (V30 §37): the player gets a copy of each person field of the account and loses each one
- * the account lacks, in place, so its other properties keep their order.
+ * `player.copyFrom(playerProfile)` (V30 §37): the player gets a copy of each person field of the player profile and
+ * loses each one the player profile lacks, in place, so its other properties keep their order.
  */
-export function copyAccount(evaluator: Evaluator, span: SourceSpan): void {
+export function copyPlayerProfile(evaluator: Evaluator, span: SourceSpan): void {
   const player = speakerByName(evaluator, PLAYER, span);
   const reference: SerializableRuntimeValue = {
     kind: "speakerReference",
@@ -108,7 +108,7 @@ export function copyAccount(evaluator: Evaluator, span: SourceSpan): void {
     });
   }
   for (const name of PERSON_FIELDS) {
-    const value = evaluator.snapshot.account.find((field) => field.name === name)?.value;
+    const value = evaluator.snapshot.playerProfile.find((field) => field.name === name)?.value;
     if (value === undefined) {
       const index = player.properties.findIndex((property) => property.name === name);
       if (index >= 0) player.properties.splice(index, 1);
@@ -116,9 +116,15 @@ export function copyAccount(evaluator: Evaluator, span: SourceSpan): void {
     }
     setSpeakerProperty(player, name, value, span);
     if (evaluator.trace === null) continue;
-    // Each field depends only on the account's field it copies.
+    // Each field depends only on the player profile's field it copies.
     const previous = evaluator.trace.push();
-    evaluator.trace.readState(stateKey("account", name), null, `account.${name}`, value, true);
+    evaluator.trace.readState(
+      stateKey("playerProfile", name),
+      null,
+      `playerProfile.${name}`,
+      value,
+      true,
+    );
     evaluator.writeState(reference, name, value, span, { property: name });
     evaluator.trace.pop(previous);
   }

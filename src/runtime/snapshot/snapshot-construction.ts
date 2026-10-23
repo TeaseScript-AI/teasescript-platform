@@ -38,7 +38,7 @@ import {
   cloneScriptStorage,
   type RuntimeScriptStorageEntrySnapshot,
 } from "../host-data/script-storage.js";
-import { accountFromInput, cloneAccount } from "../host-data/account.js";
+import { playerProfileFromInput, clonePlayerProfile } from "../host-data/player-profile.js";
 import { addStoredFiles } from "../host-data/stored-files.js";
 import {
   validateCapturedSerializableValue,
@@ -147,7 +147,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
   }
   const debugMode = capturedOptions.debugMode === undefined ? false : capturedOptions.debugMode;
   if (typeof debugMode !== "boolean") throw new TypeError("debugMode must be a boolean.");
-  const account = accountFromInput(capturedOptions.account);
+  const playerProfile = playerProfileFromInput(capturedOptions.playerProfile);
   const storedFiles = capturedOptions.storedFiles === undefined ? [] : capturedOptions.storedFiles;
   if (!Array.isArray(storedFiles) || !storedFiles.every(isStoredFileReference))
     throw new TypeError("storedFiles must be a list of stored file references.");
@@ -225,7 +225,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     nextPermanentButtonId: 1,
     liveMessages: [],
     debugMode,
-    account,
+    playerProfile,
     randomControl: null,
     maxCallDepth,
     status: "ready",
@@ -316,7 +316,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     nextPermanentButtonId: snapshot.nextPermanentButtonId,
     liveMessages: snapshot.liveMessages.map((message) => ({ ...message })),
     debugMode: snapshot.debugMode,
-    account: cloneAccount(snapshot.account),
+    playerProfile: clonePlayerProfile(snapshot.playerProfile),
     randomControl: cloneRandomControl(snapshot.randomControl),
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,

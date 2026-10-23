@@ -13,7 +13,7 @@ import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js"
 
 const VERA = 'speaker vera {\n    firstName: "Vera"\n}';
 
-const ACCOUNT = {
+const PLAYER_PROFILE = {
   firstName: "Sam",
   gender: "male",
   petNames: ["pup"],
@@ -297,24 +297,27 @@ test("a custom property that only some ways assign is a compile error that names
 
 test("reading a built-in field, term, or name list where no way gave it one is a compile error", () => {
   const copyFix = (field: string): string =>
-    `Copy the account before this line, as in 'player.copyFrom(account)' at the start of the script, or assign ${field} first.`;
-  assert.deepEqual(diagnostics('say "Hello ${player.firstName}"\nplayer.copyFrom(account)\nexit'), [
+    `Copy the player profile before this line, as in 'player.copyFrom(playerProfile)' at the start of the script, or assign ${field} first.`;
+  assert.deepEqual(
+    diagnostics('say "Hello ${player.firstName}"\nplayer.copyFrom(playerProfile)\nexit'),
     [
-      "TSV043",
-      "main.tease:1",
-      `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. The copy on line 2 comes only later. ${copyFix("'player.firstName'")}`,
+      [
+        "TSV043",
+        "main.tease:1",
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the player profile or assigns 'firstName' before this line runs. The copy on line 2 comes only later. ${copyFix("'player.firstName'")}`,
+      ],
     ],
-  ]);
+  );
   // In a function that a call runs before the copy.
   assert.deepEqual(
     diagnostics(
-      'function greet {\n    say "Hi ${player.firstName}"\n}\ngreet()\nplayer.copyFrom(account)\nexit',
+      'function greet {\n    say "Hi ${player.firstName}"\n}\ngreet()\nplayer.copyFrom(playerProfile)\nexit',
     ),
     [
       [
         "TSV043",
         "main.tease:2",
-        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. The copy on line 5 comes only later. ${copyFix("'player.firstName'")}`,
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the player profile or assigns 'firstName' before this line runs. The copy on line 5 comes only later. ${copyFix("'player.firstName'")}`,
       ],
     ],
   );
@@ -322,7 +325,7 @@ test("reading a built-in field, term, or name list where no way gave it one is a
     [
       "TSV043",
       "main.tease:1",
-      `Speaker 'player' has no 'heShe' yet here: nothing copies the account or assigns 'heShe' or 'gender' before this line runs. Line 2 assigns 'gender', but only later. ${copyFix("'player.gender' or 'player.heShe'")}`,
+      `Speaker 'player' has no 'heShe' yet here: nothing copies the player profile or assigns 'heShe' or 'gender' before this line runs. Line 2 assigns 'gender', but only later. ${copyFix("'player.gender' or 'player.heShe'")}`,
     ],
   ]);
   // An assignment on a way that ends before the read, or one that no way runs, gives nothing there.
@@ -334,7 +337,7 @@ test("reading a built-in field, term, or name list where no way gave it one is a
       [
         "TSV043",
         "main.tease:5",
-        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. Line 2 assigns it, but only on a way that does not reach this line. ${copyFix("'player.firstName'")}`,
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the player profile or assigns 'firstName' before this line runs. Line 2 assigns it, but only on a way that does not reach this line. ${copyFix("'player.firstName'")}`,
       ],
     ],
   );
@@ -351,7 +354,7 @@ test("reading a built-in field, term, or name list where no way gave it one is a
       [
         "TSV043",
         "main.tease:6",
-        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. Line 3 assigns it, but that line never runs. ${copyFix("'player.firstName'")}`,
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the player profile or assigns 'firstName' before this line runs. Line 3 assigns it, but that line never runs. ${copyFix("'player.firstName'")}`,
       ],
     ],
   );
@@ -364,7 +367,7 @@ test("reading a built-in field, term, or name list where no way gave it one is a
       [
         "TSV043",
         "main.tease:8",
-        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. Line 3 assigns it, but only on a way that does not reach this line. ${copyFix("'player.firstName'")}`,
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the player profile or assigns 'firstName' before this line runs. Line 3 assigns it, but only on a way that does not reach this line. ${copyFix("'player.firstName'")}`,
       ],
     ],
   );
@@ -376,7 +379,7 @@ test("reading a built-in field, term, or name list where no way gave it one is a
       [
         "TSV043",
         "main.tease:9",
-        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. Line 2 assigns it, but that line never runs. ${copyFix("'player.firstName'")}`,
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the player profile or assigns 'firstName' before this line runs. Line 2 assigns it, but that line never runs. ${copyFix("'player.firstName'")}`,
       ],
     ],
   );
@@ -394,14 +397,14 @@ test("reading a built-in field, term, or name list where no way gave it one is a
       [
         "TSV043",
         "main.tease:5",
-        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. Line 4 of 'setup.tease' assigns it, but that line never runs. ${copyFix("'player.firstName'")}`,
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the player profile or assigns 'firstName' before this line runs. Line 4 of 'setup.tease' assigns it, but that line never runs. ${copyFix("'player.firstName'")}`,
       ],
     ],
   );
-  // A custom property named `copy` is not the copy of the account.
+  // A custom property named `copy` is not the copy of the player profile.
   assert.deepEqual(
     diagnostics(
-      "say player.copy\nsay player.firstName\nplayer.copy = 1\nplayer.copyFrom(account)\nexit",
+      "say player.copy\nsay player.firstName\nplayer.copy = 1\nplayer.copyFrom(playerProfile)\nexit",
     ),
     [
       [
@@ -412,7 +415,7 @@ test("reading a built-in field, term, or name list where no way gave it one is a
       [
         "TSV043",
         "main.tease:2",
-        `Speaker 'player' has no 'firstName' yet here: nothing copies the account or assigns 'firstName' before this line runs. The copy on line 4 comes only later. ${copyFix("'player.firstName'")}`,
+        `Speaker 'player' has no 'firstName' yet here: nothing copies the player profile or assigns 'firstName' before this line runs. The copy on line 4 comes only later. ${copyFix("'player.firstName'")}`,
       ],
     ],
   );
@@ -451,7 +454,10 @@ test("reading a built-in field, term, or name list where no way gave it one is a
 test("reads that every followed way prepares compile and run", () => {
   // Each silent form runs to its end without a runtime error.
   const runs = (main: string, others: Record<string, string> = {}): string[] =>
-    outputs(assertRuntimeResumeEquivalent(project(main, others), { account: ACCOUNT }).events);
+    outputs(
+      assertRuntimeResumeEquivalent(project(main, others), { playerProfile: PLAYER_PROFILE })
+        .events,
+    );
   const declared = 'speaker vera {\n    firstName: "Vera"\n    mood: "calm"\n}';
   // Declared in the block, assigned on every branch, by loops that run, or by a function that always assigns.
   assert.deepEqual(
@@ -593,7 +599,7 @@ test("reads that every followed way prepares compile and run", () => {
         "}",
         "nameIt(vera)",
         "say vera.extra",
-        "player.copyFrom(account)",
+        "player.copyFrom(playerProfile)",
         'say "${player.firstName} ${player.heShe}"',
         "exit",
       ].join("\n"),
@@ -669,7 +675,7 @@ test("what the compiler cannot follow stays a runtime error", () => {
   // Each compiles without diagnostics and fails with TSR017 when it runs.
   const fails = (main: string, others: Record<string, string> = {}): string[] =>
     outputs(
-      assertRuntimeResumeEquivalent(project(main, others), { account: {}, ending: "failed" })
+      assertRuntimeResumeEquivalent(project(main, others), { playerProfile: {}, ending: "failed" })
         .events,
     );
   const cases: [string, string, Record<string, string>][] = [
@@ -701,7 +707,7 @@ test("what the compiler cannot follow stays a runtime error", () => {
     ],
     [
       "a copy inside a branch",
-      'if load("copy", default: false) { player.copyFrom(account) }\nsay player.firstName\nexit',
+      'if load("copy", default: false) { player.copyFrom(playerProfile) }\nsay player.firstName\nexit',
       {},
     ],
     // A recursion counts as assigning everything, also when the only store of the file it calls never runs.

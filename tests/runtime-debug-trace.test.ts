@@ -18,7 +18,7 @@ import {
   type InstructionPlan,
   type InterpreterEvent,
   type ProjectSourceFile,
-  type RuntimeAccountInput,
+  type RuntimePlayerProfileInput,
   type RuntimeDebugRecord,
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSession,
@@ -74,8 +74,8 @@ interface PlayOptions {
   /** Leave every interaction unanswered, so that buttons time out. */
   readonly unanswered?: boolean;
   readonly from?: RuntimeSnapshot;
-  /** The person fields of the player's account. */
-  readonly account?: RuntimeAccountInput;
+  /** The person fields of the player's profile. */
+  readonly playerProfile?: RuntimePlayerProfileInput;
 }
 
 interface Played {
@@ -106,7 +106,7 @@ function play(plan: InstructionPlan, options: PlayOptions = {}): Played {
       seed: SEED,
       persistentScriptStorage: options.persistentStores !== undefined,
       ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
-      ...(options.account === undefined ? {} : { account: options.account }),
+      ...(options.playerProfile === undefined ? {} : { playerProfile: options.playerProfile }),
     });
   const apply = (result: { snapshot: RuntimeSnapshot; events: readonly InterpreterEvent[] }) => {
     snapshot = result.snapshot;
@@ -827,28 +827,28 @@ test("a term that a speaker's gender gives, or a title read through the other on
   assert.ok(!lineage(played.trace, explicit!.id).some((step) => step.target === "changed"));
 });
 
-test("a field the player copied from the account comes from the account's field, which the host gave", () => {
+test("a field the player copied from the player profile comes from the player profile's field, which the host gave", () => {
   const played = traced(
     [
       'let mine = "Sam"',
       "player.firstName = mine",
-      "player.copyFrom(account)",
-      'say "${player.firstName} ${account.lastName}"',
+      "player.copyFrom(playerProfile)",
+      'say "${player.firstName} ${playerProfile.lastName}"',
       "exit",
     ].join("\n"),
-    { account: { firstName: "Alex", lastName: "Morgan" } },
+    { playerProfile: { firstName: "Alex", lastName: "Morgan" } },
   );
   const [copied, read] = causes(played.trace, outputOf(played, "Alex Morgan"));
   const steps = lineage(played.trace, copied!.id);
   assert.ok(steps.some((step) => step.kind === "assignment" && step.target === "player.firstName"));
   assert.ok(
-    steps.some((step) => step.kind === "unrecorded" && step.target === "account.firstName"),
+    steps.some((step) => step.kind === "unrecorded" && step.target === "playerProfile.firstName"),
   );
   // The value the copy replaced is no cause.
   assert.ok(!steps.some((step) => step.target === "mine"));
   assert.ok(
     lineage(played.trace, read!.id).some(
-      (step) => step.kind === "unrecorded" && step.target === "account.lastName",
+      (step) => step.kind === "unrecorded" && step.target === "playerProfile.lastName",
     ),
   );
 });

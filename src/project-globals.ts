@@ -37,8 +37,8 @@ interface FileSurvey {
   /** Its globals and speakers by source position. */
   readonly declarations: readonly (GlobalStatement | SpeakerDeclaration)[];
   readonly namesPlayer: boolean;
-  /** Its first `player.copyFrom(account)` statement in walk order: its call. */
-  readonly accountCopy: CallExpression | undefined;
+  /** Its first `player.copyFrom(playerProfile)` statement in walk order: its call. */
+  readonly playerProfileCopy: CallExpression | undefined;
   readonly setsDefaultSpeaker: boolean;
 }
 
@@ -63,7 +63,7 @@ function fileSurvey(program: Program): FileSurvey {
     else if (node.kind === "expressionStatement" && copy === undefined) {
       // EVIDENCE: invariant: the parser gives this kind only to expression statements.
       const { expression } = node as ExpressionStatement;
-      if (copiesAccount(expression)) copy = expression;
+      if (copiesPlayerProfile(expression)) copy = expression;
     }
     return false;
   });
@@ -72,7 +72,7 @@ function fileSurvey(program: Program): FileSurvey {
       declarations.sort((left, right) => left.span.start.offset - right.span.start.offset),
     ),
     namesPlayer,
-    accountCopy: copy,
+    playerProfileCopy: copy,
     setsDefaultSpeaker: setsDefault,
   });
   surveys.set(program, survey);
@@ -94,8 +94,8 @@ export function sessionDeclarations(programs: readonly Program[]): readonly Sess
     : declared;
 }
 
-/** Whether `expression` is `player.copyFrom(account)`, the one form of `copyFrom` (V30 §37). */
-export function copiesAccount(expression: Expression): expression is CallExpression {
+/** Whether `expression` is `player.copyFrom(playerProfile)`, the one form of `copyFrom` (V30 §37). */
+export function copiesPlayerProfile(expression: Expression): expression is CallExpression {
   if (expression.kind !== "callExpression" || expression.arguments.length !== 1) return false;
   const { callee } = expression;
   const argument = expression.arguments[0]!;
@@ -106,17 +106,17 @@ export function copiesAccount(expression: Expression): expression is CallExpress
     callee.object.name === PLAYER &&
     argument.kind === "positionalArgument" &&
     argument.value.kind === "identifier" &&
-    argument.value.name === "account"
+    argument.value.name === "playerProfile"
   );
 }
 
 /**
- * A `player.copyFrom(account)` statement in a file of the project, wherever it stands, or `undefined` without one: its
- * call.
+ * A `player.copyFrom(playerProfile)` statement in a file of the project, wherever it stands, or `undefined` without
+ * one: its call.
  */
-export function accountCopy(programs: readonly Program[]): CallExpression | undefined {
+export function playerProfileCopy(programs: readonly Program[]): CallExpression | undefined {
   for (const program of programs) {
-    const copy = fileSurvey(program).accountCopy;
+    const copy = fileSurvey(program).playerProfileCopy;
     if (copy !== undefined) return copy;
   }
   return undefined;

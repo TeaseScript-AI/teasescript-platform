@@ -3,7 +3,7 @@ import { ref, type ShallowRef } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
-import { DEMO_ACCOUNT } from "../../demo-account.js";
+import { DEMO_PLAYER_PROFILE } from "../../demo-player-profile.js";
 import type { KeptRoomStore, KeptSessionStore } from "../../kept-sessions.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotice } from "../../notices.js";
@@ -134,7 +134,7 @@ const startOptions = (recording: Parameters<PlayerSessionStart>[0]) => ({
   ...recording,
   temporalContext: playerTemporalContext(),
   wallClockMs: Date.now(),
-  account: DEMO_ACCOUNT,
+  playerProfile: DEMO_PLAYER_PROFILE,
 });
 // A package is compiled and prepared like in the default build; a scenario is a fixed development script.
 let failure: ShallowRef<ScriptFailure | null> | null = null;

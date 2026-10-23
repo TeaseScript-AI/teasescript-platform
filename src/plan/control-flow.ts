@@ -137,7 +137,7 @@ export class PlanControlFlow {
       case "declareGlobal":
       case "declareSpeaker":
       case "setDefaultSpeaker":
-      case "copyAccount":
+      case "copyPlayerProfile":
       case "enterScope":
       case "leaveScope":
       case "declareBinding":

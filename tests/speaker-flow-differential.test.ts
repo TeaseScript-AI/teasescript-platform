@@ -618,7 +618,7 @@ const TEMPLATES: readonly Template[] = [
       "hideImage",
       "hideCamera",
       "speaker vera",
-      "player.copyFrom(account)",
+      "player.copyFrom(playerProfile)",
       `say ${k.expr} // READ`,
     ],
   },

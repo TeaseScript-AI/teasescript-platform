@@ -29,7 +29,7 @@ import type { LazyDefaultOperation } from "../lazy-defaults.js";
 import { isNumericFunction } from "../numeric-functions.js";
 import { isRandomFunction } from "../random-functions.js";
 import { angleDegrees, angleValue } from "../angle.js";
-import { accountFieldValue } from "./host-data/account.js";
+import { playerProfileFieldValue } from "./host-data/player-profile.js";
 import { listFunctionValue } from "./values/list-statistics.js";
 import { CORE_RUNTIME_BUILTINS, type ConversionName } from "../language-facts.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
@@ -175,7 +175,7 @@ import {
 import {
   speakerByName,
   speakerById,
-  copyAccount,
+  copyPlayerProfile,
   outputSpeaker,
   interpolationText,
   sayText,
@@ -359,7 +359,7 @@ export class Evaluator {
           | "calendarDuration"
           | "identifier"
           | "debugMode"
-          | "accountField"
+          | "playerProfileField"
           | "temporary"
           | "preparedReference";
       }
@@ -380,19 +380,19 @@ export class Evaluator {
           true,
         );
         return this.snapshot.debugMode;
-      case "accountField": {
-        const value = accountFieldValue(this.snapshot.account, expression.name);
+      case "playerProfileField": {
+        const value = playerProfileFieldValue(this.snapshot.playerProfile, expression.name);
         if (value === undefined)
           throw fault(
             "TSR017",
-            `The account has no '${expression.name}': the player's account does not give one. Give the player a value of its own instead, as in 'player.${expression.name} = ...'.`,
+            `'playerProfile' has no '${expression.name}': the player's profile does not give one. Give the player a value of its own instead, as in 'player.${expression.name} = ...'.`,
             expression.span,
           );
-        // The host gave the account, so a read has no recorded origin.
+        // The host gave the player profile, so a read has no recorded origin.
         this.trace?.readState(
-          stateKey("account", expression.name),
+          stateKey("playerProfile", expression.name),
           null,
-          `account.${expression.name}`,
+          `playerProfile.${expression.name}`,
           value,
           true,
         );
@@ -803,7 +803,7 @@ export class Evaluator {
         case "calendarDuration":
         case "identifier":
         case "debugMode":
-        case "accountField":
+        case "playerProfileField":
         case "temporary":
         case "preparedReference":
           value = this.#evaluateLeaf(expression);
@@ -1366,11 +1366,11 @@ export class Evaluator {
   }
 
   /**
-   * `player.copyFrom(account)` (V30 §37): the player gets a copy of each person field of the account and loses each one
-   * the account lacks, in place, so its other properties keep their order.
+   * `player.copyFrom(playerProfile)` (V30 §37): the player gets a copy of each person field of the player profile and
+   * loses each one the player profile lacks, in place, so its other properties keep their order.
    */
-  public copyAccount(span: SourceSpan): void {
-    return copyAccount(this, span);
+  public copyPlayerProfile(span: SourceSpan): void {
+    return copyPlayerProfile(this, span);
   }
 
   public outputSpeaker(

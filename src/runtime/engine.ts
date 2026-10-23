@@ -764,8 +764,8 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     }
-    case "copyAccount":
-      evaluator.copyAccount(copySpan(instruction.span));
+    case "copyPlayerProfile":
+      evaluator.copyPlayerProfile(copySpan(instruction.span));
       advance(snapshot);
       return;
     case "enterScope":

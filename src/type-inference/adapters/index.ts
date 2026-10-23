@@ -60,7 +60,7 @@ const RELATIONS: OperationRelations = Object.freeze({
       return interactions.relationOf(contract.family, contract.name);
     const family = FREE_STANDING.get(contract.family);
     // A module that serves several families keys by `<family>.<name>`; one that serves one by the name; a family
-    // whose names are open, such as `angle.<unit>` or `speakerField.account.<name>`, by `<family>.*`.
+    // whose names are open, such as `angle.<unit>` or `speakerField.playerProfile.<name>`, by `<family>.*`.
     return (
       family?.get(`${contract.family}.${contract.name}`) ??
       family?.get(contract.name) ??

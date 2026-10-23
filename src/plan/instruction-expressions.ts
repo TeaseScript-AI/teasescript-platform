@@ -82,7 +82,7 @@ export function instructionExpressions(instruction: Instruction): readonly Expre
       ];
     case "interaction":
     case "setDefaultSpeaker":
-    case "copyAccount":
+    case "copyPlayerProfile":
     case "enterScope":
     case "leaveScope":
     case "jump":
