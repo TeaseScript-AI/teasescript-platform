@@ -143,7 +143,7 @@ async function main() {
         ],
         ["scriptStorage", () => scriptStorageScenario(cdp, origin)],
         ["dataMode", () => dataModeScenario(cdp, origin)],
-        ["online", () => onlineScenario(cdp, onlineOrigin)],
+        ["online", () => onlineScenario(cdp, onlineOrigin, debugPort)],
         ["demo", () => demoScenario(cdp, origin)],
         ["insecureOrigin", () => insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`)],
         ["package", () => packageScenario(cdp, origin)],
@@ -709,9 +709,9 @@ function play(mode) {
 }
 
 // Online mode on the temporary test server, opened from its stand-in page: saves reach the server and come back in a
-// later run, the session the server keeps continues in a browser that kept nothing, stand-alone keeps its own data, and
-// a write that fails says so.
-async function onlineScenario(cdp, origin) {
+// later run, the session the server keeps continues in a browser that kept nothing, a device whose session another
+// continued says so and can continue it again, stand-alone keeps its own data, and a write that fails says so.
+async function onlineScenario(cdp, origin, debugPort) {
   const activate = "[data-session-activation] button";
   const messages = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`;
   const said = (text) => `${messages}.some((message) => message.includes(${JSON.stringify(text)}))`;
@@ -742,8 +742,19 @@ async function onlineScenario(cdp, origin) {
     await physicalClick(cdp, activate);
     await waitFor(cdp, said("Some of her messages make you wait."), 15_000);
   };
-  const session = (method) =>
-    `fetch('/api/scripts/%22repository-demo%22/session', { method: '${method}', headers: { Authorization: 'Bearer ' + sessionStorage.getItem('teasescript-online-token') } }).then((reply) => reply.status)`;
+  const reply = (method, read) =>
+    `fetch('/api/scripts/%22repository-demo%22/session', { method: '${method}', headers: { Authorization: 'Bearer ' + sessionStorage.getItem('teasescript-online-token') } }).then(${read})`;
+  const session = (method) => reply(method, "(reply) => reply.status");
+  const awaited = async (expression) =>
+    (await cdp.call("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }))
+      .result.result.value;
+  const revision = () => awaited(reply("HEAD", "(reply) => reply.headers.get('X-Revision')"));
+  const until = async (check, what) => {
+    const deadline = Date.now() + 15_000;
+    while (!(await check()))
+      if (Date.now() > deadline) throw new Error(what);
+      else await new Promise((resolve) => setTimeout(resolve, 200));
+  };
   // The session is kept on the server once it presents its first interaction.
   const kept = async () => {
     const deadline = Date.now() + 15_000;
@@ -760,6 +771,7 @@ async function onlineScenario(cdp, origin) {
   await open("online");
   assertEqual(await value(cdp, said("Back again")), false, "The account's first visit");
   await kept();
+  await takeover(cdp, debugPort, origin, { activate, said, revision, until, reply, awaited });
   await open("online", "Continue");
   await discard();
   await open("online");
@@ -783,6 +795,88 @@ async function onlineScenario(cdp, origin) {
     8_000,
     "A failed write says so",
   );
+}
+
+// Another device continues the session and answers there. This device says so when its page shows again, and Continue
+// here goes on from the other device's answer; then the other device says so in turn. Browsers fire `visibilitychange`
+// when the player returns to a tab; the scenario fires it itself, since both pages stay shown.
+async function takeover(
+  cdp,
+  debugPort,
+  origin,
+  { activate, said, revision, until, reply, awaited },
+) {
+  const notice = "This session continues on another device.";
+  const shown = (page) =>
+    value(page, `document.body.innerText.includes(${JSON.stringify(notice)})`);
+  const browser = await connectCdp(
+    (await (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).json()).webSocketDebuggerUrl,
+  );
+  const { result: context } = await browser.call("Target.createBrowserContext");
+  let other;
+  try {
+    const { result: target } = await browser.call("Target.createTarget", {
+      url: "about:blank",
+      browserContextId: context.browserContextId,
+    });
+    other = await connectCdp(`ws://127.0.0.1:${debugPort}/devtools/page/${target.targetId}`);
+    await other.call("Page.enable");
+    await other.call("Runtime.enable");
+    await setViewport(other, 1440, 900);
+    await navigate(other, `${origin}/`);
+    await waitFor(other, `!!document.getElementById('online')`);
+    await value(other, play("online"));
+    await waitFor(
+      other,
+      `document.querySelector('${activate}')?.textContent.trim() === 'Continue'`,
+      15_000,
+      "The other device shows Continue",
+    );
+    await physicalClick(other, activate);
+    // Space in the empty composer hurries the messages along until the name is asked.
+    const input = `document.querySelector('[data-composer-input]')`;
+    const deadline = Date.now() + 30_000;
+    while ((await value(other, `${input}?.placeholder ?? null`)) !== "What you call her") {
+      if (Date.now() > deadline) throw new Error("The other device asks for a name");
+      if (await value(other, `${input}?.disabled === false`)) {
+        await focusSeen(other, input);
+        await pressSpace(other);
+      }
+      await delay(300);
+    }
+    await physicalClick(other, "[data-composer-input]");
+    await other.call("Input.insertText", { text: "Lady Quill" });
+    await physicalClick(other, ".composer-send");
+    await waitFor(other, said("Lady Quill. Good."), 15_000, "The other device took the answer");
+    await until(
+      async () => (await awaited(reply("GET", "(reply) => reply.text()"))).includes("Lady Quill"),
+      "The server keeps the other device's answer",
+    );
+    await value(cdp, `document.dispatchEvent(new Event('visibilitychange'))`);
+    await until(() => shown(cdp), "This device says the session continues on another device");
+    const before = await revision();
+    await physicalClick(cdp, "[data-notification-bell]");
+    await waitFor(cdp, `!!document.querySelector('[data-notice-action="session-taken-over"]')`);
+    await physicalClick(cdp, '[data-notice-action="session-taken-over"]');
+    await waitFor(
+      cdp,
+      said("Lady Quill. Good."),
+      15_000,
+      "Continue here goes on from the other device",
+    );
+    if (await value(cdp, `!!document.querySelector('[data-player-notification-panel]')`))
+      await pressEscape(cdp);
+    assertEqual(await shown(cdp), false, "Continue here withdraws the notice");
+    await until(async () => (await revision()) !== before, "This device keeps the session again");
+    await value(other, `document.dispatchEvent(new Event('visibilitychange'))`);
+    await until(() => shown(other), "The other device says so in turn");
+  } finally {
+    other?.close();
+    await browser.call("Target.disposeBrowserContext", {
+      browserContextId: context.browserContextId,
+    });
+    browser.close();
+  }
 }
 
 // Plays the repository demo on the maintained /player/ route of the built Player with trusted input, so the Start

@@ -130,7 +130,9 @@ Continue works on another device; its debug rooms stay in this browser, in a dat
 notices a second writer, such as another device or tab, without resolving it: a change names the revision of the data
 its Player last saw, a kept session that another Player changed meanwhile is refused, also when a new session would
 replace it, so the session kept first stays, and a saved value is written anyway, so the last one stays. An import's
-discard of a kept session names no revision and always goes ahead.
+discard of a kept session names no revision and always goes ahead. A Player whose keep is refused, or which finds a
+newer revision when its page shows again, tells the player and can continue the session from the server's state
+([PLAYER-UI](ui/PLAYER-UI.md#session-start-and-user-activation)).
 
 ### Script storage in the browser
 

@@ -466,7 +466,11 @@ instead of Start; it goes on from the last kept point, with those photos as sess
 kept session uses stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
 a kept session whose events the engine's `interpreterEventProblem` refuses, such as a message without its markup or an
 answer without its form, is not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous, so a step after the last kept point, such as a reload in the
-moment after an answer, can be lost. A saved-data import of the script discards its kept session
+moment after an answer, can be lost. Online, when another device or tab kept the session since this Player did, the
+server refuses this Player's keep, and a [player notice](#player-notices) says "This session continues on another
+device." with **Continue here**; the Player also asks the server when the page shows again, so the notice can come
+before anything more is played here. Until then nothing more is kept here. **Continue here** continues the session as
+the server keeps it now, or shows Start when it ended there, and the other Player is told in turn. A saved-data import of the script discards its kept session
 ([transfer](../DATA-AND-API.md#saved-data-transfer)). A script a host prepares without its plan, such as a development
 scenario, keeps none. The debug room has a start page of its own, with its restarts
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-room)). Start and Continue
@@ -553,7 +557,8 @@ audio, is labelled **Needs action**, offers no dismiss control, and disappears o
 
 The current conditions are blocked audio (warning, with **Enable audio**), saved data unavailable at session start
 (info: progress is not saved), a failed script-storage write (warning, for the run it happened in; a new
-Start withdraws it), an image request that allows only the camera where no camera can be used (warning,
+Start withdraws it), an online session that another device continues (warning, with **Continue here**; see
+[Session start and user activation](#session-start-and-user-activation)), an image request that allows only the camera where no camera can be used (warning,
 withdrawn when the request ends), a media file the script refers to that the Player cannot use (warning, see
 [Stage and media presentation](#stage-and-media-presentation)), and a session stopped by an error (error, with
 **Details**; see [Session end and failure](#session-end-and-failure)). Each level also has a theme status colour, following
