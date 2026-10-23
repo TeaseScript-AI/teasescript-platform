@@ -241,8 +241,10 @@ After the player confirms, a session of the script in progress ends. Each medium
 nothing in the checkpoint changes. The values then replace the script's saved data at once, their media stored first,
 as a save stores them, and the session replaces the one the Player keeps for the script, with the media only it uses,
 so the start page and a later reload offer Continue ([Session start and user
-activation](ui/PLAYER-UI.md#session-start-and-user-activation)). When the values cannot be saved, nothing is
-imported; when the session cannot be kept, the values stay imported and Start begins a new session with them.
+activation](ui/PLAYER-UI.md#session-start-and-user-activation)). The session is kept only with every medium it uses.
+When the values cannot be saved, nothing is imported. When the session kept before cannot be replaced, the values stay
+imported and Continue goes on with that earlier session; when the imported session or one of its media cannot be kept,
+the values stay imported and Start begins a new session with them.
 
 Ordinary Player use does not expose arbitrary manual checkpoint/restore points as a rewind mechanism. The runtime/Player
 creates and restores supported checkpoints according to the session lifecycle. Developer/debug tooling may expose

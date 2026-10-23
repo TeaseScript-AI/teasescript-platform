@@ -179,8 +179,11 @@ const SAVED_PHOTO = compilePlayerProject(
   'let picture: string = askImage(hint: "Add an image to save")\nsave picture as "photo"\nsay "Saved.", instant\nlet unsaved: string = askImage(hint: "Add an image that stays unsaved")\nshowImage unsaved\nlet done = askText(hint: "Anything else?")\nsay "Thanks, ${done}.", instant\nexit',
 ).plan!;
 
-test("a session exported in one browser continues in another after the import, as Continue does after a reload", async (context) => {
-  stubBrowser(context);
+/**
+ * The session of `SAVED_PHOTO` exported in a browser of its own at its last question, read back from the exported file:
+ * one photo saved, one only the session shows.
+ */
+async function exported(context: TestContext) {
   const first = browser();
   const exporting = await page(context, first, SAVED_PHOTO);
   assert.equal(
@@ -204,14 +207,20 @@ test("a session exported in one browser continues in another after the import, a
     new Set([saved, unsaved]),
   );
   const file = new Uint8Array(await (await sessionTransferFile(transfer, true)).arrayBuffer());
+  const read = await readPlayerTransferFile(file);
+  assert.equal(read.kind, "session");
+  return { session: read.kind === "session" ? read.session : transfer, saved, unsaved };
+}
+
+test("a session exported in one browser continues in another after the import, as Continue does after a reload", async (context) => {
+  stubBrowser(context);
+  const read = await exported(context);
+  const { saved, unsaved } = read;
 
   // Another browser, which plays a session of its own until the import ends it.
   const second = browser();
   const importing = await page(context, second, SAVED_PHOTO);
   await importing.activate();
-  const read = await readPlayerTransferFile(file);
-  assert.equal(read.kind, "session");
-  if (read.kind !== "session") return;
   const review = await importing.reviewSessionImport(read.session);
   assert.equal(review.currentValues, 0);
   assert.equal(playerRuntimeForeground(importing.session.value!)?.kind, "ask-image");
@@ -252,6 +261,65 @@ test("a session exported in one browser continues in another after the import, a
     "the transcript before the export stays",
   );
   assert.equal(said(reloaded.session.value).at(-1), "Thanks, nothing.");
+});
+
+/** A store of kept sessions whose discard, or whose photo writes, fail while `failing` says so. */
+function failingKept(failing: { discard: boolean; media: boolean }): KeptSessionStore {
+  const kept = memoryKeptSessionStore();
+  return {
+    ...kept,
+    discard: async (scope) => {
+      if (failing.discard) throw new DOMException("Aborted.", "AbortError");
+      return kept.discard(scope);
+    },
+    media: {
+      ...kept.media,
+      add: async (record) => {
+        if (failing.media) throw new DOMException("Storage is full.", "QuotaExceededError");
+        return kept.media.add(record);
+      },
+    },
+  };
+}
+
+test("an import that cannot keep the session or its photos says so, and a reload offers what the browser kept", async (context) => {
+  stubBrowser(context);
+  const { session, saved } = await exported(context);
+  const failing = { discard: false, media: false };
+  const second = { ...browser(), kept: failingKept(failing) };
+  // This browser keeps a session of its own, at its first image request.
+  const own = await page(context, second, SAVED_PHOTO);
+  await own.activate();
+  await until(
+    async () => (await second.kept.session(SCOPE)) !== null,
+    "the own session was not kept",
+  );
+  const importRefused = async (message: RegExp) => {
+    const host = await page(context, second, SAVED_PHOTO);
+    await assert.rejects(
+      host.importSession(await host.reviewSessionImport(session)),
+      (error: unknown) => error instanceof Error && message.test(error.message),
+    );
+    // The saved data is imported either way.
+    assert.deepEqual([...second.entries], [["photo", saved]]);
+    return page(context, second, SAVED_PHOTO);
+  };
+
+  // The session kept before cannot be replaced: a reload continues that one, as the message says.
+  failing.discard = true;
+  const earlier = await importRefused(
+    /could not replace the session it kept .* goes on with that earlier session/,
+  );
+  assert.equal(earlier.activation.value, "continue");
+  await earlier.activate();
+  assert.equal(playerRuntimeForeground(earlier.session.value!)?.kind, "ask-image");
+
+  // The photo only the session uses cannot be kept: the session is not kept without it, and a reload offers Start.
+  failing.discard = false;
+  failing.media = true;
+  const anew = await importRefused(/could not keep the session, .* Start begins a new session/);
+  assert.equal(anew.activation.value, "start");
+  assert.equal(await second.kept.session(SCOPE), null);
 });
 
 test("a session whose state this browser cannot write is refused with the reason, and is no longer kept for a reload", async (context) => {

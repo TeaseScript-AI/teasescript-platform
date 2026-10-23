@@ -1579,16 +1579,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         failure =
           "Nothing was imported: this browser could not save the session's data, for example because storage is full.";
       }
-      if (failure === null)
+      if (failure === null) {
+        let discarded = false;
         try {
           kept = { plan: false, count: 0, last: null };
           await keptSessions.discard(scope);
+          discarded = true;
           const references = capturedMediaReferencesIn(
             review.snapshotJson,
             transfer.session.events,
           );
+          // Unlike keeping a session as it plays, every photo goes into a store the discard emptied, so a failure is real:
+          // the session is not kept without the media it uses.
           for (const photo of capturedMedia.sessionRecords(references))
-            await keptSessions.media.add(photo).catch(() => {});
+            await keptSessions.media.add(photo);
           await keptSessions.publish(scope, {
             planJson: JSON.stringify(plan),
             snapshotJson: review.snapshotJson,
@@ -1597,9 +1601,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             marks: { editedWhileDebugging: null, rewoundWhileDebugging: null },
           });
         } catch {
-          failure =
-            "The session's saved data was imported, but this browser could not keep the session, for example because storage is full. Start begins a new session with that data.";
+          failure = discarded
+            ? "The session's saved data was imported, but this browser could not keep the session, for example because storage is full. Start begins a new session with that data."
+            : "The session's saved data was imported, but this browser could not replace the session it kept for this script. Continue, if offered, goes on with that earlier session.";
         }
+      }
     } finally {
       await loadScriptStorage();
       importing.value = false;
