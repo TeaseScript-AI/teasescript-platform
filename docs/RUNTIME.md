@@ -1470,7 +1470,8 @@ prepared through `.text` keeps the text read then, as for a text variable.
 The compiler implements globals, global functions, and always-global speakers under ADR 0022 §3 and §6 and
 specification [§11](specifications/accepted-syntaxes-v30.md#global-functions) and
 [§12](specifications/accepted-syntaxes-v30.md#global-variables). Their names are checked across all files, and the
-types of all files share one environment in the checking order of ADR 0021 rule 6.
+types of all files share one environment, which the type checker fills file by file in project order, `main.tease`
+first and then the others by path.
 
 The start values of all globals and speakers form a startup prefix at the beginning of the root region of `main.tease`:
 one `declareGlobal` (with an optional runtime `typeCheck`) or `declareSpeaker` instruction each, in session-start order,
