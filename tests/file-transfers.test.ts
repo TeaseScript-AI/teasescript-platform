@@ -219,33 +219,13 @@ test("a call starts another file, so a label or a call that can start the runnin
     ),
     [],
   );
-  // A global function runs in the file whose code that can run calls it, directly or through another global function.
+  // A global function runs in the files whose code calls it where it can run, directly or through another global
+  // function, and its call there only warns (see below). A caller in code that never runs does not count.
   const lib = {
     "lib.tease":
       'global function relay { punish() }\nglobal function punish { call "rooms/*.tease" }',
   };
   assert.deepEqual(diagnostics(project("relay()\nexit", { ...rooms, ...lib })), []);
-  assert.deepEqual(
-    diagnostics(project("exit", { ...rooms, ...lib, "rooms/b.tease": "relay()\nexit" })),
-    [
-      [
-        "lib.tease",
-        "TSV072",
-        "A call starts another file, but this call can start 'rooms/b.tease', which calls global function 'punish' and so is the running file then. Change the pattern so that it matches only other files.",
-      ],
-    ],
-  );
-  // Also where the call follows parameter defaults, which run only for an argument left out.
-  assert.deepEqual(
-    diagnostics(
-      project("exit", {
-        ...rooms,
-        "lib.tease": 'global function punish(level = 2) { call "rooms/*.tease" }',
-        "rooms/b.tease": "punish()\nexit",
-      }),
-    ).map(([path, code]) => `${path} ${code}`),
-    ["lib.tease TSV072"],
-  );
   for (const caller of ["exit\nrelay()", "function never { relay() }\nexit"])
     assert.deepEqual(
       diagnostics(project("relay()\nexit", { ...rooms, ...lib, "rooms/b.tease": caller }))
@@ -308,8 +288,17 @@ test("a call whose file only the run decides warns, and fails when it starts the
       "main.tease TSV073 The block that line 1 starts runs later, so the compiler cannot tell whether the file this call starts is running then. A call starts another file, so the call fails if it is. If the block can run while that file runs, put what the call should run in a function and call that instead.",
     ],
   );
-  // A call of a global function that runs only on some ways through the function, by a test or in a parameter
-  // default, warns where a calling file may be the running file then.
+  // A global function's call of a file whose code calls the function, directly or through another global function:
+  // whether the call runs while that file runs depends on the run, by a test or a default here or in a caller.
+  const relayed = project('call "rooms/b.tease"\nexit', {
+    "rooms/a.tease": "end",
+    "rooms/b.tease": "relay()\nend",
+    "lib.tease":
+      'global function relay { punish() }\nglobal function punish { call "rooms/*.tease" }',
+  });
+  assert.deepEqual(warned(relayed), [
+    "lib.tease TSV073 This call can start 'rooms/b.tease', which calls global function 'punish', but the compiler cannot tell whether the call runs while 'rooms/b.tease' runs. A call starts another file, so the call fails if it does. If it can, change the pattern so that it matches only other files.",
+  ]);
   const guard = (argument: string) =>
     project('visit(false)\nsay "back"\nexit', {
       "b.tease": `visit(${argument})\nsay "b"\nend`,
@@ -329,7 +318,7 @@ test("a call whose file only the run decides warns, and fails when it starts the
     "lib.tease TSV073 This call can start 'main.tease', which calls global function 'visit', but the compiler cannot tell whether the call runs while 'main.tease' runs. A call starts another file, so the call fails if it does. If it can, call 'visit' only from other files, or put what it starts in a function.",
   ]);
   assert.deepEqual(said(supplied, { warnings: ["TSV073"] }), ["provided", "exit"]);
-  // So does a call of the global function that a file's own code makes only on some ways.
+  // So does a call of the global function whose run a file's own code decides.
   const visit = 'global function visit {\n    call "main.tease"\n    return "done"\n}';
   for (const [files, outcome] of [
     [
@@ -344,6 +333,11 @@ test("a call whose file only the run decides warns, and fails when it starts the
         "lib.tease": 'global function visit {\n    inside = true\n    call "b.tease"\n}',
       }),
       ["b", "back", "exit"],
+    ],
+    // A block may end the wait before the call of the function.
+    [
+      project("timer async 1 s { exit }\nwait 2 s\nvisit()\nexit", { "lib.tease": visit }),
+      ["exit"],
     ],
   ] as const) {
     assert.deepEqual(

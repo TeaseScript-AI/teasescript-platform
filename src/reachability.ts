@@ -357,17 +357,15 @@ export class Reachability {
   }
 
   /**
-   * A `call` starts another file, so a call that can start the running file is an error (TSV072, V30 §29). Code runs in
-   * the file whose top level runs it, also through the functions it calls where it can run: a function of the file, or a
-   * global function, which runs in every file whose code calls it where it can run. Code of a file runs only in that
-   * file, so a call there that can start the file is an error, also where it cannot run itself, as a call of the file it
-   * stands in is an error anywhere. A global function runs in a file for certain only through calls that run whenever
-   * their code runs, from the top of the file or the entry of a function (see {@link #runsOnEntry}), and its call is an
-   * error only where it can start such a file and runs whenever the function runs. Everywhere else only the run decides,
-   * and a call that may start a file its code runs in is a warning (TSV073): where a test, a default, or another way
-   * decides whether it runs there, where its tagged pick or reference decides, or where a timer, media, or button block
-   * runs its code, which runs later, while the file that started it or a file it called runs, or after it. The runtime
-   * checks every call (TSR069). `calls` holds each call by its transfer instruction.
+   * A `call` starts another file, so a call that can start the running file is an error (TSV072, V30 §29). A file's own
+   * code, its top level and its functions, runs in that file, so a call there that can start the file is an error, also
+   * where it cannot run itself, as a call of the file it stands in is an error anywhere. A global function runs in every
+   * file whose code calls it where it can run, also through other global functions, but whether its call runs while
+   * such a file runs depends on the run: on its tests and defaults, and on the blocks that may end a wait first. So only
+   * the run decides there, as it does for a tagged pick or reference that the compiler cannot decide, and for code that
+   * a timer, media, or button block runs, which runs later, while the file that started it or a file it called runs, or
+   * after it. A call that may start a file its code runs in then is a warning (TSV073), and the runtime checks every call
+   * (TSR069). `calls` holds each call by its transfer instruction.
    */
   public runningFileDiagnostics(calls: ReadonlyMap<number, FileCall>): Diagnostic[][] {
     const diagnostics = this.plan.files.map((): Diagnostic[] => []);
@@ -375,51 +373,18 @@ export class Reachability {
     // A function or block by its id, a file's top level by `-1 - file`.
     const region = (index: number): number =>
       this.#flow.functionOf(index)?.id ?? -1 - this.#flow.fileOf(index);
-    const onEntry = new Map<number, ReadonlySet<number>>();
-    // Whether the instruction at `index` runs whenever the code of its region runs: from the top of its file, or the
-    // entry of its function. A block runs later, so none of its code does.
-    const sure = (index: number): boolean => {
-      const definition = this.#flow.functionOf(index);
-      if (definition !== null && definition.handler !== null) return false;
-      const node = region(index);
-      let runs = onEntry.get(node);
-      if (runs === undefined) {
-        const file = this.plan.files[this.#flow.fileOf(index)]!;
-        runs =
-          definition === null
-            ? this.#runsOnEntry(file.entryInstruction, file.rootEndInstruction)
-            : this.#runsOnEntry(definition.entryInstruction, definition.endInstruction);
-        onEntry.set(node, runs);
-      }
-      return runs.has(index);
-    };
-    // The functions each region calls where it can run, and those of them it calls whenever it runs in a file.
     const callees = new Map<number, number[]>();
-    const sureCallees = new Map<number, number[]>();
-    const add = (map: Map<number, number[]>, caller: number, callee: number): void => {
-      const list = map.get(caller);
-      if (list === undefined) map.set(caller, [callee]);
-      else list.push(callee);
-    };
-    // The files each region may run in and those it runs in for certain, and an instruction that starts a block from
-    // which it runs later. A pair is found once, then passed on to the functions the region calls: a file as itself,
-    // a block's start as `-1 - start`.
+    // The files each region may run in, and an instruction that starts a block from which it runs later. A pair is
+    // found once, then passed on to the functions the region calls: a file as itself, a block's start as `-1 - start`.
     const running = new Map<number, Set<number>>();
-    const surely = new Map<number, Set<number>>();
     const later = new Map<number, number>();
     const work: (readonly [number, number])[] = [];
-    const sureWork: (readonly [number, number])[] = [];
-    const found = (
-      map: Map<number, Set<number>>,
-      list: (readonly [number, number])[],
-      node: number,
-      file: number,
-    ): void => {
-      const files = map.get(node) ?? new Set<number>();
+    const runs = (node: number, file: number): void => {
+      const files = running.get(node) ?? new Set<number>();
       if (files.has(file)) return;
       files.add(file);
-      map.set(node, files);
-      list.push([node, file]);
+      running.set(node, files);
+      work.push([node, file]);
     };
     const runsLater = (node: number, start: number): void => {
       if (later.has(node)) return;
@@ -429,42 +394,33 @@ export class Reachability {
     this.plan.instructions.forEach((instruction, index) => {
       if (this.#reached[index] === 0) return;
       if (instruction.kind === "callFunction") {
-        add(callees, region(index), instruction.functionId);
-        if (sure(index)) add(sureCallees, region(index), instruction.functionId);
+        const caller = region(index);
+        const list = callees.get(caller);
+        if (list === undefined) callees.set(caller, [instruction.functionId]);
+        else list.push(instruction.functionId);
       }
       for (const handler of this.#flow.handlersOf(index)) runsLater(handler, index);
     });
-    this.plan.files.forEach((_, file) => {
-      found(running, work, -1 - file, file);
-      found(surely, sureWork, -1 - file, file);
-    });
+    this.plan.files.forEach((_, file) => runs(-1 - file, file));
     for (let pair = work.pop(); pair !== undefined; pair = work.pop()) {
       const [node, fact] = pair;
       for (const callee of callees.get(node) ?? [])
-        if (fact >= 0) found(running, work, callee, fact);
+        if (fact >= 0) runs(callee, fact);
         else runsLater(callee, -1 - fact);
     }
-    for (let pair = sureWork.pop(); pair !== undefined; pair = sureWork.pop())
-      for (const callee of sureCallees.get(pair[0]) ?? []) found(surely, sureWork, callee, pair[1]);
-    const none = new Set<number>();
     for (const [index, call] of calls) {
       const node = region(index);
-      const files = running.get(node) ?? none;
+      const files = running.get(node) ?? new Set<number>();
       const definition = this.#flow.functionOf(index);
-      // A file's own code names the file it runs in; a global function, a file that runs it for certain.
-      const certainly =
-        definition === null || (!definition.global && definition.handler === null)
-          ? files
-          : definition.handler === null && sure(index)
-            ? (surely.get(node) ?? none)
-            : none;
+      const global =
+        definition?.global === true && definition.handler === null ? definition.name : null;
       let certain: number | undefined;
       let guarded: number | undefined;
       let possible: number | undefined;
       for (const file of call.files ?? [...files].sort((left, right) => left - right)) {
         if (!files.has(file)) continue;
         const starts = call.starts(file);
-        if (starts === true && certainly.has(file)) {
+        if (starts === true && global === null) {
           certain = file;
           break;
         }
@@ -479,8 +435,6 @@ export class Reachability {
         start === undefined
       )
         continue;
-      const global =
-        definition?.global === true && definition.handler === null ? definition.name : null;
       const file = this.#flow.fileOf(index);
       const path = (target: number): string => this.plan.files[target]!.path;
       diagnostics[file]!.push(
@@ -488,7 +442,7 @@ export class Reachability {
           ? createDiagnostic(
               DiagnosticSeverity.Error,
               "TSV072",
-              calledFileMessage(path(certain), call.form, global),
+              calledFileMessage(path(certain), call.form, null),
               call.span,
             )
           : createDiagnostic(
@@ -509,28 +463,6 @@ export class Reachability {
       );
     }
     return diagnostics;
-  }
-
-  /**
-   * The instructions of a region from `entry` up to `end` that run whenever it runs: those from its entry up to the
-   * first that may go on more than one way, past the defaults of a function's parameters, which run only for an
-   * argument left out and then go on where a supplied argument does. A call counts as returning (ADR 0022 §4.3).
-   */
-  #runsOnEntry(entry: number, end: number): ReadonlySet<number> {
-    const runs = new Set<number>();
-    let index = entry;
-    while (index < end && !runs.has(index)) {
-      runs.add(index);
-      const instruction = this.plan.instructions[index]!;
-      if (instruction.kind === "prepareParameterDefault") {
-        index = instruction.target;
-        continue;
-      }
-      const onward = this.#successors(index).filter(({ edge }) => ONWARD_EDGES.has(edge));
-      if (onward.length !== 1 || onward[0]!.node < entry) break;
-      index = onward[0]!.node;
-    }
-    return runs;
   }
 
   /** Whether the blocks that the instruction at `index` creates may run after the file entry that created them ended. */
