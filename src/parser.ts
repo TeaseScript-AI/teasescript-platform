@@ -1357,7 +1357,22 @@ class Parser {
   *#parseTransferStatement(): ParseTask<GotoStatement | CallFileStatement | null> {
     const keyword = this.#advance();
     const tagged = this.#checkIdentifier("tagged");
+    const reported = this.#diagnostics.length;
     const target = yield* parseChild(this.#parseTransferTarget(keyword));
+    // `call scene()`: a function runs by its name and `()`, without `call` or `goto` (V30 §10). A malformed call is
+    // reported first. The statement ends after the call, where the list it stands in finds its end, also at the `}` of
+    // a compact block.
+    if (target?.kind === "callExpression") {
+      if (this.#diagnostics.length === reported && target.callee.kind === "identifier")
+        this.#reportSpan(
+          parserDiagnosticCode.expectedLabelName,
+          keyword.lexeme === "call"
+            ? `A call only starts a file, so it cannot run function '${target.callee.name}'. Leave out 'call' to run it.`
+            : `A 'goto' only goes to a label or a file, so it cannot run function '${target.callee.name}'. Leave out 'goto' to run it.`,
+          target.span,
+        );
+      return null;
+    }
     if (target === null) {
       // A statement at the start of a continued line, after a trailing comma or option name, is kept.
       if (tagged && this.#previous().kind === TokenKind.Newline && this.#atStatementStart()) {
@@ -1373,7 +1388,8 @@ class Parser {
       : Object.freeze({ kind: "callFileStatement", target, span });
   }
 
-  *#parseTransferTarget(keyword: Token): ParseTask<TransferTarget | null> {
+  /** A transfer's target, or the call of a function written as one, which the statement reports. */
+  *#parseTransferTarget(keyword: Token): ParseTask<TransferTarget | CallExpression | null> {
     // `goto tagged "punishment"` picks a file by its tags, a target computed when the statement runs (ADR 0023).
     if (this.#checkIdentifier("tagged")) {
       const query = this.#parseTaggedQuery("scripts");
@@ -1391,6 +1407,8 @@ class Parser {
     }
     if (this.#check(TokenKind.Identifier)) {
       const label = this.#identifier(this.#advance());
+      if (this.#check(TokenKind.LeftParenthesis))
+        return yield* parseChild(this.#withinDelimiters(this.#finishCall(label, this.#advance())));
       return Object.freeze({ kind: "labelTarget", label, span: copySpan(label.span) });
     }
     const start = this.#peek();

@@ -4624,7 +4624,8 @@ Rules:
 - A `script(...)` whose path is literal, quoted text without `${...}`, is checked like a file target: a path that leaves
   the package, a missing file, a glob, and a `goto` to a file of declarations only are compile errors, also for another
   reference whose target the compiler can see. Any other reference is checked when a transfer uses it: a missing file,
-  or a `goto` to a file of declarations only, is a runtime error.
+  or a `goto` to a file of declarations only, is a runtime error, and a `goto` that may lead to such a file is a
+  warning (`TSV074`).
 - Reading or assigning a variable of the file whose `let` has not run in this entry into the file, as in a function
   called before the `let`, is a runtime error.
 - Functions and labels are local to their file.

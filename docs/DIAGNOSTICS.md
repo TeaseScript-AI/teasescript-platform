@@ -169,7 +169,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV054` | Variable that a `goto` may leave without a value | error | name pass |
 | `TSV055` | Invalid start value | error | name pass, type checker |
 | `TSV056` | Global function that uses names of its file | error | name pass |
-| `TSV057` | Invalid file target | error | name pass |
+| `TSV057` | Invalid file target | error | name pass, plan analysis |
 | `TSV058` | Loop with no way out | warning | plan analysis |
 | `TSV059` | Invalid camera view member | error | type checker |
 | `TSV061` | Wait or timer written in days or weeks | warning | compiler |
@@ -185,6 +185,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV071` | `end` that may have no call to return to | warning | plan analysis |
 | `TSV072` | `call` of the running file | error | plan analysis |
 | `TSV073` | `call` that may start the running file | warning | plan analysis |
+| `TSV074` | `goto` that may lead to a file of declarations only | warning | plan analysis |
 
 ## Tags (TST)
 
@@ -233,6 +234,9 @@ code each.
 - `TSV055`
   - name pass: a start value that says, asks, waits, plays media, calls a function, or uses a local or a later global (`startValueMessage`)
   - type checker: the same rule with the same text for a start value that selects at random, with `.random` or a list in `${...}`, which needs the value's type
+- `TSV057`
+  - name pass: a file target that names no file the `goto` or `call` can start, among them a `goto` to a file of declarations only, by its path or a `script(...)` of its path written out (`declarationsOnlyMessage`)
+  - plan analysis: the same rule with the same text for a computed `goto`, such as `goto (next)`, when the references of the project can name only one file and it holds declarations only
 - `TST004`
   - parser: a tag that a file header gives two different numbers (`conflictingTagMessage`)
   - compiler: the same rule with the same text, naming the image, for the keywords of an image

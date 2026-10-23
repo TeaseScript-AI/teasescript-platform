@@ -249,9 +249,18 @@ test("a call whose file only the run decides warns, and fails when it starts the
     `TSR069 This call cannot start '${path}', because that file is already running. To run a part of a file and come back, put that part in a function and write the function's name with '()' instead.`;
   const later = (where: string, path: string) =>
     `This call runs later, from the timer on ${where}, so the compiler cannot tell whether '${path}' is already running then. If it is, the call fails. If that can happen, stop the timer while '${path}' runs, or put what '${path}' does in a function and write the function's name with '()' instead.`;
-  // A computed target.
+  // A computed target. Where the references of the project can name only the running file, it starts that file.
+  assert.deepEqual(
+    warned(
+      project('call "a.tease"\nexit', { "a.tease": 'let me = script("a.tease")\ncall (me)\nend' }),
+    ),
+    [
+      "a.tease TSV072 This call starts its own file, 'a.tease', which is already running. To run a part of it and come back, put that part in a function and write the function's name with '()' instead. To continue at a label without coming back, write 'goto' and the label.",
+    ],
+  );
   const computed = project('call "a.tease"\nexit', {
-    "a.tease": 'let me = script("a.tease")\ncall (me)\nend',
+    "a.tease": 'let rooms = [script("a.tease"), script("b.tease")]\ncall (rooms[0])\nend',
+    "b.tease": "end",
   });
   assert.deepEqual(warned(computed), [
     "a.tease TSV073 This call's file is known only when it runs, so the compiler cannot tell whether it is its own file, 'a.tease', which is already running. If it is, the call fails. If it can be, put the part to run in a function and write the function's name with '()' instead.",
@@ -560,20 +569,18 @@ test("an end with no call to return to is an error on every way the compiler can
     ["b", "back", "exit"],
   );
   // A computed target hides the way: a warning, and the end fails if no call waits when it runs.
-  const files = project('let next = script("scene.tease")\ngoto (next)', {
-    "scene.tease": 'say "scene"\nend',
-    "done.tease": "exit",
-  });
-  assert.deepEqual(
-    diagnostics(files[0]!.source, { "scene.tease": files[1]!.source, "done.tease": "exit" }),
-    [
-      [
-        "scene.tease",
-        "TSV071",
-        "The 'goto' on line 2 of 'main.tease' picks its file when it runs, so the compiler cannot tell whether this 'end' has a call to return to then. Without one, the 'end' fails. If that 'goto' can lead here, write 'call' instead of 'goto' there, or use 'exit' or 'goto' here instead of 'end'.",
-      ],
-    ],
+  const others = { "scene.tease": 'say "scene"\nend', "done.tease": "exit" };
+  const files = project(
+    'let rooms = [script("scene.tease"), script("done.tease")]\ngoto (rooms[0])',
+    others,
   );
+  assert.deepEqual(diagnostics(files[0]!.source, others), [
+    [
+      "scene.tease",
+      "TSV071",
+      "The 'goto' on line 2 of 'main.tease' picks its file when it runs, so the compiler cannot tell whether this 'end' has a call to return to then. Without one, the 'end' fails. If that 'goto' can lead here, write 'call' instead of 'goto' there, or use 'exit' or 'goto' here instead of 'end'.",
+    ],
+  ]);
   const plan = compileProject(files).plan!;
   const ended = run(plan, createImmediatePacingRuntimeSnapshot(plan)).events;
   assert.deepEqual(outputs(ended), ["scene", "failure TSR066"]);
@@ -582,6 +589,18 @@ test("an end with no call to return to is an error on every way the compiler can
     [
       "This 'end' has no call to return to, because no file called this one. Start this file with 'call' where it should come back, or use 'exit' where the session should finish.",
     ],
+  );
+  // Also where the references of the project can name only one file: whether a way through the reference reaches the
+  // end with no call waiting depends on the run, here on a global that the end's file tests (#1015 review r1, B1).
+  assert.deepEqual(
+    said(
+      project(
+        'global cameByCall = false\nlet next = script("room.tease")\ncameByCall = true\ncall (next)\ncameByCall = false\ngoto (next)',
+        { "room.tease": 'say "room"\nif not cameByCall { exit }\nend' },
+      ),
+      { warnings: ["TSV071"] },
+    ),
+    ["room", "room", "exit"],
   );
 });
 
@@ -709,6 +728,51 @@ test("a fallback statement is no statement", () => {
         "TeaseScript has no 'fallback': an 'end' returns to the file that called this one. Use 'call' to start a file that should come back here, and 'goto' or 'exit' where no call waits.",
       ],
     ],
+  );
+});
+
+test("a function is no target of a call or goto", () => {
+  // V30 §10: a function runs by its name and '()', without 'call'.
+  const found = (main: string): [string, string, string][] =>
+    compileProject(project(main)).diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.message,
+      main.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
+    ]);
+  const scene = 'function scene(level = 1) { say "scene ${level}" }\n';
+  assert.deepEqual(found(`${scene}call scene()\nexit`), [
+    [
+      "TSP039",
+      "A call only starts a file, so it cannot run function 'scene'. Leave out 'call' to run it.",
+      "scene()",
+    ],
+  ]);
+  assert.deepEqual(found(`${scene}if true {\n    call scene(level: 2)\n}\nexit`), [
+    [
+      "TSP039",
+      "A call only starts a file, so it cannot run function 'scene'. Leave out 'call' to run it.",
+      "scene(level: 2)",
+    ],
+  ]);
+  assert.deepEqual(found(`${scene}goto scene()\nexit`), [
+    [
+      "TSP039",
+      "A 'goto' only goes to a label or a file, so it cannot run function 'scene'. Leave out 'goto' to run it.",
+      "scene()",
+    ],
+  ]);
+  // The statement ends after the call, also at the `}` of a compact block, so the statements around it stay.
+  const compact = `${scene}if true { call scene() } else { goto scene() }\nexit`;
+  assert.deepEqual(
+    found(compact).map(([code, , text]) => [code, text]),
+    [
+      ["TSP039", "scene()"],
+      ["TSP039", "scene()"],
+    ],
+  );
+  assert.deepEqual(
+    parse(compact).program.statements.map((statement) => statement.kind),
+    ["functionDeclaration", "ifStatement", "exitStatement"],
   );
 });
 
@@ -959,7 +1023,7 @@ test("a goto or call names a file that exists", () => {
   assert.deepEqual(codes('goto "helpers.tease"', others), [
     [
       "TSV057",
-      "'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.",
+      "'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Use its global functions, speakers, and globals in any file without going there.",
     ],
   ]);
   // Calling such a file runs nothing and returns at once.

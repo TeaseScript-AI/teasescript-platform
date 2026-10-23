@@ -28,7 +28,12 @@ import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS, PROTECTED_NAME_CODE } from "./language-facts.js";
 import { PlanControlFlow } from "./plan/control-flow.js";
-import { Reachability, type ConstantTest, type FileCall } from "./reachability.js";
+import {
+  knownReferenceFile,
+  Reachability,
+  type ConstantTest,
+  type FileCall,
+} from "./reachability.js";
 import {
   stopsTypeCheck,
   validateProjectSemantics,
@@ -397,7 +402,7 @@ function checkFlow(
     );
     const statementFlow = reachability.statementFlow();
     const endings = reachability.endingDiagnostics();
-    // Where computed targets may lead, found once for both checks that need it.
+    // Where computed targets may lead, found once for the checks that need it.
     let found:
       | { picks: ReadonlyMap<number, readonly number[]>; referenced: readonly number[] | null }
       | undefined;
@@ -408,14 +413,18 @@ function checkFlow(
       });
     const returns = reachability.pendingCallDiagnostics(targets);
     const calls = reachability.runningFileDiagnostics(fileCalls(plan, trace, checked, targets));
+    const gotos = reachability.computedGotoDiagnostics(() => targets().referenced);
+    const transfers = files.map((_, index) => [
+      ...returns[index]!,
+      ...calls[index]!,
+      ...gotos[index]!,
+    ]);
     const errors = files.map((_, index) => [
       // The initialization check at labels decides itself which functions and blocks run, by the calls and creations
       // in statements that can run (ADR 0022 §3.4).
       ...checked.names[index]!.checkInitialization(statementFlow),
       ...endings[index]!,
-      ...[...returns[index]!, ...calls[index]!].filter(
-        (diagnostic) => diagnostic.severity === DiagnosticSeverity.Error,
-      ),
+      ...transfers[index]!.filter((diagnostic) => diagnostic.severity === DiagnosticSeverity.Error),
     ]);
     if (!errors.some((diagnostics) => diagnostics.length > 0) && !reachability.reachesExit()) {
       const main = files[0]!.result.program;
@@ -444,7 +453,7 @@ function checkFlow(
         file,
         [
           ...warnings[index]!,
-          ...[...returns[index]!, ...calls[index]!].filter(
+          ...transfers[index]!.filter(
             (diagnostic) => diagnostic.severity === DiagnosticSeverity.Warning,
           ),
           ...errors[index]!,
@@ -567,7 +576,8 @@ function transferOf(
  * The `call`s of files by their transfer instruction, for the check of the running file (see
  * `Reachability.runningFileDiagnostics`). A file written out or a glob can start each file it names; a tagged pick each
  * file that the name pass finds it may match, as the known values of its bounds and tag lists decide (V30 §41); any
- * other computed target may start each file that a reference may name, which only the run decides.
+ * other computed target may start each file that a reference may name, which only the run decides, unless the
+ * references can name only one file: the target then names that file, as a path does.
  */
 function fileCalls(
   plan: InstructionPlan,
@@ -596,11 +606,16 @@ function fileCalls(
       }
       const query = target.query;
       let matches: ((tags: ReadonlyMap<string, number | null>) => boolean | null) | undefined;
+      // A reference that can name only one file names it, as a path does.
+      const form =
+        target.form === "computed" && knownReferenceFile(files) !== undefined
+          ? "path"
+          : target.form;
       calls.set(index, {
-        form: target.form,
+        form,
         files,
         starts:
-          target.form === "computed"
+          form === "computed"
             ? () => null
             : query === null
               ? () => true
