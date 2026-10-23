@@ -4652,16 +4652,11 @@ Behavior:
   anywhere, including in a called file or a function, and never returns. A project with no reachable `exit` does not
   compile.
 - `end` ends the current file, also from inside a function or block, and returns to the file that `call`ed it.
-- Reaching an `end` with no pending `call` is a runtime error. It is a compile error where the compiler, following files
-  written out and globs, can prove that the `end` fails whenever some code runs: where every way to the `end`, or to
-  code that always goes on to the `end`, has no pending `call`, also when another way reaches the `end` through a
-  `call`, as with the `goto` in `if pick { call "scene.tease" } else { goto "scene.tease" }` when `scene.tease` consists
-  of `say "scene"` and `end`. This also holds where a test whose result the compiler does not know keeps that code from
-  running. The message points to `call`, `goto`, or `exit`. Elsewhere it is a warning (`TSV071`,
-  [§13](#compile-errors-warnings-and-checks-when-the-script-runs)), as where code before the `end` may leave first, such
-  as `if not cameByCall { exit }` in a file that one way reaches by `call` and another by `goto`, and where a computed
-  target, such as a reference in a variable or a tagged pick, or a timer, media, or button block, which runs later,
-  hides the way.
+- Reaching an `end` with no pending `call` is a runtime error. It is a compile error where the compiler can prove that
+  the `end` fails whenever some code runs, also when another way reaches the `end` through a `call`, as with the `goto`
+  in `if pick { call "scene.tease" } else { goto "scene.tease" }` when `scene.tease` consists of `say "scene"` and `end`.
+  The message points to `call`, `goto`, or `exit`. Where the compiler cannot prove it, it is a warning (`TSV071`,
+  [§13](#compile-errors-warnings-and-checks-when-the-script-runs)).
 - A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. A file of
   declarations only (functions, global functions, speakers, and globals without `default:`) runs nothing on its own
   and needs no ending; a `goto` into such a file is a compile error. A call
