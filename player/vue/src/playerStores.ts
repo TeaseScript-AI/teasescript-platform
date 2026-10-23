@@ -17,7 +17,7 @@ import {
 } from "../../online-data.js";
 import type { PlayerDataContext } from "../../player-data.js";
 import { browserSavedData, savedDataHost } from "../../saved-data.js";
-import { createLocalScriptStorage } from "../../script-storage.js";
+import { createLocalScriptStorage, type ScriptStorageProvider } from "../../script-storage.js";
 import { browserStorage } from "./usePlayerPreference";
 import type { PlayerSessionOptions } from "./usePlayerSession";
 
@@ -84,19 +84,21 @@ export async function openPlayerStores(context: PlayerDataContext): Promise<Play
     keptSessions: onlineKeptSessions(context),
     debugRooms: await openDebugRooms(`:online:${JSON.stringify([context.server, account])}`),
   };
+  // One provider per scope, so that an import writes with the revision its review read.
+  const providers = new Map<string, ScriptStorageProvider>();
+  const provider = (scope: string) => {
+    let found = providers.get(scope);
+    if (found === undefined) providers.set(scope, (found = onlineScriptStorage(context, scope)));
+    return found;
+  };
   const savedData = savedDataHost(
-    { ...onlineSavedScripts(context), provider: (scope) => onlineScriptStorage(context, scope) },
+    { ...onlineSavedScripts(context), provider },
     capturedMedia.repository,
     kept.keptSessions,
     capturedMedia.locks,
   );
   return {
-    storage: (scope) => ({
-      scriptStorage: onlineScriptStorage(context, scope),
-      capturedMedia,
-      savedData,
-      ...kept,
-    }),
+    storage: (scope) => ({ scriptStorage: provider(scope), capturedMedia, savedData, ...kept }),
     playerProfile: profile,
   };
 }

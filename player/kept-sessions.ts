@@ -29,8 +29,11 @@ export interface KeptSessionStore {
   publish(scope: string, session: KeptSessionUpdate): Promise<void>;
   /** The photos of every kept session, with the scope as namespace. */
   readonly media: CapturedMediaRepository;
-  /** Deletes the scope's session and its photos, at once. */
-  discard(scope: string): Promise<void>;
+  /**
+   * Deletes the scope's session and its photos, at once. With `replacing`, this Player starts a new session over the one
+   * it found: a store that other Players also keep sessions in, such as a server, refuses when one kept it meanwhile.
+   */
+  discard(scope: string, replacing?: boolean): Promise<void>;
 }
 
 /**

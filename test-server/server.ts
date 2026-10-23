@@ -214,10 +214,13 @@ export function testServer(options: TestServerOptions): {
           revisionHeader(store.revision(user, scopeKey, "storage")),
         );
       if (failsOnPurpose()) return;
-      // A value is written even if another was written meanwhile, so the last one stays.
-      conflicting("storage");
-      if (method === "DELETE")
+      // Each change compares the revision and changes the data with no wait in between, after its body is read, so no
+      // other request comes between them. A value is written even if another was written meanwhile, so the last one
+      // stays.
+      if (method === "DELETE") {
+        conflicting("storage");
         return sendEmpty(response, 204, revisionHeader(store.replace(user, scopeKey, [])));
+      }
       const body = await readJson(request);
       if (method === "PATCH") {
         if (body === null || typeof body.key !== "string" || !("value" in body))
@@ -229,6 +232,7 @@ export function testServer(options: TestServerOptions): {
           );
           if (problem !== null) return sendJson(response, 400, { error: problem });
         }
+        conflicting("storage");
         const revision = store.write(
           user,
           scopeKey,
@@ -243,6 +247,7 @@ export function testServer(options: TestServerOptions): {
         if (problem !== null) return sendJson(response, 400, { error: problem });
         // EVIDENCE: validation: validateScriptStorageEntries accepted `entries` as script storage entries.
         const accepted = entries as readonly { readonly key: string; readonly value: unknown }[];
+        conflicting("storage");
         const revision = store.replace(
           user,
           scopeKey,
@@ -272,12 +277,15 @@ export function testServer(options: TestServerOptions): {
           revisionHeader(store.revision(user, scopeKey, "session")),
         );
       }
-      if (method === "DELETE")
+      // Two devices must not mix their events: the session kept first stays, also against a Player that would replace
+      // it with a new one. A discard that names no revision, such as an import's, always goes ahead.
+      const refused = () =>
+        sendJson(response, 409, { error: "Another Player kept this session meanwhile." });
+      if (method === "DELETE") {
+        if (conflicting("session")) return refused();
         return sendEmpty(response, 204, revisionHeader(store.discardSession(user, scopeKey)));
+      }
       if (method === "PUT") {
-        // Two devices must not mix their events: the session kept first stays.
-        if (conflicting("session"))
-          return sendJson(response, 409, { error: "Another Player kept this session meanwhile." });
         const body = await readJson(request);
         const { planJson, snapshotJson, eventsFrom, events, marks } = body ?? {};
         if (
@@ -292,13 +300,15 @@ export function testServer(options: TestServerOptions): {
           return sendJson(response, 400, {
             error: "Send { planJson, snapshotJson, eventsFrom, events, marks }.",
           });
-        const result = store.publishSession(user, scopeKey, {
+        const kept = {
           plan: planJson,
           snapshot: snapshotJson,
           marks: serializeValidatedRuntimeJson(marks),
           eventsFrom,
           events: events.map((event) => serializeValidatedRuntimeJson(event)),
-        });
+        };
+        if (conflicting("session")) return refused();
+        const result = store.publishSession(user, scopeKey, kept);
         if (typeof result !== "number")
           return sendJson(response, 400, {
             error: result === "gap" ? "The events leave a gap." : "No plan is kept or sent.",

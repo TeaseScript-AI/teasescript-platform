@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import test, { after, before } from "node:test";
+import { effectScope } from "vue";
 
-import { CapturedMediaStore } from "../player/captured-media.js";
-import type { KeptSessionUpdate } from "../player/kept-sessions.js";
+import { CapturedMediaStore, type CapturedMediaRepository } from "../player/captured-media.js";
+import type { CapturedMediaLocks } from "../player/captured-media-persistence.js";
+import type { DebugRecorder } from "../player/debug-recorder.js";
+import type { KeptSessionStore, KeptSessionUpdate } from "../player/kept-sessions.js";
+import { uncoordinatedCapturedMediaLocks } from "../player/captured-media-persistence.js";
 import {
   onlineKeptSessions,
   onlineMediaRepository,
@@ -12,15 +16,26 @@ import {
   onlineScriptStorage,
   readOnlineAccount,
 } from "../player/online-data.js";
+import {
+  activatePlayerRuntimeButton,
+  createPlayerRuntimeSession,
+  type PlayerRuntimeSession,
+  type PlayerRuntimeSessionOptions,
+} from "../player/runtime-adapter.js";
+import type { ScriptStorageProvider } from "../player/script-storage.js";
+import type { InstructionPlan } from "../src/index.js";
 import { createSourcePosition, createSourceSpan } from "../src/source.js";
 import { testServer } from "../test-server/server.js";
+import { loadPlayerModule } from "./helpers/player-modules.js";
 
 // The temporary test server answers the Player's online client: this test goes when the test server goes.
 
+const log: string[] = [];
 const instance = testServer({
   data: ":memory:",
   account: "peter",
   latency: { normalMs: 0, slowMs: 0, jitterMs: 0 },
+  log: (line) => log.push(line),
 });
 const http = createServer(instance.listener);
 let server = { server: "", token: "" };
@@ -188,6 +203,11 @@ test("a kept session continues on another device, and a stale Player cannot over
   assert.notEqual(await phone.media.get("kept", reference), null);
   // Saved photos are apart from a kept session's.
   assert.equal(await onlineMediaRepository(server).get("kept", reference), null);
+  // A Player that found the session cannot replace it with a new one once another kept it meanwhile.
+  await laptop.publish("kept", update(4, "five", 5));
+  await assert.rejects(phone.discard("kept", true), /HTTP 409/u);
+  assert.equal((await laptop.session("kept"))?.snapshotJson, "five");
+  // A discard that is no new session, such as an import's, goes ahead.
   await phone.discard("kept");
   assert.equal(await laptop.session("kept"), null);
   assert.equal(await laptop.media.get("kept", reference), null);
@@ -211,5 +231,148 @@ test("saved values written meanwhile by another Player are kept, and the stand-i
   await phone.write("level", 3);
   const page = await (await fetch(new URL("/", server.server))).text();
   assert.equal(page.match(/saved values · shared/gu)?.length, 1);
-  assert.equal(page.match(/kept session · kept/gu)?.length, 2);
+  assert.equal(page.match(/kept session · kept/gu)?.length, 3);
+});
+
+test("of two overlapping keeps from the same revision, only the one the server finishes reading first is kept", async () => {
+  const sessions = onlineKeptSessions(server);
+  const at = createSourcePosition(0, 0, 0);
+  const marks = { editedWhileDebugging: null, rewoundWhileDebugging: null };
+  assert.equal(await sessions.session("overlap"), null);
+  await sessions.publish("overlap", {
+    planJson: "plan",
+    snapshotJson: "first",
+    eventsFrom: 0,
+    events: [{ kind: "exit", sequence: 1, span: createSourceSpan(at, at) }],
+    marks,
+  });
+  const { origin } = new URL(server.server);
+  const url = `${origin}/api/scripts/${encodeURIComponent('"overlap"')}/session`;
+  const body = (snapshotJson: string) =>
+    JSON.stringify({ planJson: null, snapshotJson, eventsFrom: 1, events: [], marks });
+  const headers = (text: string) => ({
+    Authorization: `Bearer ${server.token}`,
+    "Content-Type": "application/json",
+    "Content-Length": String(Buffer.byteLength(text)),
+    "X-Base-Revision": "1",
+  });
+  // The slow keep sends half of its body, and the fast one all of it, while the slow one waits.
+  const slowBody = body("slow");
+  const slow = httpRequest(url, { method: "PUT", headers: headers(slowBody) });
+  const slowStatus = new Promise<number | undefined>((resolve, reject) => {
+    slow.on("response", (response) => {
+      response.resume();
+      resolve(response.statusCode);
+    });
+    slow.on("error", reject);
+  });
+  slow.write(slowBody.slice(0, 10));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const fastBody = body("fast");
+  const fast = await fetch(url, { method: "PUT", headers: headers(fastBody), body: fastBody });
+  assert.equal(fast.status, 204);
+  slow.end(slowBody.slice(10));
+  assert.equal(await slowStatus, 409);
+  assert.equal((await sessions.session("overlap"))?.snapshotJson, "fast");
+});
+
+test("a photo the server keeps with a session is sent once, however often the session is kept", async () => {
+  const sessions = onlineKeptSessions(server);
+  const photo = {
+    namespace: "photos-once",
+    reference,
+    kind: "image" as const,
+    mimeType: "image/png",
+    size: 1,
+    data: new Blob([new Uint8Array([7])], { type: "image/png" }),
+  };
+  await sessions.media.add(photo);
+  await assert.rejects(sessions.media.add(photo), { name: "ConstraintError" });
+  assert.equal(
+    log.filter((line) => line.startsWith("PUT /api/scripts/%22photos-once%22/session-media/"))
+      .length,
+    1,
+  );
+  // After a discard the photo is sent again with the next session.
+  await sessions.discard("photos-once");
+  await sessions.media.add(photo);
+  assert.equal(
+    log.filter((line) => line.startsWith("PUT /api/scripts/%22photos-once%22/session-media/"))
+      .length,
+    2,
+  );
+});
+
+test("a Player that starts over a session another Player kept meanwhile leaves that session, and the server notices", async (context) => {
+  // EVIDENCE: validation: Vite loaded the real source module; this test uses only these members of its host API.
+  const { usePlayerSession } = (await loadPlayerModule("player/vue/src/usePlayerSession.ts")) as {
+    usePlayerSession(options: {
+      readonly scriptStorage: ScriptStorageProvider;
+      readonly keptSessions: KeptSessionStore;
+      readonly capturedMedia: {
+        readonly repository: CapturedMediaRepository;
+        readonly locks: CapturedMediaLocks;
+      };
+    }): {
+      readonly session: { readonly value: PlayerRuntimeSession | null };
+      loadScriptStorage(): Promise<void>;
+      scriptStorageOptions(): PlayerRuntimeSessionOptions;
+      prepareScript(
+        plan: InstructionPlan,
+        create: (recording: { readonly recorder: DebugRecorder }) => PlayerRuntimeSession,
+      ): Promise<void>;
+      activate(): void;
+      update(session: PlayerRuntimeSession): void;
+    };
+  };
+  // Event targets are the browser surface a session that only shows buttons uses.
+  for (const name of ["document", "window"]) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+    const target = Object.assign(new EventTarget(), { visibilityState: "visible" });
+    Object.defineProperty(globalThis, name, { configurable: true, value: target });
+    context.after(() => {
+      if (previous) Object.defineProperty(globalThis, name, previous);
+      else Reflect.deleteProperty(globalThis, name);
+    });
+  }
+  const source = 'showButton "First"\nshowButton "Second"\nexit';
+  const plan = createPlayerRuntimeSession(source).plan;
+  const open = async () => {
+    const scope = effectScope();
+    context.after(() => scope.stop());
+    const locks = uncoordinatedCapturedMediaLocks();
+    const player = scope.run(() =>
+      usePlayerSession({
+        scriptStorage: onlineScriptStorage(server, "two-starts"),
+        keptSessions: onlineKeptSessions(server),
+        capturedMedia: { repository: onlineMediaRepository(server), locks },
+      }),
+    )!;
+    await player.loadScriptStorage();
+    await player.prepareScript(plan, (recording) =>
+      createPlayerRuntimeSession(plan, { ...recording, ...player.scriptStorageOptions() }),
+    );
+    return player;
+  };
+  const kept = onlineKeptSessions(server);
+  const until = async (done: () => Promise<boolean>) => {
+    const deadline = Date.now() + 4000;
+    while (!(await done())) {
+      assert.ok(Date.now() < deadline, "Timed out");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
+  // Both Players show Start; the first starts and plays on, then the second starts too.
+  const first = await open();
+  const second = await open();
+  first.activate();
+  first.update(activatePlayerRuntimeButton(first.session.value!)!.session);
+  await until(
+    async () =>
+      (await kept.session("two-starts"))?.events.length === first.session.value?.events.length,
+  );
+  const before = await kept.session("two-starts");
+  second.activate();
+  await until(async () => log.includes("Two writers: kept session of two-starts"));
+  assert.deepEqual(await kept.session("two-starts"), before);
 });

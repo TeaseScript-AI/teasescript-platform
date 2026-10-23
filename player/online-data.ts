@@ -38,7 +38,8 @@ import type { ScriptStorageProvider } from "./script-storage.js";
 // Saved values and the kept session each have a revision, which every reply that reads or changes them names in
 // `X-Revision`, a missing session's 404 too. A change names the revision its Player last saw in `X-Base-Revision`, so
 // that the server notices another writer in between: it writes a saved value anyway, so the last one stays, and
-// refuses to keep a session with 409.
+// refuses to keep a session, or to discard it for a new one, with 409. A change of data this Player has not read names
+// none and is not checked, such as an import's discard of a kept session.
 //
 // A scope and a reference are each one path segment: the JSON string, percent-encoded, which keeps every text, also
 // `..` and a lone surrogate, apart from every other. A request that takes longer than `REQUEST_TIMEOUT_MS` fails.
@@ -128,6 +129,24 @@ export function onlineScriptStorage(server: OnlineServer, scope: string): Script
 export function onlineKeptSessions(server: OnlineServer): KeptSessionStore {
   const revisions = new Map<string, string>();
   const path = (scope: string) => `${scriptPath(scope)}/session`;
+  const base = (scope: string): Readonly<Record<string, string>> => {
+    const revision = revisions.get(scope);
+    return revision === undefined ? {} : { [BASE_REVISION]: revision };
+  };
+  // The photos the server keeps with each scope's session, as far as this store knows them: a session keeps its photos
+  // at every keep, and one the server holds already is not sent again.
+  const media = onlineMediaRepository(server, "session-media");
+  const kept = new Map<string, Promise<Set<string>>>();
+  const keptMedia = (scope: string) => {
+    let references = kept.get(scope);
+    if (references === undefined) {
+      references = media.listReferences(scope).then((found) => new Set(found));
+      // A failed listing is asked again next time.
+      references.catch(() => kept.delete(scope));
+      kept.set(scope, references);
+    }
+    return references;
+  };
   return {
     async session(scope): Promise<StoredKeptSession | null> {
       const response = await send(server, "GET", path(scope));
@@ -142,18 +161,32 @@ export function onlineKeptSessions(server: OnlineServer): KeptSessionStore {
       return { planJson, snapshotJson, events, marks };
     },
     async publish(scope, update) {
-      const response = await request(
-        server,
-        "PUT",
-        path(scope),
-        jsonBody(update, { [BASE_REVISION]: revisions.get(scope) ?? "0" }),
-      );
+      const response = await request(server, "PUT", path(scope), jsonBody(update, base(scope)));
       revisions.set(scope, response.headers.get(REVISION) ?? "0");
     },
-    media: onlineMediaRepository(server, "session-media"),
-    async discard(scope) {
-      const response = await request(server, "DELETE", path(scope));
+    media: {
+      ...media,
+      async add(record) {
+        const references = await keptMedia(record.namespace);
+        if (references.has(record.reference))
+          throw new DOMException("The photo is kept already.", "ConstraintError");
+        await media.add(record);
+        references.add(record.reference);
+      },
+      async delete(namespace, reference) {
+        await media.delete(namespace, reference);
+        (await kept.get(namespace)?.catch(() => null))?.delete(reference);
+      },
+    },
+    async discard(scope, replacing) {
+      const response = await request(
+        server,
+        "DELETE",
+        path(scope),
+        replacing ? { headers: base(scope) } : undefined,
+      );
       revisions.set(scope, response.headers.get(REVISION) ?? "0");
+      kept.delete(scope);
     },
   };
 }

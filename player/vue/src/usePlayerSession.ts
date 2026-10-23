@@ -1298,7 +1298,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         await capturedMedia.promote(references).catch(() => {});
       } else {
         // A new session replaces the one kept before, with its photos.
-        if (from === 0) await store.discard(keptScope);
+        if (from === 0) await store.discard(keptScope, true);
         // The photos no save stored go with the session, a photo already kept as it is; a stored one stays stored
         // while the session uses it (`capturedMediaStorage`).
         for (const photo of capturedMedia.sessionRecords(references))
