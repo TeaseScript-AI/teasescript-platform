@@ -4596,8 +4596,9 @@ Rules:
 - A `call` starts another file, so a `call` that can start the running file is a compile error: `call label`, a `call`
   of the file it stands in, a glob or tagged pick that can choose that file, and in a global function a `call` that can
   start a file that calls the function. A timer, media, or button block runs later, while its file or a file it called
-  runs, or after it, so a `call` in a block, like a computed target, is checked when it runs: starting the running file
-  is a runtime error then.
+  runs, or after it, so for a `call` in a block the running file is the file running when the block runs. Where the
+  compiler cannot prove whether a `call` can start the running file, the call is checked when it runs
+  ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)): starting the running file is a runtime error then.
 - Each entry into a file, by a `goto` or `call` naming it, starts at its top with fresh top-level variables of that
   file. A `goto` to a label of the file continues with the variables of the entry it runs in.
 - A function sees the top-level variables of the entry that called it, and a timer, media, or button block those of the
@@ -6445,12 +6446,12 @@ if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }
 - `goto tagged` and `call tagged` pick a file of the project by the tags of its header ([File header](#file-header))
   and enter it at its top, as `goto (reference)` does ([§29](#29-script-files-and-paths)). Every file that runs
   something is a candidate, `main.tease` and the current file too, but a `call tagged` that can pick the running file
-  is a compile error ([§29](#29-script-files-and-paths)): for this, a comparison is false for a file without a number
-  for its tag, and is decided by a constant bound. A file of declarations only runs nothing on its own and is skipped,
-  as for a glob. The option `from:` limits the candidates to a path or glob written out in quotes, as
-  for `goto`; one that names no file that runs something is a compile error. `findScripts` takes `where:`, `all:`,
-  `none:`, `any:`, and `from:` as named arguments and returns `script` references to all matching candidates in path
-  order, as a `script[]`. A pick, too, chooses among the candidates in path order.
+  is a compile error where the compiler can prove it, and is otherwise checked when it runs, as for any `call`
+  ([§29](#29-script-files-and-paths)). A file of declarations only runs nothing on its own and is skipped, as for a
+  glob. The option `from:` limits the candidates to a path or glob written out in quotes, as for `goto`; one that names
+  no file that runs something is a compile error. `findScripts` takes `where:`, `all:`, `none:`, `any:`, and `from:` as
+  named arguments and returns `script` references to all matching candidates in path order, as a `script[]`. A pick,
+  too, chooses among the candidates in path order.
 - Comparison bounds and tag lists are evaluated once, in written order, before any candidate is matched. Matching draws
   no random number. A pick (`showImage tagged`, `goto tagged`, `call tagged`) draws once from the session random
   generator, and restoring a checkpoint never draws again.
