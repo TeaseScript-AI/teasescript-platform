@@ -9,6 +9,7 @@ import {
   openIndexedDbKeptSessionStore,
 } from "../../kept-sessions.js";
 import {
+  onlineKeptSessions,
   onlineMediaRepository,
   onlineSavedScripts,
   onlineScriptStorage,
@@ -16,7 +17,7 @@ import {
 } from "../../online-data.js";
 import type { PlayerDataContext } from "../../player-data.js";
 import { browserSavedData, savedDataHost } from "../../saved-data.js";
-import { createLocalScriptStorage } from "../../script-storage.js";
+import { createLocalScriptStorage, type ScriptStorageProvider } from "../../script-storage.js";
 import { browserStorage } from "./usePlayerPreference";
 import type { PlayerSessionOptions } from "./usePlayerSession";
 
@@ -43,15 +44,21 @@ export interface PlayerStores {
 
 /**
  * Opens the stores of `context`'s mode. Stand-alone keeps everything in this browser. Online keeps saved values,
- * photos, and the saved-data list on the server and reads the account's player profile, rejecting with an
- * `OnlineDataError` when the server cannot give it; its kept sessions and debug rooms stay in this browser, in
- * databases of the server's account alone.
+ * photos, the saved-data list, and the kept sessions on the server and reads the account's player profile, rejecting
+ * with an `OnlineDataError` when the server cannot give it; its debug rooms stay in this browser, in a database of the
+ * server's account alone.
  */
 export async function openPlayerStores(context: PlayerDataContext): Promise<PlayerStores> {
   if (context.mode === "standalone") {
     // Durable captured and chosen media; when IndexedDB is unavailable, it stays session media.
     const repository = await openIndexedDbMediaRepository().catch(() => null);
-    const kept = await openKeptStores("");
+    // Kept sessions and debug rooms outlive a reload and a closed browser; without IndexedDB they last as long as the
+    // page.
+    const [keptSessions, debugRooms] = await Promise.all([
+      openIndexedDbKeptSessionStore().catch(() => memoryKeptSessionStore()),
+      openDebugRooms(""),
+    ]);
+    const kept = { keptSessions, debugRooms };
     const savedData = browserSavedData(browserStorage(), repository, kept.keptSessions);
     const persistent = shallowRef<boolean | null>(null);
     void persistentStorage().then((granted) => (persistent.value = granted));
@@ -73,35 +80,37 @@ export async function openPlayerStores(context: PlayerDataContext): Promise<Play
     repository: onlineMediaRepository(context),
     locks: uncoordinatedCapturedMediaLocks(),
   };
-  const kept = await openKeptStores(`:online:${JSON.stringify([context.server, account])}`);
+  const kept = {
+    keptSessions: onlineKeptSessions(context),
+    debugRooms: await openDebugRooms(`:online:${JSON.stringify([context.server, account])}`),
+  };
+  // One provider per scope, so that an import writes with the revision its review read.
+  const providers = new Map<string, ScriptStorageProvider>();
+  const provider = (scope: string) => {
+    let found = providers.get(scope);
+    if (found === undefined) providers.set(scope, (found = onlineScriptStorage(context, scope)));
+    return found;
+  };
   const savedData = savedDataHost(
-    { ...onlineSavedScripts(context), provider: (scope) => onlineScriptStorage(context, scope) },
+    { ...onlineSavedScripts(context), provider },
     capturedMedia.repository,
     kept.keptSessions,
     capturedMedia.locks,
   );
   return {
-    storage: (scope) => ({
-      scriptStorage: onlineScriptStorage(context, scope),
-      capturedMedia,
-      savedData,
-      ...kept,
-    }),
+    storage: (scope) => ({ scriptStorage: provider(scope), capturedMedia, savedData, ...kept }),
     playerProfile: profile,
   };
 }
 
-/** Kept sessions and debug rooms outlive a reload and a closed browser; without IndexedDB they last as long as the page. */
-async function openKeptStores(suffix: string) {
-  const [keptSessions, debugRooms] = await Promise.all([
-    openIndexedDbKeptSessionStore(`teasescript-kept-sessions${suffix}`).catch(() =>
-      memoryKeptSessionStore(),
-    ),
-    openIndexedDbKeptRoomStore(`teasescript-debug-rooms${suffix}`).catch(() =>
-      memoryKeptRoomStore(),
-    ),
-  ]);
-  return { keptSessions, debugRooms };
+/**
+ * The debug rooms of this browser, apart for each data mode and account; without IndexedDB they last as long as the
+ * page.
+ */
+function openDebugRooms(suffix: string) {
+  return openIndexedDbKeptRoomStore(`teasescript-debug-rooms${suffix}`).catch(() =>
+    memoryKeptRoomStore(),
+  );
 }
 
 /**

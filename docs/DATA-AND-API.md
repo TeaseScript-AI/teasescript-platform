@@ -125,8 +125,14 @@ before it mounts (`player/vue/src/playerStores.ts`), and the two modes never sha
 no data at all. Stand-alone keeps everything in this browser and asks the browser to keep it persistent. Online keeps
 saved values, the photos they reference, and the saved-data list on a server of the Player's own origin and takes the
 player profile from the server's account (`player/online-data.ts`, whose HTTP shapes are provisional); it never sweeps
-the server's photos, since it cannot see the account's other devices. Its kept sessions and debug rooms stay in this
-browser, in databases of that account alone.
+the server's photos, since it cannot see the account's other devices. It also keeps the session there, so that
+Continue works on another device; its debug rooms stay in this browser, in a database of that account alone. The server
+notices a second writer, such as another device or tab, without resolving it: a change names the revision of the data
+its Player last saw, a kept session that another Player changed meanwhile is refused, also when a new session would
+replace it, so the session kept first stays, and a saved value is written anyway, so the last one stays. An import's
+discard of a kept session names no revision and always goes ahead. A Player whose keep is refused, or which finds a
+newer revision when its page shows again, tells the player and can continue the session from the server's state
+([PLAYER-UI](ui/PLAYER-UI.md#session-start-and-user-activation)).
 
 ### Script storage in the browser
 

@@ -16,6 +16,11 @@ export function hostPage(page: {
   };
   readonly state: TestServerState;
   readonly profile: string;
+  readonly conflicts: readonly {
+    readonly at: string;
+    readonly scope: string;
+    readonly kind: string;
+  }[];
 }): string {
   const config = JSON.stringify({
     token: page.token,
@@ -23,6 +28,17 @@ export function hostPage(page: {
     state: page.state,
     profile: JSON.parse(page.profile),
   }).replaceAll("<", "\\u003c");
+  const conflicts =
+    page.conflicts.length === 0
+      ? `<p class="quiet">None so far.</p>`
+      : `<ul>${page.conflicts
+          .map(
+            ({ at, scope, kind }) =>
+              `<li>${escapeHtml(at.slice(0, 19).replace("T", " "))} UTC · ${
+                kind === "session" ? "kept session" : "saved values"
+              } · ${escapeHtml(JSON.parse(scope))}</li>`,
+          )
+          .join("")}</ul>`;
   const options = page.packages
     .map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`)
     .join("");
@@ -70,9 +86,15 @@ export function hostPage(page: {
 </fieldset>
 <label><input type="checkbox" id="down"> Server down</label>
 <div class="row">
-<button id="fail" type="button">Fail the next write</button>
+<button id="fail" type="button">Fail the next save</button>
 <span id="fail-status" role="status"></span>
 </div>
+</section>
+<section>
+<h2>Two writers</h2>
+<p class="quiet">Changes from a Player that had missed another Player's change to the same data; the latest 20, newest
+first. A kept-session change was refused; a saved-values change was stored anyway.</p>
+${conflicts}
 </section>
 <section>
 <h2>Profile</h2>
@@ -129,7 +151,7 @@ function show(state) {
     radio.checked = radio.value === (state.slow ? "slow" : "normal");
   element("down").checked = state.down;
   element("fail").disabled = state.failNextWrite;
-  element("fail-status").textContent = state.failNextWrite ? "Waiting for the next write." : "";
+  element("fail-status").textContent = state.failNextWrite ? "Waiting for the next save." : "";
   clearInterval(polling);
   if (state.failNextWrite)
     polling = setInterval(() => fetch("/test-server/state").then((reply) => reply.json()).then(show), 2000);
