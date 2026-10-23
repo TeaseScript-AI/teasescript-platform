@@ -348,9 +348,10 @@ ADR 0018 compact forms therefore require parser-owned syntax support in addition
 
 The current engine/compiler implements compact `showButton`, `askText`, `askNumber`, and `askChoice` plus ADR 0018
 `say` smart/exact pacing and skip policy. Positive pacing uses the resumable `chatPacingGate` lifecycle described above;
-`0`/`instant` and checkpoint/restore are implemented on that same deterministic runtime model. The Player presents these Standard interaction and pacing
-controls through the framework-independent Player adapter. Editor/formatter/simulator support and final
-package/import/version/replacement design remain deferred. The production cross-origin Player/host protocol remains
-separate future work.
+`0 s`/`instant` and checkpoint/restore are implemented on that same deterministic runtime model. The Player presents
+these Standard interaction and pacing controls through the framework-independent Player adapter. Editor and formatter
+support for the compact forms is described in [Code editor](CODE-EDITOR.md#accepted-first-standard-library-poc-tooling),
+and debugger and simulator support in [Debugger](DEBUGGER.md); the final package/import/version/replacement design
+remains deferred. The production cross-origin Player/host protocol remains separate future work.
 
 Implemented Standard Library behavior ultimately requires unit, integration, editor-metadata, security-boundary, bounded-data, event-ordering, and checkpoint/resume coverage appropriate to the capabilities it composes.

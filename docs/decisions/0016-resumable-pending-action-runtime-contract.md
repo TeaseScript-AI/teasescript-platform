@@ -363,7 +363,9 @@ wait 0.5 h
 Rules:
 
 - a number needs a unit, as in `wait 10 s`; without one it is an error ([ADR 0026](0026-unified-time-semantics.md#8-explicit-units-for-time-quantities));
-- exact elapsed-time units for blocking waits are `ms`, `s`, `min`, and `h`;
+- a blocking wait takes an exact duration in any exact unit, from `ms` to days and weeks, and rejects a calendar
+  duration; a length written in days or weeks compiles with a warning
+  ([ADR 0026](0026-unified-time-semantics.md#4-exact-durations-and-calendar-units));
 - decimal durations are accepted;
 - fractionally valued milliseconds remain valid runtime numbers;
 - a browser wake-up scheduler may round its requested wake delay upward, but the runtime compares the supplied observation against the canonical deadline;
