@@ -40,6 +40,8 @@ export function hostPage(page: {
   h1 { font-size: 1.5rem; margin: 0.5rem 0; }
   h2 { font-size: 1.1rem; margin: 0.5rem 0; }
   label { display: flex; align-items: center; gap: 0.5rem; min-height: 2.75rem; }
+  fieldset { border: 0; margin: 0; padding: 0; }
+  legend { padding: 0; }
   select, textarea, button { font: inherit; }
   select, button { min-height: 2.75rem; }
   button { padding: 0 1rem; }
@@ -51,7 +53,6 @@ export function hostPage(page: {
 <body>
 <main>
 <h1>TeaseScript test server</h1>
-<p class="quiet">A temporary stand-in for the website, for development only.</p>
 <section>
 <h2>Play</h2>
 <label>Script <select id="script"><option value="">Repository demo</option>${options}</select></label>
@@ -62,8 +63,11 @@ export function hostPage(page: {
 </section>
 <section>
 <h2>Server</h2>
-<label><input type="radio" name="latency" value="normal"> Normal latency, about ${page.latency.normalMs} ms</label>
+<fieldset>
+<legend>Latency</legend>
+<label><input type="radio" name="latency" value="normal"> Normal, about ${page.latency.normalMs} ms</label>
 <label><input type="radio" name="latency" value="slow"> Slow, about ${page.latency.slowMs} ms</label>
+</fieldset>
 <label><input type="checkbox" id="down"> Server down</label>
 <div class="row">
 <button id="fail" type="button">Fail the next write</button>
@@ -112,7 +116,7 @@ function show(state) {
     radio.checked = radio.value === (state.slow ? "slow" : "normal");
   element("down").checked = state.down;
   element("fail").disabled = state.failNextWrite;
-  element("fail-status").textContent = state.failNextWrite ? "The next write fails." : "";
+  element("fail-status").textContent = state.failNextWrite ? "Waiting for the next write." : "";
   clearInterval(polling);
   if (state.failNextWrite)
     polling = setInterval(() => fetch("/test-server/state").then((reply) => reply.json()).then(show), 2000);
@@ -122,6 +126,7 @@ for (const radio of document.querySelectorAll("input[name=latency]"))
 element("down").onchange = () => change({ down: element("down").checked });
 element("fail").onclick = () => change({ failNextWrite: true });
 element("profile").value = JSON.stringify(config.profile, null, 2);
+element("profile").oninput = () => (element("profile-status").textContent = "");
 element("save-profile").onclick = async () => {
   const status = element("profile-status");
   try {
