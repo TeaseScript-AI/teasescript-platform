@@ -5670,9 +5670,10 @@ Custom-property rules:
 - The inferred or declared property type remains fixed.
 - Speaker references compare by identity with `==` and `!=` and may be used as `switch` values.
 
-### Read-only player profile
+### Reading the player profile
 
-`playerProfile` is the built-in read-only reference to the current player's server-backed profile:
+`playerProfile` is the built-in reference to the current player's server-backed profile, which a script reads directly
+and changes only through `askProfileChange(...)` ([Profile changes](#profile-changes)):
 
 ```text
 let maximum = playerProfile.settings.chastity.punishmentMaximum
@@ -6503,7 +6504,7 @@ Resolved in this revision:
 - blur uses `showBlur` and `hideBlur` as a separate non-destructive visual layer;
 - drawing uses dedicated shape/text functions and removable references;
 - initial layered-scene transitions are `"none"`, `"fade"`, and `"crossfade"` (accepted future direction; not implemented; see [§22](#22-stage-image-audio-and-video));
-- `playerProfile` is the read-only typed player profile reference;
+- `playerProfile` is the typed player profile reference, which a script changes only through `askProfileChange(...)`;
 - profile-change operations include `save`, `add`, `remove`, `removeAll`, `increase`, and `decrease`, while saving `[]` empties a list;
 - toys have server-generated IDs, may share visible names, can be disabled without script-driven deletion, and have common photos plus initial detailed schemas for butt plugs, dildos, chastity devices, and ball gags;
 - script-global data uses `publishGlobal` and `getGlobal`;

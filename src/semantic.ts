@@ -1653,12 +1653,16 @@ class SemanticValidator {
       target.kind === "identifier" ? "assigns" : "changes",
     );
     if (target.kind === "identifier") {
-      if (target.name === "debugMode" || target.name === "playerProfile") {
+      if (target.name === "debugMode") {
         this.#report(
           semanticCode.invalidAssignment,
-          `Cannot assign to '${target.name}', which is read-only.`,
+          "Cannot assign to 'debugMode', which is read-only.",
           target.span,
         );
+        return;
+      }
+      if (target.name === "playerProfile") {
+        this.#reportPlayerProfileChange(target, true);
         return;
       }
       const binding = scope.resolve(target.name);
@@ -1697,8 +1701,8 @@ class SemanticValidator {
   }
 
   /**
-   * Reports a store into the read-only player profile at `place` (`store`), or a change of one of its lists through it
-   * (V30 §37).
+   * Reports a store into the player profile at `place` (`store`), or a change of one of its lists through it: a script
+   * changes the profile only through `askProfileChange(...)` (V30 §37).
    */
   #reportPlayerProfileChange(place: Expression, store: boolean): void {
     let field = unwrapParentheses(place);
@@ -1708,13 +1712,15 @@ class SemanticValidator {
     )
       field = unwrapParentheses(field.object);
     const name = field.kind === "propertyAccessExpression" ? field.property.name : null;
-    // An assignment of a field itself, as opposed to a change inside it.
-    const assigned = store && name !== null && field === unwrapParentheses(place);
+    // An assignment of the profile or one of its fields itself, as opposed to a change inside it.
+    const assigned =
+      store && field === unwrapParentheses(place) && (name !== null || field.kind === "identifier");
     const label = name === null ? "playerProfile" : `playerProfile.${name}`;
-    const instead = name === null ? "its field" : `'player.${name}'`;
+    const instead =
+      name !== null ? `'player.${name}'` : assigned ? "the player's fields" : "its field";
     this.#report(
       semanticCode.invalidAssignment,
-      `Cannot ${assigned ? "assign to" : "change"} '${label}': the player profile is read-only. Copy it into the player with 'player.copyFrom(playerProfile)' and ${assigned ? "assign" : "change"} ${instead} instead.`,
+      `Cannot ${assigned ? "assign to" : "change"} '${label}': the player profile changes only through 'askProfileChange(...)', which the player approves. Copy it into the player with 'player.copyFrom(playerProfile)' and ${assigned ? "assign" : "change"} ${instead} instead.`,
       place.span,
     );
   }

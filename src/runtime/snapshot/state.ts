@@ -355,7 +355,7 @@ export interface RuntimeSnapshot {
   readonly liveMessages: RuntimeLiveMessageSnapshot[];
   /** What the protected `debugMode` reads: whether the host runs the session in Debug. Only the host changes it. */
   debugMode: boolean;
-  /** The read-only player profile the host gave at the start: the person fields `playerProfile` reads (V30 §37). */
+  /** The player profile the host gave at the start: the person fields `playerProfile` reads (V30 §37). */
   readonly playerProfile: RuntimePlayerProfileFieldSnapshot[];
   /**
    * Controlled randomness (docs/RUNTIME.md#controlled-randomness): how many chosen outcomes this state's history

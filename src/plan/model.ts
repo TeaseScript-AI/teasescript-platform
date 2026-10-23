@@ -1174,7 +1174,7 @@ export interface DebugModeExpressionPlan extends ExpressionPlanBase {
   readonly kind: "debugMode";
 }
 
-/** A read of a person field of the read-only player profile, which the host gives at the start (V30 §37). */
+/** A read of a person field of the player profile, which the host gives at the start (V30 §37). */
 export interface PlayerProfileFieldExpressionPlan extends ExpressionPlanBase {
   readonly kind: "playerProfileField";
   readonly name: string;

@@ -19,8 +19,8 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 /*
- * The player as a built-in speaker and the read-only player profile (V30 §37, owner-approved plan 2026-10-15): every
- * case runs from source; the player profile is one the host gives at the start.
+ * The player as a built-in speaker and the player profile (V30 §37, owner-approved plan 2026-10-15): every case runs
+ * from source; the player profile is one the host gives at the start.
  */
 
 function mismatches(source: string): [string, string, string][] {
@@ -104,30 +104,34 @@ test("the player and the player profile have compile errors that name the form t
       ["TSV004", "Cannot replace speaker 'player'.", "player"],
       [
         "TSV004",
-        "Cannot assign to 'playerProfile.firstName': the player profile is read-only. Copy it into the player with 'player.copyFrom(playerProfile)' and assign 'player.firstName' instead.",
+        "Cannot assign to 'playerProfile.firstName': the player profile changes only through 'askProfileChange(...)', which the player approves. Copy it into the player with 'player.copyFrom(playerProfile)' and assign 'player.firstName' instead.",
         "playerProfile.firstName",
       ],
       [
         "TSV004",
-        "Cannot change 'playerProfile.petNames': the player profile is read-only. Copy it into the player with 'player.copyFrom(playerProfile)' and change 'player.petNames' instead.",
+        "Cannot change 'playerProfile.petNames': the player profile changes only through 'askProfileChange(...)', which the player approves. Copy it into the player with 'player.copyFrom(playerProfile)' and change 'player.petNames' instead.",
         "playerProfile.petNames",
       ],
       [
         "TSV004",
-        "Cannot change 'playerProfile.petNames': the player profile is read-only. Copy it into the player with 'player.copyFrom(playerProfile)' and change 'player.petNames' instead.",
+        "Cannot change 'playerProfile.petNames': the player profile changes only through 'askProfileChange(...)', which the player approves. Copy it into the player with 'player.copyFrom(playerProfile)' and change 'player.petNames' instead.",
         "playerProfile.petNames[0]",
       ],
       [
         "TSV004",
-        "Cannot change 'playerProfile.petNames': the player profile is read-only. Copy it into the player with 'player.copyFrom(playerProfile)' and change 'player.petNames' instead.",
+        "Cannot change 'playerProfile.petNames': the player profile changes only through 'askProfileChange(...)', which the player approves. Copy it into the player with 'player.copyFrom(playerProfile)' and change 'player.petNames' instead.",
         "playerProfile.petNames",
       ],
       [
         "TSV004",
-        "Cannot change 'playerProfile.lovingNames': the player profile is read-only. Copy it into the player with 'player.copyFrom(playerProfile)' and change 'player.lovingNames' instead.",
+        "Cannot change 'playerProfile.lovingNames': the player profile changes only through 'askProfileChange(...)', which the player approves. Copy it into the player with 'player.copyFrom(playerProfile)' and change 'player.lovingNames' instead.",
         "playerProfile.lovingNames",
       ],
-      ["TSV004", "Cannot assign to 'playerProfile', which is read-only.", "playerProfile"],
+      [
+        "TSV004",
+        "Cannot assign to 'playerProfile': the player profile changes only through 'askProfileChange(...)', which the player approves. Copy it into the player with 'player.copyFrom(playerProfile)' and assign the player's fields instead.",
+        "playerProfile",
+      ],
       [
         "TSV028",
         "'playerProfile' is not a value of its own. Read one of its fields, as in 'playerProfile.firstName', or copy it into the player with 'player.copyFrom(playerProfile)'.",

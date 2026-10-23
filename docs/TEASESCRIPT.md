@@ -356,7 +356,7 @@ The exact syntax for detailed result objects, advanced accessibility overrides, 
 ## Currently implemented language subset
 
 The repository includes core values, variables, assignments including `+=`/`-=`, speakers with the V30 §37 terms, the
-built-in speaker `player`, and the read-only person fields of `playerProfile` ([player and player profile](RUNTIME.md#the-player-and-the-player-profile)), output, collections
+built-in speaker `player`, and reads of the person fields of `playerProfile` ([player and player profile](RUNTIME.md#the-player-and-the-player-profile)), output, collections
 including dicts ([§40](specifications/accepted-syntaxes-v30.md#40-dictionaries)), expressions, comments, ranges,
 deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, conditionals including `switch`, loops, and
 loop control.
