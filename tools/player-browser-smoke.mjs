@@ -2527,7 +2527,12 @@ async function sessionTransferScenario(debugPort, origin, profile) {
       [saved, `document.body.textContent.includes("Saved.")`],
       [unsaved, unsavedShown],
     ]) {
-      await waitFor(cdp, visible("[data-composer-attach]"), 8_000, "The image request offered no paperclip");
+      await waitFor(
+        cdp,
+        visible("[data-composer-attach]"),
+        8_000,
+        "The image request offered no paperclip",
+      );
       await openPicker(cdp);
       await setInputFiles(cdp, "[data-composer-file]", [chosen]);
       await useImage(cdp);
@@ -2564,7 +2569,11 @@ async function sessionTransferScenario(debugPort, origin, profile) {
     await navigate(cdp, `${origin}/player/?package=saved-photo`);
     await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Start'`);
     await physicalClick(cdp, "[data-settings-trigger]");
-    await waitFor(cdp, `document.querySelector('[data-import-saved-data]')?.disabled === false`, 8_000);
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-import-saved-data]')?.disabled === false`,
+      8_000,
+    );
     await physicalClick(cdp, "[data-import-saved-data]");
     await waitFor(cdp, `!!document.querySelector('[data-saved-data-import]')`);
     await setInputFiles(cdp, "[data-import-file]", [file]);
