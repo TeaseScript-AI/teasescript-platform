@@ -356,7 +356,7 @@ The exact syntax for detailed result objects, advanced accessibility overrides, 
 ## Currently implemented language subset
 
 The repository includes core values, variables, assignments including `+=`/`-=`, speakers with the V30 §37 terms, the
-built-in speaker `player`, and the read-only person fields of `account` ([player and account](RUNTIME.md#the-player-and-the-account)), output, collections
+built-in speaker `player`, and the read-only person fields of `playerProfile` ([player and player profile](RUNTIME.md#the-player-and-the-player-profile)), output, collections
 including dicts ([§40](specifications/accepted-syntaxes-v30.md#40-dictionaries)), expressions, comments, ranges,
 deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, conditionals including `switch`, loops, and
 loop control.
@@ -414,7 +414,7 @@ and logarithms `exp`, `ln`, and `log10`, angles with a unit such as `90 deg` or 
 the read-only §38 `debugMode`. When the receiver or argument type is known, misuse is compile error `TSV043`, or
 `TSV020`/`TSV022` for argument counts and names, which are also checked on a receiver of unknown type where no receiver
 with that method takes them; a method that no value has is `TSV043` also on a receiver of unknown type, as is any method
-of a speaker other than the statement `player.copyFrom(account)`; other values are checked when the operation runs.
+of a speaker other than the statement `player.copyFrom(playerProfile)`; other values are checked when the operation runs.
 
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021: variables,
 list and set elements, dict values, object properties, the custom properties of a speaker that only stores through its

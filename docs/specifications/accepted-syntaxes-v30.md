@@ -1007,7 +1007,7 @@ Rules:
 - Positional arguments come first; named arguments may follow them. A positional argument after a named one is an
   error: `moveTo(x: 10, 20)`.
 - A parameter receives at most one value: naming a parameter that a positional argument already fills is an error.
-- A grammar keyword may still be used as an API field label when it appears in the unambiguous `name:` position of a named argument, object property, or engine configuration block. This permits accepted labels such as `default:`, `repeat:`, and account-operation labels such as `save:` without permitting those words as variable or function identifiers.
+- A grammar keyword may still be used as an API field label when it appears in the unambiguous `name:` position of a named argument, object property, or engine configuration block. This permits accepted labels such as `default:`, `repeat:`, and profile-change operation labels such as `save:` without permitting those words as variable or function identifiers.
 
 ## 11. Function definitions
 **Status:** Accepted
@@ -2220,7 +2220,7 @@ items.random
 `items.random` explicitly selects one element using the deterministic session RNG. It works for value lists and object lists:
 
 ```text
-let chosenName = account.petNames.random
+let chosenName = playerProfile.petNames.random
 let stranger = speakers.random
 ```
 
@@ -2233,8 +2233,8 @@ Interpolation is the only place where a list turns into one random element. Each
 element with the deterministic session RNG:
 
 ```text
-say "Good ${account.petNames}"
-say "Come closer, ${account.petNames}"
+say "Good ${playerProfile.petNames}"
+say "Come closer, ${playerProfile.petNames}"
 ```
 
 The two evaluations may choose different elements. Replay and debugging reproduce the same session sequence.
@@ -2305,14 +2305,14 @@ when the compiler can see it. A list as a whole `askChoice` option instead gives
 To choose a specific element, use its index:
 
 ```text
-say account.petNames[0]
-say "Today I will call you ${account.petNames[1]}"
+say playerProfile.petNames[0]
+say "Today I will call you ${playerProfile.petNames[1]}"
 ```
 
 To reuse one random choice, select it explicitly and store the resulting value:
 
 ```text
-let chosenName = account.petNames.random
+let chosenName = playerProfile.petNames.random
 
 say "From now on, you are my ${chosenName}"
 say "Come here, ${chosenName}"
@@ -2321,7 +2321,7 @@ say "Come here, ${chosenName}"
 Normal assignment does not perform random selection:
 
 ```text
-let copiedNames = account.petNames
+let copiedNames = playerProfile.petNames
 ```
 
 This assigns a list copy. List assignment uses copy semantics rather than a shared reference:
@@ -5230,7 +5230,7 @@ speaker mistressVera {
 Ordinary `say` uses the current default speaker:
 
 ```text
-player.copyFrom(account)
+player.copyFrom(playerProfile)
 say "Kneel."
 say "Good morning, ${player.alias}."
 ```
@@ -5475,10 +5475,10 @@ degradingNames
 lovingNames
 ```
 
-The account supplies the player's lists: `account.petNames` reads one, and `player.copyFrom(account)` copies them into
-the player. The player's settings require at least one name in each list, and the engine checks this where the host
-gives the account; the Player has no profile input yet. There is no fallback text: a list that a script empties follows
-the ordinary empty-list rules.
+The player profile supplies the player's lists: `playerProfile.petNames` reads one, and `player.copyFrom(playerProfile)`
+copies them into the player. The player's settings require at least one name in each list, and the engine checks this
+where the host gives the profile; the Player has no profile input yet. There is no fallback text: a list that a script
+empties follows the ordinary empty-list rules.
 
 ```text
 player.petNames
@@ -5489,7 +5489,7 @@ player.lovingNames
 Interpolation selects one random element according to the list rules:
 
 ```text
-player.copyFrom(account)
+player.copyFrom(playerProfile)
 say "Come here, ${player.petNames}."
 say "Good ${player.lovingNames}."
 say "You are such a ${player.degradingNames}."
@@ -5541,7 +5541,7 @@ Setting `gender` fills the default values of the derived terms below:
 Examples:
 
 ```text
-player.copyFrom(account)
+player.copyFrom(playerProfile)
 say "You are a good ${player.boyGirl}."
 say "${mistressVera.heShe} is waiting for you."
 ```
@@ -5559,9 +5559,9 @@ player.cockClit = "cock"
 `gender` therefore provides convenient defaults. It does not make gender identity, pronouns, anatomy, and preferred words inseparable.
 
 A term set explicitly wins over the default of `gender`, and changing `gender` changes only the terms that were not set
-explicitly. Another gender value supplies no defaults. The account follows the same rules for its own `gender` and
-terms. `player` starts with no gender and no terms, and `player.copyFrom(account)` copies the account's gender and the
-terms it sets explicitly. Script assignments then change the player without changing the account.
+explicitly. Another gender value supplies no defaults. The player profile follows the same rules for its own `gender`
+and terms. `player` starts with no gender and no terms, and `player.copyFrom(playerProfile)` copies the profile's gender
+and the terms it sets explicitly. Script assignments then change the player without changing the profile.
 
 ### Anatomical and arousal terms
 
@@ -5584,7 +5584,7 @@ The confirmed anatomical and arousal terms are:
 Examples:
 
 ```text
-player.copyFrom(account)
+player.copyFrom(playerProfile)
 say "Touch your ${player.cockPussy}."
 say "${player.strokeRub} your ${player.cockClit}."
 say "Focus on your ${player.glansClitoris}."
@@ -5623,7 +5623,7 @@ Actions and anatomical targets remain separate so the same terms can be recombin
 Examples:
 
 ```text
-player.copyFrom(account)
+player.copyFrom(playerProfile)
 say "${player.strokeRub} your ${player.cockClit}."
 say "Keep ${player.strokingRubbing} your ${player.cockClit}."
 say "${player.wankRub} your ${player.cockClit}."
@@ -5652,7 +5652,7 @@ Built-in dynamic terms, name lists, presentation fields, and custom properties m
 also through a constant that holds the speaker ([§12](#constants)).
 
 A speaker has a built-in field, term, or name list only once a declaration, an assignment, or for `player` a copy of
-the account gives it one. Reading one where no way to the read has given it one is a compile error. `title` and
+the player profile gives it one. Reading one where no way to the read has given it one is a compile error. `title` and
 `shortTitle` count for each other, `gender` counts for every term, and `title`, `shortTitle`, `firstName`, or
 `lastName` counts for `displayName`. A field that only some ways give, such as through a copy inside an `if`, is checked
 when the script runs.
@@ -5670,44 +5670,45 @@ Custom-property rules:
 - The inferred or declared property type remains fixed.
 - Speaker references compare by identity with `==` and `!=` and may be used as `switch` values.
 
-### Read-only account access
+### Read-only player profile
 
-`account` is the built-in read-only reference to the current player's server-backed account view:
+`playerProfile` is the built-in read-only reference to the current player's server-backed profile:
 
 ```text
-let maximum = account.settings.chastity.punishmentMaximum
-let toys = account.toys
-let hardcoreActive = account.hardcore.active
+let maximum = playerProfile.settings.chastity.punishmentMaximum
+let toys = playerProfile.toys
+let hardcoreActive = playerProfile.hardcore.active
 ```
 
 Its person fields are those of a speaker: `title`, `shortTitle`, `firstName`, `lastName`, `displayName`, `alias`,
-`gender`, the terms, and the three name lists, as in `account.firstName`, `account.heShe`, and `account.petNames`. They
-read like a speaker's, so a term follows the account's `gender` unless the account sets it. The host gives them when the
-session starts, and the session keeps them, also across a checkpoint. Reading a field that the account lacks fails when
-the script runs.
+`gender`, the terms, and the three name lists, as in `playerProfile.firstName`, `playerProfile.heShe`, and
+`playerProfile.petNames`. They read like a speaker's, so a term follows the profile's `gender` unless the profile sets
+it. The host gives them when the session starts, and the session keeps them, also across a checkpoint. Reading a field
+that the profile lacks fails when the script runs.
 
-`player.copyFrom(account)` replaces the player's person fields with the account's: the name fields, `alias`, `gender`,
-the terms the account sets explicitly, and copies of the name lists, so `player.petNames.add(...)` never changes the
-account. A field the account lacks is cleared on `player`. The presentation fields and script-defined properties of
-`player` stay as they are. It is the only form of `copyFrom`: another receiver or argument is a compile error.
+`player.copyFrom(playerProfile)` replaces the player's person fields with the profile's: the name fields, `alias`,
+`gender`, the terms the profile sets explicitly, and copies of the name lists, so `player.petNames.add(...)` never
+changes the profile. A field the profile lacks is cleared on `player`. The presentation fields and script-defined
+properties of `player` stay as they are. It is the only form of `copyFrom`: another receiver or argument is a compile
+error.
 
 Rules:
 
-- account fields are schema-defined, typed, and available to autocomplete;
-- unknown account fields are compile errors;
-- direct assignment and changing an account list are compile errors;
+- profile fields are schema-defined, typed, and available to autocomplete;
+- unknown profile fields are compile errors;
+- direct assignment and changing a profile list are compile errors;
 - cheat mode may substitute only unlocked values according to the account rules;
 - locked values and hardcore state always expose the real server-confirmed state.
 
 ```text
-account.gender = "female" // compile error
+playerProfile.gender = "female" // compile error
 ```
 
 Large or filtered history collections use `getPlayerHistory(...)` rather than requiring the complete history to be loaded through one property.
 
-### Account changes
+### Profile changes
 
-A running script requests a blocking, server-confirmed account change with `askAccountChange(...)`. The player may accept, reject, or allow the request to expire. Supported operation groups are:
+A running script requests a blocking, server-confirmed profile change with `askProfileChange(...)`. The player may accept, reject, or allow the request to expire. Supported operation groups are:
 
 ```text
 save
@@ -5721,7 +5722,7 @@ decrease
 Meanings:
 
 - `save` replaces a schema-defined value. Saving `[]` is the way to empty an entire list.
-- `add` appends list values. Duplicate entries are allowed where the account schema permits weighting, such as name lists.
+- `add` appends list values. Duplicate entries are allowed where the profile schema permits weighting, such as name lists.
 - `remove` removes one occurrence for each supplied value.
 - `removeAll` removes every occurrence of each supplied value.
 - `increase` and `decrease` apply atomic numeric, duration, or unit-aware changes against the newest server value.
@@ -5800,7 +5801,7 @@ A script may:
 - store script-specific values with normal persistent storage for later runs of that same script;
 - ask the player to approve an account-level change through a blocking, host/server-confirmed request.
 
-A script-specific assignment never silently changes the account. Every account-setting change or lock is an active player decision. The host website shows the consequences, the tease pauses, and the result becomes accepted only after the server has stored it. `askAccountChange(...)` and its accepted operation groups provide this blocking request; the exact result object and some nested account payload fields remain open.
+A script-specific assignment never silently changes the account. Every account-setting change or lock is an active player decision. The host website shows the consequences, the tease pauses, and the result becomes accepted only after the server has stored it. `askProfileChange(...)` and its accepted operation groups provide this blocking request; the exact result object and some nested account payload fields remain open.
 
 The script author does not receive another player's account values outside that player's live runtime. Within a run, however, the script may access all account-backed information exposed by the engine for that current player; denial and chastity are not special exceptions.
 
@@ -6179,8 +6180,8 @@ drawEllipse
 drawLine
 drawText
 removeDrawing
-account
-askAccountChange
+playerProfile
+askProfileChange
 publishGlobal
 getGlobal
 loadFromScript
@@ -6502,8 +6503,8 @@ Resolved in this revision:
 - blur uses `showBlur` and `hideBlur` as a separate non-destructive visual layer;
 - drawing uses dedicated shape/text functions and removable references;
 - initial layered-scene transitions are `"none"`, `"fade"`, and `"crossfade"` (accepted future direction; not implemented; see [§22](#22-stage-image-audio-and-video));
-- `account` is the read-only typed account reference;
-- account-change operations include `save`, `add`, `remove`, `removeAll`, `increase`, and `decrease`, while saving `[]` empties a list;
+- `playerProfile` is the read-only typed player profile reference;
+- profile-change operations include `save`, `add`, `remove`, `removeAll`, `increase`, and `decrease`, while saving `[]` empties a list;
 - toys have server-generated IDs, may share visible names, can be disabled without script-driven deletion, and have common photos plus initial detailed schemas for butt plugs, dildos, chastity devices, and ball gags;
 - script-global data uses `publishGlobal` and `getGlobal`;
 - cross-script same-player saved data uses read-only `loadFromScript` plus `getScriptMetadata`;
@@ -6523,7 +6524,7 @@ Parser-POC grammar blockers:
 
 Other open API and runtime decisions:
 
-- define the account field names for unit system and decimal precision;
+- define the player profile field names for unit system and decimal precision;
 - decide whether an explicit unit-conversion method such as `measurement.to("km")` is needed in addition to presentation-only `format(...)`;
 - define background alignment/position values when `contain` or `cover` leaves or crops edges;
 - reconcile the Stage image with the layered scene: how `showImage` and the background and overlay layers coexist;
@@ -6537,7 +6538,7 @@ Other open API and runtime decisions:
 - choose exact anchor values and decide whether hidden overlay references have a dedicated redisplay command;
 - finalize drawing style parameter names, including fill, stroke, stroke width, opacity, font, text size, color, and alignment;
 - define the edited-image export API and how an edited local reference links back to its original;
-- finalize the `askAccountChange(...)` result object, especially how server-generated IDs of newly added toys are returned;
+- finalize the `askProfileChange(...)` result object, especially how server-generated IDs of newly added toys are returned;
 - define exact nested payload addressing for changing or disabling one toy by `toyId`;
 - finalize the cheat-mode, permissive-mode, and hardcore property names and user-facing labels;
 - define the per-setting lock enum, account-level counter-performance flows, owner-release rules, and exact maximum-duration fields;
