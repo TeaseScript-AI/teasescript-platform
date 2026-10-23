@@ -75,8 +75,8 @@ export function executeGoto(
 
 /**
  * `goto` or `call` naming a file: a fresh activation of the destination's file, from its top. A call may not start the
- * running file (V30 §29); the compiler rejects every call it can see doing so, and this check covers the rest, such as
- * a computed target or a block that runs while another file is running.
+ * running file (V30 §29); the compiler rejects every call it can prove does so and warns where it cannot, such as at a
+ * computed target or in a block, which may run while another file is running, and this check covers those.
  */
 export function executeTransfer(
   plan: InstructionPlan,
