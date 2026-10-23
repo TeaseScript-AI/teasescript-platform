@@ -3,6 +3,7 @@ import type {
   Block,
   CallExpression,
   Expression,
+  FileTarget,
   ForStatement,
   FunctionDeclaration,
   Program,
@@ -20,8 +21,8 @@ import {
 } from "../../expression-children.js";
 import { boundParameterName } from "../../function-arguments.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
-import { runsOnItsOwn, sessionDeclarations } from "../../project-globals.js";
-import { globMatches, isPathGlob } from "../../project-paths.js";
+import { sessionDeclarations } from "../../project-globals.js";
+import { isPathGlob } from "../../project-paths.js";
 import { listHasPosition } from "../../runtime/values/collection-operations.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { isEmptyLiteral, isNonEmptyLiteral, staticNumber } from "../../static-evaluation.js";
@@ -205,8 +206,16 @@ export interface FlowLoop {
   readonly exit: FlowNode;
 }
 
+/** A file of the project, with the files that each of its glob targets may pick, as the name pass resolved them. */
+export interface FlowGraphFile {
+  readonly path: string;
+  readonly program: Program;
+  /** The name pass's picks (`semantic.ts`): the matching files that run something, for each glob target. */
+  readonly picks: ReadonlyMap<FileTarget, readonly string[]>;
+}
+
 export interface FlowGraph {
-  readonly files: readonly { readonly path: string; readonly program: Program }[];
+  readonly files: readonly FlowGraphFile[];
   readonly nodes: readonly FlowNode[];
   readonly regions: readonly FlowRegion[];
   readonly sites: readonly CallSite[];
@@ -239,8 +248,13 @@ export interface FlowGraph {
   ownerOf(region: number): Callable | null;
   /** The node of the expression at `site`. */
   expressionAt(site: SourceSite): FlowNode | undefined;
-  /** The node of the statement at `site`; for a global or speaker, its session-start value. */
+  /**
+   * The node of the statement at `site` where it runs: for a `global` with `default:`, the assignment the declaration
+   * performs (F1a's executable store); a `global` without one and a speaker have none.
+   */
   statementAt(site: SourceSite): FlowNode | undefined;
+  /** The session-start node of the `global` or speaker declared at `site`, in the startup region (F1a's start store). */
+  startupAt(site: SourceSite): FlowNode | undefined;
   /** The binding node of the `for` loop whose statement or iterable is at `site`. */
   loopBindingAt(site: SourceSite): FlowNode | undefined;
 }
@@ -252,11 +266,9 @@ function siteKey(file: number, start: number, end: number): string {
 
 /**
  * The graph of a project's files, in project order: `main.tease` first, where the session starts, as the lowering
- * orders them (`compileStableProject`).
+ * orders them (`compileStableProject`), each with the name pass's picks for its glob targets, as the lowering takes them.
  */
-export function buildFlowGraph(
-  files: readonly { readonly path: string; readonly program: Program }[],
-): FlowGraph {
+export function buildFlowGraph(files: readonly FlowGraphFile[]): FlowGraph {
   return new FlowGraphBuilder(files).build();
 }
 
@@ -329,6 +341,7 @@ class FlowGraphBuilder {
   readonly #deadEdges = new Set<number>();
   readonly #expressionNodes = new Map<string, BuildNode>();
   readonly #statementNodes = new Map<string, BuildNode>();
+  readonly #startupNodes = new Map<string, BuildNode>();
   readonly #loopBindings = new Map<string, BuildNode>();
   readonly #labels = new Map<string, BuildNode>();
   readonly #functions = new Map<string, FunctionRegion>();
@@ -356,9 +369,7 @@ class FlowGraphBuilder {
   readonly #program: { readonly entry: BuildNode; readonly end: BuildNode };
   readonly #startup: StartupRegion;
 
-  public constructor(
-    private readonly files: readonly { readonly path: string; readonly program: Program }[],
-  ) {
+  public constructor(private readonly files: readonly FlowGraphFile[]) {
     this.#program = {
       entry: this.#node("program-entry", -1, -1, null, []),
       end: this.#node("program-end", -1, -1, null, []),
@@ -390,7 +401,7 @@ class FlowGraphBuilder {
           : declaration.properties.map((property) => property.value);
       for (const value of values)
         current = runCompileTask(this.#expression(value, context, current));
-      current = this.#statement(declaration, context, current);
+      current = this.#statement(declaration, context, current, {}, this.#startupNodes);
     }
     this.#link(current, startup.exit);
     this.files.forEach((file, index) => {
@@ -417,6 +428,7 @@ class FlowGraphBuilder {
     const { blockCalled, blockReached } = this.#blockReach();
     const expressionNodes = this.#expressionNodes;
     const statementNodes = this.#statementNodes;
+    const startupNodes = this.#startupNodes;
     const loopBindings = this.#loopBindings;
     const deadEdges = this.#deadEdges;
     const callableOf = this.#callableOf;
@@ -447,6 +459,7 @@ class FlowGraphBuilder {
       ownerOf: (region) => ownerOf[region] ?? null,
       expressionAt: (site) => expressionNodes.get(siteKey(site.file, site.start, site.end)),
       statementAt: (site) => statementNodes.get(siteKey(site.file, site.start, site.end)),
+      startupAt: (site) => startupNodes.get(siteKey(site.file, site.start, site.end)),
       loopBindingAt: (site) => loopBindings.get(siteKey(site.file, site.start, site.end)),
     };
   }
@@ -770,6 +783,7 @@ class FlowGraphBuilder {
     context: WalkContext,
     current: FlowNode | null,
     extra: Partial<Pick<BuildNode, "prepared" | "fallthrough">> = {},
+    lookup: Map<string, BuildNode> = this.#statementNodes,
   ): BuildNode {
     const node = this.#node(
       "statement",
@@ -779,10 +793,7 @@ class FlowGraphBuilder {
       context.loops,
       { statement, ...extra },
     );
-    this.#statementNodes.set(
-      siteKey(context.file, statement.span.start.offset, statement.span.end.offset),
-      node,
-    );
+    lookup.set(siteKey(context.file, statement.span.start.offset, statement.span.end.offset), node);
     this.#link(current, node);
     for (const own of context.own) own.enclosing ??= node;
     return node;
@@ -1219,19 +1230,13 @@ class FlowGraphBuilder {
 
   /**
    * A `goto` continues at a label of its file or starts a file at its top; a `call` starts a file and is one call site.
-   * A glob may pick each file it matches that runs something, as the name pass decides; a computed target may name any
-   * file (L11). A file target's label is an error of the name pass, so the file starts at its top.
+   * A glob may pick the files the name pass picked for it (G1(f): no second scan); a computed target may name any file
+   * (L11). A file target's label is an error of the name pass, so the file starts at its top.
    */
   #resolveTransfers(): void {
     const byPath = new Map(this.#fileRegions.map((region) => [region.path, region]));
-    const paths = this.#fileRegions.map((region) => region.path);
-    // Each fact once per build, as the name pass keeps it: whether a file runs something, the files each glob picks,
-    // and the entries of each list of files, which transfers to the same files share.
-    const runs = this.#fileRegions.map((region) =>
-      this.files[region.file]!.program.statements.some(runsOnItsOwn),
-    );
+    // A computed target shares one list of every file, and transfers to the same files share their entries.
     const everyFile: readonly FileRegion[] = this.#fileRegions;
-    const picks = new Map<string, readonly FileRegion[]>();
     const entriesOf = new Map<readonly FileRegion[], readonly FlowNode[]>();
     for (const transfer of this.#pendingTransfers) {
       const target = transfer.target;
@@ -1248,14 +1253,11 @@ class FlowGraphBuilder {
           files = everyFile;
           uncertain = true;
         } else if (isPathGlob(target.path)) {
-          let picked = picks.get(target.path);
-          if (picked === undefined) {
-            picked = globMatches(target.path, paths)
-              .map((path) => byPath.get(path)!)
-              .filter((region) => runs[region.file] === true);
-            picks.set(target.path, picked);
-          }
-          files = picked;
+          // The name pass matched the glob once; a target it rejected picks nothing.
+          files = (this.files[transfer.file]!.picks.get(target) ?? []).flatMap((path) => {
+            const file = byPath.get(path);
+            return file === undefined ? [] : [file];
+          });
           uncertain = true;
         } else {
           const file = byPath.get(target.path);
@@ -1290,110 +1292,119 @@ class FlowGraphBuilder {
   }
 
   /**
-   * Which calls can return, by one least fixpoint over the units of code: each function, each file's top level and
-   * each block. A unit is searched once from its entry over its own nodes, and a call's summary edge is followed only
-   * once its callee is known to return; each node is visited once. A function returns when its search reaches its exit.
-   * A file's activation returns to its caller at an `end` of its top level, at an `end` in a function it calls, through
-   * a file it starts with `goto` that returns, or at an `end` of a block, which may run while any file runs. A function
-   * may end the running file through an `end`, a function that may, a `goto` of a file that returns, or a `goto` of a
-   * label, which leaves it for its file's code. A summary edge whose callees cannot return is dead (L10, L11).
+   * Which calls can return (G1(a), L10, L11), by one least fixpoint that carries two facts backward over each region's
+   * own nodes, each node taking each fact once: it can reach its function's exit (a `return`), or it can reach an `end`
+   * of the running file. A file's exit (its `end` statements, and its end, which the compiler's closing `end` reaches)
+   * and every `end` in a function or block have the second. A call has a fact of the node after it once a callee
+   * returns, and the second fact also once a function it calls may end the running file; a `goto` of files has the
+   * second once one of them returns, since a started file's `end` returns to the running file's caller; a `goto` from a
+   * function or block to a label has it once the label's own continuation has it (r4.25). A function returns when its
+   * entry has the first fact and may end the running file when its entry has the second; a file returns when its entry
+   * has the second, or when a block whose registration can run has it: such a block may run while any file runs (G1(b);
+   * a registration in dead code or in a function nothing calls registers nothing, r4.25). Each dependency waits in one
+   * list, registered once and woken once. A summary edge whose callees cannot return is dead.
    */
   #decideReturns(): void {
     const regions = this.#regions;
+    const RETURN = 0;
+    const END = 1;
+    const facts = [new Uint8Array(this.#nodes.length), new Uint8Array(this.#nodes.length)] as const;
     const returns = new Uint8Array(regions.length);
     const ends = new Uint8Array(regions.length);
-    const visited = new Uint8Array(this.#nodes.length);
     let blockEnds = false;
-    const sitesByCallIn = new Map<FlowNode, CallSite>();
-    for (const site of this.#sites) sitesByCallIn.set(site.callIn, site);
-    const jumpsByNode = new Map<FlowNode, Jump>();
-    for (const jump of this.#jumps) jumpsByNode.set(jump.node, jump);
-    const endNodes = new Set<FlowNode>(this.#ends);
-    /**
-     * What waits for a callable to return or to end the running file: a unit's search that goes on past a summary edge,
-     * or a unit that then may end the running file itself.
-     */
-    type Waiting =
-      | { readonly kind: "follow"; readonly unit: number; readonly site: CallSite }
-      | { readonly kind: "ends"; readonly unit: number };
-    const waitingForReturn = new Map<number, Waiting[]>();
-    const waitingForEnd = new Map<number, Waiting[]>();
-    const wait = (on: Map<number, Waiting[]>, region: number, waiting: Waiting): void => {
-      const list = on.get(region);
-      if (list === undefined) on.set(region, [waiting]);
+    const registered = this.#reachedIfEveryCallReturns();
+    const siteByCallOut = new Map<FlowNode, CallSite>();
+    for (const site of this.#sites) siteByCallOut.set(site.callOut, site);
+    /** A fact that a node takes once a callable returns, or once a function may end the running file. */
+    type Waiting = { readonly node: FlowNode; readonly fact: typeof RETURN | typeof END };
+    const onReturn = new Map<number, Waiting[]>();
+    const onEnd = new Map<number, Waiting[]>();
+    const onLabel = new Map<FlowNode, FlowNode[]>();
+    const wait = <K>(lists: Map<K, Waiting[]>, key: K, waiting: Waiting): void => {
+      const list = lists.get(key);
+      if (list === undefined) lists.set(key, [waiting]);
       else list.push(waiting);
     };
-    const work: { readonly unit: number; readonly node: BuildNode }[] = [];
-    const visit = (unit: number, node: FlowNode): void => {
-      if (visited[node.id] === 1) return;
-      visited[node.id] = 1;
-      work.push({ unit, node: this.#built(node) });
+    const work: Waiting[] = [];
+    const give = (node: FlowNode, fact: typeof RETURN | typeof END): void => {
+      if (facts[fact][node.id] === 1) return;
+      facts[fact][node.id] = 1;
+      work.push({ node, fact });
     };
-    const wake = (waiting: Waiting): void => {
-      if (waiting.kind === "ends") markEnds(waiting.unit);
-      else if (!this.#deadEdges.has(edgeKey(waiting.site.callIn, waiting.site.callOut)))
-        visit(waiting.unit, waiting.site.callOut);
-    };
-    /** What a callable's new fact wakes, taken by the main loop, so a chain of waits does not deepen the stack. */
-    const woken: Waiting[] = [];
     const markReturns = (region: number): void => {
       if (returns[region] === 1) return;
       returns[region] = 1;
-      for (const waiting of waitingForReturn.get(region) ?? []) woken.push(waiting);
-      waitingForReturn.delete(region);
+      for (const waiting of onReturn.get(region) ?? []) give(waiting.node, waiting.fact);
+      onReturn.delete(region);
     };
-    /** The unit's activation may end the running file: a file returns, a function ends its caller's, a block any. */
-    const markEnds = (unit: number): void => {
-      const region = regions[unit]!;
-      if (region.kind === "file") return markReturns(unit);
-      if (region.kind === "handler") {
-        if (blockEnds) return;
-        blockEnds = true;
-        for (const file of this.#fileRegions) markReturns(file.id);
-        return;
-      }
-      if (ends[unit] === 1) return;
-      ends[unit] = 1;
-      for (const waiting of waitingForEnd.get(unit) ?? []) woken.push(waiting);
-      waitingForEnd.delete(unit);
+    const markEnds = (region: number): void => {
+      if (ends[region] === 1) return;
+      ends[region] = 1;
+      for (const waiting of onEnd.get(region) ?? []) give(waiting.node, waiting.fact);
+      onEnd.delete(region);
     };
-    for (const region of regions) if (region.kind !== "startup") visit(region.id, region.entry);
-    while (work.length > 0 || woken.length > 0) {
-      if (woken.length > 0) {
-        wake(woken.pop()!);
-        continue;
-      }
-      const { unit, node } = work.pop()!;
-      const region = regions[unit]!;
-      if (node === region.exit && (region.kind === "function" || region.kind === "file"))
-        markReturns(unit);
-      if (endNodes.has(node)) markEnds(unit);
-      const site = sitesByCallIn.get(node);
-      if (site !== undefined)
-        for (const callee of site.callees) {
-          if (returns[callee.id] === 1) wake({ kind: "follow", unit, site });
-          else wait(waitingForReturn, callee.id, { kind: "follow", unit, site });
-          if (callee.kind !== "function") continue;
-          if (ends[callee.id] === 1) markEnds(unit);
-          else wait(waitingForEnd, callee.id, { kind: "ends", unit });
+    for (const site of this.#sites)
+      for (const callee of site.callees)
+        if (callee.kind === "function") wait(onEnd, callee.id, { node: site.callIn, fact: END });
+    for (const jump of this.#jumps)
+      if (jump.kind === "file")
+        for (const file of jump.files) wait(onReturn, file.id, { node: jump.node, fact: END });
+      else if (regions[jump.node.region]!.kind !== "file")
+        for (const label of jump.targets) {
+          const list = onLabel.get(label);
+          if (list === undefined) onLabel.set(label, [jump.node]);
+          else list.push(jump.node);
         }
-      const jump = jumpsByNode.get(node);
-      if (jump?.kind === "label") {
-        // Within a file's top level the jump goes on at its label; from a function or block it leaves them for it.
-        if (region.kind !== "file") markEnds(unit);
-      } else if (jump !== undefined)
-        for (const file of jump.files) {
-          if (returns[file.id] === 1) markEnds(unit);
-          else wait(waitingForReturn, file.id, { kind: "ends", unit });
+    for (const region of regions)
+      if (region.kind === "function") give(region.exit, RETURN);
+      else if (region.kind === "file") give(region.exit, END);
+    for (const node of this.#ends) give(node, END);
+    while (work.length > 0) {
+      const { node, fact } = work.pop()!;
+      const region = regions[node.region]!;
+      if (node === region.entry)
+        if (region.kind === "function") {
+          if (fact === RETURN) markReturns(region.id);
+          else markEnds(region.id);
+        } else if (region.kind === "file") {
+          if (fact === END) markReturns(region.id);
+        } else if (
+          region.kind === "handler" &&
+          fact === END &&
+          !blockEnds &&
+          registered[region.creation.id] === 1
+        ) {
+          blockEnds = true;
+          for (const file of this.#fileRegions) markReturns(file.id);
         }
-      for (const next of node.successors) {
-        if (next.region !== unit || next === site?.callOut) continue;
-        if (!this.#deadEdges.has(edgeKey(node, next))) visit(unit, next);
+      if (fact === END) for (const from of onLabel.get(node) ?? []) give(from, END);
+      const site = siteByCallOut.get(node);
+      for (const before of node.predecessors) {
+        if (before.region !== node.region || this.#deadEdges.has(edgeKey(before, node))) continue;
+        if (site === undefined || before !== site.callIn) give(before, fact);
+        else if (site.callees.some((callee) => returns[callee.id] === 1)) give(before, fact);
+        else for (const callee of site.callees) wait(onReturn, callee.id, { node: before, fact });
       }
     }
     for (const site of this.#sites)
       if (!site.callees.some((callee) => returns[callee.id] === 1))
         this.#deadEdges.add(edgeKey(site.callIn, site.callOut));
+  }
+
+  /** The nodes that some way over edges that are not dead reaches from the program's entry, every call returning. */
+  #reachedIfEveryCallReturns(): Uint8Array {
+    const reached = new Uint8Array(this.#nodes.length);
+    const work: BuildNode[] = [this.#program.entry];
+    reached[this.#program.entry.id] = 1;
+    while (work.length > 0) {
+      const node = work.pop()!;
+      for (const next of node.successors)
+        if (reached[next.id] === 0 && !this.#deadEdges.has(edgeKey(node, next))) {
+          reached[next.id] = 1;
+          work.push(next);
+        }
+    }
+    return reached;
   }
 
   /**
