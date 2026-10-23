@@ -477,7 +477,10 @@ goes on from the last kept point, with those photos as session media again; a st
 stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
 a kept session whose events the engine's `interpreterEventProblem` refuses, such as a message without its markup or an
 answer without its form, is not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
-moment after an answer, can be lost. A saved-data import of the script discards its kept session
+moment after an answer, can be lost. A state this browser cannot write, such as one holding a list too long to save,
+is not kept, and in the normal room the session kept before is discarded, so a reload never goes on from an earlier
+point as if it were the current one; while the session runs or waits, a warning [notice](#player-notices) says that a
+reload would lose it, until a later state is kept. A saved-data import of the script discards its kept session
 ([transfer](../DATA-AND-API.md#saved-data-transfer)); a session import replaces it ([Player Settings](#player-settings)).
 A script a host prepares without its plan, such as a development
 scenario, keeps none. The debug room has a start page of its own, with its restarts
@@ -566,7 +569,7 @@ audio, is labelled **Needs action**, offers no dismiss control, and disappears o
 
 The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
 (info: saved progress is not kept), a failed script-storage write (warning, for the run it happened in; a new
-Start withdraws it), an image request that allows only the camera where no camera can be used (warning,
+Start withdraws it), a session this browser cannot keep for a reload (warning, withdrawn once a later state is kept), an image request that allows only the camera where no camera can be used (warning,
 withdrawn when the request ends), a media file the script refers to that the Player cannot use (warning, see
 [Stage and media presentation](#stage-and-media-presentation)), and a session stopped by an error (error, with
 **Details**; see [Session end and failure](#session-end-and-failure)). Each level also has a theme status colour, following

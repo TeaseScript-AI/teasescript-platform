@@ -1274,6 +1274,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     try {
       snapshotJson = playerRuntimeSnapshotJson(current);
     } catch {
+      // A state this browser cannot write, such as one holding a list too long to save, cannot be kept, and the point kept
+      // before must not stand in for it: a reload would go on from an earlier state as if it were this one. In the debug
+      // room it stays until a later state is kept, since discarding it there would take the room's saved data too.
+      if (room.value === "normal") await forgetKeptSession(current);
       return;
     }
     const events = current.events;
@@ -1313,9 +1317,22 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       });
       kept = { plan: true, count, last };
       if (inDebugRoom) debugRoom.value = { session: true };
+      else notices.dismiss(playerNoticeKeys.sessionNotKept);
     } catch {
       // The session kept before stays; a reload continues from there.
     }
+  }
+  /**
+   * Discards the session kept for a reload when its state `current` cannot be kept, so the next state that can be is kept
+   * anew; while the session runs or waits, a notice says that a reload would lose it.
+   */
+  async function forgetKeptSession(current: PlayerRuntimeSession) {
+    kept = { plan: false, count: 0, last: null };
+    await keptSessions.discard(keptScope!).catch(() => {});
+    const live = current.state.status === "running" || current.state.status === "waiting";
+    if (!live) notices.dismiss(playerNoticeKeys.sessionNotKept);
+    else if (!notices.list.some((notice) => notice.key === playerNoticeKeys.sessionNotKept))
+      notices.publish(playerNotices.sessionNotKept());
   }
   /** Keeps the shown session as it is now and waits until it is kept. */
   async function keepSession(): Promise<void> {

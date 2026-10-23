@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
-import { memoryKeptSessionStore, type KeptSessionStore } from "../player/kept-sessions.js";
 import {
+  memoryKeptSessionStore,
+  keptSession,
+  type KeptSessionStore,
+} from "../player/kept-sessions.js";
+import {
+  activatePlayerRuntimeButton,
   compilePlayerProject,
   createPlayerRuntimeSession,
   playerRuntimeForeground,
@@ -247,4 +252,69 @@ test("a session exported in one browser continues in another after the import, a
     "the transcript before the export stays",
   );
   assert.equal(said(reloaded.session.value).at(-1), "Thanks, nothing.");
+});
+
+test("a session whose state this browser cannot write is refused with the reason, and is no longer kept for a reload", async (context) => {
+  stubBrowser(context);
+  const plan = compilePlayerProject(
+    'say "Short", instant\nshowButton "Count"\nlet xs = (1..=5000).toList()\nsay "Long", instant\nshowButton "Shrink"\nxs = [1]\nsay "Short again", instant\nshowButton "Done"\nexit',
+  ).plan!;
+  const at = browser();
+  const host = await page(context, at, plan);
+  await host.activate();
+  const keptState = async () => {
+    const stored = await at.kept.session(SCOPE);
+    return stored === null ? null : keptSession(stored);
+  };
+  const press = () => {
+    const pressed = activatePlayerRuntimeButton(host.session.value!);
+    assert.ok(pressed);
+    host.update(pressed.session);
+  };
+  await until(async () => (await keptState()) !== null, "the session was not kept");
+
+  // V8 cannot enumerate the keys of a list of about 134 million elements, nor write a state as JSON longer than a text
+  // can be; a list of 5,000 stands for such a list.
+  const ownKeys = Reflect.ownKeys;
+  context.mock.method(Reflect, "ownKeys", (target: Parameters<typeof Reflect.ownKeys>[0]) => {
+    if (Array.isArray(target) && target.length > 1_000)
+      throw new RangeError("Too many properties to enumerate");
+    return ownKeys(target);
+  });
+  const stringify = JSON.stringify;
+  context.mock.method(JSON, "stringify", (...args: Parameters<typeof JSON.stringify>) => {
+    const json = stringify(...args);
+    if (
+      typeof args[0] === "object" &&
+      args[0] !== null &&
+      "observedSessionTimeMs" in args[0] &&
+      json.length > 20_000
+    )
+      throw new RangeError("Invalid string length");
+    return json;
+  });
+  press();
+  assert.equal(said(host.session.value).at(-1), "Long");
+  await assert.rejects(
+    host.exportSession(),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.name === "StorageTransferError" &&
+      /cannot write the session as it is now, .* so it cannot be exported/.test(error.message),
+  );
+  // The point kept before would go on from before the list as if it were now, so it goes, and a notice says so.
+  await until(async () => (await keptState()) === null, "the earlier kept point still stands in");
+  await until(
+    () => host.notices.value.some((notice) => notice.key === "session-not-kept"),
+    "no notice says that a reload would lose the session",
+  );
+
+  // Once the state can be written again, it is kept anew and the notice goes.
+  press();
+  assert.equal(said(host.session.value).at(-1), "Short again");
+  await until(async () => (await keptState()) !== null, "the session was not kept again");
+  assert.ok(!host.notices.value.some((notice) => notice.key === "session-not-kept"));
+  context.mock.restoreAll();
+  const stored = (await keptState())!;
+  assert.equal(stored.events.length, host.session.value!.events.length);
 });
