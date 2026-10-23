@@ -97,6 +97,17 @@ export interface CapturedMediaLocks {
 
 const lockName = (scope: string) => `teasescript-captured-media:${scope}`;
 
+/**
+ * No coordination, for media other devices may use too, such as on a server: no Player can prove it is alone, so media
+ * is never swept, and durable media writes go ahead.
+ */
+export function uncoordinatedCapturedMediaLocks(): CapturedMediaLocks {
+  return {
+    holdLive: () => ({ granted: Promise.resolve("unsupported"), release: () => {} }),
+    whenIdle: async () => false,
+  };
+}
+
 /** Web Locks coordination; without it no Player can prove it is alone, so media is never swept. */
 export function browserCapturedMediaLocks(): CapturedMediaLocks {
   const locks = typeof navigator === "undefined" ? undefined : navigator.locks;

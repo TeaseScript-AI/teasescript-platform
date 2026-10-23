@@ -10,6 +10,7 @@ import {
   capturedMediaReferences,
   capturedMediaStorage,
   sweepCapturedMedia,
+  uncoordinatedCapturedMediaLocks,
   withCapturedMedia,
   type CapturedMediaLocks,
 } from "../player/captured-media-persistence.js";
@@ -204,6 +205,21 @@ test("a sweep runs only when no Player is live, against a fresh read of the save
   await withCapturedMedia(provider, later).clear();
   await sweepCapturedMedia(provider, later, idle);
   assert.equal(repository.size, 0);
+});
+
+test("media other devices may use, as on a server, is never swept, while saves still store their photos", async () => {
+  const repository = new FakeMediaRepository();
+  const earlier = new CapturedMediaStore(repository, urls, "package");
+  const provider = new FakeProvider();
+  const storage = capturedMediaStorage(provider, earlier, uncoordinatedCapturedMediaLocks());
+  const photo = earlier.add("image", png("photo")).reference;
+  await storage.write("a", photo);
+  await storage.write("a", null);
+  await storage.close();
+  // Another device's kept session may still use the photo no saved value references now.
+  const later = new CapturedMediaStore(repository, urls, "package");
+  await capturedMediaStorage(provider, later, uncoordinatedCapturedMediaLocks()).close();
+  assert.deepEqual(await repository.listReferences("package"), [photo]);
 });
 
 test("a sweep keeps the stored photos a session kept for a reload uses, and defers when they cannot be read", async () => {
