@@ -21,6 +21,7 @@ import { speakerPropertySource, speakerPropertyValue } from "../../speaker-terms
 import { RuntimeFault } from "../errors.js";
 import { quotedText } from "../values/value-text.js";
 import { messageText } from "../values/text-length.js";
+import { listHasPosition } from "../values/collection-operations.js";
 import { loweredOperand } from "./lowered-operands.js";
 import { durationPropertyMessage } from "../../duration.js";
 import { missingMemberMessage } from "../values/string-operations.js";
@@ -321,8 +322,8 @@ export function listPosition(
   use: "read" | "assign" | "remove",
   span: SourceSpan = indexPlan!.span,
 ): number {
+  if (listHasPosition(list.items.length, value)) return value;
   const whole = typeof value === "number" && Number.isInteger(value);
-  if (whole && value >= 0 && value < list.items.length) return value;
   // A label is only written for the failure.
   const index = indexPlan === null ? null : loweredOperand(evaluator.plan, indexPlan);
   const indexLabel =

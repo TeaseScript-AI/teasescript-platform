@@ -187,6 +187,11 @@ export function readDict(
   }
 }
 
+/** Whether a list of `length` elements has the position `index`: a whole number from 0 up to below its length. */
+export function listHasPosition(length: number, index: unknown): index is number {
+  return typeof index === "number" && Number.isInteger(index) && index >= 0 && index < length;
+}
+
 /**
  * A call of a method of a list or set that only reads it (`onlyReadsList`), with as many arguments as it takes: its
  * result, or `undefined` when a list's `get` gives its `default:`, which `defaulted` says the call has and `named`
@@ -240,12 +245,7 @@ export function readCollection(
       ]);
       if (problem !== undefined) throw fault("TSR028", problem.message, span);
       const index = positional[0]!;
-      return typeof index === "number" &&
-        Number.isInteger(index) &&
-        index >= 0 &&
-        index < receiver.items.length
-        ? receiver.items[index]!
-        : undefined;
+      return listHasPosition(receiver.items.length, index) ? receiver.items[index]! : undefined;
     }
     case "toSet":
       return createCapturedSerializableSet(receiver.items);

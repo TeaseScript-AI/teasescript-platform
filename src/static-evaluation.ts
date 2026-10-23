@@ -66,6 +66,28 @@ function unwrapParentheses(expression: Expression): Expression {
   return expression;
 }
 
+/** A literal list, set, or dict, or a range of constant numbers, with nothing to go through. */
+export function isEmptyLiteral(expression: Expression): boolean {
+  const node = unwrapParentheses(expression);
+  if (node.kind === "listLiteral" || node.kind === "setLiteral") return node.elements.length === 0;
+  if (node.kind === "dictLiteral") return node.entries.length === 0;
+  if (node.kind !== "rangeExpression") return false;
+  const start = staticNumber(node.start);
+  const end = staticNumber(node.end);
+  return start !== undefined && end !== undefined && (node.inclusive ? end < start : end <= start);
+}
+
+/** A literal list, set, dict, or range that certainly has an element, so a loop over it runs at least once. */
+export function isNonEmptyLiteral(expression: Expression): boolean {
+  const node = unwrapParentheses(expression);
+  if (node.kind === "listLiteral" || node.kind === "setLiteral") return node.elements.length > 0;
+  if (node.kind === "dictLiteral") return node.entries.length > 0;
+  if (node.kind !== "rangeExpression") return false;
+  const start = staticNumber(node.start);
+  const end = staticNumber(node.end);
+  return start !== undefined && end !== undefined && (node.inclusive ? end >= start : end > start);
+}
+
 function* staticNumberTask(expression: Expression): CompileTask<number | undefined> {
   let negate = false;
   while (true) {
