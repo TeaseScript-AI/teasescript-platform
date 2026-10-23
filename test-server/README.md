@@ -43,11 +43,12 @@ path, status, time, and bytes received.
 
 ## Two writers
 
-Each script's saved values and kept session have a revision, and every change sends the revision its Player last saw.
-When that is older, because another device or tab changed the data in between, the change is listed under **Two
-writers** on the stand-in page and logged as `Two writers: …`. Nothing is merged. A kept-session change is refused: the
-other Player plays on, but its progress is no longer kept, so a reload continues the session the first Player kept. A
-saved-values change is stored anyway, so the last change to a value stays.
+Each script's saved values and kept session have a revision. A write, and a new session's reset of the one kept before,
+sends the revision its Player last saw. When that is older, because another device or tab changed the data in between,
+the change is listed under **Two writers** on the stand-in page and logged as `Two writers: …`. Nothing is merged. A
+kept-session change is refused: the other Player plays on, but its progress is no longer kept, so a reload continues the
+session the first Player kept. A saved-values change is stored anyway, so the last change to a value stays. An import's
+discard of a kept session sends no revision and always goes ahead.
 
 ## Switches
 

@@ -128,8 +128,9 @@ player profile from the server's account (`player/online-data.ts`, whose HTTP sh
 the server's photos, since it cannot see the account's other devices. It also keeps the session there, so that
 Continue works on another device; its debug rooms stay in this browser, in a database of that account alone. The server
 notices a second writer, such as another device or tab, without resolving it: a change names the revision of the data
-its Player last saw, a kept session that another Player changed meanwhile is refused, so the session kept first stays,
-and a saved value is written anyway, so the last one stays.
+its Player last saw, a kept session that another Player changed meanwhile is refused, also when a new session would
+replace it, so the session kept first stays, and a saved value is written anyway, so the last one stays. An import's
+discard of a kept session names no revision and always goes ahead.
 
 ### Script storage in the browser
 

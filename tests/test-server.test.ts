@@ -303,6 +303,28 @@ test("a photo the server keeps with a session is sent once, however often the se
   );
 });
 
+test("a session photo is still sent when the listing of the session's photos fails", async (context) => {
+  const realFetch = globalThis.fetch;
+  let failed = false;
+  context.mock.method(globalThis, "fetch", (input: string | URL, init?: RequestInit) => {
+    if (!failed && (init?.method ?? "GET") === "GET" && String(input).endsWith("/session-media")) {
+      failed = true;
+      return Promise.resolve(new Response(null, { status: 503 }));
+    }
+    return realFetch(input, init);
+  });
+  await onlineKeptSessions(server).media.add({
+    namespace: "listing-fails",
+    reference,
+    kind: "image",
+    mimeType: "image/png",
+    size: 1,
+    data: new Blob([new Uint8Array([7])], { type: "image/png" }),
+  });
+  assert.equal(failed, true);
+  assert.notEqual(await onlineKeptSessions(server).media.get("listing-fails", reference), null);
+});
+
 test("a Player that starts over a session another Player kept meanwhile leaves that session, and the server notices", async (context) => {
   // EVIDENCE: validation: Vite loaded the real source module; this test uses only these members of its host API.
   const { usePlayerSession } = (await loadPlayerModule("player/vue/src/usePlayerSession.ts")) as {

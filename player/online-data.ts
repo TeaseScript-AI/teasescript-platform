@@ -167,11 +167,12 @@ export function onlineKeptSessions(server: OnlineServer): KeptSessionStore {
     media: {
       ...media,
       async add(record) {
-        const references = await keptMedia(record.namespace);
-        if (references.has(record.reference))
+        // Without the listing the photo is sent anyway: the server never stores it twice.
+        const references = await keptMedia(record.namespace).catch(() => null);
+        if (references?.has(record.reference))
           throw new DOMException("The photo is kept already.", "ConstraintError");
         await media.add(record);
-        references.add(record.reference);
+        references?.add(record.reference);
       },
       async delete(namespace, reference) {
         await media.delete(namespace, reference);
