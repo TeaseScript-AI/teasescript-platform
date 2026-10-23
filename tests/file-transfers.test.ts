@@ -501,7 +501,7 @@ test("a file target names no label, and a global function goes to no label of it
   );
 });
 
-test("an end with no call to return to is an error on every way the compiler can follow", () => {
+test("an end with no call to return to is an error where code that runs without one always leads to it", () => {
   const diagnostics = (
     main: string,
     others: Record<string, string> = {},
@@ -519,16 +519,32 @@ test("an end with no call to return to is an error on every way the compiler can
     ],
   ]);
   const scene = { "scene.tease": 'say "scene"\nend' };
-  const noCall =
-    "This 'end' has no call to return to when the 'goto' on line 2 of 'main.tease' leads here. Write 'call' instead of 'goto' there to come back after it, or use 'exit' or 'goto' here instead of 'end'.";
-  // Also when another way calls the file, and in a function that the file calls.
-  for (const [main, others] of [
-    ['say "start"\ngoto "scene.tease"', scene],
+  const noCall = (line: number) =>
+    `This 'end' has no call to return to when the 'goto' on line ${line} of 'main.tease' leads here. Write 'call' instead of 'goto' there to come back after it, or use 'exit' or 'goto' here instead of 'end'.`;
+  const leave = { "scene.tease": "leave()\nexit\nfunction leave { end }" };
+  // Also in a function that the file calls, and where a test that the compiler does not read keeps the goto from
+  // running: the goto fails whenever it runs.
+  for (const [main, others, line] of [
+    ['say "start"\ngoto "scene.tease"', scene, 2],
+    ['say "start"\ngoto "scene.tease"', leave, 2],
+    ['let n = 1\nif n == 1 { exit }\ngoto "scene.tease"', scene, 3],
+    // Also when another way calls the file, where the code after the goto always goes on to the end: through
+    // branches that meet again, a call of a file that comes back, and a call of a function that ends the file.
     [
       'let pick = askBoolean "Call it?"\nif pick { call "scene.tease" } else { goto "scene.tease" }\nexit',
       scene,
+      2,
     ],
-    ['say "start"\ngoto "scene.tease"', { "scene.tease": "leave()\nexit\nfunction leave { end }" }],
+    [
+      'call "scene.tease"\ngoto "scene.tease"',
+      {
+        "scene.tease":
+          'call "intro.tease"\nif askBoolean "Ready?" { say "yes" } else { say "no" }\nend',
+        "intro.tease": 'say "intro"\nend',
+      },
+      2,
+    ],
+    ['call "scene.tease"\ngoto "scene.tease"', leave, 2],
   ] as const) {
     const found = diagnostics(main, others).filter(([, code]) => code === "TSV070");
     assert.deepEqual(
@@ -536,7 +552,7 @@ test("an end with no call to return to is an error on every way the compiler can
       [["scene.tease", "TSV070"]],
       main,
     );
-    assert.equal(found[0]![2], noCall);
+    assert.equal(found[0]![2], noCall(line));
   }
   // A script(...) of a path written out names its file, like a file target.
   assert.deepEqual(
@@ -597,6 +613,45 @@ test("an end with no call to return to is an error on every way the compiler can
       project(
         'global cameByCall = false\nlet next = script("room.tease")\ncameByCall = true\ncall (next)\ncameByCall = false\ngoto (next)',
         { "room.tease": 'say "room"\nif not cameByCall { exit }\nend' },
+      ),
+      { warnings: ["TSV071"] },
+    ),
+    ["room", "room", "exit"],
+  );
+  // The same with the file written out: after the goto, the code before the end may leave first, here when the test of
+  // the global fails, so the end may never fail. The compiler does not read such a test, so it warns.
+  const cameByCall =
+    'global cameByCall = false\ncameByCall = true\ncall "room.tease"\ncameByCall = false\ngoto "room.tease"';
+  const room = { "room.tease": 'say "room"\nif not cameByCall { exit }\nend' };
+  assert.deepEqual(diagnostics(cameByCall, room), [
+    [
+      "room.tease",
+      "TSV071",
+      "This 'end' has no call to return to when the 'goto' on line 5 of 'main.tease' leads here, but the compiler cannot tell whether the script reaches it then. If it does, the 'end' fails. If that can happen, write 'call' instead of 'goto' there, or use 'exit' or 'goto' here instead of 'end'.",
+    ],
+  ]);
+  // Also where a function or a called file leaves first.
+  for (const others of [
+    room,
+    {
+      "room.tease": 'say "room"\ncheck()\nend\nfunction check {\n    if not cameByCall { exit }\n}',
+    },
+    {
+      "room.tease": 'say "room"\ncall "check.tease"\nend',
+      "check.tease": "if not cameByCall { exit }\nend",
+    },
+  ])
+    assert.deepEqual(said(project(cameByCall, others), { warnings: ["TSV071"] }), [
+      "room",
+      "room",
+      "exit",
+    ]);
+  // A block may run while the code waits and leave first: here a timer that the goto does not stop.
+  assert.deepEqual(
+    said(
+      project(
+        'call "room.tease"\nlet t = timer(duration: 1 s, async: true, persist: true) { exit }\ngoto "room.tease"',
+        { "room.tease": 'say "room"\nwait 2 s\nend' },
       ),
       { warnings: ["TSV071"] },
     ),
