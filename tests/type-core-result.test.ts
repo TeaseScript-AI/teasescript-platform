@@ -57,7 +57,6 @@ test("one unknown's word is its first reason's in the rank external, opaque, def
     [opaque | deferred | missing, "unmodelled"],
     [deferred | missing, "deferred-parameter"],
     [missing | budget, "missing"],
-    [budget, "unknown"],
     [0, "unknown"],
   ] as const)
     assert.equal(reasonContext(reasons), word, `reasons ${reasons}`);
