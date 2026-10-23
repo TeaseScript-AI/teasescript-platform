@@ -9,7 +9,7 @@ import {
 } from "./expression-children.js";
 import { PlanControlFlow, type FlowEdge } from "./plan/control-flow.js";
 import { solveForward } from "./plan/dataflow.js";
-import type { CompiledFunctionDefinition, InstructionPlan } from "./plan/model.js";
+import type { InstructionPlan } from "./plan/model.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { runsOnItsOwn } from "./project-globals.js";
 import type { FileCallTarget } from "./semantic.js";
@@ -360,13 +360,14 @@ export class Reachability {
    * A `call` starts another file, so a call that can start the running file is an error (TSV072, V30 §29). Code runs in
    * the file whose top level runs it, also through the functions it calls where it can run: a function of the file, or a
    * global function, which runs in every file whose code calls it where it can run. Code of a file runs only in that
-   * file, so its call is checked also where it cannot run itself, as a call of the file it stands in is an error
-   * anywhere. A global function's code runs in a calling file for certain only where it runs whenever the function runs
-   * (see {@link #runsOnEntry}), through calls that do too. A call is an error where it can start a file its code runs in
-   * for certain, and a warning (TSV073) where only the run decides: where its code runs in that file only on some ways,
-   * where its tagged pick or reference decides, or where a timer, media, or button block runs its code, which runs
-   * later, while the file that started it or a file it called runs, or after it. The runtime checks every call (TSR069).
-   * `calls` holds each call by its transfer instruction.
+   * file, so a call there that can start the file is an error, also where it cannot run itself, as a call of the file it
+   * stands in is an error anywhere. A global function runs in a file for certain only through calls that run whenever
+   * their code runs, from the top of the file or the entry of a function (see {@link #runsOnEntry}), and its call is an
+   * error only where it can start such a file and runs whenever the function runs. Everywhere else only the run decides,
+   * and a call that may start a file its code runs in is a warning (TSV073): where a test, a default, or another way
+   * decides whether it runs there, where its tagged pick or reference decides, or where a timer, media, or button block
+   * runs its code, which runs later, while the file that started it or a file it called runs, or after it. The runtime
+   * checks every call (TSR069). `calls` holds each call by its transfer instruction.
    */
   public runningFileDiagnostics(calls: ReadonlyMap<number, FileCall>): Diagnostic[][] {
     const diagnostics = this.plan.files.map((): Diagnostic[] => []);
@@ -375,16 +376,20 @@ export class Reachability {
     const region = (index: number): number =>
       this.#flow.functionOf(index)?.id ?? -1 - this.#flow.fileOf(index);
     const onEntry = new Map<number, ReadonlySet<number>>();
-    // Whether the instruction at `index` runs in each file its code runs in, whenever that code runs there: in a file's
-    // top level and its functions, and where it runs whenever its global function runs.
-    const fixed = (index: number): boolean => {
+    // Whether the instruction at `index` runs whenever the code of its region runs: from the top of its file, or the
+    // entry of its function. A block runs later, so none of its code does.
+    const sure = (index: number): boolean => {
       const definition = this.#flow.functionOf(index);
-      if (definition === null || (!definition.global && definition.handler === null)) return true;
-      if (definition.handler !== null) return false;
-      let runs = onEntry.get(definition.id);
+      if (definition !== null && definition.handler !== null) return false;
+      const node = region(index);
+      let runs = onEntry.get(node);
       if (runs === undefined) {
-        runs = this.#runsOnEntry(definition);
-        onEntry.set(definition.id, runs);
+        const file = this.plan.files[this.#flow.fileOf(index)]!;
+        runs =
+          definition === null
+            ? this.#runsOnEntry(file.entryInstruction, file.rootEndInstruction)
+            : this.#runsOnEntry(definition.entryInstruction, definition.endInstruction);
+        onEntry.set(node, runs);
       }
       return runs.has(index);
     };
@@ -425,7 +430,7 @@ export class Reachability {
       if (this.#reached[index] === 0) return;
       if (instruction.kind === "callFunction") {
         add(callees, region(index), instruction.functionId);
-        if (fixed(index)) add(sureCallees, region(index), instruction.functionId);
+        if (sure(index)) add(sureCallees, region(index), instruction.functionId);
       }
       for (const handler of this.#flow.handlersOf(index)) runsLater(handler, index);
     });
@@ -445,14 +450,21 @@ export class Reachability {
     for (const [index, call] of calls) {
       const node = region(index);
       const files = running.get(node) ?? none;
-      const sure = fixed(index) ? (surely.get(node) ?? none) : none;
+      const definition = this.#flow.functionOf(index);
+      // A file's own code names the file it runs in; a global function, a file that runs it for certain.
+      const certainly =
+        definition === null || (!definition.global && definition.handler === null)
+          ? files
+          : definition.handler === null && sure(index)
+            ? (surely.get(node) ?? none)
+            : none;
       let certain: number | undefined;
       let guarded: number | undefined;
       let possible: number | undefined;
       for (const file of call.files ?? [...files].sort((left, right) => left - right)) {
         if (!files.has(file)) continue;
         const starts = call.starts(file);
-        if (starts === true && sure.has(file)) {
+        if (starts === true && certainly.has(file)) {
           certain = file;
           break;
         }
@@ -467,7 +479,6 @@ export class Reachability {
         start === undefined
       )
         continue;
-      const definition = this.#flow.functionOf(index);
       const global =
         definition?.global === true && definition.handler === null ? definition.name : null;
       const file = this.#flow.fileOf(index);
@@ -501,14 +512,14 @@ export class Reachability {
   }
 
   /**
-   * The instructions of a function that run whenever it runs: those from its entry up to the first that may go on more
-   * than one way, past the defaults of its parameters, which run only for an argument left out and then go on where a
-   * supplied argument does. A call counts as returning (ADR 0022 §4.3).
+   * The instructions of a region from `entry` up to `end` that run whenever it runs: those from its entry up to the
+   * first that may go on more than one way, past the defaults of a function's parameters, which run only for an
+   * argument left out and then go on where a supplied argument does. A call counts as returning (ADR 0022 §4.3).
    */
-  #runsOnEntry(definition: CompiledFunctionDefinition): ReadonlySet<number> {
+  #runsOnEntry(entry: number, end: number): ReadonlySet<number> {
     const runs = new Set<number>();
-    let index = definition.entryInstruction;
-    while (index < definition.endInstruction && !runs.has(index)) {
+    let index = entry;
+    while (index < end && !runs.has(index)) {
       runs.add(index);
       const instruction = this.plan.instructions[index]!;
       if (instruction.kind === "prepareParameterDefault") {
@@ -516,7 +527,7 @@ export class Reachability {
         continue;
       }
       const onward = this.#successors(index).filter(({ edge }) => ONWARD_EDGES.has(edge));
-      if (onward.length !== 1 || onward[0]!.node < definition.entryInstruction) break;
+      if (onward.length !== 1 || onward[0]!.node < entry) break;
       index = onward[0]!.node;
     }
     return runs;

@@ -329,6 +329,29 @@ test("a call whose file only the run decides warns, and fails when it starts the
     "lib.tease TSV073 This call can start 'main.tease', which calls global function 'visit', but the compiler cannot tell whether the call runs while 'main.tease' runs. A call starts another file, so the call fails if it does. If it can, call 'visit' only from other files, or put what it starts in a function.",
   ]);
   assert.deepEqual(said(supplied, { warnings: ["TSV073"] }), ["provided", "exit"]);
+  // So does a call of the global function that a file's own code makes only on some ways.
+  const visit = 'global function visit {\n    call "main.tease"\n    return "done"\n}';
+  for (const [files, outcome] of [
+    [
+      project('function display(text = visit()) { say text }\ndisplay("provided")\nexit', {
+        "lib.tease": visit,
+      }),
+      ["provided", "exit"],
+    ],
+    [
+      project('global inside = false\nvisit()\nsay "back"\nexit', {
+        "b.tease": 'if not inside { visit() }\nsay "b"\nend',
+        "lib.tease": 'global function visit {\n    inside = true\n    call "b.tease"\n}',
+      }),
+      ["b", "back", "exit"],
+    ],
+  ] as const) {
+    assert.deepEqual(
+      warned(files).map((line) => line.split(" ", 2).join(" ")),
+      ["lib.tease TSV073"],
+    );
+    assert.deepEqual(said(files, { warnings: ["TSV073"] }), outcome);
+  }
   // Where the known values rule the running file out, and references name only other files, the call runs.
   assert.deepEqual(
     said(
