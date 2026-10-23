@@ -275,12 +275,32 @@ test("a row exists exactly where the runtime evaluates the operator, with the ki
   assert.deepEqual(failures, []);
 });
 
+test("a number result follows V30 §4: an integer when every operand is one, a number otherwise and from `/`", () => {
+  // the runtime keeps no spelling, so its whole quotient cannot tell `integer` from `number` (`fitsResult`)
+  const numeric = OPERATOR_ROWS.filter(
+    (row) =>
+      row.result !== "boolean" &&
+      row.operands.every((kind) => kind === "integer" || kind === "number"),
+  );
+  for (const row of numeric)
+    assert.equal(
+      row.result,
+      row.operator !== "/" && row.operands.every((kind) => kind === "integer")
+        ? "integer"
+        : "number",
+      `${row.operator} ${row.operands.join(" ")}`,
+    );
+  // each of `+ - * / %` on the four pairs of number kinds, and `neg` on both
+  assert.equal(numeric.length, 22);
+});
+
 /**
- * Values of each kind that a row uses, the samples among them, where checks by value can fail: zero, a negative and a
- * fraction; calendar durations of two families, one with an exact offset, and zero; the empty text and list.
+ * Values of each kind that a row uses, the samples among them, where checks by value can fail: zero, a negative, a
+ * fraction and the largest number (a whole one, which scales a calendar duration's parts out of whole numbers);
+ * calendar durations of two families, one with an exact offset, and zero; the empty text and list.
  */
 const EDGES: Readonly<Partial<Record<ValueKind, readonly SerializableRuntimeValue[]>>> = {
-  integer: [6, 4, 0, -3],
+  integer: [6, 4, 0, -3, Number.MAX_VALUE],
   number: [2.5, 0.5, 0.3, -0.25],
   string: ["a", "b", ""],
   list: [
@@ -307,16 +327,6 @@ const EDGES: Readonly<Partial<Record<ValueKind, readonly SerializableRuntimeValu
   ...TEMPORAL,
 };
 
-/**
- * Rows the table takes by value although no value fails them: an integer factor keeps a calendar duration's parts
- * whole. Calendar scaling is one value-dependent row in TABLE F16 and the expectation set
- * (`cp9-cells/F16/scale-calendar`), whichever kind the factor has.
- */
-const BY_VALUE_WITHOUT_FAILURE = new Set([
-  "* integer calendarDuration",
-  "* calendarDuration integer",
-]);
-
 test("a row the runtime takes by value has values that fail its check of the kinds, and no other row has", () => {
   const failures: string[] = [];
   for (const row of OPERATOR_ROWS) {
@@ -336,7 +346,7 @@ test("a row the runtime takes by value has values that fail its check of the kin
     }
     if (failedByValue && !row.byValue)
       failures.push(`${what}: the runtime fails some values with TSR009, the row is not by value`);
-    if (!failedByValue && row.byValue && !BY_VALUE_WITHOUT_FAILURE.has(what))
+    if (!failedByValue && row.byValue)
       failures.push(`${what}: the row is by value, no value fails it`);
   }
   assert.deepEqual(failures, []);
