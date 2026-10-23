@@ -2037,7 +2037,7 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 101 | Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `setFallback` instruction, and a `transfer` destination names a file's entry, never a label; plan validation previously accepted both. |
+| Instruction plan | 101 | Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `setFallback` instruction, a `transfer` destination names a file's entry, never a label, and no `goto` stands in a global function or its blocks; plan validation previously accepted all three. |
 | Runtime snapshot | 89 | Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `fallback` field, a script reference is `{ kind: "script", path }` without `label`, and an activation root's `entry` is its file's entry, never a label; validation previously accepted all three. |
 | Checkpoint | 125 | The plan and snapshot contracts of files entered at their top. |
 

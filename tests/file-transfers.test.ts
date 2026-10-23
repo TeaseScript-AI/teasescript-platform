@@ -790,6 +790,30 @@ test("a plan enters a file only at the start of its root region", () => {
   );
 });
 
+test("a plan's global function has no label to go to", () => {
+  const plan = compiled(
+    project("skip()\nexit", {
+      "lib.tease": 'label later\nexit\nglobal function skip { say "skip" }',
+    }),
+  );
+  const lib = plan.files[1]!;
+  const skip = plan.functions.find((definition) => definition.name === "skip")!;
+  const at = plan.instructions.findIndex(
+    (instruction, index) => index >= skip.bodyEntryInstruction && instruction.kind === "say",
+  );
+  const errors = validateInstructionPlan({
+    ...plan,
+    instructions: plan.instructions.map((instruction, index) =>
+      index === at
+        ? { kind: "goto", target: lib.labels[0]!.instruction, span: instruction.span }
+        : instruction,
+    ),
+  }).errors.map((error) => error.message);
+  assert.ok(
+    errors.includes("A goto in a global function or its blocks has no label to continue at."),
+  );
+});
+
 test("a timer block may change a loop condition while a called file runs", () => {
   assert.deepEqual(
     said(

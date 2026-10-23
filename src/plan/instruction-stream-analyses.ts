@@ -495,6 +495,18 @@ function validateInstructionControlFlowRegions(
               `${instructionPath}.target`,
             ),
           );
+        } else if (
+          region.kind === "function" &&
+          index.functionsById.get(region.functionId)?.global === true
+        ) {
+          // A global function runs in the file that called it, so no label is its own (V30 §11).
+          errors.push(
+            planError(
+              "TSC002",
+              "A goto in a global function or its blocks has no label to continue at.",
+              `${instructionPath}.target`,
+            ),
+          );
         }
         return;
       case "transfer":
