@@ -275,7 +275,17 @@ export const DIAGNOSTIC_CODES = {
     },
   },
   TSV056: entry(["name pass"], "error", "Global function that uses names of its file", DOCS.values),
-  TSV057: entry(["name pass"], "error", "Invalid file target", DOCS.values),
+  TSV057: {
+    ...entry(["name pass", "plan analysis"], "error", "Invalid file target", DOCS.values),
+    shared: {
+      parts: [
+        "a file target that names no file the `goto` or `call` can start, among them a `goto` to a file of " +
+          "declarations only, by its path or a `script(...)` of its path written out (`declarationsOnlyMessage`)",
+        "the same rule with the same text for a `goto` to a reference when the references of the project can name " +
+          "only that file",
+      ],
+    },
+  },
   TSV058: entry(["plan analysis"], "warning", "Loop with no way out", DOCS.values),
   TSV059: entry(["type checker"], "error", "Invalid camera view member", DOCS.values),
   TSV061: entry(["compiler"], "warning", "Wait or timer written in days or weeks", DOCS.values),
@@ -299,6 +309,12 @@ export const DIAGNOSTIC_CODES = {
     ["plan analysis"],
     "warning",
     "`call` that may start the running file",
+    DOCS.values,
+  ),
+  TSV074: entry(
+    ["plan analysis"],
+    "warning",
+    "`goto` that may lead to a file of declarations only",
     DOCS.values,
   ),
 

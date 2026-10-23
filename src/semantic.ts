@@ -62,6 +62,7 @@ import { noteSharing, rootName, type Sharing } from "./operation-checks.js";
 import { changesEntries } from "./dict-operations.js";
 import { changesElements, reordersList } from "./list-methods.js";
 import {
+  declarationsOnlyMessage,
   globMatches,
   isPathGlob,
   packageGlobProblem,
@@ -1332,7 +1333,7 @@ class SemanticValidator {
     if (transfer !== "callFileStatement" && this.project.declarationsOnly.has(target.path)) {
       this.#report(
         semanticCode.invalidFileTarget,
-        `'${target.path}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`,
+        declarationsOnlyMessage(target.path),
         target.pathSpan,
       );
       return false;
@@ -1388,7 +1389,7 @@ class SemanticValidator {
         : !this.project.labels.has(path)
           ? `The project has no file '${path}'. Paths start at the package root, such as "rooms/hall.tease".`
           : transfer === "gotoStatement" && this.project.declarationsOnly.has(path)
-            ? `'${path}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`
+            ? declarationsOnlyMessage(path)
             : null;
     if (problem !== null) {
       this.#report(semanticCode.invalidFileTarget, problem, pathArgument.span);

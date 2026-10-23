@@ -249,9 +249,18 @@ test("a call whose file only the run decides warns, and fails when it starts the
     `TSR069 This call cannot start '${path}', because that file is already running. To run a part of a file and come back, put that part in a function and write the function's name with '()' instead.`;
   const later = (where: string, path: string) =>
     `This call runs later, from the timer on ${where}, so the compiler cannot tell whether '${path}' is already running then. If it is, the call fails. If that can happen, stop the timer while '${path}' runs, or put what '${path}' does in a function and write the function's name with '()' instead.`;
-  // A computed target.
+  // A computed target. Where the references of the project can name only the running file, it starts that file.
+  assert.deepEqual(
+    warned(
+      project('call "a.tease"\nexit', { "a.tease": 'let me = script("a.tease")\ncall (me)\nend' }),
+    ),
+    [
+      "a.tease TSV072 This call starts its own file, 'a.tease', which is already running. To run a part of it and come back, put that part in a function and write the function's name with '()' instead. To continue at a label without coming back, write 'goto' and the label.",
+    ],
+  );
   const computed = project('call "a.tease"\nexit', {
-    "a.tease": 'let me = script("a.tease")\ncall (me)\nend',
+    "a.tease": 'let rooms = [script("a.tease"), script("b.tease")]\ncall (rooms[0])\nend',
+    "b.tease": "end",
   });
   assert.deepEqual(warned(computed), [
     "a.tease TSV073 This call's file is known only when it runs, so the compiler cannot tell whether it is its own file, 'a.tease', which is already running. If it is, the call fails. If it can be, put the part to run in a function and write the function's name with '()' instead.",
@@ -559,21 +568,24 @@ test("an end with no call to return to is an error on every way the compiler can
     ),
     ["b", "back", "exit"],
   );
-  // A computed target hides the way: a warning, and the end fails if no call waits when it runs.
-  const files = project('let next = script("scene.tease")\ngoto (next)', {
-    "scene.tease": 'say "scene"\nend',
-    "done.tease": "exit",
-  });
-  assert.deepEqual(
-    diagnostics(files[0]!.source, { "scene.tease": files[1]!.source, "done.tease": "exit" }),
-    [
-      [
-        "scene.tease",
-        "TSV071",
-        "The 'goto' on line 2 of 'main.tease' picks its file when it runs, so the compiler cannot tell whether this 'end' has a call to return to then. Without one, the 'end' fails. If that 'goto' can lead here, write 'call' instead of 'goto' there, or use 'exit' or 'goto' here instead of 'end'.",
-      ],
-    ],
+  // So does a reference when the references of the project can name only that file.
+  assert.deepEqual(diagnostics('let next = script("scene.tease")\ngoto (next)', scene), [
+    ["scene.tease", "TSV070", noCall],
+  ]);
+  // A computed target that may start other files too hides the way: a warning, and the end fails if no call waits when
+  // it runs.
+  const others = { "scene.tease": 'say "scene"\nend', "done.tease": "exit" };
+  const files = project(
+    'let rooms = [script("scene.tease"), script("done.tease")]\ngoto (rooms[0])',
+    others,
   );
+  assert.deepEqual(diagnostics(files[0]!.source, others), [
+    [
+      "scene.tease",
+      "TSV071",
+      "The 'goto' on line 2 of 'main.tease' picks its file when it runs, so the compiler cannot tell whether this 'end' has a call to return to then. Without one, the 'end' fails. If that 'goto' can lead here, write 'call' instead of 'goto' there, or use 'exit' or 'goto' here instead of 'end'.",
+    ],
+  ]);
   const plan = compileProject(files).plan!;
   const ended = run(plan, createImmediatePacingRuntimeSnapshot(plan)).events;
   assert.deepEqual(outputs(ended), ["scene", "failure TSR066"]);

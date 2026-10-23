@@ -30,6 +30,14 @@ export function packageAssetPathProblem(path: string): string | null {
   return null;
 }
 
+/**
+ * Why a `goto` cannot go to `path`, a file of declarations only, which runs nothing on its own (V30 §29): one text for
+ * the compile error and the runtime check.
+ */
+export function declarationsOnlyMessage(path: string): string {
+  return `'${path}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`;
+}
+
 /** Orders project files: `main.tease` first, then the other paths by UTF-16 code unit. */
 export function compareProjectPaths(left: string, right: string): number {
   if (left === right) return 0;

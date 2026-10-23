@@ -33,6 +33,7 @@ import {
 } from "../background/permanent-buttons.js";
 import { describeValue } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
+import { declarationsOnlyMessage } from "../../project-paths.js";
 
 /*
  * Transfers (ADR 0022 §5). Each entry into a file is an activation with its own top-level variables, in a root scope.
@@ -197,7 +198,7 @@ function resolveComputed(
     file < 0
       ? `This ${keyword} names the file '${messageText(path)}', but the project has no such file. Paths start at the package root, such as "rooms/hall.tease".`
       : keyword === "goto" && runsNothing(plan, file)
-        ? `'${messageText(path)}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`
+        ? declarationsOnlyMessage(messageText(path))
         : null;
   if (problem !== null) throw new RuntimeFault("TSR069", problem, copySpan(span));
   return { file, target: plan.files[file]!.entryInstruction };

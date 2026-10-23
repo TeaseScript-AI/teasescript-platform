@@ -157,9 +157,16 @@ test("a computed target that names no file, or a file that runs nothing, fails w
   assert.deepEqual(failure('let room = "cellar"\ngoto script("rooms/${room}.tease")'), [
     `failure TSR069: This goto names the file 'rooms/cellar.tease', but the project has no such file. Paths start at the package root, such as "rooms/hall.tease".`,
   ]);
-  assert.deepEqual(failure('let path = "helpers.tease"\nlet next = script(path)\ngoto (next)'), [
-    "failure TSR069: 'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.",
-  ]);
+  // A path computed otherwise may name any file, so the goto warns that it may name a file that runs nothing.
+  assert.deepEqual(
+    said(project('let path = "helpers.tease"\nlet next = script(path)\ngoto (next)', others), {
+      ending: "failed",
+      warnings: ["TSV074"],
+    }),
+    [
+      "failure TSR069: 'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.",
+    ],
+  );
   // Calling such a file runs nothing and returns at once. The compiler cannot tell which file the path names, so the
   // call warns that it may start the running file.
   assert.deepEqual(
@@ -168,10 +175,50 @@ test("a computed target that names no file, or a file that runs nothing, fails w
     }),
     ["back", "exit"],
   );
-  // A loaded value that is not a reference is no target.
-  assert.deepEqual(failure('let next = load "ne" + "xt", default: null\ngoto (next)'), [
-    "failure TSR058: goto needs a script reference here, made with script(...), but this is null.",
+  // A loaded value that is not a reference is no target. An earlier session may have saved a reference to any file.
+  assert.deepEqual(
+    said(project('let next = load "ne" + "xt", default: null\ngoto (next)', others), {
+      ending: "failed",
+      warnings: ["TSV074"],
+    }),
+    [
+      "failure TSR058: goto needs a script reference here, made with script(...), but this is null.",
+    ],
+  );
+});
+
+test("a goto to a reference that can name a file of declarations only warns, or is an error where it names only that file", () => {
+  const others = { ...HALL, "helpers.tease": 'function greet { say "hi" }' };
+  const check = (main: string): [string, string][] =>
+    diagnostics(project(main, others)).map(([, code, message]) => [code, message]);
+  const runsNothing =
+    "'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.";
+  // V30 §29: where the references of the project can name only that file, as for a script(...) of its path.
+  assert.deepEqual(
+    check('if debugMode { exit }\nlet next = script("helpers.tease")\ngoto (next)'),
+    [["TSV057", runsNothing]],
+  );
+  // Where they may name another file too, the run decides, and the goto fails if it goes there.
+  const rooms = 'let rooms = [script("helpers.tease"), script("rooms/hall.tease")]\n';
+  assert.deepEqual(check(`${rooms}goto (rooms[0])`), [
+    [
+      "TSV074",
+      "The file of this 'goto' is known only when it runs, so the compiler cannot tell whether it is 'helpers.tease', which holds declarations only and runs nothing. If it is, the 'goto' fails. If it can be, make sure it names a file that runs something.",
+    ],
   ]);
+  assert.deepEqual(
+    said(project(`${rooms}goto (rooms[0])`, others), { ending: "failed", warnings: ["TSV074"] }),
+    [`failure TSR069: ${runsNothing}`],
+  );
+  assert.deepEqual(said(project(`${rooms}goto (rooms[1])`, others), { warnings: ["TSV074"] }), [
+    "hall",
+    "exit",
+  ]);
+  // A call of such a file runs nothing and returns.
+  assert.deepEqual(
+    said(project('let next = script("helpers.tease")\ncall (next)\nsay "back"\nexit', others)),
+    ["back", "exit"],
+  );
 });
 
 test("a script(...) with literal text is checked like a file target, and a computed target needs a reference", () => {

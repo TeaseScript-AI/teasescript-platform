@@ -9,9 +9,11 @@ import {
 } from "./expression-children.js";
 import { PlanControlFlow, type FlowEdge } from "./plan/control-flow.js";
 import { solveForward } from "./plan/dataflow.js";
-import type { InstructionPlan } from "./plan/model.js";
+import type { ExpressionPlan, InstructionPlan, LiteralExpressionPlan } from "./plan/model.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { runsOnItsOwn } from "./project-globals.js";
+import { declarationsOnlyMessage } from "./project-paths.js";
+import { runsNothing } from "./runtime/scopes/activation-validation.js";
 import type { FileCallTarget } from "./semantic.js";
 import { CORE_RUNTIME_BUILTINS } from "./language-facts.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
@@ -23,9 +25,9 @@ import type { DeadWays } from "./way-facts.js";
  * a call that can run reaches it; and in a timer, media, or button block where code that can run creates it (ADR 0022
  * §3.4). A call counts as returning, also of a function that never returns, so the ending after it is still written out
  * (ADR 0022 §4.3). The checks that follow it: the endings of files and of the session (TSV052, TSV053), an `end` with
- * no file call to return to (TSV070, TSV071), a `call` that can start the running file (TSV072, TSV073), loops with no
- * way out (TSV058), code that never runs (TSV065, TSV066), and the flow of statements that the check of variables at
- * labels follows (TSV054).
+ * no file call to return to (TSV070, TSV071), a `call` that can start the running file (TSV072, TSV073), a computed
+ * `goto` that can lead to a file of declarations only (TSV057, TSV074), loops with no way out (TSV058), code that never
+ * runs (TSV065, TSV066), and the flow of statements that the check of variables at labels follows (TSV054).
  */
 
 /**
@@ -302,10 +304,11 @@ export class Reachability {
 
   /**
    * The way of each computed target for the check of waiting calls (see {@link pendingCallDiagnostics}). A
-   * `script(...)` of a path written out names its file, which the check follows like a file target. Any other target
-   * leads to a node of its own after the instructions, a hub, with a way into each file it may start: those of its
-   * tagged pick, or those any reference may name. Targets that may start the same files share one, by the list of files
-   * `picks` shares, so the ways grow with the files, not with the targets times the files.
+   * `script(...)` of a path written out names its file, which the check follows like a file target, and so does a
+   * reference when the references of the project can name only one file (see {@link knownReferenceFile}). Any other
+   * target leads to a node of its own after the instructions, a hub, with a way into each file it may start: those of
+   * its tagged pick, or those any reference may name. Targets that may start the same files share one, by the list of
+   * files `picks` shares, so the ways grow with the files, not with the targets times the files.
    */
   #computedWays(
     picks: ReadonlyMap<number, readonly number[]>,
@@ -316,6 +319,7 @@ export class Reachability {
   } {
     const count = this.plan.instructions.length;
     const files = new Map(this.plan.files.map((file, index) => [file.path, index]));
+    const known = knownReferenceFile(referenced);
     const targets = new Map<number, { readonly node: number; readonly edge: string }>();
     const hubs: (readonly number[])[] = [];
     // By the list of files, which `picks` shares; `null` for the files any other reference may name.
@@ -336,24 +340,74 @@ export class Reachability {
     this.plan.instructions.forEach((instruction, index) => {
       if (instruction.kind !== "transfer" || !("value" in instruction.destination)) return;
       const value = instruction.destination.value;
-      const path =
-        value.kind === "call" &&
-        value.callee.kind === "identifier" &&
-        value.callee.name === "script" &&
-        value.arguments.length === 1 &&
-        value.arguments[0]!.value.kind === "literal"
-          ? value.arguments[0]!.value.value
-          : undefined;
+      const path = writtenPath(value);
       if (path !== undefined) {
         const file = typeof path === "string" ? files.get(path) : undefined;
         if (file !== undefined)
           targets.set(index, { node: this.plan.files[file]!.entryInstruction, edge: "transfer" });
         return;
       }
+      if (value.kind !== "tagQuery" && known !== undefined) {
+        targets.set(index, { node: this.plan.files[known]!.entryInstruction, edge: "transfer" });
+        return;
+      }
       const node = hub((value.kind === "tagQuery" ? picks.get(index) : undefined) ?? null);
       targets.set(index, { node, edge: "computed" });
     });
     return { targets, hubs };
+  }
+
+  /**
+   * A `goto` to a file of declarations only ends nowhere, so it fails (V30 §29). The name pass reports one whose
+   * `script(...)` names its file in text written out, and a tagged pick never picks such a file. For any other computed
+   * target, the files that the references of the project may name decide, which `referenced` gives, `null` for every
+   * file: a `goto` whose one such file runs nothing is an error (TSV057, with the name pass's text), and one that may
+   * lead to such a file is a warning (TSV074), which the runtime checks (TSR069). Like the name pass, this also reports
+   * a `goto` that never runs.
+   */
+  public computedGotoDiagnostics(referenced: () => readonly number[] | null): Diagnostic[][] {
+    const diagnostics = this.plan.files.map((): Diagnostic[] => []);
+    // The same for every such goto, so found once: a file of declarations only it may lead to, and whether it must.
+    let found: { readonly file: number | undefined; readonly known: boolean } | undefined;
+    this.plan.instructions.forEach((instruction, index) => {
+      if (
+        instruction.kind !== "transfer" ||
+        instruction.mode !== "goto" ||
+        !("value" in instruction.destination)
+      )
+        return;
+      const value = instruction.destination.value;
+      if (value.kind === "tagQuery" || writtenPath(value) !== undefined) return;
+      if (found === undefined) {
+        const files = referenced();
+        const known = knownReferenceFile(files);
+        found = {
+          file: (known !== undefined ? [known] : (files ?? [...this.plan.files.keys()])).find(
+            (file) => runsNothing(this.plan, file),
+          ),
+          known: known !== undefined,
+        };
+      }
+      if (found.file === undefined) return;
+      const path = this.plan.files[found.file]!.path;
+      const span = planLocationToSourceSpan(value.span);
+      diagnostics[this.#flow.fileOf(index)]!.push(
+        found.known
+          ? createDiagnostic(
+              DiagnosticSeverity.Error,
+              "TSV057",
+              declarationsOnlyMessage(path),
+              span,
+            )
+          : createDiagnostic(
+              DiagnosticSeverity.Warning,
+              "TSV074",
+              `The file of this 'goto' is known only when it runs, so the compiler cannot tell whether it is '${path}', which holds declarations only and runs nothing. If it is, the 'goto' fails. If it can be, make sure it names a file that runs something.`,
+              span,
+            ),
+      );
+    });
+    return diagnostics;
   }
 
   /**
@@ -725,6 +779,25 @@ function laterCallMessage(
   return path !== null
     ? `This call runs later, ${block.when}, so the compiler cannot tell whether '${path}' is already running then. If it is, the call fails. If that can happen, ${block.stop} while '${path}' runs, or put what '${path}' does in a function and write the function's name with '()' instead.`
     : `This call runs later, ${block.when}, so the compiler cannot tell whether the file it starts is already running then. If it is, the call fails. If that can happen, ${block.stop} while such a file runs.`;
+}
+
+/**
+ * The one file that a computed target's reference can name, when the references of the project can name only that
+ * file (`referenced`, see `referencedFiles` in `compiler.ts`): such a target starts it, if it starts a file at all.
+ */
+export function knownReferenceFile(referenced: readonly number[] | null): number | undefined {
+  return referenced?.length === 1 ? referenced[0] : undefined;
+}
+
+/** The path of a computed target that is a `script(...)` of a path written out, which names its file; else none. */
+function writtenPath(value: ExpressionPlan): LiteralExpressionPlan["value"] | undefined {
+  return value.kind === "call" &&
+    value.callee.kind === "identifier" &&
+    value.callee.name === "script" &&
+    value.arguments.length === 1 &&
+    value.arguments[0]!.value.kind === "literal"
+    ? value.arguments[0]!.value.value
+    : undefined;
 }
 
 /** For each index, how many of the entries before it are set; one more count at the end, for all of them. */
