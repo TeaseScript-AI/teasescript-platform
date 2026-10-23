@@ -14,6 +14,7 @@ import {
 import { executeInstruction, run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { pressPermanentButton } from "../src/runtime/operations/press-permanent-button.js";
 import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import { createXorShift32State, nextXorShift32 } from "../src/runtime/random/random.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -232,6 +233,49 @@ test("a call that would start the running file fails when it runs", () => {
   );
 });
 
+test("a block runs later, so its end only warns and its call of a file is checked when it runs", () => {
+  const press = (plan: InstructionPlan, snapshot: RuntimeSnapshot) => {
+    const pressed = pressPermanentButton(plan, snapshot, 1);
+    assert.equal(pressed.outcome.kind, "pressed");
+    const after = run(plan, pressed.snapshot);
+    return [...pressed.events, ...after.events];
+  };
+  // A Skip button of main.tease ends the file that main.tease called, while it waits.
+  const skip = compileProject(
+    project('let skip = showPermanentButton "Skip" { end }\ncall "scene.tease"\nsay "back"\nexit', {
+      "scene.tease": 'say "scene"\nwait 2 s\nsay "never"\nend',
+    }),
+  );
+  assert.deepEqual(
+    skip.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
+    [
+      [
+        "TSV071",
+        "The block that line 1 starts runs later, so the compiler cannot tell whether a call waits for this end when it runs. Without one, the end fails. If the block can run while no file call waits, use exit or goto here instead of end.",
+      ],
+    ],
+  );
+  const waiting = run(skip.plan!, createImmediatePacingRuntimeSnapshot(skip.plan!));
+  assert.deepEqual(outputs([...waiting.events, ...press(skip.plan!, waiting.snapshot)]), [
+    "scene",
+    "back",
+    "exit",
+  ]);
+  // A Replay button that a called file shows calls that file again once main.tease runs.
+  const replay = compiled(
+    project('call "scene.tease"\nwait 2 s\nexit', {
+      "scene.tease": 'say "scene"\nsetup()\nend',
+      "lib.tease":
+        'global function setup {\n    let replay = showPermanentButton "Replay", persist: true { call "scene.tease" }\n}',
+    }),
+  );
+  const shown = run(replay, createImmediatePacingRuntimeSnapshot(replay));
+  assert.deepEqual(outputs([...shown.events, ...press(replay, shown.snapshot)]), [
+    "scene",
+    "scene",
+  ]);
+});
+
 test("a file target names no label, and a global function goes to no label of its file", () => {
   const diagnostics = (main: string, others: Record<string, string> = {}): [string, string][] =>
     compileProject(project(main, others)).diagnostics.map((diagnostic) => [
@@ -328,15 +372,21 @@ test("an end with no call to return to is an error on every way the compiler can
     diagnostics('goto script("scene.tease")', scene).map(([path, code]) => [path, code]),
     [["scene.tease", "TSV070"]],
   );
-  // A tagged pick may start only the files whose tags it may match.
+  // A tagged pick may start only the files whose tags it may match, by its tag tests and literal tag lists.
   const tagged = (tags: string, source: string) => `---\ntags: "${tags}"\n---\n${source}`;
-  assert.deepEqual(
-    diagnostics('goto tagged "finale"', {
-      "finale.tease": tagged("finale", "exit"),
-      "scene.tease": tagged("scene", "end"),
-    }),
-    [],
-  );
+  for (const pick of [
+    'goto tagged "finale"',
+    'goto tagged all: ["finale"]',
+    'goto tagged none: ["scene"]',
+  ])
+    assert.deepEqual(
+      diagnostics(pick, {
+        "finale.tease": tagged("finale", "exit"),
+        "scene.tease": tagged("scene", "end"),
+      }),
+      [],
+      pick,
+    );
   // A goto keeps the call that waits for the file it leaves.
   assert.deepEqual(
     said(

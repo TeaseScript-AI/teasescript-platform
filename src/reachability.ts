@@ -9,16 +9,9 @@ import {
 } from "./expression-children.js";
 import { PlanControlFlow, type FlowEdge } from "./plan/control-flow.js";
 import { solveForward } from "./plan/dataflow.js";
-import type {
-  ExpressionPlan,
-  InstructionPlan,
-  PlanFile,
-  TagQueryExpressionPlan,
-} from "./plan/model.js";
+import type { InstructionPlan } from "./plan/model.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { runsOnItsOwn } from "./project-globals.js";
-import { globMatches, isPathGlob } from "./project-paths.js";
-import { evaluateTagSteps } from "./tag-query.js";
 import { CORE_RUNTIME_BUILTINS } from "./language-facts.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import type { DeadWays } from "./way-facts.js";
@@ -207,43 +200,62 @@ export class Reachability {
   /**
    * An `end` returns to the file that called the running one (V30 §30). The ways from the start of the session follow
    * which file calls are waiting: a `call` makes one wait, and a `goto` keeps those that wait. An `end` that a way
-   * reaches with none waiting is an error (TSV070), also when another way reaches it through a call. Where only a
-   * computed target, which may start any file, leads there with none waiting, it is a warning (TSV071), and the `end`
-   * fails if that happens. The `end` that closes a file's top level is the ending check's (TSV052).
+   * reaches with none waiting is an error (TSV070), also when another way reaches it through a call. Where only a way
+   * the compiler cannot follow leads there with none waiting, it is a warning (TSV071), and the `end` fails if that
+   * happens: a computed target, which may start any file, or the files `picks` gives for a tagged pick, by instruction;
+   * and a timer, media, or button block, which runs later, while the file that started it or a file it called runs, or
+   * after it. The `end` that closes a file's top level is the ending check's (TSV052).
    */
-  public pendingCallDiagnostics(): Diagnostic[][] {
+  public pendingCallDiagnostics(picks: ReadonlyMap<number, readonly number[]>): Diagnostic[][] {
     const diagnostics = this.plan.files.map((): Diagnostic[] => []);
+    const closing = new Set(this.plan.files.map((file) => file.rootEndInstruction - 1));
+    if (
+      !this.plan.instructions.some(
+        (instruction, index) => instruction.kind === "end" && !closing.has(index),
+      )
+    )
+      return diagnostics;
+    const count = this.plan.instructions.length;
+    const ways = this.#computedWays(picks);
     const states = solveForward<CallsWaiting, string>(
       {
-        nodeCount: this.plan.instructions.length,
-        successors: (index) => this.#waysWithCalls(index),
+        nodeCount: count + ways.hubs.length,
+        successors: (node) => {
+          if (node >= count)
+            return ways.hubs[node - count]!.map((entry) => ({ node: entry, edge: "hub" }));
+          const out = this.#successors(node);
+          const computed = ways.targets.get(node);
+          if (computed !== undefined) out.push(computed);
+          return out;
+        },
         join: (left, right) => ({
           none: left.none ?? right.none,
           hidden: left.hidden ?? right.hidden,
         }),
         equals: (left, right) => left.none === right.none && left.hidden === right.hidden,
-        transfer: (index, edge, state) => {
-          const instruction = this.plan.instructions[index]!;
-          if (instruction.kind !== "transfer" || (edge !== "transfer" && edge !== "computed"))
+        transfer: (node, edge, state) => {
+          const waitsForNone = state.none !== null || state.hidden !== null;
+          if (edge === "handler") return waitsForNone ? { none: null, hidden: node } : state;
+          const instruction = this.plan.instructions[node];
+          if (instruction?.kind !== "transfer" || (edge !== "transfer" && edge !== "computed"))
             return state;
           if (instruction.mode === "call") return { none: null, hidden: null };
           // A goto keeps the calls that wait; with none, the file it starts has none either.
           if (edge === "transfer")
-            return { none: state.none === null ? null : index, hidden: state.hidden };
-          return {
-            none: null,
-            hidden: state.none === null && state.hidden === null ? null : index,
-          };
+            return { none: state.none === null ? null : node, hidden: state.hidden };
+          return { none: null, hidden: waitsForNone ? node : null };
         },
       },
       [[this.plan.files[0]!.startInstruction, { none: SESSION_START, hidden: null }]],
     );
-    const closing = new Set(this.plan.files.map((file) => file.rootEndInstruction - 1));
-    states.forEach((state, index) => {
+    for (let index = 0; index < count; index += 1) {
+      const state = states[index];
       const instruction = this.plan.instructions[index]!;
-      if (state === null || instruction.kind !== "end" || closing.has(index)) return;
-      if (state.none === null && state.hidden === null) return;
+      if (state === null || state === undefined || instruction.kind !== "end" || closing.has(index))
+        continue;
+      if (state.none === null && state.hidden === null) continue;
       const file = this.#flow.fileOf(index);
+      const fix = "use exit or goto here instead of end";
       diagnostics[file]!.push(
         createDiagnostic(
           state.none !== null ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
@@ -251,54 +263,68 @@ export class Reachability {
           state.none === SESSION_START
             ? "No call waits for this end, because the session starts in main.tease without one, so there is nothing to return to. Use exit to finish the session, or goto to continue in another file."
             : state.none !== null
-              ? `No call waits for this end when the goto on ${this.#where(state.none, file)} leads here, so there is nothing to return to. Write call there to come back after it, or use exit or goto here instead of end.`
-              : `The goto on ${this.#where(state.hidden!, file)} picks its file when it runs, so the compiler cannot tell whether a call waits for this end then. Without one, the end fails. Write call there to come back after it, or use exit or goto here instead of end.`,
+              ? `No call waits for this end when the goto on ${this.#where(state.none, file)} leads here, so there is nothing to return to. Write call there to come back after it, or ${fix}.`
+              : this.plan.instructions[state.hidden!]!.kind === "transfer"
+                ? `The goto on ${this.#where(state.hidden!, file)} picks its file when it runs, so the compiler cannot tell whether a call waits for this end then. Without one, the end fails. Write call there to come back after it, or ${fix}.`
+                : `The block that ${this.#where(state.hidden!, file)} starts runs later, so the compiler cannot tell whether a call waits for this end when it runs. Without one, the end fails. If the block can run while no file call waits, ${fix}.`,
           planLocationToSourceSpan(instruction.span),
         ),
       );
-    });
+    }
     return diagnostics;
   }
 
   /**
-   * The ways on from the instruction at `index` for the check of waiting calls: those of {@link #successors}, and from
-   * a computed target into each file it may start. A `script(...)` of literal text names its file, which the check
-   * follows like a file target; a pick by tags may start a file that its tag tests allow; any other reference any file.
+   * The way of each computed target for the check of waiting calls (see {@link pendingCallDiagnostics}). A
+   * `script(...)` of a path written out names its file, which the check follows like a file target. Any other target
+   * leads to a node of its own after the instructions, a hub, with a way into each file it may start; targets that may
+   * start the same files share one, so the ways grow with the files, not with the targets times the files.
    */
-  #waysWithCalls(index: number): { readonly node: number; readonly edge: string }[] {
-    const ways = this.#successors(index);
-    const instruction = this.plan.instructions[index]!;
-    if (instruction.kind !== "transfer" || !("value" in instruction.destination)) return ways;
-    let computed = this.#computedWays.get(index);
-    if (computed === undefined) {
-      computed = this.#computedTargets(instruction.destination.value);
-      this.#computedWays.set(index, computed);
-    }
-    return [...ways, ...computed];
-  }
-
-  /** The ways of a computed target, once for each instruction (see {@link #waysWithCalls}). */
-  readonly #computedWays = new Map<number, readonly { node: number; edge: string }[]>();
-
-  #computedTargets(value: ExpressionPlan): readonly { node: number; edge: string }[] {
-    const path =
-      value.kind === "call" &&
-      value.callee.kind === "identifier" &&
-      value.callee.name === "script" &&
-      value.arguments.length === 1 &&
-      value.arguments[0]!.value.kind === "literal"
-        ? value.arguments[0]!.value.value
-        : undefined;
-    const files =
-      path !== undefined
-        ? this.plan.files.filter((file) => file.path === path)
-        : value.kind === "tagQuery"
-          ? this.plan.files.filter((file) => file.tags !== null && mayPick(value, file))
-          : this.plan.files;
-    return files.map((file) => ({
-      node: file.entryInstruction,
-      edge: path === undefined ? "computed" : "transfer",
-    }));
+  #computedWays(picks: ReadonlyMap<number, readonly number[]>): {
+    readonly targets: ReadonlyMap<number, { readonly node: number; readonly edge: string }>;
+    readonly hubs: readonly (readonly number[])[];
+  } {
+    const count = this.plan.instructions.length;
+    const files = new Map(this.plan.files.map((file, index) => [file.path, index]));
+    const targets = new Map<number, { readonly node: number; readonly edge: string }>();
+    const hubs: (readonly number[])[] = [];
+    const hubOf = new Map<string, number>();
+    const hub = (key: string, entries: () => readonly number[]): number => {
+      let node = hubOf.get(key);
+      if (node === undefined) {
+        node = count + hubs.length;
+        hubs.push(entries());
+        hubOf.set(key, node);
+      }
+      return node;
+    };
+    this.plan.instructions.forEach((instruction, index) => {
+      if (instruction.kind !== "transfer" || !("value" in instruction.destination)) return;
+      const value = instruction.destination.value;
+      const path =
+        value.kind === "call" &&
+        value.callee.kind === "identifier" &&
+        value.callee.name === "script" &&
+        value.arguments.length === 1 &&
+        value.arguments[0]!.value.kind === "literal"
+          ? value.arguments[0]!.value.value
+          : undefined;
+      if (path !== undefined) {
+        const file = typeof path === "string" ? files.get(path) : undefined;
+        if (file !== undefined)
+          targets.set(index, { node: this.plan.files[file]!.entryInstruction, edge: "transfer" });
+        return;
+      }
+      const picked = value.kind === "tagQuery" ? picks.get(index) : undefined;
+      const node =
+        picked === undefined
+          ? hub("", () => this.plan.files.map((file) => file.entryInstruction))
+          : hub(picked.join(","), () =>
+              picked.map((file) => this.plan.files[file]!.entryInstruction),
+            );
+      targets.set(index, { node, edge: "computed" });
+    });
+    return { targets, hubs };
   }
 
   /** Where the instruction at `index` stands, as seen from the file `from`: `line 3` or `line 3 of main.tease`. */
@@ -477,25 +503,6 @@ interface CallsWaiting {
 
 /** The start of the session, which runs `main.tease` with no call waiting. */
 const SESSION_START = -1;
-
-/**
- * Whether a pick by tags may choose a file, by its `from:` and its tag tests: a comparison or tag list is computed, so
- * it may hold.
- */
-function mayPick(query: TagQueryExpressionPlan, file: PlanFile): boolean {
-  if (
-    query.from !== null &&
-    (isPathGlob(query.from)
-      ? globMatches(query.from, [file.path]).length === 0
-      : query.from !== file.path)
-  )
-    return false;
-  const tags = new Set(file.tags?.map((tag) => tag.name));
-  return (
-    evaluateTagSteps(query.steps, (step) => (step.kind === "tag" ? tags.has(step.name) : null)) !==
-    false
-  );
-}
 
 /** For each index, how many of the entries before it are set; one more count at the end, for all of them. */
 function countsBefore(set: Uint8Array): Int32Array {

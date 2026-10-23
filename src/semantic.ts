@@ -198,6 +198,11 @@ export interface FileSemanticResult {
   readonly diagnostics: readonly Diagnostic[];
   /** The files each glob target may pick, in project order. */
   readonly picks: ReadonlyMap<FileTarget, readonly string[]>;
+  /**
+   * The files each `goto tagged` or `call tagged` may pick, by the tags of their headers; comparisons and computed tag
+   * lists count as possibly true.
+   */
+  readonly taggedPicks: ReadonlyMap<Statement, readonly string[]>;
   /** The variables each timer, media, or button block shares with the code that created it (V30 §14). */
   readonly captures: ReadonlyMap<Block, readonly string[]>;
   /** The declarations of the shared variables that a block assigns or changes in place, with how. */
@@ -224,24 +229,25 @@ export interface ProjectProgram {
 }
 
 /**
- * A global function runs in the file that called it, directly or through other global functions, so a call in it
- * that may start such a file may start the running file (V30 §29).
+ * A call that may start the running file is an error (V30 §29). Code runs in the file whose top level runs it, also
+ * through the functions it calls: a function of the file, or a global function, which runs in every file that calls
+ * it. A timer, media, or button block runs later, while that file or a file it called runs, or after it, so the running
+ * file of a block's code is known only when it runs, which checks it then.
  */
-function reportGlobalFileCalls(
+function reportFileCalls(
   project: ProjectNames,
   validators: readonly (SemanticValidator | null)[],
 ): void {
-  if (!validators.some((validator) => (validator?.globalFileCalls.length ?? 0) > 0)) return;
-  // The global functions that each node of the call graph calls.
+  if (!validators.some((validator) => (validator?.fileCalls.length ?? 0) > 0)) return;
+  // The functions that each node of the call graph calls where it runs, not in a block.
   const calls = new Map<string, string[]>();
   for (const validator of validators)
-    for (const [caller, callee] of validator?.callEdges() ?? []) {
-      if (!callee.startsWith("global:")) continue;
+    for (const { caller, callee } of validator?.callEdges() ?? []) {
       const callees = calls.get(caller);
       if (callees === undefined) calls.set(caller, [callee]);
       else callees.push(callee);
     }
-  // The files each global function runs in, by its node: each pair is found once, then passed on to what it calls.
+  // The files that each node runs in: each pair is found once, then passed on to what it calls.
   const running = new Map<string, Set<number>>();
   const work: (readonly [string, number])[] = [];
   const add = (node: string, file: number): void => {
@@ -251,23 +257,21 @@ function reportGlobalFileCalls(
     running.set(node, files);
     work.push([node, file]);
   };
-  for (const [caller, callees] of calls) {
-    if (caller.startsWith("global:")) continue;
-    const file = Number(caller.slice(0, caller.indexOf(":")));
-    for (const callee of callees) add(callee, file);
-  }
+  validators.forEach((validator, file) => {
+    if (validator !== null) add(`${file}:`, file);
+  });
   for (let pair = work.pop(); pair !== undefined; pair = work.pop())
     for (const callee of calls.get(pair[0]) ?? []) add(callee, pair[1]);
   const fileByPath = new Map(project.files.map((file, index) => [file.path, index]));
   for (const [file, validator] of validators.entries())
-    for (const call of validator?.globalFileCalls ?? []) {
-      const files = running.get(`global:${call.function}`) ?? new Set<number>();
+    for (const call of validator?.fileCalls ?? []) {
+      const files = running.get(call.node) ?? new Set<number>();
       const own = call.paths.find((path) => files.has(fileByPath.get(path) ?? -1));
       if (own !== undefined)
         project.report(
           file,
           semanticCode.invalidFileTarget,
-          calledFileMessage(own, call.form, call.function),
+          calledFileMessage(own, call.form, call.global),
           call.span,
         );
     }
@@ -337,11 +341,12 @@ export function validateProjectSemantics(
     validator.validate(file.program);
     return validator;
   });
-  reportGlobalFileCalls(project, validators);
+  reportFileCalls(project, validators);
   return project.diagnostics.map((diagnostics, index) =>
     Object.freeze({
       diagnostics: Object.freeze([...diagnostics]),
       picks: validators[index]?.picks ?? new Map<FileTarget, readonly string[]>(),
+      taggedPicks: validators[index]?.taggedPicks ?? new Map<Statement, readonly string[]>(),
       captures: validators[index]?.captures ?? new Map<Block, readonly string[]>(),
       sharedWrites: validators[index]?.sharedWrites ?? new Map<VariableSite, Sharing>(),
       writtenLets: validators[index]?.writtenLets ?? new Set<LetStatement>(),
@@ -1213,12 +1218,12 @@ class SemanticValidator {
           this.#directTarget = { call: expression, transfer: statement.kind };
           this.#validateExpression(target.expression, scope, null);
           this.#directTarget = null;
-          if (
-            statement.kind === "callFileStatement" &&
-            expression.kind === "tagQueryExpression" &&
-            expression.catalog === "scripts"
-          )
-            this.#checkCalledFiles(this.#taggedCandidates(expression), "tagged", target.span);
+          if (expression.kind === "tagQueryExpression" && expression.catalog === "scripts") {
+            const candidates = this.#taggedCandidates(expression);
+            this.taggedPicks.set(statement, candidates);
+            if (statement.kind === "callFileStatement")
+              this.#checkCalledFiles(candidates, "tagged", target.span);
+          }
           return;
         }
         if (!this.#validateTransferTarget(target, statement.kind)) return;
@@ -1386,7 +1391,7 @@ class SemanticValidator {
   }
 
   /**
-   * The files a `call tagged` may pick by the tags of their headers: those that run something, within its `from:`,
+   * The files a tagged pick may choose by the tags of their headers: those that run something, within its `from:`,
    * whose tags the query's tag tests and literal tag lists do not rule out. None when the tags are not known, or the
    * `from:` is not a path or glob, which the type check reports.
    */
@@ -1413,30 +1418,36 @@ class SemanticValidator {
   }
 
   /**
-   * A call starts another file (V30 §29): a call that may start the file it runs in is an error. Outside a global
-   * function that is the file the call is written in. A global function runs in the file that called it, so its calls
-   * are checked once every file is known (see `reportGlobalFileCalls`).
+   * A call starts another file (V30 §29): a call that may start the file it runs in is an error. Which files code runs in
+   * follows the calls of every file, so the calls are checked once every file is known (see `reportFileCalls`).
    */
   #checkCalledFiles(
     paths: readonly string[],
     form: "path" | "glob" | "tagged",
     span: SourceSpan,
   ): void {
-    if (this.#globalFunction !== null) {
-      this.globalFileCalls.push({ function: this.#globalFunction.name.name, paths, form, span });
-      return;
-    }
-    const own = this.project.files[this.file]!.path;
-    if (paths.includes(own))
-      this.#report(semanticCode.invalidFileTarget, calledFileMessage(own, form, null), span);
+    // A block runs later, in a file that only the runtime knows.
+    if (this.#context.kind === "handler") return;
+    this.fileCalls.push({
+      node: this.#codeNode(this.#context),
+      paths,
+      form,
+      span,
+      global: this.#globalFunction?.name.name ?? null,
+    });
   }
 
-  /** The calls of files in global functions, which the project checks against the files that call each function. */
-  readonly globalFileCalls: {
-    readonly function: string;
+  /** The files that each `goto tagged` or `call tagged` may pick, by its tag tests and literal tag lists. */
+  readonly taggedPicks = new Map<Statement, readonly string[]>();
+
+  /** The calls of files outside blocks, by the node of the call graph whose code makes them. */
+  readonly fileCalls: {
+    readonly node: string;
     readonly paths: readonly string[];
     readonly form: "path" | "glob" | "tagged";
     readonly span: SourceSpan;
+    /** The global function the call is in, which runs in the files that call it. */
+    readonly global: string | null;
   }[] = [];
 
   #validateFunction(declaration: FunctionDeclaration): void {
@@ -2423,19 +2434,22 @@ class SemanticValidator {
     }
   }
 
-  /** The node of the call graph that code of a context runs in: a file's top level, or a function. */
-  #codeNode(start: FlowContext): string {
-    let context = start;
-    while (context.kind === "handler") context = context.origin;
+  /** The node of the call graph that code outside blocks runs in: a file's top level, or a function. */
+  #codeNode(context: Exclude<FlowContext, { kind: "handler" }>): string {
     if (context.kind === "root") return `${this.file}:`;
     return this.#functions.get(context.name)?.global === true
       ? `global:${context.name}`
       : `${this.file}:${context.name}`;
   }
 
-  /** The calls of author functions as written, as edges between the code that calls and the function called. */
-  callEdges(): readonly (readonly [string, string])[] {
-    return this.#callEdges.map(({ callee, context }) => [this.#codeNode(context), callee] as const);
+  /**
+   * The calls of author functions as written, outside blocks, as edges between the code that calls and the function
+   * called. A block runs later, so the code that creates it does not run what the block calls.
+   */
+  callEdges(): readonly { readonly caller: string; readonly callee: string }[] {
+    return this.#callEdges.flatMap(({ callee, context }) =>
+      context.kind === "handler" ? [] : [{ caller: this.#codeNode(context), callee }],
+    );
   }
 
   /**

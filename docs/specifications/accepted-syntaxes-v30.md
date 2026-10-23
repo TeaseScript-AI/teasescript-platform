@@ -4323,8 +4323,9 @@ Rules:
   separate file.
 - A `call` starts another file, so a `call` that can start the running file is a compile error: `call label`, a `call`
   of the file it stands in, a glob or tagged pick that can choose that file, and in a global function a `call` that can
-  start a file that calls the function. A `call` that starts the running file as it runs, through a computed target or
-  from a block, is a runtime error.
+  start a file that calls the function. A timer, media, or button block runs later, while its file or a file it called
+  runs, or after it, so a `call` in a block, like a computed target, is checked when it runs: starting the running file
+  is a runtime error then.
 - Each entry into a file, by a `goto` or `call` naming it, starts at its top with fresh top-level variables of that
   file. A `goto` to a label of the file continues with the variables of the entry it runs in.
 - A function sees the top-level variables of the entry that called it, and a timer, media, or button block those of the
@@ -4380,8 +4381,8 @@ Behavior:
 - An `end` that a way the compiler can follow, through files written out and globs, reaches with no pending `call` is a
   compile error, also when another way reaches the same `end` through a `call`, as in
   `if pick { call "scene.tease" } else { goto "scene.tease" }`. The message points to `call`, `goto`, or `exit`. Where a
-  computed target, such as a reference in a variable or a tagged pick, hides the way, it is a warning (`TSV071`), and
-  reaching that `end` with no pending `call` is a runtime error.
+  computed target, such as a reference in a variable or a tagged pick, or a timer, media, or button block, which runs
+  later, hides the way, it is a warning (`TSV071`), and reaching that `end` with no pending `call` is a runtime error.
 - A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. A file of
   declarations only (functions, global functions, speakers, and globals without `default:`) runs nothing on its own
   and needs no ending; a `goto` into such a file is a compile error. A call

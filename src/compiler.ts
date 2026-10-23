@@ -383,7 +383,7 @@ function checkFlow(
     );
     const statementFlow = reachability.statementFlow();
     const endings = reachability.endingDiagnostics();
-    const returns = reachability.pendingCallDiagnostics();
+    const returns = reachability.pendingCallDiagnostics(taggedPicks(plan, trace, checked.names));
     const errors = files.map((_, index) => [
       // The initialization check at labels decides itself which functions and blocks run, by the calls and creations
       // in statements that can run (ADR 0022 §3.4).
@@ -442,6 +442,34 @@ function checkFlow(
     );
     return null;
   }
+}
+
+/** The files that each tagged pick of the plan may start, by its transfer instruction (see `FileSemanticResult`). */
+function taggedPicks(
+  plan: InstructionPlan,
+  trace: LoweringTrace,
+  names: readonly FileSemanticResult[],
+): ReadonlyMap<number, readonly number[]> {
+  const files = new Map(plan.files.map((file, index) => [file.path, index]));
+  const picks = new Map<number, readonly number[]>();
+  for (const result of names)
+    for (const [statement, paths] of result.taggedPicks) {
+      const range = trace.statements.get(statement);
+      if (range === undefined) continue;
+      // The transfer comes last, after the tag tests and lists.
+      for (let index = range.end - 1; index >= range.start; index -= 1)
+        if (plan.instructions[index]!.kind === "transfer") {
+          picks.set(
+            index,
+            paths.flatMap((path) => {
+              const file = files.get(path);
+              return file === undefined ? [] : [file];
+            }),
+          );
+          break;
+        }
+    }
+  return picks;
 }
 
 /** What a TSV046 warning says its test always gives, by its words: `null` for a case that never matches or an empty range. */
