@@ -1291,12 +1291,13 @@ class FlowGraphBuilder {
       else if (!this.#deadEdges.has(edgeKey(waiting.site.callIn, waiting.site.callOut)))
         visit(waiting.unit, waiting.site.callOut);
     };
+    /** What a callable's new fact wakes, taken by the main loop, so a chain of waits does not deepen the stack. */
+    const woken: Waiting[] = [];
     const markReturns = (region: number): void => {
       if (returns[region] === 1) return;
       returns[region] = 1;
-      const list = waitingForReturn.get(region) ?? [];
+      for (const waiting of waitingForReturn.get(region) ?? []) woken.push(waiting);
       waitingForReturn.delete(region);
-      for (const waiting of list) wake(waiting);
     };
     /** The unit's activation may end the running file: a file returns, a function ends its caller's, a block any. */
     const markEnds = (unit: number): void => {
@@ -1310,12 +1311,15 @@ class FlowGraphBuilder {
       }
       if (ends[unit] === 1) return;
       ends[unit] = 1;
-      const list = waitingForEnd.get(unit) ?? [];
+      for (const waiting of waitingForEnd.get(unit) ?? []) woken.push(waiting);
       waitingForEnd.delete(unit);
-      for (const waiting of list) wake(waiting);
     };
     for (const region of regions) if (region.kind !== "startup") visit(region.id, region.entry);
-    while (work.length > 0) {
+    while (work.length > 0 || woken.length > 0) {
+      if (woken.length > 0) {
+        wake(woken.pop()!);
+        continue;
+      }
       const { unit, node } = work.pop()!;
       const region = regions[unit]!;
       if (node === region.exit && (region.kind === "function" || region.kind === "file"))
