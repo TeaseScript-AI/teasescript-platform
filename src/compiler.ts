@@ -1,4 +1,4 @@
-import type { Block, FileTarget, InteractionExpression, Program } from "./ast.js";
+import type { Block, FileTarget, InteractionExpression, Program, Statement } from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
 import { dayWaitWarnings } from "./day-waits.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
@@ -28,7 +28,7 @@ import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS, PROTECTED_NAME_CODE } from "./language-facts.js";
 import { PlanControlFlow } from "./plan/control-flow.js";
-import { Reachability, type ConstantTest } from "./reachability.js";
+import { Reachability, type ConstantTest, type FileCall } from "./reachability.js";
 import {
   stopsTypeCheck,
   validateProjectSemantics,
@@ -36,10 +36,11 @@ import {
   type SemanticValidationOptions,
 } from "./semantic.js";
 import { speakerFlowDiagnostics, type SpeakerFlowInput } from "./speaker-flow.js";
-import type { RuntimeCheckSite } from "./type-inference/backend.js";
+import type { RuntimeCheckSite, TypeCheckResult } from "./type-inference/backend.js";
 import { checkTypes } from "./type-inference/index.js";
 import { createSourcePosition, createSourceSpan } from "./source.js";
 import { DeadWays, type WayFacts } from "./way-facts.js";
+import { matchesTags } from "./tag-query.js";
 
 export interface CompileOptions extends SemanticValidationOptions {
   /** The package images and their XMP keywords, which tag queries search; none by default. */
@@ -276,6 +277,7 @@ interface CheckedProject {
   readonly speakerFlow: SpeakerFlowInput;
   readonly ways: WayFacts;
   readonly names: readonly FileSemanticResult[];
+  readonly known: TypeCheckResult["known"];
 }
 
 /**
@@ -344,6 +346,7 @@ function checkProject(
           speakerFlow: types.speakerFlow,
           ways: types.ways,
           names,
+          known: types.known,
         };
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
@@ -394,16 +397,25 @@ function checkFlow(
     );
     const statementFlow = reachability.statementFlow();
     const endings = reachability.endingDiagnostics();
-    const returns = reachability.pendingCallDiagnostics(() => ({
-      picks: taggedPicks(plan, trace, checked.names),
-      referenced: referencedFiles(plan, checked.names, hostValues),
-    }));
+    // Where computed targets may lead, found once for both checks that need it.
+    let found:
+      | { picks: ReadonlyMap<number, readonly number[]>; referenced: readonly number[] | null }
+      | undefined;
+    const targets = () =>
+      (found ??= {
+        picks: taggedPicks(plan, trace, checked.names),
+        referenced: referencedFiles(plan, checked.names, hostValues),
+      });
+    const returns = reachability.pendingCallDiagnostics(targets);
+    const calls = reachability.runningFileDiagnostics(fileCalls(plan, trace, checked, targets));
     const errors = files.map((_, index) => [
       // The initialization check at labels decides itself which functions and blocks run, by the calls and creations
       // in statements that can run (ADR 0022 §3.4).
       ...checked.names[index]!.checkInitialization(statementFlow),
       ...endings[index]!,
-      ...returns[index]!.filter((diagnostic) => diagnostic.severity === DiagnosticSeverity.Error),
+      ...[...returns[index]!, ...calls[index]!].filter(
+        (diagnostic) => diagnostic.severity === DiagnosticSeverity.Error,
+      ),
     ]);
     if (!errors.some((diagnostics) => diagnostics.length > 0) && !reachability.reachesExit()) {
       const main = files[0]!.result.program;
@@ -432,7 +444,7 @@ function checkFlow(
         file,
         [
           ...warnings[index]!,
-          ...returns[index]!.filter(
+          ...[...returns[index]!, ...calls[index]!].filter(
             (diagnostic) => diagnostic.severity === DiagnosticSeverity.Warning,
           ),
           ...errors[index]!,
@@ -523,8 +535,8 @@ function taggedPicks(
   const picks = new Map<number, readonly number[]>();
   for (const result of names)
     for (const [statement, paths] of result.taggedPicks) {
-      const range = trace.statements.get(statement);
-      if (range === undefined) continue;
+      const index = transferOf(plan, trace, statement);
+      if (index === undefined) continue;
       let indices = shared.get(paths);
       if (indices === undefined) {
         indices = paths.flatMap((path) => {
@@ -533,14 +545,70 @@ function taggedPicks(
         });
         shared.set(paths, indices);
       }
-      // The transfer comes last, after the tag tests and lists.
-      for (let index = range.end - 1; index >= range.start; index -= 1)
-        if (plan.instructions[index]!.kind === "transfer") {
-          picks.set(index, indices);
-          break;
-        }
+      picks.set(index, indices);
     }
   return picks;
+}
+
+/** The transfer instruction of a `goto` or `call` statement: it comes last, after its target's tag tests and lists. */
+function transferOf(
+  plan: InstructionPlan,
+  trace: LoweringTrace,
+  statement: Statement,
+): number | undefined {
+  const range = trace.statements.get(statement);
+  if (range === undefined) return undefined;
+  for (let index = range.end - 1; index >= range.start; index -= 1)
+    if (plan.instructions[index]!.kind === "transfer") return index;
+  return undefined;
+}
+
+/**
+ * The `call`s of files by their transfer instruction, for the check of the running file (see
+ * `Reachability.runningFileDiagnostics`). A file written out or a glob can start each file it names; a tagged pick each
+ * file that the name pass finds it may match, as the known values of its bounds and tag lists decide (V30 §41); any
+ * other computed target may start each file that a reference may name, which only the run decides.
+ */
+function fileCalls(
+  plan: InstructionPlan,
+  trace: LoweringTrace,
+  checked: CheckedProject,
+  targets: () => { readonly referenced: readonly number[] | null },
+): ReadonlyMap<number, FileCall> {
+  const calls = new Map<number, FileCall>();
+  const indices = new Map(plan.files.map((file, index) => [file.path, index]));
+  const shared = new Map<readonly string[], readonly number[]>();
+  const tags: (ReadonlyMap<string, number | null> | undefined)[] = [];
+  const tagsOf = (file: number): ReadonlyMap<string, number | null> =>
+    (tags[file] ??= new Map((plan.files[file]!.tags ?? []).map((tag) => [tag.name, tag.value])));
+  for (const result of checked.names)
+    for (const [statement, target] of result.fileCalls) {
+      const index = transferOf(plan, trace, statement);
+      if (index === undefined) continue;
+      let files: readonly number[] | null | undefined =
+        target.paths === null ? targets().referenced : shared.get(target.paths);
+      if (files === undefined) {
+        files = target.paths!.flatMap((path) => {
+          const file = indices.get(path);
+          return file === undefined ? [] : [file];
+        });
+        shared.set(target.paths!, files);
+      }
+      const query = target.query;
+      let matches: ((tags: ReadonlyMap<string, number | null>) => boolean | null) | undefined;
+      calls.set(index, {
+        form: target.form,
+        files,
+        starts:
+          target.form === "computed"
+            ? () => null
+            : query === null
+              ? () => true
+              : (file) => (matches ??= matchesTags(query.steps, checked.known))(tagsOf(file)),
+        span: target.span,
+      });
+    }
+  return calls;
 }
 
 /** What a TSV046 warning says its test always gives, by its words: `null` for a case that never matches or an empty range. */

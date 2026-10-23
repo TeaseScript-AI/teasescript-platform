@@ -31,9 +31,9 @@ goto script("rooms/${room}.tease")            // dynamic: an explicit conversion
 
 1. `goto` and `call` accept the same file targets, and a file is entered only at its top: a file target, a glob, a
    tagged pick, and a script reference take no label. A missing file is a compile error. A `call` starts another file,
-   so a `call` that can start the running file is a compile error, and a runtime error where a computed target or a
-   block, which runs later, hides it (V30 §29). A local `goto label` stays within its file; a function is the returning
-   part of a file.
+   so a `call` that can start the running file is a compile error where the compiler can prove it, and otherwise is
+   checked when it runs, as where a computed target or a block, which runs later, hides it (V30 §29). A local
+   `goto label` stays within its file; a function is the returning part of a file.
 2. A glob uses `*` for any characters within one folder or file name. Globs are expanded at compile time. A glob only
    picks files that do something: the matched files that do not hold declarations only. It is a compile error only
    when no such file remains.

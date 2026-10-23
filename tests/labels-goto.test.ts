@@ -202,7 +202,7 @@ test("every file says how it ends, and the project reaches an exit", () => {
     [
       "TSV070",
       1,
-      "No call waits for this end, because the session starts in main.tease without one, so there is nothing to return to. Use exit to finish the session, or goto to continue in another file.",
+      "This 'end' has no call to return to, because the session starts in 'main.tease' without one. Use 'exit' to finish the session, or 'goto' to continue in another file.",
     ],
   ]);
 });

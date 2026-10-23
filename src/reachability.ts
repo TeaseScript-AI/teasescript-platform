@@ -12,6 +12,7 @@ import { solveForward } from "./plan/dataflow.js";
 import type { InstructionPlan } from "./plan/model.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { runsOnItsOwn } from "./project-globals.js";
+import type { FileCallTarget } from "./semantic.js";
 import { CORE_RUNTIME_BUILTINS } from "./language-facts.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import type { DeadWays } from "./way-facts.js";
@@ -22,8 +23,9 @@ import type { DeadWays } from "./way-facts.js";
  * a call that can run reaches it; and in a timer, media, or button block where code that can run creates it (ADR 0022
  * §3.4). A call counts as returning, also of a function that never returns, so the ending after it is still written out
  * (ADR 0022 §4.3). The checks that follow it: the endings of files and of the session (TSV052, TSV053), an `end` with
- * no file call to return to (TSV070, TSV071), loops with no way out (TSV058), code that never runs (TSV065, TSV066),
- * and the flow of statements that the check of variables at labels follows (TSV054).
+ * no file call to return to (TSV070, TSV071), a `call` that can start the running file (TSV072, TSV073), loops with no
+ * way out (TSV058), code that never runs (TSV065, TSV066), and the flow of statements that the check of variables at
+ * labels follows (TSV054).
  */
 
 /**
@@ -39,6 +41,18 @@ export interface ConstantTest {
 export interface StatementFlow {
   readonly unreachable: ReadonlySet<Statement>;
   readonly continuing: ReadonlySet<Statement>;
+}
+
+/**
+ * A `call` of a file, for the check of the running file (see {@link Reachability.runningFileDiagnostics}): how it names
+ * its file, the files it may start by index or `null` for any file, and for one of them whether the call can start it:
+ * `true` for certain, `false` when it cannot after all, or `null` where only the run decides.
+ */
+export interface FileCall {
+  readonly form: FileCallTarget["form"];
+  readonly files: readonly number[] | null;
+  readonly starts: (file: number) => boolean | null;
+  readonly span: SourceSpan;
 }
 
 const NO_WAY_OUT =
@@ -267,18 +281,18 @@ export class Reachability {
         continue;
       if (state.none === null && state.hidden === null) continue;
       const file = this.#flow.fileOf(index);
-      const fix = "use exit or goto here instead of end";
+      const fix = "use 'exit' or 'goto' here instead of 'end'";
       diagnostics[file]!.push(
         createDiagnostic(
           state.none !== null ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
           state.none !== null ? "TSV070" : "TSV071",
           state.none === SESSION_START
-            ? "No call waits for this end, because the session starts in main.tease without one, so there is nothing to return to. Use exit to finish the session, or goto to continue in another file."
+            ? "This 'end' has no call to return to, because the session starts in 'main.tease' without one. Use 'exit' to finish the session, or 'goto' to continue in another file."
             : state.none !== null
-              ? `No call waits for this end when the goto on ${this.#where(state.none, file)} leads here, so there is nothing to return to. Write call there to come back after it, or ${fix}.`
+              ? `This 'end' has no call to return to when the 'goto' on ${this.#where(state.none, file)} leads here. Write 'call' instead of 'goto' there to come back after it, or ${fix}.`
               : this.plan.instructions[state.hidden!]!.kind === "transfer"
-                ? `The goto on ${this.#where(state.hidden!, file)} picks its file when it runs, so the compiler cannot tell whether a call waits for this end then. Without one, the end fails. If that goto can lead here, write call there to come back after it, or ${fix}.`
-                : `The block that ${this.#where(state.hidden!, file)} starts runs later, so the compiler cannot tell whether a call waits for this end when it runs. Without one, the end fails. If the block can run while no file call waits, ${fix}.`,
+                ? `The 'goto' on ${this.#where(state.hidden!, file)} picks its file when it runs, so the compiler cannot tell whether this 'end' has a call to return to then. Without one, the 'end' fails. If that 'goto' can lead here, write 'call' instead of 'goto' there, or ${fix}.`
+                : `This 'end' runs later, ${this.#blockAt(state.hidden!, file).when}, so the compiler cannot tell whether it has a call to return to then. Without one, the 'end' fails. If that can happen, ${fix}.`,
           planLocationToSourceSpan(instruction.span),
         ),
       );
@@ -342,6 +356,116 @@ export class Reachability {
     return { targets, hubs };
   }
 
+  /**
+   * A `call` starts another file, so a call that can start the running file is an error (TSV072, V30 §29). A file's own
+   * code, its top level and its functions, runs in that file, so a call there that can start the file is an error, also
+   * where it cannot run itself, as a call of the file it stands in is an error anywhere. A global function runs in every
+   * file whose code calls it where it can run, also through other global functions, but whether its call runs while
+   * such a file runs depends on the run: on its tests and defaults, and on the blocks that may end a wait first. So only
+   * the run decides there, as it does for a tagged pick or reference that the compiler cannot decide, and for code that
+   * a timer, media, or button block runs, which runs later, while the file that started it or a file it called runs, or
+   * after it. A call that may start a file its code runs in then is a warning (TSV073), and the runtime checks every call
+   * (TSR069). `calls` holds each call by its transfer instruction.
+   */
+  public runningFileDiagnostics(calls: ReadonlyMap<number, FileCall>): Diagnostic[][] {
+    const diagnostics = this.plan.files.map((): Diagnostic[] => []);
+    if (calls.size === 0) return diagnostics;
+    // A function or block by its id, a file's top level by `-1 - file`.
+    const region = (index: number): number =>
+      this.#flow.functionOf(index)?.id ?? -1 - this.#flow.fileOf(index);
+    const callees = new Map<number, number[]>();
+    // The files each region may run in, and an instruction that starts a block from which it runs later. A pair is
+    // found once, then passed on to the functions the region calls: a file as itself, a block's start as `-1 - start`.
+    const running = new Map<number, Set<number>>();
+    const later = new Map<number, number>();
+    const work: (readonly [number, number])[] = [];
+    const runs = (node: number, file: number): void => {
+      const files = running.get(node) ?? new Set<number>();
+      if (files.has(file)) return;
+      files.add(file);
+      running.set(node, files);
+      work.push([node, file]);
+    };
+    const runsLater = (node: number, start: number): void => {
+      if (later.has(node)) return;
+      later.set(node, start);
+      work.push([node, -1 - start]);
+    };
+    this.plan.instructions.forEach((instruction, index) => {
+      if (this.#reached[index] === 0) return;
+      if (instruction.kind === "callFunction") {
+        const caller = region(index);
+        const list = callees.get(caller);
+        if (list === undefined) callees.set(caller, [instruction.functionId]);
+        else list.push(instruction.functionId);
+      }
+      for (const handler of this.#flow.handlersOf(index)) runsLater(handler, index);
+    });
+    this.plan.files.forEach((_, file) => runs(-1 - file, file));
+    for (let pair = work.pop(); pair !== undefined; pair = work.pop()) {
+      const [node, fact] = pair;
+      for (const callee of callees.get(node) ?? [])
+        if (fact >= 0) runs(callee, fact);
+        else runsLater(callee, -1 - fact);
+    }
+    for (const [index, call] of calls) {
+      const node = region(index);
+      const files = running.get(node) ?? new Set<number>();
+      const definition = this.#flow.functionOf(index);
+      const global =
+        definition?.global === true && definition.handler === null ? definition.name : null;
+      let certain: number | undefined;
+      let guarded: number | undefined;
+      let possible: number | undefined;
+      for (const file of call.files ?? [...files].sort((left, right) => left - right)) {
+        if (!files.has(file)) continue;
+        const starts = call.starts(file);
+        if (starts === true && global === null) {
+          certain = file;
+          break;
+        }
+        // In a global function, which is the only code with a certain target left here.
+        if (starts === true) guarded ??= file;
+        else if (starts === null) possible ??= file;
+      }
+      const start = later.get(node);
+      if (
+        certain === undefined &&
+        guarded === undefined &&
+        possible === undefined &&
+        start === undefined
+      )
+        continue;
+      const file = this.#flow.fileOf(index);
+      const path = (target: number): string => this.plan.files[target]!.path;
+      diagnostics[file]!.push(
+        certain !== undefined
+          ? createDiagnostic(
+              DiagnosticSeverity.Error,
+              "TSV072",
+              calledFileMessage(path(certain), call.form),
+              call.span,
+            )
+          : createDiagnostic(
+              DiagnosticSeverity.Warning,
+              "TSV073",
+              guarded !== undefined
+                ? guardedCallMessage(path(guarded), call.form, global!)
+                : possible !== undefined
+                  ? pickedFileMessage(path(possible), call.form, global)
+                  : laterCallMessage(
+                      this.#blockAt(start!, file),
+                      call.form === "path" && call.files?.length === 1
+                        ? path(call.files[0]!)
+                        : null,
+                    ),
+              call.span,
+            ),
+      );
+    }
+    return diagnostics;
+  }
+
   /** Whether the blocks that the instruction at `index` creates may run after the file entry that created them ended. */
   #outlivesItsFile(index: number): boolean {
     const instruction = this.plan.instructions[index];
@@ -354,7 +478,21 @@ export class Reachability {
   #where(index: number, from: number): string {
     const file = this.#flow.fileOf(index);
     const line = `line ${this.plan.instructions[index]!.span.sl + 1}`;
-    return file === from ? line : `${line} of ${this.plan.files[file]!.path}`;
+    return file === from ? line : `${line} of '${this.plan.files[file]!.path}'`;
+  }
+
+  /**
+   * The block that the instruction at `index` starts, as seen from the file `from`: when it runs, as in "from the timer
+   * on line 3", and how to stop it.
+   */
+  #blockAt(index: number, from: number): { readonly when: string; readonly stop: string } {
+    const where = this.#where(index, from);
+    const kind = this.plan.instructions[index]!.kind;
+    return kind === "showPermanentButton"
+      ? { when: `when the button on ${where} is pressed`, stop: "remove the button" }
+      : kind === "playMedia"
+        ? { when: `from the media on ${where}`, stop: "stop the media" }
+        : { when: `from the timer on ${where}`, stop: "stop the timer" };
   }
 
   /** Whether an `exit` can run, which the project needs (TSV053, ADR 0022 §4.1). */
@@ -526,6 +664,68 @@ interface CallsWaiting {
 
 /** The start of the session, which runs `main.tease` with no call waiting. */
 const SESSION_START = -1;
+
+/** `text` with its first letter in lower case, to follow "If that can happen, ". */
+function lowerFirst(text: string): string {
+  return `${text[0]!.toLowerCase()}${text.slice(1)}`;
+}
+
+/**
+ * What to do about a call that can start `path` while it is running, by how the call names its file: in a file's own
+ * code, or in a global function, `global`.
+ */
+function calledFileFix(path: string, form: FileCall["form"], global: string | null): string {
+  return form === "glob"
+    ? `Change the pattern so that it does not match '${path}'.`
+    : form === "tagged"
+      ? `Leave '${path}' out with 'from:', or with a tag that it does not have.`
+      : global === null
+        ? "To run a part of it and come back, put that part in a function and write the function's name with '()' instead. To continue at a label without coming back, write 'goto' and the label."
+        : `Run '${global}' only from other files.`;
+}
+
+/** Why a call may not start `path`, the file it stands in (V30 §29): that file is already running. */
+function calledFileMessage(path: string, form: FileCall["form"]): string {
+  return `This call ${form === "path" ? "starts" : "can pick"} its own file, '${path}', which is already running. ${calledFileFix(path, form, null)}`;
+}
+
+/**
+ * Why a call in a global function, `global`, may start `path`, a file whose code runs the function: the compiler cannot
+ * tell whether that file is running then.
+ */
+function guardedCallMessage(path: string, form: FileCall["form"], global: string): string {
+  return form === "path"
+    ? `This call starts '${path}', which runs global function '${global}', so the compiler cannot tell whether '${path}' is already running when the call runs. If it is, the call fails. If that can happen, run '${global}' only from other files.`
+    : `This call can pick '${path}', which runs global function '${global}', so the compiler cannot tell whether that file is already running when this call picks it. If it is, the call fails. If that can happen, ${lowerFirst(calledFileFix(path, form, global))}`;
+}
+
+/**
+ * Why a call whose tagged pick or computed target decides its file when it runs may start `path`: in a file's own code,
+ * its own file, and in a global function, `global`, a file whose code runs the function.
+ */
+function pickedFileMessage(path: string, form: FileCall["form"], global: string | null): string {
+  if (form === "tagged")
+    return global === null
+      ? `This call's tags depend on a value known only when it runs, so the compiler cannot tell whether it can pick its own file, '${path}', which is already running. If it does, the call fails. ${calledFileFix(path, form, global)}`
+      : `This call's tags depend on a value known only when it runs, so the compiler cannot tell whether it can pick '${path}', which runs global function '${global}'. If it picks '${path}' while that file is running, the call fails. ${calledFileFix(path, form, global)}`;
+  return global === null
+    ? `This call's file is known only when it runs, so the compiler cannot tell whether it is its own file, '${path}', which is already running. If it is, the call fails. If it can be, put the part to run in a function and write the function's name with '()' instead.`
+    : `This call's file is known only when it runs, so the compiler cannot tell whether it is '${path}', which runs global function '${global}'. If it is, and '${path}' is running then, the call fails. If it can be '${path}', run '${global}' only from other files.`;
+}
+
+/**
+ * Why a call that a block runs later may start a running file: the block runs while the file that started it or a file
+ * it called runs, or after it. `block` says when it runs and how to stop it; `path` is the file the call names, `null`
+ * when it picks one.
+ */
+function laterCallMessage(
+  block: { readonly when: string; readonly stop: string },
+  path: string | null,
+): string {
+  return path !== null
+    ? `This call runs later, ${block.when}, so the compiler cannot tell whether '${path}' is already running then. If it is, the call fails. If that can happen, ${block.stop} while '${path}' runs, or put what '${path}' does in a function and write the function's name with '()' instead.`
+    : `This call runs later, ${block.when}, so the compiler cannot tell whether the file it starts is already running then. If it is, the call fails. If that can happen, ${block.stop} while such a file runs.`;
+}
 
 /** For each index, how many of the entries before it are set; one more count at the end, for all of them. */
 function countsBefore(set: Uint8Array): Int32Array {

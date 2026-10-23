@@ -41,8 +41,11 @@ function outputs(events: readonly InterpreterEvent[]): string[] {
 }
 
 /** Runs a project to its end, also stepwise with a checkpoint at every boundary, and returns what it said. */
-function said(files: readonly ProjectSourceFile[]): string[] {
-  return outputs(assertRuntimeResumeEquivalent(files).events);
+function said(
+  files: readonly ProjectSourceFile[],
+  options: Parameters<typeof assertRuntimeResumeEquivalent>[1] = {},
+): string[] {
+  return outputs(assertRuntimeResumeEquivalent(files, options).events);
 }
 
 function compiled(files: readonly ProjectSourceFile[]): InstructionPlan {
@@ -129,7 +132,7 @@ test("a goto in a called file replaces it, and the call still returns", () => {
   );
 });
 
-test("a call starts another file, so a label or a file that may be running is an error", () => {
+test("a call starts another file, so a label or a call that can start the running file is an error", () => {
   const diagnostics = (files: ProjectSourceFile[]): [string, string, string][] =>
     compileProject(files).diagnostics.map((diagnostic) => [
       diagnostic.path,
@@ -140,30 +143,34 @@ test("a call starts another file, so a label or a file that may be running is an
     [
       "main.tease",
       "TSV057",
-      "A call starts another file at its top, so it cannot go to label 'greeting' of this file. Use 'goto greeting' to continue at the label, or put that part in a function and call the function.",
+      "A call only starts a file, at its top, so 'call greeting' cannot go to a label or function of this file. Write 'goto greeting' to continue at a label, or 'greeting()' to run a function.",
     ],
   ]);
   const ownFile =
-    "A call starts another file, but this call can start 'main.tease', the file it is in. To run a part of this file and come back, put it in a function and call that, or use goto with a label of this file to continue there.";
+    "This call starts its own file, 'main.tease', which is already running. To run a part of it and come back, put that part in a function and write the function's name with '()' instead. To continue at a label without coming back, write 'goto' and the label.";
   // Every spelling of the file, also where the call never runs.
-  for (const call of [
-    'call "main.tease"',
-    'call script("main.tease")',
-    'if false { call "main.tease" }',
-  ])
+  for (const call of ['call "main.tease"', 'call script("main.tease")'])
     assert.deepEqual(
       diagnostics(project(`${call}\nexit`)),
-      [["main.tease", "TSV057", ownFile]],
+      [["main.tease", "TSV072", ownFile]],
       call,
     );
+  assert.deepEqual(diagnostics(project('if false { call "main.tease" }\nexit')), [
+    [
+      "main.tease",
+      "TSV065",
+      "This code never runs, because the condition on line 1 is never true. Remove it, or change the condition.",
+    ],
+    ["main.tease", "TSV072", ownFile],
+  ]);
   const rooms = { "rooms/a.tease": "exit", "rooms/b.tease": "exit" };
   assert.deepEqual(
     diagnostics(project("exit", { ...rooms, "rooms/a.tease": 'call "rooms/*.tease"\nexit' })),
     [
       [
         "rooms/a.tease",
-        "TSV057",
-        "A call starts another file, but this call can start 'rooms/a.tease', the file it is in. Change the pattern so that it matches only other files.",
+        "TSV072",
+        "This call can pick its own file, 'rooms/a.tease', which is already running. Change the pattern so that it does not match 'rooms/a.tease'.",
       ],
     ],
   );
@@ -175,25 +182,31 @@ test("a call starts another file, so a label or a file that may be running is an
     [
       [
         "a.tease",
-        "TSV057",
-        "A call starts another file, but this call can start 'a.tease', the file it is in. Limit the candidates with 'from:', or with a tag that 'a.tease' does not have.",
+        "TSV072",
+        "This call can pick its own file, 'a.tease', which is already running. Leave 'a.tease' out with 'from:', or with a tag that it does not have.",
       ],
     ],
   );
-  // A comparison is false for a file without a number for its tag, and decided by a constant bound.
+  // A comparison is false for a file without a number for its tag, and a bound or a tag list is decided by its known
+  // value; where none is known, the call only warns (V30 §13, §41).
   const scenes = { "scene.tease": '---\ntags: punishment: 4\n---\nsay "scene"\nend' };
-  for (const [header, pick, can] of [
-    ["", '"punishment" > minimum', false],
-    ['---\ntags: "punishment"\n---\n', '"punishment" > minimum', false],
-    ["---\ntags: punishment: 1\n---\n", '"punishment" > 3', false],
-    ["---\ntags: punishment: 4\n---\n", '"punishment" > 3', true],
-    ["---\ntags: punishment: 1\n---\n", '"punishment" > minimum', true],
+  const values = 'let minimum = 3\nlet wanted = ["punishment"]\nlet lowest = 3\nlowest = 0\n';
+  for (const [header, pick, codes] of [
+    ["", '"punishment" > lowest', []],
+    ['---\ntags: "punishment"\n---\n', '"punishment" > lowest', []],
+    ["---\ntags: punishment: 1\n---\n", '"punishment" > 3', []],
+    ["---\ntags: punishment: 4\n---\n", '"punishment" > 3', ["TSV072"]],
+    ["---\ntags: punishment: 1\n---\n", '"punishment" > minimum', []],
+    ["---\ntags: punishment: 4\n---\n", '"punishment" > minimum', ["TSV072"]],
+    ["---\ntags: punishment: 1\n---\n", '"punishment" > lowest', ["TSV073"]],
+    ["", "all: wanted", []],
+    ['---\ntags: "punishment"\n---\n', "all: wanted", ["TSV072"]],
   ] as const)
     assert.deepEqual(
-      diagnostics(
-        project(`${header}let minimum = 3\ncall tagged ${pick}\nsay "back"\nexit`, scenes),
-      ).map(([path, code]) => `${path} ${code}`),
-      can ? ["main.tease TSV057"] : [],
+      diagnostics(project(`${header}${values}call tagged ${pick}\nsay "back"\nexit`, scenes)).map(
+        ([path, code]) => `${path} ${code}`,
+      ),
+      codes.map((code) => `main.tease ${code}`),
       `${header}${pick}`,
     );
   // A tag test or `from:` that leaves the file out allows the call.
@@ -206,50 +219,168 @@ test("a call starts another file, so a label or a file that may be running is an
     ),
     [],
   );
-  // A global function runs in the file that called it, directly or through another global function.
+  // A global function runs in the files whose code calls it where it can run, directly or through another global
+  // function, and its call there only warns (see below). A caller in code that never runs does not count.
   const lib = {
     "lib.tease":
       'global function relay { punish() }\nglobal function punish { call "rooms/*.tease" }',
   };
   assert.deepEqual(diagnostics(project("relay()\nexit", { ...rooms, ...lib })), []);
-  assert.deepEqual(
-    diagnostics(project("exit", { ...rooms, ...lib, "rooms/b.tease": "relay()\nexit" })),
-    [
-      [
-        "lib.tease",
-        "TSV057",
-        "A call starts another file, but this call can start 'rooms/b.tease', which calls global function 'punish' and so is the running file then. Change the pattern so that it matches only other files.",
-      ],
-    ],
-  );
+  for (const caller of ["exit\nrelay()", "function never { relay() }\nexit"])
+    assert.deepEqual(
+      diagnostics(project("relay()\nexit", { ...rooms, ...lib, "rooms/b.tease": caller }))
+        .filter(([, code]) => code !== "TSV065")
+        .map(([path, code]) => `${path} ${code}`),
+      [],
+      caller,
+    );
 });
 
-test("a call that would start the running file fails when it runs", () => {
+test("a call whose file only the run decides warns, and fails when it starts the running file", () => {
+  const warned = (files: ProjectSourceFile[]): string[] =>
+    compileProject(files).diagnostics.map(
+      (diagnostic) => `${diagnostic.path} ${diagnostic.code} ${diagnostic.message}`,
+    );
   const failure = (files: ProjectSourceFile[]): readonly string[] =>
-    assertRuntimeResumeEquivalent(files, { ending: "failed" }).events.flatMap((event) =>
-      event.kind === "runtimeFailure" ? [`${event.code} ${event.message}`] : [],
+    assertRuntimeResumeEquivalent(files, { ending: "failed", warnings: ["TSV073"] }).events.flatMap(
+      (event) => (event.kind === "runtimeFailure" ? [`${event.code} ${event.message}`] : []),
     );
   const message = (path: string) =>
-    `TSR069 This call would start '${path}', the file that is running, but a call starts another file. To run a part of a file and come back, put it in a function and call that.`;
+    `TSR069 This call cannot start '${path}', because that file is already running. To run a part of a file and come back, put that part in a function and write the function's name with '()' instead.`;
+  const later = (where: string, path: string) =>
+    `This call runs later, from the timer on ${where}, so the compiler cannot tell whether '${path}' is already running then. If it is, the call fails. If that can happen, stop the timer while '${path}' runs, or put what '${path}' does in a function and write the function's name with '()' instead.`;
   // A computed target.
-  assert.deepEqual(
-    failure(
-      project('call "a.tease"\nexit', { "a.tease": 'let me = script("a.tease")\ncall (me)\nend' }),
-    ),
-    [message("a.tease")],
+  const computed = project('call "a.tease"\nexit', {
+    "a.tease": 'let me = script("a.tease")\ncall (me)\nend',
+  });
+  assert.deepEqual(warned(computed), [
+    "a.tease TSV073 This call's file is known only when it runs, so the compiler cannot tell whether it is its own file, 'a.tease', which is already running. If it is, the call fails. If it can be, put the part to run in a function and write the function's name with '()' instead.",
+  ]);
+  assert.deepEqual(failure(computed), [message("a.tease")]);
+  // A tagged pick whose bound only the run knows.
+  const picked = project(
+    '---\ntags: punishment: 4\n---\nlet lowest = 3\nlowest = 2\ncall tagged "punishment" > lowest\nexit',
+    { "scene.tease": '---\ntags: punishment: 1\n---\nsay "scene"\nend' },
   );
-  // A block of main.tease that fires while the file main.tease called runs.
+  assert.deepEqual(warned(picked), [
+    "main.tease TSV073 This call's tags depend on a value known only when it runs, so the compiler cannot tell whether it can pick its own file, 'main.tease', which is already running. If it does, the call fails. Leave 'main.tease' out with 'from:', or with a tag that it does not have.",
+  ]);
+  assert.deepEqual(failure(picked), [message("main.tease")]);
+  // A block of main.tease that fires while main.tease, or the file it called, runs, also through a function.
+  const own = project('timer async 1 s { call "main.tease" }\nwait 2 s\nexit');
+  assert.deepEqual(warned(own), [`main.tease TSV073 ${later("line 1", "main.tease")}`]);
+  assert.deepEqual(failure(own), [message("main.tease")]);
+  const called = project('timer async 1 s { call "b.tease" }\ncall "b.tease"\nexit', {
+    "b.tease": "wait 2 s\nend",
+  });
+  assert.deepEqual(warned(called), [`main.tease TSV073 ${later("line 1", "b.tease")}`]);
+  assert.deepEqual(failure(called), [message("b.tease")]);
+  const through = project("timer async 1 s { punish() }\nwait 2 s\nexit", {
+    "lib.tease": 'global function punish { call "main.tease" }',
+  });
+  assert.deepEqual(warned(through), [
+    `lib.tease TSV073 ${later("line 1 of 'main.tease'", "main.tease")}`,
+  ]);
+  assert.deepEqual(failure(through), [message("main.tease")]);
   assert.deepEqual(
-    failure(
-      project('timer async 1 s { call "b.tease" }\ncall "b.tease"\nexit', {
-        "b.tease": "wait 2 s\nend",
+    warned(project('timer async 1 s { call "rooms/*.tease" }\nexit', { "rooms/a.tease": "end" })),
+    [
+      "main.tease TSV073 This call runs later, from the timer on line 1, so the compiler cannot tell whether the file it starts is already running then. If it is, the call fails. If that can happen, stop the timer while such a file runs.",
+    ],
+  );
+  // A button's block runs when the button is pressed, and a media block from the media.
+  assert.deepEqual(
+    warned(
+      project('let b = showPermanentButton "Punish" { call "punish.tease" }\nwait 5 s\nexit', {
+        "punish.tease": "wait 2 s\nend",
       }),
     ),
-    [message("b.tease")],
+    [
+      "main.tease TSV073 This call runs later, when the button on line 1 is pressed, so the compiler cannot tell whether 'punish.tease' is already running then. If it is, the call fails. If that can happen, remove the button while 'punish.tease' runs, or put what 'punish.tease' does in a function and write the function's name with '()' instead.",
+    ],
+  );
+  assert.deepEqual(
+    warned(
+      project(
+        'let music = playAudio async "music.mp3" {\n    at 1 s {\n        call "b.tease"\n    }\n}\ncall "b.tease"\nexit',
+        { "b.tease": "wait 2 s\nend" },
+      ),
+    ),
+    [
+      "main.tease TSV073 This call runs later, from the media on line 1, so the compiler cannot tell whether 'b.tease' is already running then. If it is, the call fails. If that can happen, stop the media while 'b.tease' runs, or put what 'b.tease' does in a function and write the function's name with '()' instead.",
+    ],
+  );
+  // A global function's call of a file whose code calls the function, directly or through another global function:
+  // whether the call runs while that file runs depends on the run, by a test or a default here or in a caller.
+  const relayed = project('call "rooms/b.tease"\nexit', {
+    "rooms/a.tease": "end",
+    "rooms/b.tease": "relay()\nend",
+    "lib.tease":
+      'global function relay { punish() }\nglobal function punish { call "rooms/*.tease" }',
+  });
+  assert.deepEqual(warned(relayed), [
+    "lib.tease TSV073 This call can pick 'rooms/b.tease', which runs global function 'punish', so the compiler cannot tell whether that file is already running when this call picks it. If it is, the call fails. If that can happen, change the pattern so that it does not match 'rooms/b.tease'.",
+  ]);
+  const guard = (argument: string) =>
+    project('visit(false)\nsay "back"\nexit', {
+      "b.tease": `visit(${argument})\nsay "b"\nend`,
+      "lib.tease":
+        'global function visit(alreadyThere: boolean) {\n    if not alreadyThere { call "b.tease" }\n}',
+    });
+  assert.deepEqual(warned(guard("true")), [
+    "lib.tease TSV073 This call starts 'b.tease', which runs global function 'visit', so the compiler cannot tell whether 'b.tease' is already running when the call runs. If it is, the call fails. If that can happen, run 'visit' only from other files.",
+  ]);
+  assert.deepEqual(said(guard("true"), { warnings: ["TSV073"] }), ["b", "back", "exit"]);
+  assert.deepEqual(failure(guard("false")), [message("b.tease")]);
+  const supplied = project('display("provided")\nexit', {
+    "lib.tease":
+      'global function visit {\n    call "main.tease"\n    return "done"\n}\nglobal function display(text = visit()) { say text }',
+  });
+  assert.deepEqual(warned(supplied), [
+    "lib.tease TSV073 This call starts 'main.tease', which runs global function 'visit', so the compiler cannot tell whether 'main.tease' is already running when the call runs. If it is, the call fails. If that can happen, run 'visit' only from other files.",
+  ]);
+  assert.deepEqual(said(supplied, { warnings: ["TSV073"] }), ["provided", "exit"]);
+  // So does a call of the global function whose run a file's own code decides.
+  const visit = 'global function visit {\n    call "main.tease"\n    return "done"\n}';
+  for (const [files, outcome] of [
+    [
+      project('function display(text = visit()) { say text }\ndisplay("provided")\nexit', {
+        "lib.tease": visit,
+      }),
+      ["provided", "exit"],
+    ],
+    [
+      project('global inside = false\nvisit()\nsay "back"\nexit', {
+        "b.tease": 'if not inside { visit() }\nsay "b"\nend',
+        "lib.tease": 'global function visit {\n    inside = true\n    call "b.tease"\n}',
+      }),
+      ["b", "back", "exit"],
+    ],
+    // A block may end the wait before the call of the function.
+    [
+      project("timer async 1 s { exit }\nwait 2 s\nvisit()\nexit", { "lib.tease": visit }),
+      ["exit"],
+    ],
+  ] as const) {
+    assert.deepEqual(
+      warned(files).map((line) => line.split(" ", 2).join(" ")),
+      ["lib.tease TSV073"],
+    );
+    assert.deepEqual(said(files, { warnings: ["TSV073"] }), outcome);
+  }
+  // Where the known values rule the running file out, and references name only other files, the call runs.
+  assert.deepEqual(
+    said(
+      project(
+        '---\ntags: punishment: 1\n---\nlet minimum = 3\ncall tagged "punishment" > minimum\nlet next = [script("scene.tease")]\ncall (next[0])\nexit',
+        { "scene.tease": '---\ntags: punishment: 4\n---\nsay "scene"\nend' },
+      ),
+    ),
+    ["scene", "scene", "exit"],
   );
 });
 
-test("a block runs later, so its end only warns and its call of a file is checked when it runs", () => {
+test("a block runs later, so its end and its call of a file only warn and are checked when they run", () => {
   const press = (plan: InstructionPlan, snapshot: RuntimeSnapshot) => {
     const pressed = pressPermanentButton(plan, snapshot, 1);
     assert.equal(pressed.outcome.kind, "pressed");
@@ -267,7 +398,7 @@ test("a block runs later, so its end only warns and its call of a file is checke
     [
       [
         "TSV071",
-        "The block that line 1 starts runs later, so the compiler cannot tell whether a call waits for this end when it runs. Without one, the end fails. If the block can run while no file call waits, use exit or goto here instead of end.",
+        "This 'end' runs later, when the button on line 1 is pressed, so the compiler cannot tell whether it has a call to return to then. Without one, the 'end' fails. If that can happen, use 'exit' or 'goto' here instead of 'end'.",
       ],
     ],
   );
@@ -277,14 +408,20 @@ test("a block runs later, so its end only warns and its call of a file is checke
     "back",
     "exit",
   ]);
-  // A Replay button that a called file shows calls that file again once main.tease runs.
-  const replay = compiled(
+  // A Replay button that a called file shows calls that file again once main.tease runs. Pressed while the file
+  // runs, it would fail, so the call warns.
+  const replayed = compileProject(
     project('call "scene.tease"\nwait 2 s\nexit', {
       "scene.tease": 'say "scene"\nsetup()\nend',
       "lib.tease":
         'global function setup {\n    let replay = showPermanentButton "Replay", persist: true { call "scene.tease" }\n}',
     }),
   );
+  assert.deepEqual(
+    replayed.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    [["lib.tease", "TSV073"]],
+  );
+  const replay = replayed.plan!;
   // A persistent block, or a media block, may run after the file that started it has returned.
   assert.deepEqual(
     compileProject(
@@ -311,7 +448,7 @@ test("a file target names no label, and a global function goes to no label of it
   for (const [main, message] of [
     [
       'goto "rooms/hall.tease" start',
-      `A goto to 'rooms/hall.tease' starts it at its top, so it cannot go to label 'start'. Write 'goto "rooms/hall.tease"', or put the part after 'start' in a file of its own and goto that file.`,
+      `A 'goto' to 'rooms/hall.tease' starts it at its top, so it cannot go to label 'start'. Write 'goto "rooms/hall.tease"', or put the part after 'start' in a file of its own and 'goto' that file.`,
     ],
     [
       'if false { call "rooms/hall.tease" start }\nexit',
@@ -319,15 +456,15 @@ test("a file target names no label, and a global function goes to no label of it
     ],
     [
       'goto "rooms/*.tease" start',
-      "A goto starts the file it picks at its top, so it cannot go to label 'start'. Put the part after 'start' in a file of its own and goto that file.",
+      "A 'goto' starts the file it picks at its top, so it cannot go to label 'start'. Put the part after 'start' in a file of its own and 'goto' that file.",
     ],
     [
       'let next = script("rooms/hall.tease", label: "start")\ngoto (next)',
-      "A script reference starts its file at its top, so it takes no 'label:'. Put the part after 'start' in a file of its own and name that file.",
+      "A file is always entered at its top, so 'script(...)' takes no 'label:'. Put the part after 'start' in a file of its own and name that file in 'script(...)'.",
     ],
     [
       'let name = "start"\ncall script("rooms/hall.tease", label: name)\nexit',
-      "A call starts the file it picks at its top, so it cannot go to a label. Put the part after the label in a file of its own and call that file.",
+      "A file is always entered at its top, so 'script(...)' takes no 'label:'. Put the part after the label in a file of its own and name that file in 'script(...)'.",
     ],
   ] as const)
     assert.deepEqual(diagnostics(main, rooms), [["TSV057", message]], main);
@@ -338,7 +475,7 @@ test("a file target names no label, and a global function goes to no label of it
       [
         [
           "TSV051",
-          "A global function can run in any file, so it cannot go to label 'later' of 'lib.tease'. Put the part after the label in a file of its own and goto that file, or in a function that does the work and returns.",
+          "A global function can run in any file, so it cannot go to label 'later' of 'lib.tease'. Put the part after the label in a file of its own and 'goto' that file, or in a global function that does the work and returns.",
         ],
       ],
       main,
@@ -369,12 +506,12 @@ test("an end with no call to return to is an error on every way the compiler can
     [
       "main.tease",
       "TSV070",
-      "No call waits for this end, because the session starts in main.tease without one, so there is nothing to return to. Use exit to finish the session, or goto to continue in another file.",
+      "This 'end' has no call to return to, because the session starts in 'main.tease' without one. Use 'exit' to finish the session, or 'goto' to continue in another file.",
     ],
   ]);
   const scene = { "scene.tease": 'say "scene"\nend' };
   const noCall =
-    "No call waits for this end when the goto on line 2 of main.tease leads here, so there is nothing to return to. Write call there to come back after it, or use exit or goto here instead of end.";
+    "This 'end' has no call to return to when the 'goto' on line 2 of 'main.tease' leads here. Write 'call' instead of 'goto' there to come back after it, or use 'exit' or 'goto' here instead of 'end'.";
   // Also when another way calls the file, and in a function that the file calls.
   for (const [main, others] of [
     ['say "start"\ngoto "scene.tease"', scene],
@@ -433,15 +570,19 @@ test("an end with no call to return to is an error on every way the compiler can
       [
         "scene.tease",
         "TSV071",
-        "The goto on line 2 of main.tease picks its file when it runs, so the compiler cannot tell whether a call waits for this end then. Without one, the end fails. If that goto can lead here, write call there to come back after it, or use exit or goto here instead of end.",
+        "The 'goto' on line 2 of 'main.tease' picks its file when it runs, so the compiler cannot tell whether this 'end' has a call to return to then. Without one, the 'end' fails. If that 'goto' can lead here, write 'call' instead of 'goto' there, or use 'exit' or 'goto' here instead of 'end'.",
       ],
     ],
   );
   const plan = compileProject(files).plan!;
-  assert.deepEqual(outputs(run(plan, createImmediatePacingRuntimeSnapshot(plan)).events), [
-    "scene",
-    "failure TSR066",
-  ]);
+  const ended = run(plan, createImmediatePacingRuntimeSnapshot(plan)).events;
+  assert.deepEqual(outputs(ended), ["scene", "failure TSR066"]);
+  assert.deepEqual(
+    ended.flatMap((event) => (event.kind === "runtimeFailure" ? [event.message] : [])),
+    [
+      "This 'end' has no call to return to, because no file called this one. Start this file with 'call' where it should come back, or use 'exit' where the session should finish.",
+    ],
+  );
 });
 
 test("a computed target may start only the files that a reference of the project may name", () => {
@@ -565,7 +706,7 @@ test("a fallback statement is no statement", () => {
     [
       [
         "TSP001",
-        "TeaseScript has no 'fallback': an end returns to the file that called this one. Use call to start a file that should come back here, and goto or exit where no call waits.",
+        "TeaseScript has no 'fallback': an 'end' returns to the file that called this one. Use 'call' to start a file that should come back here, and 'goto' or 'exit' where no call waits.",
       ],
     ],
   );
@@ -916,6 +1057,8 @@ test("a block changes the variables of a file the session left, also across a fi
         ].join("\n"),
         { "wait.tease": "wait 5 s\nexit", "pause.tease": "wait 1 s\nend" },
       ),
+      // The timer runs `later`, whose call of pause.tease would fail if the timer fired while pause.tease runs.
+      { warnings: ["TSV073"] },
     ),
     ["9 9", "exit"],
   );

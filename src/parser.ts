@@ -3436,7 +3436,7 @@ class Parser {
           parserDiagnosticCode.expectedStatement,
           // `fallback` was a statement until an end always returned to a call.
           expression.name === "fallback"
-            ? "TeaseScript has no 'fallback': an end returns to the file that called this one. Use call to start a file that should come back here, and goto or exit where no call waits."
+            ? "TeaseScript has no 'fallback': an 'end' returns to the file that called this one. Use 'call' to start a file that should come back here, and 'goto' or 'exit' where no call waits."
             : "Expected a supported TeaseScript statement.",
           expression.span,
         );

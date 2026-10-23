@@ -292,6 +292,7 @@ function checkWithEffects(
           ways: checker.ways(),
           unreachable: dead.statements,
           storageTypes: storageTypePlans(storage),
+          known: (expression: Expression) => checker.knownValues.known(expression),
         }),
         dead,
         known: checker.knownValues,

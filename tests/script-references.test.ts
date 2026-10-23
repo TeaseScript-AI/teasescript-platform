@@ -160,9 +160,12 @@ test("a computed target that names no file, or a file that runs nothing, fails w
   assert.deepEqual(failure('let path = "helpers.tease"\nlet next = script(path)\ngoto (next)'), [
     "failure TSR069: 'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.",
   ]);
-  // Calling such a file runs nothing and returns at once.
+  // Calling such a file runs nothing and returns at once. The compiler cannot tell which file the path names, so the
+  // call warns that it may start the running file.
   assert.deepEqual(
-    said(project('let path = "helpers.tease"\ncall script(path)\nsay "back"\nexit', others)),
+    said(project('let path = "helpers.tease"\ncall script(path)\nsay "back"\nexit', others), {
+      warnings: ["TSV073"],
+    }),
     ["back", "exit"],
   );
   // A loaded value that is not a reference is no target.

@@ -183,6 +183,8 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV069` | Blocking media handle, or `finish` twice | error | name pass |
 | `TSV070` | `end` with no call to return to | error | plan analysis |
 | `TSV071` | `end` that may have no call to return to | warning | plan analysis |
+| `TSV072` | `call` of the running file | error | plan analysis |
+| `TSV073` | `call` that may start the running file | warning | plan analysis |
 
 ## Tags (TST)
 
