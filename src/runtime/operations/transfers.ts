@@ -146,8 +146,7 @@ export function executeTransfer(
 
 /**
  * `end` ends the current activation, also from one of its functions or blocks, and returns after the `call` of its
- * file. Without one it fails: the compiler reports every such `end` it can follow, and warns where a computed target
- * hides the way (V30 §30).
+ * file. Without one it fails, which the compiler reports as V30 §30 decides.
  */
 export function executeEnd(
   instruction: EndInstruction,
