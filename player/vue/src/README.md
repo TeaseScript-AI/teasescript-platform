@@ -73,7 +73,9 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   repository demo: `demoHost.ts` supplies its source and resolves its package-relative references to the package's
   SVG files and to sounds that `generatedAudio.ts` synthesizes. With `?package=<id>`, `packageHost.ts` loads a package
   of the playground server's development package root instead and resolves its images, audio, and video; with `?dev`
-  too, the development preview plays that package instead of a scenario. `hostedScript.ts` compiles the script before
+  too, the development preview plays that package instead of a scenario. Before either mounts, `main.ts` opens the
+  stores of the data mode the address chooses with `playerStores.ts`, and both use only those; when they cannot be
+  opened, `ScriptProblems.vue` names the problem instead of Start. `hostedScript.ts` compiles the script before
   Start; one that does not compile shows `ScriptProblems.vue` with its diagnostics instead of Start. `PlayerApp.vue`
   composes the Debug panel: `usePlayerDebug.ts` owns the Debug menu and Debug switches, the countdown line that
   `RuntimeInteraction.vue` shows, and the scopes of `useDebugLog.ts`, of the time controls that

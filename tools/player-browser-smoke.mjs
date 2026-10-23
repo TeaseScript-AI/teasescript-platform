@@ -128,6 +128,7 @@ async function main() {
           },
         ],
         ["scriptStorage", () => scriptStorageScenario(cdp, origin)],
+        ["dataMode", () => dataModeScenario(cdp, origin)],
         ["demo", () => demoScenario(cdp, origin)],
         ["insecureOrigin", () => insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`)],
         ["package", () => packageScenario(cdp, origin)],
@@ -174,7 +175,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a data mode that cannot be opened, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
       );
     } finally {
       cdp.close();
@@ -566,6 +567,12 @@ async function scriptStorageScenario(cdp, origin) {
     "Reloading after the first visible demo message must show Back again. Visit 2.",
   );
   await openSettings();
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-storage-persistence]')?.textContent.trim().startsWith('Stored in this browser')`,
+    5_000,
+    "Saved data says that it is stored in this browser",
+  );
   assertEqual(
     await value(cdp, `document.querySelector('[data-clear-saved-data]').disabled`),
     true,
@@ -648,6 +655,30 @@ async function scriptStorageScenario(cdp, origin) {
     true,
     "Browser storage is usable again before the next scenario",
   );
+}
+
+// A data mode the Player cannot use opens no data at all: it names the problem instead of Start, rather than playing on
+// this browser's stand-alone data.
+async function dataModeScenario(cdp, origin) {
+  // The host leaves the token in the tab's session storage.
+  await navigate(cdp, `${origin}/player/`);
+  await value(cdp, `sessionStorage.setItem('teasescript-online-token', 'smoke')`);
+  try {
+    await navigate(cdp, `${origin}/player/?data=online&server=/no-server/`);
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-script-failure]')?.textContent.includes('The Player cannot open its data')`,
+      8_000,
+      "An online server that cannot be reached shows why instead of Start",
+    );
+    assertEqual(
+      await value(cdp, `!!document.querySelector('[data-session-activation] button')`),
+      false,
+      "No Start without the chosen data",
+    );
+  } finally {
+    await value(cdp, `sessionStorage.removeItem('teasescript-online-token')`);
+  }
 }
 
 // Plays the repository demo on the maintained /player/ route of the built Player with trusted input, so the Start

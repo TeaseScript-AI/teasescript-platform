@@ -2,14 +2,10 @@
 import { ref, type ShallowRef } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import type { CapturedMediaRepository } from "../../captured-media.js";
 import { DEMO_PLAYER_PROFILE } from "../../demo-player-profile.js";
-import type { KeptRoomStore, KeptSessionStore } from "../../kept-sessions.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotice } from "../../notices.js";
 import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime-adapter.js";
-import { browserSavedData } from "../../saved-data.js";
-import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
 import { prepareHostedScript, type ScriptHost, type ScriptIdentity } from "./hostedScript";
@@ -26,12 +22,12 @@ import {
   viewfinderScenarioSource,
 } from "./runtimeScenario";
 import PermanentButtons from "./PermanentButtons.vue";
+import type { PlayerStores } from "./playerStores";
 import { stageFixtures } from "./stageFixtures";
 import StageRightRail from "./StageRightRail.vue";
 import ThemeLab from "./ThemeLab.vue";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import TimerRegion from "./TimerRegion.vue";
-import { browserStorage } from "./usePlayerPreference";
 import { usePlayerSession, type PlayerSessionStart } from "./usePlayerSession";
 import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
@@ -65,9 +61,8 @@ const backgroundControlsReset = ref(0);
 const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 
 const props = defineProps<{
-  capturedMediaRepository?: CapturedMediaRepository | null;
-  keptSessions?: KeptSessionStore;
-  debugRooms?: KeptRoomStore;
+  /** The stores of the player's data, which main.ts opened for the host's data mode. */
+  stores: PlayerStores;
   /** The package `?package=<id>` selects; the preview plays it instead of a development scenario. */
   packageHost?: ScriptHost | null;
 }>();
@@ -83,16 +78,8 @@ const player = usePlayerSession(
   packageHost !== null
     ? {
         resolveAsset: packageHost.resolveAsset,
-        scriptStorage: createLocalScriptStorage(browserStorage(), packageHost.storageScope),
-        // As in the default build: an image the script saves a reference to stays in this browser for later runs.
-        capturedMedia: { repository: props.capturedMediaRepository ?? null },
-        savedData: browserSavedData(
-          browserStorage(),
-          props.capturedMediaRepository ?? null,
-          props.keptSessions,
-        ),
-        ...(props.keptSessions && { keptSessions: props.keptSessions }),
-        ...(props.debugRooms && { debugRooms: props.debugRooms }),
+        // As in the default build.
+        ...props.stores.storage(packageHost.storageScope),
         room,
         debugPackage: { id: packageHost.storageScope, version: null },
       }
@@ -103,17 +90,7 @@ const player = usePlayerSession(
             ? (path) => resolveDevelopmentAsset(path) ?? resolveDemoAsset(path)
             : resolveDevelopmentAsset,
         capabilities: { camera: cameraScenario || viewfinderScenario },
-        ...(cameraScenario && {
-          scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),
-          capturedMedia: { repository: props.capturedMediaRepository ?? null },
-          savedData: browserSavedData(
-            browserStorage(),
-            props.capturedMediaRepository ?? null,
-            props.keptSessions,
-          ),
-          ...(props.debugRooms && { debugRooms: props.debugRooms }),
-          room,
-        }),
+        ...(cameraScenario && { ...props.stores.storage("development-camera"), room }),
       },
 );
 
@@ -134,7 +111,7 @@ const startOptions = (recording: Parameters<PlayerSessionStart>[0]) => ({
   ...recording,
   temporalContext: playerTemporalContext(),
   wallClockMs: Date.now(),
-  playerProfile: DEMO_PLAYER_PROFILE,
+  playerProfile: props.stores.playerProfile ?? DEMO_PLAYER_PROFILE,
 });
 // A package is compiled and prepared like in the default build; a scenario is a fixed development script.
 let failure: ShallowRef<ScriptFailure | null> | null = null;
@@ -174,6 +151,7 @@ else
     :author="identity?.author ?? ''"
     :package-name="packageHost?.name ?? ''"
     :failure="failure ?? null"
+    :storage-persistent="props.stores.persistent?.value"
     :media="mediaFixture === 'Runtime' ? undefined : stageFixtures[mediaFixture]"
     :debug="debug"
   >
