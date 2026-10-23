@@ -236,7 +236,7 @@ code each.
   - type checker: the same rule with the same text for a start value that selects at random, with `.random` or a list in `${...}`, which needs the value's type
 - `TSV057`
   - name pass: a file target that names no file the `goto` or `call` can start, among them a `goto` to a file of declarations only, by its path or a `script(...)` of its path written out (`declarationsOnlyMessage`)
-  - plan analysis: the same rule with the same text for a `goto` to a reference when the references of the project can name only that file
+  - plan analysis: the same rule with the same text for a computed `goto`, such as `goto (next)`, when the references of the project can name only one file and it holds declarations only
 - `TST004`
   - parser: a tag that a file header gives two different numbers (`conflictingTagMessage`)
   - compiler: the same rule with the same text, naming the image, for the keywords of an image

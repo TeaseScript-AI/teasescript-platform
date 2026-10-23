@@ -164,7 +164,7 @@ test("a computed target that names no file, or a file that runs nothing, fails w
       warnings: ["TSV074"],
     }),
     [
-      "failure TSR069: 'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.",
+      "failure TSR069: 'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Use its global functions, speakers, and globals in any file without going there.",
     ],
   );
   // Calling such a file runs nothing and returns at once. The compiler cannot tell which file the path names, so the
@@ -192,7 +192,7 @@ test("a goto to a reference that can name a file of declarations only warns, or 
   const check = (main: string): [string, string][] =>
     diagnostics(project(main, others)).map(([, code, message]) => [code, message]);
   const runsNothing =
-    "'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.";
+    "'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Use its global functions, speakers, and globals in any file without going there.";
   // V30 §29: where the references of the project can name only that file, as for a script(...) of its path.
   assert.deepEqual(
     check('if debugMode { exit }\nlet next = script("helpers.tease")\ngoto (next)'),
@@ -203,7 +203,7 @@ test("a goto to a reference that can name a file of declarations only warns, or 
   assert.deepEqual(check(`${rooms}goto (rooms[0])`), [
     [
       "TSV074",
-      "The file of this 'goto' is known only when it runs, so the compiler cannot tell whether it is 'helpers.tease', which holds declarations only and runs nothing. If it is, the 'goto' fails. If it can be, make sure it names a file that runs something.",
+      "The file of this 'goto' is known only when it runs, so the compiler cannot tell whether it is 'helpers.tease', which holds declarations only and runs nothing. If it is, the 'goto' fails. If it can be, make sure the 'goto' leads to a file that runs something.",
     ],
   ]);
   assert.deepEqual(
@@ -253,7 +253,7 @@ test("a script(...) with literal text is checked like a file target, and a compu
   assert.deepEqual(check('goto script("helpers.tease")'), [
     [
       "TSV057",
-      "'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.",
+      "'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Use its global functions, speakers, and globals in any file without going there.",
     ],
   ]);
   assert.deepEqual(

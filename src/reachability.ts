@@ -402,7 +402,7 @@ export class Reachability {
           : createDiagnostic(
               DiagnosticSeverity.Warning,
               "TSV074",
-              `The file of this 'goto' is known only when it runs, so the compiler cannot tell whether it is '${path}', which holds declarations only and runs nothing. If it is, the 'goto' fails. If it can be, make sure it names a file that runs something.`,
+              `The file of this 'goto' is known only when it runs, so the compiler cannot tell whether it is '${path}', which holds declarations only and runs nothing. If it is, the 'goto' fails. If it can be, make sure the 'goto' leads to a file that runs something.`,
               span,
             ),
       );

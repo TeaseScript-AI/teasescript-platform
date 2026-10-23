@@ -1003,7 +1003,7 @@ test("a goto or call names a file that exists", () => {
   assert.deepEqual(codes('goto "helpers.tease"', others), [
     [
       "TSV057",
-      "'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.",
+      "'helpers.tease' holds declarations only and runs nothing, so going there would end nowhere. Use its global functions, speakers, and globals in any file without going there.",
     ],
   ]);
   // Calling such a file runs nothing and returns at once.

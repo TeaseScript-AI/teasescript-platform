@@ -281,8 +281,8 @@ export const DIAGNOSTIC_CODES = {
       parts: [
         "a file target that names no file the `goto` or `call` can start, among them a `goto` to a file of " +
           "declarations only, by its path or a `script(...)` of its path written out (`declarationsOnlyMessage`)",
-        "the same rule with the same text for a `goto` to a reference when the references of the project can name " +
-          "only that file",
+        "the same rule with the same text for a computed `goto`, such as `goto (next)`, when the references of the " +
+          "project can name only one file and it holds declarations only",
       ],
     },
   },

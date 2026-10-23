@@ -35,7 +35,7 @@ export function packageAssetPathProblem(path: string): string | null {
  * the compile error and the runtime check.
  */
 export function declarationsOnlyMessage(path: string): string {
-  return `'${path}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`;
+  return `'${path}' holds declarations only and runs nothing, so going there would end nowhere. Use its global functions, speakers, and globals in any file without going there.`;
 }
 
 /** Orders project files: `main.tease` first, then the other paths by UTF-16 code unit. */

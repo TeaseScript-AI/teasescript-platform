@@ -4624,7 +4624,8 @@ Rules:
 - A `script(...)` whose path is literal, quoted text without `${...}`, is checked like a file target: a path that leaves
   the package, a missing file, a glob, and a `goto` to a file of declarations only are compile errors, also for another
   reference whose target the compiler can see. Any other reference is checked when a transfer uses it: a missing file,
-  or a `goto` to a file of declarations only, is a runtime error.
+  or a `goto` to a file of declarations only, is a runtime error, and a `goto` that may lead to such a file is a
+  warning (`TSV074`).
 - Reading or assigning a variable of the file whose `let` has not run in this entry into the file, as in a function
   called before the `let`, is a runtime error.
 - Functions and labels are local to their file.
@@ -4654,9 +4655,9 @@ Behavior:
 - An `end` that a way the compiler can follow, through files written out, globs, and references whose target the
   compiler can see, reaches with no pending `call` is a compile error, also when another way reaches the same `end`
   through a `call`, as in `if pick { call "scene.tease" } else { goto "scene.tease" }`. The message points to `call`,
-  `goto`, or `exit`. Where a computed target, such as a reference in a variable or a tagged pick, or a timer, media, or
-  button block, which runs later, hides the way, it is a warning (`TSV071`), and reaching that `end` with no pending
-  `call` is a runtime error.
+  `goto`, or `exit`. Where a computed target, such as any other reference or a tagged pick, or a timer, media, or button
+  block, which runs later, hides the way, it is a warning (`TSV071`), and reaching that `end` with no pending `call` is
+  a runtime error.
 - A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. A file of
   declarations only (functions, global functions, speakers, and globals without `default:`) runs nothing on its own
   and needs no ending; a `goto` into such a file is a compile error. A call
