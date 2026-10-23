@@ -74,6 +74,7 @@ import {
 } from "../../capture-call.js";
 import { isConversion, takesDefault, takesFiles } from "../../conversions.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
+import { boundParameterName } from "../../function-arguments.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralValue } from "../../duration.js";
@@ -2966,19 +2967,13 @@ export class InstructionCompiler {
     expression.arguments.forEach((argument, index) => {
       const lowered = loweredArguments[index]!;
       for (const temporaryId of lowered.temporaryIds) temporaryIds.push(temporaryId);
-      let parameterName: string;
-      if (argument.kind === "namedArgument") {
-        parameterName = argument.name.name;
-      } else {
-        const parameter = registered.declaration.parameters[index];
-        if (parameter === undefined) {
-          throw new InstructionCompilationError(
-            "TSC003",
-            `Function '${name}' has no parameter for positional argument ${index + 1}.`,
-            argument.span,
-          );
-        }
-        parameterName = parameter.name.name;
+      const parameterName = boundParameterName(registered.declaration.parameters, argument, index);
+      if (parameterName === undefined) {
+        throw new InstructionCompilationError(
+          "TSC003",
+          `Function '${name}' has no parameter for positional argument ${index + 1}.`,
+          argument.span,
+        );
       }
       planned.push({
         parameterName,

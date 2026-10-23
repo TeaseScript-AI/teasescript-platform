@@ -18,9 +18,11 @@ import {
   statementExpressions,
   unwrap,
 } from "../../expression-children.js";
+import { boundParameterName } from "../../function-arguments.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
 import { runsOnItsOwn, sessionDeclarations } from "../../project-globals.js";
 import { globMatches, isPathGlob } from "../../project-paths.js";
+import { listHasPosition } from "../../runtime/values/collection-operations.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { isEmptyLiteral, isNonEmptyLiteral, staticNumber } from "../../static-evaluation.js";
 import { caseValueKey } from "../../switch-cases.js";
@@ -303,7 +305,6 @@ interface PendingTransfer {
 /** The parameter binding nodes whose default an always-supplied or never-supplied argument decides. */
 interface DefaultChoice {
   readonly function: FunctionRegion;
-  readonly index: number;
   readonly name: string;
   /** The node before the default, which leads to its first node and, skipping it, to the binding. */
   readonly before: FlowNode;
@@ -348,6 +349,10 @@ class FlowGraphBuilder {
   readonly #leftBy = new Set<FlowNode>();
   readonly #logicals: { readonly file: number; readonly expression: BinaryExpression }[] = [];
   readonly #labelled = new Set<FileRegion>();
+  /** The nodes made since the last join of dead code that may have no predecessor (see `#joinDead`). */
+  readonly #orphans: number[] = [];
+  /** The literal value of each condition asked so far (see `literalTruth`). */
+  readonly #truths = new Map<Expression, boolean | null>();
   readonly #program: { readonly entry: BuildNode; readonly end: BuildNode };
   readonly #startup: StartupRegion;
 
@@ -471,6 +476,7 @@ class FlowGraphBuilder {
       ...extra,
     };
     this.#nodes.push(node);
+    this.#orphans.push(node.id);
     return node;
   }
 
@@ -505,8 +511,9 @@ class FlowGraphBuilder {
    */
   #joinDead(first: number, from: FlowNode | null): void {
     if (from === null) return;
-    for (let index = first; index < this.#nodes.length; index += 1) {
-      const node = this.#nodes[index]!;
+    // Each node is looked at by the innermost join after it is made, never again by the joins around it.
+    while (this.#orphans.length > 0 && this.#orphans.at(-1)! >= first) {
+      const node = this.#nodes[this.#orphans.pop()!]!;
       if (node.predecessors.length === 0) this.#link(from, node, true);
     }
   }
@@ -604,14 +611,15 @@ class FlowGraphBuilder {
           call: expression,
         });
       if (lazy === undefined) return out;
-      // P7: a `get` on a list literal with a literal index uses its default exactly when the index is past the end.
+      // P7: a `get` on a list literal with a literal index uses its default exactly when the list has no such position
+      // (`listHasPosition`, the runtime's rule: a negative or fractional index takes the default too).
       let runs: "never" | "always" | "maybe" = "maybe";
       if (callee.kind === "propertyAccessExpression" && callee.property.name === "get") {
         const receiver = unwrap(callee.object);
         const index = expression.arguments[0];
         const position = index === undefined ? null : literalCount(index.value);
         if (receiver.kind === "listLiteral" && position !== null)
-          runs = receiver.elements.length > position ? "never" : "always";
+          runs = listHasPosition(receiver.elements.length, position) ? "never" : "always";
       }
       const accepted = remember(this.#own("default-accepted", context, expression.span));
       if (runs !== "never") {
@@ -640,7 +648,7 @@ class FlowGraphBuilder {
         if (leftValue.kind === "nullLiteral") runs = "always";
         else if (NON_NULL_LITERALS.has(leftValue.kind)) runs = "never";
       } else {
-        const value = literalTruth(expression.left);
+        const value = literalTruth(expression.left, this.#truths);
         if (value !== null) runs = value === (expression.operator === "and") ? "always" : "never";
       }
       const node = remember(this.#own("expression", context, expression.span, { expression }));
@@ -845,7 +853,7 @@ class FlowGraphBuilder {
           operand: unwrap(statement.condition),
           branches,
         });
-        const value = literalTruth(statement.condition);
+        const value = literalTruth(statement.condition, this.#truths);
         const join = this.#node("join", region, file, null, loops);
         const thenStart = this.#node("branch", region, file, null, loops);
         branches.push(thenStart);
@@ -888,7 +896,7 @@ class FlowGraphBuilder {
           operand: unwrap(statement.condition),
           branches,
         });
-        const value = literalTruth(statement.condition);
+        const value = literalTruth(statement.condition, this.#truths);
         const body = this.#node("loop-body", region, file, null, inner.loops);
         branches.push(body);
         this.#link(condition, body, value === false);
@@ -1124,7 +1132,7 @@ class FlowGraphBuilder {
       this.#globalFunctions.set(name, region);
     const inner = this.#context(id, file, context.fileRegion, null, region, null, []);
     let cursor: FlowNode = entry;
-    for (const [index, parameter] of declaration.parameters.entries()) {
+    for (const parameter of declaration.parameters) {
       const binding = this.#node("parameter", id, file, parameter.span, []);
       parameters.set(parameter.name.name, binding);
       if (parameter.defaultValue !== null) {
@@ -1134,7 +1142,6 @@ class FlowGraphBuilder {
         this.#link(value, binding);
         this.#defaultChoices.push({
           function: region,
-          index,
           name: parameter.name.name,
           before: cursor,
           binding,
@@ -1177,19 +1184,36 @@ class FlowGraphBuilder {
     }
   }
 
-  /** P7: a default that every call supplies never runs, and one that no call supplies always runs. */
+  /**
+   * P7: a default that every call supplies never runs, and one that no call supplies always runs. Each call's arguments
+   * are bound to parameters once, as the lowering binds them (`boundParameterName`), and counted per parameter.
+   */
   #decideDefaults(): void {
+    const suppliedBy = new Map<FunctionRegion, Map<string, number>>();
+    const supplied = (callee: FunctionRegion): Map<string, number> => {
+      const known = suppliedBy.get(callee);
+      if (known !== undefined) return known;
+      const counts = new Map<string, number>();
+      for (const site of callee.sites) {
+        if (site.call === null) continue;
+        const bound = new Set<string>();
+        site.call.arguments.forEach((argument, index) => {
+          const name = boundParameterName(callee.declaration.parameters, argument, index);
+          if (name !== undefined) bound.add(name);
+        });
+        for (const name of bound) counts.set(name, (counts.get(name) ?? 0) + 1);
+      }
+      suppliedBy.set(callee, counts);
+      return counts;
+    };
     for (const choice of this.#defaultChoices) {
-      const sites = choice.function.sites;
-      if (sites.length === 0) continue;
-      const supplied = sites.map(
-        (site) => site.call !== null && supplies(site.call, choice.index, choice.name),
-      );
-      if (supplied.every(Boolean)) {
+      const sites = choice.function.sites.length;
+      if (sites === 0) continue;
+      const count = supplied(choice.function).get(choice.name) ?? 0;
+      if (count === sites) {
         for (const next of choice.before.successors)
           if (next !== choice.binding) this.#deadEdges.add(edgeKey(choice.before, next));
-      } else if (!supplied.some(Boolean))
-        this.#deadEdges.add(edgeKey(choice.before, choice.binding));
+      } else if (count === 0) this.#deadEdges.add(edgeKey(choice.before, choice.binding));
     }
   }
 
@@ -1358,7 +1382,7 @@ class FlowGraphBuilder {
 
   /**
    * A function nothing calls, a file nothing enters, and every node that no edge reaches, such as a label nothing jumps
-   * to, hang below the startup region by dead edges, so that every node has a dominator.
+   * to or a cycle nothing enters, hang below the startup region by dead edges, so that every node has a dominator.
    */
   #joinUnentered(): void {
     const from = this.#built(this.#startup.exit);
@@ -1371,6 +1395,24 @@ class FlowGraphBuilder {
     for (const node of this.#nodes)
       if (node.predecessors.length === 0 && node !== this.#program.entry)
         this.#link(from, node, true);
+    // A cycle that nothing enters, such as a function that only calls itself, hangs there by its first node.
+    const reached = new Uint8Array(this.#nodes.length);
+    const reach = (start: BuildNode): void => {
+      const work = [start];
+      reached[start.id] = 1;
+      while (work.length > 0)
+        for (const next of work.pop()!.successors)
+          if (reached[next.id] === 0) {
+            reached[next.id] = 1;
+            work.push(next);
+          }
+    };
+    reach(this.#program.entry);
+    for (const node of this.#nodes)
+      if (reached[node.id] === 0) {
+        this.#link(from, node, true);
+        reach(node);
+      }
   }
 
   #decideLiveness(): void {
@@ -1388,14 +1430,30 @@ class FlowGraphBuilder {
     for (const node of this.#nodes) node.dead = live[node.id] === 0;
   }
 
-  /** The callables in a cycle of calls: the strongly connected components of the call graph (Tarjan, iteratively). */
+  /**
+   * The callables in a cycle of calls and file transfers, which may run in several activations at once: the strongly
+   * connected components of the graph from each callable to those it may run in (Tarjan, iteratively). A file that a
+   * `goto` starts runs in place of the file it leaves, inside whatever called that one.
+   */
   #recursion(callables: readonly Callable[]): ReadonlySet<Callable> {
     const recursive = new Set<Callable>();
-    const callers = (callable: Callable): Callable[] =>
-      callable.sites.flatMap((site) => {
+    const startedBy = new Map<Callable, Callable[]>();
+    for (const jump of this.#jumps) {
+      const from = this.#callableOf[jump.node.region];
+      if (jump.kind !== "file" || from === null || from === undefined) continue;
+      for (const file of jump.files) {
+        const list = startedBy.get(file);
+        if (list === undefined) startedBy.set(file, [from]);
+        else list.push(from);
+      }
+    }
+    const callers = (callable: Callable): Callable[] => [
+      ...callable.sites.flatMap((site) => {
         const caller = this.#callableOf[site.caller];
         return caller === null || caller === undefined ? [] : [caller];
-      });
+      }),
+      ...(startedBy.get(callable) ?? []),
+    ];
     const index = new Map<Callable, number>();
     const low = new Map<Callable, number>();
     const onStack = new Set<Callable>();
@@ -1517,31 +1575,52 @@ function edgeKey(from: FlowNode, to: FlowNode): number {
  * P7: the value a condition always has by its literals, as the type check reads conditions (`conditionShape`): a
  * boolean literal, `not` of one, or `and` and `or` that their literal operands decide; `null` when a run decides it.
  */
-function literalTruth(expression: Expression): boolean | null {
-  return runCompileTask(literalTruthTask(expression));
+function literalTruth(
+  expression: Expression,
+  known: Map<Expression, boolean | null>,
+): boolean | null {
+  return runCompileTask(literalTruthTask(expression, known));
 }
 
-function* literalTruthTask(expression: Expression): CompileTask<boolean | null> {
+/** The fold of {@link literalTruth}, each expression once: an `and` chain's operands are asked again by each prefix. */
+function* literalTruthTask(
+  expression: Expression,
+  known: Map<Expression, boolean | null>,
+): CompileTask<boolean | null> {
+  const found = known.get(expression);
+  if (found !== undefined) return found;
   const shape = conditionShape(expression);
+  let value: boolean | null = null;
   switch (shape.kind) {
     case "literal":
-      return shape.node.value;
+      value = shape.node.value;
+      break;
     case "not": {
-      const value = yield* compileChild(literalTruthTask(shape.operand));
-      return value === null ? null : !value;
+      const operand = yield* compileChild(literalTruthTask(shape.operand, known));
+      value = operand === null ? null : !operand;
+      break;
     }
     case "and":
     case "or": {
       // `false` decides an `and` and `true` an `or`, whichever operand has it.
       const decides = shape.kind === "or";
-      const left = yield* compileChild(literalTruthTask(shape.left));
-      const right = yield* compileChild(literalTruthTask(shape.right));
-      if (left === decides || right === decides) return decides;
-      return left === null || right === null ? null : !decides;
+      const left = yield* compileChild(literalTruthTask(shape.left, known));
+      const right = yield* compileChild(literalTruthTask(shape.right, known));
+      value =
+        left === decides || right === decides
+          ? decides
+          : left === null || right === null
+            ? null
+            : !decides;
+      break;
     }
-    default:
-      return null;
+    case "null":
+    case "type":
+    case "other":
+      break;
   }
+  known.set(expression, value);
+  return value;
 }
 
 /** P7: a `repeat` count or a list index that its literals give, as the type check folds a count, or `null`. */
@@ -1562,14 +1641,4 @@ function literalRounds(count: Expression): LiteralRounds {
 /** P7: the rounds of a `for` over a literal collection or a range of constant numbers, as the type check reads it. */
 function literalCollectionRounds(iterable: Expression): LiteralRounds {
   return isEmptyLiteral(iterable) ? "none" : isNonEmptyLiteral(iterable) ? "some" : null;
-}
-
-/** Whether a call supplies the parameter at `index` named `name`: by position, or by name. */
-function supplies(call: CallExpression, index: number, name: string): boolean {
-  let positional = 0;
-  for (const argument of call.arguments) {
-    if (argument.kind === "positionalArgument") positional += 1;
-    else if (argument.name.name === name) return true;
-  }
-  return positional > index;
 }
