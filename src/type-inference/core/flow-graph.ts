@@ -22,7 +22,7 @@ import { lazyDefaultArgument } from "../../lazy-defaults.js";
 import { runsOnItsOwn, sessionDeclarations } from "../../project-globals.js";
 import { globMatches, isPathGlob } from "../../project-paths.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
-import { staticNumber } from "../../static-evaluation.js";
+import { isEmptyLiteral, isNonEmptyLiteral, staticNumber } from "../../static-evaluation.js";
 import { caseValueKey } from "../../switch-cases.js";
 import type { SourceSite } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
@@ -39,8 +39,9 @@ import { conditionShape } from "../narrowing-shapes.js";
  * session starts at the program's entry, runs the session-start values of every global and speaker (the startup
  * region, which dominates every file), and enters the first file. What the graph proves from literals (P7) is a dead
  * edge: a literal condition, `switch` subject or lazy operand, a literal `repeat` count (`0`: the body is dead; `1`: no
- * second round; `1` or more: the body runs before the loop is left), a `get` on a list literal with a literal index,
- * and a parameter default that every call supplies or none does. A call that cannot return has a dead summary edge.
+ * second round; `1` or more: the body runs before the loop is left), a `for` over a literal collection (empty: the body
+ * is dead; not empty: the body runs before the loop is left), a `get` on a list literal with a literal index, and a
+ * parameter default that every call supplies or none does. A call that cannot return has a dead summary edge.
  * Dead code keeps its nodes, joined to the live code before it by dead edges, so every node has a dominator.
  */
 
@@ -905,7 +906,9 @@ class FlowGraphBuilder {
         );
         if (isRepeat)
           this.#countUses.push({ file, span: statement.span, operand: unwrap(statement.count) });
-        const count = isRepeat ? literalCount(statement.count) : null;
+        const rounds = isRepeat
+          ? literalRounds(statement.count)
+          : literalCollectionRounds(statement.iterable);
         const head = this.#node("loop-head", region, file, statement.span, loops);
         const exit = this.#node("loop-exit", region, file, null, loops);
         const inner = { ...context, loops: [...loops, head], loop: { head, exit } };
@@ -922,7 +925,7 @@ class FlowGraphBuilder {
           );
         }
         // The head is where a round ends: the body runs again from it, or the loop is left.
-        if (count !== null && count <= 0) {
+        if (rounds === "none") {
           // P7: the body never runs.
           this.#link(counted, exit);
           this.#link(counted, head, true);
@@ -931,7 +934,7 @@ class FlowGraphBuilder {
           this.#link(bodyEnd, head);
           return exit;
         }
-        if (count === 1) {
+        if (rounds === "one") {
           // P7: the body runs once; a `continue` ends that round, and with it the loop.
           this.#link(counted, body);
           const bodyEnd = yield* compileChild(this.#block(statement.body.statements, inner, body));
@@ -940,8 +943,8 @@ class FlowGraphBuilder {
           this.#link(head, exit);
           return exit;
         }
-        // P7: a literal count of one or more runs the body before the loop can be left.
-        this.#link(counted, count !== null ? body : head);
+        // P7: a literal count of one or more, or a non-empty literal collection, runs the body before the loop can be left.
+        this.#link(counted, rounds === "some" ? body : head);
         this.#link(head, exit);
         this.#link(head, body);
         const bodyEnd = yield* compileChild(this.#block(statement.body.statements, inner, body));
@@ -1544,6 +1547,21 @@ function* literalTruthTask(expression: Expression): CompileTask<boolean | null> 
 /** P7: a `repeat` count or a list index that its literals give, as the type check folds a count, or `null`. */
 function literalCount(expression: Expression): number | null {
   return staticNumber(expression) ?? null;
+}
+
+/** P7: how often a body runs by its literals: never, exactly once, at least once, or `null` when a run decides. */
+type LiteralRounds = "none" | "one" | "some" | null;
+
+/** P7: the rounds of a `repeat` whose count its literals give. */
+function literalRounds(count: Expression): LiteralRounds {
+  const value = literalCount(count);
+  if (value === null) return null;
+  return value <= 0 ? "none" : value === 1 ? "one" : value > 1 ? "some" : null;
+}
+
+/** P7: the rounds of a `for` over a literal collection or a range of constant numbers, as the type check reads it. */
+function literalCollectionRounds(iterable: Expression): LiteralRounds {
+  return isEmptyLiteral(iterable) ? "none" : isNonEmptyLiteral(iterable) ? "some" : null;
 }
 
 /** Whether a call supplies the parameter at `index` named `name`: by position, or by name. */

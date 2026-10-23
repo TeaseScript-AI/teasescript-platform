@@ -251,6 +251,8 @@ import {
 } from "./duration.js";
 import {
   findVisibleOverflows,
+  isEmptyLiteral,
+  isNonEmptyLiteral,
   isStaticDuration,
   KnownValues,
   VISIBLE_OVERFLOW_MESSAGES,
@@ -9983,28 +9985,6 @@ function decidedSlot(type: StaticType, at: SourceSpan): StaticType {
   slot.resolvedAt = at;
   slot.order = nextDecision();
   return slot;
-}
-
-/** A literal list, set, dict, or range that certainly has an element, so a loop over it runs at least once. */
-/** A literal or constant range with nothing to go through. */
-function isEmptyLiteral(expression: Expression): boolean {
-  const node = unwrap(expression);
-  if (node.kind === "listLiteral" || node.kind === "setLiteral") return node.elements.length === 0;
-  if (node.kind === "dictLiteral") return node.entries.length === 0;
-  if (node.kind !== "rangeExpression") return false;
-  const start = staticNumber(node.start);
-  const end = staticNumber(node.end);
-  return start !== undefined && end !== undefined && (node.inclusive ? end < start : end <= start);
-}
-
-function isNonEmptyLiteral(expression: Expression): boolean {
-  const node = unwrap(expression);
-  if (node.kind === "listLiteral" || node.kind === "setLiteral") return node.elements.length > 0;
-  if (node.kind === "dictLiteral") return node.entries.length > 0;
-  if (node.kind !== "rangeExpression") return false;
-  const start = staticNumber(node.start);
-  const end = staticNumber(node.end);
-  return start !== undefined && end !== undefined && (node.inclusive ? end >= start : end > start);
 }
 
 /** Two kinds a literal mixes; for two objects, the property whose types differ. */
