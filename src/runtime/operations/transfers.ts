@@ -115,7 +115,7 @@ export function executeTransfer(
   if (instruction.mode === "call" && destination.file === runningFile(snapshot)) {
     throw new RuntimeFault(
       "TSR069",
-      `This call would start '${messageText(plan.files[destination.file]!.path)}', the file that is running, but a call starts another file. To run a part of a file and come back, put it in a function and call that.`,
+      `This call cannot start '${messageText(plan.files[destination.file]!.path)}', because that file is already running. To run a part of a file and come back, put that part in a function and write the function's name with '()' instead.`,
       copySpan(instruction.span),
     );
   }
@@ -157,7 +157,7 @@ export function executeEnd(
   if (index < 0) {
     throw new RuntimeFault(
       "TSR066",
-      "This file ended, but no file called it, so there is nothing to return to. Use call where this file should be started and come back, or use exit where the session should finish.",
+      "This 'end' has no call to return to, because no file called this one. Start this file with 'call' where it should come back, or use 'exit' where the session should finish.",
       copySpan(instruction.span),
     );
   }

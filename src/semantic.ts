@@ -250,7 +250,8 @@ export interface ProjectProgram {
 
 /**
  * Why a `goto` or `call` cannot name a label of a file, or a `script(...)` reference one (V30 §29): a file starts at its
- * top. `path` is the file a literal path names, `null` for a glob or a reference; `label` is `null` when computed.
+ * top. `keyword` is `null` for a reference, `path` the file a literal path names or `null` for a glob, and `label` is
+ * `null` when computed.
  */
 function fileLabelMessage(
   keyword: "goto" | "call" | null,
@@ -259,13 +260,14 @@ function fileLabelMessage(
 ): string {
   const named = label === null ? "a label" : `label '${label}'`;
   const after = label === null ? "the label" : `'${label}'`;
-  if (keyword === null || path === null)
-    return keyword !== null
-      ? `A ${keyword} starts the file it picks at its top, so it cannot go to ${named}. Put the part after ${after} in a file of its own and ${keyword} that file.`
-      : `A script reference starts its file at its top, so it takes no 'label:'. Put the part after ${after} in a file of its own and name that file.`;
+  const transfer = keyword === "goto" ? "'goto'" : "call";
+  if (keyword === null)
+    return `A file is always entered at its top, so 'script(...)' takes no 'label:'. Put the part after ${after} in a file of its own and name that file in 'script(...)'.`;
+  if (path === null)
+    return `A ${transfer} starts the file it picks at its top, so it cannot go to ${named}. Put the part after ${after} in a file of its own and ${transfer} that file.`;
   return keyword === "call"
     ? `A call starts '${path}' at its top, so it cannot go to ${named}. Put the part after ${after} in a file of its own and call that file, or in a global function.`
-    : `A goto to '${path}' starts it at its top, so it cannot go to ${named}. Write 'goto "${path}"', or put the part after ${after} in a file of its own and goto that file.`;
+    : `A 'goto' to '${path}' starts it at its top, so it cannot go to ${named}. Write 'goto "${path}"', or put the part after ${after} in a file of its own and 'goto' that file.`;
 }
 
 /**
@@ -1281,9 +1283,9 @@ class SemanticValidator {
       const label = target.label.name;
       const problem =
         transfer === "callFileStatement"
-          ? `A call starts another file at its top, so it cannot go to label '${label}' of this file. Use 'goto ${label}' to continue at the label, or put that part in a function and call the function.`
+          ? `A call only starts a file, at its top, so 'call ${label}' cannot go to a label or function of this file. Write 'goto ${label}' to continue at a label, or '${label}()' to run a function.`
           : this.#globalFunction !== null
-            ? `A global function can run in any file, so it cannot go to label '${label}' of '${path}'. Put the part after the label in a file of its own and goto that file, or in a function that does the work and returns.`
+            ? `A global function can run in any file, so it cannot go to label '${label}' of '${path}'. Put the part after the label in a file of its own and 'goto' that file, or in a global function that does the work and returns.`
             : this.#labels.has(label)
               ? null
               : `This file has no label '${label}'. Add 'label ${label}' in the outer level of the file.`;
@@ -1348,11 +1350,7 @@ class SemanticValidator {
     if (label !== undefined) {
       this.#report(
         semanticCode.invalidFileTarget,
-        fileLabelMessage(
-          transfer === "callFileStatement" ? "call" : transfer === null ? null : "goto",
-          literalText(label) ?? null,
-          null,
-        ),
+        fileLabelMessage(null, literalText(label) ?? null, null),
         label.span,
       );
       return;

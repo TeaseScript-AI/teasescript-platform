@@ -143,11 +143,11 @@ test("a call starts another file, so a label or a call that can start the runnin
     [
       "main.tease",
       "TSV057",
-      "A call starts another file at its top, so it cannot go to label 'greeting' of this file. Use 'goto greeting' to continue at the label, or put that part in a function and call the function.",
+      "A call only starts a file, at its top, so 'call greeting' cannot go to a label or function of this file. Write 'goto greeting' to continue at a label, or 'greeting()' to run a function.",
     ],
   ]);
   const ownFile =
-    "A call starts another file, but this call can start 'main.tease', the file it is in. To run a part of this file and come back, put it in a function and call that, or use goto with a label of this file to continue there.";
+    "This call starts its own file, 'main.tease', which is already running. To run a part of it and come back, put that part in a function and write the function's name with '()' instead. To continue at a label without coming back, write 'goto' and the label.";
   // Every spelling of the file, also where the call never runs.
   for (const call of ['call "main.tease"', 'call script("main.tease")'])
     assert.deepEqual(
@@ -170,7 +170,7 @@ test("a call starts another file, so a label or a call that can start the runnin
       [
         "rooms/a.tease",
         "TSV072",
-        "A call starts another file, but this call can start 'rooms/a.tease', the file it is in. Change the pattern so that it matches only other files.",
+        "This call can pick its own file, 'rooms/a.tease', which is already running. Change the pattern so that it does not match 'rooms/a.tease'.",
       ],
     ],
   );
@@ -183,7 +183,7 @@ test("a call starts another file, so a label or a call that can start the runnin
       [
         "a.tease",
         "TSV072",
-        "A call starts another file, but this call can start 'a.tease', the file it is in. Limit the candidates with 'from:', or with a tag that 'a.tease' does not have.",
+        "This call can pick its own file, 'a.tease', which is already running. Leave 'a.tease' out with 'from:', or with a tag that it does not have.",
       ],
     ],
   );
@@ -246,15 +246,15 @@ test("a call whose file only the run decides warns, and fails when it starts the
       (event) => (event.kind === "runtimeFailure" ? [`${event.code} ${event.message}`] : []),
     );
   const message = (path: string) =>
-    `TSR069 This call would start '${path}', the file that is running, but a call starts another file. To run a part of a file and come back, put it in a function and call that.`;
+    `TSR069 This call cannot start '${path}', because that file is already running. To run a part of a file and come back, put that part in a function and write the function's name with '()' instead.`;
   const later = (where: string, path: string) =>
-    `The block that ${where} starts runs later, so the compiler cannot tell whether '${path}' is running when this call starts it. A call starts another file, so the call fails if it is. If the block can run while '${path}' runs, put what the call should run in a function and call that instead.`;
+    `This call runs later, from the timer on ${where}, so the compiler cannot tell whether '${path}' is already running then. If it is, the call fails. If that can happen, stop the timer while '${path}' runs, or put what '${path}' does in a function and write the function's name with '()' instead.`;
   // A computed target.
   const computed = project('call "a.tease"\nexit', {
     "a.tease": 'let me = script("a.tease")\ncall (me)\nend',
   });
   assert.deepEqual(warned(computed), [
-    "a.tease TSV073 This call starts the file its reference names when it runs, so the compiler cannot tell whether that is 'a.tease', the file it is in. A call starts another file, so the call fails if it is. If the reference can name 'a.tease', put the part to run in a function and call that instead.",
+    "a.tease TSV073 This call's file is known only when it runs, so the compiler cannot tell whether it is its own file, 'a.tease', which is already running. If it is, the call fails. If it can be, put the part to run in a function and write the function's name with '()' instead.",
   ]);
   assert.deepEqual(failure(computed), [message("a.tease")]);
   // A tagged pick whose bound only the run knows.
@@ -263,7 +263,7 @@ test("a call whose file only the run decides warns, and fails when it starts the
     { "scene.tease": '---\ntags: punishment: 1\n---\nsay "scene"\nend' },
   );
   assert.deepEqual(warned(picked), [
-    "main.tease TSV073 This call picks its file when it runs, so the compiler cannot tell whether it picks 'main.tease', the file it is in. A call starts another file, so the call fails if it does. Limit the candidates with 'from:', or with a tag that 'main.tease' does not have.",
+    "main.tease TSV073 This call's tags depend on a value known only when it runs, so the compiler cannot tell whether it can pick its own file, 'main.tease', which is already running. If it does, the call fails. Leave 'main.tease' out with 'from:', or with a tag that it does not have.",
   ]);
   assert.deepEqual(failure(picked), [message("main.tease")]);
   // A block of main.tease that fires while main.tease, or the file it called, runs, also through a function.
@@ -279,13 +279,13 @@ test("a call whose file only the run decides warns, and fails when it starts the
     "lib.tease": 'global function punish { call "main.tease" }',
   });
   assert.deepEqual(warned(through), [
-    `lib.tease TSV073 ${later("line 1 of main.tease", "main.tease")}`,
+    `lib.tease TSV073 ${later("line 1 of 'main.tease'", "main.tease")}`,
   ]);
   assert.deepEqual(failure(through), [message("main.tease")]);
   assert.deepEqual(
     warned(project('timer async 1 s { call "rooms/*.tease" }\nexit', { "rooms/a.tease": "end" })),
     [
-      "main.tease TSV073 The block that line 1 starts runs later, so the compiler cannot tell whether the file this call starts is running then. A call starts another file, so the call fails if it is. If the block can run while that file runs, put what the call should run in a function and call that instead.",
+      "main.tease TSV073 This call runs later, from the timer on line 1, so the compiler cannot tell whether the file it starts is already running then. If it is, the call fails. If that can happen, stop the timer while such a file runs.",
     ],
   );
   // A global function's call of a file whose code calls the function, directly or through another global function:
@@ -297,7 +297,7 @@ test("a call whose file only the run decides warns, and fails when it starts the
       'global function relay { punish() }\nglobal function punish { call "rooms/*.tease" }',
   });
   assert.deepEqual(warned(relayed), [
-    "lib.tease TSV073 This call can start 'rooms/b.tease', which calls global function 'punish', but the compiler cannot tell whether the call runs while 'rooms/b.tease' runs. A call starts another file, so the call fails if it does. If it can, change the pattern so that it matches only other files.",
+    "lib.tease TSV073 This call can pick 'rooms/b.tease', which runs global function 'punish', so the compiler cannot tell whether that file is already running when this call picks it. If it is, the call fails. If that can happen, change the pattern so that it does not match 'rooms/b.tease'.",
   ]);
   const guard = (argument: string) =>
     project('visit(false)\nsay "back"\nexit', {
@@ -306,7 +306,7 @@ test("a call whose file only the run decides warns, and fails when it starts the
         'global function visit(alreadyThere: boolean) {\n    if not alreadyThere { call "b.tease" }\n}',
     });
   assert.deepEqual(warned(guard("true")), [
-    "lib.tease TSV073 This call can start 'b.tease', which calls global function 'visit', but the compiler cannot tell whether the call runs while 'b.tease' runs. A call starts another file, so the call fails if it does. If it can, call 'visit' only from other files, or put what it starts in a function.",
+    "lib.tease TSV073 This call starts 'b.tease', which runs global function 'visit', so the compiler cannot tell whether 'b.tease' is already running when the call runs. If it is, the call fails. If that can happen, run 'visit' only from other files.",
   ]);
   assert.deepEqual(said(guard("true"), { warnings: ["TSV073"] }), ["b", "back", "exit"]);
   assert.deepEqual(failure(guard("false")), [message("b.tease")]);
@@ -315,7 +315,7 @@ test("a call whose file only the run decides warns, and fails when it starts the
       'global function visit {\n    call "main.tease"\n    return "done"\n}\nglobal function display(text = visit()) { say text }',
   });
   assert.deepEqual(warned(supplied), [
-    "lib.tease TSV073 This call can start 'main.tease', which calls global function 'visit', but the compiler cannot tell whether the call runs while 'main.tease' runs. A call starts another file, so the call fails if it does. If it can, call 'visit' only from other files, or put what it starts in a function.",
+    "lib.tease TSV073 This call starts 'main.tease', which runs global function 'visit', so the compiler cannot tell whether 'main.tease' is already running when the call runs. If it is, the call fails. If that can happen, run 'visit' only from other files.",
   ]);
   assert.deepEqual(said(supplied, { warnings: ["TSV073"] }), ["provided", "exit"]);
   // So does a call of the global function whose run a file's own code decides.
@@ -376,7 +376,7 @@ test("a block runs later, so its end and its call of a file only warn and are ch
     [
       [
         "TSV071",
-        "The block that line 1 starts runs later, so the compiler cannot tell whether a call waits for this end when it runs. Without one, the end fails. If the block can run while no file call waits, use exit or goto here instead of end.",
+        "This 'end' runs later, when the button on line 1 is pressed, so the compiler cannot tell whether it has a call to return to then. Without one, the 'end' fails. If that can happen, use 'exit' or 'goto' here instead of 'end'.",
       ],
     ],
   );
@@ -426,7 +426,7 @@ test("a file target names no label, and a global function goes to no label of it
   for (const [main, message] of [
     [
       'goto "rooms/hall.tease" start',
-      `A goto to 'rooms/hall.tease' starts it at its top, so it cannot go to label 'start'. Write 'goto "rooms/hall.tease"', or put the part after 'start' in a file of its own and goto that file.`,
+      `A 'goto' to 'rooms/hall.tease' starts it at its top, so it cannot go to label 'start'. Write 'goto "rooms/hall.tease"', or put the part after 'start' in a file of its own and 'goto' that file.`,
     ],
     [
       'if false { call "rooms/hall.tease" start }\nexit',
@@ -434,15 +434,15 @@ test("a file target names no label, and a global function goes to no label of it
     ],
     [
       'goto "rooms/*.tease" start',
-      "A goto starts the file it picks at its top, so it cannot go to label 'start'. Put the part after 'start' in a file of its own and goto that file.",
+      "A 'goto' starts the file it picks at its top, so it cannot go to label 'start'. Put the part after 'start' in a file of its own and 'goto' that file.",
     ],
     [
       'let next = script("rooms/hall.tease", label: "start")\ngoto (next)',
-      "A script reference starts its file at its top, so it takes no 'label:'. Put the part after 'start' in a file of its own and name that file.",
+      "A file is always entered at its top, so 'script(...)' takes no 'label:'. Put the part after 'start' in a file of its own and name that file in 'script(...)'.",
     ],
     [
       'let name = "start"\ncall script("rooms/hall.tease", label: name)\nexit',
-      "A call starts the file it picks at its top, so it cannot go to a label. Put the part after the label in a file of its own and call that file.",
+      "A file is always entered at its top, so 'script(...)' takes no 'label:'. Put the part after the label in a file of its own and name that file in 'script(...)'.",
     ],
   ] as const)
     assert.deepEqual(diagnostics(main, rooms), [["TSV057", message]], main);
@@ -453,7 +453,7 @@ test("a file target names no label, and a global function goes to no label of it
       [
         [
           "TSV051",
-          "A global function can run in any file, so it cannot go to label 'later' of 'lib.tease'. Put the part after the label in a file of its own and goto that file, or in a function that does the work and returns.",
+          "A global function can run in any file, so it cannot go to label 'later' of 'lib.tease'. Put the part after the label in a file of its own and 'goto' that file, or in a global function that does the work and returns.",
         ],
       ],
       main,
@@ -484,12 +484,12 @@ test("an end with no call to return to is an error on every way the compiler can
     [
       "main.tease",
       "TSV070",
-      "No call waits for this end, because the session starts in main.tease without one, so there is nothing to return to. Use exit to finish the session, or goto to continue in another file.",
+      "This 'end' has no call to return to, because the session starts in 'main.tease' without one. Use 'exit' to finish the session, or 'goto' to continue in another file.",
     ],
   ]);
   const scene = { "scene.tease": 'say "scene"\nend' };
   const noCall =
-    "No call waits for this end when the goto on line 2 of main.tease leads here, so there is nothing to return to. Write call there to come back after it, or use exit or goto here instead of end.";
+    "This 'end' has no call to return to when the 'goto' on line 2 of 'main.tease' leads here. Write 'call' instead of 'goto' there to come back after it, or use 'exit' or 'goto' here instead of 'end'.";
   // Also when another way calls the file, and in a function that the file calls.
   for (const [main, others] of [
     ['say "start"\ngoto "scene.tease"', scene],
@@ -548,7 +548,7 @@ test("an end with no call to return to is an error on every way the compiler can
       [
         "scene.tease",
         "TSV071",
-        "The goto on line 2 of main.tease picks its file when it runs, so the compiler cannot tell whether a call waits for this end then. Without one, the end fails. If that goto can lead here, write call there to come back after it, or use exit or goto here instead of end.",
+        "The 'goto' on line 2 of 'main.tease' picks its file when it runs, so the compiler cannot tell whether this 'end' has a call to return to then. Without one, the 'end' fails. If that 'goto' can lead here, write 'call' instead of 'goto' there, or use 'exit' or 'goto' here instead of 'end'.",
       ],
     ],
   );
@@ -680,7 +680,7 @@ test("a fallback statement is no statement", () => {
     [
       [
         "TSP001",
-        "TeaseScript has no 'fallback': an end returns to the file that called this one. Use call to start a file that should come back here, and goto or exit where no call waits.",
+        "TeaseScript has no 'fallback': an 'end' returns to the file that called this one. Use 'call' to start a file that should come back here, and 'goto' or 'exit' where no call waits.",
       ],
     ],
   );

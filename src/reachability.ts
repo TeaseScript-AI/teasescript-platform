@@ -281,18 +281,18 @@ export class Reachability {
         continue;
       if (state.none === null && state.hidden === null) continue;
       const file = this.#flow.fileOf(index);
-      const fix = "use exit or goto here instead of end";
+      const fix = "use 'exit' or 'goto' here instead of 'end'";
       diagnostics[file]!.push(
         createDiagnostic(
           state.none !== null ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
           state.none !== null ? "TSV070" : "TSV071",
           state.none === SESSION_START
-            ? "No call waits for this end, because the session starts in main.tease without one, so there is nothing to return to. Use exit to finish the session, or goto to continue in another file."
+            ? "This 'end' has no call to return to, because the session starts in 'main.tease' without one. Use 'exit' to finish the session, or 'goto' to continue in another file."
             : state.none !== null
-              ? `No call waits for this end when the goto on ${this.#where(state.none, file)} leads here, so there is nothing to return to. Write call there to come back after it, or ${fix}.`
+              ? `This 'end' has no call to return to when the 'goto' on ${this.#where(state.none, file)} leads here. Write 'call' instead of 'goto' there to come back after it, or ${fix}.`
               : this.plan.instructions[state.hidden!]!.kind === "transfer"
-                ? `The goto on ${this.#where(state.hidden!, file)} picks its file when it runs, so the compiler cannot tell whether a call waits for this end then. Without one, the end fails. If that goto can lead here, write call there to come back after it, or ${fix}.`
-                : `The block that ${this.#where(state.hidden!, file)} starts runs later, so the compiler cannot tell whether a call waits for this end when it runs. Without one, the end fails. If the block can run while no file call waits, ${fix}.`,
+                ? `The 'goto' on ${this.#where(state.hidden!, file)} picks its file when it runs, so the compiler cannot tell whether this 'end' has a call to return to then. Without one, the 'end' fails. If that 'goto' can lead here, write 'call' instead of 'goto' there, or ${fix}.`
+                : `This 'end' runs later, ${this.#blockAt(state.hidden!, file).when}, so the compiler cannot tell whether it has a call to return to then. Without one, the 'end' fails. If that can happen, ${fix}.`,
           planLocationToSourceSpan(instruction.span),
         ),
       );
@@ -454,7 +454,7 @@ export class Reachability {
                 : possible !== undefined
                   ? pickedFileMessage(path(possible), call.form, global)
                   : laterCallMessage(
-                      this.#where(start!, file),
+                      this.#blockAt(start!, file),
                       call.form === "path" && call.files?.length === 1
                         ? path(call.files[0]!)
                         : null,
@@ -478,7 +478,21 @@ export class Reachability {
   #where(index: number, from: number): string {
     const file = this.#flow.fileOf(index);
     const line = `line ${this.plan.instructions[index]!.span.sl + 1}`;
-    return file === from ? line : `${line} of ${this.plan.files[file]!.path}`;
+    return file === from ? line : `${line} of '${this.plan.files[file]!.path}'`;
+  }
+
+  /**
+   * The block that the instruction at `index` starts, as seen from the file `from`: when it runs, as in "from the timer
+   * on line 3", and how to stop it.
+   */
+  #blockAt(index: number, from: number): { readonly when: string; readonly stop: string } {
+    const where = this.#where(index, from);
+    const kind = this.plan.instructions[index]!.kind;
+    return kind === "showPermanentButton"
+      ? { when: `when the button on ${where} is pressed`, stop: "remove the button" }
+      : kind === "playMedia"
+        ? { when: `from the media on ${where}`, stop: "stop the media" }
+        : { when: `from the timer on ${where}`, stop: "stop the timer" };
   }
 
   /** Whether an `exit` can run, which the project needs (TSV053, ADR 0022 §4.1). */
@@ -651,61 +665,66 @@ interface CallsWaiting {
 /** The start of the session, which runs `main.tease` with no call waiting. */
 const SESSION_START = -1;
 
+/** `text` with its first letter in lower case, to follow "If that can happen, ". */
+function lowerFirst(text: string): string {
+  return `${text[0]!.toLowerCase()}${text.slice(1)}`;
+}
+
 /**
- * The running file a call may start, `path`: the file it stands in, or for a call in a global function, a file that
- * calls the function.
+ * What to do about a call that can start `path` while it is running, by how the call names its file: in a file's own
+ * code, or in a global function, `global`.
  */
-function runningFileText(path: string, global: string | null): string {
-  return global === null
-    ? `'${path}', the file it is in`
-    : `'${path}', which calls global function '${global}' and so is the running file then`;
-}
-
-/** Why a call may not start `path`, the file it stands in (V30 §29): a call starts another file. */
-function calledFileMessage(path: string, form: FileCall["form"]): string {
-  return `A call starts another file, but this call can start '${path}', the file it is in. ${calledFileFix(path, form, null)}`;
-}
-
-/** What to do about a call that can start `path`, a running file, by how it names its file. */
 function calledFileFix(path: string, form: FileCall["form"], global: string | null): string {
   return form === "glob"
-    ? "Change the pattern so that it matches only other files."
+    ? `Change the pattern so that it does not match '${path}'.`
     : form === "tagged"
-      ? `Limit the candidates with 'from:', or with a tag that '${path}' does not have.`
+      ? `Leave '${path}' out with 'from:', or with a tag that it does not have.`
       : global === null
-        ? "To run a part of this file and come back, put it in a function and call that, or use goto with a label of this file to continue there."
-        : `Call '${global}' only from other files, or put what it starts in a function.`;
+        ? "To run a part of it and come back, put that part in a function and write the function's name with '()' instead. To continue at a label without coming back, write 'goto' and the label."
+        : `Run '${global}' only from other files.`;
+}
+
+/** Why a call may not start `path`, the file it stands in (V30 §29): that file is already running. */
+function calledFileMessage(path: string, form: FileCall["form"]): string {
+  return `This call ${form === "path" ? "starts" : "can pick"} its own file, '${path}', which is already running. ${calledFileFix(path, form, null)}`;
 }
 
 /**
- * Why a call in a global function, `global`, may start `path`, a file that calls the function, where the compiler cannot
- * tell whether the call runs while that file runs.
+ * Why a call in a global function, `global`, may start `path`, a file whose code runs the function: the compiler cannot
+ * tell whether that file is running then.
  */
 function guardedCallMessage(path: string, form: FileCall["form"], global: string): string {
-  const fix = calledFileFix(path, form, global);
-  return `This call can start '${path}', which calls global function '${global}', but the compiler cannot tell whether the call runs while '${path}' runs. A call starts another file, so the call fails if it does. If it can, ${fix[0]!.toLowerCase()}${fix.slice(1)}`;
-}
-
-/** Why a call whose tagged pick or reference decides its file when it runs may start `path`, the running file. */
-function pickedFileMessage(path: string, form: FileCall["form"], global: string | null): string {
-  const running = runningFileText(path, global);
-  if (form === "tagged")
-    return `This call picks its file when it runs, so the compiler cannot tell whether it picks ${running}. A call starts another file, so the call fails if it does. ${calledFileFix(path, form, global)}`;
-  const fix =
-    global === null
-      ? "put the part to run in a function and call that instead"
-      : `call '${global}' only from other files, or put what it starts in a function`;
-  return `This call starts the file its reference names when it runs, so the compiler cannot tell whether that is ${running}. A call starts another file, so the call fails if it is. If the reference can name '${path}', ${fix}.`;
+  return form === "path"
+    ? `This call starts '${path}', which runs global function '${global}', so the compiler cannot tell whether '${path}' is already running when the call runs. If it is, the call fails. If that can happen, run '${global}' only from other files.`
+    : `This call can pick '${path}', which runs global function '${global}', so the compiler cannot tell whether that file is already running when this call picks it. If it is, the call fails. If that can happen, ${lowerFirst(calledFileFix(path, form, global))}`;
 }
 
 /**
- * Why a call that a block runs later may start the running file: the block runs while the file that started it or a
- * file it called runs, or after it. `path` is the file the call names, `null` when it picks one.
+ * Why a call whose tagged pick or computed target decides its file when it runs may start `path`: in a file's own code,
+ * its own file, and in a global function, `global`, a file whose code runs the function.
  */
-function laterCallMessage(where: string, path: string | null): string {
+function pickedFileMessage(path: string, form: FileCall["form"], global: string | null): string {
+  if (form === "tagged")
+    return global === null
+      ? `This call's tags depend on a value known only when it runs, so the compiler cannot tell whether it can pick its own file, '${path}', which is already running. If it does, the call fails. ${calledFileFix(path, form, global)}`
+      : `This call's tags depend on a value known only when it runs, so the compiler cannot tell whether it can pick '${path}', which runs global function '${global}'. If it picks '${path}' while that file is running, the call fails. ${calledFileFix(path, form, global)}`;
+  return global === null
+    ? `This call's file is known only when it runs, so the compiler cannot tell whether it is its own file, '${path}', which is already running. If it is, the call fails. If it can be, put the part to run in a function and write the function's name with '()' instead.`
+    : `This call's file is known only when it runs, so the compiler cannot tell whether it is '${path}', which runs global function '${global}'. If it is, and '${path}' is running then, the call fails. If it can be '${path}', run '${global}' only from other files.`;
+}
+
+/**
+ * Why a call that a block runs later may start a running file: the block runs while the file that started it or a file
+ * it called runs, or after it. `block` says when it runs and how to stop it; `path` is the file the call names, `null`
+ * when it picks one.
+ */
+function laterCallMessage(
+  block: { readonly when: string; readonly stop: string },
+  path: string | null,
+): string {
   return path !== null
-    ? `The block that ${where} starts runs later, so the compiler cannot tell whether '${path}' is running when this call starts it. A call starts another file, so the call fails if it is. If the block can run while '${path}' runs, put what the call should run in a function and call that instead.`
-    : `The block that ${where} starts runs later, so the compiler cannot tell whether the file this call starts is running then. A call starts another file, so the call fails if it is. If the block can run while that file runs, put what the call should run in a function and call that instead.`;
+    ? `This call runs later, ${block.when}, so the compiler cannot tell whether '${path}' is already running then. If it is, the call fails. If that can happen, ${block.stop} while '${path}' runs, or put what '${path}' does in a function and write the function's name with '()' instead.`
+    : `This call runs later, ${block.when}, so the compiler cannot tell whether the file it starts is already running then. If it is, the call fails. If that can happen, ${block.stop} while such a file runs.`;
 }
 
 /** For each index, how many of the entries before it are set; one more count at the end, for all of them. */
