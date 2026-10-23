@@ -27,6 +27,7 @@ import type {
   RegexLiteral,
   ShowPopupParts,
   TagQueryExpression,
+  TagQueryStep,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
@@ -74,7 +75,8 @@ import {
   setsDefaultSpeaker,
 } from "./project-globals.js";
 import { PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
-import { mayMatchTags } from "./tag-query.js";
+import { mayMatchTags, tagQueryKey } from "./tag-query.js";
+import { staticNumber } from "./static-evaluation.js";
 import type { Tag } from "./tags.js";
 import { duplicateEntryMessage } from "./object-properties.js";
 import { startValueMessage, startValueOwner } from "./start-value-rules.js";
@@ -370,6 +372,9 @@ class ProjectNames {
 
   /** The tags of each file that runs something, by path, when they are known. */
   readonly tags = new Map<string, ReadonlyMap<string, number | null>>();
+
+  /** The files that tagged picks with the same facts may choose (see `#taggedCandidates`), by those facts. */
+  readonly taggedPicks = new Map<string, readonly string[]>();
 
   readonly diagnostics: Diagnostic[][];
 
@@ -1392,29 +1397,38 @@ class SemanticValidator {
 
   /**
    * The files a tagged pick may choose by the tags of their headers: those that run something, within its `from:`,
-   * whose tags the query's tag tests and literal tag lists do not rule out. None when the tags are not known, or the
-   * `from:` is not a path or glob, which the type check reports.
+   * whose tags its tag tests, literal tag lists, and comparisons do not rule out. A comparison is false for a file
+   * without a number for its tag, and decided by its bound where the bound is a constant (V30 §41). None when the tags
+   * are not known, or the `from:` is not a path or glob, which the type check reports. Picks with the same facts share
+   * one list, found once.
    */
   #taggedCandidates(query: TagQueryExpression): readonly string[] {
-    const files = this.project.files.filter((file) => this.project.tags.has(file.path));
     const from = query.from?.pattern ?? null;
-    if (
-      from !== null &&
-      (isPathGlob(from) ? packageGlobProblem(from) : packagePathProblem(from)) !== null
-    )
-      return [];
-    const within = new Set(
+    const bound = (step: Extract<TagQueryStep, { kind: "tagCompare" }>) => {
+      const value = staticNumber(step.bound);
+      return value !== undefined && Number.isFinite(value) ? value : undefined;
+    };
+    const key = JSON.stringify([from, tagQueryKey(query.steps, bound)]);
+    const known = this.project.taggedPicks.get(key);
+    if (known !== undefined) return known;
+    const files = this.project.files.filter((file) => this.project.tags.has(file.path));
+    const within =
       from === null
-        ? files.map((file) => file.path)
-        : globMatches(
-            from,
-            files.map((file) => file.path),
-          ),
-    );
-    const mayMatch = mayMatchTags(query.steps);
-    return files.flatMap((file) =>
+        ? new Set(files.map((file) => file.path))
+        : (isPathGlob(from) ? packageGlobProblem(from) : packagePathProblem(from)) !== null
+          ? new Set<string>()
+          : new Set(
+              globMatches(
+                from,
+                files.map((file) => file.path),
+              ),
+            );
+    const mayMatch = mayMatchTags(query.steps, bound);
+    const picks = files.flatMap((file) =>
       within.has(file.path) && mayMatch(this.project.tags.get(file.path)!) ? [file.path] : [],
     );
+    this.project.taggedPicks.set(key, picks);
+    return picks;
   }
 
   /**

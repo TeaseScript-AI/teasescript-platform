@@ -159,22 +159,64 @@ export function evaluateTagSteps<Step extends { readonly kind: string }>(
 
 /**
  * Whether a candidate with these tags may match a query's steps by their tag tests and literal tag lists alone: a
- * comparison or a computed list counts as possibly true, as a check that does no value reasoning needs (ADR 0023). Each
- * literal tag list is read once, for all candidates.
+ * computed list counts as possibly true, and so does a comparison, as a check that does no value reasoning needs (ADR
+ * 0023). With `bound`, which gives a comparison's bound where it is known, a comparison is decided where it can be: false
+ * for a candidate without a number for its tag, whatever the bound, and by the bound where that is known. Each literal
+ * tag list and each bound is read once, for all candidates.
  */
 export function mayMatchTags(
   steps: readonly TagQueryStep[],
+  bound?: (step: Extract<TagQueryStep, { kind: "tagCompare" }>) => number | undefined,
 ): (tags: ReadonlyMap<string, number | null>) => boolean {
-  const lists = new Map<TagQueryStep, readonly string[] | null>();
-  for (const step of steps)
-    if (step.kind === "tagList") lists.set(step, literalTagNames(step.value));
+  const facts = stepFacts(steps, bound);
   return (tags) =>
     evaluateTagSteps(steps, (step) => {
       if (step.kind === "tag") return tags.has(step.name);
+      if (step.kind === "tagCompare") {
+        if (bound === undefined) return null;
+        const value = tags.get(step.name);
+        if (value === undefined || value === null) return false;
+        const known = facts.get(step);
+        return typeof known === "number" ? compareTagValue(value, step.operator, known) : null;
+      }
       if (step.kind !== "tagList") return null;
-      const names = lists.get(step)!;
-      return names === null ? null : passesTagList(step.option, names, tags);
+      const names = facts.get(step);
+      return Array.isArray(names) ? passesTagList(step.option, names, tags) : null;
     }) !== false;
+}
+
+/**
+ * A key of what {@link mayMatchTags} reads of a query's steps, with the same `bound`: two queries with the same key and
+ * `from:` may match the same candidates.
+ */
+export function tagQueryKey(
+  steps: readonly TagQueryStep[],
+  bound?: (step: Extract<TagQueryStep, { kind: "tagCompare" }>) => number | undefined,
+): string {
+  const facts = stepFacts(steps, bound);
+  return JSON.stringify(
+    steps.map((step) =>
+      step.kind === "tag"
+        ? [step.name]
+        : step.kind === "tagCompare"
+          ? [step.name, step.operator, facts.get(step) ?? null]
+          : step.kind === "tagList"
+            ? [step.option, facts.get(step) ?? null]
+            : step.kind,
+    ),
+  );
+}
+
+/** The literal tag list of each `tagList` step, and the known bound of each comparison, given `bound`. */
+function stepFacts(
+  steps: readonly TagQueryStep[],
+  bound: ((step: Extract<TagQueryStep, { kind: "tagCompare" }>) => number | undefined) | undefined,
+): ReadonlyMap<TagQueryStep, readonly string[] | number | null> {
+  const facts = new Map<TagQueryStep, readonly string[] | number | null>();
+  for (const step of steps)
+    if (step.kind === "tagList") facts.set(step, literalTagNames(step.value));
+    else if (step.kind === "tagCompare") facts.set(step, bound?.(step) ?? null);
+  return facts;
 }
 
 /** The tag names of a list literal of quoted names, or `null` for anything else, which only runtime knows. */

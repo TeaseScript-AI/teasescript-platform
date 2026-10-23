@@ -206,7 +206,9 @@ export class Reachability {
    * and a timer, media, or button block, which runs later, while the file that started it or a file it called runs, or
    * after it. The `end` that closes a file's top level is the ending check's (TSV052).
    */
-  public pendingCallDiagnostics(picks: ReadonlyMap<number, readonly number[]>): Diagnostic[][] {
+  public pendingCallDiagnostics(
+    picks: () => ReadonlyMap<number, readonly number[]>,
+  ): Diagnostic[][] {
     const diagnostics = this.plan.files.map((): Diagnostic[] => []);
     const closing = new Set(this.plan.files.map((file) => file.rootEndInstruction - 1));
     if (
@@ -216,7 +218,7 @@ export class Reachability {
     )
       return diagnostics;
     const count = this.plan.instructions.length;
-    const ways = this.#computedWays(picks);
+    const ways = this.#computedWays(picks());
     const states = solveForward<CallsWaiting, string>(
       {
         nodeCount: count + ways.hubs.length,
@@ -235,7 +237,12 @@ export class Reachability {
         equals: (left, right) => left.none === right.none && left.hidden === right.hidden,
         transfer: (node, edge, state) => {
           const waitsForNone = state.none !== null || state.hidden !== null;
-          if (edge === "handler") return waitsForNone ? { none: null, hidden: node } : state;
+          // A block runs later: a non-persistent timer's or button's while the file that started it, or one it called,
+          // runs, so with the calls that wait there; a persistent one's or a media block also after that file ended.
+          if (edge === "handler")
+            return waitsForNone || this.#outlivesItsFile(node)
+              ? { none: null, hidden: node }
+              : state;
           const instruction = this.plan.instructions[node];
           if (instruction?.kind !== "transfer" || (edge !== "transfer" && edge !== "computed"))
             return state;
@@ -278,7 +285,8 @@ export class Reachability {
    * The way of each computed target for the check of waiting calls (see {@link pendingCallDiagnostics}). A
    * `script(...)` of a path written out names its file, which the check follows like a file target. Any other target
    * leads to a node of its own after the instructions, a hub, with a way into each file it may start; targets that may
-   * start the same files share one, so the ways grow with the files, not with the targets times the files.
+   * start the same files share one, a list of files `picks` shares, so the ways grow with the files, not with the targets
+   * times the files.
    */
   #computedWays(picks: ReadonlyMap<number, readonly number[]>): {
     readonly targets: ReadonlyMap<number, { readonly node: number; readonly edge: string }>;
@@ -288,13 +296,18 @@ export class Reachability {
     const files = new Map(this.plan.files.map((file, index) => [file.path, index]));
     const targets = new Map<number, { readonly node: number; readonly edge: string }>();
     const hubs: (readonly number[])[] = [];
-    const hubOf = new Map<string, number>();
-    const hub = (key: string, entries: () => readonly number[]): number => {
-      let node = hubOf.get(key);
+    // By the list of files, which `picks` shares; `null` for every file.
+    const hubOf = new Map<readonly number[] | null, number>();
+    const hub = (picked: readonly number[] | null): number => {
+      let node = hubOf.get(picked);
       if (node === undefined) {
         node = count + hubs.length;
-        hubs.push(entries());
-        hubOf.set(key, node);
+        hubs.push(
+          (picked ?? this.plan.files.map((_, file) => file)).map(
+            (file) => this.plan.files[file]!.entryInstruction,
+          ),
+        );
+        hubOf.set(picked, node);
       }
       return node;
     };
@@ -315,16 +328,18 @@ export class Reachability {
           targets.set(index, { node: this.plan.files[file]!.entryInstruction, edge: "transfer" });
         return;
       }
-      const picked = value.kind === "tagQuery" ? picks.get(index) : undefined;
-      const node =
-        picked === undefined
-          ? hub("", () => this.plan.files.map((file) => file.entryInstruction))
-          : hub(picked.join(","), () =>
-              picked.map((file) => this.plan.files[file]!.entryInstruction),
-            );
+      const node = hub((value.kind === "tagQuery" ? picks.get(index) : undefined) ?? null);
       targets.set(index, { node, edge: "computed" });
     });
     return { targets, hubs };
+  }
+
+  /** Whether the blocks that the instruction at `index` creates may run after the file entry that created them ended. */
+  #outlivesItsFile(index: number): boolean {
+    const instruction = this.plan.instructions[index];
+    return instruction?.kind === "startTimer" || instruction?.kind === "showPermanentButton"
+      ? instruction.persist
+      : true;
   }
 
   /** Where the instruction at `index` stands, as seen from the file `from`: `line 3` or `line 3 of main.tease`. */

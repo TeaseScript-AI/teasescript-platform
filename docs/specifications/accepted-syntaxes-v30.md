@@ -6171,8 +6171,9 @@ if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }
 - `goto tagged` and `call tagged` pick a file of the project by the tags of its header ([File header](#file-header))
   and enter it at its top, as `goto (reference)` does ([§29](#29-script-files-and-paths)). Every file that runs
   something is a candidate, `main.tease` and the current file too, but a `call tagged` that can pick the running file
-  is a compile error ([§29](#29-script-files-and-paths)); a file of declarations only runs nothing on its own and is
-  skipped, as for a glob. The option `from:` limits the candidates to a path or glob written out in quotes, as
+  is a compile error ([§29](#29-script-files-and-paths)): for this, a comparison is false for a file without a number
+  for its tag, and is decided by a constant bound. A file of declarations only runs nothing on its own and is skipped,
+  as for a glob. The option `from:` limits the candidates to a path or glob written out in quotes, as
   for `goto`; one that names no file that runs something is a compile error. `findScripts` takes `where:`, `all:`,
   `none:`, `any:`, and `from:` as named arguments and returns `script` references to all matching candidates in path
   order, as a `script[]`. A pick, too, chooses among the candidates in path order.

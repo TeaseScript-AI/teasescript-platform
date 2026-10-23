@@ -180,6 +180,22 @@ test("a call starts another file, so a label or a file that may be running is an
       ],
     ],
   );
+  // A comparison is false for a file without a number for its tag, and decided by a constant bound.
+  const scenes = { "scene.tease": '---\ntags: punishment: 4\n---\nsay "scene"\nend' };
+  for (const [header, pick, can] of [
+    ["", '"punishment" > minimum', false],
+    ['---\ntags: "punishment"\n---\n', '"punishment" > minimum', false],
+    ["---\ntags: punishment: 1\n---\n", '"punishment" > 3', false],
+    ["---\ntags: punishment: 4\n---\n", '"punishment" > 3', true],
+    ["---\ntags: punishment: 1\n---\n", '"punishment" > minimum', true],
+  ] as const)
+    assert.deepEqual(
+      diagnostics(
+        project(`${header}let minimum = 3\ncall tagged ${pick}\nsay "back"\nexit`, scenes),
+      ).map(([path, code]) => `${path} ${code}`),
+      can ? ["main.tease TSV057"] : [],
+      `${header}${pick}`,
+    );
   // A tag test or `from:` that leaves the file out allows the call.
   assert.deepEqual(
     diagnostics(
@@ -268,6 +284,15 @@ test("a block runs later, so its end only warns and its call of a file is checke
       "lib.tease":
         'global function setup {\n    let replay = showPermanentButton "Replay", persist: true { call "scene.tease" }\n}',
     }),
+  );
+  // A persistent block, or a media block, may run after the file that started it has returned.
+  assert.deepEqual(
+    compileProject(
+      project('call "scene.tease"\nwait 1 s\nexit', {
+        "scene.tease": 'let stop = showPermanentButton "End", persist: true { end }\nend',
+      }),
+    ).diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    [["scene.tease", "TSV071"]],
   );
   const shown = run(replay, createImmediatePacingRuntimeSnapshot(replay));
   assert.deepEqual(outputs([...shown.events, ...press(replay, shown.snapshot)]), [
@@ -443,22 +468,26 @@ test("a block of a file the session left sees that file's variables, and its got
 
 test("a block's goto abandons the file its activation called and keeps that activation's callers", () => {
   assert.deepEqual(
-    said(
-      project('call "middle.tease"\nsay "main continues"\nexit', {
-        "middle.tease": [
-          "let step = 7",
-          'let alarm = timer(duration: 1 s, async: true, display: "hidden", persist: true) {',
-          "    goto interrupted",
-          "}",
-          'call "slow.tease"',
-          'say "never"',
-          "end",
-          "label interrupted",
-          'say "interrupted at ${step}"',
-          "end",
-        ].join("\n"),
-        "slow.tease": 'wait 5 s\nsay "never slow"\nend',
-      }),
+    outputs(
+      assertRuntimeResumeEquivalent(
+        project('call "middle.tease"\nsay "main continues"\nexit', {
+          "middle.tease": [
+            "let step = 7",
+            'let alarm = timer(duration: 1 s, async: true, display: "hidden", persist: true) {',
+            "    goto interrupted",
+            "}",
+            'call "slow.tease"',
+            'say "never"',
+            "end",
+            "label interrupted",
+            'say "interrupted at ${step}"',
+            "end",
+          ].join("\n"),
+          "slow.tease": 'wait 5 s\nsay "never slow"\nend',
+        }),
+        // The persistent timer could fire after middle.tease returned, and then its end would have no call to return to.
+        { warnings: ["TSV071"] },
+      ).events,
     ),
     ["interrupted at 7", "main continues", "exit"],
   );
