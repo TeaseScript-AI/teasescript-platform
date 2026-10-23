@@ -10,7 +10,8 @@ is no CORS:
 - `/`: a stand-in for the website, which owns accounts and the mode choice. It opens the Player stand-alone or online as
   the one account, flips the switches below, and edits the account's player profile. Its texts are for testing only.
 - `/player/` and `/dev-package/`: the built Player and the development packages, through the playground's own server
-  code, unchanged.
+  code, unchanged. The default packages folder holds `server-check`: a saved count, the profile's display name, and a
+  photo kept for the next visit.
 - `/api/`: the provisional API of the Player's online mode; [`player/online-data.ts`](../player/online-data.ts) lists
   its shapes.
 - `/test-server/state`: the switches and the profile as JSON, read with `GET` and changed with `POST`.
@@ -29,7 +30,7 @@ HOST=0.0.0.0 PLAYGROUND_TLS_NAMES=agents.home.arpa node dist/test-server/server.
 | `PORT`, `HOST`           | `4181`, `127.0.0.1`                                   | Where it listens.                                     |
 | `TEST_SERVER_ACCOUNT`    | `peter`                                               | The one account, which **Online** signs in to.        |
 | `TEST_SERVER_DATA`       | `$XDG_STATE_HOME/teasescript-test-server/data.sqlite` | The SQLite file, outside the repository.              |
-| `TEST_SERVER_PACKAGES`   | none                                                  | A folder of development packages, each a subfolder.   |
+| `TEST_SERVER_PACKAGES`   | `test-server/packages`                                | A folder of development packages, each a subfolder.   |
 | `TEST_SERVER_LATENCY_MS` | `40`                                                  | The wait before every request is answered.            |
 | `TEST_SERVER_SLOW_MS`    | `800`                                                 | The wait while **Slow** is on.                        |
 | `TEST_SERVER_JITTER_MS`  | `15`                                                  | Up to this much more or less, at random, per request. |

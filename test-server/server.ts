@@ -37,6 +37,8 @@ export interface TestServerOptions {
     readonly jitterMs: number;
   };
   readonly projectRoot?: string;
+  /** Takes one line per `/api/` request: method, path, status, time, and bytes received. */
+  readonly log?: (line: string) => void;
 }
 
 /** The switches the stand-in page and `/test-server/state` change while the server runs. */
@@ -82,7 +84,7 @@ export function testServer(options: TestServerOptions): {
     }, wait);
     response.on("finish", () => {
       if (request.url?.startsWith("/api/"))
-        console.log(
+        options.log?.(
           `${request.method} ${request.url.split("?", 1)[0]} ${response.statusCode} ${Math.round(performance.now() - started)} ms ${request.headers["content-length"] ?? 0} B in`,
         );
     });
@@ -390,9 +392,11 @@ async function start(): Promise<Server> {
   const { listener } = testServer({
     data: process.env.TEST_SERVER_DATA ?? join(stateHome, "teasescript-test-server", "data.sqlite"),
     account: process.env.TEST_SERVER_ACCOUNT ?? "peter",
-    ...(process.env.TEST_SERVER_PACKAGES
-      ? { packages: resolve(process.env.TEST_SERVER_PACKAGES) }
-      : {}),
+    // The folder of the server-check package unless another is given.
+    packages: resolve(
+      process.env.TEST_SERVER_PACKAGES || join(defaultProjectRoot(), "test-server", "packages"),
+    ),
+    log: (line) => console.log(line),
     latency: {
       normalMs: environmentNumber("TEST_SERVER_LATENCY_MS", DEFAULT_LATENCY.normalMs),
       slowMs: environmentNumber("TEST_SERVER_SLOW_MS", DEFAULT_LATENCY.slowMs),
