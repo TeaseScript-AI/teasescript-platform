@@ -8,7 +8,7 @@ import {
   statementExpressions,
 } from "./expression-children.js";
 import { PlanControlFlow, type FlowEdge } from "./plan/control-flow.js";
-import { solveForward } from "./plan/dataflow.js";
+import { solveBackward, solveForward } from "./plan/dataflow.js";
 import type { ExpressionPlan, InstructionPlan, LiteralExpressionPlan } from "./plan/model.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { runsOnItsOwn } from "./project-globals.js";
@@ -130,20 +130,30 @@ export class Reachability {
    */
   #successors(index: number): { readonly node: number; readonly edge: string }[] {
     const out: { node: number; edge: string }[] = [];
+    for (const { node, edge } of this.#ways(index)) if (node !== null) out.push({ node, edge });
+    for (const handler of this.#flow.handlersOf(index)) {
+      const definition = this.#flow.functionById(handler);
+      if (definition !== undefined)
+        out.push({ node: definition.entryInstruction, edge: "handler" });
+    }
+    return out;
+  }
+
+  /**
+   * The ways on from the instruction at `index` that can run, also those that leave the plan's code (`node: null`): the
+   * plan's, without those that the type check rules out, and from a `continue` of a loop that runs once also to the
+   * loop's end (see `DeadWays.runsOnce`).
+   */
+  #ways(index: number): { readonly node: number | null; readonly edge: FlowEdge["kind"] }[] {
+    const out: { node: number | null; edge: FlowEdge["kind"] }[] = [];
     for (const { edge, target } of this.#flow.successors(index))
-      if (target !== null && this.ways.possible(index, edge.kind))
-        out.push({ node: target, edge: edge.kind });
+      if (this.ways.possible(index, edge.kind)) out.push({ node: target, edge: edge.kind });
     const instruction = this.plan.instructions[index]!;
     if (instruction.kind === "loopControl" && instruction.action === "continue") {
       const start = this.#flow.loopStart(instruction.loopId);
       const loop = start === undefined ? undefined : this.plan.instructions[start];
       if (start !== undefined && loop?.kind === "loopStart" && this.ways.runsOnce(start))
         out.push({ node: loop.target, edge: "exhausted" });
-    }
-    for (const handler of this.#flow.handlersOf(index)) {
-      const definition = this.#flow.functionById(handler);
-      if (definition !== undefined)
-        out.push({ node: definition.entryInstruction, edge: "handler" });
     }
     return out;
   }
@@ -214,14 +224,17 @@ export class Reachability {
   }
 
   /**
-   * An `end` returns to the file that called the running one (V30 §30). The ways from the start of the session follow
-   * which file calls are waiting: a `call` makes one wait, and a `goto` keeps those that wait. An `end` that a way
-   * reaches with none waiting is an error (TSV070), also when another way reaches it through a call. Where only a way
-   * the compiler cannot follow leads there with none waiting, it is a warning (TSV071), and the `end` fails if that
-   * happens: a computed target, which may start a file that `targets` gives, the files its `picks` give for a tagged
-   * pick, by instruction, else those that any reference in the project may name, `referenced`, where `null` is every
-   * file; and a timer, media, or button block, which runs later, while the file that started it or a file it called
-   * runs, or after it. The `end` that closes a file's top level is the ending check's (TSV052).
+   * An `end` returns to the file that called the running one (V30 §30), and fails without one. The ways from the start
+   * of the session follow which file calls are waiting: a `call` makes one wait, and a `goto` keeps those that wait.
+   * The `end` is an error (TSV070) only where it fails whenever some code runs (V30 §13): where every way to it has none
+   * waiting, or where code that every way reaches with none waiting certainly goes on to it (see {@link #provenEnds}),
+   * also when another way reaches it through a call. Where a way the compiler follows reaches it with none waiting but
+   * neither holds, because code before it may leave first, it is a warning (TSV071), and so it is where only a way the
+   * compiler cannot follow leads there with none waiting: a computed target, which may start a file that `targets`
+   * gives, the files its `picks` give for a tagged pick, by instruction, else those that any reference in the project
+   * may name, `referenced`, where `null` is every file; and a timer, media, or button block, which runs later, while the
+   * file that started it or a file it called runs, or after it. The runtime checks the `end` then (TSR066). The `end`
+   * that closes a file's top level is the ending check's (TSV052).
    */
   public pendingCallDiagnostics(
     targets: () => {
@@ -254,28 +267,42 @@ export class Reachability {
         join: (left, right) => ({
           none: left.none ?? right.none,
           hidden: left.hidden ?? right.hidden,
+          waiting: left.waiting || right.waiting,
         }),
-        equals: (left, right) => left.none === right.none && left.hidden === right.hidden,
+        equals: (left, right) =>
+          left.none === right.none &&
+          left.hidden === right.hidden &&
+          left.waiting === right.waiting,
         transfer: (node, edge, state) => {
           const waitsForNone = state.none !== null || state.hidden !== null;
           // A block runs later: a non-persistent timer's or button's while the file that started it, or one it called,
           // runs, so with the calls that wait there; a persistent one's or a media block also after that file ended.
           if (edge === "handler")
             return waitsForNone || this.#outlivesItsFile(node)
-              ? { none: null, hidden: node }
+              ? { none: null, hidden: node, waiting: true }
               : state;
           const instruction = this.plan.instructions[node];
           if (instruction?.kind !== "transfer" || (edge !== "transfer" && edge !== "computed"))
             return state;
-          if (instruction.mode === "call") return { none: null, hidden: null };
+          if (instruction.mode === "call") return { none: null, hidden: null, waiting: true };
           // A goto keeps the calls that wait; with none, the file it starts has none either.
           if (edge === "transfer")
-            return { none: state.none === null ? null : node, hidden: state.hidden };
-          return { none: null, hidden: waitsForNone ? node : null };
+            return {
+              none: state.none === null ? null : node,
+              hidden: state.hidden,
+              waiting: state.waiting,
+            };
+          return { none: null, hidden: waitsForNone ? node : null, waiting: state.waiting };
         },
       },
-      [[this.plan.files[0]!.startInstruction, { none: SESSION_START, hidden: null }]],
+      [
+        [
+          this.plan.files[0]!.startInstruction,
+          { none: SESSION_START, hidden: null, waiting: false },
+        ],
+      ],
     );
+    let proven: ReadonlyMap<number, number> | undefined;
     for (let index = 0; index < count; index += 1) {
       const state = states[index];
       const instruction = this.plan.instructions[index]!;
@@ -284,22 +311,143 @@ export class Reachability {
       if (state.none === null && state.hidden === null) continue;
       const file = this.#flow.fileOf(index);
       const fix = "use 'exit' or 'goto' here instead of 'end'";
+      // The way that the message names: a `goto` that leads here, or the start of the session.
+      const certain =
+        state.none === null
+          ? undefined
+          : withoutCall(state)
+            ? state.none
+            : (proven ??= this.#provenEnds(states, ways.targets)).get(index);
+      const way = certain ?? state.none;
       diagnostics[file]!.push(
         createDiagnostic(
-          state.none !== null ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
-          state.none !== null ? "TSV070" : "TSV071",
-          state.none === SESSION_START
+          certain !== undefined ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
+          certain !== undefined ? "TSV070" : "TSV071",
+          certain === SESSION_START
             ? "This 'end' has no call to return to, because the session starts in 'main.tease' without one. Use 'exit' to finish the session, or 'goto' to continue in another file."
-            : state.none !== null
-              ? `This 'end' has no call to return to when the 'goto' on ${this.#where(state.none, file)} leads here. Write 'call' instead of 'goto' there to come back after it, or ${fix}.`
-              : this.plan.instructions[state.hidden!]!.kind === "transfer"
-                ? `The 'goto' on ${this.#where(state.hidden!, file)} picks its file when it runs, so the compiler cannot tell whether this 'end' has a call to return to then. Without one, the 'end' fails. If that 'goto' can lead here, write 'call' instead of 'goto' there, or ${fix}.`
-                : `This 'end' runs later, ${this.#blockAt(state.hidden!, file).when}, so the compiler cannot tell whether it has a call to return to then. Without one, the 'end' fails. If that can happen, ${fix}.`,
+            : certain !== undefined
+              ? `This 'end' has no call to return to when the 'goto' on ${this.#where(certain, file)} leads here. Write 'call' instead of 'goto' there to come back after it, or ${fix}.`
+              : way === SESSION_START
+                ? `This 'end' has no call to return to when the start of the session in 'main.tease' leads here, but the compiler cannot tell whether the script reaches it then. If it does, the 'end' fails. If that can happen, ${fix}.`
+                : way !== null
+                  ? `This 'end' has no call to return to when the 'goto' on ${this.#where(way, file)} leads here, but the compiler cannot tell whether the script reaches it then. If it does, the 'end' fails. If that can happen, write 'call' instead of 'goto' there, or ${fix}.`
+                  : this.plan.instructions[state.hidden!]!.kind === "transfer"
+                    ? `The 'goto' on ${this.#where(state.hidden!, file)} picks its file when it runs, so the compiler cannot tell whether this 'end' has a call to return to then. Without one, the 'end' fails. If that 'goto' can lead here, write 'call' instead of 'goto' there, or ${fix}.`
+                    : `This 'end' runs later, ${this.#blockAt(state.hidden!, file).when}, so the compiler cannot tell whether it has a call to return to then. Without one, the 'end' fails. If that can happen, ${fix}.`,
           planLocationToSourceSpan(instruction.span),
         ),
       );
     }
     return diagnostics;
+  }
+
+  /**
+   * The `end`s that code which every way reaches with no call waiting certainly goes on to (see {@link #endings}), as
+   * the `goto` in `if pick { call "scene.tease" } else { goto "scene.tease" }` when `scene.tease` is `say "scene"` and
+   * `end`: whenever that code runs, the run fails at the `end`, unless it never goes on, as at an answer that never
+   * comes. Each `end` maps to the way that its message names: such a `goto` that leads to it, else the way by which that
+   * code runs. A timer, media, or button block may run before any instruction while that code waits, so when a block
+   * that can run may leave the code it interrupts, no `end` is found.
+   */
+  #provenEnds(
+    states: readonly (CallsWaiting | null)[],
+    computed: ReadonlyMap<number, { readonly node: number; readonly edge: string }>,
+  ): ReadonlyMap<number, number> {
+    const proven = new Map<number, number>();
+    const endings = this.#endings(computed);
+    for (let index = 0; index < this.plan.instructions.length; index += 1) {
+      if (this.#reached[index] === 0) continue;
+      for (const handler of this.#flow.handlersOf(index)) {
+        const definition = this.#flow.functionById(handler);
+        const ending = definition === undefined ? null : endings[definition.entryInstruction];
+        if (ending !== null && ending !== undefined && (ending.leaves || ending.end !== null))
+          return proven;
+      }
+    }
+    const byGoto = new Set<number>();
+    endings.forEach((ending, index) => {
+      const state = states[index];
+      if (
+        ending === null ||
+        ending.leaves ||
+        ending.returns ||
+        ending.end === null ||
+        ending.end === SEVERAL ||
+        state === null ||
+        state === undefined ||
+        !withoutCall(state) ||
+        byGoto.has(ending.end)
+      )
+        return;
+      const instruction = this.plan.instructions[index]!;
+      if (instruction.kind === "transfer" && instruction.mode === "goto") {
+        proven.set(ending.end, index);
+        byGoto.add(ending.end);
+      } else if (!proven.has(ending.end)) proven.set(ending.end, state.none!);
+    });
+    return proven;
+  }
+
+  /**
+   * How the code from each instruction on can stop (see {@link Ending}), by the ways of {@link #ways}, where a computed
+   * target that names its file, by `computed`, goes on in that file: a `goto` of a file goes on in it, a file `call`
+   * comes back unless the called file may leave, and a function call does what the function does, then goes on after
+   * the call where the function may return. A first solve, in which every function may return, tells where one may. A
+   * block that an instruction creates runs later, so it is no way on from there.
+   */
+  #endings(
+    computed: ReadonlyMap<number, { readonly node: number; readonly edge: string }>,
+  ): (Ending | null)[] {
+    let first: readonly (Ending | null)[] | null = null;
+    const solve = (): (Ending | null)[] =>
+      solveBackward<Ending, string>({
+        nodeCount: this.plan.instructions.length,
+        successors: (index) =>
+          this.#ways(index).map(({ node, edge }) => {
+            if (node !== null || edge === "end" || edge === "return") return { node, edge };
+            const target = computed.get(index);
+            return target?.edge === "transfer" ? target : { node: null, edge: "leaves" };
+          }),
+        join: (left, right) => ({
+          end:
+            left.end === null || left.end === right.end
+              ? right.end
+              : right.end === null
+                ? left.end
+                : SEVERAL,
+          leaves: left.leaves || right.leaves,
+          returns: left.returns || right.returns,
+        }),
+        equals: (left, right) =>
+          left.end === right.end && left.leaves === right.leaves && left.returns === right.returns,
+        transfer: (index, edge, state) => {
+          const instruction = this.plan.instructions[index]!;
+          switch (edge) {
+            case "end":
+              return { end: index, leaves: false, returns: false };
+            case "return":
+              return RETURNS;
+            case "leaves":
+              return LEAVING;
+            // Into a function: what it does, where its return goes on after the call.
+            case "call":
+              return state?.returns === true ? { ...state, returns: false } : state;
+            case "resume": {
+              if (first === null || instruction.kind !== "callFunction") return state;
+              const entry = this.#flow.functionById(instruction.functionId)?.entryInstruction;
+              return entry === undefined || first[entry]?.returns === true ? state : null;
+            }
+            case "transfer":
+              if (instruction.kind !== "transfer" || instruction.mode === "goto") return state;
+              // The called file's `end` comes back after the call.
+              return state?.leaves === true ? LEAVING : null;
+            default:
+              return state;
+          }
+        },
+      });
+    first = solve();
+    return solve();
   }
 
   /**
@@ -704,16 +852,40 @@ export class Reachability {
 
 /**
  * Whether a way reaches code with no file call waiting: `none` names one by the `goto` that started the running file
- * without a call, or `SESSION_START`, and `hidden` one by the computed `goto` that may have done so. Both `null`: every
- * way there has a call waiting. The first way found names each.
+ * without a call, or `SESSION_START`, and `hidden` one by the computed `goto`, or the instruction that creates a block,
+ * that may have done so. Both `null`: every way there has a call waiting. The first way found names each. `waiting`:
+ * whether a way reaches the code with a call waiting.
  */
 interface CallsWaiting {
   readonly none: number | null;
   readonly hidden: number | null;
+  readonly waiting: boolean;
 }
 
 /** The start of the session, which runs `main.tease` with no call waiting. */
 const SESSION_START = -1;
+
+/** Whether every way to code reaches it with no call waiting, also the ways that the compiler cannot follow. */
+function withoutCall(state: CallsWaiting): boolean {
+  return state.none !== null && state.hidden === null && !state.waiting;
+}
+
+/**
+ * How the code from an instruction on can stop running (see `Reachability.#endings`): at an `end`, the instruction
+ * `end`, or `SEVERAL` for more than one, `null` for none; by leaving the code that runs, `leaves`, through an `exit`, a
+ * computed target, or a file call that may not come back; and by returning from its function, `returns`. Code that
+ * never stops, as a loop with no way out, has no ending.
+ */
+interface Ending {
+  readonly end: number | null;
+  readonly leaves: boolean;
+  readonly returns: boolean;
+}
+
+/** More than one `end` at which code may stop. */
+const SEVERAL = -1;
+const LEAVING: Ending = { end: null, leaves: true, returns: false };
+const RETURNS: Ending = { end: null, leaves: false, returns: true };
 
 /** `text` with its first letter in lower case, to follow "If that can happen, ". */
 function lowerFirst(text: string): string {

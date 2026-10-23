@@ -96,9 +96,9 @@ goto script("rooms/${room}.tease")            // dynamic: an explicit conversion
    The compiler follows the statements, with constant conditions, loops that certainly run once or never,
    `while true`, and branches that all end; a call counts as returning, also of a function that always ends the
    session, so the ending after such a call is still written out.
-4. An `end` that a way the compiler can follow reaches with no pending `call` is a compile error, also when another way
-   reaches it through a `call`, like the error of rule 3. Where a computed target or a block, which runs later, hides
-   the way, it is a warning, and reaching `end` with no pending `call` is a runtime error (V30 §30).
+4. Reaching `end` with no pending `call` is a runtime error. It is a compile error where the compiler can prove that the
+   `end` fails whenever some code runs, also when another way reaches it through a `call`, and otherwise a warning
+   (V30 §13, §30).
 
 ### 5. Transfers
 

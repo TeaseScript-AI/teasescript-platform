@@ -4652,11 +4652,11 @@ Behavior:
   anywhere, including in a called file or a function, and never returns. A project with no reachable `exit` does not
   compile.
 - `end` ends the current file, also from inside a function or block, and returns to the file that `call`ed it.
-- An `end` that a way the compiler can follow, through files written out and globs, reaches with no pending `call` is a
-  compile error, also when another way reaches the same `end` through a `call`, as in
-  `if pick { call "scene.tease" } else { goto "scene.tease" }`. The message points to `call`, `goto`, or `exit`. Where a
-  computed target, such as a reference in a variable or a tagged pick, or a timer, media, or button block, which runs
-  later, hides the way, it is a warning (`TSV071`), and reaching that `end` with no pending `call` is a runtime error.
+- Reaching an `end` with no pending `call` is a runtime error. It is a compile error where the compiler can prove that
+  the `end` fails whenever some code runs, also when another way reaches the `end` through a `call`, as with the `goto`
+  in `if pick { call "scene.tease" } else { goto "scene.tease" }` when `scene.tease` consists of `say "scene"` and `end`.
+  The message points to `call`, `goto`, or `exit`. Where the compiler cannot prove it, it is a warning (`TSV071`,
+  [§13](#compile-errors-warnings-and-checks-when-the-script-runs)).
 - A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. A file of
   declarations only (functions, global functions, speakers, and globals without `default:`) runs nothing on its own
   and needs no ending; a `goto` into such a file is a compile error. A call
