@@ -1111,9 +1111,10 @@ text/number answers. Pointer or touch activation does not focus the composer or 
 activation can move focus to the next choice. Foreground and right-rail action buttons retain their opaque authored
 colour as the material base. Without an authored fill, the light or dark theme's neutral control surface supplies that
 base. Black or white labels and contrast-limited lighting keep the material readable across normal, hover, and pressed
-states. Unavailable action buttons use the shared disabled surface, text and border roles, without relief or hover/pressed
-feedback. They retain native disabled semantics and cannot activate. Right-rail action buttons use the same opaque
-material as foreground buttons.
+states. Unavailable action buttons use the shared disabled surface, text and border roles, without relief or
+hover/pressed feedback, and cannot run their action. They retain native disabled semantics, except a button that stays
+focusable while unavailable, such as an inactive right-rail control or Use image before there is an image, which is
+exposed as disabled with `aria-disabled`. Right-rail action buttons use the same opaque material as foreground buttons.
 
 The [Player action button design rationale](UI-DESIGN-AND-ENGINEERING.md#player-action-button-design-rationale) explains the
 material choice and its reuse boundaries.

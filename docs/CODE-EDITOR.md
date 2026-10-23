@@ -93,7 +93,9 @@ The first implementation should provide:
 - diagnostics for mixed value types where no union type is declared
   ([V30 §19](specifications/accepted-syntaxes-v30.md#19-choices)) and choices without buttons;
 - diagnostics for negative, non-finite, unsupported-magnitude, or overflowing explicit pacing values;
-- documentation that input text is a Standard UI hint rather than an automatic speaker transcript message;
+- documentation that a basic ask's text is the question, which the requesting speaker says in the chat before the
+  field opens, and that `hint:` is help shown in the field only
+  ([questions and hints](decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints));
 - documentation of exact text/number normalization, simple return types, and mandatory interactions with no player cancellation result (timer expiry blocks may still discard an interrupted interaction; see [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time));
 - formatting that preserves the accepted compact order and keeps compact `askChoice` options in one statement;
 - source-span preservation from compact syntax through fully lowered plan instructions;

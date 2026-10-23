@@ -107,8 +107,9 @@ checker, lowering, plan, runtime and editor cannot drift apart.
   the shared order helpers (`src/expression-children.ts`).
 - Where the lowering has a lazy path and an instruction path for one construct, both use one
   implementation and one message for each runtime rule.
-- Every editor completion compiles where it is offered, and the editor's syntax help is built from the
-  parser's tables.
+- Every editor completion of implemented syntax compiles where it is offered, and the editor's syntax help
+  is built from the parser's tables. Accepted syntax may be offered before it is implemented
+  ([completion policy](../CODE-EDITOR.md#accepted-first-standard-library-poc-tooling)).
 - When a second fix for the same kind of case is needed in one area, look for the shared cause before
   patching again (see Convergence).
 
