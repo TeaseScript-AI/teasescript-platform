@@ -241,6 +241,14 @@ function literalValue(
   }
 }
 
+/**
+ * A key of a literal case value or `switch` subject, equal for literals that compare equal with `==` (`2` and `2.0`), or
+ * `undefined` for another value.
+ */
+export function caseValueKey(expression: Expression): string | undefined {
+  return literalValue(unwrapParentheses(expression))?.key;
+}
+
 /** A literal case value as written, such as `5.0` or `"open"`, or `undefined` for another value. */
 export function caseValueText(expression: Expression): string | undefined {
   return literalValue(unwrapParentheses(expression))?.text;
