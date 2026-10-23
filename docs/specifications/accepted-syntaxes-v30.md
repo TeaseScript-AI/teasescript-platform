@@ -3256,7 +3256,8 @@ answers.
 
 ### Prefilled answers
 
-Every single-field input accepts an optional named `prefill:` answer, a starting answer that the player still confirms:
+The single-field inputs listed below accept an optional named `prefill:` answer, a starting answer that the player
+still confirms:
 
 ```text
 let name = askText("What is your name?", prefill: "Ada")
@@ -4199,9 +4200,9 @@ Rules:
 - The complete string is treated as one key.
 
 Storage currently supports strings, finite numbers, booleans, lists, objects, sets, dicts, ranges, durations, angles,
-date and time values, and `script` references ([§29](#29-script-files-and-paths)), including nested `null`. Wider
-persistent-data support is not yet implemented; this subset is not a permanent language limit. The compiler rejects a
-default whose type is known and does not fit the declared type. Replacement-value recovery under
+date and time values, `script` references ([§29](#29-script-files-and-paths)), and regexes ([§8](#regexes)), including
+nested `null`. Wider persistent-data support is not yet implemented; this subset is not a permanent language limit. The
+compiler rejects a default whose type is known and does not fit the declared type. Replacement-value recovery under
 [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
 
 Examples:
@@ -4595,8 +4596,9 @@ Rules:
 - A `call` starts another file, so a `call` that can start the running file is a compile error: `call label`, a `call`
   of the file it stands in, a glob or tagged pick that can choose that file, and in a global function a `call` that can
   start a file that calls the function. A timer, media, or button block runs later, while its file or a file it called
-  runs, or after it, so a `call` in a block, like a computed target, is checked when it runs: starting the running file
-  is a runtime error then.
+  runs, or after it, so for a `call` in a block the running file is the file running when the block runs. Where the
+  compiler cannot prove whether a `call` can start the running file, the call is checked when it runs
+  ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)): starting the running file is a runtime error then.
 - Each entry into a file, by a `goto` or `call` naming it, starts at its top with fresh top-level variables of that
   file. A `goto` to a label of the file continues with the variables of the entry it runs in.
 - A function sees the top-level variables of the entry that called it, and a timer, media, or button block those of the
@@ -5892,7 +5894,6 @@ History is queried with `getPlayerHistory(...)`, which returns a filtered list o
 ```text
 let recent = getPlayerHistory(
     type: "orgasmOutcome",
-    since: getDateTime() - 30 days,
     order: "newest",
     limit: 5
 )
@@ -6439,17 +6440,18 @@ if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }
 - In `tagged`, commas join complete predicates with `and`. The options `all:`, `none:`, and `any:` follow them, each at
   most once, with a list of tag names that a candidate must have all of, none of, or at least one of; an empty list
   passes every candidate. They join with `and` too, and take computed names: `findImages(all: wanted)`.
-- `findImages` takes the same parts as named arguments `where:`, `all:`, `none:`, and `any:`, and returns the paths of
-  all matching images in path order, as a `string[]`, which may be empty. Without arguments it returns every image.
+- `findImages` takes the same parts as named arguments `where:`, `all:`, `none:`, and `any:`, and returns all matching
+  images as a `string[]`, which may be empty: each package image by its path and each photo by its reference, in the
+  order that tag queries search them ([Image tags](#image-tags)). Without arguments it returns every image.
 - `goto tagged` and `call tagged` pick a file of the project by the tags of its header ([File header](#file-header))
   and enter it at its top, as `goto (reference)` does ([§29](#29-script-files-and-paths)). Every file that runs
   something is a candidate, `main.tease` and the current file too, but a `call tagged` that can pick the running file
-  is a compile error ([§29](#29-script-files-and-paths)): for this, a comparison is false for a file without a number
-  for its tag, and is decided by a constant bound. A file of declarations only runs nothing on its own and is skipped,
-  as for a glob. The option `from:` limits the candidates to a path or glob written out in quotes, as
-  for `goto`; one that names no file that runs something is a compile error. `findScripts` takes `where:`, `all:`,
-  `none:`, `any:`, and `from:` as named arguments and returns `script` references to all matching candidates in path
-  order, as a `script[]`. A pick, too, chooses among the candidates in path order.
+  is a compile error where the compiler can prove it, and is otherwise checked when it runs, as for any `call`
+  ([§29](#29-script-files-and-paths)). A file of declarations only runs nothing on its own and is skipped, as for a
+  glob. The option `from:` limits the candidates to a path or glob written out in quotes, as for `goto`; one that names
+  no file that runs something is a compile error. `findScripts` takes `where:`, `all:`, `none:`, `any:`, and `from:` as
+  named arguments and returns `script` references to all matching candidates in path order, as a `script[]`. A pick,
+  too, chooses among the candidates in path order.
 - Comparison bounds and tag lists are evaluated once, in written order, before any candidate is matched. Matching draws
   no random number. A pick (`showImage tagged`, `goto tagged`, `call tagged`) draws once from the session random
   generator, and restoring a checkpoint never draws again.
@@ -6467,8 +6469,8 @@ if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }
   a tag name, or a name and a number such as `punishment: 4`, with the rules of [Tags](#tags). Another keyword is
   ignored with a warning. A repeated tag counts once without a warning, because photo tools often keep `punishment`
   beside `punishment: 4`; two different numbers for one tag are an error.
-- The catalog that tag queries search is generated from the images when the project compiles. It is part of the plan,
-  so a checkpoint keeps it and a restored session searches the same images.
+- The catalog that tag queries search is generated from the package images when the project compiles. It is part of
+  the plan, so a checkpoint keeps it and a restored session searches the same images.
 - A photo taken with `takePhoto(tags: [...])` joins the catalog with these tags, under the reference `takePhoto`
   returns ([§33](#33-browser-api-file-folder-camera-and-url-references)):
 
