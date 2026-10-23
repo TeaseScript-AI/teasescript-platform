@@ -61,11 +61,12 @@ architecture may change substantially while correctness and the basic model are 
   - **Outcome:** Valid code compiles regardless of the order in which it is written or checked; invalid code is a
     compile error at a useful place wherever the compiler can know it; no type is silently unknown (a type is known, or
     the runtime check that remains is deliberate); one mechanism holds every type rule, without repeated checking
-    rounds; and the compiler is fast. The type rules the owner decided for this checker on 2026-10-19 and 2026-10-20
+    rounds; and the compiler is fast. The type rules the owner decided for this checker from 2026-10-19 to 2026-10-23
     take effect at the switch, when it becomes the compiler's checker.
   - **Reference:** [ADR 0021](../decisions/0021-static-types.md),
-    [`ARCHITECTURE.md`](../ARCHITECTURE.md#static-type-analysis), and PR #986, which writes those rules into V30 and
-    ADR 0021.
+    [`ARCHITECTURE.md`](../ARCHITECTURE.md#static-type-analysis), and the
+    [V30 status legend](../specifications/accepted-syntaxes-v30.md#status-legend), which lists the sections that state
+    those rules.
 
 - [ ] **Player UI**
   - **Outcome:** Replace the technical playground presentation with a practical Player interface for transcript output,
