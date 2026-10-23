@@ -983,7 +983,7 @@ async function updateSidebarVisibility(open: boolean) {
                           savedData.persistent === true
                             ? "Stored in this browser until you delete it."
                             : savedData.persistent === false
-                              ? "Stored in this browser, which may delete it when space runs low."
+                              ? "Stored in this browser. The browser may delete it when the device runs low on storage, so export it to keep a copy."
                               : "Stored in this browser."
                         }}
                       </p>

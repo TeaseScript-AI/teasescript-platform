@@ -301,7 +301,8 @@ belongs to the player, like an account's: **Export…** and **Import…** take t
 has played at once, or of the scripts the player keeps ticked ([format](../DATA-AND-API.md#saved-data-transfer)). It is
 not a session checkpoint. When the data is in this browser
 ([stand-alone](../DATA-AND-API.md#player-session-persistence-modes)), the section says so, and whether the browser keeps
-it until the player deletes it or may delete it when space runs low.
+it until the player deletes it or may delete it when the device runs low on storage, in which case it suggests an
+export to keep a copy.
 
 **Export…** reads every script's saved data freshly, also during a session, so saves already stored count. It lists each
 script that has saved values, by its title when a Player has shown it, otherwise by its storage scope, with its values,
