@@ -568,12 +568,7 @@ test("an end with no call to return to is an error on every way the compiler can
     ),
     ["b", "back", "exit"],
   );
-  // So does a reference when the references of the project can name only that file.
-  assert.deepEqual(diagnostics('let next = script("scene.tease")\ngoto (next)', scene), [
-    ["scene.tease", "TSV070", noCall],
-  ]);
-  // A computed target that may start other files too hides the way: a warning, and the end fails if no call waits when
-  // it runs.
+  // A computed target hides the way: a warning, and the end fails if no call waits when it runs.
   const others = { "scene.tease": 'say "scene"\nend', "done.tease": "exit" };
   const files = project(
     'let rooms = [script("scene.tease"), script("done.tease")]\ngoto (rooms[0])',
@@ -594,6 +589,18 @@ test("an end with no call to return to is an error on every way the compiler can
     [
       "This 'end' has no call to return to, because no file called this one. Start this file with 'call' where it should come back, or use 'exit' where the session should finish.",
     ],
+  );
+  // Also where the references of the project can name only one file: whether a way through the reference reaches the
+  // end with no call waiting depends on the run, here on a global that the end's file tests (#1015 review r1, B1).
+  assert.deepEqual(
+    said(
+      project(
+        'global cameByCall = false\nlet next = script("room.tease")\ncameByCall = true\ncall (next)\ncameByCall = false\ngoto (next)',
+        { "room.tease": 'say "room"\nif not cameByCall { exit }\nend' },
+      ),
+      { warnings: ["TSV071"] },
+    ),
+    ["room", "room", "exit"],
   );
 });
 

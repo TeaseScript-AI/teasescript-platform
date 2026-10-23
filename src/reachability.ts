@@ -304,11 +304,12 @@ export class Reachability {
 
   /**
    * The way of each computed target for the check of waiting calls (see {@link pendingCallDiagnostics}). A
-   * `script(...)` of a path written out names its file, which the check follows like a file target, and so does a
-   * reference when the references of the project can name only one file (see {@link knownReferenceFile}). Any other
-   * target leads to a node of its own after the instructions, a hub, with a way into each file it may start: those of
-   * its tagged pick, or those any reference may name. Targets that may start the same files share one, by the list of
-   * files `picks` shares, so the ways grow with the files, not with the targets times the files.
+   * `script(...)` of a path written out names its file, which the check follows like a file target. Any other target
+   * leads to a node of its own after the instructions, a hub, with a way into each file it may start: those of its
+   * tagged pick, or those any reference may name. Targets that may start the same files share one, by the list of files
+   * `picks` shares, so the ways grow with the files, not with the targets times the files. A reference that can name only
+   * one file leads through a hub too: the check does not read the tests that decide its ways, nor whether the target
+   * names an existing file, so an error there could reject code that cannot fail.
    */
   #computedWays(
     picks: ReadonlyMap<number, readonly number[]>,
@@ -319,7 +320,6 @@ export class Reachability {
   } {
     const count = this.plan.instructions.length;
     const files = new Map(this.plan.files.map((file, index) => [file.path, index]));
-    const known = knownReferenceFile(referenced);
     const targets = new Map<number, { readonly node: number; readonly edge: string }>();
     const hubs: (readonly number[])[] = [];
     // By the list of files, which `picks` shares; `null` for the files any other reference may name.
@@ -345,10 +345,6 @@ export class Reachability {
         const file = typeof path === "string" ? files.get(path) : undefined;
         if (file !== undefined)
           targets.set(index, { node: this.plan.files[file]!.entryInstruction, edge: "transfer" });
-        return;
-      }
-      if (value.kind !== "tagQuery" && known !== undefined) {
-        targets.set(index, { node: this.plan.files[known]!.entryInstruction, edge: "transfer" });
         return;
       }
       const node = hub((value.kind === "tagQuery" ? picks.get(index) : undefined) ?? null);
