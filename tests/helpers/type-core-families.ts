@@ -875,3 +875,137 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
     ],
   },
 ];
+
+/** A W34 chain: a k-field record replaced by one of nulls under the flag, k whole copies, the last read at k fields. */
+function w34Chain(
+  k: number,
+  record: (value: string) => string,
+  field: (index: number) => string,
+  link: (index: number) => string,
+): string {
+  const values = (value: string): string => record(`{${fields(k, () => value)}}`);
+  return lines(
+    `let box0 = ${values("1")}`,
+    `if flagHost { box0 = ${values("null")} }`,
+    rows(k, link),
+    rows(k, (i) => `repeat box${k}.${field(i)} {}`),
+  );
+}
+
+/** A W34 fan: k copies of one tested record, each read at the field its own test tests. */
+function w34Fan(k: number, copy: (index: number) => string): string {
+  return lines(
+    `let root = {${fields(k, () => "1")}}`,
+    `if flagHost { root = {${fields(k, () => "null")}} }`,
+    rows(k, copy),
+  );
+}
+
+const plainRecord = (literal: string): string => literal;
+const plainField = (index: number): string => `f${index}`;
+
+/** The chain variants of W34: the statements of each link before the next copy, or around it. */
+const W34_LINKS: readonly (readonly [string, (index: number) => string])[] = [
+  ["plain", (i: number) => `let box${i + 1} = box${i}`],
+  ["tested", (i: number) => `if box${i}.f0 != null {}\nlet box${i + 1} = box${i}`],
+  ["different", (i: number) => `if box${i}.f${i} != null {}\nlet box${i + 1} = box${i}`],
+  [
+    "guarded",
+    (i: number) => `if box${i}.f0 != null { repeat box${i}.f0 {} }\nlet box${i + 1} = box${i}`,
+  ],
+  [
+    "copies-of-copies",
+    (i: number) => `if box${i}.f0 != null {}\nlet alias${i} = box${i}\nlet box${i + 1} = alias${i}`,
+  ],
+  [
+    "copy-test",
+    (i: number) =>
+      `let box${i + 1} = box${i}\nif box${i + 1}.f${i} != null { repeat box${i + 1}.f${i} {} }`,
+  ],
+  [
+    "stores",
+    (i: number) =>
+      `if box${i}.f${i} != null {}\nif flagHost { box${i}.f${i} = 2 }\nlet box${i + 1} = box${i}`,
+  ],
+  [
+    "interleaved-stores",
+    (i: number) => `if flagHost { box${i}.f${i} = 2 }\nlet box${i + 1} = box${i}`,
+  ],
+];
+
+/**
+ * W34 (TABLE §13.3, r4.33–r4.38) as the reference model's round-10 generators write it (`fresh.py`, `fan-probe.py`,
+ * `siblings.py`): a chain of k whole copies of a k-field record read at k fields of the last copy, plain, with a test
+ * on the source before each copy (of one field, of the copy's own field, guarding a read), through an alias, nested a
+ * level, tested after each copy, with a conditional store below each source (tested and not); and k sibling copies of
+ * one record under tests of their own fields (one test, two nested, an unrelated test before the copy, one `and` chain
+ * over all k fields). Every copy is resolved once and read once per field: k + k, never k × k.
+ */
+export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link]): WorkFamily => ({
+  name: `W34-${variant}`,
+  measures: "§13.3 W34: a copy chain resolved once per copy, projected per field",
+  program: (k) => main(w34Chain(k, plainRecord, plainField, link)),
+})).concat([
+  {
+    name: "W34-nested",
+    measures: "§13.3 W34: a copy chain resolved once per copy, projected per field",
+    program: (k) =>
+      main(
+        w34Chain(
+          k,
+          (literal) => `{inner: ${literal}}`,
+          (i) => `inner.f${i}`,
+          (i) => `if box${i}.inner.f0 != null {}\nlet box${i + 1} = box${i}`,
+        ),
+      ),
+  },
+  {
+    name: "W34-fan-marked",
+    measures: "§13.3 W34 r4.38: a copy's marks asked per path and guard scope",
+    program: (k) =>
+      main(
+        w34Fan(
+          k,
+          (i) =>
+            `if root.f${i} != null {\nif root.f${i} > 0 {\nlet copy${i} = root\nrepeat copy${i}.f${i} {}\n}\n}`,
+        ),
+      ),
+  },
+  {
+    name: "W34-fan-unmarked",
+    measures: "§13.3 W34 r4.38: a copy's marks asked per path and guard scope",
+    program: (k) =>
+      main(
+        w34Fan(
+          k,
+          (i) =>
+            `if root.f${i} != null {\nif root.f${i} > 0 {}\nlet copy${i} = root\nrepeat copy${i}.f${i} {}\n}`,
+        ),
+      ),
+  },
+  {
+    name: "W34-fan-narrowing",
+    measures: "§13.3 W34 r4.38: a copy's marks asked per path and guard scope",
+    program: (k) =>
+      main(
+        w34Fan(
+          k,
+          (i) => `if root.f${i} != null {\nlet copy${i} = root\nrepeat copy${i}.f${i} {}\n}`,
+        ),
+      ),
+  },
+  {
+    name: "W34-fan-and-chain",
+    measures: "§13.3 W34 r4.38: k copies in one guard scope share its marks",
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          `if flagHost { root = {${fields(k, () => "null")}} }`,
+          `if ${Array.from({ length: k }, (_, i) => `root.f${i} != null`).join(" and ")} {`,
+          rows(k, (i) => `let copy${i} = root\nrepeat copy${i}.f${i} {}`),
+          "}",
+        ),
+      ),
+  },
+]);
