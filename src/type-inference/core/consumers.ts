@@ -740,31 +740,60 @@ export class Consumers {
 
   /**
    * C1 with C9 r4.29 and r4.43: where external data a store brings enters, for its warning and check: the external
-   * value's own expression inside the stored literal at the path, along a choice's selected value (each option, an
-   * element of a list or set argument or the argument, gives a choice object's `value`, or its `text` without one, else
-   * itself, V30 §19; a labelled option gives its label), or inside a literal a projection reads, a projection below an
-   * external value keeping its site; else the store, as for a copy of a variable (r4.43's bound options). The first in
-   * source order.
+   * value's own expression inside the stored literal at the path, along a choice's selected value, or inside a literal
+   * a projection reads, a projection below an external value keeping its site; else the store, as for a copy of a
+   * variable (r4.43's bound options). A choice's option is reached first, through the literals and the index and
+   * property projections around it, and only then selected (V30 §19: a list's or a set's elements are options, a
+   * choice object gives its `value`, or its `text` without one, any other option itself; a labelled option gives its
+   * label) and read at the path. The first in source order.
    */
   #ingressSite(d: Definition, at: readonly string[]): SourceSite {
     const { program, definitions } = this.pass;
     if (d.kind !== "whole" || d.value === undefined) return d.site;
-    const pending: [PlaceId, readonly string[]][] = [[d.value, at]];
+    // a value read at `path`; `option`: the steps inside it that still lead to a choice's option, or `null` past it
+    interface Visit {
+      readonly value: PlaceId;
+      readonly path: readonly string[];
+      readonly option: readonly string[] | null;
+    }
+    const pending: Visit[] = [{ value: d.value, path: at, option: null }];
     while (pending.length > 0) {
-      const [value, path] = pending.pop()!;
+      const { value, path, option } = pending.pop()!;
       program.work.charge("checks");
-      // the external expression itself, also where a projection reads below it (`hostValue.field`)
+      // the external expression itself, also where a projection reads below it (`hostValue.field`), an option's too
       if (definitions.ingress.has(value)) return program.place(value).site ?? d.site;
-      const next: [PlaceId, readonly string[]][] = [];
-      if (program.hasOf.has(value) || program.cellOwner.has(value)) {
-        if (path.length > 0)
-          for (const child of this.#literalChildren(value, path[0]!))
-            next.push([child.value!, path.slice(1)]);
+      const next: Visit[] = [];
+      const literal = program.hasOf.has(value) || program.cellOwner.has(value);
+      if (literal && option !== null && option.length === 0) {
+        const elements = this.#literalChildren(value, "element");
+        if (elements.length > 0)
+          for (const child of elements) next.push({ value: child.value!, path, option: [] });
+        else {
+          const valued = this.#literalChildren(value, "value");
+          const selected = valued.length > 0 ? valued : this.#literalChildren(value, "text");
+          if (selected.length === 0) next.push({ value, path, option: null });
+          for (const child of selected) next.push({ value: child.value!, path, option: null });
+        }
+      } else if (literal) {
+        const steps = option ?? path;
+        if (steps.length > 0)
+          for (const child of this.#literalChildren(value, steps[0]!))
+            next.push(
+              option === null
+                ? { value: child.value!, path: steps.slice(1), option: null }
+                : { value: child.value!, path, option: steps.slice(1) },
+            );
       } else if (program.projOf.has(value)) {
         const projection = program.projOf.get(value)!;
-        if (projection.step !== "iteration")
-          next.push([projection.owner, [stepName(projection.step), ...path]]);
-      } else {
+        if (projection.step !== "iteration") {
+          const step = stepName(projection.step);
+          next.push(
+            option === null
+              ? { value: projection.owner, path: [step, ...path], option: null }
+              : { value: projection.owner, path, option: [step, ...option] },
+          );
+        }
+      } else if (option === null) {
         const c = program.opOf.get(value);
         if (
           c?.kind === "operation" &&
@@ -772,21 +801,8 @@ export class Consumers {
           interactionCategory(c.contract.name)?.kind === "options"
         ) {
           const labels = choiceLabels(c);
-          for (const [index, argument] of c.arguments.entries()) {
-            if (labels[index] !== undefined) continue;
-            // the options: a list's or a set's elements, else the argument
-            const elements = this.#literalChildren(argument, "element").map(
-              (child) => child.value!,
-            );
-            for (const option of elements.length > 0 ? elements : [argument]) {
-              // V30 §19: the option's selected value, a choice object's `value`, or its `text` without one; any other
-              // option is its own value
-              const value = this.#literalChildren(option, "value");
-              const selected = value.length > 0 ? value : this.#literalChildren(option, "text");
-              if (selected.length === 0) next.push([option, path]);
-              else for (const child of selected) next.push([child.value!, path]);
-            }
-          }
+          for (const [index, argument] of c.arguments.entries())
+            if (labels[index] === undefined) next.push({ value: argument, path, option: [] });
         }
       }
       for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);

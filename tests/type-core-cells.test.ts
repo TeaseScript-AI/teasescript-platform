@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
 import { recordDifferences, type CompactRecord } from "./helpers/type-core-records.js";
@@ -473,6 +475,67 @@ test("external data in a choice's options or in a literal is warned at its own e
       "copy-type@54",
       "null-check@12",
     ],
+  );
+});
+
+test("a choice's option reached through index and property projections is selected before its path (Astra B6-r3)", () => {
+  // C1's site in both orders: each form follows `let chosen: integer = `, sites zero-based
+  const sites = (form: string): string[] => {
+    const request = coreRequest([
+      { path: "main.tease", source: `let chosen: integer = ${form}\nexit` },
+    ]);
+    assert.ok(request !== null, form);
+    const both = [false, true].map((reversed) => {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      return [
+        record.outcome,
+        ...record.diagnostics
+          .filter((diagnostic) => diagnostic.kind === "written-target")
+          .map((diagnostic) => `${diagnostic.kind}@${diagnostic.site.offset}`),
+        ...record.checks
+          .filter((check) => check.kind === "copy-type")
+          .map((check) => `${check.kind}@${check.site.offset}`),
+      ];
+    });
+    assert.deepEqual(both[1], both[0], `${form}: both orders`);
+    return both[0]!;
+  };
+  const at = (offset: number): string[] => [
+    "warning-runtime-check",
+    `written-target@${offset}`,
+    `copy-type@${offset}`,
+  ];
+  // an option inside an index or a property projection, with and without a projection of the result
+  assert.deepEqual(
+    sites("(askChoice [{text: hostValue.label, value: {text: hostValue.field}}][0]).text"),
+    at(72),
+  );
+  assert.deepEqual(
+    sites(
+      "(askChoice {option: {text: hostValue.label, value: {text: hostValue.field}}}.option).text",
+    ),
+    at(80),
+  );
+  assert.deepEqual(
+    sites('(askChoice [{text: "A", value: {text: hostValue.field}}][0]).text'),
+    at(60),
+  );
+  assert.deepEqual(sites('askChoice [{text: "A", value: hostValue.field}][0]'), at(52));
+  assert.deepEqual(sites('askChoice {option: {text: "A", value: hostValue.field}}.option'), at(60));
+  // the controls: the literal analogues and the direct choice object
+  assert.deepEqual(
+    sites("[{text: hostValue.label, value: {text: hostValue.field}}][0].value.text"),
+    at(61),
+  );
+  assert.deepEqual(
+    sites("{option: {text: hostValue.label, value: {text: hostValue.field}}}.option.value.text"),
+    at(69),
+  );
+  assert.deepEqual(
+    sites("(askChoice {text: hostValue.label, value: {text: hostValue.field}}).text"),
+    at(71),
   );
 });
 
