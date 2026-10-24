@@ -15,6 +15,7 @@ import {
   REFERENCE,
   typedDefault,
   unknownItem,
+  withoutMissing,
   withOwnSelection,
 } from "./contract.js";
 import { keyOf, keyPath, keyPlace, type ForLoopFacts, type Key } from "./definitions.js";
@@ -180,11 +181,12 @@ export class Values {
     rest: readonly string[],
   ): Work<readonly Item[]> {
     const value = withoutEmpty(yield* this.valueItems(option, node, [...at, "value"]));
+    const present = withoutMissing(value);
     const out: Item[] = [];
-    if (value.some((item) => !isMissing(item)))
+    if (present.length > 0)
       out.push(
         ...(rest.length === 0
-          ? value.filter((item) => !isMissing(item))
+          ? present
           : yield* this.valueItems(option, node, [...at, "value", ...rest])),
       );
     if (value.length === 0 || value.some(isMissing))
@@ -419,7 +421,7 @@ export class Values {
       const gives = method.gives;
       for (const item of withoutEmpty(yield* this.valueItems(c.receiver, at, []))) {
         if (gives.kind === "declared") {
-          const kinds = declaredResult(name, gives.kinds, item.tag === "string");
+          const kinds = declaredResult(name, gives.kinds, item.tag);
           if (rest.length === 0)
             out.push(
               ...kinds.map((tag) =>
@@ -429,6 +431,11 @@ export class Values {
                 ),
               ),
             );
+        } else if (item.tag === "unknown") {
+          // a dict's removed value, or a list's or a set's `null` where it gives that
+          out.push(item);
+          if (gives.fromList === "null" && rest.length === 0)
+            out.push(carried(makeItem("null", null, { cert: "pos" }), [item]));
         } else if (gives.fromList === "null" && item.tag !== "dict") {
           if (rest.length === 0)
             out.push(carried(makeItem("null", null, { cert: item.cert }), [item]));
@@ -436,7 +443,6 @@ export class Values {
           out.push(
             ...weaken(withoutEmpty(yield* this.valueItems(c.receiver, at, ["element", ...rest]))),
           );
-        else if (item.tag === "unknown") out.push(item);
       }
       return out;
     }

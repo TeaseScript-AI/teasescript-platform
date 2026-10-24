@@ -271,6 +271,39 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "valid",
     "",
   ],
+  // §3.2 (review r6): a guarded copy of a computed record passed to a written parameter at two sites keeps its mark
+  [
+    "§3.2 a guarded computed argument at two sites",
+    "let source = null otherwise {f: 2.0}\nfunction take(p: object) { repeat p.f {} }\nif source.f is integer {\n  take(source)\n  take(source)\n}\nexit",
+    "warning-runtime-check",
+    "member",
+  ],
+  [
+    "§3.2 an unguarded computed argument at two sites",
+    "let source = null otherwise {f: 2.0}\nfunction take(p: object) { repeat p.f {} }\ntake(source)\ntake(source)\nexit",
+    "compile-error",
+    "-",
+  ],
+  // §19, F25, F7 (review r6): an external value beside a choice object's text; an unknown receiver's result is every
+  // receiver kind's that has the method
+  [
+    "§19 an external value beside a choice object without one",
+    'let r: string = askChoice [{text: "A", value: hostValue}, {text: "B"}]',
+    "warning-runtime-check",
+    "unknown",
+  ],
+  [
+    "F25 an unknown receiver's reverse",
+    'let raw = fromJson("\\"abc\\"", default: null, files: false)\nlet text: string = raw.reverse()',
+    "warning-runtime-check",
+    "unknown unknown unknown",
+  ],
+  [
+    "F7 an unknown receiver's remove",
+    'let raw = fromJson("{}", default: null, files: false)\nlet text: string = raw.remove("key")',
+    "warning-runtime-check",
+    "unknown unknown unknown unknown",
+  ],
 ];
 
 test("the core gives the expected outcome for the programs beside the set", () => {

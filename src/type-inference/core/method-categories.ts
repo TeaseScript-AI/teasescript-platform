@@ -75,15 +75,18 @@ const TEXT_RESULTS: Readonly<Partial<Record<TextResult, readonly ValueKind[]>>> 
 };
 
 /**
- * F25: what a method with a declared result (`kinds`, a collection's) gives on its receiver: on text, its text
- * contract's result where text has the method (`reverse` gives text, a list's gives `null`).
+ * F25: what a method with a declared result (`kinds`, a collection's) gives on a receiver of `receiver`'s kind: on text,
+ * its text contract's result where text has the method (`reverse` gives text, a list's gives `null`); on an unknown
+ * receiver, either one.
  */
 export function declaredResult(
   name: string,
   kinds: readonly ValueKind[],
-  onText: boolean,
+  receiver: string,
 ): readonly ValueKind[] {
-  return (onText && isTextMethod(name) && TEXT_RESULTS[TEXT_METHODS[name].result]) || kinds;
+  const text = isTextMethod(name) ? TEXT_RESULTS[TEXT_METHODS[name].result] : undefined;
+  if (text === undefined || (receiver !== "string" && receiver !== "unknown")) return kinds;
+  return receiver === "string" ? text : [...new Set([...kinds, ...text])];
 }
 
 /** C6, F11: whether a property of a list or set selects one of its elements (on an object, its own property). */

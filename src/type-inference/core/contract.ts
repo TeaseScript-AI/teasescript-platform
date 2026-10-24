@@ -528,9 +528,14 @@ export class Contract {
         // a prefix's whole stores, shared by every property below it
         const stores = this.prefixStores(prefix);
         for (const entry of stores.list) out.push(...(yield* this.entryAt(entry, rest)));
-        // a replaced source's own stores below the prefix, only where they lie
-        for (const sub of this.relevantSubs(stores, rest))
-          out.push(...(yield* this.subAt(sub.key, rest)));
+        // a replaced source's own stores below the prefix, only where they lie, marked as its copies' entries are
+        // (§3.2: a guarded read of a copy of it is a mark of its holder)
+        for (const sub of this.relevantSubs(stores, rest)) {
+          const items = yield* this.subAt(sub.key, rest);
+          out.push(
+            ...(this.#marksAt(this.keyIdentity(sub.key).holder, rest) ? marked(items) : items),
+          );
+        }
         continue;
       }
       for (const d of definitions.byKey.get(prefix) ?? []) {
@@ -715,11 +720,12 @@ export class Contract {
     rest: readonly string[],
   ): Work<readonly Item[]> {
     const value = withoutEmpty(yield* this.contractOfValueAt(option, [...at, "value"]));
+    const present = withoutMissing(value);
     const out: Item[] = [];
-    if (value.some((item) => !isMissing(item)))
+    if (present.length > 0)
       out.push(
         ...(rest.length === 0
-          ? value.filter((item) => !isMissing(item))
+          ? present
           : yield* this.contractOfValueAt(option, [...at, "value", ...rest])),
       );
     if (value.length === 0 || value.some(isMissing))
@@ -810,17 +816,21 @@ export class Contract {
         if (gives.kind === "declared") {
           if (rest.length === 0)
             out.push(
-              ...declaredResult(name, gives.kinds, item.tag === "string").map((tag) =>
+              ...declaredResult(name, gives.kinds, item.tag).map((tag) =>
                 carried(makeItem(tag), [item]),
               ),
             );
+        } else if (item.tag === "unknown") {
+          // a dict's removed value, or a list's or a set's `null` where it gives that
+          out.push(item);
+          if (gives.fromList === "null" && rest.length === 0)
+            out.push(carried(makeItem("null"), [item]));
         } else if (gives.fromList === "null" && item.tag !== "dict") {
           if (rest.length === 0) out.push(carried(makeItem("null"), [item]));
         } else if (COLLECTIONS.has(item.tag))
           out.push(
             ...withoutEmpty(yield* this.contractOfValueAt(c.receiver, ["element", ...rest])),
           );
-        else if (item.tag === "unknown") out.push(item);
       }
       return mergeItems(out, scope);
     }
@@ -1196,7 +1206,7 @@ export class Contract {
 
   /**
    * A value's source identity: the key a read copies, its callee's result key for a call, a literal's structure, or the
-   * value itself; the read's guard an annotation.
+   * value itself; the read's guard an annotation, each with its mark holder (§8 r4.23).
    */
   public identityOf(value: PlaceId): Identity {
     if (!this.#identities.has(value)) this.#settle(this.#identityWork(value));
@@ -1229,7 +1239,16 @@ export class Contract {
           guarded: false,
           holder: this.#holders.get(id) ?? this.#newHolder(id),
         };
-      } else identity = { id: `v${value}`, key: null, guarded: false, holder: null };
+      } else {
+        // a computed value (an operation's result): its own holder, so a guarded read of a copy of it is a mark there
+        const id = `v${value}`;
+        identity = {
+          id,
+          key: null,
+          guarded: false,
+          holder: this.#holders.get(id) ?? this.#newHolder(id),
+        };
+      }
     }
     this.#identities.set(value, identity);
   }
@@ -2508,6 +2527,17 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
 /** A property read that found no such property. */
 export const isMissing = (item: Item): boolean =>
   item.tag === "unknown" && (item.reasons & REASON.missing) !== 0;
+
+/** Items without their missing alternative: an unknown only missing goes, one with another reason keeps that reason. */
+export function withoutMissing(items: readonly Item[]): Item[] {
+  return items.flatMap((item) =>
+    !isMissing(item)
+      ? [item]
+      : item.reasons === REASON.missing
+        ? []
+        : [{ ...item, reasons: item.reasons & ~REASON.missing }],
+  );
+}
 
 /** The value of a `default:` named argument. */
 export function defaultOf(c: ValueConstraint): PlaceId | undefined {

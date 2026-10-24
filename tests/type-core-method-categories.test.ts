@@ -54,7 +54,7 @@ test("a method's category gives what the contract of each receiver kind that has
     if (gives === undefined) return;
     const given =
       gives.kind === "declared"
-        ? declaredResult(name, gives.kinds, owner === "text").join("|")
+        ? declaredResult(name, gives.kinds, owner === "text" ? "string" : owner).join("|")
         : gives.kind === "removed"
           ? owner === "dict"
             ? "value"
