@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createXorShift32State, nextXorShift32 } from "../src/runtime/random/random.js";
-import { solveDemands } from "../src/type-inference/core/answers.js";
+import { analyseCore, solveDemands } from "../src/type-inference/core/answers.js";
+import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import {
   ingressStores,
@@ -227,4 +228,60 @@ test("a component found while another is solved is solved on the explicit stack"
     ["integer"],
   );
   assert.equal(solver.demandWork().length, size);
+});
+
+/**
+ * Astra B2: a recursive projection of a reference (F19a) or of a record terminates; its receiver's provisional answer
+ * no longer opens ever deeper paths, so its component closes. Under a 10,000-unit allowance, which the head before the
+ * repair crossed at 81 frames with no component, each completes in either order (the reference: 506 and 517 units, two
+ * members; the record: 657 and 694 units, three).
+ */
+test("a recursive projection of a reference or a record closes its component", () => {
+  const shapes: readonly (readonly [string, string, string, number])[] = [
+    [
+      "a reference read further",
+      'speaker narrator { value: "Hello" }\nfunction f(flag: boolean) {\n  if flag { return narrator }\n  return f(true).custom\n}\nrepeat f(false) {}\nexit',
+      "warning-runtime-check",
+      2,
+    ],
+    [
+      "a reference read further in its own call",
+      'speaker narrator { value: "Hello" }\nfunction f(flag: boolean) {\n  if flag { return narrator }\n  return f(flag).custom\n}\nrepeat f(true) {}\nexit',
+      "warning-runtime-check",
+      2,
+    ],
+    [
+      "a reference and a record in two functions",
+      'speaker narrator { value: "Hello" }\nfunction a(flag: boolean) {\n  if flag { return {n: 1} }\n  return b(flag)\n}\nfunction b(flag: boolean) {\n  if flag { return narrator }\n  return a(flag).n\n}\nrepeat a(true).n {}\nexit',
+      "warning-runtime-check",
+      0,
+    ],
+    [
+      "a record read further",
+      "function f(flag: boolean) {\n  if flag { return {custom: 1} }\n  return f(true).custom\n}\nrepeat f(false) {}\nexit",
+      "warning-runtime-check",
+      3,
+    ],
+  ];
+  const got: string[] = [];
+  const want: string[] = [];
+  for (const [name, source, outcome, members] of shapes)
+    for (const reversed of [false, true]) {
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null, name);
+      let solved = 0;
+      const run = (): string =>
+        withTestAllowance(10_000, () =>
+          withSolverSeam(
+            { reverseWorklist: reversed, onComponent: (component) => (solved += component.length) },
+            () => analyseCore(request).outcome,
+          ),
+        );
+      const result = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      got.push(
+        `${name}${reversed ? " reversed" : ""}: ${result}, ${solved >= members ? "closed" : solved}`,
+      );
+      want.push(`${name}${reversed ? " reversed" : ""}: ${outcome}, closed`);
+    }
+  assert.deepEqual(got, want);
 });

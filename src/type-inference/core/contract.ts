@@ -1,3 +1,4 @@
+import { isScalarKind } from "../../static-types.js";
 import { hasIdentity, VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
 import type { PlaceId, PlaceKind, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
@@ -446,14 +447,15 @@ export class Contract {
     if (program.cellOwner.has(place) || program.hasOf.has(place))
       return yield* this.contractOfLiteral(place, path);
     // F19a: a reference's member is opaque, whatever is stored through it
-    if (yield* this.refReceiver(key)) return [unknownItem(REASON.opaque)];
+    const receiver = yield* this.#receiver(key);
+    if (receiver.reference) return [unknownItem(REASON.opaque)];
     const written = writtenOf(found.kind);
     // F2, F22: the written type is the contract; the stores keep M. §3.2 (r4.9): it fixes the kinds, never removes the
     // mark of what is stored
     if (written !== null) {
       const at = termAt(written, path);
       if (at !== null) {
-        const stored = yield* this.#contractAlong(place, path, 0);
+        const stored = yield* this.#contractAlong(place, path, 0, receiver.floor);
         const guarded = stored.some((item) => item.guarded === true);
         const tags = typeTags(at).map((tag) =>
           makeItem(tag, null, guarded ? { cert: "pos", guarded: true } : {}),
@@ -463,7 +465,7 @@ export class Contract {
           : tags;
       }
     }
-    return mergeItems(yield* this.#contractAlong(place, path, 0), program.scope);
+    return mergeItems(yield* this.#contractAlong(place, path, 0, receiver.floor), program.scope);
   }
 
   /** The contract's answer to a read (§3.2): every kind as an item, definite only by P3; the read's word. */
@@ -515,24 +517,45 @@ export class Contract {
 
   /** §3 step 1, F19a: a receiver on the key's path whose contract holds a reference kind (one object behind every alias). */
   public *refReceiver(key: Key): Work<boolean> {
+    return (yield* this.#receiver(key)).reference;
+  }
+
+  /**
+   * One walk of a key's receivers: whether one holds a reference kind (F19a), and else the longest prefix whose kinds
+   * hold nothing a step below can be read from (none yet, or only scalars and `null`), -1 for none. A path below such a
+   * value holds nothing, so the contract asks no shorter prefix's stores: a recursive projection waits for its
+   * receiver's answer instead of asking ever deeper paths through it before its component can close (Astra B2); the
+   * read reruns when the prefix gains a kind that holds the step (C5 reports a member read the kinds lack).
+   */
+  *#receiver(key: Key): Work<{ readonly reference: boolean; readonly floor: number }> {
     const place = keyPlace(key);
     const path = keyPath(key);
+    let floor = -1;
     for (let length = 0; length < path.length; length += 1) {
       this.pass.program.work.charge("invSteps");
       const items = yield* this.contractOf(keyOf(place, path.slice(0, length)));
-      if (items.some((item) => REFERENCE.has(item.tag))) return true;
+      if (items.some((item) => REFERENCE.has(item.tag))) return { reference: true, floor };
+      if (
+        !items.some(
+          (item) =>
+            item.tag === "unknown" ||
+            (item.tag !== "empty" && item.tag !== "null" && !isScalarKind(item.tag)),
+        )
+      )
+        floor = length;
     }
-    return false;
+    return { reference: false, floor };
   }
 
   /**
    * The definitions of a key and of its prefixes from the prefix of length `from` on (0: every one, the key's contract;
-   * 1: a replaced source's own stores below its root, which `prefixStores` keeps apart from the root's whole stores).
+   * 1: a replaced source's own stores below its root, which `prefixStores` keeps apart from the root's whole stores),
+   * none at or below `floor`, the longest prefix that holds nothing below it (`#receiver`).
    */
-  *#contractAlong(place: PlaceId, path: readonly string[], from: number): Work<Item[]> {
+  *#contractAlong(place: PlaceId, path: readonly string[], from: number, floor = -1): Work<Item[]> {
     const { program, definitions, lists } = this.pass;
     const out: Item[] = [];
-    for (let length = path.length; length >= from; length -= 1) {
+    for (let length = path.length; length >= from && length > floor; length -= 1) {
       const prefix = keyOf(place, path.slice(0, length));
       const rest = path.slice(length);
       if (rest.length > 0) {
