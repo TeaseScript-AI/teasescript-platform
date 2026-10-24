@@ -409,6 +409,55 @@ test("external data in a choice's options or in a literal is warned at its own e
     "copy-type@23",
     "null-check@23",
   ]);
+  // the selected value's site, not the first external expression in the option: a choice object's `value` beside an
+  // external `text`, read whole or through a projection, alone or in a list; its `text` without a value
+  assert.deepEqual(
+    sited("let chosen: integer = askChoice {text: hostValue.label, value: hostValue.field}\nexit"),
+    [
+      "warning-runtime-check",
+      "written-target@63",
+      "member-read@39",
+      "member-read@63",
+      "copy-type@63",
+      "null-check@39",
+      "null-check@63",
+    ],
+  );
+  assert.deepEqual(
+    sited(
+      "let chosen: integer = (askChoice {text: hostValue.label, value: {text: hostValue.field}}).text\nexit",
+    ),
+    [
+      "warning-runtime-check",
+      "written-target@71",
+      "member-read@40",
+      "member-read@71",
+      "copy-type@71",
+      "null-check@40",
+      "null-check@71",
+    ],
+  );
+  assert.deepEqual(
+    sited(
+      "let chosen: integer = (askChoice [{text: hostValue.label, value: {text: hostValue.field}}]).text\nexit",
+    ),
+    [
+      "warning-runtime-check",
+      "written-target@72",
+      "member-read@41",
+      "member-read@72",
+      "copy-type@72",
+      "null-check@41",
+      "null-check@72",
+    ],
+  );
+  assert.deepEqual(sited("let chosen: integer = askChoice {text: hostValue.label}\nexit"), [
+    "warning-runtime-check",
+    "written-target@39",
+    "member-read@39",
+    "copy-type@39",
+    "null-check@39",
+  ]);
   // r4.43 (3): options held in a variable follow the copy reading: the store into the written place
   assert.deepEqual(sited("let opts = [hostValue, 1]\nlet answer: integer = askChoice opts\nexit"), [
     "warning-runtime-check",

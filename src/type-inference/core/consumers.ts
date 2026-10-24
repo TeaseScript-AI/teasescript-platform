@@ -740,10 +740,11 @@ export class Consumers {
 
   /**
    * C1 with C9 r4.29 and r4.43: where external data a store brings enters, for its warning and check: the external
-   * value's own expression inside the stored literal at the path, among a choice's literal options (an option, or an
-   * element of a list or set option, or such an option's `value`, or its `text` without one, as V30 §19 selects it; a
-   * labelled option gives its label), or inside a literal a projection reads; else the store, as for a copy of a
-   * variable (r4.43's bound options). The first in source order.
+   * value's own expression inside the stored literal at the path, along a choice's selected value (each option, an
+   * element of a list or set argument or the argument, gives a choice object's `value`, or its `text` without one, else
+   * itself, V30 §19; a labelled option gives its label), or inside a literal a projection reads, a projection below an
+   * external value keeping its site; else the store, as for a copy of a variable (r4.43's bound options). The first in
+   * source order.
    */
   #ingressSite(d: Definition, at: readonly string[]): SourceSite {
     const { program, definitions } = this.pass;
@@ -773,15 +774,17 @@ export class Consumers {
           const labels = choiceLabels(c);
           for (const [index, argument] of c.arguments.entries()) {
             if (labels[index] !== undefined) continue;
-            const options = [
-              argument,
-              ...this.#literalChildren(argument, "element").map((child) => child.value!),
-            ];
-            for (const option of options) {
-              next.push([option, path]);
+            // the options: a list's or a set's elements, else the argument
+            const elements = this.#literalChildren(argument, "element").map(
+              (child) => child.value!,
+            );
+            for (const option of elements.length > 0 ? elements : [argument]) {
+              // V30 §19: the option's selected value, a choice object's `value`, or its `text` without one; any other
+              // option is its own value
               const value = this.#literalChildren(option, "value");
-              for (const child of value.length > 0 ? value : this.#literalChildren(option, "text"))
-                next.push([child.value!, path]);
+              const selected = value.length > 0 ? value : this.#literalChildren(option, "text");
+              if (selected.length === 0) next.push([option, path]);
+              else for (const child of selected) next.push([child.value!, path]);
             }
           }
         }
