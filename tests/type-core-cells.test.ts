@@ -827,6 +827,16 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `integer-check d.values.element [integer] @${at("d.values.first {}")}`,
       ],
     ],
+    // r4.43: C1's site at the external value among the options a dict's values give a choice
+    [
+      "a choice over a dict's values",
+      'let n: integer = askChoice dict{a: {text: "A", value: hostValue}}.values\nexit',
+      (at) => [
+        "warning-runtime-check",
+        `written-target warning-runtime-check @${at("hostValue")}`,
+        `copy-type n [integer] @${at("hostValue")}`,
+      ],
+    ],
     [
       "an object's own values",
       "let o = {values: [1]}\nlet t: string = o.values.first\nexit",

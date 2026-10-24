@@ -159,6 +159,54 @@ export class Values {
     node: FlowNode | null,
     rest: readonly string[],
   ): Work<readonly Item[]> {
+    return yield* this.#through(value, node, rest, 0);
+  }
+
+  /**
+   * TABLE r4.46 (2): a value read along a path through a dict's `values` (a new list of its values) or `keys` (a new
+   * list of text), from the step `from` on: as certain as the dict, either may hold none (no count proof, no `null`);
+   * an object's own property of the name, and a reference's member, are read as any property (F11, F19a); under a
+   * test of the path the read is marked (§3.2).
+   */
+  *#through(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+    from: number,
+  ): Work<readonly Item[]> {
+    const at = rest.findIndex((step, index) => index >= from && dictList(step) !== undefined);
+    if (at < 0) return yield* this.#valueAt(value, node, rest);
+    const before = rest.slice(0, at);
+    const after = rest.slice(at + 1);
+    const out: Item[] = [];
+    let own = false;
+    for (const item of withoutEmpty(yield* this.#through(value, node, before, from))) {
+      if (item.tag === "dict") {
+        const of = (tag: "list" | "string"): Item =>
+          carried({ ...makeItem(tag, item.writer, { context: item.context }), cert: item.cert }, [
+            item,
+          ]);
+        if (after.length === 0) out.push(of("list"));
+        else if (after[0] === "element") {
+          const elements =
+            dictList(rest[at]!) === "keys"
+              ? after.length === 1
+                ? [of("string")]
+                : []
+              : withoutEmpty(yield* this.#through(value, node, [...before, ...after], at));
+          out.push(...(item.cert === "def" ? elements : weaken(elements)));
+          if (after.length === 1) out.push(EMPTY);
+        }
+      } else if (item.tag === "object" || REFERENCE.has(item.tag)) own = true;
+      else if (item.tag === "unknown") out.push(item);
+    }
+    if (own) out.push(...(yield* this.#through(value, node, rest, at + 1)));
+    const items = mergeItems(out, this.pass.program.scope);
+    return this.pass.guards.guardedRead(value, rest) ? marked(items) : items;
+  }
+
+  /** The value of a place at a node at a path, by the place's kind. */
+  *#valueAt(value: PlaceId, node: FlowNode | null, rest: readonly string[]): Work<readonly Item[]> {
     const { program, contract } = this.pass;
     if (program.speakerPlaces.has(value))
       return [makeItem("unknown", null, { reasons: REASON.opaque, context: "unmodelled" })];
@@ -175,8 +223,6 @@ export class Values {
         return yield* this.#iteration(projection.owner, at, rest);
       if (measuresLength(projection.step))
         return yield* this.#length(projection.owner, at, projection.step, rest);
-      if (dictList(projection.step) !== undefined)
-        return yield* this.#dictList(value, projection.owner, at, projection.step, rest);
       const elements = yield* this.valueItems(projection.owner, at, [
         stepName(projection.step),
         ...rest,
@@ -228,48 +274,6 @@ export class Values {
       else if (item.tag === "unknown") out.push(item);
     }
     return mergeItems(out, this.pass.program.scope);
-  }
-
-  /**
-   * TABLE r4.46 (2): a dict's `values` is a new list of its values, its `keys` one of text, as certain as the receiver;
-   * either may hold none (no count proof, no `null`); an object's own property of the name is its property (F11). Under
-   * a test of its own path the read is marked (§3.2).
-   */
-  *#dictList(
-    value: PlaceId,
-    owner: PlaceId,
-    node: FlowNode | null,
-    step: string,
-    rest: readonly string[],
-  ): Work<readonly Item[]> {
-    // F19a: a receiver that may be a reference has the runtime's members
-    if (heldReference(yield* this.pass.contract.valueReceiver(owner)))
-      return yield* this.valueItems(owner, node, [step, ...rest]);
-    const out: Item[] = [];
-    for (const item of withoutEmpty(yield* this.valueItems(owner, node, []))) {
-      if (item.tag === "dict") {
-        const of = (tag: "list" | "string"): Item =>
-          carried({ ...makeItem(tag, item.writer, { context: item.context }), cert: item.cert }, [
-            item,
-          ]);
-        if (rest.length === 0) out.push(of("list"));
-        else if (rest[0] === "element") {
-          const elements =
-            dictList(step) === "keys"
-              ? rest.length === 1
-                ? [of("string")]
-                : []
-              : withoutEmpty(yield* this.valueItems(owner, node, rest));
-          out.push(...(item.cert === "def" ? elements : weaken(elements)));
-          if (rest.length === 1) out.push(EMPTY);
-        }
-      } else if (item.tag === "object" || REFERENCE.has(item.tag)) {
-        const own = yield* this.valueItems(owner, node, [step, ...rest]);
-        out.push(...(item.cert === "def" ? own : weaken(own)));
-      } else if (item.tag === "unknown") out.push(item);
-    }
-    const items = mergeItems(out, this.pass.program.scope);
-    return this.pass.guards.guardedRead(value, rest) ? marked(items) : items;
   }
 
   /**

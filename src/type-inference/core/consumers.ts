@@ -785,9 +785,9 @@ export class Consumers {
         const projection = program.projOf.get(value)!;
         if (projection.step !== "iteration")
           next.push([projection.owner, [stepName(projection.step), ...steps]]);
-        // r4.46 (2): an element of a dict's `values` is one of its values
-        if (dictList(projection.step) === "values" && step === "element")
-          next.push([projection.owner, steps]);
+        // r4.46 (2): an element of a dict's `values` is one of its values, and so is each option they give a choice
+        if (dictList(projection.step) === "values" && (step === "element" || step === OPTIONS))
+          next.push([projection.owner, step === "element" ? steps : ["element", SELECT, ...rest]]);
       } else {
         const c = program.opOf.get(value);
         if (

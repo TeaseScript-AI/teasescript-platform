@@ -493,11 +493,33 @@ export class Contract {
   *#contractOf(key: Key): Work<readonly Item[]> {
     const { program } = this.pass;
     const place = keyPlace(key);
-    const path = keyPath(key);
     const found = program.places[place];
     if (found === undefined) return [unknownItem(REASON.external)];
     if (program.isHost(place)) return [unknownItem(REASON.external)];
     if (program.speakerPlaces.has(place)) return [unknownItem(REASON.opaque)];
+    // r4.46 (2): a key through a dict's `values` or `keys` (a copy of one) holds its list
+    return yield* this.#keyThrough(key, 0);
+  }
+
+  /** A key's contract along a path through a dict's `values` or `keys` from the step `from` on. */
+  *#keyThrough(key: Key, from: number): Work<readonly Item[]> {
+    const place = keyPlace(key);
+    const path = keyPath(key);
+    const at = path.findIndex((step, index) => index >= from && dictList(step) !== undefined);
+    if (at < 0) return yield* this.#keyContract(key);
+    return yield* this.#dictLists(path, at, from, (along, start) =>
+      start === 0
+        ? this.contractOf(keyOf(place, along))
+        : this.#keyThrough(keyOf(place, along), start),
+    );
+  }
+
+  /** The contract of a key from its stores and its prefixes' (§3.2). */
+  *#keyContract(key: Key): Work<readonly Item[]> {
+    const { program } = this.pass;
+    const place = keyPlace(key);
+    const path = keyPath(key);
+    const found = program.place(place);
     if (program.cellOwner.has(place) || program.hasOf.has(place))
       return yield* this.contractOfLiteral(place, path);
     // F19a: a reference's member is opaque, whatever is stored through it
@@ -757,6 +779,57 @@ export class Contract {
 
   /** The kinds at a path of a value: a literal's field, a copied record's field. */
   public *contractOfValueAt(value: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
+    return yield* this.#through(value, rest, 0);
+  }
+
+  /**
+   * TABLE r4.46 (2): a value's kinds along a path through a dict's `values` (a new list of its values) or `keys` (a new
+   * list of text), from the step `from` on: either may hold none (no count proof, no `null`); an object's own property
+   * of the name, and a reference's member, are read as any property (F11, F19a); under a test of the path the read is
+   * marked (§3.2).
+   */
+  *#through(value: PlaceId, rest: readonly string[], from: number): Work<readonly Item[]> {
+    const at = rest.findIndex((step, index) => index >= from && dictList(step) !== undefined);
+    if (at < 0) return yield* this.#valueAt(value, rest);
+    const items = yield* this.#dictLists(rest, at, from, (path, start) =>
+      this.#through(value, path, start),
+    );
+    return this.pass.guards.guardedRead(value, rest) ? marked(items) : items;
+  }
+
+  /**
+   * The kinds along `path` whose step `at` is the first from `from` on that is a dict's `values` or `keys`, by `read` (a
+   * path through such steps from a step on): the dict's lists, and an object's own property of the name or a
+   * reference's member read as any property.
+   */
+  *#dictLists(
+    path: readonly string[],
+    at: number,
+    from: number,
+    read: (path: readonly string[], from: number) => Work<readonly Item[]>,
+  ): Work<readonly Item[]> {
+    const before = path.slice(0, at);
+    const after = path.slice(at + 1);
+    const out: Item[] = [];
+    let own = false;
+    for (const item of withoutEmpty(yield* read(before, from))) {
+      if (item.tag === "dict") {
+        if (after.length === 0) out.push(carried(makeItem("list", item.writer), [item]));
+        else if (after[0] === "element") {
+          if (dictList(path[at]!) === "values")
+            out.push(...withoutEmpty(yield* read([...before, ...after], at)));
+          else if (after.length === 1) out.push(carried(makeItem("string", item.writer), [item]));
+          if (after.length === 1) out.push(EMPTY);
+        }
+      } else if (item.tag === "object" || REFERENCE.has(item.tag)) own = true;
+      else if (item.tag === "unknown") out.push(item);
+    }
+    if (own) out.push(...(yield* read(path, at + 1)));
+    return mergeItems(out, this.pass.program.scope);
+  }
+
+  /** The kinds at a path of a value, by the value's kind. */
+  *#valueAt(value: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
     if (rest.length === 0) return yield* this.contractOfValue(value);
     const { program, guards } = this.pass;
     program.work.charge("invSteps");
@@ -773,8 +846,6 @@ export class Contract {
         return yield* this.#contractIteration(projection.owner, rest);
       if (measuresLength(projection.step))
         return yield* this.#contractLength(projection.owner, projection.step, rest);
-      if (dictList(projection.step) !== undefined)
-        return yield* this.#contractDictList(value, projection.owner, projection.step, rest);
       const elements = yield* this.contractOfValueAt(projection.owner, [
         stepName(projection.step),
         ...rest,
@@ -811,8 +882,6 @@ export class Contract {
         return yield* this.#contractIteration(projection.owner, []);
       if (measuresLength(projection.step))
         return yield* this.#contractLength(projection.owner, projection.step, []);
-      if (dictList(projection.step) !== undefined)
-        return yield* this.#contractDictList(value, projection.owner, projection.step, []);
       const elements = yield* this.contractOfValueAt(projection.owner, [stepName(projection.step)]);
       if (!selectsElement(projection.step)) return elements;
       const owners = withoutEmpty(yield* this.contractOfValue(projection.owner));
@@ -859,38 +928,6 @@ export class Contract {
       else if (item.tag === "unknown") out.push(item);
     }
     return mergeItems(out, this.pass.program.scope);
-  }
-
-  /**
-   * TABLE r4.46 (2): a dict's `values` is a new list of its values, its `keys` one of text; either may hold none (no
-   * count proof, no `null`); an object's own property of the name is its property (F11). Under a test of its own path
-   * the read is marked (§3.2).
-   */
-  *#contractDictList(
-    value: PlaceId,
-    owner: PlaceId,
-    step: string,
-    rest: readonly string[],
-  ): Work<readonly Item[]> {
-    // F19a: a receiver that may be a reference has the runtime's members
-    if (heldReference(yield* this.valueReceiver(owner)))
-      return yield* this.contractOfValueAt(owner, [step, ...rest]);
-    const out: Item[] = [];
-    for (const item of withoutEmpty(yield* this.contractOfValue(owner))) {
-      if (item.tag === "dict") {
-        if (rest.length === 0) out.push(carried(makeItem("list", item.writer), [item]));
-        else if (rest[0] === "element") {
-          if (dictList(step) === "values")
-            out.push(...withoutEmpty(yield* this.contractOfValueAt(owner, rest)));
-          else if (rest.length === 1) out.push(carried(makeItem("string", item.writer), [item]));
-          if (rest.length === 1) out.push(EMPTY);
-        }
-      } else if (item.tag === "object" || REFERENCE.has(item.tag))
-        out.push(...(yield* this.contractOfValueAt(owner, [step, ...rest])));
-      else if (item.tag === "unknown") out.push(item);
-    }
-    const items = mergeItems(out, this.pass.program.scope);
-    return this.pass.guards.guardedRead(value, rest) ? marked(items) : items;
   }
 
   /** F14: a text's or a collection's length is a whole number; an object's own `length` is its property (F11). */
@@ -1153,23 +1190,14 @@ export class Contract {
 
   // ----------------------------------------------------------------------------- the one identity function (§8 r4.15)
 
-  /**
-   * The key a value copies, through its projections: `seed.f0` reads `seed|f0`; `null` for no read, and for a read
-   * through `keys` or `values`, a new list on a dict (r4.46 (2)), never a key below it (an object's own property of the
-   * name keeps its kinds that way, as a value of its own).
-   */
+  /** The key a value copies, through its projections: `seed.f0` reads `seed|f0`; `null` for no read. */
   public copiedKey(value: PlaceId): Key | null {
     const { program } = this.pass;
     const steps: string[] = [];
     let current = value;
     while (!program.occurrenceOf.has(current)) {
       const projection = program.projOf.get(current);
-      if (
-        projection === undefined ||
-        projection.step === "iteration" ||
-        dictList(projection.step) !== undefined
-      )
-        return null;
+      if (projection === undefined || projection.step === "iteration") return null;
       program.work.charge("invSteps");
       steps.push(stepName(projection.step));
       current = projection.owner;
@@ -1177,16 +1205,13 @@ export class Contract {
     return keyOf(program.occurrenceOf.get(current)!, steps.reverse());
   }
 
-  /**
-   * A call's result read further (`snapshot()`, `snapshot().data`): the callee's result key (F20), else `null`, also
-   * through `keys` or `values` (as `copiedKey`).
-   */
+  /** A call's result read further (`snapshot()`, `snapshot().data`): the callee's result key (F20), else `null`. */
   public resultKey(value: PlaceId): Key | null {
     const { program } = this.pass;
     const steps: string[] = [];
     let current = value;
     for (let projection = program.projOf.get(current); projection !== undefined;) {
-      if (projection.step === "iteration" || dictList(projection.step) !== undefined) return null;
+      if (projection.step === "iteration") return null;
       program.work.charge("invSteps");
       steps.push(stepName(projection.step));
       current = projection.owner;

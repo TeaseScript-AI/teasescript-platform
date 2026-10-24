@@ -605,7 +605,8 @@ class CoreAnswers implements Answers {
         const { path } = task;
         const at = task.value;
         const source = contract.copiedKey(at) ?? contract.resultKey(at);
-        if (source !== null) {
+        // r4.46 (2): through a dict's `values` the projections are followed (a dict's values are its elements)
+        if (source !== null && !keyPath(source).some((step) => dictList(step) !== undefined)) {
           pending.push({ key: keyOf(keyPlace(source), [...keyPath(source), ...path]) });
           continue;
         }
