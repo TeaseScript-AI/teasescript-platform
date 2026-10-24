@@ -73,6 +73,8 @@ interface CopyLink {
   tree: number;
   /** The nearest copy at or above it whose read an operand region of a test of its source holds (§3.2), or `null`. */
   operand: CopyLink | null;
+  /** The nearest copy above it of its own source whose read stands in another callable, or `null`. */
+  across: CopyLink | null;
 }
 
 /**
@@ -200,6 +202,7 @@ interface CopyForest {
 export class ExactPath {
   readonly #memo = new Map<string, ExactAnswer>();
   #copies: CopyForest | null = null;
+  readonly #guarded = new Map<CopyLink, Map<string, number>>();
 
   public constructor(readonly pass: CorePass) {}
 
@@ -317,6 +320,7 @@ export class ExactPath {
           root: null,
           tree: 0,
           operand: null,
+          across: null,
         });
       }
     // each copy's anchor: the definition its source answers with, a copy or an origin
@@ -359,6 +363,11 @@ export class ExactPath {
     const children = (link: CopyLink): readonly CopyLink[] => anchors.get(link.d.uid)?.copies ?? [];
     let clock = 0;
     let trees = 0;
+    // per source, the copies open on the walk, grouped by their reads' callables
+    const openCopies = new Map<
+      PlaceId,
+      { readonly callable: number; readonly links: CopyLink[] }[]
+    >();
     const walk = (top: readonly CopyLink[]): void => {
       const tree = trees++;
       const stack: { readonly list: readonly CopyLink[]; next: number }[] = [
@@ -370,7 +379,13 @@ export class ExactPath {
         if (link === undefined) {
           stack.pop();
           const parent = stack.at(-1);
-          if (parent !== undefined) parent.list[parent.next - 1]!.exit = clock - 1;
+          if (parent !== undefined) {
+            const closed = parent.list[parent.next - 1]!;
+            closed.exit = clock - 1;
+            const groups = openCopies.get(closed.source)!;
+            groups.at(-1)!.links.pop();
+            if (groups.at(-1)!.links.length === 0) groups.pop();
+          }
           continue;
         }
         level.next += 1;
@@ -382,6 +397,18 @@ export class ExactPath {
         link.root = up === null ? link : up.root;
         link.tree = tree;
         link.operand = guards.operandAround(link.source, link.read) ? link : (up?.operand ?? null);
+        const callable = indexOf(program.callableAt(link.read));
+        let groups = openCopies.get(link.source);
+        if (groups === undefined) openCopies.set(link.source, (groups = []));
+        const last = groups.at(-1);
+        link.across =
+          last === undefined
+            ? null
+            : last.callable !== callable
+              ? last.links.at(-1)!
+              : (groups.at(-2)?.links.at(-1) ?? null);
+        if (last !== undefined && last.callable === callable) last.links.push(link);
+        else groups.push({ callable, links: [link] });
         stack.push({ list: children(link), next: 0 });
       }
     };
@@ -725,11 +752,7 @@ export class ExactPath {
           : places;
       for (const place of asked) {
         const anchor = this.#placeAnchors(forest, place).innermost(link.enter);
-        if (
-          anchor !== null &&
-          anchor.depth > floor &&
-          guards.narrowed(keyOf(place, rest.slice(0, length)), this.#copyOn(anchor, link).read)
-        )
+        if (anchor !== null && this.#guardedDepth(this.#copyOn(anchor, link), path) > floor)
           return true;
       }
     }
@@ -748,6 +771,38 @@ export class ExactPath {
     )
       if (guards.narrowed(keyOf(copy.source, rest), copy.read)) return true;
     return false;
+  }
+
+  /**
+   * The depth of the nearest copy at or above `copy`, of its source, whose read a test of the source at the path
+   * guards, or -1: within one callable a chain's reads are nested in the dominator tree, so a branch that holds a
+   * copy's read holds every nearer one of its source there; a chain carries the source's reads into other callables
+   * only through bindings (`across`), each asked in turn. Once per copy and path.
+   */
+  #guardedDepth(copy: CopyLink, path: string): number {
+    const { guards, program } = this.pass;
+    const asked: CopyLink[] = [];
+    let found = -1;
+    for (let at: CopyLink | null = copy; at !== null; at = at.across) {
+      const known = this.#guarded.get(at)?.get(path);
+      if (known !== undefined) {
+        found = known;
+        break;
+      }
+      program.work.charge("exactQueries");
+      asked.push(at);
+      if (guards.narrowed(keyOf(at.source, path === "" ? [] : path.split(".")), at.read)) {
+        found = at.depth;
+        break;
+      }
+    }
+    // each copy asked answers with what was found at or above it
+    for (const at of asked) {
+      let byPath = this.#guarded.get(at);
+      if (byPath === undefined) this.#guarded.set(at, (byPath = new Map()));
+      byPath.set(path, found);
+    }
+    return found;
   }
 
   /** D's value at the path `rest` below its key, at D's node (§3.1's answer): once per (D, path). */

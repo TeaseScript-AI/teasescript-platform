@@ -182,6 +182,19 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "compile-error",
     "-",
   ],
+  // W34: a guard of the argument a parameter copies marks the callee's copies of it (review r5)
+  [
+    "§3.2 a guarded argument copied in the callee",
+    "let seed = {f: 2.0}\nfunction take(p) {\n  seed = p\n  let saved = seed\n  repeat saved.f {}\n}\nif seed.f is integer { take(seed) }\nexit",
+    "warning-runtime-check",
+    "branch",
+  ],
+  [
+    "§3.2 an unguarded argument copied in the callee",
+    "let seed = {f: 2.0}\nfunction take(p) {\n  seed = p\n  let saved = seed\n  repeat saved.f {}\n}\ntake(seed)\nexit",
+    "compile-error",
+    "-",
+  ],
   // F21: a dead call is no site and binds nothing
   [
     "F21 one live call beside a dead one",
