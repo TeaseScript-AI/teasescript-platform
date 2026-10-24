@@ -3,6 +3,7 @@ import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import {
   ASKED,
+  carried,
   conversionKind,
   defaultOf,
   emptyAt,
@@ -145,12 +146,17 @@ export class Values {
         const elements = withoutEmpty(yield* this.valueItems(owner, node, ["element", ...rest]));
         out.push(...(item.cert === "def" ? elements : weaken(elements)));
       } else if ((item.tag === "dict" || item.tag === "range") && rest.length === 0)
-        out.push({
-          ...makeItem(item.tag === "dict" ? "string" : "integer", item.writer, {
-            context: item.context,
-          }),
-          cert: item.cert,
-        });
+        out.push(
+          carried(
+            {
+              ...makeItem(item.tag === "dict" ? "string" : "integer", item.writer, {
+                context: item.context,
+              }),
+              cert: item.cert,
+            },
+            [item],
+          ),
+        );
       else if (item.tag === "unknown") out.push(item);
     }
     return mergeItems(out, this.pass.program.scope);
@@ -170,10 +176,12 @@ export class Values {
         item.tag === "dict"
       ) {
         if (rest.length === 0)
-          out.push({
-            ...makeItem("integer", item.writer, { context: item.context }),
-            cert: item.cert,
-          });
+          out.push(
+            carried(
+              { ...makeItem("integer", item.writer, { context: item.context }), cert: item.cert },
+              [item],
+            ),
+          );
       } else if (item.tag === "object") {
         const own = yield* this.valueItems(owner, node, ["length", ...rest]);
         out.push(...(item.cert === "def" ? own : weaken(own)));
@@ -381,13 +389,16 @@ export class Values {
         if (declared !== undefined) {
           if (rest.length === 0)
             out.push(
-              ...declared.map((tag) => ({
-                ...makeItem(tag),
-                cert: declared.length === 1 ? item.cert : ("pos" as const),
-              })),
+              ...declared.map((tag) =>
+                carried(
+                  { ...makeItem(tag), cert: declared.length === 1 ? item.cert : ("pos" as const) },
+                  [item],
+                ),
+              ),
             );
         } else if (name === "remove" && item.tag !== "dict") {
-          if (rest.length === 0) out.push(makeItem("null", null, { cert: item.cert }));
+          if (rest.length === 0)
+            out.push(carried(makeItem("null", null, { cert: item.cert }), [item]));
         } else if (COLLECTIONS.has(item.tag))
           out.push(
             ...weaken(withoutEmpty(yield* this.valueItems(c.receiver, at, ["element", ...rest]))),
@@ -401,16 +412,18 @@ export class Values {
       family === "method" &&
       ["toSet", "toList", "take", "takeLast"].includes(name) &&
       c.receiver !== null
-    )
+    ) {
+      const held = yield* this.valueItems(
+        c.receiver,
+        at,
+        rest.length === 0 ? [] : ["element", ...rest.slice(1)],
+      );
       return [
-        ...(rest.length === 0 ? [makeItem(name === "toSet" ? "set" : "list")] : []),
-        ...(yield* this.valueItems(
-          c.receiver,
-          at,
-          rest.length === 0 ? [] : ["element", ...rest.slice(1)],
-        )).filter((item) => rest.length > 0 || (item.tag !== "list" && item.tag !== "set")),
+        ...(rest.length === 0 ? [carried(makeItem(name === "toSet" ? "set" : "list"), held)] : []),
+        ...held.filter((item) => rest.length > 0 || (item.tag !== "list" && item.tag !== "set")),
         ...(name.startsWith("take") && rest.length === 1 ? [EMPTY] : []),
       ];
+    }
     if (family === "operator" && name === "+" && rest.length > 0) {
       const operands: (readonly Item[])[] = [];
       for (const argument of c.arguments) operands.push(yield* this.valueItems(argument, at, rest));

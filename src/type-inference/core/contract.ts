@@ -85,6 +85,17 @@ export function unknownItem(reasons: number, writer: Writer | null = null): Item
   return makeItem("unknown", writer, { reasons });
 }
 
+/**
+ * §3.2: the mark travels with the value through every transfer: an item a transfer makes from others (F7's declared
+ * result, F10's conversion, F14's length, F27's key) is guarded, and possible, where one of them is.
+ */
+export function carried(item: Item, from: readonly Item[]): Item {
+  const guard = from.find((each) => each.guarded === true);
+  return guard === undefined
+    ? item
+    : { ...item, cert: "pos", guarded: true, context: item.context ?? guard.context };
+}
+
 /** A typeless load's `default: null` beside its external data: the null carries the ingress's word (§3.4 r4.11). */
 export function ingressNull(writer: Writer | null = null): Item {
   return makeItem("null", writer, { cert: "pos", word: "unknown" });
@@ -662,7 +673,9 @@ export class Contract {
       if (item.tag === "list" || item.tag === "set")
         out.push(...withoutEmpty(yield* this.contractOfValueAt(owner, ["element", ...rest])));
       else if ((item.tag === "dict" || item.tag === "range") && rest.length === 0)
-        out.push(makeItem(item.tag === "dict" ? "string" : "integer", item.writer));
+        out.push(
+          carried(makeItem(item.tag === "dict" ? "string" : "integer", item.writer), [item]),
+        );
       else if (item.tag === "unknown") out.push(item);
     }
     return mergeItems(out, this.pass.program.scope);
@@ -678,7 +691,7 @@ export class Contract {
         item.tag === "set" ||
         item.tag === "dict"
       ) {
-        if (rest.length === 0) out.push(makeItem("integer", item.writer));
+        if (rest.length === 0) out.push(carried(makeItem("integer", item.writer), [item]));
       } else if (item.tag === "object")
         out.push(...(yield* this.contractOfValueAt(owner, ["length", ...rest])));
       else if (item.tag === "unknown") out.push(item);
@@ -753,9 +766,9 @@ export class Contract {
       for (const item of withoutEmpty(yield* this.contractOfValue(c.receiver))) {
         const declared = METHOD_RESULT[name];
         if (declared !== undefined) {
-          if (rest.length === 0) out.push(...declared.map((tag) => makeItem(tag)));
+          if (rest.length === 0) out.push(...declared.map((tag) => carried(makeItem(tag), [item])));
         } else if (name === "remove" && item.tag !== "dict") {
-          if (rest.length === 0) out.push(makeItem("null"));
+          if (rest.length === 0) out.push(carried(makeItem("null"), [item]));
         } else if (COLLECTIONS.has(item.tag))
           out.push(
             ...withoutEmpty(yield* this.contractOfValueAt(c.receiver, ["element", ...rest])),
@@ -771,7 +784,12 @@ export class Contract {
       c.receiver !== null
     )
       return rest.length === 0
-        ? [makeItem(name === "toSet" ? "set" : "list")]
+        ? [
+            carried(
+              makeItem(name === "toSet" ? "set" : "list"),
+              yield* this.contractOfValue(c.receiver),
+            ),
+          ]
         : [
             ...(yield* this.contractOfValueAt(c.receiver, ["element", ...rest.slice(1)])),
             ...(name.startsWith("take") && rest.length === 1 ? [EMPTY] : []),
