@@ -9,8 +9,10 @@ import {
   DIAGNOSTIC_CODES,
   type DiagnosticCodeInfo,
   type DiagnosticOwner,
+  type OwnedCodeOf,
   type SharedDiagnosticCode,
 } from "../src/diagnostic-codes.js";
+import { DiagnosticSeverity } from "../src/diagnostics.js";
 
 const root = process.cwd();
 const REGISTRY = "src/diagnostic-codes.ts";
@@ -358,14 +360,64 @@ test("each code is reported by every owner the registry names and by no other", 
   }
 });
 
-test("an object literal reports a code with the severity that the registry gives it", () => {
+test("an object literal reports a code with a severity that the registry gives it", () => {
   for (const use of sources.flatMap(({ reported }) => reported))
     if (use.severity !== undefined)
-      assert.equal(
-        use.severity,
-        registry[use.code]!.severity,
+      assert.ok(
+        registry[use.code]!.severities.some((severity) => severity === use.severity),
         `${where(use)} reports ${use.code} as ${use.severity}.`,
       );
+});
+
+/** Checks that a code has one known severity, or both in the order of {@link DiagnosticSeverity}. */
+function checkSeverities(code: string, info: DiagnosticCodeInfo): void {
+  const known: readonly string[] = Object.values(DiagnosticSeverity);
+  const declared: readonly string[] = info.severities;
+  assert.ok(declared.length > 0, `${code} has no severity.`);
+  assert.deepEqual(
+    declared,
+    known.filter((severity) => declared.includes(severity)),
+    `${code} must list known severities (${known.join(", ")}), each once and in this order.`,
+  );
+}
+
+/** The severities of a code as its row in a document shows them. */
+const severityText = (info: DiagnosticCodeInfo): string => info.severities.join(" or ");
+
+test("each code has one severity, or both", () => {
+  for (const [code, info] of Object.entries(registry)) checkSeverities(code, info);
+});
+
+test("a code with both severities is a code of each, and its row shows both", () => {
+  const docs = "docs/DIAGNOSTICS.md#names-types-and-values-tsv";
+  const fixture = {
+    TSV901: { owners: ["type checker"], severities: ["error", "warning"], title: "Both", docs },
+    TSV902: { owners: ["type checker"], severities: ["error"], title: "Error", docs },
+    TSV903: { owners: ["type checker"], severities: ["warning"], title: "Warning", docs },
+  } as const satisfies Record<string, DiagnosticCodeInfo>;
+  type Code<S extends DiagnosticSeverity = DiagnosticSeverity> = OwnedCodeOf<
+    typeof fixture,
+    "type checker",
+    S
+  >;
+  // Each pair is a code as an error code and as a warning code.
+  const pairs: [Code<"error">, Code<"warning">][] = [
+    ["TSV901", "TSV901"],
+    ["TSV902", "TSV903"],
+    // @ts-expect-error -- a code with only the error severity is no warning code
+    ["TSV902", "TSV902"],
+    // @ts-expect-error -- a code with only the warning severity is no error code
+    ["TSV903", "TSV903"],
+  ];
+  const all: Code[] = ["TSV901", "TSV902", "TSV903"];
+  assert.equal(pairs.length + all.length, 7);
+
+  for (const [code, info] of Object.entries(fixture)) checkSeverities(code, info);
+  assert.deepEqual(Object.values(fixture).map(severityText), [
+    "error or warning",
+    "error",
+    "warning",
+  ]);
 });
 
 test("a shared code is one problem with one text", () => {
@@ -459,7 +511,7 @@ test("DIAGNOSTICS.md lists its codes as the registry does", () => {
         "| Code | Title | Severity | Owner |",
         "| --- | --- | --- | --- |",
       ]),
-      `| \`${code}\` | ${info.title} | ${info.severity} | ${info.owners.join(", ")} |`,
+      `| \`${code}\` | ${info.title} | ${severityText(info)} | ${info.owners.join(", ")} |`,
     ]);
   }
   const documented = sections(document);
