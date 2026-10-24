@@ -1229,6 +1229,30 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
     program: (k) =>
       main(argumentChain(k, (j) => `if p${j}.f${j} != null and use${j + 1}(p${j}) {}`)),
   },
+  {
+    name: "W34-captured-own-tests",
+    measures:
+      "§13.3 W34 (review r6): a record captured into one global down k calls, each testing its own field, read at k fields",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          `if flagHost { seed = {${fields(k, () => "null")}} }`,
+          rows(k, (j) =>
+            lines(
+              `function use${j}(p${j}) {`,
+              `seed = p${j}`,
+              j === k - 1
+                ? rows(k, (i) => `repeat seed.f${i} {}`)
+                : `if seed.f${j} != null { use${j + 1}(seed) }`,
+              "return true",
+              "}",
+            ),
+          ),
+          "use0(seed)",
+        ),
+      ),
+  },
 ]);
 
 /** A family whose work is a known product, accepted as measured: its doubling at k = 64 → 128, the steeper order's. */
@@ -1246,8 +1270,8 @@ export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
     name: "W34-known-tested-anchors",
     measures:
       "§13.3 W34 r4.41: k sources each tested and redefined through five copies in one tree, read at k fields",
-    // 107,695 / 323,855 / 1,081,807 / 3,900,239 units at k = 32 … 256 (review r5: 110,646 / 335,894 / 1,130,454)
-    measured: 3.35,
+    // 113,352 / 343,368 / 1,153,608 / 4,174,920 units at k = 32 … 256 (review r5: 110,646 / 335,894 / 1,130,454)
+    measured: 3.37,
     program: (k) =>
       main(
         lines(

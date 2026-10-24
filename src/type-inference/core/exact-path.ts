@@ -79,8 +79,6 @@ interface CopyLink {
   tree: number;
   /** Whether an operand region of a test of its source holds its read (§3.2). */
   operand: boolean;
-  /** The nearest copy above it of its own source whose read stands in another callable, or `null`. */
-  across: CopyLink | null;
 }
 
 /**
@@ -210,7 +208,10 @@ interface CopyForest {
 export class ExactPath {
   readonly #memo = new Map<string, ExactAnswer>();
   #copies: CopyForest | null = null;
-  readonly #guarded = new Map<CopyLink, Map<string, number>>();
+  /** Per source, its copies whose reads are reached, per callable (built once). */
+  #bySource: Map<PlaceId, Map<Callable | null, CopyLink[]>> | null = null;
+  /** Per source and callable, those copies' intervals of the walk, nested (built as asked). */
+  readonly #sourceSpans = new Map<PlaceId, Map<Callable | null, NestedSpans<CopyLink>>>();
 
   public constructor(readonly pass: CorePass) {}
 
@@ -328,7 +329,6 @@ export class ExactPath {
           root: null,
           tree: 0,
           operand: false,
-          across: null,
         });
       }
     // each copy's anchor: the definition its source answers with, a copy or an origin
@@ -371,11 +371,6 @@ export class ExactPath {
     const children = (link: CopyLink): readonly CopyLink[] => anchors.get(link.d.uid)?.copies ?? [];
     let clock = 0;
     let trees = 0;
-    // per source, the copies open on the walk, grouped by their reads' callables
-    const openCopies = new Map<
-      PlaceId,
-      { readonly callable: number; readonly links: CopyLink[] }[]
-    >();
     const walk = (top: readonly CopyLink[]): void => {
       const tree = trees++;
       const stack: { readonly list: readonly CopyLink[]; next: number }[] = [
@@ -388,11 +383,7 @@ export class ExactPath {
           stack.pop();
           const parent = stack.at(-1);
           if (parent !== undefined) {
-            const closed = parent.list[parent.next - 1]!;
-            closed.exit = clock - 1;
-            const groups = openCopies.get(closed.source)!;
-            groups.at(-1)!.links.pop();
-            if (groups.at(-1)!.links.length === 0) groups.pop();
+            parent.list[parent.next - 1]!.exit = clock - 1;
           }
           continue;
         }
@@ -405,18 +396,6 @@ export class ExactPath {
         link.root = up === null ? link : up.root;
         link.tree = tree;
         link.operand = guards.operandAround(link.source, link.read);
-        const callable = indexOf(program.callableAt(link.read));
-        let groups = openCopies.get(link.source);
-        if (groups === undefined) openCopies.set(link.source, (groups = []));
-        const last = groups.at(-1);
-        link.across =
-          last === undefined
-            ? null
-            : last.callable !== callable
-              ? last.links.at(-1)!
-              : (groups.at(-2)?.links.at(-1) ?? null);
-        if (last !== undefined && last.callable === callable) last.links.push(link);
-        else groups.push({ callable, links: [link] });
         stack.push({ list: children(link), next: 0 });
       }
     };
@@ -821,7 +800,7 @@ export class ExactPath {
           : places;
       for (const place of asked) {
         const anchor = this.#placeAnchors(forest, place).innermost(link.enter);
-        if (anchor !== null && this.#guardedDepth(this.#copyOn(anchor, link), path) > floor)
+        if (anchor !== null && this.#guardedDepth(forest, this.#copyOn(anchor, link), path) > floor)
           return true;
       }
     }
@@ -847,35 +826,57 @@ export class ExactPath {
   }
 
   /**
-   * The depth of the nearest copy at or above `copy`, of its source, whose read a test of the source at the path
-   * guards, or -1: within one callable a chain's reads are nested in the dominator tree, so a branch that holds a
-   * copy's read holds every nearer one of its source there; a chain carries the source's reads into other callables
-   * only through bindings (`across`), each asked in turn. Once per copy and path.
+   * The depth of the nearest copy at or above `copy`, of its source, whose read a branch of a test of the source at the
+   * path holds, or -1. Only the callables the test's branches stand in are asked, each by its nearest copy at or above
+   * `copy`: a chain's reads in one callable are nested in the dominator tree and a branch is a dominator subtree, so a
+   * branch that holds an earlier copy's read there holds the nearest one's; a chain enters a callable once (a return
+   * to one closes a copy cycle, which the walk stops).
    */
-  #guardedDepth(copy: CopyLink, path: string): number {
-    const { guards, program } = this.pass;
-    const asked: CopyLink[] = [];
+  #guardedDepth(forest: CopyForest, copy: CopyLink, path: string): number {
+    const { guards } = this.pass;
+    const key = keyOf(copy.source, path === "" ? [] : path.split("."));
     let found = -1;
-    for (let at: CopyLink | null = copy; at !== null; at = at.across) {
-      const known = this.#guarded.get(at)?.get(path);
-      if (known !== undefined) {
-        found = known;
-        break;
-      }
-      program.work.charge("exactQueries");
-      asked.push(at);
-      if (guards.narrowed(keyOf(at.source, path === "" ? [] : path.split(".")), at.read)) {
-        found = at.depth;
-        break;
-      }
-    }
-    // each copy asked answers with what was found at or above it
-    for (const at of asked) {
-      let byPath = this.#guarded.get(at);
-      if (byPath === undefined) this.#guarded.set(at, (byPath = new Map()));
-      byPath.set(path, found);
+    for (const callable of guards.branchCallables(key)?.keys() ?? []) {
+      const nearest = this.#copiesIn(forest, copy.source, callable)?.innermost(copy.enter) ?? null;
+      if (nearest !== null && nearest.depth > found && guards.branchHolds(key, nearest.read))
+        found = nearest.depth;
     }
     return found;
+  }
+
+  /** A source's copies read in a callable, as their intervals of the walk, nested once per source and callable. */
+  #copiesIn(
+    forest: CopyForest,
+    source: PlaceId,
+    callable: Callable | null,
+  ): NestedSpans<CopyLink> | null {
+    const known = this.#sourceSpans.get(source)?.get(callable);
+    if (known !== undefined) return known;
+    const { program } = this.pass;
+    if (this.#bySource === null) {
+      const bySource = new Map<PlaceId, Map<Callable | null, CopyLink[]>>();
+      for (const link of forest.links.values()) {
+        if (!program.reached(link.read)) continue;
+        program.work.charge("exactQueries");
+        let byCallable = bySource.get(link.source);
+        if (byCallable === undefined) bySource.set(link.source, (byCallable = new Map()));
+        const at = program.callableAt(link.read);
+        const list = byCallable.get(at);
+        if (list === undefined) byCallable.set(at, [link]);
+        else list.push(link);
+      }
+      this.#bySource = bySource;
+    }
+    const links = this.#bySource.get(source)?.get(callable);
+    if (links === undefined) return null;
+    const nested = new NestedSpans(
+      links.map((link) => ({ start: link.enter, end: link.exit, item: link })),
+      program.work,
+    );
+    let byCallable = this.#sourceSpans.get(source);
+    if (byCallable === undefined) this.#sourceSpans.set(source, (byCallable = new Map()));
+    byCallable.set(callable, nested);
+    return nested;
   }
 
   /** D's value at the path `rest` below its key, at D's node (§3.1's answer): once per (D, path). */

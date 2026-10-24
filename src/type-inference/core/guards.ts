@@ -293,6 +293,17 @@ export class GuardIndex {
     return false;
   }
 
+  /** Whether a branch a test of exactly `key` guards in a reached node's own callable holds it (§3.2). */
+  public branchHolds(key: Key, node: FlowNode): boolean {
+    const program = this.program;
+    if (!program.reached(node)) return false;
+    const branches = this.#branches.get(key)?.get(program.callableAt(node));
+    return (
+      branches !== undefined &&
+      this.encloses(branches, (entry) => program.position(entry), program.position(node))
+    );
+  }
+
   /** Every branch a test guards: its tested key, the callable it stands in, and its entry (W34's copy forest). */
   public *branchRegions(): Generator<{
     readonly key: Key;
