@@ -139,6 +139,7 @@ async function main() {
           },
         ],
         ["savedDataImport", () => savedDataImportScenario(debugPort, origin, exported)],
+        ["sessionTransfer", () => sessionTransferScenario(debugPort, origin, profile)],
         ["debugExport", () => debugExportScenario(cdp, origin, profile)],
         ["debugHistoryStorage", () => debugHistoryStorageScenario(cdp, origin)],
         ["photoColour", () => photoColourScenario(cdp, origin, profile)],
@@ -174,7 +175,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, a session exported and continued in another profile, the debug export after a script error, the rewind history's IndexedDB store, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, and a public key's unlock request",
       );
     } finally {
       cdp.close();
@@ -2431,9 +2432,8 @@ async function savedDataExportScenario(cdp, origin, profile) {
   return { file };
 }
 
-// Imports the export into a fresh browser profile, as on another device: once confirmed, the next Start shows the saved
-// photo again.
-async function savedDataImportScenario(debugPort, origin, exported) {
+// Runs `run` on a page of a fresh browser profile, as on another device, and removes the profile afterwards.
+async function inFreshProfile(debugPort, run) {
   const browser = await connectCdp(
     (await (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).json()).webSocketDebuggerUrl,
   );
@@ -2448,6 +2448,20 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     await cdp.call("Page.enable");
     await cdp.call("Runtime.enable");
     await setViewport(cdp, 1440, 900);
+    return await run(cdp);
+  } finally {
+    cdp?.close();
+    await browser.call("Target.disposeBrowserContext", {
+      browserContextId: context.browserContextId,
+    });
+    browser.close();
+  }
+}
+
+// Imports the export into a fresh browser profile, as on another device: once confirmed, the next Start shows the saved
+// photo again.
+async function savedDataImportScenario(debugPort, origin, exported) {
+  await inFreshProfile(debugPort, async (cdp) => {
     const start = "[data-session-activation] button";
     await navigate(cdp, `${origin}/player/?package=saved-photo`);
     await waitFor(cdp, `!!document.querySelector('${start}')`);
@@ -2490,13 +2504,118 @@ async function savedDataImportScenario(debugPort, origin, exported) {
       8_000,
       "The imported photo is not on the Stage",
     );
-  } finally {
-    cdp?.close();
-    await browser.call("Target.disposeBrowserContext", {
-      browserContextId: context.browserContextId,
-    });
-    browser.close();
-  }
+  });
+}
+
+// A session of `saved-photo` exported at its last question in one fresh profile and imported in another, as on another
+// device: Continue there shows the photo only the session holds and the transcript, and the session goes on to its end.
+async function sessionTransferScenario(debugPort, origin, profile) {
+  const saved = join(profile, "session-saved.png");
+  const unsaved = join(profile, "session-unsaved.png");
+  await writeFile(saved, solidPng(24, 16, [30, 160, 90]));
+  await writeFile(unsaved, solidPng(20, 12, [200, 60, 60]));
+  const downloads = join(profile, "session-downloads");
+  await mkdir(downloads, { recursive: true });
+  const start = "[data-session-activation] button";
+  const unsavedShown = `(() => { const image = document.querySelector('.stage-media'); return !!image && image.complete && image.naturalWidth === 20; })()`;
+  const file = await inFreshProfile(debugPort, async (cdp) => {
+    await cdp.call("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
+    await navigate(cdp, `${origin}/player/?package=saved-photo`);
+    await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Start'`);
+    await physicalClick(cdp, start);
+    for (const [chosen, shown] of [
+      [saved, `document.body.textContent.includes("Saved.")`],
+      [unsaved, unsavedShown],
+    ]) {
+      await waitFor(
+        cdp,
+        visible("[data-composer-attach]"),
+        8_000,
+        "The image request offered no paperclip",
+      );
+      await openPicker(cdp);
+      await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+      await useImage(cdp);
+      await waitFor(cdp, shown, 8_000, "The script did not go on with the image");
+    }
+    await physicalClick(cdp, "[data-settings-trigger]");
+    await physicalClick(cdp, "[data-export-saved-data]");
+    await waitFor(cdp, `document.querySelector('[data-export-kind-session]')?.disabled === false`);
+    await physicalClick(cdp, "[data-export-kind-session]");
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-export-session]') && !!document.querySelector('[data-export-download]')`,
+      8_000,
+      "The session export offered no download",
+    );
+    const name = await value(cdp, `document.querySelector('[data-export-download]').download`);
+    assertEqual(name, "Saved-photo-session.teasesession.json.gz", "The session export's file name");
+    await physicalClick(cdp, "[data-export-download]");
+    const deadline = Date.now() + 8_000;
+    while (!(await readdir(downloads)).includes(name)) {
+      if (Date.now() > deadline) throw new Error("The session export was not downloaded");
+      await delay(50);
+    }
+    const path = join(downloads, name);
+    const exported = JSON.parse(gunzipSync(await readFile(path)).toString("utf8"));
+    assertEqual(
+      `${exported.format} ${exported.scope} ${exported.entries.map((entry) => entry.key).sort()} ${exported.media.length}`,
+      "teasescript-session development-package:saved-photo photo,score 2",
+      "The session export holds the script's saved values and both photos",
+    );
+    return path;
+  });
+  await inFreshProfile(debugPort, async (cdp) => {
+    await navigate(cdp, `${origin}/player/?package=saved-photo`);
+    await waitFor(cdp, `document.querySelector('${start}')?.textContent.trim() === 'Start'`);
+    await physicalClick(cdp, "[data-settings-trigger]");
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-import-saved-data]')?.disabled === false`,
+      8_000,
+    );
+    await physicalClick(cdp, "[data-import-saved-data]");
+    await waitFor(cdp, `!!document.querySelector('[data-saved-data-import]')`);
+    await setInputFiles(cdp, "[data-import-file]", [file]);
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-import-session-review]')`,
+      8_000,
+      "The session file was not reviewed",
+    );
+    await physicalClick(cdp, "[data-import-confirm]");
+    await waitFor(
+      cdp,
+      `document.body.innerText.includes("Session imported.")`,
+      8_000,
+      "The session import did not finish",
+    );
+    for (const dialog of ["[data-saved-data-import]", "[data-player-settings]"]) {
+      await pressEscape(cdp);
+      await waitFor(cdp, `!document.querySelector(${JSON.stringify(dialog)})`);
+    }
+    await waitFor(
+      cdp,
+      `document.querySelector('${start}')?.textContent.trim() === 'Continue'`,
+      8_000,
+      "The imported session is not offered to continue",
+    );
+    await physicalClick(cdp, start);
+    await waitFor(
+      cdp,
+      `${unsavedShown} && [...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Saved.'))`,
+      8_000,
+      "Continue did not go on with the imported session's photo and transcript",
+    );
+    await typeInto(cdp, "[data-composer-input]", "nothing");
+    await physicalClick(cdp, ".composer-send");
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-session-end-dialog]')`,
+      8_000,
+      "The imported session did not go on to its end",
+    );
+  });
 }
 
 // A script error in the default build, without Debug: the error line opens the error dialog, which says where the

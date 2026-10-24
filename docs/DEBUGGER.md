@@ -132,7 +132,7 @@ debug room while it starts with the Debug menu on, and with `room=debug`.
   has no mark.
 - The Debug panel's Storage tab, an export of saved data, and an import treat the rooms apart: the tab shows the debug
   room's values, an export takes the script's own, and an import in the debug room replaces the script's own without
-  ending the debug session.
+  ending the debug session. A session is exported and imported only in the normal room.
 
 ### Random draws
 

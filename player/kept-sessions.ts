@@ -83,23 +83,15 @@ export interface KeptSessionUpdate {
  * (`interpreterEventProblem`), else `null`. Restoring validates the snapshot against the plan.
  */
 export function keptSession(stored: StoredKeptSession): KeptSession | null {
-  const { planJson, snapshotJson, events, marks } = stored;
+  const { planJson, snapshotJson, marks } = stored;
   if (typeof planJson !== "string" || typeof snapshotJson !== "string") return null;
-  let sequence = 0;
-  for (const event of events) {
-    if (interpreterEventProblem(event) !== null) return null;
-    // EVIDENCE: validation: interpreterEventProblem accepted the event, with its sequence, above.
-    const next = (event as InterpreterEvent).sequence;
-    if (next <= sequence) return null;
-    sequence = next;
-  }
-  if (!isRecord(marks)) return null;
+  const events = sessionEvents(stored.events);
+  if (events === null || !isRecord(marks)) return null;
   try {
     return {
       planJson,
       snapshotJson,
-      // EVIDENCE: validation: the loop above proved each event an interpreter event in increasing sequence.
-      events: events as readonly InterpreterEvent[],
+      events,
       marks: {
         editedWhileDebugging: parseEditedWhileDebugging(marks["editedWhileDebugging"] ?? null),
         rewoundWhileDebugging: parseRewoundWhileDebugging(marks["rewoundWhileDebugging"] ?? null),
@@ -108,6 +100,23 @@ export function keptSession(stored: StoredKeptSession): KeptSession | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The events that led to a session read back from outside, when each is an interpreter event (`interpreterEventProblem`)
+ * and their sequence increases, else `null`.
+ */
+export function sessionEvents(events: readonly unknown[]): readonly InterpreterEvent[] | null {
+  let sequence = 0;
+  for (const event of events) {
+    if (interpreterEventProblem(event) !== null) return null;
+    // EVIDENCE: validation: interpreterEventProblem accepted the event, with its sequence, above.
+    const next = (event as InterpreterEvent).sequence;
+    if (next <= sequence) return null;
+    sequence = next;
+  }
+  // EVIDENCE: validation: the loop above proved each event an interpreter event in increasing sequence.
+  return events as readonly InterpreterEvent[];
 }
 
 // A reference as `CapturedMediaStore` hands it out (`captured-media.ts`), anywhere in JSON text.

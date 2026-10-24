@@ -57,6 +57,7 @@ export const playerNoticeKeys = {
   audioBlocked: "audio-blocked",
   storageUnavailable: "storage-unavailable",
   storageWriteFailed: "storage-write-failed",
+  sessionNotKept: "session-not-kept",
   imageNeedsCamera: "image-needs-camera",
   sessionError: "session-error",
   rewindNotAdopted: "rewind-not-adopted",
@@ -85,6 +86,12 @@ export const playerNotices = {
     key: playerNoticeKeys.storageWriteFailed,
     level: "warning",
     message: "Some progress could not be saved in this browser.",
+  }),
+  /** The session's state cannot be written, so the session kept for a reload was discarded. */
+  sessionNotKept: (): PlayerNotice => ({
+    key: playerNoticeKeys.sessionNotKept,
+    level: "warning",
+    message: "This browser cannot keep the session as it is now, so a reload would lose it.",
   }),
   /** Debug's rewind could not adopt the inspected state: its saved data could not replace the browser's. */
   rewindNotAdopted: (): PlayerNotice => ({
