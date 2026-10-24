@@ -12,7 +12,7 @@ import { recordDifferences, type CompactRecord } from "./helpers/type-core-recor
  * below; a record is asserted when every cell it tests is among them. Admission (A2–A8; A1 and A9, against written
  * types, are S4's), the boundary checks of external data (C9), fallbacks and defaults (C10), saves (C8), loads (F18,
  * F19), the adapters' cell (C13), the budget's fallback (B1), stage 3b (§13), and the cells and work families that
- * measure admission (F28, S5, S6, P1, H8; W3, W5, W15, W26) join with their steps.
+ * measure admission (F28, S5, S6, P1, H8; W3, W5, W15) join with their steps.
  */
 const COMPLETED: ReadonlySet<string> = new Set([
   // the transfers (§2)
@@ -52,6 +52,7 @@ const COMPLETED: ReadonlySet<string> = new Set([
     "W4",
     "W6",
     "W7",
+    "W8",
     "W9",
     "W10",
     "W11",
