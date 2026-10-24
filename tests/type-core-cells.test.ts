@@ -663,7 +663,7 @@ function summary(record: CompactRecord): string[] {
  * none, decided by the key and never by what the value resolves to (an empty answer is unresolved, not an absent key),
  * per alternative, on the value side and through a function's result (the contract) alike; a dict's `values` and
  * `keys` are lists of its values and of text that may hold none. Per program its record in both orders, with its sites
- * written as the text they start at: the set's records `cp9-cells/s4/choice-value/…` (set `b1c18b4ef1d8a5c1`), C9's
+ * written as the text they start at: the set's records `cp9-cells/s4/choice-value/…` (set `486ac8093b597b45`), C9's
  * boundary check left out (it joins with S6), and controls beside them.
  */
 test("a choice object's value is selected by its key, and a dict's values and keys are lists", () => {
@@ -698,6 +698,15 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         "warning-runtime-check",
         `member-read warning-runtime-check @${at("dict")}`,
         `empty-check dict{k:7}.values [list] @${at("dict")}`,
+      ],
+    ],
+    [
+      "set mixed-omitted",
+      'repeat askChoice [{text:"A", value:1}, {text:"B"}] {}\nexit\n',
+      (at) => [
+        "warning-runtime-check",
+        `integer-use warning-runtime-check @${at("askChoice")}`,
+        `integer-check askChoice [{text:"A", value:1}, {text:"B"}] [integer] @${at("askChoice")}`,
       ],
     ],
     [
