@@ -1,0 +1,467 @@
+{
+  "reason": "A court run by unnamed officials. The judge (the court's voice: arraignment, sentencing, trial, verdict, collateral and evidence counters, jury instructions) and the guard who carries out each punishment speak most; the prosecutor, defense counsel, jury foreman and jury members speak in the trial; a court clerk, security, the receptionist, the medical examiner and the probation officer speak at their desks. Speakers are recognised by the scene (the punishment closures' sentence case is the judge's, their punishment case the guard's). Menus, dockets, evidence displays, camera countdowns, confessions, uploads and errors are system text.",
+  "speakers": {
+    "judge": {
+      "displayName": "Judge"
+    },
+    "guard": {
+      "displayName": "Guard"
+    },
+    "prosecutor": {
+      "displayName": "Prosecutor"
+    },
+    "defense": {
+      "displayName": "Defense counsel"
+    },
+    "foreman": {
+      "displayName": "Jury foreman"
+    },
+    "juror": {
+      "displayName": "Jury member"
+    },
+    "clerk": {
+      "displayName": "Court clerk"
+    },
+    "security": {
+      "displayName": "Security"
+    },
+    "receptionist": {
+      "displayName": "Receptionist"
+    },
+    "medical": {
+      "displayName": "Medical examiner"
+    },
+    "probation": {
+      "displayName": "Probation officer"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/courtroom.groovy:takePic",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/courtroom.groovy:getText",
+      "speaker": "judge"
+    },
+    {
+      "function": "scripts/courtroom.groovy:getCrime",
+      "speaker": "judge"
+    },
+    {
+      "function": "scripts/courtroom.groovy:getURL",
+      "speaker": "judge"
+    },
+    {
+      "function": "scripts/courtroom.groovy:showEvidence",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/courtroom.groovy:showColl",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:389",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:422",
+      "speaker": "receptionist"
+    },
+    {
+      "at": "scripts/courtroom.groovy:429",
+      "speaker": "medical"
+    },
+    {
+      "at": "scripts/courtroom.groovy:451",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:478",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:501",
+      "speaker": "judge"
+    },
+    {
+      "after": "scripts/courtroom.groovy:522",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:579",
+      "speaker": "probation"
+    },
+    {
+      "at": "scripts/courtroom.groovy:630",
+      "speaker": "security"
+    },
+    {
+      "at": "scripts/courtroom.groovy:659",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:743",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:755",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:790",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:815",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:840",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:873",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:886",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:979",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:990",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/courtroom.groovy:1029",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1105",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1136",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1182",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1194",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/courtroom.groovy:1237",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/courtroom.groovy:1240",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1251",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1257",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/courtroom.groovy:1273",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/courtroom.groovy:1276",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1322",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1333",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1429",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1446",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1494",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1508",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/courtroom.groovy:1593",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/courtroom.groovy:1596",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/courtroom.groovy:1618",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/courtroom.groovy:1621",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1675",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:1703",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/courtroom.groovy:1823",
+      "speaker": "guard"
+    },
+    {
+      "after": "scripts/courtroom.groovy:1872",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2016",
+      "speaker": "clerk"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2424",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2479",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2501",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2507",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2576",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2613",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2617",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2625",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2629",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2641",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2671",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2696",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2760",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2763",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2771",
+      "speaker": "clerk"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2777",
+      "speaker": "judge"
+    },
+    {
+      "after": "scripts/courtroom.groovy:2793",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2823",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2849",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2862",
+      "speaker": "defense"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2864",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2885",
+      "speaker": "defense"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2887",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2892",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2898",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2907",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2911",
+      "speaker": "foreman"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2913",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2916",
+      "speaker": "juror"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2924",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2969",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2980",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2986",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:2998",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3030",
+      "speaker": "guard"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3039",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3061",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3064",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3072",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3076",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3155",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3163",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3168",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3174",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3179",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3210",
+      "speaker": "prosecutor"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3215",
+      "speaker": "prosecutor"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3220",
+      "speaker": "prosecutor"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3228",
+      "speaker": "judge"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3441",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3446",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/courtroom.groovy:3483",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/courtroom.groovy:3155",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/courtroom.groovy:3168",
+      "speaker": "player"
+    },
+    {
+      "message": "scripts/courtroom.groovy:3179",
+      "speaker": "player"
+    }
+  ],
+  "names": []
+}

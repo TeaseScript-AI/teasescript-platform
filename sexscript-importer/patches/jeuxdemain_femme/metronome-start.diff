@@ -1,0 +1,11 @@
+--- a/scripts/jeuxdemain_femme.groovy
++++ b/scripts/jeuxdemain_femme.groovy
+@@ -154,7 +154,7 @@
+ 	//	playMetronome(this, "strokes", 50, 190);
+ 	def playMetronome ={main, mType = "seconds", mON = 60, mBPM = 60 ->
+ 
+-		def mBPS, mStrokes; int mSpeed; int mCount = 0;
++		def mBPS = 0, mStrokes = 0; int mSpeed; int mCount = 0;
+ 
+ 		// STROKE NUMBER NOT SECONDS
+ 		if(mType == "strokes" || mType == "strokehold") {

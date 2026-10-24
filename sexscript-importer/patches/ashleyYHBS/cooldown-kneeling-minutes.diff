@@ -1,0 +1,12 @@
+--- a/scripts/Banjo/ashleyweeklyspank.groovy
++++ b/scripts/Banjo/ashleyweeklyspank.groovy
+@@ -1876,6 +1876,9 @@
+ 	} else if(cornertimeTone=="cooldown") {
+ 		if(attitude<=30) {
+ 			cornertime = "kneeling"
++			// Uncertain patch of a legacy bug: this position had no minutes, so the message read a missing (or an old) value;
++			// the duration is the cooldown's other one, which the author may have meant otherwise.
++			cornertimeMins = getRandom(4)+2 + cornertimeBonus
+ 		} else {
+ 			cornertimeMins = getRandom(4)+2 + cornertimeBonus
+ 			choice = getRandom(6)

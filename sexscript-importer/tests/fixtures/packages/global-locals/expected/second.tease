@@ -1,0 +1,11 @@
+let lastTime = getAbsoluteDateTime()
+function elapsed {
+  return round((getAbsoluteDateTime() - lastTime) / 1 s)
+}
+function remember {
+  let lastTimeValue = getAbsoluteDateTime()
+  save lastTimeValue as "demo.lastTime"
+}
+remember()
+say prose "Elapsed ${elapsed()}", instant
+exit

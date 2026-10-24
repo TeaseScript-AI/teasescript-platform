@@ -1,0 +1,23 @@
+// A flag read of a key the package saves only flags under is a flag, which a test takes as it is (spinthebottle); so is
+// a variable that starts as a flag, also where it takes the value of a key built as the script runs (DisciplineClinic).
+if load("game.onBench", default: null) == null {
+  save false as "game.onBench"
+}
+let onBench: boolean = load "game.onBench", default: false
+if onBench {
+  say prose "On the bench.", instant
+}
+function sit {
+  save true as "game.onBench"
+}
+let lying = false
+let slot = "a"
+// NOTE SX_LOAD_KEEPS_VALUE line 9: Groovy stored null in 'lying' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+lying = load "game.${slot}.lying", default: lying
+if lying {
+  say prose "Lying.", instant
+}
+if not lying {
+  say prose "Honest.", instant
+}
+exit

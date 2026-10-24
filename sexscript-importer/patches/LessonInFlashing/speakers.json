@@ -1,0 +1,75 @@
+{
+  "reason": "Three guides take turns, each introduced under her own picture: the first guide (Dagmar, named by Andrea at 81), then Andrea from her self-introduction (79), then Marketa (121). Part 2 opens with one greeting from each, after which Dagmar speaks for the group (\"we\") under her pictures; the random-pick notice and the closing \"Goodbye\" are system text.",
+  "speakers": {
+    "dagmar": {
+      "firstName": "Dagmar",
+      "displayName": "Woman"
+    },
+    "andrea": {
+      "firstName": "Andrea"
+    },
+    "marketa": {
+      "firstName": "Marketa"
+    }
+  },
+  "default": "dagmar",
+  "prefixes": [],
+  "switches": [
+    {
+      "entry": "scripts/alessoninflashing.groovy",
+      "speaker": "dagmar"
+    },
+    {
+      "at": "scripts/alessoninflashing.groovy:20",
+      "speaker": "dagmar"
+    },
+    {
+      "at": "scripts/alessoninflashing.groovy:78",
+      "speaker": "andrea"
+    },
+    {
+      "at": "scripts/alessoninflashing.groovy:120",
+      "speaker": "marketa"
+    },
+    {
+      "at": "scripts/alessoninflashing.groovy:248",
+      "speaker": "system"
+    },
+    {
+      "entry": "scripts/alessoninflashing2.groovy",
+      "speaker": "dagmar"
+    },
+    {
+      "at": "scripts/alessoninflashing2.groovy:18",
+      "speaker": "andrea"
+    },
+    {
+      "at": "scripts/alessoninflashing2.groovy:22",
+      "speaker": "marketa"
+    },
+    {
+      "at": "scripts/alessoninflashing2.groovy:26",
+      "speaker": "dagmar"
+    },
+    {
+      "at": "scripts/alessoninflashing2.groovy:62",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/alessoninflashing2.groovy:64",
+      "speaker": "dagmar"
+    }
+  ],
+  "names": [
+    {
+      "after": [
+        "scripts/alessoninflashing.groovy:79"
+      ],
+      "files": [
+        "scripts/alessoninflashing.groovy"
+      ],
+      "speaker": "dagmar",
+      "template": "Dagmar"
+    }
+  ]
+}

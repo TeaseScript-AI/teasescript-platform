@@ -1,0 +1,73 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/questionnaire.groovy:28",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:44",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:57",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:61",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:88",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:101",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:131",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:149",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:167",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:185",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:203",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:220",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:252",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:284",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/questionnaire.groovy:335",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

@@ -1,0 +1,40 @@
+--- a/scripts/toy/cornertime.groovy
++++ b/scripts/toy/cornertime.groovy
+@@ -29,15 +29,6 @@
+ 		return json.bytes.encodeBase64().toString()
+ 	}
+ 
+-	toy.metaClass.writeCTfile {punishment, filename ->
+-		def file = new File(filename)
+-		def newLine = System.getProperty("line.separator")
+-		//write header, input, and footer
+-		file.write("-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----" + newLine)
+-		file.append(punishment + newLine)
+-		file.append("-----END CORNERTIME CUSTOM PUNISHMENT-----")
+-	}
+-
+ 	toy.metaClass.setupCornertime {tmin=300, tmax=600, context="play" ->
+ 		return [
+ 			title: "Toy-ID-"+randRange(1e6, 1e7-1).toString()+"-"+(getTime()-16e8).toString(),
+@@ -74,9 +65,10 @@
+ 			if (getBoolean(null, "Open website", "Continue")) {
+ 				useUrl("cornertime.github.io");
+ 			}
+-			def inputfile = "toy_ct_input.txt";
+-			writeCTfile(encodeCTpunishment(ctconfig), inputfile);
+-			useFile(inputfile);
++			// The input with its header and footer, which the player copies or downloads (patch webcam-cornertime-export;
++			// an output edit shows it with exportText as the file toy_ct_input.txt).
++			def ctinput = "-----BEGIN CORNERTIME CUSTOM PUNISHMENT-----\n" + encodeCTpunishment(ctconfig) + "\n-----END CORNERTIME CUSTOM PUNISHMENT-----";
++			showPopup(ctinput);
+ 			present([DRESSED], [
+ 					["Here's the input, copy it into the field but do NOT start yet."]]);
+ 			pause(7);
+@@ -111,7 +103,6 @@
+ 				}
+ 				else getreport = false
+ 			}
+-			new File(inputfile).delete();
+ 			return ctoutput;
+ 		}
+ 	

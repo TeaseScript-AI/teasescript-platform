@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "speed-at-least-one",
+      "layer": "source",
+      "category": "e",
+      "reason": "Legacy bug (creator report): the speed calibration (SpeedTest) stores the answer to \"How many did you get?\" as the speed rating without a lower bound, so 0 or a negative answer made the speed session's target 0 and its pace 60000 / (target * 2) divide by zero, or its waits negative (V2 explorer: TSR036 and TSR050). Evident intent: the rating is a positive number of thrusts a minute (the session tests again below 1); the patch keeps at least 1.",
+      "diff": "speed-at-least-one.diff"
+    }
+  ]
+}

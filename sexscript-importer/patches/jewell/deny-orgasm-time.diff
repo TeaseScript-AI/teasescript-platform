@@ -1,0 +1,20 @@
+--- a/scripts/jewell/cumPermission.groovy
++++ b/scripts/jewell/cumPermission.groovy
+@@ -345,7 +345,7 @@
+ 	def messages28 = ["You will be denied orgasms for 72 hours while you think about your failure.","This is completely unacceptable, you stupid slut! No cumming for 72 hours.","I am very disappointed in you, "+loadString("intro.name")+". You will be denied orgasm for 72 hours."]
+ 	show(messages28[getRandom(3)])
+ 	wait(6)
+-	save("jewell.deny_Orgasm", true)
++	save("jewell.deny_Orgasm", getTime()+72*3600)
+ 	block = "finish"
+ 	break
+ 
+@@ -353,7 +353,7 @@
+ 	def messages29 = ["Bad, slut! Your pathetic dicklet belongs to me, and I did not give you permission to cum. No cumming for 24 hours.","What a naughty whore. I'm giving you 24 hours of chastity to cool off.","No cumming for 24 hours. You'll have to learn better, slave.","You are denied orgasm for 24 hours. Slaves need better control."]
+ 	show(messages29[getRandom(4)])
+ 	wait(6)
+-	save("jewell.deny_Orgasm", true)
++	save("jewell.deny_Orgasm", getTime()+24*3600)
+ 	block = "finish"
+ 	break
+ 

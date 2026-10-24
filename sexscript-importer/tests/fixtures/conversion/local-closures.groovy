@@ -1,0 +1,57 @@
+// A closure kept in a local of a function becomes a function, which its calls call directly while nothing assigns
+// the local again; one that captures another closure of the function cannot convert
+// and stays declared without an action, so the code that calls it still compiles.
+def countdown = { n ->
+	final announce = { t -> show("Count " + t) }
+	final twice = { t -> announce(t); announce(t + n) }
+	announce(n)
+	twice(1)
+}
+countdown(2)
+// A closure called where it is written calls its function directly.
+def limits = { -> return [low: 1, high: 3] }()
+show("Up to " + limits.high)
+// A closure declared in a block of the script becomes a script function at the top, where TeaseScript declares
+// functions; one that reads a variable of such a block stays unconverted, and so does one whose name the script uses
+// outside the block, where it meant something else.
+def punish
+if (getBoolean("Estim connected?")) {
+	def shock = { message, shocks ->
+		show(message)
+		(1..shocks).each { wait(1) }
+	}
+	def note = "Careful"
+	def warn = { -> show(note) }
+	punish = { -> shock("Ouch", 2) }
+}
+if (punish) punish()
+if (getBoolean("Hurry?")) {
+	def wait = { seconds -> show("Skipping ${seconds} seconds") }
+}
+wait(1)
+// A closure that gets itself as its parameter, and calls it, calls itself directly, as every call passes it.
+def again = { again, times ->
+	if (times > 0) {
+		show("Again " + times)
+		again(again, times - 1)
+	}
+}
+again(again, 2)
+// A function that took the legacy script object as `main` called its methods as SexScript's; a call passes null in its
+// place, and a whole default that a call passes a fraction takes fractions (jeuxdemain_femme's animations).
+def pulse = { main, speed = 1 ->
+	main.show("Pulse " + speed)
+}
+pulse(this, 0.5)
+pulse(this)
+// A call by the name of a closure's parameter calls the value it gets, so its fraction is not the script function's of
+// that name; and a whole default that the function uses as a list position keeps whole, where a call with the script
+// object that passes it a fraction stays a TODO.
+def apply = { action -> action(0.5) }
+def pick = { n = 1 -> show(["zero", "one"][n]) }
+def echo = { n -> show(n) }
+pick()
+apply(echo)
+def card = { main, n = 1 -> main.show(["zero", "one"][n]) }
+card(this)
+if (false) card(this, 0.5)

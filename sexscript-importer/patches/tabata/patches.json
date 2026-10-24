@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "round-range",
+      "layer": "source",
+      "category": "e",
+      "reason": "rand_num is a random number of edging rounds between lower and upper, computed with % (upper-lower), which divided by zero when the player entered the same number for both, as the legacy script did too. When upper is not above lower, rand_num is lower, the number the player asked for.",
+      "diff": "round-range.diff"
+    }
+  ]
+}

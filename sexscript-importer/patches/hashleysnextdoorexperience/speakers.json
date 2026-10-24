@@ -1,0 +1,13 @@
+{
+  "reason": "Ms. Ashley, the player's next-door neighbour, speaks every message in the first person and names herself (\"jack it for Ms. Ashley\", line 50). The only other voice is one sentence at the start of the message at line 315 (\"Excuse me, Ms. Ashely ? Slave Steve is drained\"), said by a girl of the house inside Ashley's message; the format cannot split it, so it stays with Ashley.",
+  "speakers": {
+    "ashley": {
+      "title": "Ms.",
+      "firstName": "Ashley"
+    }
+  },
+  "default": "ashley",
+  "prefixes": [],
+  "switches": [],
+  "names": []
+}

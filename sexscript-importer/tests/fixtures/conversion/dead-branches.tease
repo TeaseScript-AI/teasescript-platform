@@ -1,0 +1,25 @@
+// Code that never runs is not written (#946): the branch of a test the conversion decides that it does not take, as a
+// connection test (ScarlettsBlackmail), the default of a menu whose cases take every option, and what follows a menu
+// whose every way leaves.
+// NOTE SX_ONLINE_STORAGE line 4: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+say prose "Pick", instant
+switch (askChoice 0: "A", 1: "B") {
+  case 0 {
+    say prose "A", instant
+  }
+  case 1 {
+    say prose "B", instant
+  }
+}
+say prose "Again?", instant
+let again = askChoice 0: "Yes", 1: "No"
+switch again {
+  case 0 {
+    say prose "Once more", instant
+    goto "dead-branches.tease"
+  }
+  case 1 {
+    say prose "Bye", instant
+    exit
+  }
+}

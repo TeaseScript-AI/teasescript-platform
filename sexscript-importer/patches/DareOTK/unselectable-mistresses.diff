@@ -1,0 +1,65 @@
+--- a/scripts/DareOTK.groovy
++++ b/scripts/DareOTK.groovy
+@@ -697,21 +697,21 @@
+ 					mistressSet6()
+ 					IntroMistress()
+ 				}
+-				if(subMenu==6) {
+-					mistress = "Paris"
+-					mistressSet7()
+-					IntroMistress()
+-				}
+-				if(subMenu==7) {
+-					mistress = "Phoenix"
+-					mistressSet8()
+-					IntroMistress()
+-				}
+-				if(subMenu==8) {
+-					mistress = "Snow"
+-					mistressSet9()
+-					IntroMistress()
+-				}
++//				if(subMenu==6) {
++//					mistress = "Paris"
++//					mistressSet7()
++//					IntroMistress()
++//				}
++//				if(subMenu==7) {
++//					mistress = "Phoenix"
++//					mistressSet8()
++//					IntroMistress()
++//				}
++//				if(subMenu==8) {
++//					mistress = "Snow"
++//					mistressSet9()
++//					IntroMistress()
++//				}
+ 				disMenu = false
+ 			}				
+ 		}
+@@ -1491,9 +1491,9 @@
+ 			else if(pick_mistress==4) mistressSet4()
+ 			else if(pick_mistress==5) mistressSet5()
+ 			else if(pick_mistress==6) mistressSet6()
+-			else if(pick_mistress==7) mistressSet7()
+-			else if(pick_mistress==8) mistressSet8()
+-			else if(pick_mistress==9) mistressSet9()
++//			else if(pick_mistress==7) mistressSet7()
++//			else if(pick_mistress==8) mistressSet8()
++//			else if(pick_mistress==9) mistressSet9()
+ 		}
+ 		else if(AutoMistress) {
+ 			show(null)
+@@ -1546,9 +1546,9 @@
+ 			else if(pick_mistress==4) mistressSet4()
+ 			else if(pick_mistress==5) mistressSet5()
+ 			else if(pick_mistress==6) mistressSet6()
+-			else if(pick_mistress==7) mistressSet7()
+-			else if(pick_mistress==8) mistressSet8()
+-			else if(pick_mistress==9) mistressSet9()
++//			else if(pick_mistress==7) mistressSet7()
++//			else if(pick_mistress==8) mistressSet8()
++//			else if(pick_mistress==9) mistressSet9()
+ 			mistressSelection = false
+ 			mistressIntro()
+ 			pick_count++

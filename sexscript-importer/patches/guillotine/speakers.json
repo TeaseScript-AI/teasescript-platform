@@ -1,0 +1,64 @@
+{
+  "reason": "An unnamed executioner (the voice of the m_diag/f_diag sound files) gives the prisoner and the guards their orders during the execution; a reporter asks the post-execution interview questions when broadcasting. Menus, rules, setup, schedule, broadcast screens and countdown timers are system text; the blade's sound effects are narration.",
+  "speakers": {
+    "executioner": {
+      "displayName": "Executioner"
+    },
+    "reporter": {
+      "displayName": "Reporter"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/guillotine.groovy:badURL",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/guillotine.groovy:lockPlayer",
+      "speaker": "executioner"
+    },
+    {
+      "at": "scripts/guillotine.groovy:235",
+      "speaker": "system"
+    },
+    {
+      "after": "scripts/guillotine.groovy:235",
+      "speaker": "executioner"
+    },
+    {
+      "at": "scripts/guillotine.groovy:676",
+      "speaker": "executioner"
+    },
+    {
+      "at": "scripts/guillotine.groovy:788",
+      "speaker": "executioner"
+    },
+    {
+      "at": "scripts/guillotine.groovy:844",
+      "speaker": "narrator"
+    },
+    {
+      "at": "scripts/guillotine.groovy:891",
+      "speaker": "executioner"
+    },
+    {
+      "at": "scripts/guillotine.groovy:916",
+      "speaker": "executioner"
+    },
+    {
+      "at": "scripts/guillotine.groovy:934",
+      "speaker": "reporter"
+    },
+    {
+      "after": "scripts/guillotine.groovy:954",
+      "speaker": "reporter"
+    },
+    {
+      "at": "scripts/guillotine.groovy:987",
+      "speaker": "executioner"
+    }
+  ],
+  "names": []
+}

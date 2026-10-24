@@ -1,0 +1,173 @@
+{
+  "reason": "One unnamed character; the owner's rule names her Mistress (Haiku and Luna inventories agree).",
+  "speakers": {
+    "main": {
+      "title": "Mistress"
+    }
+  },
+  "default": "main",
+  "prefixes": [],
+  "switches": [
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:190",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:197",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:210",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:214",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:220",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:229",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:240",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:244",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:255",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:264",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:276",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:283",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:286",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:295",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:304",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:307",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:309",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:320",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:331",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:357",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:359",
+      "speaker": "narrator"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:381",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:386",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:430",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:442",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:447",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:458",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:466",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:482",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:494",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:498",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:506",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:512",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:517",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:535",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:563",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:566",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:568",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:580",
+      "speaker": "system"
+    },
+    {
+      "message": "scripts/ZapEdgeStrip.groovy:604",
+      "speaker": "system"
+    }
+  ],
+  "names": []
+}

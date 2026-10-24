@@ -1,0 +1,26 @@
+--- a/scripts/SpankingTime.groovy
++++ b/scripts/SpankingTime.groovy
+@@ -296,13 +296,7 @@
+ show("Fine. Then send it to me.");
+ wait(4);
+ 
+-def img_imageFilePath = getFile("Send your red ass to your mistress");
+-def assPic = "SpankingTime/"+(new File(img_imageFilePath)).getName();
+-def img_inputStream = new FileInputStream(img_imageFilePath);
+-def img_outputStream = new FileOutputStream("images/"+assPic, false);
+-img_outputStream.getChannel().transferFrom(img_inputStream.getChannel(), 0, (new File(img_imageFilePath)).length());
+-img_inputStream.close();
+-img_outputStream.close();
++def assPic = getFile("Send your red ass to your mistress");
+ 
+ show("You look so cute in this photo hehe!!\n\nIt's your best face, hehe!!");
+ wait(5);
+@@ -315,7 +309,7 @@
+ show("I hope that from now on you're not going to missbehave.");
+ wait(4);
+ 
+-setImage(""+assPic+"");
++setImage(assPic);
+ 
+ show("If you ever think about going over a rule, take a look at this ass to know what is going to happen if you do.");
+ showButton("yes mistress");

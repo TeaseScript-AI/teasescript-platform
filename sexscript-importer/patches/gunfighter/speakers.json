@@ -1,0 +1,54 @@
+{
+  "reason": "Arcade quick-draw game: the only character lines are the current opponent's one-line taunts (ready, win, lose), shown in quotes during each duel; the opponent's name is opponentName, set per opponent in setOpponent. The intro crawl is narration; menus, settings, round cards, duel prompts and scores have no speaker.",
+  "speakers": {
+    "opponent": {
+      "displayName": "Opponent"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/Banjo/gunfighter.groovy:introTextCrawl",
+      "speaker": "narrator"
+    },
+    {
+      "function": "scripts/Banjo/gunfighter.groovy:introLogo",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/gunfighter.groovy:381",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Banjo/gunfighter.groovy:385",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/gunfighter.groovy:401",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Banjo/gunfighter.groovy:411",
+      "speaker": "opponent"
+    },
+    {
+      "at": "scripts/Banjo/gunfighter.groovy:441",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/Banjo/gunfighter.groovy:451",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "variable": "opponentName",
+      "files": [
+        "scripts/Banjo/gunfighter.groovy"
+      ],
+      "speaker": "opponent",
+      "template": "{}"
+    }
+  ]
+}

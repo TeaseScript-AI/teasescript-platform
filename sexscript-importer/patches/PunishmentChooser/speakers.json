@@ -1,0 +1,83 @@
+{
+  "reason": "One disciplinarian per session, picked at random from seven (variable mistress) and introduced as \"Hi, I'm \"+title+\" \"+mistress; she speaks whenever one of her picture helpers (setImageIntro/Scold/Implement/Finish) is set. The title menu, options, statistics/odds tables, toy list, test-mode prompts and session-closing notices of the options menu have no character.",
+  "speakers": {
+    "mistress": {
+      "title": "Mistress"
+    }
+  },
+  "default": "system",
+  "prefixes": [],
+  "switches": [
+    {
+      "function": "scripts/PunishmentChooser.groovy:start",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/PunishmentChooser.groovy:setImageStart",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/PunishmentChooser.groovy:setImageIntro",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/PunishmentChooser.groovy:setImageScold",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/PunishmentChooser.groovy:setImageImplement",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/PunishmentChooser.groovy:setImageFinish",
+      "speaker": "mistress"
+    },
+    {
+      "function": "scripts/PunishmentChooser.groovy:calculatePunishmentsWeights",
+      "speaker": "system"
+    },
+    {
+      "function": "scripts/PunishmentChooser.groovy:showStats",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/PunishmentChooser.groovy:2507",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/PunishmentChooser.groovy:2582",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/PunishmentChooser.groovy:2906",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/PunishmentChooser.groovy:2912",
+      "speaker": "system"
+    },
+    {
+      "at": "scripts/PunishmentChooser.groovy:3138",
+      "speaker": "system"
+    }
+  ],
+  "names": [
+    {
+      "variable": "mistress",
+      "files": [
+        "scripts/PunishmentChooser.groovy"
+      ],
+      "speaker": "mistress",
+      "values": {
+        "Alexis": "Miss Alexis",
+        "Allison": "Miss Allison",
+        "Ashley": "Mistress Ashley",
+        "Audrey": "Miss Audrey",
+        "Gigi": "Miss Gigi",
+        "Kym": "Mistress Kym",
+        "Sadie": "Miss Sadie"
+      },
+      "otherwise": "Mistress"
+    }
+  ]
+}

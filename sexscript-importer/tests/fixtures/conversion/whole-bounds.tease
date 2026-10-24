@@ -1,0 +1,49 @@
+// A loop goes through, and a draw takes from, a range that ends at a whole number. One that may end at a fraction ends
+// where Groovy stopped: n.times runs for the whole part of n, an inclusive range at the last whole number in it, an
+// exclusive one before the first whole number past it; whole bounds stay as they are.
+let half = 2.5
+for it in 0..toInteger(half) {
+  say prose "Tick ${it}", instant
+}
+for i in 0..=floor(half) {
+  say prose "Up to ${i}", instant
+}
+for it in 0..ceil(half) {
+  say prose "Below ${it}", instant
+}
+// Java's nextInt took a whole number only, here one a variable that may hold a fraction holds.
+let bound = 2.5
+bound = 4
+// NOTE SX_RANDOM_OBJECT line 13: Java's Random object kept its own sequence of random numbers; its draws come from the session's random numbers now, with the same distribution.
+say prose "Drawn ${randomInteger(0..ceil(bound))}", instant
+let whole = 3
+for it in 0..whole {
+  say prose "Again ${it}", instant
+}
+for i in 0..whole {
+  say prose "Whole ${i}", instant
+}
+say prose "Drawn ${randomInteger(0..whole)}", instant
+// A Groovy range ran down where its first bound was greater: written so, it is the list of its numbers (guillotine's
+// countdown); where only the values show it, the loop is the plain ascending range, empty where Groovy counted down
+// (owner decision 2026-10-15: Domme2's reward of 0 points ran twice, unintended).
+for it in [3, 2, 1] {
+  say prose "Down ${it}", instant
+}
+let rewardPoints = randomInteger(0..2)
+for it in 1..=rewardPoints {
+  say prose "Stroke ${it}", instant
+}
+for k in 0..rewardPoints {
+  say prose "Before ${k}", instant
+}
+// The range's bounds are computed once, its first bound first.
+let low = 1
+function lift {
+  low = 3
+  return 4
+}
+for k in low..=floor(lift()) {
+  say prose "Bound ${k}", instant
+}
+exit

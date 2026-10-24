@@ -1,0 +1,15 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -257,9 +257,9 @@ return new Object() {
+ 	};
+ 	final compose = { texts ->
+ 		if (!texts || texts.isEmpty()) return null;
+-		return texts.collect {
+-				t -> t[getRandom(t.size())]
+-			}.join(" ").capitalize();
++		def parts = [];
++		for (t in texts) parts.add(t[getRandom(t.size())]);
++		return parts.join(" ").capitalize();
+ 	};
+ 	final present = { imageSpec, texts ->
+ 		if (texts) {

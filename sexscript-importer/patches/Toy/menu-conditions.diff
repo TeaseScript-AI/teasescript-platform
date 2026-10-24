@@ -1,0 +1,17 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -406,9 +406,11 @@
+ 				final waitTime = Math.min(cycleTime, e.event.time - getTime());
+ 				final clickTime = showButton("Please, ${dommeTitle()}?", waitTime);
+ 				if (clickTime < waitTime) {
+-					def opts = requestables.values().toList().findAll {
+-						it -> !it.cond || it.cond()
+-					};
++					def opts = [];
++					for (r in requestables.values()) {
++						def cond = r.cond;
++						if (!cond || cond()) opts.add(r);
++					}
+ 					opts.push([ lbl: "Back", act: null ]);
+ 					def opt = getSelectedValue(stateIs("DEBUG") ? DOMME : "Yes, toy?", opts.collect { it.lbl });
+ 					def act = opts[opt].act;

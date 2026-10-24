@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "fixed-folder-walks",
+      "layer": "source",
+      "category": "b",
+      "reason": "The images come from walking the images folder and four levels of its subfolders through closures that take the folder as a parameter, and the stimulation sounds from a sounds folder chosen at runtime, sounds/<eStimSound> where it exists or else sounds. The conversion walks only folders that it knows when converting, so both lists stayed empty: the start stopped picking a picture (TSR019), and so would the first stimulation. The package holds images/Concentration and sounds/ShockYourself, the folder that the author's setting eStimSound names; the patch walks the images folder with eachFileRecurse, keeping the same cap, and the sounds of sounds/ShockYourself, adding each name without setting the walk's file to it.",
+      "diff": "fixed-folder-walks.diff"
+    }
+  ]
+}

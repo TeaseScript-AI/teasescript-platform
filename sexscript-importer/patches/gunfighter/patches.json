@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "score-start",
+      "layer": "source",
+      "category": "b",
+      "reason": "score is declared without a value and set to 0 when a game starts, but a function adds to it, so TeaseScript sees a value that may be null there. It starts at 0, the value each game sets anyway.",
+      "diff": "score-start.diff"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+--- a/scripts/Banjo/dungeoncrawl.groovy
++++ b/scripts/Banjo/dungeoncrawl.groovy
+@@ -7184,7 +7184,7 @@
+ 	locationActions = ["Nothing"]
+ 	if(hasLockpick)
+ 		locationActions = locationActions + ["Use Lockpick"]
+-	if(spellLight)
++	if(spellOpen)
+ 		locationActions = locationActions + ["Use Magic"]
+ 	locationVisit = true
+ 	while(locationVisit) {
