@@ -29,7 +29,11 @@ export interface SharedDiagnosticCode {
 export interface DiagnosticCodeInfo {
   /** The passes or components that report the code: one, or several with {@link shared}. */
   readonly owners: readonly [DiagnosticOwner, ...DiagnosticOwner[]];
-  readonly severity: DiagnosticSeverity;
+  /**
+   * The severities that the code is reported with: one, or both for a rule that is an error where the compiler proves
+   * the problem and a warning where the script checks it when it runs.
+   */
+  readonly severities: readonly [DiagnosticSeverity, ...DiagnosticSeverity[]];
   /** A short title, as the code's row in its document shows it. */
   readonly title: string;
   /** The document and section that explain the code, from the repository root. */
@@ -50,19 +54,24 @@ const DOCS = {
   checkpoint: "docs/RUNTIME.md#checkpoint-boundary",
 } as const;
 
-/** One code's entry: its owners, severity, title, and documentation. */
+/** One code's entry: its owners, its severity or both severities, its title, and its documentation. */
 function entry<const O extends DiagnosticCodeInfo["owners"], const S extends DiagnosticSeverity>(
   owners: O,
-  severity: S,
+  severity: S | readonly [S, S],
   title: string,
   docs: string,
-): { readonly owners: O; readonly severity: S; readonly title: string; readonly docs: string } {
-  return { owners, severity, title, docs };
+): {
+  readonly owners: O;
+  readonly severities: readonly [S, ...S[]];
+  readonly title: string;
+  readonly docs: string;
+} {
+  return { owners, severities: typeof severity === "string" ? [severity] : severity, title, docs };
 }
 
 /**
  * Every diagnostic code: each code that a compiler diagnostic, runtime failure, developer warning, or checkpoint error
- * carries, once, with its owner, severity, title, and documentation. Emission sites take the code types below, so an
+ * carries, once, with its owner, severities, title, and documentation. Emission sites take the code types below, so an
  * unregistered code does not compile, and `tests/diagnostic-codes.test.ts` checks the rest against the source and the
  * documents.
  */
@@ -565,20 +574,32 @@ export type DiagnosticCode = {
   [C in keyof Registry]: Registry[C] extends { readonly retired: true } ? never : C;
 }[keyof Registry];
 
-/** The severity that `code` is reported with. */
-export type DiagnosticCodeSeverity<C extends DiagnosticCode> = Registry[C]["severity"];
+/** The severities that `code` is reported with. */
+export type DiagnosticCodeSeverity<C extends DiagnosticCode> = Registry[C]["severities"][number];
 
-/** The codes that `owner` reports, with `severity` when it is given. */
-export type OwnedDiagnosticCode<
+/**
+ * The codes of `registry` that `owner` reports, but the retired ones, with `severity` among their severities when it is
+ * given: a code with both severities is a code of each.
+ */
+export type OwnedCodeOf<
+  R extends Readonly<Record<string, DiagnosticCodeInfo>>,
   O extends DiagnosticOwner,
   S extends DiagnosticSeverity = DiagnosticSeverity,
 > = {
-  [C in DiagnosticCode]: O extends Registry[C]["owners"][number]
-    ? Registry[C]["severity"] extends S
-      ? C
-      : never
-    : never;
-}[DiagnosticCode];
+  [C in keyof R]: R[C] extends { readonly retired: true }
+    ? never
+    : O extends R[C]["owners"][number]
+      ? [Extract<R[C]["severities"][number], S>] extends [never]
+        ? never
+        : C
+      : never;
+}[keyof R];
+
+/** The codes that `owner` reports, with `severity` among their severities when it is given. */
+export type OwnedDiagnosticCode<
+  O extends DiagnosticOwner,
+  S extends DiagnosticSeverity = DiagnosticSeverity,
+> = OwnedCodeOf<Registry, O, S>;
 
 /** The code of a runtime failure. */
 export type RuntimeErrorCode = OwnedDiagnosticCode<"runtime", "error">;

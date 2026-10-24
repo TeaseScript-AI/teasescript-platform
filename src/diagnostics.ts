@@ -12,7 +12,7 @@ export interface Diagnostic {
   readonly span: SourceSpan;
 }
 
-/** A diagnostic with a registered code, at the severity that the code is registered with. */
+/** A diagnostic with a registered code, at one of the severities that the code is registered with. */
 export function createDiagnostic<C extends DiagnosticCode>(
   severity: DiagnosticCodeSeverity<C>,
   code: C,
