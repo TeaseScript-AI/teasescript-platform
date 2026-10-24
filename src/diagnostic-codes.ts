@@ -366,12 +366,6 @@ export const DIAGNOSTIC_CODES = {
     "Unsupported instruction plan format or version",
     DOCS.compiler,
   ),
-  TSC011: entry(
-    ["type checker"],
-    "error",
-    "Program outside the candidate type analysis (test-only)",
-    DOCS.compiler,
-  ),
 
   TSR001: entry(["runtime"], "error", "Declaration set up twice (defect)", DOCS.runtime),
   TSR002: entry(["runtime"], "error", "Assignment without a variable (defect)", DOCS.runtime),

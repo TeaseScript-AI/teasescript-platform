@@ -1,13 +1,7 @@
 import type { Block, Expression, Program, Statement, TypeAnnotation } from "../../ast.js";
-import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "../../diagnostics.js";
 import type { SourceSpan } from "../../source.js";
-import type {
-  SolvedTypeFacts,
-  TypeAnalysisBackend,
-  TypeAnalysisOutcome,
-  TypeAnalysisRequest,
-  TypeCheckResult,
-} from "../backend.js";
+import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } from "../backend.js";
+import type { SourceSite } from "../graph.js";
 import { analyseCore, type Answers } from "./answers.js";
 import { BudgetExhausted } from "./budget.js";
 import {
@@ -24,8 +18,9 @@ import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 /*
  * The coarse core as a type analysis backend (the port plan's S5): complete for a stated slice of the language and
  * reached only through the test-only candidate compile route (`compileSourceWithBackend` in `src/compiler.ts`), never
- * by a production compile. A program outside the slice is rejected with one `TSC011` error at its first construct
- * outside it, before or after the analysis; the slice grows step by step until the consumer is complete (S9b).
+ * by a production compile. A program outside the slice throws `CandidateOutsideSlice` at its first construct outside
+ * it, before or after the analysis: a test-time signal, never a diagnostic, since no author can reach the route; the
+ * slice grows step by step until the consumer is complete (S9b).
  *
  * The slice: `let` with or without a written type (a named type, `T?` and `T[]` of them; no written union, whose
  * required checks come with narrowing, S10), assignment of a variable, `if` and `else`, `repeat` with a count, `say`
@@ -33,9 +28,27 @@ import type { CoreAnalysisRequest, CoreFile } from "./program.js";
  * index reads and parentheses. Its consumers are C1 (a store into a written place) and C2 (a repeat count, an index);
  * its ingress is a host value stored into a written place, with C9's boundary check there. Rejected after the
  * analysis: any other consumer's diagnostic, a warning about a possible `null` (narrowing's required check, S10), a
- * variable without a written type whose kinds are no settled family (admission, S6), a host value read anywhere else
- * (S6's boundaries), and the work allowance (S8).
+ * variable without a written type whose kinds are no settled family or that copies a variable with one (admission,
+ * S6), a host value read anywhere else or stored as a whole collection (S6's boundaries), lists nested `SLICE_DEPTH`
+ * deep, and the work allowance (S8).
  */
+
+/** Test-only: a program outside the candidate's slice, at its first construct outside it (see above). */
+export class CandidateOutsideSlice extends Error {
+  public constructor(
+    /** The project path of the construct's file. */
+    readonly path: string,
+    /** The construct's site: its file's index in the project and its span's offsets. */
+    readonly site: SourceSite,
+    /** The construct in words, as the message names it. */
+    readonly what: string,
+  ) {
+    super(
+      `The candidate type analysis does not cover ${what} yet (${path}, offset ${site.start}).`,
+    );
+    this.name = "CandidateOutsideSlice";
+  }
+}
 
 /** The coarse core's backend, for the stated slice (see above). */
 export const CORE_BACKEND: TypeAnalysisBackend = {
@@ -44,12 +57,12 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
     const core = coreRequest(request);
     const globals = new Set(request.options.globals ?? []);
     const before = outsideSyntax(core.files, globals);
-    if (before !== null) return rejected(core, before);
+    if (before !== null) throw outsideSlice(core, before);
     const index = new SliceIndex(core.files.map((file) => file.program));
     const answers = analyseCore(core);
     try {
       const after = outsideAnswers(answers, index, core.files, globals);
-      if (after !== null) return rejected(core, after);
+      if (after !== null) throw outsideSlice(core, after);
       const checked = coreCheckResult(answers, index, core);
       // computed here, so that a question past the allowance rejects the program instead of failing a later caller
       const facts = coreFacts(answers, index, core);
@@ -57,7 +70,7 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
     } catch (error) {
       // the questions after the analysis spend the same allowance (TABLE §8); its fallback is S8's
       if (!(error instanceof BudgetExhausted)) throw error;
-      return rejected(core, overAllowance(core.files));
+      throw outsideSlice(core, overAllowance(core.files));
     }
   },
 };
@@ -79,35 +92,13 @@ interface Outside {
   readonly what: string;
 }
 
-/** The one diagnostic of a program outside the slice, and no other output. */
-function rejected(request: CoreAnalysisRequest, outside: Outside): TypeAnalysisOutcome {
-  const diagnostics: Diagnostic[][] = request.files.map(() => []);
-  diagnostics[outside.file]!.push(
-    createDiagnostic(
-      DiagnosticSeverity.Error,
-      "TSC011",
-      `The candidate type analysis does not cover ${outside.what} yet. Its slice is let, assignment, if, repeat, ` +
-        "say of plain text and exit, with literals, variables, lists, index reads and host values stored into " +
-        "typed variables.",
-      outside.span,
-    ),
+/** The signal of a program outside the slice. */
+function outsideSlice(request: CoreAnalysisRequest, outside: Outside): CandidateOutsideSlice {
+  return new CandidateOutsideSlice(
+    request.files[outside.file]!.path,
+    { file: outside.file, start: outside.span.start.offset, end: outside.span.end.offset },
+    outside.what,
   );
-  const checked: TypeCheckResult = {
-    diagnostics,
-    runtimeChecks: new Map(),
-    formShapes: new Map(),
-    ways: { paths: new Map(), operands: new Map() },
-    unreachable: new Set(),
-    speakerFlow: { reads: new Map(), stores: new Map() },
-    storageTypes: [],
-    known: () => undefined,
-  };
-  return {
-    checked,
-    facts: (): SolvedTypeFacts => {
-      throw new Error("A program outside the candidate type analysis's slice has no facts.");
-    },
-  };
 }
 
 // ------------------------------------------------------------------------------------------------- the syntax

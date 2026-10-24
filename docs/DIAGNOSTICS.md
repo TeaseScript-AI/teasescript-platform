@@ -26,8 +26,7 @@ The codes that more than one owner reports are listed in
   check that number and duration literals are finite.
 - **name pass** (`src/semantic.ts`): names, scopes, placement, and what the structure of a command allows.
 - **type checker** (`src/type-checker.ts`): types and values. The coarse core (`src/type-inference/core/`), which
-  replaces it, is reached only through a test-only compile route so far, for the language slice its backend accepts;
-  that route rejects every other program with `TSC011`.
+  replaces it, is reached only through a test-only compile route so far.
 - **compiler** (`src/compiler.ts`): the project's file paths and images, waits written in days or weeks, the check of
   the compiled plan, and the host's call stack.
 - **lowering** (`src/compiler/`): the instruction plan.
@@ -214,7 +213,6 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSC008` | Invalid presentation option or markup colour | error | type checker |
 | `TSC009` | Invalid or repeated package path | error | compiler |
 | `TSC010` | Unsupported instruction plan format or version | error | plan validation |
-| `TSC011` | Program outside the candidate type analysis (test-only) | error | type checker |
 
 ## Codes with more than one owner
 

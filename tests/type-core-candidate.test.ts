@@ -24,7 +24,7 @@ import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-con
 import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import type { TypeAnalysisRequest, TypeCheckResult } from "../src/type-inference/backend.js";
-import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -37,6 +37,16 @@ const OPTIONS = { globals: ["hostValue"] };
 
 function candidate(source: string): CompilationResult {
   return compileSourceWithBackend(source, OPTIONS, CORE_BACKEND);
+}
+
+/** The result of `compile`, or `null` for a program outside the candidate's slice. */
+function insideSlice<T>(compile: () => T): T | null {
+  try {
+    return compile();
+  } catch (error) {
+    if (error instanceof CandidateOutsideSlice) return null;
+    throw error;
+  }
 }
 
 /** The diagnostics as these tests compare them: severity, code and start offset. */
@@ -77,8 +87,10 @@ test("every record of the set inside the slice compiles on the candidate route a
   };
   const accepted: string[] = [];
   for (const record of readFixture()) {
-    const result = compileProjectWithBackend(record.files, OPTIONS, CORE_BACKEND);
-    if (result.diagnostics.some((diagnostic) => diagnostic.code === "TSC011")) continue;
+    const result = insideSlice(() =>
+      compileProjectWithBackend(record.files, OPTIONS, CORE_BACKEND),
+    );
+    if (result === null) continue;
     accepted.push(record.name);
     // C1 (`written-target`) under TSV041 and C2 (`integer-use`) under TSV011, each an error or a runtime-checked
     // warning (D3 (a)), at the record's sites
@@ -294,7 +306,7 @@ test("a checkpoint after a passed check resumes with the same state, and the lat
   }
 });
 
-test("a program outside the slice is rejected with one TSC011 error and no plan", () => {
+test("a program outside the slice throws at its first construct outside it", () => {
   for (const [source, offset] of [
     // a statement outside the slice
     ["let total = 0\nfor value in [1, 2] {\n  total = value\n}\nexit\n", 14],
@@ -323,9 +335,15 @@ test("a program outside the slice is rejected with one TSC011 error and no plan"
     ],
     [`let a: integer${"[]".repeat(256)} = []\nexit\n`, 7],
   ] as const) {
-    const compiled = candidate(source);
-    assert.deepEqual(sited(compiled), [`error TSC011@${offset}`], source);
-    assert.equal(compiled.plan, null, source);
+    assert.throws(
+      () => candidate(source),
+      (error) =>
+        error instanceof CandidateOutsideSlice &&
+        error.path === "main.tease" &&
+        error.site.file === 0 &&
+        error.site.start === offset,
+      source,
+    );
   }
 });
 
@@ -447,9 +465,10 @@ test("a program the work allowance stops after its analysis is rejected, never a
   assert.ok(request !== null);
   const outcomes = new Set<string>();
   for (let allowance = 20; allowance <= 4_000; allowance += 20) {
-    const outcome = withTestAllowance(allowance, () => CORE_BACKEND.analyze(request));
-    if (outcome.checked.diagnostics.flat().some((diagnostic) => diagnostic.code === "TSC011"))
-      outcomes.add("rejected");
+    const outcome = insideSlice(() =>
+      withTestAllowance(allowance, () => CORE_BACKEND.analyze(request)),
+    );
+    if (outcome === null) outcomes.add("rejected");
     else {
       assert.doesNotThrow(() => outcome.facts(), String(allowance));
       outcomes.add("accepted");
