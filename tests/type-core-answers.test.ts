@@ -54,7 +54,7 @@ test("the properties of a projected value and of a call's result are known", () 
   assert.deepEqual([...made.answers.properties(made.node("make()")).keys()], ["left"]);
   const edited = analysed("let box = {left: 1}\nbox.right = 2\nlet copy = box\nsay copy");
   assert.deepEqual([...edited.answers.properties(edited.node("copy")).keys()], ["left", "right"]);
-  // a source a literal holds, and projections of literals and of computed values (review r2)
+  // a source a literal holds, and projections of literals and of computed values (review r2, r3)
   for (const [source, text] of [
     ["let inner = {value: 2}\nlet outer = {nested: inner}\nsay outer.nested", "outer.nested"],
     [
@@ -64,6 +64,11 @@ test("the properties of a projected value and of a call's result are known", () 
     ["let inner = {value: 2}\nsay [inner][0]", "[inner][0]"],
     ["say [{value: 2}][0]", "[{value: 2}][0]"],
     ["say {nested: {value: 2}}.nested", "{nested: {value: 2}}.nested"],
+    // a fallback's operands, an object's own `length`, a loop's element, a sum's elements (review r3)
+    ["say null otherwise {value: 2}", "null otherwise {value: 2}"],
+    ["say {length: {value: 2}}.length", "{length: {value: 2}}.length"],
+    ["for item in [{value: 2}] { say item }", "item"],
+    ["say ([{value: 2}] + [{value: 2}])[0]", "([{value: 2}] + [{value: 2}])[0]"],
   ] as const) {
     const held = analysed(source);
     const properties = held.answers.properties(held.node(text));

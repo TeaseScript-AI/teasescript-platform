@@ -4,7 +4,14 @@ import type { OperandView } from "../adapters/relation.js";
 import type { DynamicWhy, PlaceId } from "../graph.js";
 import { BudgetExhausted, checkNesting, type BudgetLimit, type WorkCounter } from "./budget.js";
 import { Consumers } from "./consumers.js";
-import { Contract, typeTags, termAt, writtenOf, type ContractFacts } from "./contract.js";
+import {
+  Contract,
+  defaultOf,
+  typeTags,
+  termAt,
+  writtenOf,
+  type ContractFacts,
+} from "./contract.js";
 import {
   DefinitionIndex,
   DefinitionLists,
@@ -484,29 +491,54 @@ class CoreAnswers implements Answers {
       { readonly key: Key } | { readonly literal: PlaceId; readonly path: readonly string[] }
     )[] = [];
     const seen = new Set<string>();
-    // a value read further at a path: its key or its literal, through the projections that hold it
+    // a value read further at a path: its key or its literal, through the projections that hold it and the operations
+    // that pass a value on as it is (F10's conversions, F17a's fallback, a `get`'s element or default, a load's or
+    // `fromJson`'s default, `+`'s elements)
     const follow = (start: PlaceId, path: readonly string[]): void => {
       let base = start;
-      const steps: string[] = [];
+      const steps: string[] = [...path];
       for (;;) {
         const source = contract.copiedKey(base) ?? contract.resultKey(base);
         if (source !== null) {
-          pending.push({ key: keyOf(keyPlace(source), [...keyPath(source), ...steps, ...path]) });
+          pending.push({ key: keyOf(keyPlace(source), [...keyPath(source), ...steps]) });
           return;
         }
         if (program.hasOf.has(base)) {
-          pending.push({ literal: base, path: [...steps, ...path] });
+          pending.push({ literal: base, path: steps });
           return;
         }
         const projection = program.projOf.get(base);
-        if (
-          projection === undefined ||
-          projection.step === "iteration" ||
-          projection.step === "length"
-        )
-          return;
-        steps.unshift(stepName(projection.step));
-        base = projection.owner;
+        if (projection !== undefined) {
+          // F27: a loop visits the elements; F11: an object's own `length` is its property
+          steps.unshift(projection.step === "iteration" ? "element" : stepName(projection.step));
+          base = projection.owner;
+          continue;
+        }
+        const c = program.opOf.get(base);
+        if (c === undefined) return;
+        if (c.kind === "fallback") {
+          follow(c.left, steps);
+          follow(c.right, steps);
+        } else if (c.kind === "get") {
+          follow(c.receiver, ["element", ...steps]);
+          follow(c.fallback, steps);
+        } else if (c.kind === "load") {
+          if (c.fallback !== null) follow(c.fallback, steps);
+        } else if (c.kind === "operation") {
+          const { family, name } = c.contract;
+          const fallback = defaultOf(c);
+          if (name === "fromJson" && fallback !== undefined) follow(fallback, steps);
+          else if (
+            family === "method" &&
+            ["toSet", "toList", "take", "takeLast"].includes(name) &&
+            c.receiver !== null &&
+            steps[0] === "element"
+          )
+            follow(c.receiver, steps);
+          else if (family === "operator" && name === "+" && steps[0] === "element")
+            for (const argument of c.arguments) follow(argument, steps);
+        }
+        return;
       }
     };
     follow(value, []);
