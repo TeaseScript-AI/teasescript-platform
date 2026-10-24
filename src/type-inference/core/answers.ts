@@ -408,7 +408,10 @@ class CoreAnswers implements Answers {
       projection = program.projOf.get(base)
     )
       base = projection.owner;
-    const target = program.occurrenceOf.has(base) ? program.targetRoot(value) : null;
+    // a bare read's place is its binding's, as a read below one is (S3 §1, Astra B7)
+    const target = program.occurrenceOf.has(base)
+      ? program.targetRoot(program.occurrenceOf.get(value) ?? value)
+      : null;
     let route: Route = "value";
     if (target !== null)
       route = this.#consumers.quiet.has(value)

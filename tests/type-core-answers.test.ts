@@ -126,3 +126,12 @@ test("a read below a binding names its route and place; a projection of no place
   const literal = analysed("say [hostValue][0]");
   assert.equal(literal.answers.at(literal.node("[hostValue][0]"))?.place, null);
 });
+
+test("a bare read names its binding's place, the one its declaration stores into (Astra B7)", () => {
+  const { answers, node } = analysed("let n: integer = 1\nsay n\nexit");
+  const declared = answers.at(node("let n: integer = 1", "statement"));
+  const read = answers.at(node("n"));
+  assert.ok(declared?.place && read?.place);
+  assert.deepEqual(read.place, declared.place);
+  assert.deepEqual(answers.place(read.place.id).admitted, { by: "written", kinds: ["integer"] });
+});
