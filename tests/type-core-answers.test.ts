@@ -77,6 +77,9 @@ test("the properties of a projected value and of a call's result are known", () 
       'say askChoice [{text: "A", value: {value: 2}}]',
       'askChoice [{text: "A", value: {value: 2}}]',
     ],
+    // a whole choice object, written and bound (review r5)
+    ['say askChoice {text: "A", value: {value: 2}}', 'askChoice {text: "A", value: {value: 2}}'],
+    ['let option = {text: "A", value: {value: 2}}\nsay askChoice option', "askChoice option"],
   ] as const) {
     const held = analysed(source);
     const properties = held.answers.properties(held.node(text));

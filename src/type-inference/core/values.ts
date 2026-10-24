@@ -2,10 +2,12 @@ import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import {
   carried,
+  choiceLabels,
   conversionKind,
   defaultOf,
   emptyAt,
   ingressNull,
+  isMissing,
   ONLY_NULL,
   OPAQUE_MEMBER,
   operatorOf,
@@ -166,6 +168,28 @@ export class Values {
       else if (item.tag === "unknown") out.push(item);
     }
     return mergeItems(out, this.pass.program.scope);
+  }
+
+  /**
+   * V30 §19: the value a choice object's button gives at `rest`: its `value`, and its `text` where it may have none.
+   */
+  *#choiceValue(
+    option: PlaceId,
+    node: FlowNode | null,
+    at: readonly string[],
+    rest: readonly string[],
+  ): Work<readonly Item[]> {
+    const value = withoutEmpty(yield* this.valueItems(option, node, [...at, "value"]));
+    const out: Item[] = [];
+    if (value.some((item) => !isMissing(item)))
+      out.push(
+        ...(rest.length === 0
+          ? value.filter((item) => !isMissing(item))
+          : yield* this.valueItems(option, node, [...at, "value", ...rest])),
+      );
+    if (value.length === 0 || value.some(isMissing))
+      out.push(...(yield* this.valueItems(option, node, [...at, "text", ...rest])));
+    return out;
   }
 
   /**
@@ -471,22 +495,26 @@ export class Values {
     const interaction = family === "interaction" ? interactionCategory(name) : undefined;
     if (interaction?.kind === "asks")
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
-    // askChoice: each option's value, an object option's `value` field
+    // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
     if (interaction?.kind === "options") {
-      for (const argument of c.arguments) {
-        out.push(
-          ...(yield* this.valueItems(argument, at, rest)).filter(
-            (item) => item.tag !== "list" && item.tag !== "set",
-          ),
-        );
-        for (const item of withoutEmpty(yield* this.valueItems(argument, at, ["element"])))
-          out.push(
-            ...(item.tag === "object"
-              ? yield* this.valueItems(argument, at, ["element", "value", ...rest])
-              : rest.length === 0
-                ? [item]
-                : []),
-          );
+      const labels = choiceLabels(c);
+      for (const [index, argument] of c.arguments.entries()) {
+        const label = labels[index];
+        if (label !== undefined) {
+          if (label !== null && rest.length === 0) out.push(makeItem(label));
+          continue;
+        }
+        const option = withoutEmpty(yield* this.valueItems(argument, at, []));
+        if (option.some((item) => item.tag === "list" || item.tag === "set"))
+          for (const item of withoutEmpty(yield* this.valueItems(argument, at, ["element"])))
+            if (item.tag === "object")
+              out.push(...(yield* this.#choiceValue(argument, at, ["element"], rest)));
+            else if (rest.length === 0 || item.tag === "unknown") out.push(item);
+        if (option.some((item) => item.tag === "object"))
+          out.push(...(yield* this.#choiceValue(argument, at, [], rest)));
+        for (const item of option)
+          if (item.tag === "list" || item.tag === "set" || item.tag === "object") continue;
+          else if (rest.length === 0 || item.tag === "unknown") out.push(item);
       }
       return out;
     }

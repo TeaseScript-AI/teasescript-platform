@@ -706,6 +706,27 @@ export class Contract {
   }
 
   /** F14: a text's or a collection's length is a whole number; an object's own `length` is its property (F11). */
+  /**
+   * V30 §19: the value a choice object's button gives at `rest`: its `value`, and its `text` where it may have none.
+   */
+  *#choiceValue(
+    option: PlaceId,
+    at: readonly string[],
+    rest: readonly string[],
+  ): Work<readonly Item[]> {
+    const value = withoutEmpty(yield* this.contractOfValueAt(option, [...at, "value"]));
+    const out: Item[] = [];
+    if (value.some((item) => !isMissing(item)))
+      out.push(
+        ...(rest.length === 0
+          ? value.filter((item) => !isMissing(item))
+          : yield* this.contractOfValueAt(option, [...at, "value", ...rest])),
+      );
+    if (value.length === 0 || value.some(isMissing))
+      out.push(...(yield* this.contractOfValueAt(option, [...at, "text", ...rest])));
+    return out;
+  }
+
   *#contractLength(owner: PlaceId, step: string, rest: readonly string[]): Work<readonly Item[]> {
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.contractOfValue(owner))) {
@@ -849,22 +870,27 @@ export class Contract {
     const interaction = family === "interaction" ? interactionCategory(name) : undefined;
     if (interaction?.kind === "asks")
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
+    // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
     if (interaction?.kind === "options") {
       const out: Item[] = [];
-      for (const argument of c.arguments) {
-        out.push(
-          ...(yield* this.contractOfValueAt(argument, rest)).filter(
-            (item) => item.tag !== "list" && item.tag !== "set",
-          ),
-        );
-        for (const item of withoutEmpty(yield* this.contractOfValueAt(argument, ["element"])))
-          out.push(
-            ...(item.tag === "object"
-              ? yield* this.contractOfValueAt(argument, ["element", "value", ...rest])
-              : rest.length === 0
-                ? [item]
-                : []),
-          );
+      const labels = choiceLabels(c);
+      for (const [index, argument] of c.arguments.entries()) {
+        const label = labels[index];
+        if (label !== undefined) {
+          if (label !== null && rest.length === 0) out.push(makeItem(label));
+          continue;
+        }
+        const option = withoutEmpty(yield* this.contractOfValue(argument));
+        if (option.some((item) => item.tag === "list" || item.tag === "set"))
+          for (const item of withoutEmpty(yield* this.contractOfValueAt(argument, ["element"])))
+            if (item.tag === "object")
+              out.push(...(yield* this.#choiceValue(argument, ["element"], rest)));
+            else if (rest.length === 0 || item.tag === "unknown") out.push(item);
+        if (option.some((item) => item.tag === "object"))
+          out.push(...(yield* this.#choiceValue(argument, [], rest)));
+        for (const item of option)
+          if (item.tag === "list" || item.tag === "set" || item.tag === "object") continue;
+          else if (rest.length === 0 || item.tag === "unknown") out.push(item);
       }
       return mergeItems(out, scope);
     }
@@ -2461,6 +2487,27 @@ export function writtenOf(kind: PlaceKind): TypeTerm | null {
     ? kind.written
     : null;
 }
+
+/**
+ * V30 §19: per option of an `askChoice`, by index, the kind its written label gives, `null` for a labelled list or set
+ * written empty (no button), or `undefined` without a label.
+ */
+export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | undefined)[] {
+  const evidence = "evidence" in c ? c.evidence : undefined;
+  if (evidence?.kind !== "choice") return [];
+  return evidence.options.map((option) =>
+    option.label === null
+      ? undefined
+      : (option.content.kind === "list" || option.content.kind === "set") &&
+          option.content.elements.length === 0
+        ? null
+        : option.label.kind,
+  );
+}
+
+/** A property read that found no such property. */
+export const isMissing = (item: Item): boolean =>
+  item.tag === "unknown" && (item.reasons & REASON.missing) !== 0;
 
 /** The value of a `default:` named argument. */
 export function defaultOf(c: ValueConstraint): PlaceId | undefined {

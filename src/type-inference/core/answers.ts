@@ -5,6 +5,7 @@ import type { DynamicWhy, PlaceId } from "../graph.js";
 import { BudgetExhausted, checkNesting, type BudgetLimit, type WorkCounter } from "./budget.js";
 import { Consumers } from "./consumers.js";
 import {
+  choiceLabels,
   Contract,
   defaultOf,
   typeTags,
@@ -563,10 +564,17 @@ class CoreAnswers implements Answers {
               pending.push({ value: c.receiver, path: ["element", ...path] });
           } else if (family === "operator" && name === "+" && path[0] === "element")
             for (const argument of c.arguments) pending.push({ value: argument, path });
-          else if (family === "interaction" && interactionCategory(name)?.kind === "options")
-            // F25: `askChoice`'s answer is an option's value
-            for (const argument of c.arguments)
-              pending.push({ value: argument, path: ["element", "value", ...path] });
+          else if (family === "interaction" && interactionCategory(name)?.kind === "options") {
+            // V30 §19: `askChoice`'s answer is a button's value: a whole choice object's or an element's (a label
+            // is text or a number)
+            const labels = choiceLabels(c);
+            for (const [index, argument] of c.arguments.entries())
+              if (labels[index] === undefined)
+                pending.push(
+                  { value: argument, path: ["value", ...path] },
+                  { value: argument, path: ["element", "value", ...path] },
+                );
+          }
         }
         continue;
       }

@@ -249,6 +249,28 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "compile-error",
     "-",
   ],
+  // V30 §19: askChoice gives a label's kind, or a button's value: a whole choice object's or an element's `value`, or
+  // its `text` where it has no `value` (review r5)
+  ["§19 a name label", "let r = askChoice back: 5\nlet n: integer = r", "compile-error", "-"],
+  ["§19 a number label", 'let r = askChoice 1: "One"\nlet t: string = r', "compile-error", "-"],
+  [
+    "§19 an element without its value",
+    'let xs = [{text: "Corner"}]\nlet r = askChoice xs\nlet n: integer = r',
+    "compile-error",
+    "-",
+  ],
+  [
+    "§19 a whole choice object",
+    'let r = askChoice {text: "A", value: {payload: 2}}\nlet t: string = r.payload',
+    "compile-error",
+    "-",
+  ],
+  [
+    "§19 a bound choice object",
+    'let o = {text: "A", value: 3}\nlet r = askChoice o\nrepeat r {}',
+    "valid",
+    "",
+  ],
 ];
 
 test("the core gives the expected outcome for the programs beside the set", () => {
