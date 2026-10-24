@@ -473,27 +473,63 @@ class CoreAnswers implements Answers {
 
   /**
    * The names of a value's known properties (S3 §1): those the keys below its source store, and those the objects of
-   * its literal, or of the literals its source's stores hold at its path, have; a source stored from another key, and
-   * a copied source's own stores below its root, are followed to that key, each key once.
+   * its literals have at its path. A source is a key, or a literal at a path: a value is followed through its
+   * projections to a copied key, a call's result key or a literal; a key to its prefixes' stores and their sources'
+   * own stores; a literal to the reads and calls standing at its path or above it. Each source once.
    */
   #propertyNames(value: PlaceId): ReadonlySet<string> {
     const { program, contract, definitions } = this.#pass;
     const names = new Set<string>();
-    const literalNames = (literal: PlaceId, path: readonly string[]): void => {
-      for (const object of contract.literalIndex(literal).objects.get(path.join("."))?.list ?? [])
-        for (const name of object.names) names.add(name);
+    const pending: (
+      { readonly key: Key } | { readonly literal: PlaceId; readonly path: readonly string[] }
+    )[] = [];
+    const seen = new Set<string>();
+    // a value read further at a path: its key or its literal, through the projections that hold it
+    const follow = (start: PlaceId, path: readonly string[]): void => {
+      let base = start;
+      const steps: string[] = [];
+      for (;;) {
+        const source = contract.copiedKey(base) ?? contract.resultKey(base);
+        if (source !== null) {
+          pending.push({ key: keyOf(keyPlace(source), [...keyPath(source), ...steps, ...path]) });
+          return;
+        }
+        if (program.hasOf.has(base)) {
+          pending.push({ literal: base, path: [...steps, ...path] });
+          return;
+        }
+        const projection = program.projOf.get(base);
+        if (
+          projection === undefined ||
+          projection.step === "iteration" ||
+          projection.step === "length"
+        )
+          return;
+        steps.unshift(stepName(projection.step));
+        base = projection.owner;
+      }
     };
-    const source = contract.copiedKey(value) ?? contract.resultKey(value);
-    if (source === null) {
-      if (program.hasOf.has(value)) literalNames(value, []);
-      return names;
-    }
-    const pending: Key[] = [source];
-    const seen = new Set<Key>();
+    follow(value, []);
     while (pending.length > 0) {
-      const key = pending.pop()!;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      const source = pending.pop()!;
+      if ("literal" in source) {
+        const id = `l${source.literal}|${source.path.join(".")}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const index = contract.literalIndex(source.literal);
+        for (const object of index.objects.get(source.path.join("."))?.list ?? [])
+          for (const name of object.names) names.add(name);
+        for (let length = 0; length <= source.path.length; length += 1) {
+          const at = source.path.slice(0, length).join(".");
+          const rest = source.path.slice(length);
+          for (const entry of [...(index.reads.get(at) ?? []), ...(index.others.get(at) ?? [])])
+            follow(entry.value, rest);
+        }
+        continue;
+      }
+      const key = source.key;
+      if (seen.has(`k${key}`)) continue;
+      seen.add(`k${key}`);
       const place = keyPlace(key);
       const path = keyPath(key);
       for (const below of definitions.keysBelow(key)) {
@@ -505,18 +541,12 @@ class CoreAnswers implements Answers {
         const stores = contract.prefixStores(keyOf(place, path.slice(0, length)));
         // the sources' own stores below their roots
         for (const sub of contract.subSources(stores))
-          pending.push(keyOf(keyPlace(sub), [...keyPath(sub), ...rest]));
+          pending.push({ key: keyOf(keyPlace(sub), [...keyPath(sub), ...rest]) });
         for (const entry of stores.list) {
           const at = [...(entry.at ?? []), ...rest];
-          const inner =
-            entry.key !== undefined
-              ? entry.key
-              : entry.value === undefined
-                ? null
-                : (contract.copiedKey(entry.value) ?? contract.resultKey(entry.value));
-          if (inner !== null) pending.push(keyOf(keyPlace(inner), [...keyPath(inner), ...at]));
-          else if (entry.value !== undefined && program.hasOf.has(entry.value))
-            literalNames(entry.value, at);
+          if (entry.key !== undefined)
+            pending.push({ key: keyOf(keyPlace(entry.key), [...keyPath(entry.key), ...at]) });
+          else if (entry.value !== undefined) follow(entry.value, at);
         }
       }
     }

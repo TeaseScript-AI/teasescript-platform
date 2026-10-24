@@ -54,6 +54,25 @@ test("the properties of a projected value and of a call's result are known", () 
   assert.deepEqual([...made.answers.properties(made.node("make()")).keys()], ["left"]);
   const edited = analysed("let box = {left: 1}\nbox.right = 2\nlet copy = box\nsay copy");
   assert.deepEqual([...edited.answers.properties(edited.node("copy")).keys()], ["left", "right"]);
+  // a source a literal holds, and projections of literals and of computed values (review r2)
+  for (const [source, text] of [
+    ["let inner = {value: 2}\nlet outer = {nested: inner}\nsay outer.nested", "outer.nested"],
+    [
+      "function make { return {value: 2} }\nlet outer = {nested: make()}\nsay outer.nested",
+      "outer.nested",
+    ],
+    ["let inner = {value: 2}\nsay [inner][0]", "[inner][0]"],
+    ["say [{value: 2}][0]", "[{value: 2}][0]"],
+    ["say {nested: {value: 2}}.nested", "{nested: {value: 2}}.nested"],
+  ] as const) {
+    const held = analysed(source);
+    const properties = held.answers.properties(held.node(text));
+    assert.deepEqual(
+      [...properties].map(([name, items]) => `${name}: ${items.map((item) => item.tag).join(",")}`),
+      ["value: integer"],
+      text,
+    );
+  }
 });
 
 test("a statement that stores answers for the place it stores into", () => {
