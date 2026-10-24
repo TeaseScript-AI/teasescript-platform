@@ -107,8 +107,9 @@ export function memberResult(name: string): readonly ValueKind[] | undefined {
 }
 
 /**
- * What an interaction gives: F25's declared answer, or one of its options' values (`askChoice`), which enters as
- * external data (C9). Any other interaction's answer is the runtime's.
+ * What an interaction gives: F25's declared answer, or one of its options' values (`askChoice`): authored options give
+ * their authored kinds, and only an option from external data (a host read, a load, `fromJson`) brings it in, at that
+ * option (C9, TABLE r4.42–r4.43). Any other interaction's answer is the runtime's.
  */
 export type InteractionCategory =
   { readonly kind: "asks"; readonly result: ValueKind } | { readonly kind: "options" };

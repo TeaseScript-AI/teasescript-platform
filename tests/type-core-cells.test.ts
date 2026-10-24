@@ -97,7 +97,7 @@ const ADMISSION: ReadonlyMap<string, string> = new Map([
   ["cp9-cells/F23/return-conflict", "a function's result decided by its first return (A2, A6)"],
   [
     "cp9-cells/F25/choice",
-    "the boundary check of an `askChoice` result stored into a written place (C9)",
+    "an obsolete C9 boundary at an authored choice (withdrawn by r4.42), kept byte-identical until S6 refreshes the set",
   ],
 ]);
 
