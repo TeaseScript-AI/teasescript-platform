@@ -203,10 +203,16 @@ export function solveDemands(
   keys: readonly string[],
 ): (readonly Item[])[] {
   const pass = createPass(request);
-  return keys.map((key) => pass.solver.run(demandWork(pass, key)));
+  return keys.map((key) => {
+    pass.solver.run(demandWork(pass, key));
+    // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store)
+    const answer = pass.solver.answer(key);
+    if (answer === undefined) throw new Error(`The demand '${key}' did not finish.`);
+    return answer;
+  });
 }
 
-/** The computation that demands `key` (`c|`, `def|`, `cop|`, `lit|`, `op|`, as the parts write them). */
+/** The computation that demands `key` (`c|`, `def|`, `cop|`, `lit|`, `op|`, `dk|`, `dn|`, `vdk|`, `vdn|`, as the parts write them). */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   const [kind, ...parts] = key.split("|");
   const { program, contract, values, exact } = pass;
@@ -229,6 +235,21 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
     case "op": {
       const rest = parts[1] === "" || parts[1] === undefined ? [] : parts[1].split(".");
       return values.valueItems(Number(parts[0]), null, rest);
+    }
+    case "dk": {
+      const rest = parts[1] === "" || parts[1] === undefined ? [] : parts[1].split(".");
+      return contract.defaultKinds(Number(parts[0]), rest);
+    }
+    case "dn":
+      return contract.onlyNull(Number(parts[0]));
+    case "vdk": {
+      const rest = parts[1] === "" || parts[1] === undefined ? [] : parts[1].split(".");
+      const node = parts[2] === "-" ? null : (program.flow.nodes[Number(parts[2])] ?? null);
+      return values.defaultKinds(Number(parts[0]), node, rest);
+    }
+    case "vdn": {
+      const node = parts[1] === "-" ? null : (program.flow.nodes[Number(parts[1])] ?? null);
+      return values.onlyNull(Number(parts[0]), node);
     }
     default:
       throw new Error(`No demand is written '${key}'.`);

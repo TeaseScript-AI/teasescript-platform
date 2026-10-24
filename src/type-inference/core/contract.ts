@@ -22,7 +22,7 @@ import {
 } from "./items.js";
 import { operationItems, type Operator } from "./operator-table.js";
 import { stepName, type ValueConstraint } from "./program.js";
-import type { Demand, Work } from "./solver.js";
+import type { Decision, Demand, Work } from "./solver.js";
 
 /*
  * The contract of the coarse core (checkpoint 9, TABLE §1, §3.2, §8): the kinds a key can hold on any run, flow-
@@ -89,6 +89,39 @@ export function unknownItem(reasons: number, writer: Writer | null = null): Item
 export function ingressNull(writer: Writer | null = null): Item {
   return makeItem("null", writer, { cert: "pos", word: "unknown" });
 }
+
+/**
+ * F18 (r4.5), F19 (r4.1): the kinds a `load` or `fromJson` takes from its default's (the input): the default's own;
+ * `unknown` where it has none; `unknown` and, at the value itself, the ingress `null` (with the writer of the default's
+ * `null` where `writer` asks) where it holds only `null` (a known `default: null` keeps null). A choice on the default's
+ * completed kinds: a provisional default without kinds is not yet one without kinds.
+ */
+export function typedDefault(rest: readonly string[], writer: boolean): Decision {
+  return {
+    choose: (input) =>
+      withoutEmpty(input).length === 0
+        ? "none"
+        : input.every((item) => item.tag === "null")
+          ? "null"
+          : "own",
+    answer: (choice, input) => {
+      if (choice === "none") return [unknownItem(REASON.external), ...withoutEmpty(input)];
+      if (choice !== "null") return input;
+      const first = input.find((item) => item.tag === "null");
+      return [
+        unknownItem(REASON.external),
+        ...(rest.length === 0 ? [ingressNull(writer ? (first?.writer ?? null) : null)] : []),
+        ...input.filter((item) => item.tag !== "null"),
+      ];
+    },
+  };
+}
+
+/** F19 (r4.1): a default holds only `null`, or nothing (`[ingressNull()]`, or none), on its completed kinds. */
+export const ONLY_NULL: Decision = {
+  choose: (input) => (input.every((item) => item.tag === "null") ? "null" : "other"),
+  answer: (choice) => (choice === "null" ? [ingressNull()] : []),
+};
 
 /** F11 (r4.4): an object's own `first`, `last` or `random`, which the core does not read. */
 export const OWN_SELECTION: Item = Object.freeze(
@@ -671,30 +704,17 @@ export class Contract {
         ],
         scope,
       );
-    // F19 (r4.1): a known `default: null` keeps null (a null field of a default is not known yet, ADR 1.4)
-    const typed = function* (
-      contract: Contract,
-      fallback: PlaceId | undefined,
-    ): Work<readonly Item[]> {
-      const items = fallback === undefined ? [] : yield* contract.contractOfValueAt(fallback, rest);
-      if (withoutEmpty(items).length === 0) return [unknownItem(REASON.external)];
-      if (items.every((item) => item.tag === "null"))
-        return [unknownItem(REASON.external), ...(rest.length === 0 ? [ingressNull()] : [])];
-      return items;
-    };
     if (c.kind === "load") {
       // F19: a computed key
       if (c.key === null) {
-        const fallback = c.fallback;
         const nullDefault =
-          rest.length === 0 &&
-          fallback !== null &&
-          (yield* this.contractOfValue(fallback)).every((item) => item.tag === "null");
+          rest.length === 0 && c.fallback !== null && (yield* this.onlyNull(c.fallback)).length > 0;
         return [unknownItem(REASON.external), ...(nullDefault ? [ingressNull()] : [])];
       }
       const expected = yield* this.expectedOf(c, rest);
       if (expected !== null) return expected;
-      if (c.fallback !== null) return [...(yield* typed(this, c.fallback)), ...emptyAt(rest)];
+      if (c.fallback !== null)
+        return [...(yield* this.defaultKinds(c.fallback, rest)), ...emptyAt(rest)];
     }
     if (c.kind !== "operation") return [unknownItem(REASON.external)];
     const { family, name } = c.contract;
@@ -778,13 +798,17 @@ export class Contract {
         scope,
       );
     }
-    if (name === "fromJson")
+    if (name === "fromJson") {
+      const fallback = defaultOf(c);
       return (
         (yield* this.expectedOf(c, rest)) ?? [
-          ...(yield* typed(this, defaultOf(c))),
+          ...(fallback === undefined
+            ? [unknownItem(REASON.external)]
+            : yield* this.defaultKinds(fallback, rest)),
           ...emptyAt(rest),
         ]
       );
+    }
     if (family === "interaction" && ASKED[name] !== undefined)
       return rest.length === 0 ? [makeItem(ASKED[name])] : [];
     if (family === "interaction") {
@@ -834,9 +858,7 @@ export class Contract {
     const term = termAt(written, rest);
     const fallback = c.kind === "load" ? (c.fallback ?? undefined) : defaultOf(c);
     const nullDefault =
-      rest.length === 0 &&
-      fallback !== undefined &&
-      (yield* this.contractOfValue(fallback)).every((item) => item.tag === "null");
+      rest.length === 0 && fallback !== undefined && (yield* this.onlyNull(fallback)).length > 0;
     return [
       ...(term === null ? ["unknown" as const] : typeTags(term)).map((tag) =>
         tag === "unknown" ? unknownItem(REASON.external) : makeItem(tag, null, { cert: "pos" }),
@@ -844,6 +866,32 @@ export class Contract {
       ...(nullDefault ? [makeItem("null", null, { cert: "pos" })] : []),
       ...emptyAt(rest),
     ];
+  }
+
+  /** The kinds a `load` or `fromJson` takes from its default at `rest` (`typedDefault`), on the default's contract. */
+  public *defaultKinds(fallback: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
+    const site = this.pass.program.places[fallback]?.site ?? null;
+    return yield {
+      key: `dk|${fallback}|${rest.join(".")}`,
+      kind: "contract",
+      file: site?.file ?? -1,
+      offset: site?.start ?? -1,
+      make: () => this.contractOfValueAt(fallback, rest),
+      decision: typedDefault(rest, false),
+    };
+  }
+
+  /** F19 (r4.1): whether a default holds only `null` (or nothing), by its contract (`ONLY_NULL`). */
+  public *onlyNull(fallback: PlaceId): Work<readonly Item[]> {
+    const site = this.pass.program.places[fallback]?.site ?? null;
+    return yield {
+      key: `dn|${fallback}`,
+      kind: "contract",
+      file: site?.file ?? -1,
+      offset: site?.start ?? -1,
+      make: () => this.contractOfValue(fallback),
+      decision: ONLY_NULL,
+    };
   }
 
   /**

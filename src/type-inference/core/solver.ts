@@ -11,15 +11,29 @@ import { itemsSignature, type IngressCell, type Item, type ItemScope } from "./i
  * members run in a total order derived from the source (file, offset, demand kind, key), a member again only when a
  * member it read changed, until no member's `itemsSignature` changes. When a member's run reads a demand that belongs
  * to the component through others (expansion), the enlarged component starts again from bottom; when it reads an
- * unfinished demand outside the component, the component is part of a larger one and is solved with it. So an answer
- * depends on the final member set, never on the order the demands were discovered in; the tests check that property
- * (the component test re-solves every component from each member and in the reverse order).
+ * unfinished demand outside the component, the component is part of a larger one and is solved with it. A component
+ * being solved stays on the explicit stack too: its members' runs are frames above it, and a component one of them
+ * closes is solved above that. So an answer depends on the final member set, never on the order the demands were
+ * discovered in; the tests check that property (the component test re-solves every component from each member and in
+ * the reverse order).
+ *
+ * That needs answers monotone in what they read. A choice that is not (a `Decision`: F18/F19's default without kinds
+ * gives `unknown`) is made on a completed input: at once outside every component; inside one, the component is solved
+ * first with every choice open and, where a choice then changes an answer, again from bottom with the choices held.
  */
 
 /** What a demand asks, which orders the members of one component at one site (S3 §1). */
 export type DemandKind = "contract" | "exact" | "value";
 
 const KIND_RANK: Readonly<Record<DemandKind, number>> = { contract: 0, exact: 1, value: 2 };
+
+/** A choice a demand makes on what its run computes (its input) that is not monotone in it. */
+export interface Decision {
+  /** The choice on a completed input. */
+  readonly choose: (input: readonly Item[]) => string;
+  /** The answer under a choice, or an open one (`null`): monotone in the input either way. */
+  readonly answer: (choice: string | null, input: readonly Item[]) => readonly Item[];
+}
 
 export interface Demand {
   /** The demand's identity: equal keys are one demand, computed once. */
@@ -28,7 +42,9 @@ export interface Demand {
   /** Where it stands in the source: its file's index in project order and its offset; `-1` for no site. */
   readonly file: number;
   readonly offset: number;
+  /** Computes its answer, or its decision's input. */
   readonly make: () => Work<readonly Item[]>;
+  readonly decision?: Decision;
 }
 
 /** A computation that yields the demands it reads and receives their items. */
@@ -40,6 +56,10 @@ interface DemandNode {
   readonly index: number;
   /** Its answer so far: provisional until its component is solved. */
   value: readonly Item[];
+  /** What its last run computed: its decision's input. */
+  input: readonly Item[];
+  /** Its decision's choice while its component is solved with the choices held; `null` while open. */
+  choice: string | null;
   /** The component being solved that it is a member of. */
   component: Component | null;
 }
@@ -57,6 +77,15 @@ interface Frame {
   selfRead: boolean;
   /** The ledger's total when it started: the work it and the demands it was the first to compute cost. */
   readonly started: number;
+  /** A member's run again: the solving that takes its result. */
+  readonly rerun: Rerun | null;
+}
+
+interface Rerun {
+  readonly solving: Solving;
+  readonly member: DemandNode;
+  /** The members of its component it has read. */
+  readonly reads: Set<DemandNode>;
 }
 
 interface Component {
@@ -68,6 +97,24 @@ interface Component {
   readonly dependents: Map<DemandNode, Set<DemandNode>>;
   readonly reads: Map<DemandNode, Set<DemandNode>>;
   cells: Map<string, IngressCell>;
+}
+
+/** A component being solved: above the frame that reads the demand that closed it, below its members' runs. */
+interface Solving {
+  readonly component: Component;
+  /** The first run that closed it. */
+  readonly closing: Frame;
+  /** The frame stack's length while no member runs. */
+  readonly depth: number;
+  /** The members in the order they run in, and each one's place in it. */
+  members: DemandNode[];
+  position: Map<DemandNode, number>;
+  /** The places to run in this round, those that ran in it, and those for the next round. */
+  now: PositionHeap;
+  done: Set<number>;
+  next: Set<number>;
+  /** The members' choices are held: the second solve. */
+  held: boolean;
 }
 
 /** A solved component's member: its key and its answer. */
@@ -164,8 +211,10 @@ export class Solver {
   /** Tarjan's stack of unfinished demands outside the components being solved. */
   readonly #stack: DemandNode[] = [];
   readonly #frames: Frame[] = [];
-  /** The member runs in progress, the innermost last, with what each has read of its component. */
-  readonly #reruns: { readonly member: DemandNode; readonly reads: Set<DemandNode> }[] = [];
+  /** The components being solved, the innermost last. */
+  readonly #solving: Solving[] = [];
+  /** The member runs in progress, the innermost last. */
+  readonly #reruns: Rerun[] = [];
   readonly #work: WorkLedger;
   readonly #scope: ItemScope;
   readonly #seam: SolverSeam | null = activeSeam;
@@ -188,7 +237,15 @@ export class Solver {
       return [];
     })();
     try {
-      this.#drive(this.#frame(null, top, this.#counter++));
+      this.#drive(this.#frame(null, top, this.#counter++, null));
+    } catch (error) {
+      // a stop (the budget's) leaves demands unfinished: they are forgotten, the finished ones kept
+      this.#active.clear();
+      this.#stack.length = 0;
+      this.#frames.length = 0;
+      this.#solving.length = 0;
+      this.#reruns.length = 0;
+      throw error;
     } finally {
       this.#running = false;
     }
@@ -206,7 +263,12 @@ export class Solver {
     return this.#units;
   }
 
-  #frame(node: DemandNode | null, work: Work<readonly Item[]>, index: number): Frame {
+  #frame(
+    node: DemandNode | null,
+    work: Work<readonly Item[]>,
+    index: number,
+    rerun: Rerun | null,
+  ): Frame {
     this.#work.charge("frames");
     return {
       node,
@@ -217,15 +279,20 @@ export class Solver {
       base: this.#stack.length,
       selfRead: false,
       started: this.#work.total,
+      rerun,
     };
   }
 
-  /** Runs frames from `base` on until `base` itself returns, and returns its result. */
-  #drive(base: Frame): readonly Item[] {
+  /** Runs frames, and solves the components they close, until `base` returns. */
+  #drive(base: Frame): void {
     const frames = this.#frames;
-    const depth = frames.length;
     frames.push(base);
     for (;;) {
+      const solving = this.#solving.at(-1);
+      if (solving !== undefined && solving.depth === frames.length) {
+        this.#step(solving);
+        continue;
+      }
       const frame = frames.at(-1)!;
       const step = frame.work.next(frame.pending ?? []);
       frame.pending = undefined;
@@ -236,11 +303,12 @@ export class Solver {
       }
       frames.pop();
       if (frame === base) {
-        if (frames.length !== depth) throw new Error("The solver's frames are out of order.");
-        return step.value;
+        if (frames.length !== 0 || this.#solving.length !== 0)
+          throw new Error("The solver's frames are out of order.");
+        return;
       }
-      const parent = frames.at(-1)!;
-      parent.pending = this.#finish(frame, step.value, parent);
+      if (frame.rerun !== null) this.#rerunDone(frame, step.value);
+      else this.#finish(frame, step.value, frames.at(-1)!);
     }
   }
 
@@ -253,9 +321,16 @@ export class Solver {
     }
     const node = this.#active.get(demand.key);
     if (node === undefined) {
-      const created: DemandNode = { demand, index: this.#counter++, value: [], component: null };
+      const created: DemandNode = {
+        demand,
+        index: this.#counter++,
+        value: [],
+        input: [],
+        choice: null,
+        component: null,
+      };
       this.#active.set(demand.key, created);
-      const pushed = this.#frame(created, demand.make(), created.index);
+      const pushed = this.#frame(created, demand.make(), created.index, null);
       this.#stack.push(created);
       this.#frames.push(pushed);
       return;
@@ -272,113 +347,130 @@ export class Solver {
     frame.pending = node.value;
   }
 
-  /** A demand's first run returned `items`: memoise it, solve the component it closes, or keep it provisional. */
-  #finish(frame: Frame, items: readonly Item[], parent: Frame): readonly Item[] {
+  /**
+   * A demand's first run returned `items`: memoise its answer, keep it provisional, or start solving the component it
+   * closes; its reader `parent` takes the answer then.
+   */
+  #finish(frame: Frame, items: readonly Item[], parent: Frame): void {
     const node = frame.node!;
-    node.value = items;
+    const decision = node.demand.decision;
+    node.input = items;
+    node.value = decision === undefined ? items : decision.answer(null, items);
     parent.low = Math.min(parent.low, frame.low);
-    if (frame.low !== frame.index) return items;
+    if (frame.low !== frame.index) {
+      parent.pending = node.value;
+      return;
+    }
     const members = this.#stack.splice(frame.base);
     if (members.length === 1 && !frame.selfRead) {
-      this.#memo.set(node.demand.key, items);
+      if (decision !== undefined) node.value = decision.answer(decision.choose(items), items);
+      this.#memo.set(node.demand.key, node.value);
       this.#active.delete(node.demand.key);
       this.#units.push({ key: node.demand.key, units: this.#work.total - frame.started });
-      return items;
+      parent.pending = node.value;
+      return;
     }
-    const outer = this.#solve(members, frame.index);
-    if (outer !== null) {
-      // part of a larger component: the reader belongs to it too
-      parent.low = Math.min(parent.low, outer);
-      return node.value;
-    }
-    this.#units.push({ key: node.demand.key, units: this.#work.total - frame.started });
-    return this.#memo.get(node.demand.key)!;
-  }
-
-  /**
-   * Solves a component canonically (S3 §1) and memoises its members; returns `null`, or the low link of the larger
-   * component it turned out to belong to, whose root then solves it with the rest.
-   */
-  #solve(found: DemandNode[], index: number): number | null {
     const component: Component = {
-      index,
-      members: found,
-      low: index,
+      index: frame.index,
+      members,
+      low: frame.index,
       base: this.#stack.length,
       dependents: new Map(),
       reads: new Map(),
       cells: new Map(),
     };
-    for (const member of found) member.component = component;
-    this.#work.charge("sccMembers", found.length);
+    for (const member of members) member.component = component;
+    this.#work.charge("sccMembers", members.length);
+    const solving: Solving = {
+      component,
+      closing: frame,
+      depth: this.#frames.length,
+      members: [],
+      position: new Map(),
+      now: new PositionHeap(),
+      done: new Set(),
+      next: new Set(),
+      held: false,
+    };
+    this.#begin(solving);
+    this.#solving.push(solving);
+  }
+
+  /** Solving starts again from bottom: no items, no recorded reads, fresh ingress cells, every member to run. */
+  #begin(solving: Solving): void {
+    const { component } = solving;
     const reverse = this.#seam?.reverseWorklist === true;
-    restart: for (;;) {
-      const members = [...component.members].sort((a, b) =>
-        reverse ? canonical(b.demand, a.demand) : canonical(a.demand, b.demand),
-      );
-      const position = new Map(members.map((member, at) => [member, at]));
-      component.dependents.clear();
-      component.reads.clear();
-      component.cells = new Map();
-      for (const member of members) member.value = [];
-      let next = new Set(members.map((_, at) => at));
-      while (next.size > 0) {
-        this.#work.charge("sccRounds");
-        const now = new PositionHeap();
-        for (const at of next) now.push(at);
-        next = new Set();
-        const done = new Set<number>();
-        while (now.size > 0) {
-          const at = now.pop();
-          if (done.has(at)) continue;
-          done.add(at);
-          const member = members[at]!;
-          const changed = this.#rerun(component, member);
-          if (component.low < component.index) {
-            this.#abandon(component);
-            return component.low;
-          }
-          if (this.#stack.length > component.base) {
-            // members found through a member's run: the enlarged component starts again from bottom
-            const joined = this.#stack.splice(component.base);
-            for (const found of joined) found.component = component;
-            component.members = [...component.members, ...joined];
-            this.#work.charge("sccMembers", joined.length);
-            continue restart;
-          }
-          if (!changed) continue;
-          for (const dependent of component.dependents.get(member) ?? []) {
-            this.#work.charge("sccDeps");
-            // a member after this one runs in this round, one before it in the next
-            const later = position.get(dependent)!;
-            if (later > at) now.push(later);
-            else next.add(later);
-          }
+    solving.members = [...component.members].sort((a, b) =>
+      reverse ? canonical(b.demand, a.demand) : canonical(a.demand, b.demand),
+    );
+    solving.position = new Map(solving.members.map((member, at) => [member, at]));
+    component.dependents.clear();
+    component.reads.clear();
+    component.cells = new Map();
+    for (const member of solving.members) member.value = [];
+    solving.now = new PositionHeap();
+    solving.done = new Set();
+    solving.next = new Set(solving.members.map((_, at) => at));
+  }
+
+  /**
+   * The next step of solving a component canonically (S3 §1): a member's run, the choices once the open solve is
+   * stable, or the end.
+   */
+  #step(solving: Solving): void {
+    for (;;) {
+      if (solving.now.size === 0) {
+        if (solving.next.size > 0) {
+          this.#work.charge("sccRounds");
+          for (const at of solving.next) solving.now.push(at);
+          solving.next = new Set();
+          solving.done = new Set();
+          continue;
         }
+        if (!solving.held && this.#choose(solving)) {
+          solving.held = true;
+          this.#begin(solving);
+          continue;
+        }
+        this.#solved(solving);
+        return;
       }
-      const solved = members.map((member) => ({ key: member.demand.key, items: member.value }));
-      for (const member of members) {
-        member.component = null;
-        this.#memo.set(member.demand.key, member.value);
-        this.#active.delete(member.demand.key);
-      }
-      this.#seam?.onComponent?.(solved);
-      return null;
+      const at = solving.now.pop();
+      if (solving.done.has(at)) continue;
+      solving.done.add(at);
+      const member = solving.members[at]!;
+      this.#work.charge("sccReruns");
+      const rerun: Rerun = { solving, member, reads: new Set() };
+      this.#reruns.push(rerun);
+      this.#frames.push(this.#frame(null, member.demand.make(), solving.component.index, rerun));
+      return;
     }
   }
 
-  /** Runs a member again from its demand; returns whether its answer changed. */
-  #rerun(component: Component, member: DemandNode): boolean {
-    this.#work.charge("sccReruns");
-    const reads = new Set<DemandNode>();
-    this.#reruns.push({ member, reads });
-    const frame = this.#frame(null, member.demand.make(), component.index);
-    let items: readonly Item[];
-    try {
-      items = this.#anchored(component, member, this.#drive(frame));
-    } finally {
-      this.#reruns.pop();
+  /**
+   * The members' choices on their open answers' inputs: whether one changes an answer (the component is then solved
+   * again with them held).
+   */
+  #choose(solving: Solving): boolean {
+    let changes = false;
+    for (const member of solving.members) {
+      const decision = member.demand.decision;
+      if (decision === undefined) continue;
+      member.choice = decision.choose(member.input);
+      if (
+        itemsSignature(decision.answer(member.choice, member.input), this.#scope) !==
+        itemsSignature(decision.answer(null, member.input), this.#scope)
+      )
+        changes = true;
     }
+    return changes;
+  }
+
+  /** A member's run again returned `input`: record its reads and answer, and go on solving as that requires. */
+  #rerunDone(frame: Frame, input: readonly Item[]): void {
+    const { solving, member, reads } = frame.rerun!;
+    const { component } = solving;
+    this.#reruns.pop();
     component.low = Math.min(component.low, frame.low);
     for (const read of component.reads.get(member) ?? []) {
       this.#work.charge("sccDeps");
@@ -391,11 +483,63 @@ export class Solver {
       dependents.add(member);
     }
     component.reads.set(member, reads);
+    const decision = member.demand.decision;
+    const items = this.#anchored(
+      component,
+      member,
+      decision === undefined ? input : decision.answer(member.choice, input),
+    );
     const changed =
       itemsSignature(items, this.#scope) !== itemsSignature(member.value, this.#scope);
     // its ingress cells took this run's stores whether or not its kinds changed
     member.value = items;
-    return changed;
+    member.input = input;
+    if (component.low < component.index) {
+      this.#abandon(solving);
+      return;
+    }
+    if (this.#stack.length > component.base) {
+      // members found through a member's run: the enlarged component starts again from bottom, its choices open
+      const joined = this.#stack.splice(component.base);
+      for (const found of joined) found.component = component;
+      component.members = [...component.members, ...joined];
+      this.#work.charge("sccMembers", joined.length);
+      for (const each of component.members) each.choice = null;
+      solving.held = false;
+      this.#begin(solving);
+      return;
+    }
+    if (!changed) return;
+    const at = solving.position.get(member)!;
+    for (const dependent of component.dependents.get(member) ?? []) {
+      this.#work.charge("sccDeps");
+      // a member after this one runs in this round, one before it in the next
+      const later = solving.position.get(dependent)!;
+      if (later > at) solving.now.push(later);
+      else solving.next.add(later);
+    }
+  }
+
+  /** A component is stable: its members are memoised, and the reader of the one that closed it takes its answer. */
+  #solved(solving: Solving): void {
+    this.#solving.pop();
+    const solved = solving.members.map((member) => ({
+      key: member.demand.key,
+      items: member.value,
+    }));
+    for (const member of solving.members) {
+      member.component = null;
+      member.choice = null;
+      this.#memo.set(member.demand.key, member.value);
+      this.#active.delete(member.demand.key);
+    }
+    this.#seam?.onComponent?.(solved);
+    const closing = solving.closing.node!;
+    this.#units.push({
+      key: closing.demand.key,
+      units: this.#work.total - solving.closing.started,
+    });
+    this.#frames.at(-1)!.pending = closing.value;
   }
 
   /**
@@ -414,10 +558,21 @@ export class Solver {
     });
   }
 
-  /** A component that belongs to a larger one: its members wait, provisional, on Tarjan's stack. */
-  #abandon(component: Component): void {
+  /**
+   * A component that belongs to a larger one: its members wait, provisional, on Tarjan's stack, and the reader of the
+   * one that closed it belongs to the larger one too.
+   */
+  #abandon(solving: Solving): void {
+    this.#solving.pop();
+    const { component } = solving;
     const members = [...component.members].sort((a, b) => a.index - b.index);
-    for (const member of members) member.component = null;
+    for (const member of members) {
+      member.component = null;
+      member.choice = null;
+    }
     this.#stack.splice(component.base, 0, ...members);
+    const parent = this.#frames.at(-1)!;
+    parent.low = Math.min(parent.low, component.low);
+    parent.pending = solving.closing.node!.value;
   }
 }

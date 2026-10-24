@@ -8,12 +8,14 @@ import {
   emptyAt,
   ingressNull,
   METHOD_RESULT,
+  ONLY_NULL,
   OPAQUE_MEMBER,
   operatorOf,
   plusElements,
   REFERENCE,
   REMOVALS,
   SELECTIONS,
+  typedDefault,
   unknownItem,
   withOwnSelection,
 } from "./contract.js";
@@ -235,19 +237,6 @@ export class Values {
     const scope = program.scope;
     const at = program.exprAt(c.site) ?? node;
     const external = (): Item[] => [unknownItem(REASON.external)];
-    // F18 (r4.5): the default's kinds, definite (the runtime checks the value against the default's type); F19
-    // (r4.1): a known `default: null` keeps null
-    const typed = function* (
-      values: Values,
-      fallback: PlaceId,
-      fallbackAt: FlowNode | null,
-    ): Work<readonly Item[]> {
-      const items = yield* values.valueItems(fallback, fallbackAt, rest);
-      if (withoutEmpty(items).length === 0) return external();
-      if (items.every((item) => item.tag === "null"))
-        return [...external(), ...(rest.length === 0 ? [ingressNull(items[0]!.writer)] : [])];
-      return items;
-    };
     let out: Item[] = [];
     if (c.kind === "fallback") {
       const left = yield* this.valueItems(c.left, at, rest);
@@ -294,8 +283,7 @@ export class Values {
       if (rest.length > 0) out = external();
       else {
         const nullDefault =
-          c.fallback !== null &&
-          (yield* this.valueItems(c.fallback, at, [])).every((item) => item.tag === "null");
+          c.fallback !== null && (yield* this.onlyNull(c.fallback, at)).length > 0;
         out = [...external(), ...(nullDefault ? [ingressNull()] : [])];
       }
     } else if (c.kind === "load") {
@@ -303,22 +291,50 @@ export class Values {
       const expected = yield* contract.expectedOf(c, rest);
       if (expected !== null) out = [...expected];
       else if (c.fallback !== null)
-        out = [...(yield* typed(this, c.fallback, at)), ...emptyAt(rest)];
+        out = [...(yield* this.defaultKinds(c.fallback, at, rest)), ...emptyAt(rest)];
       else out = external();
-    } else if (c.kind === "operation") out = yield* this.#operation(c, at, rest, typed);
+    } else if (c.kind === "operation") out = yield* this.#operation(c, at, rest);
     else out = external();
     return alternatives(out, scope);
+  }
+
+  /**
+   * F18 (r4.5): the kinds a `load` or `fromJson` takes from its default's value at `at` (`typedDefault`): definite,
+   * the runtime checks the value against the default's type.
+   */
+  public *defaultKinds(
+    fallback: PlaceId,
+    at: FlowNode | null,
+    rest: readonly string[],
+  ): Work<readonly Item[]> {
+    const site = this.pass.program.places[fallback]?.site ?? null;
+    return yield {
+      key: `vdk|${fallback}|${rest.join(".")}|${at?.id ?? "-"}`,
+      kind: "value",
+      file: site?.file ?? -1,
+      offset: site?.start ?? -1,
+      make: () => this.valueItems(fallback, at, rest),
+      decision: typedDefault(rest, true),
+    };
+  }
+
+  /** F19 (r4.1): whether a default's value at `at` holds only `null` (or nothing) (`ONLY_NULL`). */
+  public *onlyNull(fallback: PlaceId, at: FlowNode | null): Work<readonly Item[]> {
+    const site = this.pass.program.places[fallback]?.site ?? null;
+    return yield {
+      key: `vdn|${fallback}|${at?.id ?? "-"}`,
+      kind: "value",
+      file: site?.file ?? -1,
+      offset: site?.start ?? -1,
+      make: () => this.valueItems(fallback, at, []),
+      decision: ONLY_NULL,
+    };
   }
 
   *#operation(
     c: Extract<ValueConstraint, { readonly kind: "operation" }>,
     at: FlowNode | null,
     rest: readonly string[],
-    typed: (
-      values: Values,
-      fallback: PlaceId,
-      fallbackAt: FlowNode | null,
-    ) => Work<readonly Item[]>,
   ): Work<Item[]> {
     const { program, contract } = this.pass;
     const { family, name } = c.contract;
@@ -430,7 +446,7 @@ export class Values {
       const fallback = defaultOf(c);
       return fallback === undefined
         ? [unknownItem(REASON.external)]
-        : [...(yield* typed(this, fallback, at)), ...emptyAt(rest)];
+        : [...(yield* this.defaultKinds(fallback, at, rest)), ...emptyAt(rest)];
     }
     // F25: the built-in's declared result
     if (family === "interaction" && ASKED[name] !== undefined)
