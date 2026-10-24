@@ -583,14 +583,23 @@ class CoreAnswers implements Answers {
         const at = task.path.join(".");
         for (const object of index.objects.get(at)?.list ?? [])
           for (const name of object.names) names.add(name);
-        // the reads and calls standing at the path or above it, followed at the rest of the path
+        // the reads and calls standing at the path or above it, followed at the rest of the path: asked by the path's
+        // prefixes, or by the stands of a map that has fewer (a deep path beside few stands, a shallow one beside many)
         for (const map of [index.reads, index.others])
-          for (const [stand, entries] of map) {
-            const depth = stand === "" ? 0 : stand.split(".").length;
-            if (stand !== "" && at !== stand && !at.startsWith(`${stand}.`)) continue;
-            for (const entry of entries)
-              pending.push({ value: entry.value, path: task.path.slice(depth) });
-          }
+          if (map.size > task.path.length + 1)
+            for (let depth = 0, stand = ""; depth <= task.path.length; depth += 1) {
+              if (depth > 0)
+                stand = depth === 1 ? task.path[0]! : `${stand}.${task.path[depth - 1]!}`;
+              for (const entry of map.get(stand) ?? [])
+                pending.push({ value: entry.value, path: task.path.slice(depth) });
+            }
+          else
+            for (const [stand, entries] of map) {
+              const depth = stand === "" ? 0 : stand.split(".").length;
+              if (stand !== "" && at !== stand && !at.startsWith(`${stand}.`)) continue;
+              for (const entry of entries)
+                pending.push({ value: entry.value, path: task.path.slice(depth) });
+            }
         continue;
       }
       const key = task.key;
