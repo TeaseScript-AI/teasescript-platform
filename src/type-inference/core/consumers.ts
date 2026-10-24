@@ -10,6 +10,7 @@ import type { Constraint, PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import {
   choiceLabels,
+  heldReference,
   MEMBER_KINDS,
   OWN_SELECTION,
   REFERENCE,
@@ -368,6 +369,20 @@ export class Consumers {
 
   #kindsOf(value: PlaceId, node: FlowNode | null): Item[] {
     return withoutEmpty(this.#run(this.pass.values.valueItems(value, node, [])));
+  }
+
+  /**
+   * A member's or a method's receiver: its kinds at the node, and F19a before them (r4.44): where the shared decision
+   * on the receiver's contract holds a reference the exact value lacks, its reference kinds too, whose members the
+   * consumer's member obligations cover.
+   */
+  #receiverKinds(value: PlaceId, node: FlowNode | null): Item[] {
+    const kinds = this.#kindsOf(value, node);
+    if (kinds.some((item) => REFERENCE.has(item.tag))) return kinds;
+    const contract = this.#run(this.pass.contract.valueReceiver(value));
+    return heldReference(contract)
+      ? [...kinds, ...contract.filter((item) => REFERENCE.has(item.tag))]
+      : kinds;
   }
 
   // ------------------------------------------------------------------------------ C1, C7 against written types
@@ -1070,7 +1085,7 @@ export class Consumers {
         return;
       }
     }
-    const owners = this.#kindsOf(c.owner, node);
+    const owners = this.#receiverKinds(c.owner, node);
     const label = this.#keyLabel(c.owner);
     // C6: a selection on a collection, or on an unknown receiver that may be one
     if (
@@ -1131,7 +1146,7 @@ export class Consumers {
       this.#skip(receiver);
       return;
     }
-    const kinds = this.#kindsOf(receiver, node);
+    const kinds = this.#receiverKinds(receiver, node);
     this.#defaultNull(receiver, node, site);
     this.#memberChecks(
       this.#own(receiver, site),

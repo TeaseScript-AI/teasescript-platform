@@ -244,3 +244,49 @@ test("a handle's own length is the runtime's member, its consumer's check kept (
     [opaque, opaque, opaque, opaque],
   );
 });
+
+test("a receiver that may be a reference answers by F19a before its exact value (Astra Q4-r2)", () => {
+  const read = (source: string, text: string): string => {
+    const { answers, node } = analysed(source);
+    const at = answers.at(node(text));
+    const diagnostics = answers.diagnostics.map((d) => `${d.kind} ${d.class}`).sort();
+    const checks = answers.checks.map((check) => check.kind).sort();
+    return `${at?.route}: ${at?.items.map((item) => item.tag).join(",")}; ${diagnostics.join(", ")}; ${checks.join(", ")}`;
+  };
+  const vera = "speaker vera { length: 2 }\n";
+  const opaque =
+    "unknown; integer-use warning-runtime-check, member-read warning-runtime-check; integer-check, null-check";
+  assert.deepEqual(
+    [
+      // a written union with text or a list, and a late store of the speaker
+      read(
+        `${vera}let alias: string|speaker = "abc"\nrepeat alias.length {}\nexit`,
+        "alias.length",
+      ),
+      read(
+        `${vera}let alias: integer[]|speaker = [1]\nrepeat alias.length {}\nexit`,
+        "alias.length",
+      ),
+      read(`${vera}let alias = [1]\nrepeat alias.length {}\nalias = vera\nexit`, "alias.length"),
+      // a function's result that may be the speaker or a list: no integer beside the member
+      read(
+        `${vera}function h(flag: boolean) {\n  if flag { return vera }\n  return [1]\n}\nrepeat h(true).length {}\nexit`,
+        "h(true).length",
+      ),
+      // the pure reference, and a method of a written union
+      read(`${vera}let alias = vera\nrepeat alias.length {}\nexit`, "alias.length"),
+      read(
+        `${vera}let alias: string|speaker = "abc"\nsay alias.uppercase()\nexit`,
+        "alias.uppercase()",
+      ),
+    ],
+    [
+      `contract: ${opaque}`,
+      `contract: ${opaque}`,
+      `contract: ${opaque}`,
+      `value: ${opaque}`,
+      `contract: ${opaque}`,
+      "value: unknown; member-read warning-runtime-check; null-check",
+    ],
+  );
+});

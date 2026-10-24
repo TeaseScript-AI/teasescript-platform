@@ -248,7 +248,7 @@ export function solveDemands(
 }
 
 /**
- * The computation that demands `key` (`c|`, `rc|`, `cm|`, `def|`, `cop|`, `lit|`, `op|`, `vm|`, `dk|`, `dn|`, `vdk|`,
+ * The computation that demands `key` (`c|`, `rc|`, `cv|`, `def|`, `cop|`, `lit|`, `op|`, `dk|`, `dn|`, `vdk|`,
  * `vdn|`, as the parts write them).
  */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
@@ -259,12 +259,8 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
       return contract.contractOf(parts.join("|"));
     case "rc":
       return contract.receiverKinds(parts.join("|"));
-    case "cm":
-      return contract.methodReceiver(Number(parts[0]));
-    case "vm": {
-      const node = parts[1] === "-" ? null : (program.flow.nodes[Number(parts[1])] ?? null);
-      return values.methodReceiver(Number(parts[0]), node);
-    }
+    case "cv":
+      return contract.valueReceiver(Number(parts[0]));
     case "cop":
       return contract.contractOfValue(Number(parts[0]));
     case "def": {

@@ -619,11 +619,14 @@ export class Contract {
     };
   }
 
-  /** A method's receiver's contract as a demand of its own, with F19a's decision (r4.44). */
-  public *methodReceiver(receiver: PlaceId): Work<readonly Item[]> {
+  /**
+   * A value's contract as a receiver (a method's, a length's owner), a demand of its own with F19a's decision (r4.44):
+   * the one decision both sides take before an exact answer or a transfer's alternatives.
+   */
+  public *valueReceiver(receiver: PlaceId): Work<readonly Item[]> {
     const site = this.pass.program.places[receiver]?.site ?? null;
     return yield {
-      key: `cm|${receiver}`,
+      key: `cv|${receiver}`,
       kind: "contract",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -853,6 +856,9 @@ export class Contract {
   }
 
   *#contractLength(owner: PlaceId, step: string, rest: readonly string[]): Work<readonly Item[]> {
+    // F19a before F14: a receiver that may be a reference has the runtime's members, its `length` among them
+    if (heldReference(yield* this.valueReceiver(owner)))
+      return yield* this.contractOfValueAt(owner, [step, ...rest]);
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.contractOfValue(owner))) {
       if (
@@ -906,7 +912,7 @@ export class Contract {
     if (
       family === "method" &&
       c.receiver !== null &&
-      heldReference(yield* this.methodReceiver(c.receiver))
+      heldReference(yield* this.valueReceiver(c.receiver))
     )
       return [unknownItem(REASON.opaque)];
     // F26b (r5): always text

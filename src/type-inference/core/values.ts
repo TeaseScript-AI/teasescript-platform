@@ -13,7 +13,6 @@ import {
   OPAQUE_MEMBER,
   operatorOf,
   plusElements,
-  RECEIVER,
   REFERENCE,
   typedDefault,
   unknownItem,
@@ -263,6 +262,10 @@ export class Values {
     step: string,
     rest: readonly string[],
   ): Work<readonly Item[]> {
+    // F19a before F14 and the exact value: a receiver that may be a reference has the runtime's members, its `length`
+    // among them, read as a member so its route is the member's
+    if (heldReference(yield* this.pass.contract.valueReceiver(owner)))
+      return yield* this.valueItems(owner, node, [step, ...rest]);
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.valueItems(owner, node, []))) {
       if (
@@ -436,19 +439,6 @@ export class Values {
     };
   }
 
-  /** A method's receiver's value at `at` as a demand of its own, with F19a's decision (r4.44). */
-  public *methodReceiver(receiver: PlaceId, at: FlowNode | null): Work<readonly Item[]> {
-    const site = this.pass.program.places[receiver]?.site ?? null;
-    return yield {
-      key: `vm|${receiver}|${at?.id ?? "-"}`,
-      kind: "value",
-      file: site?.file ?? -1,
-      offset: site?.start ?? -1,
-      make: () => this.valueItems(receiver, at, []),
-      decision: RECEIVER,
-    };
-  }
-
   *#operation(
     c: Extract<ValueConstraint, { readonly kind: "operation" }>,
     at: FlowNode | null,
@@ -457,11 +447,11 @@ export class Values {
     const { program, contract } = this.pass;
     const { family, name } = c.contract;
     const out: Item[] = [];
-    // F19a: a reference's method is opaque, a decision of its component (r4.44)
+    // F19a: a reference's method is opaque, by the receiver's contract before its exact value (r4.44)
     if (
       family === "method" &&
       c.receiver !== null &&
-      heldReference(yield* this.methodReceiver(c.receiver, at))
+      heldReference(yield* contract.valueReceiver(c.receiver))
     )
       return [OPAQUE_MEMBER];
     // F26b (r5): `"${v}"` is always text
