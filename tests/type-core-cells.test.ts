@@ -846,6 +846,29 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `copy-type n [integer] @${at("hostValue")}`,
       ],
     ],
+    // F19a: a receiver that may be a reference has the runtime's members, before a dict's list (review r2)
+    [
+      "a dict's keys on a receiver that may be a reference",
+      'let o = dict{k: "bad"}\nif askBoolean "pick" { o = player }\nrepeat o.keys.first {}\nexit',
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("o.keys.first")}`,
+        `member-read warning-runtime-check @${at("o.keys.first")}`,
+        `member-read warning-runtime-check @${at("o.keys.first")}`,
+        `integer-use warning-runtime-check @${at("o.keys.first")}`,
+        `null-check o [non-null] @${at("o.keys.first")}`,
+        `empty-check o.keys [list] @${at("o.keys.first")}`,
+        `null-check o.keys [non-null] @${at("o.keys.first")}`,
+        `integer-check o.keys.element [integer] @${at("o.keys.first")}`,
+      ],
+    ],
+    // a path through eight objects' own `values` is read once per step, as any property's (review r2: it exhausted the
+    // allowance)
+    [
+      "a path through eight objects' own values",
+      `let n0 = {v: 7}\n${Array.from({ length: 8 }, (_, i) => `let n${i + 1} = {values: [n${i}]}`).join("\n")}\nrepeat n8${".values.first".repeat(8)}.v {}\nexit`,
+      () => ["valid"],
+    ],
     [
       "an object's own values",
       "let o = {values: [1]}\nlet t: string = o.values.first\nexit",

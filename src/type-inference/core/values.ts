@@ -164,9 +164,10 @@ export class Values {
 
   /**
    * TABLE r4.46 (2): a value read along a path through a dict's `values` (a new list of its values) or `keys` (a new
-   * list of text), from the step `from` on: as certain as the dict, either may hold none (no count proof, no `null`);
-   * an object's own property of the name, and a reference's member, are read as any property (F11, F19a); under a
-   * test of the path the read is marked (§3.2).
+   * list of text), from the step `from` on, where the path ends: at a literal or an operation (a projection passes its
+   * step to its owner, and a variable or a call its key to the key's reads, which the contract answers the same way).
+   * The lists are as certain as the dict and may hold none (no count proof, no `null`); an object's own property of the
+   * name is read as any property (F11), and a receiver that may be a reference has the runtime's members (F19a).
    */
   *#through(
     value: PlaceId,
@@ -174,13 +175,25 @@ export class Values {
     rest: readonly string[],
     from: number,
   ): Work<readonly Item[]> {
+    const { program } = this.pass;
     const at = rest.findIndex((step, index) => index >= from && dictList(step) !== undefined);
-    if (at < 0) return yield* this.#valueAt(value, node, rest);
+    const call = program.callOutOf.has(value) && program.opOf.get(value)?.kind === "call";
+    if (
+      at < 0 ||
+      program.occurrenceOf.has(value) ||
+      program.projOf.has(value) ||
+      program.speakerPlaces.has(value) ||
+      call
+    )
+      return yield* this.#valueAt(value, node, rest);
     const before = rest.slice(0, at);
     const after = rest.slice(at + 1);
+    const receiver = withoutEmpty(yield* this.#through(value, node, before, from));
+    if (receiver.some((item) => REFERENCE.has(item.tag)))
+      return yield* this.#through(value, node, rest, at + 1);
     const out: Item[] = [];
     let own = false;
-    for (const item of withoutEmpty(yield* this.#through(value, node, before, from))) {
+    for (const item of receiver) {
       if (item.tag === "dict") {
         const of = (tag: "list" | "string"): Item =>
           carried({ ...makeItem(tag, item.writer, { context: item.context }), cert: item.cert }, [
@@ -197,12 +210,11 @@ export class Values {
           out.push(...(item.cert === "def" ? elements : weaken(elements)));
           if (after.length === 1) out.push(EMPTY);
         }
-      } else if (item.tag === "object" || REFERENCE.has(item.tag)) own = true;
+      } else if (item.tag === "object") own = true;
       else if (item.tag === "unknown") out.push(item);
     }
     if (own) out.push(...(yield* this.#through(value, node, rest, at + 1)));
-    const items = mergeItems(out, this.pass.program.scope);
-    return this.pass.guards.guardedRead(value, rest) ? marked(items) : items;
+    return mergeItems(out, program.scope);
   }
 
   /** The value of a place at a node at a path, by the place's kind. */

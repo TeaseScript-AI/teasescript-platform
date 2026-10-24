@@ -501,16 +501,19 @@ export class Contract {
     return yield* this.#keyThrough(key, 0);
   }
 
-  /** A key's contract along a path through a dict's `values` or `keys` from the step `from` on. */
+  /**
+   * A key's contract along a path through a dict's `values` or `keys` from the step `from` on, its receiver decided as
+   * a reference's or not once (F19a, r4.44): a reference's member is the runtime's.
+   */
   *#keyThrough(key: Key, from: number): Work<readonly Item[]> {
     const place = keyPlace(key);
     const path = keyPath(key);
     const at = path.findIndex((step, index) => index >= from && dictList(step) !== undefined);
     if (at < 0) return yield* this.#keyContract(key);
-    return yield* this.#dictLists(path, at, from, (along, start) =>
-      start === 0
-        ? this.contractOf(keyOf(place, along))
-        : this.#keyThrough(keyOf(place, along), start),
+    const receiver = yield* this.receiverKinds(keyOf(place, path.slice(0, at)));
+    if (heldReference(receiver)) return yield* this.#keyContract(key);
+    return yield* this.#dictLists(path, at, receiver, (along, start) =>
+      this.#keyThrough(keyOf(place, along), start),
     );
   }
 
@@ -784,35 +787,46 @@ export class Contract {
 
   /**
    * TABLE r4.46 (2): a value's kinds along a path through a dict's `values` (a new list of its values) or `keys` (a new
-   * list of text), from the step `from` on: either may hold none (no count proof, no `null`); an object's own property
-   * of the name, and a reference's member, are read as any property (F11, F19a); under a test of the path the read is
-   * marked (§3.2).
+   * list of text), from the step `from` on, where the path ends: at a literal or an operation (a projection passes its
+   * step to its owner, and a variable or a call its key to `#keyThrough`). Either list may hold none (no count proof, no
+   * `null`); an object's own property of the name is read as any property (F11), and a receiver that may be a reference
+   * has the runtime's members (F19a).
    */
   *#through(value: PlaceId, rest: readonly string[], from: number): Work<readonly Item[]> {
+    const { program } = this.pass;
     const at = rest.findIndex((step, index) => index >= from && dictList(step) !== undefined);
-    if (at < 0) return yield* this.#valueAt(value, rest);
-    const items = yield* this.#dictLists(rest, at, from, (path, start) =>
+    if (
+      at < 0 ||
+      program.occurrenceOf.has(value) ||
+      program.projOf.has(value) ||
+      program.speakerPlaces.has(value) ||
+      program.callOutOf.has(value)
+    )
+      return yield* this.#valueAt(value, rest);
+    const receiver = yield* this.#through(value, rest.slice(0, at), from);
+    if (receiver.some((item) => REFERENCE.has(item.tag)))
+      return yield* this.#through(value, rest, at + 1);
+    return yield* this.#dictLists(rest, at, receiver, (path, start) =>
       this.#through(value, path, start),
     );
-    return this.pass.guards.guardedRead(value, rest) ? marked(items) : items;
   }
 
   /**
-   * The kinds along `path` whose step `at` is the first from `from` on that is a dict's `values` or `keys`, by `read` (a
-   * path through such steps from a step on): the dict's lists, and an object's own property of the name or a
-   * reference's member read as any property.
+   * The kinds along `path` whose step `at` is a dict's `values` or `keys`, given the receiver's kinds before it, by
+   * `read` (a path through such steps from a step on): the dict's lists, and an object's own property of the name read
+   * as any property.
    */
   *#dictLists(
     path: readonly string[],
     at: number,
-    from: number,
+    receiver: readonly Item[],
     read: (path: readonly string[], from: number) => Work<readonly Item[]>,
   ): Work<readonly Item[]> {
     const before = path.slice(0, at);
     const after = path.slice(at + 1);
     const out: Item[] = [];
     let own = false;
-    for (const item of withoutEmpty(yield* read(before, from))) {
+    for (const item of withoutEmpty(receiver)) {
       if (item.tag === "dict") {
         if (after.length === 0) out.push(carried(makeItem("list", item.writer), [item]));
         else if (after[0] === "element") {
@@ -821,7 +835,7 @@ export class Contract {
           else if (after.length === 1) out.push(carried(makeItem("string", item.writer), [item]));
           if (after.length === 1) out.push(EMPTY);
         }
-      } else if (item.tag === "object" || REFERENCE.has(item.tag)) own = true;
+      } else if (item.tag === "object") own = true;
       else if (item.tag === "unknown") out.push(item);
     }
     if (own) out.push(...(yield* read(path, at + 1)));
