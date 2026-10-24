@@ -5,7 +5,12 @@ import { analyseCore, type Answers } from "../src/type-inference/core/answers.js
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { W34_VARIANTS, WORK_FAMILIES, type WorkFamily } from "./helpers/type-core-families.js";
+import {
+  W34_KNOWN_PRODUCTS,
+  W34_VARIANTS,
+  WORK_FAMILIES,
+  type WorkFamily,
+} from "./helpers/type-core-families.js";
 
 /**
  * The work of the coarse core (checkpoint 9, TABLE §8 and §10.1's W rows) as a sampled regression oracle: every
@@ -80,6 +85,24 @@ test("every W34 variant's work and each of its counters grow with the program in
           steep.push(
             `${name} ${counter}: ${doubling(small.counts.get(counter) ?? 0, after).toFixed(3)}`,
           );
+    }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * W34's two known products (TABLE r4.41, PLAN §6b): accepted at S4 as measured, like W13, so this gate holds each to its
+ * measured doubling in either order and catches a regression; it asserts no linearity for them.
+ */
+test("W34's two known products grow no faster than measured", () => {
+  const steep: string[] = [];
+  for (const family of W34_KNOWN_PRODUCTS)
+    for (const reversed of [false, true]) {
+      const small = analysed(family, 64, reversed).budget;
+      const large = analysed(family, 128, reversed).budget;
+      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+      const doubling = (2 * (large.total / small.total)) / scale;
+      if (doubling > family.measured)
+        steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
     }
   assert.deepEqual(steep, []);
 });

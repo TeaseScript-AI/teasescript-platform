@@ -1230,3 +1230,58 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
       main(argumentChain(k, (j) => `if p${j}.f${j} != null and use${j + 1}(p${j}) {}`)),
   },
 ]);
+
+/** A family whose work is a known product, accepted as measured: its doubling at k = 64 → 128, the steeper order's. */
+export interface KnownProduct extends WorkFamily {
+  readonly measured: number;
+}
+
+/**
+ * W34's two remaining combinations (TABLE r4.41, PLAN §6b), accepted at S4 as measured products like W13: more than
+ * four sources tested at one path, each with more than four anchors in one tree, read there many times; and sources
+ * copied from more than four shared roots, stored at one path every copy reads (review r5's generators).
+ */
+export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
+  {
+    name: "W34-known-tested-anchors",
+    measures:
+      "§13.3 W34 r4.41: k sources each tested and redefined through five copies in one tree, read at k fields",
+    // 107,695 / 323,855 / 1,081,807 / 3,900,239 units at k = 32 … 256 (review r5: 110,646 / 335,894 / 1,130,454)
+    measured: 3.35,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "hostValue")}}`,
+          rows(k, (i) =>
+            lines(
+              `let seed${i} = ${i === 0 ? "root" : `seed${i - 1}`}`,
+              `if seed${i} != null { say "tested" }`,
+              rows(5, (j) => `let a${i}_${j} = seed${i}\nseed${i} = a${i}_${j}`),
+            ),
+          ),
+          rows(k, (j) => `repeat seed${k - 1}.f${j} {}`),
+        ),
+      ),
+  },
+  {
+    name: "W34-known-stored-roots",
+    measures:
+      "§13.3 W34 r4.41: k sources copied from five shared roots, each stored at the path every copy reads",
+    // 49,587 / 113,555 / 285,139 / 801,619 units at k = 32 … 256 (review r5: 113,562 / 285,146 / 801,626 from 64)
+    measured: 2.53,
+    program: (k) =>
+      main(
+        lines(
+          rows(5, (j) => `let root${j} = {f0: hostValue}`),
+          rows(k, (i) =>
+            lines(
+              `let seed${i} = root0`,
+              rows(5, (j) => `${j === 0 ? "" : `seed${i} = root${j}\n`}let a${i}_${j} = seed${i}`),
+              `seed${i}.f0 = 1`,
+            ),
+          ),
+          rows(k, (i) => `repeat a${i}_0.f0 {}`),
+        ),
+      ),
+  },
+];
