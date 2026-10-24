@@ -41,8 +41,12 @@ import {
   type SemanticValidationOptions,
 } from "./semantic.js";
 import { speakerFlowDiagnostics, type SpeakerFlowInput } from "./speaker-flow.js";
-import type { RuntimeCheckSite, TypeCheckResult } from "./type-inference/backend.js";
-import { checkTypes } from "./type-inference/index.js";
+import type {
+  RuntimeCheckSite,
+  TypeAnalysisBackend,
+  TypeCheckResult,
+} from "./type-inference/backend.js";
+import { analyzeTypes } from "./type-inference/index.js";
 import { createSourcePosition, createSourceSpan } from "./source.js";
 import { DeadWays, type WayFacts } from "./way-facts.js";
 import { matchesTags } from "./tag-query.js";
@@ -101,9 +105,31 @@ export { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./lang
 
 /** Parses, validates, and compiles one source as the `main.tease` of a single-file project, without executing it. */
 export function compileSource(source: string, options: CompileOptions = {}): CompilationResult {
+  return compileSingleSource(source, options);
+}
+
+/**
+ * Test-only, M4's candidate route (removed with the legacy type analysis): `compileSource` with the type analysis of
+ * `backend` instead of the production default. `src/index.ts` does not export it, and no production caller passes a
+ * backend.
+ */
+export function compileSourceWithBackend(
+  source: string,
+  options: CompileOptions,
+  backend: TypeAnalysisBackend,
+): CompilationResult {
+  return compileSingleSource(source, options, backend);
+}
+
+function compileSingleSource(
+  source: string,
+  options: CompileOptions,
+  backend?: TypeAnalysisBackend,
+): CompilationResult {
   const { result, imageDiagnostics: images } = compileProjectFiles(
     [{ path: MAIN_FILE_PATH, source }],
     options,
+    backend,
   );
   const { path: _path, ...file } = result.files[0]!;
   // The image catalog's diagnostics name their image; the source's own follow them, as in the project.
@@ -127,10 +153,23 @@ export function compileProject(
   return compileProjectFiles(sources, options).result;
 }
 
-/** A project compilation, and the image catalog's share of its diagnostics. */
+/** Test-only, M4's candidate route: `compileProject` with the type analysis of `backend` (see `compileSourceWithBackend`). */
+export function compileProjectWithBackend(
+  sources: readonly ProjectSourceFile[],
+  options: CompileOptions,
+  backend: TypeAnalysisBackend,
+): ProjectCompilationResult {
+  return compileProjectFiles(sources, options, backend).result;
+}
+
+/**
+ * A project compilation, and the image catalog's share of its diagnostics. The types are analysed by `backend`, else by
+ * the production default.
+ */
 function compileProjectFiles(
   sources: readonly ProjectSourceFile[],
   options: CompileOptions,
+  backend?: TypeAnalysisBackend,
 ): {
   readonly result: ProjectCompilationResult;
   readonly imageDiagnostics: readonly ProjectDiagnostic[];
@@ -144,11 +183,18 @@ function compileProjectFiles(
   };
   const files = inventory.files.map(({ path, source }) => parseFile(path, source));
   let plan: InstructionPlan | null = null;
-  const checked = checkProject(files, {
-    ...validationOptions,
-    capturesTaggedPhotos: capturesTaggedPhotos(files.map((file) => file.result.program)),
-    scriptCatalog: files.map((file) => ({ path: file.result.path, tags: scriptTags(file.result) })),
-  });
+  const checked = checkProject(
+    files,
+    {
+      ...validationOptions,
+      capturesTaggedPhotos: capturesTaggedPhotos(files.map((file) => file.result.program)),
+      scriptCatalog: files.map((file) => ({
+        path: file.result.path,
+        tags: scriptTags(file.result),
+      })),
+    },
+    backend,
+  );
   if (inventory.diagnostics.length === 0 && !hasErrors(catalog.diagnostics) && checked !== null) {
     const trace: LoweringTrace = { origins: new Map(), statements: new Map() };
     plan = lowerProject(
@@ -287,12 +333,14 @@ interface CheckedProject {
 
 /**
  * Validates the names of the files without syntax errors, then, when every file is free of errors that leave the type
- * check without a basis (see `stopsTypeCheck`), the types of the whole project. Returns what the checks found for the
- * lowering and the checks that follow the plan, or `null` when the project has an error.
+ * check without a basis (see `stopsTypeCheck`), the types of the whole project, by `backend` or the production default.
+ * Returns what the checks found for the lowering and the checks that follow the plan, or `null` when the project has an
+ * error.
  */
 function checkProject(
   files: CompiledProjectFile[],
   options: ProjectCheckOptions,
+  backend?: TypeAnalysisBackend,
 ): CheckedProject | null {
   let current = 0;
   const track = (file: number): void => {
@@ -323,19 +371,27 @@ function checkProject(
     if (files.some((file) => file.parsed === null || file.result.diagnostics.some(stopsTypeCheck)))
       return null;
     // Types are checked once every name resolves, so a type message never repeats a name or structure error.
-    const types = checkTypes(
-      files.map((file) => ({ path: file.result.path, program: file.result.program })),
+    const types = analyzeTypes(
       {
-        ...options,
-        sharedWrites: new Map(names.flatMap((result) => [...result.sharedWrites])),
-        written: {
-          lets: new Set(names.flatMap((result) => [...result.writtenLets])),
-          globals: new Set(names.flatMap((result) => [...result.writtenGlobals])),
+        files: files.map((file) => ({
+          path: file.result.path,
+          program: file.result.program,
+          source: file.source,
+          ...(file.picks === undefined ? {} : { picks: file.picks }),
+        })),
+        options: {
+          ...options,
+          sharedWrites: new Map(names.flatMap((result) => [...result.sharedWrites])),
+          written: {
+            lets: new Set(names.flatMap((result) => [...result.writtenLets])),
+            globals: new Set(names.flatMap((result) => [...result.writtenGlobals])),
+          },
+          speakers: new Map(names.flatMap((result) => [...result.speakers])),
         },
-        speakers: new Map(names.flatMap((result) => [...result.speakers])),
+        onFile: track,
       },
-      track,
-    );
+      backend,
+    ).checked;
     types.diagnostics.forEach((diagnostics, index) =>
       addSemanticDiagnostics(files[index]!, [
         ...diagnostics,
