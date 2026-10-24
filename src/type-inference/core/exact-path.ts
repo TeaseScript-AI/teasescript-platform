@@ -1,7 +1,8 @@
 import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { keyOf, keyPlace, prefixesOf, type Definition, type Key } from "./definitions.js";
+import { keyOf, keyPath, keyPlace, prefixesOf, type Definition, type Key } from "./definitions.js";
 import type { FlowNode } from "./flow-graph.js";
+import { marked } from "./guards.js";
 import {
   alternatives,
   EMPTY,
@@ -27,14 +28,46 @@ import type { Work } from "./solver.js";
 export type ExactAnswer =
   { readonly def: Definition; readonly rest: readonly string[] } | { readonly fail: ContextWord };
 
-/** A plain copy's origin (W34): the definition it copies, or the source the copy chain stops at with its word. */
-type Origin =
-  | { readonly def: Definition }
-  | { readonly place: PlaceId; readonly node: FlowNode; readonly fail: ContextWord };
+/** A path step no definition names: the exact path every path below a source shares that no key below it overlaps. */
+const ANY_PATH = "*";
+
+/**
+ * A whole copy of a place (W34): the copy, the source it reads and where, and what the source holds there for every
+ * path no key below it overlaps (`top`): the copy it comes from (`up`), another whole store, no exact definition (the
+ * word), or something only the copy's own reads answer. The copies form a forest toward their origins, walked once.
+ */
+interface CopyLink {
+  readonly d: Definition;
+  readonly source: PlaceId;
+  readonly read: FlowNode;
+  up: CopyLink | null;
+  top:
+    | { readonly kind: "copy" | "own" }
+    | { readonly kind: "origin"; readonly def: Definition }
+    | { readonly kind: "fail"; readonly word: ContextWord };
+  depth: number;
+  enter: number;
+  exit: number;
+  /** The root of its tree, and the nearest copy at or above it that reads the same source. */
+  root: CopyLink | null;
+  same: CopyLink | null;
+  /** The nearest copy at or above it whose read a test of its source may guard (§3.2), or `null`. */
+  marked: CopyLink | null;
+}
+
+interface CopyForest {
+  /** The copies by their definition. */
+  readonly links: ReadonlyMap<number, CopyLink>;
+  /** Per source, its copies in the walk's order. */
+  readonly bySource: ReadonlyMap<PlaceId, readonly CopyLink[]>;
+  /** Per path below a source, the sources with a key at that path, and those with one at it or below it. */
+  readonly at: ReadonlyMap<string, ReadonlySet<PlaceId>>;
+  readonly below: ReadonlyMap<string, ReadonlySet<PlaceId>>;
+}
 
 export class ExactPath {
   readonly #memo = new Map<string, ExactAnswer>();
-  readonly #origins = new Map<number, Origin>();
+  #copies: CopyForest | null = null;
 
   public constructor(readonly pass: CorePass) {}
 
@@ -119,55 +152,159 @@ export class ExactPath {
   }
 
   /**
-   * W34 (r4.33): a whole copy of a record place stored only whole and never tested has, at a property path, its
-   * origin's value: the copy chain is resolved once per copy at the record level, then projected at the field.
+   * W34 (r4.33, r4.36–r4.38): the forest of whole copies of places, built once. A copy's source answers at the record
+   * level for every path no key below the source overlaps (the exact path of a path no definition names), so a chain
+   * is resolved once per copy and projected per field: a test on a source never splits it (its marks are found at the
+   * read), and a store below a source stops it only at the stored path. Per path below a source, the sources with keys
+   * there; per copy, the nearest copy above it whose read a test may guard.
    */
-  #plainCopySource(d: Definition): PlaceId | null {
+  #forest(): CopyForest {
+    if (this.#copies !== null) return this.#copies;
     const { program, definitions, guards } = this.pass;
-    if (d.kind !== "whole" || d.weak || d.value === undefined) return null;
-    const source = program.occurrenceOf.get(d.value);
-    if (source === undefined || program.isHost(source)) return null;
-    if (definitions.keysBelow(keyOf(source, [])).length > 0) return null;
-    return guards.testedPlaces().has(source) ? null : source;
+    const work = program.work;
+    const links = new Map<number, CopyLink>();
+    for (const list of [...definitions.byKey.values(), ...definitions.cellDefs.values()])
+      for (const d of list) {
+        work.charge("exactQueries");
+        if (d.kind !== "whole" || d.weak || d.value === undefined) continue;
+        const source = program.occurrenceOf.get(d.value);
+        if (source === undefined || program.isHost(source)) continue;
+        const read = program.occNode.get(d.value) ?? program.projOf.get(d.value)?.node ?? null;
+        if (read === null) continue;
+        links.set(d.uid, {
+          d,
+          source,
+          read,
+          up: null,
+          top: { kind: "own" },
+          depth: 0,
+          enter: 0,
+          exit: 0,
+          root: null,
+          same: null,
+          marked: null,
+        });
+      }
+    const children = new Map<CopyLink, CopyLink[]>();
+    const roots: CopyLink[] = [];
+    for (const link of links.values()) {
+      const answer = this.exactPath(keyOf(link.source, [ANY_PATH]), link.read);
+      if (!("def" in answer)) link.top = { kind: "fail", word: answer.fail };
+      else if (answer.def.kind === "whole" && answer.rest.length === 1) {
+        const up = links.get(answer.def.uid);
+        if (up === undefined) link.top = { kind: "origin", def: answer.def };
+        else {
+          link.up = up;
+          link.top = { kind: "copy" };
+          const list = children.get(up);
+          if (list === undefined) children.set(up, [link]);
+          else list.push(link);
+        }
+      }
+      if (link.up === null) roots.push(link);
+    }
+    // one walk: each copy's interval, depth, root, nearest copy of its own source above it and nearest guarded read
+    const bySource = new Map<PlaceId, CopyLink[]>();
+    const open = new Map<PlaceId, CopyLink[]>();
+    let clock = 0;
+    for (const root of roots) {
+      const stack: { readonly link: CopyLink; next: number }[] = [];
+      const enter = (link: CopyLink): void => {
+        work.charge("exactQueries");
+        const parent = link.up;
+        link.enter = clock++;
+        link.depth = parent === null ? 0 : parent.depth + 1;
+        link.root = parent === null ? link : parent.root;
+        const same = open.get(link.source);
+        link.same = same?.at(-1) ?? null;
+        if (same === undefined) open.set(link.source, [link]);
+        else same.push(link);
+        link.marked = guards.testedAround(link.source, link.read) ? link : (parent?.marked ?? null);
+        const list = bySource.get(link.source);
+        if (list === undefined) bySource.set(link.source, [link]);
+        else list.push(link);
+        stack.push({ link, next: 0 });
+      };
+      enter(root);
+      while (stack.length > 0) {
+        const top = stack.at(-1)!;
+        const child = children.get(top.link)?.[top.next++];
+        if (child !== undefined) enter(child);
+        else {
+          stack.pop();
+          top.link.exit = clock - 1;
+          open.get(top.link.source)!.pop();
+        }
+      }
+    }
+    // the keys below each source, by their path and every prefix of it
+    const at = new Map<string, Set<PlaceId>>();
+    const below = new Map<string, Set<PlaceId>>();
+    const add = (map: Map<string, Set<PlaceId>>, path: string, place: PlaceId): void => {
+      work.charge("exactQueries");
+      const set = map.get(path);
+      if (set === undefined) map.set(path, new Set([place]));
+      else set.add(place);
+    };
+    for (const source of bySource.keys())
+      for (const key of definitions.keysBelow(keyOf(source, []))) {
+        const path = keyPath(key);
+        add(at, path.join("."), source);
+        for (let length = 1; length <= path.length; length += 1)
+          add(below, path.slice(0, length).join("."), source);
+      }
+    this.#copies = { links, bySource, at, below };
+    return this.#copies;
   }
 
-  #copyOrigin(d: Definition): Origin {
-    const { program } = this.pass;
-    const seen: Definition[] = [];
-    let current = d;
-    let origin: Origin;
-    for (;;) {
-      program.work.charge("exactQueries");
-      const known = this.#origins.get(current.uid);
-      if (known !== undefined) {
-        origin = known;
-        break;
-      }
-      const source = this.#plainCopySource(current);
-      const node =
-        source === null
-          ? null
-          : (program.occNode.get(current.value!) ??
-            program.projOf.get(current.value!)?.node ??
-            null);
-      if (source === null || node === null) {
-        origin = { def: current };
-        break;
-      }
-      seen.push(current);
-      const answer = this.exactPath(keyOf(source, []), node);
-      if (!("def" in answer)) {
-        origin = { place: source, node, fail: answer.fail };
-        break;
-      }
-      if (answer.def.kind !== "whole" || answer.rest.length > 0) {
-        origin = { def: current };
-        break;
-      }
-      current = answer.def;
+  /** The copy of `source` at or above `link`, the nearest, if any: a binary search in the source's copies. */
+  #copyOf(forest: CopyForest, source: PlaceId, link: CopyLink): CopyLink | null {
+    const list = forest.bySource.get(source) ?? [];
+    let low = 0;
+    let high = list.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      this.pass.program.work.charge("eventSteps");
+      if (list[middle]!.enter <= link.enter) low = middle + 1;
+      else high = middle;
     }
-    for (const copy of seen) this.#origins.set(copy.uid, origin);
-    return origin;
+    let found = low > 0 ? list[low - 1]! : null;
+    // one in a sibling tree walked before: the nearest of its own source's copies above it that holds the link
+    while (found !== null && found.exit < link.enter) {
+      this.pass.program.work.charge("eventSteps");
+      found = found.same;
+    }
+    return found;
+  }
+
+  /**
+   * Where a copy's chain stops at the path `rest` (r4.38): the nearest copy at or above it whose source has a key at
+   * the path, above it or below it, whose own read answers there; a chain without a record-level answer stops at its
+   * root; `null` where the chain's origin answers.
+   */
+  #stopAt(forest: CopyForest, link: CopyLink, rest: readonly string[]): CopyLink | null {
+    const sources = [forest.below.get(rest.join("."))];
+    for (let length = 1; length < rest.length; length += 1)
+      sources.push(forest.at.get(rest.slice(0, length).join(".")));
+    let stop: CopyLink | null = null;
+    for (const set of sources)
+      for (const source of set ?? []) {
+        const found = this.#copyOf(forest, source, link);
+        if (found !== null && (stop === null || found.depth > stop.depth)) stop = found;
+      }
+    return stop ?? (link.root!.top.kind === "own" ? link.root : null);
+  }
+
+  /** §3.2: whether a test of its source guards the read of a copy from `link` up to `stop` (excluded), at the path. */
+  #markedAlong(link: CopyLink, rest: readonly string[], stop: CopyLink | null): boolean {
+    const { guards } = this.pass;
+    for (
+      let copy = link.marked;
+      copy !== null && (stop === null || copy.depth > stop.depth);
+      copy = copy.up?.marked ?? null
+    )
+      if (guards.narrowed(keyOf(copy.source, rest), copy.read)) return true;
+    return false;
   }
 
   /** D's value at the path `rest` below its key, at D's node (§3.1's answer): once per (D, path). */
@@ -187,18 +324,26 @@ export class ExactPath {
     program.work.charge("exactValues");
     if (d.kind === "const") return rest.length === 0 ? (d.items ?? []) : [];
     const writer = definitions.writerOf(d);
-    if (d.kind === "whole" && rest.length > 0 && !rest.includes("element")) {
-      const origin = this.#copyOrigin(d);
-      if (!("def" in origin) || origin.def !== d) {
-        const place = "def" in origin ? origin.def.place : origin.place;
-        if (!(yield* contract.refReceiver(keyOf(place, rest)))) {
-          const items =
-            "def" in origin
-              ? yield* this.defVal(origin.def, rest)
-              : yield* contract.contractRead(keyOf(origin.place, rest), origin.node, origin.fail);
-          return mergeItems(withWriter(items, writer), scope);
-        }
+    // W34: a copy at a field is its chain's value there, with the marks of the copies' reads along the chain
+    const forest = d.kind === "whole" && rest.length > 0 && !rest.includes("element");
+    const link = forest ? this.#forest().links.get(d.uid) : undefined;
+    if (link !== undefined) {
+      const stop = this.#stopAt(this.#forest(), link, rest);
+      const root = link.root!;
+      let items: readonly Item[] | null = null;
+      if (stop !== null && stop !== link) items = yield* this.defVal(stop.d, rest);
+      else if (stop === null && root.top.kind === "origin") {
+        if (!(yield* contract.refReceiver(keyOf(root.top.def.place, rest))))
+          items = yield* this.defVal(root.top.def, rest);
+      } else if (stop === null && root.top.kind === "fail") {
+        if (!(yield* contract.refReceiver(keyOf(root.source, rest))))
+          items = yield* contract.contractRead(keyOf(root.source, rest), root.read, root.top.word);
       }
+      if (items !== null)
+        return mergeItems(
+          withWriter(this.#markedAlong(link, rest, stop) ? marked(items) : items, writer),
+          scope,
+        );
     }
     if (d.kind === "whole")
       return mergeItems(

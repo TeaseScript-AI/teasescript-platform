@@ -53,7 +53,10 @@ export class GuardIndex {
   readonly belowTested = new Set<Key>();
   /** The tested keys q below each key, per relative path q, and the longest such path (§8 r4.23's holders). */
   #testedRelative: Map<string, Set<Key>> | null = null;
-  #places: Set<PlaceId> | null = null;
+  #byPlace: {
+    readonly branches: ReadonlyMap<PlaceId, ReadonlyMap<Callable | null, Regions<FlowNode>>>;
+    readonly operands: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>>;
+  } | null = null;
   #testedLength = 0;
 
   public constructor(readonly program: CoreProgram) {
@@ -266,17 +269,6 @@ export class GuardIndex {
     return this.#operandCallables.get(key);
   }
 
-  /** The places some test names, at any path (W34: a copy of one is no plain copy). */
-  public testedPlaces(): ReadonlySet<PlaceId> {
-    if (this.#places === null) {
-      this.#places = new Set(
-        [...this.#branches.keys(), ...this.#operands.keys()].map((key) => keyPlace(key)),
-      );
-      this.program.work.charge("indexSteps", this.#places.size + 1);
-    }
-    return this.#places;
-  }
-
   /**
    * Whether a read of `key` at `node` is guarded (§3.2, per path): a test of the key or of a prefix guards a branch of
    * the node's own callable that dominates the node, or an operand region holds the node: a binary search per key asked,
@@ -302,6 +294,83 @@ export class GuardIndex {
         return true;
     }
     return false;
+  }
+
+  /**
+   * Whether a test of some key of the place guards a node (W34 r4.38: a copy read there may carry a mark of its source,
+   * which `narrowed` then asks at the read's path): a binary search in each of the place's two indexes, built once
+   * from the per-key ones, never a scan of the place's tested paths.
+   */
+  public testedAround(place: PlaceId, node: FlowNode): boolean {
+    const program = this.program;
+    if (!program.reached(node)) return false;
+    const { branches, operands } = this.#placeIndex();
+    program.work.charge("eventSteps");
+    const entries = branches.get(place)?.get(program.callableAt(node));
+    if (
+      entries !== undefined &&
+      this.encloses(entries, (entry) => program.position(entry), program.position(node))
+    )
+      return true;
+    const regions = node.span === null ? undefined : operands.get(place)?.get(node.file);
+    return (
+      regions !== undefined &&
+      node.span !== null &&
+      this.encloses(regions, (region) => region.start, node.span.start.offset)
+    );
+  }
+
+  /** The per-key regions merged per place: its tests' branch entries per callable, its operand regions per file. */
+  #placeIndex(): {
+    readonly branches: ReadonlyMap<PlaceId, ReadonlyMap<Callable | null, Regions<FlowNode>>>;
+    readonly operands: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>>;
+  } {
+    if (this.#byPlace !== null) return this.#byPlace;
+    const program = this.program;
+    const merge = <G, T>(
+      source: ReadonlyMap<Key, ReadonlyMap<G, Regions<T>>>,
+      start: (entry: T) => number,
+      end: (entry: T) => number,
+    ): Map<PlaceId, Map<G, Regions<T>>> => {
+      const lists = new Map<PlaceId, Map<G, T[]>>();
+      for (const [key, byGroup] of source)
+        for (const [group, regions] of byGroup) {
+          program.work.charge("indexSteps", regions.list.length);
+          let byPlace = lists.get(keyPlace(key));
+          if (byPlace === undefined) lists.set(keyPlace(key), (byPlace = new Map()));
+          const list = byPlace.get(group);
+          if (list === undefined) byPlace.set(group, [...regions.list]);
+          else list.push(...regions.list);
+        }
+      const merged = new Map<PlaceId, Map<G, Regions<T>>>();
+      for (const [place, byGroup] of lists) {
+        const sorted = new Map<G, Regions<T>>();
+        for (const [group, list] of byGroup) {
+          program.work.charge("indexSteps", sortCost(list.length));
+          list.sort((a, b) => start(a) - start(b));
+          let last = -1;
+          sorted.set(group, {
+            list,
+            ends: list.map((entry) => (last = Math.max(last, end(entry)))),
+          });
+        }
+        merged.set(place, sorted);
+      }
+      return merged;
+    };
+    this.#byPlace = {
+      branches: merge(
+        this.#branches,
+        (entry) => program.position(entry),
+        (entry) => program.positionEnd(entry),
+      ),
+      operands: merge(
+        this.#operands,
+        (region) => region.start,
+        (region) => region.end,
+      ),
+    };
+    return this.#byPlace;
   }
 
   /**
