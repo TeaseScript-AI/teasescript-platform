@@ -288,13 +288,12 @@ function diagnosticOf(
       expression.span,
     );
   }
-  const rule =
-    index.roleOf(expression) === "index"
-      ? "A list index must be a whole number (integer)"
-      : REPEAT_COUNT_RULE;
+  // a count is TSV011's rule, a list index TSV043's (D3 (a): each rule's existing code)
+  const listIndex = index.roleOf(expression) === "index";
+  const rule = listIndex ? "A list index must be a whole number (integer)" : REPEAT_COUNT_RULE;
   return createDiagnostic(
     severity,
-    "TSV011",
+    listIndex ? "TSV043" : "TSV011",
     diagnostic.class === "compile-error"
       ? `${rule}, but '${text}' is ${kindsText(
           (answers.at(nodeOf(answers, index, expression))?.items ?? []).filter(

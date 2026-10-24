@@ -242,7 +242,7 @@ export const DIAGNOSTIC_CODES = {
   TSV043: {
     ...entry(
       ["type checker", "plan analysis"],
-      "error",
+      ["error", "warning"],
       "Unsupported operand, method, or property",
       DOCS.values,
     ),

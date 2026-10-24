@@ -81,9 +81,10 @@ function checkedStores(plan: InstructionPlan): string[] {
 }
 
 test("every record of the set inside the slice compiles on the candidate route as the record expects", () => {
-  const codes: Readonly<Record<string, string>> = {
-    "written-target": "TSV041",
-    "integer-use": "TSV011",
+  const kinds: Readonly<Record<string, string>> = {
+    TSV041: "written-target",
+    TSV011: "integer-use",
+    TSV043: "integer-use",
   };
   const accepted: string[] = [];
   for (const record of readFixture()) {
@@ -92,20 +93,20 @@ test("every record of the set inside the slice compiles on the candidate route a
     );
     if (result === null) continue;
     accepted.push(record.name);
-    // C1 (`written-target`) under TSV041 and C2 (`integer-use`) under TSV011, each an error or a runtime-checked
-    // warning (D3 (a)), at the record's sites
+    // C1 (`written-target`) under TSV041 and C2 (`integer-use`) under TSV011 for a count and TSV043 for a list index,
+    // each an error or a runtime-checked warning (D3 (a)), at the record's sites
     assert.deepEqual(
       result.diagnostics
-        .filter((diagnostic) => diagnostic.code === "TSV041" || diagnostic.code === "TSV011")
+        .filter((diagnostic) => kinds[diagnostic.code] !== undefined)
         .map(
           (diagnostic) =>
-            `${diagnostic.severity} ${diagnostic.code} ${diagnostic.path}@${diagnostic.span.start.offset}`,
+            `${diagnostic.severity} ${kinds[diagnostic.code]} ${diagnostic.path}@${diagnostic.span.start.offset}`,
         )
         .sort(),
       record.expected.diagnostics
         .map(
           (diagnostic) =>
-            `${diagnostic.class === "compile-error" ? "error" : "warning"} ${codes[diagnostic.kind]} ` +
+            `${diagnostic.class === "compile-error" ? "error" : "warning"} ${diagnostic.kind} ` +
             `${diagnostic.site.file}@${diagnostic.site.offset}`,
         )
         .sort(),
@@ -211,7 +212,7 @@ test("C1's copy check and C9's boundary check run where external data enters a w
   }
 });
 
-test("C2's integer check of a count and an index warns with TSV011 and runs at the use", () => {
+test("C2's integer check warns with TSV011 at a count and TSV043 at a list index, and runs at the use", () => {
   const count = candidate(
     'let count: number = hostValue\nsay "ready"\nrepeat count {\n  say "turn"\n}\nexit\n',
   );
@@ -229,7 +230,7 @@ test("C2's integer check of a count and an index warns with TSV011 and runs at t
   const index = candidate(
     "let rows = [10, 20]\nlet at: number = hostValue\nrepeat rows[at] {}\nexit\n",
   );
-  assert.deepEqual(sited(index), ["warning TSV041@37", "warning TSV011@59"]);
+  assert.deepEqual(sited(index), ["warning TSV041@37", "warning TSV043@59"]);
   assert.ok(index.plan !== null);
   assert.equal(runWith(index.plan, 1).status, "halted");
   assert.equal(runWith(index.plan, 0.5).failure, "TSR024@59:61");
@@ -238,12 +239,15 @@ test("C2's integer check of a count and an index warns with TSV011 and runs at t
   // the proven cases stay errors under the same codes
   assert.deepEqual(sited(candidate("let n = 2.5\nrepeat n {}\nexit\n")), ["error TSV011@19"]);
   assert.deepEqual(sited(candidate("let n: integer = 2.5\nexit\n")), ["error TSV041@17"]);
+  assert.deepEqual(sited(candidate("let xs = [10, 20]\nlet i = 1.5\nrepeat xs[i] {}\nexit\n")), [
+    "error TSV043@40",
+  ]);
   // in parentheses the diagnostic stands at the content (§3.4), once, and names the index's rule
   assert.deepEqual(sited(candidate("let n = 2.5\nrepeat (n) {}\nexit\n")), ["error TSV011@20"]);
   const parenthesized = candidate(
     "let rows = [10, 20]\nlet at = 0.5\nrepeat rows[(at)] {}\nexit\n",
   );
-  assert.deepEqual(sited(parenthesized), ["error TSV011@46"]);
+  assert.deepEqual(sited(parenthesized), ["error TSV043@46"]);
   assert.match(parenthesized.diagnostics[0]!.message, /^A list index must be a whole number/);
 });
 

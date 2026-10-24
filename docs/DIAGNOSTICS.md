@@ -158,7 +158,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV040` | List where text is shown | error | type checker |
 | `TSV041` | Type mismatch | error or warning | type checker |
 | `TSV042` | Value that cannot be shown | error | type checker |
-| `TSV043` | Unsupported operand, method, or property | error | type checker, plan analysis |
+| `TSV043` | Unsupported operand, method, or property | error or warning | type checker, plan analysis |
 | `TSV044` | Mixed types | error | type checker |
 | `TSV045` | Negative list index | error | type checker |
 | `TSV046` | Test with a constant result | warning | type checker |
