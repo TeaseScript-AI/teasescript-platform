@@ -1,4 +1,5 @@
 import { CONVERSIONS, isConversion, type ConversionResult } from "../../conversions.js";
+import { dictProperty } from "../../dict-operations.js";
 import { listProperty } from "../../list-methods.js";
 import { isTextMethod, TEXT_METHODS, type TextResult } from "../../text-operations.js";
 import type { ValueKind } from "../../value-kinds.js";
@@ -97,6 +98,15 @@ export function selectsElement(property: string): boolean {
 /** F14: whether a property gives the length of a text or a collection (on an object, its own property). */
 export function measuresLength(property: string): boolean {
   return listProperty(property)?.gives === "length";
+}
+
+/**
+ * TABLE r4.46 (2): a dict's property that gives a new list each read, by what the list holds: the dict's values
+ * (`values`) or its keys, text (`keys`); on an object, a property of that name is its own (F11).
+ */
+export function dictList(property: string): "values" | "keys" | undefined {
+  const gives = dictProperty(property)?.gives;
+  return gives === "values" || gives === "keys" ? gives : undefined;
 }
 
 /** The members of the built-in values that give a declared result whatever their receiver: F14's `length`. */

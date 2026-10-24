@@ -30,7 +30,7 @@ import {
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { firstWriter, makeItem, REASON, type Item, type ItemTag, type Writer } from "./items.js";
-import { interactionCategory, selectsElement } from "./method-categories.js";
+import { dictList, interactionCategory, selectsElement } from "./method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
 import { propertyName, propertyStep, siteKey, stepName, type ValueConstraint } from "./program.js";
@@ -785,6 +785,9 @@ export class Consumers {
         const projection = program.projOf.get(value)!;
         if (projection.step !== "iteration")
           next.push([projection.owner, [stepName(projection.step), ...steps]]);
+        // r4.46 (2): an element of a dict's `values` is one of its values
+        if (dictList(projection.step) === "values" && step === "element")
+          next.push([projection.owner, steps]);
       } else {
         const c = program.opOf.get(value);
         if (

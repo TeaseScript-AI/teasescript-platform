@@ -645,3 +645,204 @@ test("the core gives the expected outcome for the programs beside the set", () =
     CONTROLS.map(([name, , outcome, contexts]) => `${name}: ${outcome} [${contexts}]`),
   );
 });
+
+/** A record as one sorted list of texts: its outcome, its diagnostics and its checks. */
+function summary(record: CompactRecord): string[] {
+  return [
+    record.outcome,
+    ...record.diagnostics.map((d) => `${d.kind} ${d.class} @${d.site.offset}`),
+    ...record.checks.map(
+      (check) =>
+        `${check.kind} ${check.target} [${check.against.join(", ")}]${check.boundary ? " boundary" : ""} @${check.site.offset}`,
+    ),
+  ].sort();
+}
+
+/**
+ * TABLE r4.46 (1), (2) (#1026): a choice object gives its `value` where it has the key and its `text` where it has
+ * none, decided by the key and never by what the value resolves to (an empty answer is unresolved, not an absent key),
+ * per alternative, on the value side and through a function's result (the contract) alike; a dict's `values` and
+ * `keys` are lists of its values and of text that may hold none. Per program its record in both orders, with its sites
+ * written as the text they start at: the set's records `cp9-cells/s4/choice-value/…` (set `b1c18b4ef1d8a5c1`), C9's
+ * boundary check left out (it joins with S6), and controls beside them.
+ */
+test("a choice object's value is selected by its key, and a dict's values and keys are lists", () => {
+  const programs: readonly (readonly [
+    string,
+    string,
+    (at: (text: string) => number) => string[],
+  ])[] = [
+    [
+      "set computed-integer",
+      'let result: integer = askChoice {text:"A", value:dict{k:7}.values.first}\nsay [result]\nexit\n',
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("dict")}`,
+        `empty-check dict{k:7}.values [list] @${at("dict")}`,
+      ],
+    ],
+    [
+      "set computed-string",
+      'let result = askChoice {text:0, value:dict{k:"bad"}.values.first}\nrepeat result {}\nexit\n',
+      (at) => [
+        "compile-error",
+        `integer-use compile-error @${at("result {}")}`,
+        `member-read warning-runtime-check @${at("dict")}`,
+        `empty-check dict{k:"bad"}.values [list] @${at("dict")}`,
+      ],
+    ],
+    [
+      "set bound-integer",
+      'let v = dict{k:7}.values.first\nlet result: integer = askChoice {text:"A", value:v}\nsay [result]\nexit\n',
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("dict")}`,
+        `empty-check dict{k:7}.values [list] @${at("dict")}`,
+      ],
+    ],
+    [
+      "set all-integer",
+      'repeat askChoice [{text:"A", value:1}, {text:"B", value:2}] {}\nexit\n',
+      () => ["valid"],
+    ],
+    ["set omitted-integers", "repeat askChoice [{text:0}, {text:1}] {}\nexit\n", () => ["valid"]],
+    [
+      "set omitted-string-written",
+      'let s: integer = askChoice [{text:"A"}]\nexit\n',
+      (at) => ["compile-error", `written-target compile-error @${at("askChoice")}`],
+    ],
+    [
+      "set external-written",
+      'let result: integer = askChoice {text:"A", value:hostValue}\nsay [result]\nexit\n',
+      (at) => [
+        "warning-runtime-check",
+        `written-target warning-runtime-check @${at("hostValue")}`,
+        `copy-type result [integer] @${at("hostValue")}`,
+      ],
+    ],
+    // each alternative its own: the first object's value, the second's text, never the first's text
+    [
+      "an omitted value beside a present one",
+      'repeat askChoice [{text: "A", value: 1}, {text: 2}] {}\nexit',
+      () => ["valid"],
+    ],
+    // a value computed in a solver component: the choice's own result, whichever member the solve enters
+    [
+      "a value from its own component",
+      'function pick(n) {\n  if n > 0 { return askChoice {text: 0, value: pick(n - 1)} }\n  return "bad"\n}\nlet r: string = pick(1)\nexit',
+      () => ["valid"],
+    ],
+    [
+      "a wrong value from its own component",
+      'function pick(n) {\n  if n > 0 { return askChoice {text: "zero", value: pick(n - 1)} }\n  return 5\n}\nlet r: string = pick(1)\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at("pick(1)")}`],
+    ],
+    // the contract: a function's result (F20)
+    [
+      "a computed value through a result",
+      'function pick { return askChoice {text: "A", value: dict{k: 7}.values.first} }\nlet n: integer = pick()\nexit',
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("dict")}`,
+        `empty-check dict{k: 7}.values [list] @${at("dict")}`,
+      ],
+    ],
+    [
+      "a wrong computed value through a result",
+      'function pick { return askChoice {text: 0, value: dict{k: "bad"}.values.first} }\nrepeat pick() {}\nexit',
+      (at) => [
+        "compile-error",
+        `integer-use compile-error @${at("pick() {}")}`,
+        `member-read warning-runtime-check @${at("dict")}`,
+        `empty-check dict{k: "bad"}.values [list] @${at("dict")}`,
+      ],
+    ],
+    // a present value that may be a missing member is that value, never the text beside it
+    [
+      "a value that may be missing",
+      'let flag = askBoolean "f"\nfunction pick(f) {\n  if f { return {maybe: "s"} }\n  return {other: 1}\n}\nlet r: string = askChoice {text: 1, value: pick(flag).maybe}\nexit',
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("pick(flag)")}`,
+        `written-target warning-runtime-check @${at("askChoice")}`,
+        `copy-type r [string] @${at("askChoice")}`,
+        `null-check pick.result [non-null] @${at("pick(flag)")}`,
+      ],
+    ],
+    // a choice object held in a variable, whose value may be a missing member: possibly its text, never certainly
+    [
+      "a held choice object whose value may be missing",
+      'let flag = askBoolean "f"\nfunction pick(f) {\n  if f { return {maybe: "s"} }\n  return {other: 1}\n}\nlet o = {text: 1, value: pick(flag).maybe}\nlet r: string = askChoice o\nexit',
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("pick(flag)")}`,
+        `written-target warning-runtime-check @${at("askChoice")}`,
+        `copy-type r [string] @${at("askChoice")}`,
+        `null-check pick.result [non-null] @${at("pick(flag)")}`,
+      ],
+    ],
+    // a dict's lists outside a choice: read, copied, and an object's own property of the name
+    [
+      "a dict's values",
+      'repeat dict{k: "bad"}.values.first {}\nexit',
+      (at) => [
+        "compile-error",
+        `integer-use compile-error @${at("dict")}`,
+        `member-read warning-runtime-check @${at("dict")}`,
+        `empty-check dict{k: "bad"}.values [list] @${at("dict")}`,
+      ],
+    ],
+    [
+      "a dict's keys",
+      "let d = dict{k: 1}\nrepeat d.keys.first {}\nexit",
+      (at) => [
+        "compile-error",
+        `integer-use compile-error @${at("d.keys")}`,
+        `member-read warning-runtime-check @${at("d.keys")}`,
+        `empty-check d.keys [list] @${at("d.keys")}`,
+      ],
+    ],
+    [
+      "a copy of a dict's values read by its contract",
+      'let d = dict{k: "bad"}\nlet vs = d.values\nshowPermanentButton "b" { vs = d.values }\nrepeat vs.first {}\nexit',
+      (at) => [
+        "warning-runtime-check",
+        `integer-use warning-runtime-check @${at("vs.first")}`,
+        `member-read warning-runtime-check @${at("vs.first")}`,
+        `empty-check vs [list] @${at("vs.first")}`,
+        `integer-check vs.element [integer] @${at("vs.first")}`,
+      ],
+    ],
+    [
+      "an object's own values",
+      "let o = {values: [1]}\nlet t: string = o.values.first\nexit",
+      (at) => ["compile-error", `written-target compile-error @${at("o.values.first")}`],
+    ],
+    [
+      "external data among a dict's values",
+      "let n: integer = dict{k: hostValue}.values.first\nexit",
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("dict")}`,
+        `written-target warning-runtime-check @${at("hostValue")}`,
+        `copy-type n [integer] @${at("hostValue")}`,
+        `empty-check dict{k: hostValue}.values [list] @${at("dict")}`,
+      ],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, expect] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const expected = expect((text) => source.indexOf(text)).sort();
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const got = summary({ ...record, checks: record.checks.filter((check) => !check.boundary) });
+      if (JSON.stringify(got) !== JSON.stringify(expected))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join("; ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});

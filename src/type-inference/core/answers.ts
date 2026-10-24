@@ -13,7 +13,12 @@ import {
   writtenOf,
   type ContractFacts,
 } from "./contract.js";
-import { conversionCategory, interactionCategory, methodCategory } from "./method-categories.js";
+import {
+  conversionCategory,
+  dictList,
+  interactionCategory,
+  methodCategory,
+} from "./method-categories.js";
 import {
   DefinitionIndex,
   DefinitionLists,
@@ -616,6 +621,13 @@ class CoreAnswers implements Answers {
             const of = kinds(projection.owner);
             if (of.has("list") || of.has("set"))
               pending.push({ value: projection.owner, path: ["element", ...path] });
+          } else if (dictList(projection.step) !== undefined) {
+            // r4.46 (2): a dict's `values` holds its values (its `keys` text); an object's own property of the name
+            const of = kinds(projection.owner);
+            if (of.has("object"))
+              pending.push({ value: projection.owner, path: [projection.step, ...path] });
+            if (of.has("dict") && dictList(projection.step) === "values" && path[0] === "element")
+              pending.push({ value: projection.owner, path });
           } else
             pending.push({ value: projection.owner, path: [stepName(projection.step), ...path] });
           continue;

@@ -1,6 +1,12 @@
 import { isScalarKind } from "../../static-types.js";
 import { hasIdentity, VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
-import type { PlaceId, PlaceKind, TypeTerm } from "../graph.js";
+import type {
+  ChoiceObjectEvidence,
+  ChoiceOptionEvidence,
+  PlaceId,
+  PlaceKind,
+  TypeTerm,
+} from "../graph.js";
 import type { CorePass } from "./answers.js";
 import type { ReadRoute } from "./values.js";
 import { keyOf, keyPath, keyPlace, sortCost, type Definition, type Key } from "./definitions.js";
@@ -11,6 +17,7 @@ import {
   builtinResult,
   conversionCategory,
   declaredResult,
+  dictList,
   interactionCategory,
   measuresLength,
   memberResult,
@@ -766,6 +773,8 @@ export class Contract {
         return yield* this.#contractIteration(projection.owner, rest);
       if (measuresLength(projection.step))
         return yield* this.#contractLength(projection.owner, projection.step, rest);
+      if (dictList(projection.step) !== undefined)
+        return yield* this.#contractDictList(projection.owner, projection.step, rest);
       const elements = yield* this.contractOfValueAt(projection.owner, [
         stepName(projection.step),
         ...rest,
@@ -802,6 +811,8 @@ export class Contract {
         return yield* this.#contractIteration(projection.owner, []);
       if (measuresLength(projection.step))
         return yield* this.#contractLength(projection.owner, projection.step, []);
+      if (dictList(projection.step) !== undefined)
+        return yield* this.#contractDictList(projection.owner, projection.step, []);
       const elements = yield* this.contractOfValueAt(projection.owner, [stepName(projection.step)]);
       if (!selectsElement(projection.step)) return elements;
       const owners = withoutEmpty(yield* this.contractOfValue(projection.owner));
@@ -850,29 +861,32 @@ export class Contract {
     return mergeItems(out, this.pass.program.scope);
   }
 
-  /** F14: a text's or a collection's length is a whole number; an object's own `length` is its property (F11). */
   /**
-   * V30 §19: the value a choice object's button gives at `rest`: its `value`, and its `text` where it may have none.
+   * TABLE r4.46 (2): a dict's `values` is a new list of its values, its `keys` one of text; either may hold none (no
+   * count proof, no `null`); an object's own property of the name is its property (F11).
    */
-  *#choiceValue(
-    option: PlaceId,
-    at: readonly string[],
-    rest: readonly string[],
-  ): Work<readonly Item[]> {
-    const value = withoutEmpty(yield* this.contractOfValueAt(option, [...at, "value"]));
-    const present = withoutMissing(value);
+  *#contractDictList(owner: PlaceId, step: string, rest: readonly string[]): Work<readonly Item[]> {
+    // F19a: a receiver that may be a reference has the runtime's members
+    if (heldReference(yield* this.valueReceiver(owner)))
+      return yield* this.contractOfValueAt(owner, [step, ...rest]);
     const out: Item[] = [];
-    if (present.length > 0)
-      out.push(
-        ...(rest.length === 0
-          ? present
-          : yield* this.contractOfValueAt(option, [...at, "value", ...rest])),
-      );
-    if (value.length === 0 || value.some(isMissing))
-      out.push(...(yield* this.contractOfValueAt(option, [...at, "text", ...rest])));
-    return out;
+    for (const item of withoutEmpty(yield* this.contractOfValue(owner))) {
+      if (item.tag === "dict") {
+        if (rest.length === 0) out.push(carried(makeItem("list", item.writer), [item]));
+        else if (rest[0] === "element") {
+          if (dictList(step) === "values")
+            out.push(...withoutEmpty(yield* this.contractOfValueAt(owner, rest)));
+          else if (rest.length === 1) out.push(carried(makeItem("string", item.writer), [item]));
+          if (rest.length === 1) out.push(EMPTY);
+        }
+      } else if (item.tag === "object" || REFERENCE.has(item.tag))
+        out.push(...(yield* this.contractOfValueAt(owner, [step, ...rest])));
+      else if (item.tag === "unknown") out.push(item);
+    }
+    return mergeItems(out, this.pass.program.scope);
   }
 
+  /** F14: a text's or a collection's length is a whole number; an object's own `length` is its property (F11). */
   *#contractLength(owner: PlaceId, step: string, rest: readonly string[]): Work<readonly Item[]> {
     // F19a before F14: a receiver that may be a reference has the runtime's members, its `length` among them
     if (heldReference(yield* this.valueReceiver(owner)))
@@ -1030,29 +1044,11 @@ export class Contract {
     if (interaction?.kind === "asks")
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
     // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
-    if (interaction?.kind === "options") {
-      const out: Item[] = [];
-      const labels = choiceLabels(c);
-      for (const [index, argument] of c.arguments.entries()) {
-        const label = labels[index];
-        if (label !== undefined) {
-          if (label !== null && rest.length === 0) out.push(makeItem(label));
-          continue;
-        }
-        const option = withoutEmpty(yield* this.contractOfValue(argument));
-        if (option.some((item) => item.tag === "list" || item.tag === "set"))
-          for (const item of withoutEmpty(yield* this.contractOfValueAt(argument, ["element"])))
-            if (item.tag === "object")
-              out.push(...(yield* this.#choiceValue(argument, ["element"], rest)));
-            else if (rest.length === 0 || item.tag === "unknown") out.push(item);
-        if (option.some((item) => item.tag === "object"))
-          out.push(...(yield* this.#choiceValue(argument, [], rest)));
-        for (const item of option)
-          if (item.tag === "list" || item.tag === "set" || item.tag === "object") continue;
-          else if (rest.length === 0 || item.tag === "unknown") out.push(item);
-      }
-      return mergeItems(out, scope);
-    }
+    if (interaction?.kind === "options")
+      return mergeItems(
+        yield* choiceItems(c, rest, (value, path) => this.contractOfValueAt(value, path)),
+        scope,
+      );
     if (rest.length > 0) return [unknownItem(REASON.opaque)];
     // F16: the runtime's operator table
     const operator = operatorOf(c);
@@ -1150,14 +1146,23 @@ export class Contract {
 
   // ----------------------------------------------------------------------------- the one identity function (§8 r4.15)
 
-  /** The key a value copies, through its projections: `seed.f0` reads `seed|f0`; `null` for no read. */
+  /**
+   * The key a value copies, through its projections: `seed.f0` reads `seed|f0`; `null` for no read, and for a read
+   * through `keys` or `values`, a new list on a dict (r4.46 (2)), never a key below it (an object's own property of the
+   * name keeps its kinds that way, as a value of its own).
+   */
   public copiedKey(value: PlaceId): Key | null {
     const { program } = this.pass;
     const steps: string[] = [];
     let current = value;
     while (!program.occurrenceOf.has(current)) {
       const projection = program.projOf.get(current);
-      if (projection === undefined || projection.step === "iteration") return null;
+      if (
+        projection === undefined ||
+        projection.step === "iteration" ||
+        dictList(projection.step) !== undefined
+      )
+        return null;
       program.work.charge("invSteps");
       steps.push(stepName(projection.step));
       current = projection.owner;
@@ -1165,13 +1170,16 @@ export class Contract {
     return keyOf(program.occurrenceOf.get(current)!, steps.reverse());
   }
 
-  /** A call's result read further (`snapshot()`, `snapshot().data`): the callee's result key (F20), else `null`. */
+  /**
+   * A call's result read further (`snapshot()`, `snapshot().data`): the callee's result key (F20), else `null`, also
+   * through `keys` or `values` (as `copiedKey`).
+   */
   public resultKey(value: PlaceId): Key | null {
     const { program } = this.pass;
     const steps: string[] = [];
     let current = value;
     for (let projection = program.projOf.get(current); projection !== undefined;) {
-      if (projection.step === "iteration") return null;
+      if (projection.step === "iteration" || dictList(projection.step) !== undefined) return null;
       program.work.charge("invSteps");
       steps.push(stepName(projection.step));
       current = projection.owner;
@@ -2675,12 +2683,83 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
   );
 }
 
+/**
+ * V30 §19, TABLE r4.46 (1): an `askChoice`'s answer at `rest`, read by `read`: per option its label's kind, or each of
+ * its buttons' values. Whether a choice object gives its `value` or its `text` is decided by the key's presence in the
+ * object, never by what the key's value resolves to (an empty answer is unresolved, the solver's bottom, never an absent
+ * key): a written choice object (the whole option, or an element of a written list or set) by the keys it writes; one
+ * the options hold without writing it (a variable's, a call's) by its records: its `value`, and its `text` where a record
+ * of it lacks the key (F11's `missing`).
+ */
+export function* choiceItems(
+  c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+  rest: readonly string[],
+  read: (value: PlaceId, path: readonly string[]) => Work<readonly Item[]>,
+): Work<Item[]> {
+  const out: Item[] = [];
+  const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
+  const labels = choiceLabels(c);
+  // a choice object the options hold without writing it; where some of its records lack the key and some have it,
+  // neither the values nor the texts are certain
+  const held = function* (option: PlaceId, at: readonly string[]): Work<void> {
+    const value = withoutEmpty(yield* read(option, [...at, "value"]));
+    const lacking = value.some(isMissing);
+    const present = withoutMissing(value);
+    const either = (items: readonly Item[]): readonly Item[] =>
+      lacking && present.length > 0 ? weaken(items) : items;
+    if (present.length > 0 || !lacking)
+      out.push(
+        ...either(rest.length === 0 ? present : yield* read(option, [...at, "value", ...rest])),
+      );
+    if (lacking) out.push(...either(yield* read(option, [...at, "text", ...rest])));
+  };
+  // a written choice object's `value`, or its `text` without one; any other option or element by its value
+  const button = function* (place: PlaceId, object: ChoiceObjectEvidence | null): Work<void> {
+    const selected = object === null ? null : (object.value ?? object.text);
+    if (selected !== null) {
+      out.push(...(yield* read(selected, rest)));
+      return;
+    }
+    const items = withoutEmpty(yield* read(place, []));
+    if (items.some((item) => item.tag === "object")) yield* held(place, []);
+    for (const item of items)
+      if (item.tag !== "object" && (rest.length === 0 || item.tag === "unknown")) out.push(item);
+  };
+  for (const [index, argument] of c.arguments.entries()) {
+    const label = labels[index];
+    if (label !== undefined) {
+      if (label !== null && rest.length === 0) out.push(makeItem(label));
+      continue;
+    }
+    const content: ChoiceOptionEvidence["content"] | undefined = evidence[index]?.content;
+    if (content?.kind === "object") {
+      yield* button(argument, content.object);
+      continue;
+    }
+    if (content?.kind === "list" || content?.kind === "set") {
+      for (const element of content.elements) yield* button(element.place, element.object);
+      continue;
+    }
+    // a computed option: a list's or a set's elements, a choice object, or a value
+    const option = withoutEmpty(yield* read(argument, []));
+    if (option.some((item) => item.tag === "list" || item.tag === "set"))
+      for (const item of withoutEmpty(yield* read(argument, ["element"])))
+        if (item.tag === "object") yield* held(argument, ["element"]);
+        else if (rest.length === 0 || item.tag === "unknown") out.push(item);
+    if (option.some((item) => item.tag === "object")) yield* held(argument, []);
+    for (const item of option)
+      if (item.tag === "list" || item.tag === "set" || item.tag === "object") continue;
+      else if (rest.length === 0 || item.tag === "unknown") out.push(item);
+  }
+  return out;
+}
+
 /** A property read that found no such property. */
-export const isMissing = (item: Item): boolean =>
+const isMissing = (item: Item): boolean =>
   item.tag === "unknown" && (item.reasons & REASON.missing) !== 0;
 
 /** Items without their missing alternative: an unknown only missing goes, one with another reason keeps that reason. */
-export function withoutMissing(items: readonly Item[]): Item[] {
+function withoutMissing(items: readonly Item[]): Item[] {
   return items.flatMap((item) =>
     !isMissing(item)
       ? [item]

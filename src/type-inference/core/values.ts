@@ -2,13 +2,12 @@ import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import {
   carried,
-  choiceLabels,
+  choiceItems,
   conversionKind,
   defaultOf,
   emptyAt,
   heldReference,
   ingressNull,
-  isMissing,
   ONLY_NULL,
   OPAQUE_MEMBER,
   operatorOf,
@@ -16,7 +15,6 @@ import {
   REFERENCE,
   typedDefault,
   unknownItem,
-  withoutMissing,
   withOwnSelection,
 } from "./contract.js";
 import { keyOf, keyPath, keyPlace, type ForLoopFacts, type Key } from "./definitions.js";
@@ -27,6 +25,7 @@ import {
   builtinResult,
   conversionCategory,
   declaredResult,
+  dictList,
   interactionCategory,
   measuresLength,
   memberResult,
@@ -176,6 +175,8 @@ export class Values {
         return yield* this.#iteration(projection.owner, at, rest);
       if (measuresLength(projection.step))
         return yield* this.#length(projection.owner, at, projection.step, rest);
+      if (dictList(projection.step) !== undefined)
+        return yield* this.#dictList(projection.owner, at, projection.step, rest);
       const elements = yield* this.valueItems(projection.owner, at, [
         stepName(projection.step),
         ...rest,
@@ -230,26 +231,42 @@ export class Values {
   }
 
   /**
-   * V30 §19: the value a choice object's button gives at `rest`: its `value`, and its `text` where it may have none.
+   * TABLE r4.46 (2): a dict's `values` is a new list of its values, its `keys` one of text, as certain as the receiver;
+   * either may hold none (no count proof, no `null`); an object's own property of the name is its property (F11).
    */
-  *#choiceValue(
-    option: PlaceId,
+  *#dictList(
+    owner: PlaceId,
     node: FlowNode | null,
-    at: readonly string[],
+    step: string,
     rest: readonly string[],
   ): Work<readonly Item[]> {
-    const value = withoutEmpty(yield* this.valueItems(option, node, [...at, "value"]));
-    const present = withoutMissing(value);
+    // F19a: a receiver that may be a reference has the runtime's members
+    if (heldReference(yield* this.pass.contract.valueReceiver(owner)))
+      return yield* this.valueItems(owner, node, [step, ...rest]);
     const out: Item[] = [];
-    if (present.length > 0)
-      out.push(
-        ...(rest.length === 0
-          ? present
-          : yield* this.valueItems(option, node, [...at, "value", ...rest])),
-      );
-    if (value.length === 0 || value.some(isMissing))
-      out.push(...(yield* this.valueItems(option, node, [...at, "text", ...rest])));
-    return out;
+    for (const item of withoutEmpty(yield* this.valueItems(owner, node, []))) {
+      if (item.tag === "dict") {
+        const of = (tag: "list" | "string"): Item =>
+          carried({ ...makeItem(tag, item.writer, { context: item.context }), cert: item.cert }, [
+            item,
+          ]);
+        if (rest.length === 0) out.push(of("list"));
+        else if (rest[0] === "element") {
+          const elements =
+            dictList(step) === "keys"
+              ? rest.length === 1
+                ? [of("string")]
+                : []
+              : withoutEmpty(yield* this.valueItems(owner, node, rest));
+          out.push(...(item.cert === "def" ? elements : weaken(elements)));
+          if (rest.length === 1) out.push(EMPTY);
+        }
+      } else if (item.tag === "object" || REFERENCE.has(item.tag)) {
+        const own = yield* this.valueItems(owner, node, [step, ...rest]);
+        out.push(...(item.cert === "def" ? own : weaken(own)));
+      } else if (item.tag === "unknown") out.push(item);
+    }
+    return mergeItems(out, this.pass.program.scope);
   }
 
   /**
@@ -570,28 +587,8 @@ export class Values {
     if (interaction?.kind === "asks")
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
     // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
-    if (interaction?.kind === "options") {
-      const labels = choiceLabels(c);
-      for (const [index, argument] of c.arguments.entries()) {
-        const label = labels[index];
-        if (label !== undefined) {
-          if (label !== null && rest.length === 0) out.push(makeItem(label));
-          continue;
-        }
-        const option = withoutEmpty(yield* this.valueItems(argument, at, []));
-        if (option.some((item) => item.tag === "list" || item.tag === "set"))
-          for (const item of withoutEmpty(yield* this.valueItems(argument, at, ["element"])))
-            if (item.tag === "object")
-              out.push(...(yield* this.#choiceValue(argument, at, ["element"], rest)));
-            else if (rest.length === 0 || item.tag === "unknown") out.push(item);
-        if (option.some((item) => item.tag === "object"))
-          out.push(...(yield* this.#choiceValue(argument, at, [], rest)));
-        for (const item of option)
-          if (item.tag === "list" || item.tag === "set" || item.tag === "object") continue;
-          else if (rest.length === 0 || item.tag === "unknown") out.push(item);
-      }
-      return out;
-    }
+    if (interaction?.kind === "options")
+      return yield* choiceItems(c, rest, (value, path) => this.valueItems(value, at, path));
     const member = family === "member" ? memberResult(name) : undefined;
     if (member !== undefined) return member.map((kind) => makeItem(kind));
     // F19a: a handle's members are the runtime's
