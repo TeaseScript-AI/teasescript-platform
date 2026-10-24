@@ -24,7 +24,7 @@ interface Regions<T> {
 }
 
 /** A region of an `and`/`or`'s right operands, from a test's end to the end of the outermost logical: text offsets. */
-interface OperandRegion {
+export interface OperandRegion {
   readonly start: number;
   readonly end: number;
 }
@@ -302,6 +302,16 @@ export class GuardIndex {
     for (const [key, byCallable] of this.#branches)
       for (const [callable, regions] of byCallable)
         for (const entry of regions.list) yield { key, callable, entry };
+  }
+
+  /** Every tested key's operand regions in each file, sorted by where they start (W34's copy forest). */
+  public *operandRegions(): Generator<{
+    readonly key: Key;
+    readonly file: number;
+    readonly regions: readonly OperandRegion[];
+  }> {
+    for (const [key, byFile] of this.#operands)
+      for (const [file, regions] of byFile) yield { key, file, regions: regions.list };
   }
 
   /**

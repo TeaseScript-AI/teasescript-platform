@@ -968,6 +968,22 @@ const W34_LINKS: readonly (readonly [string, (index: number) => string])[] = [
  * copies under one test, k sources of five copied definitions each, a source tested at k paths and redefined k times
  * beside four more sources tested there. Every copy is resolved once and read once per field: k + k, never k × k.
  */
+/**
+ * A record passed down k single-site functions, each passing its parameter on as `step` writes the call; the last reads
+ * every field (review r5: k bindings and k fields, resolved per binding and per field, never per pair).
+ */
+const argumentChain = (k: number, step: (index: number) => string): string =>
+  lines(
+    `let seed = {guard: 1, ${fields(k, () => "1")}}`,
+    `if flagHost { seed = {guard: 1, ${fields(k, () => "null")}} }`,
+    rows(k, (j) =>
+      j === k - 1
+        ? `function use${j}(p${j}) {\n${rows(k, (i) => `repeat p${j}.f${i} {}`)}\nreturn true\n}`
+        : `function use${j}(p${j}) {\n${step(j)}\nreturn true\n}`,
+    ),
+    "use0(seed)",
+  );
+
 export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link]): WorkFamily => ({
   name: `W34-${variant}`,
   measures: "§13.3 W34: a copy chain resolved once per copy, projected per field",
@@ -1193,5 +1209,24 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
           "}",
         ),
       ),
+  },
+  {
+    name: "W34-argument-chain",
+    measures: "§13.3 W34 (review r5): a record passed down k calls and read at k fields",
+    program: (k) => main(argumentChain(k, (j) => `use${j + 1}(p${j})`)),
+  },
+  {
+    name: "W34-argument-operands",
+    measures:
+      "§13.3 W34 r4.38 (review r5): the same, each call in an operand a test of an unread field guards",
+    program: (k) =>
+      main(argumentChain(k, (j) => `if p${j}.guard != null and use${j + 1}(p${j}) {}`)),
+  },
+  {
+    name: "W34-argument-own-tests",
+    measures:
+      "§13.3 W34 r4.38: the same, each call in an operand a test of the field it passes on guards",
+    program: (k) =>
+      main(argumentChain(k, (j) => `if p${j}.f${j} != null and use${j + 1}(p${j}) {}`)),
   },
 ]);

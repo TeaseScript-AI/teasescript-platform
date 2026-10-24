@@ -1479,18 +1479,18 @@ export class Contract {
           continue;
         }
         if (d.how === "argument" || d.how === "parameter default") {
-          f.other = true;
           const parameter = program.place(d.place).kind;
-          // F21: a single non-recursive call's binding is exact, its argument's and its default's alike
-          if (
-            parameter.kind === "parameter" &&
-            parameter.written === null &&
-            !lists.singleSite(d.fn)
-          )
-            yield* adding(this, f, { unk: REASON.deferred });
-          const source = yield* this.#needValue(d.value!);
-          yield* adding(this, f, { value: d.value!, guarded: source.guarded });
-          continue;
+          const deferred =
+            parameter.kind === "parameter" && parameter.written === null && !lists.singleSite(d.fn);
+          // F21: a single non-recursive call's binding is exact, its argument's and its default's alike; an exact
+          // argument that copies a record is a copy of it, as a `let` is, shared by every field below it (W34)
+          if (d.how === "parameter default" || deferred || this.copiedKey(d.value!) === null) {
+            f.other = true;
+            if (deferred) yield* adding(this, f, { unk: REASON.deferred });
+            const source = yield* this.#needValue(d.value!);
+            yield* adding(this, f, { value: d.value!, guarded: source.guarded });
+            continue;
+          }
         }
         const copied = this.copiedKey(d.value!);
         if (copied === null) {

@@ -71,8 +71,8 @@ interface CopyLink {
   root: CopyLink | null;
   /** The tree of the forest it stands in. */
   tree: number;
-  /** The nearest copy at or above it whose read an operand region of a test of its source holds (§3.2), or `null`. */
-  operand: CopyLink | null;
+  /** Whether an operand region of a test of its source holds its read (§3.2). */
+  operand: boolean;
   /** The nearest copy above it of its own source whose read stands in another callable, or `null`. */
   across: CopyLink | null;
 }
@@ -194,6 +194,8 @@ interface CopyForest {
    * spans of the walk; a read at a path fewer sources are tested at asks each one's copy on its chain.
    */
   readonly markSpans: ReadonlyMap<string, readonly Span<number>[]>;
+  /** Per path, the copies an operand region of a test of their source at the path holds, as spans of the walk. */
+  readonly operandSpans: ReadonlyMap<string, readonly Span<number>[]>;
   /** The nested spans built so far, per index and path. */
   readonly anchorsBuilt: Map<string, NestedSpans<CopyAnchor>>;
   readonly marksBuilt: Map<string, NestedSpans<number>>;
@@ -319,7 +321,7 @@ export class ExactPath {
           exit: 0,
           root: null,
           tree: 0,
-          operand: null,
+          operand: false,
           across: null,
         });
       }
@@ -396,7 +398,7 @@ export class ExactPath {
         link.depth = up === null ? 0 : up.depth + 1;
         link.root = up === null ? link : up.root;
         link.tree = tree;
-        link.operand = guards.operandAround(link.source, link.read) ? link : (up?.operand ?? null);
+        link.operand = guards.operandAround(link.source, link.read);
         const callable = indexOf(program.callableAt(link.read));
         let groups = openCopies.get(link.source);
         if (groups === undefined) openCopies.set(link.source, (groups = []));
@@ -594,6 +596,66 @@ export class ExactPath {
       open = { key, callable: index, low, high: program.positionEnd(entry) };
     }
     if (open !== null) register(open.key, open.callable, open.low, open.high);
+    // the copies each tested key's operand regions hold: per source and file, its copies read in an operand region by
+    // their reads' offsets, with the runs of adjacent siblings (one interval of the walk); per key, its regions merged
+    // into their outermost intervals, and per interval the runs in it, found by search
+    const byOffset = new Map<
+      PlaceId,
+      Map<number, { readonly links: CopyLink[]; offsets: number[]; runEnd: number[] }>
+    >();
+    for (const link of links.values()) {
+      if (!link.operand || link.read.span === null) continue;
+      work.charge("exactQueries");
+      let byFile = byOffset.get(link.source);
+      if (byFile === undefined) byOffset.set(link.source, (byFile = new Map()));
+      const entry = byFile.get(link.read.file);
+      if (entry === undefined)
+        byFile.set(link.read.file, { links: [link], offsets: [], runEnd: [] });
+      else entry.links.push(link);
+    }
+    for (const byFile of byOffset.values())
+      for (const entry of byFile.values()) {
+        work.charge("exactQueries", sortCost(entry.links.length));
+        entry.links.sort((x, y) => x.read.span!.start.offset - y.read.span!.start.offset);
+        entry.offsets = entry.links.map((link) => link.read.span!.start.offset);
+        entry.runEnd = entry.links.map(() => 0);
+        for (let index = entry.links.length - 1; index >= 0; index -= 1) {
+          const link = entry.links[index]!;
+          const next = entry.links[index + 1];
+          entry.runEnd[index] =
+            next !== undefined && next.up === link.up && next.enter === link.exit + 1
+              ? entry.runEnd[index + 1]!
+              : index;
+        }
+      }
+    const operandSpans = new Map<string, Span<number>[]>();
+    for (const { key, file, regions } of guards.operandRegions()) {
+      const entry = byOffset.get(keyPlace(key))?.get(file);
+      if (entry === undefined) continue;
+      const path = keyPath(key).join(".");
+      for (let at = 0; at < regions.length;) {
+        const start = regions[at]!.start;
+        let end = regions[at]!.end;
+        for (at += 1; at < regions.length && regions[at]!.start <= end; at += 1) {
+          work.charge("exactQueries");
+          end = Math.max(end, regions[at]!.end);
+        }
+        const last = this.#lowerBound(entry.offsets, end + 1) - 1;
+        for (let index = this.#lowerBound(entry.offsets, start); index <= last;) {
+          work.charge("exactQueries");
+          const runEnd = Math.min(entry.runEnd[index]!, last);
+          const span = {
+            start: entry.links[index]!.enter,
+            end: entry.links[runEnd]!.exit,
+            item: entry.links[index]!.depth,
+          };
+          const list = operandSpans.get(path);
+          if (list === undefined) operandSpans.set(path, [span]);
+          else list.push(span);
+          index = runEnd + 1;
+        }
+      }
+    }
     this.#copies = {
       links,
       at,
@@ -607,6 +669,7 @@ export class ExactPath {
       markPlaces,
       markSeveral,
       markSpans,
+      operandSpans,
       anchorsBuilt: new Map(),
       marksBuilt: new Map(),
     };
@@ -720,8 +783,8 @@ export class ExactPath {
 
   /**
    * §3.2: whether a test of its source at the path, or at a prefix of it, guards the read of a copy from `link` up to
-   * `stop` (excluded): per prefix one search of the spans of the copies a branch holds, then the copies an operand region
-   * may hold, walked.
+   * `stop` (excluded): per prefix one search of the spans of the copies a branch holds, and one of those an operand region
+   * holds.
    */
   #markedAlong(
     forest: CopyForest,
@@ -764,12 +827,16 @@ export class ExactPath {
       guards.narrowed(keyOf(root.source, rest), root.read)
     )
       return true;
-    for (
-      let copy = link.operand;
-      copy !== null && copy.depth > floor;
-      copy = copy.up?.operand ?? null
-    )
-      if (guards.narrowed(keyOf(copy.source, rest), copy.read)) return true;
+    // the copies an operand region of a test of their source at the path or a prefix holds: per prefix one search
+    for (let length = 0; length <= rest.length; length += 1) {
+      const depth = this.#spans(
+        forest.marksBuilt,
+        "operand",
+        rest.slice(0, length).join("."),
+        forest.operandSpans,
+      )?.innermost(link.enter);
+      if (depth !== undefined && depth !== null && depth > floor) return true;
+    }
     return false;
   }
 
