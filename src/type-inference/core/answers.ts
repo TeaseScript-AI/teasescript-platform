@@ -2,7 +2,7 @@ import { NULL_TYPE, UNKNOWN_TYPE, isScalarKind, type StaticType } from "../../st
 import { VALUE_KINDS, type PlainKind, type ValueKind } from "../../value-kinds.js";
 import type { OperandView } from "../adapters/relation.js";
 import type { DynamicWhy, PlaceId } from "../graph.js";
-import { BudgetExhausted, type BudgetLimit, type WorkCounter } from "./budget.js";
+import { BudgetExhausted, checkNesting, type BudgetLimit, type WorkCounter } from "./budget.js";
 import { Consumers } from "./consumers.js";
 import { Contract, typeTags, termAt, writtenOf, type ContractFacts } from "./contract.js";
 import {
@@ -150,7 +150,7 @@ export interface Answers {
   readonly outcome: CoreOutcome;
   /** One per cell outcome: an error, or a warning with its one obligation (§4). */
   readonly diagnostics: readonly CoreDiagnostic[];
-  /** Every obligation once, and the boundary checks. */
+  /** Every warning's obligation, one per warning, and the boundary checks. */
   readonly checks: readonly Obligation[];
   readonly graph: FlowGraph;
   readonly dominators: Dominators;
@@ -175,6 +175,8 @@ export function analyseCore(request: CoreAnalysisRequest): Answers {
   const consumers = new Consumers(pass);
   let exhausted: BudgetLimit | null = null;
   try {
+    // the nesting limit stops the analysis before any of it (TABLE §8; S3 §5's third stop)
+    checkNesting(pass.program.nesting);
     consumers.check();
   } catch (error) {
     if (!(error instanceof BudgetExhausted)) throw error;
@@ -289,16 +291,17 @@ class CoreAnswers implements Answers {
     this.dominators = program.dom;
     this.diagnostics = exhausted === null ? [...consumers.diagnostics] : [];
     this.outcome = exhausted === null ? outcomeOf(this.diagnostics) : "budget-error";
-    const checks = new Map<string, Obligation>();
+    // each warning's obligation, one per warning (§4), then the boundary checks no warning owes
+    const checks: Obligation[] = [];
     for (const diagnostic of this.diagnostics)
       if (diagnostic.class === "warning-runtime-check") {
-        checks.set(JSON.stringify(diagnostic.obligation), diagnostic.obligation);
+        checks.push(diagnostic.obligation);
         const at = siteKey(diagnostic.obligation.site);
         const list = this.#obligations.get(at);
         if (list === undefined) this.#obligations.set(at, [diagnostic.obligation]);
         else list.push(diagnostic.obligation);
       }
-    this.checks = [...checks.values()];
+    this.checks = checks;
     const deferredParameters: PlaceId[] = [];
     const deferredResults: PlaceId[] = [];
     for (const fn of program.graph.functions) {

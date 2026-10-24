@@ -76,27 +76,43 @@ export function siteKey(site: SourceSite): string {
   return `${site.file}:${site.start}:${site.end}`;
 }
 
-/** The parsed nodes of the programs, every node with a kind, so formatting and comments do not count (TABLE §8). */
-function countSyntaxNodes(programs: readonly Program[]): number {
-  let count = 0;
-  const pending: unknown[] = [...programs];
+/**
+ * The parsed nodes of the programs, every node with a kind, so formatting and comments do not count (TABLE §8), and
+ * the deepest nesting of their blocks: a function's body, a block's, a branch's or a loop's body and an `else if`, each
+ * one level.
+ */
+function measureSyntax(programs: readonly Program[]): {
+  readonly nodes: number;
+  readonly nesting: number;
+} {
+  let nodes = 0;
+  let nesting = 0;
+  const pending: { readonly value: unknown; readonly depth: number }[] = programs.map((value) => ({
+    value,
+    depth: 0,
+  }));
   while (pending.length > 0) {
-    const value = pending.pop();
+    const { value, depth } = pending.pop()!;
     if (value === null || typeof value !== "object") continue;
     if (Array.isArray(value)) {
-      for (const entry of value) pending.push(entry);
+      for (const entry of value) pending.push({ value: entry, depth });
       continue;
     }
     // EVIDENCE: invariant: a non-array object of the parsed program, read by key.
     const fields = value as Readonly<Record<string, unknown>>;
-    if (typeof fields["kind"] === "string") count += 1;
+    if (typeof fields["kind"] === "string") nodes += 1;
+    const inner = fields["kind"] === "block" ? depth + 1 : depth;
+    nesting = Math.max(nesting, inner);
     for (const key of Object.keys(fields)) {
       if (key === "span" || key === "site") continue;
       const field = fields[key];
-      if (field !== null && typeof field === "object") pending.push(field);
+      if (field === null || typeof field !== "object") continue;
+      // an `else if` is an `if` nested in its predecessor's `else`: one level more
+      const elseIf = key === "elseBlock" && "kind" in field && field.kind === "ifStatement";
+      pending.push({ value: field, depth: elseIf ? inner + 1 : inner });
     }
   }
-  return count;
+  return { nodes, nesting };
 }
 
 /**
@@ -113,6 +129,8 @@ export class CoreProgram {
   readonly places: readonly Place[];
   readonly constraints: readonly Constraint[];
   readonly syntaxNodes: number;
+  /** The deepest nesting of the programs' blocks. */
+  readonly nesting: number;
 
   /** A read's occurrence place, by the binding it reads. */
   readonly occurrenceOf = new Map<PlaceId, PlaceId>();
@@ -134,7 +152,9 @@ export class CoreProgram {
   readonly #sources: readonly string[];
 
   public constructor(request: CoreAnalysisRequest) {
-    this.syntaxNodes = countSyntaxNodes(request.files.map((file) => file.program));
+    const syntax = measureSyntax(request.files.map((file) => file.program));
+    this.syntaxNodes = syntax.nodes;
+    this.nesting = syntax.nesting;
     this.work = ledgerFor(this.syntaxNodes);
     this.work.charge("syntaxNodes", this.syntaxNodes);
     this.scope = { work: this.work, ingress: new IngressGraph() };
