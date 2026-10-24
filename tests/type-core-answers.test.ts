@@ -135,3 +135,30 @@ test("a bare read names its binding's place, the one its declaration stores into
   assert.deepEqual(read.place, declared.place);
   assert.deepEqual(answers.place(read.place.id).admitted, { by: "written", kinds: ["integer"] });
 });
+
+test("a read's route is the path its answer took (Astra B5)", () => {
+  const route = (source: string, text: string): string | undefined => {
+    const { answers, node } = analysed(source);
+    return answers.at(node(text))?.route;
+  };
+  // the exact path's definition answers
+  assert.equal(route("let box = {left: 1}\nsay box.left\nexit", "box.left"), "exact");
+  // F19a: a reference's member is opaque before the exact path
+  assert.equal(
+    route('speaker vera { mood: "calm" }\nlet alias = vera\nsay alias.mood\nexit', "alias.mood"),
+    "contract",
+  );
+  // F5a: a loop add over an iterable that may hold no element takes the contract
+  assert.equal(
+    route(
+      'let flag = askBoolean "f"\nlet items = [1]\nif flag { items.clear() }\nlet output = []\nfor n in items { output.add(n) }\nsay output.first\nexit',
+      "output.first",
+    ),
+    "contract",
+  );
+  // F12: past an element step over a copy the contract answers
+  assert.equal(
+    route("let seed = {f: 1.5}\nlet rows = [seed]\nsay rows.first.f\nexit", "rows.first.f"),
+    "contract",
+  );
+});

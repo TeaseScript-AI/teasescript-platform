@@ -379,7 +379,7 @@ class CoreAnswers implements Answers {
   }
 
   public at(node: FlowNode): OccurrenceAnswer | null {
-    const { program, values, exact } = this.#pass;
+    const { program, values } = this.#pass;
     if (node.span === null) return null;
     const obligations =
       this.#obligations.get(
@@ -412,17 +412,13 @@ class CoreAnswers implements Answers {
     const target = program.occurrenceOf.has(base)
       ? program.targetRoot(program.occurrenceOf.get(value) ?? value)
       : null;
-    let route: Route = "value";
-    if (target !== null)
-      route = this.#consumers.quiet.has(value)
-        ? "quiet"
-        : "def" in
-            exact.exactPath(
-              keyOf(target.root, target.path),
-              program.occNode.get(value) ?? program.projOf.get(value)?.node ?? node,
-            )
-          ? "exact"
-          : "contract";
+    // the route the read's answer took, recorded as it was answered (Astra B5)
+    const route: Route =
+      target === null
+        ? "value"
+        : this.#consumers.quiet.has(value)
+          ? "quiet"
+          : values.valueRoute(value, node, []);
     return {
       items,
       route,

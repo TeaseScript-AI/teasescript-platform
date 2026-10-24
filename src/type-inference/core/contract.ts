@@ -1,6 +1,7 @@
 import { hasIdentity, VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
 import type { PlaceId, PlaceKind, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
+import type { ReadRoute } from "./values.js";
 import { keyOf, keyPath, keyPlace, sortCost, type Definition, type Key } from "./definitions.js";
 import { withoutEmpty, withWriter } from "./exact-path.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
@@ -408,7 +409,17 @@ export class Contract {
   #subFirst: Map<PlaceId, Set<string>> | null = null;
   #collected = false;
 
+  /** The value-side literal reads that passed an element step over a copy, by literal, path and node (F12). */
+  readonly #overCopy = new Set<string>();
+
   public constructor(readonly pass: CorePass) {}
+
+  /** S3 §1's route of a literal's value at a path: the contract's past an element step over a copy (F12). */
+  public literalRoute(literal: PlaceId, rest: readonly string[], node: FlowNode | null): ReadRoute {
+    return this.#overCopy.has(`${literal}|${rest.join(".")}|${node?.id ?? "-"}`)
+      ? "contract"
+      : "exact";
+  }
 
   // ------------------------------------------------------------------------------------------- the contract of a key
 
@@ -2468,6 +2479,8 @@ export class Contract {
       )
         out.push(EMPTY);
     }
+    // S3 §1's route: past an element step over a copy the contract answered (F12)
+    if (exact && overCopy) this.#overCopy.add(`${literal}|${rest.join(".")}|${node?.id ?? "-"}`);
     // §3.4 r4.11: the X word is the read's (`member` past an element step over a copy), shared by every known-kind
     // item, definite ones included, whatever its writer; an unknown keeps its reason's word
     return overCopy

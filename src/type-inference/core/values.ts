@@ -47,15 +47,33 @@ import type { Work } from "./solver.js";
 
 const COLLECTIONS = new Set(["list", "set", "dict", "object"]);
 
+/** Which path answered a read (S3 §1's route): the exact path's definition, or the contract (§3 step 1 included). */
+export type ReadRoute = "exact" | "contract";
+
 export class Values {
+  /** The route each read took, by key, node and `before`, recorded as the read is answered. */
+  readonly #routes = new Map<string, ReadRoute>();
+
   public constructor(readonly pass: CorePass) {}
 
   /** A read of `key` at `node` (§3); `before`: a definition at `node` itself does not count. */
   public *keyItems(key: Key, node: FlowNode | null, before = false): Work<readonly Item[]> {
     const { program, exact, contract, lists, guards } = this.pass;
-    if (program.isHost(keyPlace(key))) return [unknownItem(REASON.external)];
-    if (yield* contract.refReceiver(key)) return [OPAQUE_MEMBER];
-    if (node === null) return yield* contract.contractOf(key);
+    const route = (taken: ReadRoute): void => {
+      this.#routes.set(`${key}|${node?.id ?? "-"}|${before ? 1 : 0}`, taken);
+    };
+    if (program.isHost(keyPlace(key))) {
+      route("contract");
+      return [unknownItem(REASON.external)];
+    }
+    if (yield* contract.refReceiver(key)) {
+      route("contract");
+      return [OPAQUE_MEMBER];
+    }
+    if (node === null) {
+      route("contract");
+      return yield* contract.contractOf(key);
+    }
     const answer = exact.exactPath(key, node, before);
     // F5a: the loop ran only over a held iterable, and nothing between the add and the body's end may change the
     // collection: X6's events, a call into a callable that stores it included
@@ -74,8 +92,43 @@ export class Values {
             node,
             loop ? "loop" : "fail" in answer ? answer.fail : "loop",
           );
+    route("def" in answer && !loop ? exact.defRoute(answer.def, answer.rest) : "contract");
     // §3.2: under a test of its variable a read's kinds are possible and marked, and no consumer errs on them
     return guards.narrowed(key, node) ? marked(items) : items;
+  }
+
+  /**
+   * The route the value of a place at a node took at a path, read from the routes recorded as it was answered (its
+   * items are asked first): a read's own, through projections, a call's result read, a literal's (F12); an operation's
+   * value is computed, `exact`.
+   */
+  public valueRoute(value: PlaceId, node: FlowNode | null, rest: readonly string[]): ReadRoute {
+    const { program, contract } = this.pass;
+    const recorded = (key: Key, at: FlowNode | null): ReadRoute =>
+      this.#routes.get(`${key}|${at?.id ?? "-"}|0`) ?? "exact";
+    let path = rest;
+    let at = node;
+    for (let projection = program.projOf.get(value); projection !== undefined;) {
+      if (projection.step === "iteration" || measuresLength(projection.step)) return "exact";
+      path = [stepName(projection.step), ...path];
+      at = projection.node ?? at;
+      value = projection.owner;
+      projection = program.projOf.get(value);
+    }
+    if (program.speakerPlaces.has(value) || program.isHost(value)) return "contract";
+    const binding = program.occurrenceOf.get(value);
+    if (binding !== undefined)
+      return recorded(keyOf(binding, path), program.occNode.get(value) ?? at);
+    const call = program.callOutOf.has(value) ? program.opOf.get(value) : undefined;
+    if (call?.kind === "call")
+      return recorded(
+        keyOf(program.functionOf(call.fn).result, path),
+        program.callOutOf.get(value) ?? at,
+      );
+    if (program.opOf.has(value)) return "exact";
+    if (program.hasOf.has(value) || program.cellOwner.has(value))
+      return contract.literalRoute(value, path, at);
+    return recorded(keyOf(value, path), at);
   }
 
   /** F5a: the loop's iterable holds an element at the loop's entry, by the contract or by the exact value (C6's test). */

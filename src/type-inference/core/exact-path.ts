@@ -23,6 +23,7 @@ import {
 } from "./items.js";
 import type { WorkLedger } from "./budget.js";
 import type { Work } from "./solver.js";
+import type { ReadRoute } from "./values.js";
 
 /*
  * The exact path of the coarse core (checkpoint 9, TABLE §3.1): a read of key k at node n is answered from one
@@ -258,6 +259,8 @@ export class ExactPath {
   #bySource: Map<PlaceId, Map<Callable | null, CopyLink[]>> | null = null;
   /** Per source and callable, those copies' intervals of the walk, nested (built as asked). */
   readonly #sourceSpans = new Map<PlaceId, Map<Callable | null, NestedSpans<CopyLink>>>();
+  /** The route of each definition's value at a path, recorded as it is answered (S3 §1). */
+  readonly #defRoutes = new Map<string, ReadRoute>();
   /** Per tested key, its guarded exits, nested (built once its callables have been asked as often as it has exits). */
   readonly #exitSpans = new Map<Key, NestedSpans<number> | null>();
   /** Per tested key whose guarded exits are not built: its exits in its callables, and the callables asked so far. */
@@ -1031,6 +1034,11 @@ export class ExactPath {
     return nested;
   }
 
+  /** The route D's value at a path took (S3 §1): `contract` where it is a chain root's contract or a copy's below. */
+  public defRoute(d: Definition, rest: readonly string[]): ReadRoute {
+    return this.#defRoutes.get(`${d.uid}|${rest.join(".")}`) ?? "exact";
+  }
+
   /** D's value at the path `rest` below its key, at D's node (§3.1's answer): once per (D, path). */
   public *defVal(d: Definition, rest: readonly string[]): Work<readonly Item[]> {
     return yield {
@@ -1052,17 +1060,24 @@ export class ExactPath {
     const copy = d.kind === "whole" && rest.length > 0 && !rest.includes("element");
     const forest = copy ? this.#forest() : null;
     const link = forest?.links.get(d.uid);
+    const routeKey = `${d.uid}|${rest.join(".")}`;
     if (forest !== null && link !== undefined) {
       const stop = this.#stopAt(forest, link, rest);
       const root = link.root!;
       let items: readonly Item[] | null = null;
-      if (stop !== null && stop !== link) items = yield* this.defVal(stop.d, rest);
-      else if (stop === null && root.top.kind === "origin") {
-        if (!(yield* contract.refReceiver(keyOf(root.top.def.place, rest))))
+      if (stop !== null && stop !== link) {
+        items = yield* this.defVal(stop.d, rest);
+        this.#defRoutes.set(routeKey, this.defRoute(stop.d, rest));
+      } else if (stop === null && root.top.kind === "origin") {
+        if (!(yield* contract.refReceiver(keyOf(root.top.def.place, rest)))) {
           items = yield* this.defVal(root.top.def, rest);
+          this.#defRoutes.set(routeKey, this.defRoute(root.top.def, rest));
+        }
       } else if (stop === null && root.top.kind === "fail") {
-        if (!(yield* contract.refReceiver(keyOf(root.source, rest))))
+        if (!(yield* contract.refReceiver(keyOf(root.source, rest)))) {
           items = yield* contract.contractRead(keyOf(root.source, rest), root.read, root.top.word);
+          this.#defRoutes.set(routeKey, "contract");
+        }
       }
       if (items !== null)
         return mergeItems(
@@ -1070,11 +1085,11 @@ export class ExactPath {
           scope,
         );
     }
-    if (d.kind === "whole")
-      return mergeItems(
-        withWriter(yield* values.valueItems(d.value!, d.node, rest), writer),
-        scope,
-      );
+    if (d.kind === "whole") {
+      const items = yield* values.valueItems(d.value!, d.node, rest);
+      this.#defRoutes.set(routeKey, values.valueRoute(d.value!, d.node, rest));
+      return mergeItems(withWriter(items, writer), scope);
+    }
     const before = yield* values.keyItems(keyOf(d.place, [...d.path, ...rest]), d.node, true);
     // F5–F7: the collection's kind is unchanged
     if (rest.length === 0) return before;
