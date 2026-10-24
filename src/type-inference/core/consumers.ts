@@ -752,8 +752,8 @@ export class Consumers {
     while (pending.length > 0) {
       const [value, path] = pending.pop()!;
       program.work.charge("checks");
-      if (path.length === 0 && definitions.ingress.has(value))
-        return program.place(value).site ?? d.site;
+      // the external expression itself, also where a projection reads below it (`hostValue.field`)
+      if (definitions.ingress.has(value)) return program.place(value).site ?? d.site;
       const next: [PlaceId, readonly string[]][] = [];
       if (program.hasOf.has(value) || program.cellOwner.has(value)) {
         if (path.length > 0)

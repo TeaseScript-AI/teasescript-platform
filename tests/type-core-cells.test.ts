@@ -394,12 +394,37 @@ test("external data in a choice's options or in a literal is warned at its own e
     "written-target@40",
     "copy-type@40",
   ]);
+  // an external option read through a projection sits at its own expression (Astra B6-r2), in a choice and a literal
+  assert.deepEqual(sited("let chosen: integer = askChoice [hostValue.field, 2]\nexit"), [
+    "warning-runtime-check",
+    "written-target@33",
+    "member-read@33",
+    "copy-type@33",
+    "null-check@33",
+  ]);
+  assert.deepEqual(sited("let chosen: integer = [hostValue.field, 2][0]\nexit"), [
+    "warning-runtime-check",
+    "written-target@23",
+    "member-read@23",
+    "copy-type@23",
+    "null-check@23",
+  ]);
   // r4.43 (3): options held in a variable follow the copy reading: the store into the written place
   assert.deepEqual(sited("let opts = [hostValue, 1]\nlet answer: integer = askChoice opts\nexit"), [
     "warning-runtime-check",
     "written-target@48",
     "copy-type@48",
   ]);
+  assert.deepEqual(
+    sited("let opts = [hostValue.field, 1]\nlet answer: integer = askChoice opts\nexit"),
+    [
+      "warning-runtime-check",
+      "written-target@54",
+      "member-read@12",
+      "copy-type@54",
+      "null-check@12",
+    ],
+  );
 });
 
 test("the core gives the expected outcome for the programs beside the set", () => {
