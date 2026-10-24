@@ -288,7 +288,10 @@ test("a recursive projection of a reference or a record closes its component", (
 
 const NARRATOR = 'speaker narrator { value: "Hello" }\n';
 
-/** Programs whose receiver gains a reference kind only round its own cycle (r4.44), with their diagnostics. */
+/**
+ * Programs whose receiver gains a reference kind only round its own cycle (r4.44), one whose receiver holds a reference
+ * from outside the cycle beside a record round it, and the record-only control, with their diagnostics.
+ */
 const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[] = [
   [
     "a record holding a reference, read through two functions",
@@ -310,15 +313,27 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
       "member-read f(true).removeFirst()",
     ],
   ],
+  [
+    "a reference from outside the cycle beside a record round it",
+    "speaker narrator { custom: 1 }\nfunction g(flag: boolean) {\n  if flag { return narrator }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return {custom: 1} }\n  return g(true).custom\n}\nrepeat f(false) {}\nexit",
+    ["integer-use f(false)", "integer-use f(false)", "member-read g(true)", "member-read g(true)"],
+  ],
+  [
+    "the record-only control",
+    "function g(flag: boolean) {\n  if flag { return {custom: 2} }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return {custom: 1} }\n  return g(true).custom\n}\nrepeat f(false) {}\nexit",
+    ["integer-use f(false)", "member-read g(true)"],
+  ],
 ];
 
 /**
  * r4.44: F19a's test of a receiver is a decision of its component, made once on the completed open solve (every
- * receiver read as a record) and held for the second, so a reference that reaches its receiver only round its own
- * cycle makes the access opaque: a warning with its runtime obligations. On `2941d76d8` each stopped with
- * `budget-error` under a 10,000-unit allowance (with no component closed) and at the real allowance after 4 to 20 s;
- * here they take 1,359 and 1,379, 1,359 and 1,363, and 1,133 and 1,216 units in the two orders, the components six,
- * six and seven members.
+ * receiver read as a record, a prefix that holds only references or the runtime's members holding nothing below) and
+ * held for the second, so a reference that reaches its receiver only round its own cycle makes the access opaque: a
+ * warning with its runtime obligations; a reference from outside the cycle keeps its ordinary answer. The first three
+ * stopped with `budget-error` on `2941d76d8` under a 10,000-unit allowance (with no component closed) and at the real
+ * allowance after 4 to 20 s; the fourth on `30477f011` (the open solve asked ever deeper paths below the runtime's
+ * member) where `2941d76d8` took 809 and 843 units. Here, in the two orders: 1,482 and 1,502; 1,482 and 1,486; 1,372
+ * and 1,422; 1,870 and 1,568; the record-only control 1,281 and 1,248 units (1,070 and 1,128 on `2941d76d8`).
  */
 test("a reference that reaches its receiver only round its own cycle is decided once, its access opaque", () => {
   const got: string[] = [];

@@ -135,6 +135,20 @@ export const RECEIVER: Decision = {
   answer: (choice, input) => (choice === "reference" ? [...input, HELD_REFERENCE] : input),
 };
 
+/**
+ * Whether a receiver's item may hold something a structural step below reads: not a scalar, `null`, a reference kind or
+ * the runtime's opaque member (an unknown for no other reason), whose members are the runtime's (F19a).
+ */
+function holdsBelow(item: Item): boolean {
+  if (item.tag === "unknown") return item.reasons !== REASON.opaque;
+  return (
+    item.tag !== "empty" &&
+    item.tag !== "null" &&
+    !isScalarKind(item.tag) &&
+    !REFERENCE.has(item.tag)
+  );
+}
+
 /** F19a (r4.44): whether a receiver's kinds, as a `RECEIVER` demand answers them, are a reference's. */
 export function heldReference(items: readonly Item[]): boolean {
   return items.includes(HELD_REFERENCE);
@@ -485,7 +499,12 @@ export class Contract {
           : tags;
       }
     }
-    return mergeItems(yield* this.#contractAlong(place, path, 0, receiver.floor), program.scope);
+    const along = yield* this.#contractAlong(place, path, 0, receiver.floor);
+    // below a prefix that holds a reference or the runtime's member, the runtime's member (F19a)
+    return mergeItems(
+      receiver.opaque ? [...along, unknownItem(REASON.opaque)] : along,
+      program.scope,
+    );
   }
 
   /** The contract's answer to a read (§3.2): every kind as an item, definite only by P3; the read's word. */
@@ -543,32 +562,30 @@ export class Contract {
   /**
    * One walk of a key's receivers (its prefixes, each a `RECEIVER` demand): whether one is decided a reference's
    * (F19a, r4.44), and else the longest prefix whose kinds hold nothing a step below can be read from (none yet, or
-   * only scalars, `null` and reference kinds, whose members are F19a's), -1 for none. A path below such a value holds
-   * nothing, so the contract asks no shorter prefix's stores: a recursive projection waits for its receiver's answer
-   * instead of asking ever deeper paths through it before its component can close (Astra B2); the read reruns when the
-   * prefix gains a kind that holds the step (C5 reports a member read the kinds lack).
+   * only scalars, `null`, reference kinds and the runtime's opaque members, whose members are the runtime's), -1 for
+   * none, and whether it holds a reference or such a member (`opaque`: what a path below it holds is the runtime's). A
+   * path below such a value holds nothing else, so the contract asks no shorter prefix's stores: a recursive projection
+   * waits for its receiver's answer instead of asking ever deeper paths through it before its component can close
+   * (Astra B2, and the open solve of r4.44, which reads every receiver as a record); the read reruns when the prefix
+   * gains a kind that holds the step (C5 reports a member read the kinds lack).
    */
-  *#receiver(key: Key): Work<{ readonly reference: boolean; readonly floor: number }> {
+  *#receiver(
+    key: Key,
+  ): Work<{ readonly reference: boolean; readonly floor: number; readonly opaque: boolean }> {
     const place = keyPlace(key);
     const path = keyPath(key);
     let floor = -1;
+    let opaque = false;
     for (let length = 0; length < path.length; length += 1) {
       this.pass.program.work.charge("invSteps");
       const items = yield* this.receiverKinds(keyOf(place, path.slice(0, length)));
-      if (heldReference(items)) return { reference: true, floor };
-      if (
-        !items.some(
-          (item) =>
-            item.tag === "unknown" ||
-            (item.tag !== "empty" &&
-              item.tag !== "null" &&
-              !isScalarKind(item.tag) &&
-              !REFERENCE.has(item.tag)),
-        )
-      )
+      if (heldReference(items)) return { reference: true, floor, opaque };
+      if (!items.some(holdsBelow)) {
         floor = length;
+        opaque = items.some((item) => item.tag === "unknown" || REFERENCE.has(item.tag));
+      }
     }
-    return { reference: false, floor };
+    return { reference: false, floor, opaque };
   }
 
   /** A receiver's contract as a demand of its own, with F19a's decision whether it is a reference's (r4.44). */
