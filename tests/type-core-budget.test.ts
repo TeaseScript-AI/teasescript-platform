@@ -183,3 +183,25 @@ test("a recursive record type stops cleanly with budget-error, in either order (
   });
   assert.deepEqual(got, ["budget-error work 0", "budget-error work 0"]);
 });
+
+/**
+ * The same known limit in an ordinary linked list (Astra round 3): built by `chain(n)` and walked by `last(node)`
+ * through `node.next`, 66 syntax nodes, 68 instructions at runtime; the core exhausts its allowance (30,000,001 units)
+ * in both orders. An input to S8, which must give a finite conservative contract answer here (Known limits). Pinned:
+ * the stop is clean, in both orders.
+ */
+test("a linked record list stops cleanly with budget-error, in either order (a known limit until S8)", () => {
+  const source =
+    "function chain(n: integer) {\n  if n == 0 { return {value: 1, next: null} }\n  return {value: n, next: chain(n - 1)}\n}\nfunction last(node) {\n  if node.next == null { return node.value }\n  return last(node.next)\n}\nrepeat last(chain(3)) {}\nexit";
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const got = [false, true].map((reversed) => {
+    const run = (): ReturnType<typeof analyseCore> =>
+      withTestAllowance(100_000, () =>
+        withSolverSeam({ reverseWorklist: reversed }, () => analyseCore(request)),
+      );
+    const answers = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+    return `${answers.outcome} ${answers.budget.exhausted} ${answers.diagnostics.length}`;
+  });
+  assert.deepEqual(got, ["budget-error work 0", "budget-error work 0"]);
+});
