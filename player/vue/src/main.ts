@@ -1,18 +1,11 @@
 import { createApp, h } from "vue";
-import { openIndexedDbMediaRepository } from "../../indexeddb-media-repository.js";
-import {
-  memoryKeptRoomStore,
-  memoryKeptSessionStore,
-  openIndexedDbKeptRoomStore,
-  openIndexedDbKeptSessionStore,
-} from "../../kept-sessions.js";
-import { browserSavedData } from "../../saved-data.js";
-import { createLocalScriptStorage } from "../../script-storage.js";
+import { ONLINE_TOKEN_ITEM, playerDataContext } from "../../player-data.js";
 import { demoSource, demoStorageScope, resolveDemoAsset } from "./demoHost";
 import { prepareHostedScript, type ScriptHost } from "./hostedScript";
 import { developmentPackageHost } from "./packageHost";
 import PlayerApp from "./PlayerApp.vue";
-import { browserStorage } from "./usePlayerPreference";
+import { openPlayerStores } from "./playerStores";
+import type { ScriptFailure } from "./ScriptProblems.vue";
 import { usePlayerSession } from "./usePlayerSession";
 import "./style.css";
 
@@ -23,7 +16,7 @@ import "./style.css";
 const query = new URLSearchParams(window.location.search);
 const developmentPreview = import.meta.env.DEV || query.has("dev");
 const packageId = query.get("package");
-const host: ScriptHost =
+const scriptHost: ScriptHost =
   packageId === null
     ? {
         storageScope: demoStorageScope,
@@ -31,44 +24,71 @@ const host: ScriptHost =
         load: async () => ({ project: demoSource, problems: [] }),
       }
     : developmentPackageHost(packageId);
-// Durable captured and chosen media; when IndexedDB is unavailable, it stays session media.
-const capturedMediaRepository = await openIndexedDbMediaRepository().catch(() => null);
-// Kept sessions and debug rooms outlive a reload and a closed browser; without IndexedDB they last as long as the page.
-const keptSessions = await openIndexedDbKeptSessionStore().catch(() => memoryKeptSessionStore());
-const debugRooms = await openIndexedDbKeptRoomStore().catch(() => memoryKeptRoomStore());
-const app = developmentPreview
-  ? createApp((await import("./DevelopmentPreview.vue")).default, {
-      capturedMediaRepository,
-      keptSessions,
-      debugRooms,
-      packageHost: packageId === null ? null : host,
-    })
-  : // The session host lives in a component scope, so unmounting stops its media, clock and listeners.
-    createApp({
-      setup: () => {
-        const player = usePlayerSession({
-          resolveAsset: host.resolveAsset,
-          scriptStorage: createLocalScriptStorage(browserStorage(), host.storageScope),
-          // An image the script saves a reference to stays in this browser for later runs.
-          capturedMedia: { repository: capturedMediaRepository },
-          // Export and import of saved data cover every script this browser has played.
-          savedData: browserSavedData(browserStorage(), capturedMediaRepository, keptSessions),
-          keptSessions,
-          debugRooms,
-          // `room=debug` opens the script's debug room (DEBUGGER.md "Debug room"), any other URL its own.
-          room: query.get("room") === "debug" ? "debug" : "normal",
-          // The script's storage scope identifies it; development packages and the demo have no release version.
-          debugPackage: { id: host.storageScope, version: null },
+// Every store of the player's data, in the data mode the host chose (`player-data.ts`). When they cannot be opened,
+// the Player shows why instead of Start and keeps no data, rather than mixing one mode's data into the other's.
+const { stores, dataFailure } = await Promise.resolve()
+  .then(() => openPlayerStores(playerDataContext(new URL(window.location.href), onlineToken())))
+  .then(
+    (stores) => ({ stores, dataFailure: null }),
+    (error: unknown) => ({
+      stores: null,
+      dataFailure: {
+        title: "The Player cannot open your data",
+        problems: [{ message: error instanceof Error ? error.message : String(error) }],
+      } satisfies ScriptFailure,
+    }),
+  );
+// Online, the account's player profile replaces the one a package gives.
+const host: ScriptHost =
+  stores?.playerProfile === undefined
+    ? scriptHost
+    : { ...scriptHost, playerProfile: stores.playerProfile };
+const app =
+  stores === null
+    ? createApp({
+        setup: () => {
+          // Without its data the Player touches no browser storage, not even to tidy Debug's rewind histories.
+          const player = usePlayerSession({ debugHistorySpill: async () => null });
+          return () => h(PlayerApp, { player, failure: dataFailure });
+        },
+      })
+    : developmentPreview
+      ? createApp((await import("./DevelopmentPreview.vue")).default, {
+          stores,
+          packageHost: packageId === null ? null : host,
+        })
+      : // The session host lives in a component scope, so unmounting stops its media, clock and listeners.
+        createApp({
+          setup: () => {
+            const player = usePlayerSession({
+              resolveAsset: host.resolveAsset,
+              // Saved values, photos that a saved value references, the kept session, and the debug room; export and
+              // import of saved data cover every script the player has played.
+              ...stores.storage(host.storageScope),
+              // `room=debug` opens the script's debug room (DEBUGGER.md "Debug room"), any other URL its own.
+              room: query.get("room") === "debug" ? "debug" : "normal",
+              // The script's storage scope identifies it; development packages and the demo have no release version.
+              debugPackage: { id: host.storageScope, version: null },
+            });
+            const { failure, identity } = prepareHostedScript(player, host);
+            return () =>
+              h(PlayerApp, {
+                player,
+                failure: failure.value,
+                title: identity.value.title ?? "",
+                author: identity.value.author ?? "",
+                packageName: host.name ?? "",
+                storagePersistent: stores.persistent?.value,
+              });
+          },
         });
-        const { failure, identity } = prepareHostedScript(player, host);
-        return () =>
-          h(PlayerApp, {
-            player,
-            failure: failure.value,
-            title: identity.value.title ?? "",
-            author: identity.value.author ?? "",
-            packageName: host.name ?? "",
-          });
-      },
-    });
 app.mount("#app");
+
+/** The token the host left for online mode, or `null`; a host frame that denies session storage leaves none. */
+function onlineToken(): string | null {
+  try {
+    return window.sessionStorage.getItem(ONLINE_TOKEN_ITEM);
+  } catch {
+    return null;
+  }
+}

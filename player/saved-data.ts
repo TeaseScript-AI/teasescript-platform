@@ -15,15 +15,22 @@ import {
 
 const NAME_PREFIX = "player-storage-name:";
 
+/** A script the player keeps saved data for. */
+export interface SavedDataScript {
+  readonly scope: string;
+  readonly name: string | null;
+}
+
 /**
- * The saved data of every script this browser has played, as the player's own: what export and import of all saved
- * data read and write, whichever script the Player shows. A script's data stays in its own scope.
+ * The saved data of every script the player has played, as the player's own: what export and import of all saved data
+ * read and write, whichever script the Player shows. A script's data stays in its own scope.
  */
 export interface SavedDataHost {
-  /** The scopes this browser keeps saved data for, in name order; rejects when storage cannot be used. */
-  scopes(): readonly string[];
-  /** The script's title as a Player last showed it, or `null`. */
-  name(scope: string): string | null;
+  /**
+   * The scripts the player keeps saved data for, by scope, each with its title as a Player last showed it, or `null`;
+   * rejects when the saved data cannot be read.
+   */
+  scripts(): Promise<readonly SavedDataScript[]>;
   /** Remembers a script's title for listing its saved data; storage problems are ignored. */
   rememberName(scope: string, name: string): void;
   /** Reads the scope's saved values. */
@@ -47,30 +54,53 @@ export function browserSavedData(
   keptSessions?: KeptSessionStore,
   locks: CapturedMediaLocks = browserCapturedMediaLocks(),
 ): SavedDataHost {
+  const name = (scope: string): string | null => {
+    try {
+      return storage?.getItem(NAME_PREFIX + JSON.stringify(scope)) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  return savedDataHost(
+    {
+      scripts: async () =>
+        listLocalScriptStorageScopes(storage).map((scope) => ({ scope, name: name(scope) })),
+      rememberName(scope, name) {
+        try {
+          storage?.setItem(NAME_PREFIX + JSON.stringify(scope), name);
+        } catch {
+          // Without the name, the scope lists by its id.
+        }
+      },
+      provider: (scope) => createLocalScriptStorage(storage, scope),
+    },
+    repository,
+    keptSessions,
+    locks,
+  );
+}
+
+/**
+ * The saved data that `listing` lists and provides, with its photos in `repository`: a Player's photos are stored before
+ * the values that reference them, and the photos a kept session uses stay stored.
+ */
+export function savedDataHost(
+  listing: Pick<SavedDataHost, "scripts" | "rememberName" | "provider">,
+  repository: CapturedMediaRepository | null,
+  keptSessions?: KeptSessionStore,
+  locks: CapturedMediaLocks = browserCapturedMediaLocks(),
+): SavedDataHost {
   return {
-    scopes: () => listLocalScriptStorageScopes(storage),
-    name(scope) {
-      try {
-        return storage?.getItem(NAME_PREFIX + JSON.stringify(scope)) ?? null;
-      } catch {
-        return null;
-      }
-    },
-    rememberName(scope, name) {
-      try {
-        storage?.setItem(NAME_PREFIX + JSON.stringify(scope), name);
-      } catch {
-        // Without the name, the scope lists by its id.
-      }
-    },
-    provider: (scope) => createLocalScriptStorage(storage, scope),
+    scripts: () => listing.scripts(),
+    rememberName: (scope, name) => listing.rememberName(scope, name),
+    provider: (scope) => listing.provider(scope),
     media: (scope) => new CapturedMediaStore(repository, browserMediaUrls, scope),
     persistence(scope) {
       const media = new CapturedMediaStore(repository, browserMediaUrls, scope);
       return {
         // The photos a script's kept session uses stay stored, as its Player keeps them (PLAYER-UI "Session start").
         storage: capturedMediaStorage(
-          createLocalScriptStorage(storage, scope),
+          listing.provider(scope),
           media,
           locks,
           keptPhotoReferences(keptSessions),

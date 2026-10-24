@@ -80,6 +80,11 @@ const props = withDefaults(
     /** Why the script cannot start; shown instead of Start. */
     failure?: ScriptFailure | null;
     /**
+     * When the player's data is in this browser: whether the browser keeps it until the player deletes it, `null` while
+     * unknown; Player Settings' Saved data shows it.
+     */
+    storagePersistent?: boolean | null | undefined;
+    /**
      * How Debug starts: the Debug menu, and auto-skip once Debug runs. Both are off unless the host asks (`?dev`); the
      * debug room starts with the menu on.
      */
@@ -380,6 +385,7 @@ const savedData = computed(() =>
               run: props.player.clearScriptStorage,
             }
           : null,
+        ...(props.storagePersistent !== undefined && { persistent: props.storagePersistent }),
       }
     : null,
 );

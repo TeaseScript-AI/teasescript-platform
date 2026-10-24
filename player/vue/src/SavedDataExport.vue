@@ -178,16 +178,16 @@ const missingPhotos = computed(() =>
       <DialogHeader>
         <DialogTitle>Export saved data</DialogTitle>
         <DialogDescription>
-          Takes the saved data of the scripts this browser has played, with their saved photos, to another browser or
-          device. It is not a session checkpoint.
+          Takes the saved data of the scripts you have played, with their saved photos, to another browser or device.
+          It is not a session checkpoint.
         </DialogDescription>
       </DialogHeader>
       <p v-if="scripts === 'reading'" role="status" class="text-sm">Reading the saved data…</p>
       <Alert v-else-if="scripts === 'failed'" variant="destructive">
-        <AlertDescription>Could not read the saved data in this browser.</AlertDescription>
+        <AlertDescription>Could not read the saved data.</AlertDescription>
       </Alert>
       <p v-else-if="listed.length === 0" class="text-sm" data-export-empty>
-        No script has saved data in this browser yet.
+        No script has saved data yet.
       </p>
       <template v-else>
         <fieldset class="grid gap-2 text-sm">

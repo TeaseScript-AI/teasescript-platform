@@ -77,6 +77,10 @@ const props = defineProps<{
     };
     /** Clearing the shown script's saved data, when the host keeps it; possible only while no session runs. */
     readonly clear: { readonly available: boolean; readonly run: () => Promise<boolean> } | null;
+    /**
+     * When the data is in this browser: whether the browser keeps it until the player deletes it, `null` when unknown.
+     */
+    readonly persistent?: boolean | null;
   } | null;
   /** Whether a session or a Player error can be exported for a developer; the action opens the export dialog. */
   debugExport?: { readonly available: boolean; readonly open: () => void } | null;
@@ -967,8 +971,21 @@ async function updateSidebarVisibility(open: boolean) {
                     >
                       <h3 class="font-medium">Saved data</h3>
                       <p>
-                        What the scripts you play saved in this browser. Export and import take every script at once,
-                        or the ones you tick.
+                        What the scripts you play saved. Export and import take every script at once, or the ones you
+                        tick.
+                      </p>
+                      <p
+                        v-if="savedData.persistent !== undefined"
+                        class="text-muted-foreground"
+                        data-storage-persistence
+                      >
+                        {{
+                          savedData.persistent === true
+                            ? "Stored in this browser until you delete it."
+                            : savedData.persistent === false
+                              ? "Stored in this browser. The browser may delete it when the device runs low on storage, so export it to keep a copy."
+                              : "Stored in this browser."
+                        }}
                       </p>
                       <div class="flex flex-wrap gap-2">
                         <SavedDataExport :read="savedData.export" />
