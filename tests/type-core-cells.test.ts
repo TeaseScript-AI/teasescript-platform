@@ -169,6 +169,19 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "branch",
   ],
   ["§3.2 unguarded length", "let xs = [1]\nlet wrong: string = xs.length", "compile-error", "-"],
+  // W34: copies of a source without an exact definition at the copy keep the guard's mark (review r3)
+  [
+    "§3.2 guarded copies of a source a later store redefines",
+    "let seed = {g: {v: 1.5}}\nif seed.g is integer {\n  let a = seed\n  let b = a\n  repeat b.g {}\n}\nseed = {g: {v: 2}}\nexit",
+    "warning-runtime-check",
+    "branch",
+  ],
+  [
+    "§3.2 unguarded copies of a source a later store redefines",
+    "let seed = {g: {v: 1.5}}\nlet a = seed\nlet b = a\nrepeat b.g {}\nseed = {g: {v: 2}}\nexit",
+    "compile-error",
+    "-",
+  ],
   // F21: a dead call is no site and binds nothing
   [
     "F21 one live call beside a dead one",

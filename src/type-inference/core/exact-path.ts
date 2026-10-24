@@ -40,6 +40,12 @@ export type ExactAnswer =
 /** A path step no definition names: the exact path every path below a source shares that no key below it overlaps. */
 const ANY_PATH = "*";
 
+/** The trees of the copy forest a source with several anchors is listed under one by one; beyond, under all. */
+const FEW_TREES = 4;
+
+/** The sources tested at one path that a read asks one by one; beyond, by the path's spans. */
+const FEW_PLACES = 4;
+
 /**
  * A whole copy of a place (W34): the copy, the source it reads and where, and what the source holds there for every
  * path no key below it overlaps (`top`): the copy it comes from (`up`), another whole store, no exact definition (the
@@ -54,10 +60,14 @@ interface CopyLink {
     | { readonly kind: "copy" | "own" }
     | { readonly kind: "origin"; readonly def: Definition }
     | { readonly kind: "fail"; readonly word: ContextWord };
+  /** The definition its source answers with, if a whole store: its anchor. */
+  anchor: number | null;
   depth: number;
   enter: number;
   exit: number;
   root: CopyLink | null;
+  /** The tree of the forest it stands in. */
+  tree: number;
   /** The nearest copy at or above it whose read an operand region of a test of its source holds (§3.2), or `null`. */
   operand: CopyLink | null;
 }
@@ -73,6 +83,13 @@ interface CopyAnchor {
   readonly depth: number;
   readonly copies: CopyLink[];
   readonly order: number[];
+}
+
+/** A source's copies in one callable by their reads' dominator positions, each with the end of its anchor's run. */
+interface PlacedCopies {
+  readonly links: CopyLink[];
+  positions: number[];
+  runEnd: number[];
 }
 
 /** An interval of the walk with what it stands for. */
@@ -120,6 +137,19 @@ class NestedSpans<T> {
 
   /** The innermost interval holding `point`, its item; `null` if none does. */
   public innermost(point: number): T | null {
+    const at = this.#innermost(point);
+    return at < 0 ? null : this.#item[at]!;
+  }
+
+  /** The items of the intervals holding `point`, the innermost first. */
+  public *holding(point: number): Generator<T> {
+    for (let at = this.#innermost(point); at >= 0; at = this.#jumps[0]![at]!) {
+      this.work.charge("exactQueries");
+      yield this.#item[at]!;
+    }
+  }
+
+  #innermost(point: number): number {
     let low = 0;
     let high = this.#start.length;
     while (low < high) {
@@ -129,8 +159,8 @@ class NestedSpans<T> {
       else high = middle;
     }
     let at = low - 1;
-    if (at < 0) return null;
-    if (this.#end[at]! >= point) return this.#item[at]!;
+    if (at < 0) return -1;
+    if (this.#end[at]! >= point) return at;
     // the outermost interval out from it that ends before the point, then the one out from that
     for (let level = this.#jumps.length - 1; level >= 0; level -= 1) {
       this.work.charge("exactQueries");
@@ -138,7 +168,7 @@ class NestedSpans<T> {
       if (out >= 0 && this.#end[out]! < point) at = out;
     }
     at = this.#jumps[0]![at]!;
-    return at >= 0 && this.#end[at]! >= point ? this.#item[at]! : null;
+    return at >= 0 && this.#end[at]! >= point ? at : -1;
   }
 }
 
@@ -148,10 +178,22 @@ interface CopyForest {
   /** Per path below a source, the sources with a key at that path, and those with one at it or below it. */
   readonly at: ReadonlyMap<string, ReadonlySet<PlaceId>>;
   readonly below: ReadonlyMap<string, ReadonlySet<PlaceId>>;
-  /** Per such path, the anchors of those sources as the spans of their copies (built as asked). */
+  /**
+   * Per such path, the anchors of those sources as the spans of their copies (built as asked): a source's one anchor
+   * directly; a source with several, per tree of the forest, by the source, whose anchors are nested once.
+   */
   readonly atSpans: ReadonlyMap<string, readonly Span<CopyAnchor>[]>;
   readonly belowSpans: ReadonlyMap<string, readonly Span<CopyAnchor>[]>;
-  /** Per path (`""` the source itself), the copies a test of their source at the path guards, as spans of the walk. */
+  readonly atSeveral: ReadonlyMap<string, ReadonlyMap<number, ReadonlySet<PlaceId>>>;
+  readonly belowSeveral: ReadonlyMap<string, ReadonlyMap<number, ReadonlySet<PlaceId>>>;
+  readonly anchorsOf: ReadonlyMap<PlaceId, readonly CopyAnchor[]>;
+  readonly placesBuilt: Map<PlaceId, NestedSpans<CopyAnchor>>;
+  /** Per path (`""` the source itself), the sources a branch tests at the path. */
+  readonly markPlaces: ReadonlyMap<string, ReadonlySet<PlaceId>>;
+  /**
+   * Per path that more than a few sources are tested at, the copies a test of their source at the path guards, as
+   * spans of the walk; a read at a path fewer sources are tested at asks each one's copy on its chain.
+   */
   readonly markSpans: ReadonlyMap<string, readonly Span<number>[]>;
   /** The nested spans built so far, per index and path. */
   readonly anchorsBuilt: Map<string, NestedSpans<CopyAnchor>>;
@@ -271,10 +313,12 @@ export class ExactPath {
           read,
           up: null,
           top: { kind: "own" },
+          anchor: null,
           depth: 0,
           enter: 0,
           exit: 0,
           root: null,
+          tree: 0,
           operand: null,
         });
       }
@@ -289,6 +333,7 @@ export class ExactPath {
         const up = links.get(answer.def.uid);
         link.up = up ?? null;
         link.top = up === undefined ? { kind: "origin", def: answer.def } : { kind: "copy" };
+        link.anchor = answer.def.uid;
         let anchor = anchors.get(answer.def.uid);
         if (anchor === undefined)
           anchors.set(
@@ -316,7 +361,9 @@ export class ExactPath {
     // one walk: the origins' copies in their anchors' order, each copy's own copies below it
     const children = (link: CopyLink): readonly CopyLink[] => anchors.get(link.d.uid)?.copies ?? [];
     let clock = 0;
+    let trees = 0;
     const walk = (top: readonly CopyLink[]): void => {
+      const tree = trees++;
       const stack: { readonly list: readonly CopyLink[]; next: number }[] = [
         { list: top, next: 0 },
       ];
@@ -336,13 +383,14 @@ export class ExactPath {
         link.exit = link.enter;
         link.depth = up === null ? 0 : up.depth + 1;
         link.root = up === null ? link : up.root;
+        link.tree = tree;
         link.operand = guards.operandAround(link.source, link.read) ? link : (up?.operand ?? null);
         stack.push({ list: children(link), next: 0 });
       }
     };
     const origins = [...anchors.entries()].filter(([uid]) => !links.has(uid));
     for (const [, anchor] of origins) walk(anchor.copies);
-    walk(roots.filter((link) => link.top.kind !== "origin"));
+    for (const root of roots) if (root.top.kind !== "origin") walk([root]);
     const anchorsOf = new Map<PlaceId, CopyAnchor[]>();
     for (const [uid, anchor] of anchors) {
       const owner = links.get(uid);
@@ -355,19 +403,19 @@ export class ExactPath {
       if (list === undefined) anchorsOf.set(anchor.place, [placed]);
       else list.push(placed);
     }
-    const spanOf = (anchor: CopyAnchor, from: number, to: number): Span<CopyAnchor> => ({
-      start: anchor.copies[from]!.enter,
-      end: anchor.copies[to]!.exit,
-      item: anchor,
-    });
-    // the keys below each source, by their path and every prefix of it, as places and as the spans of their anchors
+    // the keys below each source, by their path and every prefix of it: as places, and as the spans of the anchors of
+    // a source with one anchor, or per tree the sources with several (their anchors nested once per source)
     const at = new Map<string, Set<PlaceId>>();
     const below = new Map<string, Set<PlaceId>>();
     const atSpans = new Map<string, Span<CopyAnchor>[]>();
     const belowSpans = new Map<string, Span<CopyAnchor>[]>();
+    const atSeveral = new Map<string, Map<number, Set<PlaceId>>>();
+    const belowSeveral = new Map<string, Map<number, Set<PlaceId>>>();
+    const treesOf = new Map<PlaceId, ReadonlySet<number>>();
     const add = (
       places: Map<string, Set<PlaceId>>,
       spans: Map<string, Span<CopyAnchor>[]>,
+      several: Map<string, Map<number, Set<PlaceId>>>,
       path: string,
       place: PlaceId,
     ): void => {
@@ -376,50 +424,129 @@ export class ExactPath {
       if (set === undefined) places.set(path, new Set([place]));
       else if (set.has(place)) return;
       else set.add(place);
-      for (const anchor of anchorsOf.get(place) ?? []) {
-        work.charge("exactQueries");
+      const own = anchorsOf.get(place) ?? [];
+      if (own.length === 1) {
+        const anchor = own[0]!;
+        const span = { start: anchor.order[0]!, end: anchor.copies.at(-1)!.exit, item: anchor };
         const list = spans.get(path);
-        const span = spanOf(anchor, 0, anchor.copies.length - 1);
         if (list === undefined) spans.set(path, [span]);
         else list.push(span);
+        return;
+      }
+      // per tree its sources; a source whose anchors stand in more than a few trees under every tree (`-1`)
+      let byTree = several.get(path);
+      if (byTree === undefined) several.set(path, (byTree = new Map()));
+      let inTrees = treesOf.get(place);
+      if (inTrees === undefined) {
+        const found = new Set(own.map((anchor) => anchor.copies[0]!.tree));
+        work.charge("exactQueries", own.length);
+        treesOf.set(place, (inTrees = found.size > FEW_TREES ? new Set([-1]) : found));
+      }
+      for (const tree of inTrees) {
+        work.charge("exactQueries");
+        const inTree = byTree.get(tree);
+        if (inTree === undefined) byTree.set(tree, new Set([place]));
+        else inTree.add(place);
       }
     };
     const sources = new Set([...links.values()].map((link) => link.source));
     for (const source of sources)
       for (const key of definitions.keysBelow(keyOf(source, []))) {
         const path = keyPath(key);
-        add(at, atSpans, path.join("."), source);
+        add(at, atSpans, atSeveral, path.join("."), source);
         for (let length = 1; length <= path.length; length += 1)
-          add(below, belowSpans, path.slice(0, length).join("."), source);
+          add(below, belowSpans, belowSeveral, path.slice(0, length).join("."), source);
       }
-    // the copies each test's branch holds: per anchor of the tested key's place, one span of consecutive copies
+    // per source and callable, its anchored copies by dominator position, with the runs of one anchor's copies (an
+    // anchor's copies in one callable are consecutive in its order, so a run is one interval of the walk)
+    const placed = new Map<PlaceId, Map<number, PlacedCopies>>();
+    for (const link of links.values()) {
+      if (link.anchor === null) continue;
+      work.charge("exactQueries");
+      let byCallable = placed.get(link.source);
+      if (byCallable === undefined) placed.set(link.source, (byCallable = new Map()));
+      const callable = indexOf(program.callableAt(link.read));
+      const entry = byCallable.get(callable);
+      if (entry === undefined)
+        byCallable.set(callable, { links: [link], positions: [], runEnd: [] });
+      else entry.links.push(link);
+    }
+    for (const byCallable of placed.values())
+      for (const entry of byCallable.values()) {
+        work.charge("exactQueries", sortCost(entry.links.length));
+        entry.links.sort((x, y) => program.position(x.read) - program.position(y.read));
+        entry.positions = entry.links.map((link) => program.position(link.read));
+        entry.runEnd = entry.links.map(() => 0);
+        for (let index = entry.links.length - 1; index >= 0; index -= 1)
+          entry.runEnd[index] =
+            index + 1 < entry.links.length &&
+            entry.links[index + 1]!.anchor === entry.links[index]!.anchor
+              ? entry.runEnd[index + 1]!
+              : index;
+      }
+    // the copies each tested key's branches hold: the branches merged into their outermost intervals per callable, and
+    // per interval the runs of the copies of the key's place in it, once per place and interval whatever key tests it
+    const markPlaces = new Map<string, Set<PlaceId>>();
+    for (const { key } of guards.branchRegions()) {
+      work.charge("exactQueries");
+      const path = keyPath(key).join(".");
+      const places = markPlaces.get(path);
+      if (places === undefined) markPlaces.set(path, new Set([keyPlace(key)]));
+      else places.add(keyPlace(key));
+    }
     const markSpans = new Map<string, Span<number>[]>();
+    const runs = new Map<string, readonly Span<number>[]>();
+    const register = (key: Key, callable: number, low: number, high: number): void => {
+      if ((markPlaces.get(keyPath(key).join("."))?.size ?? 0) <= FEW_PLACES) return;
+      const place = keyPlace(key);
+      const id = `${place}|${callable}|${low}|${high}`;
+      let found = runs.get(id);
+      if (found === undefined) {
+        const list: Span<number>[] = [];
+        const entry = placed.get(place)?.get(callable);
+        if (entry !== undefined) {
+          const last = this.#lowerBound(entry.positions, high + 1) - 1;
+          for (let index = this.#lowerBound(entry.positions, low); index <= last;) {
+            work.charge("exactQueries");
+            const end = Math.min(entry.runEnd[index]!, last);
+            list.push({
+              start: entry.links[index]!.enter,
+              end: entry.links[end]!.exit,
+              item: entry.links[index]!.depth,
+            });
+            index = end + 1;
+          }
+        }
+        runs.set(id, (found = list));
+      }
+      if (found.length === 0) return;
+      const path = keyPath(key).join(".");
+      const list = markSpans.get(path);
+      if (list === undefined) markSpans.set(path, [...found]);
+      else list.push(...found);
+    };
+    let open: { key: Key; callable: number; low: number; high: number } | null = null;
     for (const { key, callable, entry } of guards.branchRegions()) {
       work.charge("exactQueries");
       const index = indexOf(callable);
       const low = program.position(entry);
-      const high = program.positionEnd(entry);
-      for (const anchor of anchorsOf.get(keyPlace(key)) ?? []) {
-        const first = this.#firstCopy(anchor, orderOf, index, low);
-        const last = this.#firstCopy(anchor, orderOf, index, high + 1) - 1;
-        if (first > last) continue;
-        const path = keyPath(key).join(".");
-        const list = markSpans.get(path);
-        const span = {
-          start: anchor.copies[first]!.enter,
-          end: anchor.copies[last]!.exit,
-          item: anchor.depth,
-        };
-        if (list === undefined) markSpans.set(path, [span]);
-        else list.push(span);
-      }
+      if (open !== null && open.key === key && open.callable === index && low <= open.high)
+        continue;
+      if (open !== null) register(open.key, open.callable, open.low, open.high);
+      open = { key, callable: index, low, high: program.positionEnd(entry) };
     }
+    if (open !== null) register(open.key, open.callable, open.low, open.high);
     this.#copies = {
       links,
       at,
       below,
       atSpans,
       belowSpans,
+      atSeveral,
+      belowSeveral,
+      anchorsOf,
+      placesBuilt: new Map(),
+      markPlaces,
       markSpans,
       anchorsBuilt: new Map(),
       marksBuilt: new Map(),
@@ -427,20 +554,14 @@ export class ExactPath {
     return this.#copies;
   }
 
-  /** The first of an anchor's copies at or after a callable and a dominator position: a binary search. */
-  #firstCopy(
-    anchor: CopyAnchor,
-    orderOf: (link: CopyLink) => readonly [number, number],
-    callable: number,
-    position: number,
-  ): number {
+  /** The first index of a sorted list whose value is at least `value`: a binary search. */
+  #lowerBound(list: readonly number[], value: number): number {
     let low = 0;
-    let high = anchor.copies.length;
+    let high = list.length;
     while (low < high) {
       const middle = (low + high) >> 1;
       this.pass.program.work.charge("exactQueries");
-      const [c, p] = orderOf(anchor.copies[middle]!);
-      if (c < callable || (c === callable && p < position)) low = middle + 1;
+      if (list[middle]! < value) low = middle + 1;
       else high = middle;
     }
     return low;
@@ -481,22 +602,21 @@ export class ExactPath {
           ),
         ),
     ].map((spans) => spans?.innermost(link.enter) ?? null);
+    // the sources with several anchors in the link's tree, each by its anchors nested once
+    const several = [
+      forest.belowSeveral.get(rest.join(".")),
+      ...rest
+        .slice(0, -1)
+        .map((_, index) => forest.atSeveral.get(rest.slice(0, index + 1).join("."))),
+    ].flatMap((byTree) => [byTree?.get(link.tree), byTree?.get(-1)]);
+    for (const places of several)
+      for (const place of places ?? [])
+        candidates.push(this.#placeAnchors(forest, place).innermost(link.enter));
     let found: CopyAnchor | null = null;
     for (const candidate of candidates)
       if (candidate !== null && (found === null || candidate.depth > found.depth))
         found = candidate;
-    if (found !== null) {
-      // its copy on the chain: the last of its copies starting at or before the link
-      let low = 0;
-      let high = found.order.length;
-      while (low < high) {
-        const middle = (low + high) >> 1;
-        this.pass.program.work.charge("exactQueries");
-        if (found.order[middle]! <= link.enter) low = middle + 1;
-        else high = middle;
-      }
-      return found.copies[low - 1]!;
-    }
+    if (found !== null) return this.#copyOn(found, link);
     const root = link.root!;
     if (root.top.kind === "own") return root;
     if (root.top.kind === "fail") {
@@ -506,6 +626,37 @@ export class ExactPath {
         if (forest.at.get(rest.slice(0, length).join("."))?.has(root.source) === true) return root;
     }
     return null;
+  }
+
+  /** A source's anchors as the spans of their copies, nested once per source. */
+  #placeAnchors(forest: CopyForest, place: PlaceId): NestedSpans<CopyAnchor> {
+    let nested = forest.placesBuilt.get(place);
+    if (nested === undefined)
+      forest.placesBuilt.set(
+        place,
+        (nested = new NestedSpans(
+          (forest.anchorsOf.get(place) ?? []).map((anchor) => ({
+            start: anchor.order[0]!,
+            end: anchor.copies.at(-1)!.exit,
+            item: anchor,
+          })),
+          this.pass.program.work,
+        )),
+      );
+    return nested;
+  }
+
+  /** An anchor's copy on a link's chain: the last of its copies starting at or before the link. */
+  #copyOn(anchor: CopyAnchor, link: CopyLink): CopyLink {
+    let low = 0;
+    let high = anchor.order.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      this.pass.program.work.charge("exactQueries");
+      if (anchor.order[middle]! <= link.enter) low = middle + 1;
+      else high = middle;
+    }
+    return anchor.copies[low - 1]!;
   }
 
   /**
@@ -519,17 +670,35 @@ export class ExactPath {
     rest: readonly string[],
     stop: CopyLink | null,
   ): boolean {
+    const { guards } = this.pass;
     const floor = stop === null ? -1 : stop.depth;
     for (let length = 0; length <= rest.length; length += 1) {
-      const depth = this.#spans(
-        forest.marksBuilt,
-        "mark",
-        rest.slice(0, length).join("."),
-        forest.markSpans,
-      )?.innermost(link.enter);
-      if (depth !== undefined && depth !== null && depth > floor) return true;
+      const path = rest.slice(0, length).join(".");
+      const places = forest.markPlaces.get(path);
+      if (places === undefined) continue;
+      if (places.size > FEW_PLACES) {
+        const depth = this.#spans(forest.marksBuilt, "mark", path, forest.markSpans)?.innermost(
+          link.enter,
+        );
+        if (depth !== undefined && depth !== null && depth > floor) return true;
+        continue;
+      }
+      // each source tested at the path: its copies on the chain, the nearest first
+      for (const place of places)
+        for (const anchor of this.#placeAnchors(forest, place).holding(link.enter)) {
+          if (anchor.depth <= floor) break;
+          const copy = this.#copyOn(anchor, link);
+          if (guards.narrowed(keyOf(place, rest.slice(0, length)), copy.read)) return true;
+        }
     }
-    const { guards } = this.pass;
+    // a chain without an exact definition at its root: the root's own read, as its general walk marks it
+    const root = link.root!;
+    if (
+      stop === null &&
+      root.top.kind === "fail" &&
+      guards.narrowed(keyOf(root.source, rest), root.read)
+    )
+      return true;
     for (
       let copy = link.operand;
       copy !== null && copy.depth > floor;

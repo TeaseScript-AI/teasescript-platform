@@ -901,6 +901,17 @@ function w34Fan(k: number, copy: (index: number) => string): string {
   );
 }
 
+/** A W34 source redefined k times from one record, each definition followed by its own statements. */
+function w34Redefined(k: number, each: (index: number) => string, after: string): string {
+  return lines(
+    `let base = {${fields(k + 1, () => "1")}}`,
+    `if flagHost { base = {${fields(k + 1, () => "null")}} }`,
+    "let seed = base",
+    rows(k, (i) => `seed = base\n${each(i)}`),
+    after,
+  );
+}
+
 const plainRecord = (literal: string): string => literal;
 const plainField = (index: number): string => `f${index}`;
 
@@ -951,8 +962,9 @@ const W34_LINKS: readonly (readonly [string, (index: number) => string])[] = [
  * one record under tests of their own fields (one test, two nested, an unrelated test before the copy, one `and` chain
  * over all k fields). Review round 2's shapes beside them: chains after early exits on one field (read at the others,
  * and every copy read at it) and on each copy's own field, guarded sibling copies along a chain, k unrelated edited
- * records with one field name, k edited siblings of one copy, k copies of one record edited at k fields. Every copy is
- * resolved once and read once per field: k + k, never k × k.
+ * records with one field name, k edited siblings of one copy, k copies of one record edited at k fields; round 3's:
+ * one source defined k times, each definition copied after an early exit (on one field, on its own field) or with k
+ * stores below the source, and k sources of two copied definitions each. Every copy is resolved once and read once per field: k + k, never k × k.
  */
 export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link]): WorkFamily => ({
   name: `W34-${variant}`,
@@ -1023,6 +1035,56 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
           `if flagHost { root = {${fields(k, () => "null")}} }`,
           rows(k, (i) => `if flagHost { root.f${i} = 2 }`),
           rows(k, (i) => `let copy${i} = root\nrepeat copy${i}.f${i} {}`),
+        ),
+      ),
+  },
+  {
+    name: "W34-redefined-exit-tested",
+    measures: "§13.3 W34 r4.38: k definitions of one source, each copied after a test",
+    program: (k) =>
+      main(
+        w34Redefined(
+          k,
+          (i) => `if seed.f0 == null { exit }\nlet a${i} = seed\nrepeat a${i}.f0 {}`,
+          "",
+        ),
+      ),
+  },
+  {
+    name: "W34-redefined-exit-tested-own-fields",
+    measures:
+      "§13.3 W34 r4.38: k definitions of one source, each copied after a test of its own field",
+    program: (k) =>
+      main(
+        w34Redefined(
+          k,
+          (i) => `if seed.f${i} == null { exit }\nlet a${i} = seed\nrepeat a${i}.f${i} {}`,
+          "",
+        ),
+      ),
+  },
+  {
+    name: "W34-redefined-stores",
+    measures: "§13.3 W34 r4.38: k definitions of one source, each copied, and k stores below it",
+    program: (k) =>
+      main(
+        w34Redefined(
+          k,
+          (i) => `let a${i} = seed\nrepeat a${i}.f0 {}`,
+          rows(k, (i) => `seed.f${i + 1} = 1`),
+        ),
+      ),
+  },
+  {
+    name: "W34-redefined-independent",
+    measures:
+      "§13.3 W34 r4.38: k sources of two copied definitions each, a store at one shared path",
+    program: (k) =>
+      main(
+        rows(
+          k,
+          (i) =>
+            `let r${i} = {f0: 1.5}\nlet b${i} = r${i}\nr${i} = {f0: 2.5}\nr${i}.f0 = 1\nlet a${i} = r${i}\nrepeat a${i}.f0 {}\nrepeat b${i}.f0 {}`,
         ),
       ),
   },
