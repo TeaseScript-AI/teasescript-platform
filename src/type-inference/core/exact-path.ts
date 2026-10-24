@@ -41,7 +41,7 @@ export type ExactAnswer =
 const ANY_PATH = "*";
 
 /*
- * Three tuning constants (TABLE r4.41): each picks which of two indexes answers a read, never the answer. Four keeps the
+ * Four tuning constants (TABLE r4.41): each picks which of two indexes answers a read, never the answer. Four keeps the
  * common shapes on the per-source path; W34's two known products stand where more than four sources, anchors or trees
  * meet at one path (PLAN §6b).
  */
@@ -54,6 +54,9 @@ const FEW_PLACES = 4;
 
 /** The anchors of a source whose copies a path's spans hold run by run; beyond, the source is asked at the read. */
 const FEW_ANCHORS = 4;
+
+/** The callables a tested key's branches stand in that a read asks one by one; beyond, by the key's guarded exits. */
+const FEW_CALLABLES = 4;
 
 /**
  * A whole copy of a place (W34): the copy, the source it reads and where, and what the source holds there for every
@@ -200,9 +203,55 @@ interface CopyForest {
   readonly markSpans: ReadonlyMap<string, readonly Span<number>[]>;
   /** Per path, the copies an operand region of a test of their source at the path holds, as spans of the walk. */
   readonly operandSpans: ReadonlyMap<string, readonly Span<number>[]>;
+  /**
+   * Per source and callable, the copies a chain leaves the callable from (each the source's last copy there on the walk
+   * before a copy of the source in another callable), by their reads' dominator positions, with the runs of siblings.
+   */
+  readonly exits: ReadonlyMap<PlaceId, ReadonlyMap<Callable | null, PlacedExits>>;
   /** The nested spans built so far, per index and path. */
   readonly anchorsBuilt: Map<string, NestedSpans<CopyAnchor>>;
   readonly marksBuilt: Map<string, NestedSpans<number>>;
+}
+
+/**
+ * A source's exits in one callable by their reads' dominator positions; a run is the exits from one on with its parent,
+ * one interval of the walk with the siblings between them (whose reads stand between theirs).
+ */
+interface PlacedExits {
+  readonly links: CopyLink[];
+  positions: number[];
+  runEnd: number[];
+}
+
+/** The exits per source and callable, sorted, with their runs. */
+function exitsOf(
+  exits: ReadonlySet<CopyLink>,
+  program: CorePass["program"],
+): Map<PlaceId, Map<Callable | null, PlacedExits>> {
+  const work = program.work;
+  const out = new Map<PlaceId, Map<Callable | null, PlacedExits>>();
+  for (const exit of exits) {
+    work.charge("exactQueries");
+    let byCallable = out.get(exit.source);
+    if (byCallable === undefined) out.set(exit.source, (byCallable = new Map()));
+    const callable = program.callableAt(exit.read);
+    const entry = byCallable.get(callable);
+    if (entry === undefined) byCallable.set(callable, { links: [exit], positions: [], runEnd: [] });
+    else entry.links.push(exit);
+  }
+  for (const byCallable of out.values())
+    for (const entry of byCallable.values()) {
+      work.charge("exactQueries", sortCost(entry.links.length));
+      entry.links.sort((x, y) => program.position(x.read) - program.position(y.read));
+      entry.positions = entry.links.map((link) => program.position(link.read));
+      entry.runEnd = entry.links.map(() => 0);
+      for (let index = entry.links.length - 1; index >= 0; index -= 1)
+        entry.runEnd[index] =
+          index + 1 < entry.links.length && entry.links[index + 1]!.up === entry.links[index]!.up
+            ? entry.runEnd[index + 1]!
+            : index;
+    }
+  return out;
 }
 
 export class ExactPath {
@@ -212,6 +261,8 @@ export class ExactPath {
   #bySource: Map<PlaceId, Map<Callable | null, CopyLink[]>> | null = null;
   /** Per source and callable, those copies' intervals of the walk, nested (built as asked). */
   readonly #sourceSpans = new Map<PlaceId, Map<Callable | null, NestedSpans<CopyLink>>>();
+  /** Per tested key, its guarded exits, nested (built as asked). */
+  readonly #exitSpans = new Map<Key, NestedSpans<number> | null>();
 
   public constructor(readonly pass: CorePass) {}
 
@@ -371,6 +422,13 @@ export class ExactPath {
     const children = (link: CopyLink): readonly CopyLink[] => anchors.get(link.d.uid)?.copies ?? [];
     let clock = 0;
     let trees = 0;
+    // per source, its copies open on the walk, grouped by their reads' callables; a group's last copy before another
+    // callable's is an exit
+    const openCopies = new Map<
+      PlaceId,
+      { readonly callable: Callable | null; readonly links: CopyLink[] }[]
+    >();
+    const exitSet = new Set<CopyLink>();
     const walk = (top: readonly CopyLink[]): void => {
       const tree = trees++;
       const stack: { readonly list: readonly CopyLink[]; next: number }[] = [
@@ -383,7 +441,11 @@ export class ExactPath {
           stack.pop();
           const parent = stack.at(-1);
           if (parent !== undefined) {
-            parent.list[parent.next - 1]!.exit = clock - 1;
+            const closed = parent.list[parent.next - 1]!;
+            closed.exit = clock - 1;
+            const groups = openCopies.get(closed.source)!;
+            groups.at(-1)!.links.pop();
+            if (groups.at(-1)!.links.length === 0) groups.pop();
           }
           continue;
         }
@@ -396,6 +458,15 @@ export class ExactPath {
         link.root = up === null ? link : up.root;
         link.tree = tree;
         link.operand = guards.operandAround(link.source, link.read);
+        const callable = program.callableAt(link.read);
+        let groups = openCopies.get(link.source);
+        if (groups === undefined) openCopies.set(link.source, (groups = []));
+        const last = groups.at(-1);
+        if (last !== undefined && last.callable === callable) last.links.push(link);
+        else {
+          if (last !== undefined) exitSet.add(last.links.at(-1)!);
+          groups.push({ callable, links: [link] });
+        }
         stack.push({ list: children(link), next: 0 });
       }
     };
@@ -655,6 +726,7 @@ export class ExactPath {
       markSeveral,
       markSpans,
       operandSpans,
+      exits: exitsOf(exitSet, program),
       anchorsBuilt: new Map(),
       marksBuilt: new Map(),
     };
@@ -827,21 +899,80 @@ export class ExactPath {
 
   /**
    * The depth of the nearest copy at or above `copy`, of its source, whose read a branch of a test of the source at the
-   * path holds, or -1. Only the callables the test's branches stand in are asked, each by its nearest copy at or above
-   * `copy`: a chain's reads in one callable are nested in the dominator tree and a branch is a dominator subtree, so a
-   * branch that holds an earlier copy's read there holds the nearest one's; a chain enters a callable once (a return
-   * to one closes a copy cycle, which the walk stops).
+   * path holds, or -1. A chain's reads in one callable are nested in the dominator tree and a branch is a dominator
+   * subtree, so a branch that holds an earlier copy's read there holds the nearest one's; a chain enters a callable once
+   * (a return to one closes a copy cycle, which the walk stops). So in each callable the nearest copy decides: for a key
+   * tested in a few callables, each is asked by its nearest copy at or above `copy`; for one tested in more, the read's
+   * own callable is, and the other callables by the key's guarded exits (the copies a chain leaves them from, which
+   * are the nearest copies there of every chain that reaches another callable), nested once per key.
    */
   #guardedDepth(forest: CopyForest, copy: CopyLink, path: string): number {
-    const { guards } = this.pass;
+    const { guards, program } = this.pass;
     const key = keyOf(copy.source, path === "" ? [] : path.split("."));
+    const callables = guards.branchCallables(key);
+    if (callables === undefined) return -1;
+    const asked =
+      callables.size <= FEW_CALLABLES ? [...callables.keys()] : [program.callableAt(copy.read)];
     let found = -1;
-    for (const callable of guards.branchCallables(key)?.keys() ?? []) {
+    for (const callable of asked) {
+      program.work.charge("exactQueries");
       const nearest = this.#copiesIn(forest, copy.source, callable)?.innermost(copy.enter) ?? null;
       if (nearest !== null && nearest.depth > found && guards.branchHolds(key, nearest.read))
         found = nearest.depth;
     }
+    if (callables.size > FEW_CALLABLES)
+      found = Math.max(
+        found,
+        this.#guardedExits(forest, key, callables)?.innermost(copy.enter) ?? -1,
+      );
     return found;
+  }
+
+  /**
+   * A key's guarded exits: per callable its branches stand in, the branches merged into their outermost intervals, the
+   * exits of its place in an interval found by a search of their positions and taken by runs; nested once per key.
+   */
+  #guardedExits(
+    forest: CopyForest,
+    key: Key,
+    callables: ReadonlyMap<Callable | null, unknown>,
+  ): NestedSpans<number> | null {
+    const known = this.#exitSpans.get(key);
+    if (known !== undefined) return known;
+    const { guards, program } = this.pass;
+    const work = program.work;
+    const spans: Span<number>[] = [];
+    for (const callable of callables.keys()) {
+      const entry = forest.exits.get(keyPlace(key))?.get(callable);
+      const regions = guards.branchesOf(key, callable);
+      if (entry === undefined || regions === undefined) continue;
+      for (let at = 0; at < regions.list.length;) {
+        const low = program.position(regions.list[at]!);
+        let high = program.positionEnd(regions.list[at]!);
+        for (
+          at += 1;
+          at < regions.list.length && program.position(regions.list[at]!) <= high;
+          at += 1
+        ) {
+          work.charge("exactQueries");
+          high = Math.max(high, program.positionEnd(regions.list[at]!));
+        }
+        const last = this.#lowerBound(entry.positions, high + 1) - 1;
+        for (let index = this.#lowerBound(entry.positions, low); index <= last;) {
+          work.charge("exactQueries");
+          const end = Math.min(entry.runEnd[index]!, last);
+          spans.push({
+            start: entry.links[index]!.enter,
+            end: entry.links[end]!.exit,
+            item: entry.links[index]!.depth,
+          });
+          index = end + 1;
+        }
+      }
+    }
+    const nested = spans.length === 0 ? null : new NestedSpans(spans, work);
+    this.#exitSpans.set(key, nested);
+    return nested;
   }
 
   /** A source's copies read in a callable, as their intervals of the walk, nested once per source and callable. */

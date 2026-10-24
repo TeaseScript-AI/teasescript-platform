@@ -1253,6 +1253,62 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
         ),
       ),
   },
+  {
+    name: "W34-fanout-tested-callables",
+    measures:
+      "§13.3 W34 (review r7): one source passed to k functions that each test it and copy it",
+    program: (k) =>
+      main(
+        lines(
+          'let seed = {f: fromJson("2", default: null, files: false)}',
+          rows(k, (i) =>
+            lines(
+              `function use${i}(p) {`,
+              "seed = p",
+              "if seed.f is integer {",
+              "let snap = seed",
+              "repeat snap.f {}",
+              "}",
+              "}",
+            ),
+          ),
+          rows(k, (i) => `use${i}(seed)`),
+        ),
+      ),
+  },
+  {
+    name: "W34-fanout-tested-exits",
+    measures:
+      "§13.3 W34 (review r7): k fields each tested in five functions that each pass the source on k times, read once",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          `if flagHost { seed = {${fields(k, () => "null")}} }`,
+          rows(5, (c) =>
+            lines(
+              rows(k, (j) =>
+                lines(
+                  `function u${c}_${j}(r) {`,
+                  "seed = r",
+                  "let snap = seed",
+                  c === 0 && j === 0 ? rows(k, (i) => `repeat snap.f${i} {}`) : 'say "u"',
+                  "return true",
+                  "}",
+                ),
+              ),
+              `function t${c}(p) {`,
+              "seed = p",
+              rows(k, (i) => `if seed.f${i} != null { say "t" }`),
+              rows(k, (j) => `u${c}_${j}(seed)`),
+              "return true",
+              "}",
+            ),
+          ),
+          rows(5, (c) => `t${c}(seed)`),
+        ),
+      ),
+  },
 ]);
 
 /** A family whose work is a known product, accepted as measured: its doubling at k = 64 → 128, the steeper order's. */
