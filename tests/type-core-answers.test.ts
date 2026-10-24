@@ -198,4 +198,10 @@ test("a property named as an internal step keeps its name in the answers (Astra 
     answers.project(box, { property: "iteration" }).map((item) => item.tag),
     ["string"],
   );
+  // a store's member checks name the property as written
+  const stored = analysed("let box = hostValue\nbox.element = 1\nexit").answers;
+  assert.deepEqual(
+    stored.checks.map((check) => check.on),
+    ["check that box is a object with a store of .element before the store"],
+  );
 });

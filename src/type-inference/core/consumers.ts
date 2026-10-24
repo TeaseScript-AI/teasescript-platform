@@ -1648,7 +1648,7 @@ export class Consumers {
           ? `.${method}()`
           : property === "element"
             ? "an element store"
-            : `a store of .${property}`;
+            : `a store of .${property === null ? property : propertyName(property)}`;
       // C5c, ADR 1.4: a store of a property into objects: every known source lacks it, an error at the literal; some
       // lacks it, its member obligation; every source has it, nothing
       const extra: Offending[] = [];
@@ -1667,7 +1667,7 @@ export class Consumers {
         if (presence.state !== "all")
           extra.push([
             makeItem("unknown", null, { reasons: REASON.missing, context: "missing", cert: "pos" }),
-            `has .${property} before the store`,
+            `has .${propertyName(property)} before the store`,
           ]);
       }
       this.#memberChecks(at, label, receiver, takes, what, "store", extra);
