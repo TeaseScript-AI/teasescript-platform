@@ -813,6 +813,20 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `integer-check vs.element [integer] @${at("vs.first")}`,
       ],
     ],
+    // §3.2: under a test of its own path the read is marked, as `xs.first` is
+    [
+      "a dict's values under a test of their path",
+      'let d = dict{k: "a"}\nif d.values.first is integer { repeat d.values.first {} }\nexit',
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("d.values.first is")}`,
+        `member-read warning-runtime-check @${at("d.values.first {}")}`,
+        `integer-use warning-runtime-check @${at("d.values.first {}")}`,
+        `empty-check d.values [list] @${at("d.values.first is")}`,
+        `empty-check d.values [list] @${at("d.values.first {}")}`,
+        `integer-check d.values.element [integer] @${at("d.values.first {}")}`,
+      ],
+    ],
     [
       "an object's own values",
       "let o = {values: [1]}\nlet t: string = o.values.first\nexit",

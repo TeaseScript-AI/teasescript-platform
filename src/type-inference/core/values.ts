@@ -176,7 +176,7 @@ export class Values {
       if (measuresLength(projection.step))
         return yield* this.#length(projection.owner, at, projection.step, rest);
       if (dictList(projection.step) !== undefined)
-        return yield* this.#dictList(projection.owner, at, projection.step, rest);
+        return yield* this.#dictList(value, projection.owner, at, projection.step, rest);
       const elements = yield* this.valueItems(projection.owner, at, [
         stepName(projection.step),
         ...rest,
@@ -232,9 +232,11 @@ export class Values {
 
   /**
    * TABLE r4.46 (2): a dict's `values` is a new list of its values, its `keys` one of text, as certain as the receiver;
-   * either may hold none (no count proof, no `null`); an object's own property of the name is its property (F11).
+   * either may hold none (no count proof, no `null`); an object's own property of the name is its property (F11). Under
+   * a test of its own path the read is marked (§3.2).
    */
   *#dictList(
+    value: PlaceId,
     owner: PlaceId,
     node: FlowNode | null,
     step: string,
@@ -266,7 +268,8 @@ export class Values {
         out.push(...(item.cert === "def" ? own : weaken(own)));
       } else if (item.tag === "unknown") out.push(item);
     }
-    return mergeItems(out, this.pass.program.scope);
+    const items = mergeItems(out, this.pass.program.scope);
+    return this.pass.guards.guardedRead(value, rest) ? marked(items) : items;
   }
 
   /**

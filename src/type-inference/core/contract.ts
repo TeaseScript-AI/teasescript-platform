@@ -774,7 +774,7 @@ export class Contract {
       if (measuresLength(projection.step))
         return yield* this.#contractLength(projection.owner, projection.step, rest);
       if (dictList(projection.step) !== undefined)
-        return yield* this.#contractDictList(projection.owner, projection.step, rest);
+        return yield* this.#contractDictList(value, projection.owner, projection.step, rest);
       const elements = yield* this.contractOfValueAt(projection.owner, [
         stepName(projection.step),
         ...rest,
@@ -812,7 +812,7 @@ export class Contract {
       if (measuresLength(projection.step))
         return yield* this.#contractLength(projection.owner, projection.step, []);
       if (dictList(projection.step) !== undefined)
-        return yield* this.#contractDictList(projection.owner, projection.step, []);
+        return yield* this.#contractDictList(value, projection.owner, projection.step, []);
       const elements = yield* this.contractOfValueAt(projection.owner, [stepName(projection.step)]);
       if (!selectsElement(projection.step)) return elements;
       const owners = withoutEmpty(yield* this.contractOfValue(projection.owner));
@@ -863,9 +863,15 @@ export class Contract {
 
   /**
    * TABLE r4.46 (2): a dict's `values` is a new list of its values, its `keys` one of text; either may hold none (no
-   * count proof, no `null`); an object's own property of the name is its property (F11).
+   * count proof, no `null`); an object's own property of the name is its property (F11). Under a test of its own path
+   * the read is marked (§3.2).
    */
-  *#contractDictList(owner: PlaceId, step: string, rest: readonly string[]): Work<readonly Item[]> {
+  *#contractDictList(
+    value: PlaceId,
+    owner: PlaceId,
+    step: string,
+    rest: readonly string[],
+  ): Work<readonly Item[]> {
     // F19a: a receiver that may be a reference has the runtime's members
     if (heldReference(yield* this.valueReceiver(owner)))
       return yield* this.contractOfValueAt(owner, [step, ...rest]);
@@ -883,7 +889,8 @@ export class Contract {
         out.push(...(yield* this.contractOfValueAt(owner, [step, ...rest])));
       else if (item.tag === "unknown") out.push(item);
     }
-    return mergeItems(out, this.pass.program.scope);
+    const items = mergeItems(out, this.pass.program.scope);
+    return this.pass.guards.guardedRead(value, rest) ? marked(items) : items;
   }
 
   /** F14: a text's or a collection's length is a whole number; an object's own `length` is its property (F11). */
