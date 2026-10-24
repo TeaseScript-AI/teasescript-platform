@@ -16,6 +16,7 @@ import type {
   TypeCheckResult,
 } from "../backend.js";
 import { analyseCore, type Answers } from "./answers.js";
+import { BudgetExhausted } from "./budget.js";
 import { coreCheckResult, coreFacts, declarations, nodeOf, SliceIndex } from "./consumer.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
@@ -46,10 +47,16 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
     if (before !== null) return rejected(core, before);
     const index = new SliceIndex(core.files.map((file) => file.program));
     const answers = analyseCore(core);
-    const after = outsideAnswers(answers, index, core.files, globals);
-    if (after !== null) return rejected(core, after);
-    const checked = coreCheckResult(answers, index, core);
-    return { checked, facts: () => coreFacts(answers, index, core) };
+    try {
+      const after = outsideAnswers(answers, index, core.files, globals);
+      if (after !== null) return rejected(core, after);
+      const checked = coreCheckResult(answers, index, core);
+      return { checked, facts: () => coreFacts(answers, index, core) };
+    } catch (error) {
+      // the questions after the analysis spend the same allowance (TABLE §8); its fallback is S8's
+      if (!(error instanceof BudgetExhausted)) throw error;
+      return rejected(core, overAllowance(core.files));
+    }
   },
 };
 
@@ -242,6 +249,15 @@ function settledFamily(tags: readonly string[]): boolean {
   return kinds.size <= 1 || (kinds.size === 2 && kinds.has("integer") && kinds.has("number"));
 }
 
+/** A program whose analysis crossed the work allowance (S8's fallback). */
+function overAllowance(files: readonly CoreFile[]): Outside {
+  return {
+    file: 0,
+    span: files[0]!.program.span,
+    what: "a program over the analysis's work allowance",
+  };
+}
+
 /** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
 function outsideAnswers(
   answers: Answers,
@@ -250,13 +266,8 @@ function outsideAnswers(
   globals: ReadonlySet<string>,
 ): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
-    index.expressionAt(site).span;
-  if (answers.outcome === "budget-error")
-    return {
-      file: 0,
-      span: files[0]!.program.span,
-      what: "a program over the analysis's work allowance",
-    };
+    index.spanAt(site);
+  if (answers.outcome === "budget-error") return overAllowance(files);
   for (const diagnostic of answers.diagnostics) {
     if (diagnostic.kind === "member-read" || diagnostic.kind === "operator")
       return {

@@ -200,6 +200,13 @@ test("C2's integer check of a count and an index warns with TSV011 and runs at t
   // the proven cases stay errors under the same codes
   assert.deepEqual(sited(candidate("let n = 2.5\nrepeat n {}\nexit\n")), ["error TSV011@19"]);
   assert.deepEqual(sited(candidate("let n: integer = 2.5\nexit\n")), ["error TSV041@17"]);
+  // in parentheses the diagnostic stands at the content (§3.4), once, and names the index's rule
+  assert.deepEqual(sited(candidate("let n = 2.5\nrepeat (n) {}\nexit\n")), ["error TSV011@20"]);
+  const parenthesized = candidate(
+    "let rows = [10, 20]\nlet at = 0.5\nrepeat rows[(at)] {}\nexit\n",
+  );
+  assert.deepEqual(sited(parenthesized), ["error TSV011@46"]);
+  assert.match(parenthesized.diagnostics[0]!.message, /^A list index must be a whole number/);
 });
 
 /** Runs a plan to its end, observing each reading pause's deadline: the events and the final snapshot. */

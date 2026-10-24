@@ -69,6 +69,7 @@ export class SliceIndex {
   readonly reads: Identifier[] = [];
   readonly #file = new Map<object, number>();
   readonly #bySite = new Map<string, Expression>();
+  readonly #statementsBySite = new Map<string, Statement>();
   readonly #store = new Map<Expression, Store>();
   /** The expressions a store brings whole into its place: its value, and the elements of a list literal there. */
   readonly #whole = new Set<Expression>();
@@ -135,11 +136,18 @@ export class SliceIndex {
             pending.push({ expression: expression.index, store, whole: false });
             pending.push({ expression: expression.object, store, whole: false });
             break;
-          case "parenthesizedExpression":
+          case "parenthesizedExpression": {
+            // a count or an index in parentheses: its content is where the core's diagnostic stands (§3.4)
+            const role = this.#role.get(expression);
+            if (role !== undefined) this.#role.set(expression.expression, role);
             pending.push({ expression: expression.expression, store, whole });
             break;
+          }
         }
       }
+      for (const statement of this.statements)
+        if (this.#file.get(statement) === file && !this.#bySite.has(siteKey(file, statement.span)))
+          this.#statementsBySite.set(siteKey(file, statement.span), statement);
     });
   }
 
@@ -160,6 +168,15 @@ export class SliceIndex {
   /** The `let` or assignment whose stored value holds `expression`, if any. */
   public storeOf(expression: Expression): Store | undefined {
     return this.#store.get(expression);
+  }
+
+  /** The span of the expression or statement at a site of the analysis. */
+  public spanAt(site: SourceSite): SourceSpan {
+    const key = `${site.file}:${site.start}:${site.end}`;
+    const found = this.#bySite.get(key) ?? this.#statementsBySite.get(key);
+    if (found === undefined)
+      throw new Error(`The slice's source has nothing at ${site.file}:${site.start}.`);
+    return found.span;
   }
 
   /** Whether a store brings `expression` whole into its place (not as an operand of an index read). */
@@ -324,7 +341,9 @@ export function coreCheckResult(
       const rounds = literalRounds(statement.count);
       paths.set(statement, rounds === null ? [true, true] : [rounds !== "none", rounds === "none"]);
       // the kept check of a known count's value (`loop-rules.ts`), where the core finds the count's kinds fine
-      if (!sited.has(siteKey(index.fileOf(statement.count), statement.count.span))) {
+      let count: Expression = statement.count;
+      while (count.kind === "parenthesizedExpression") count = count.expression;
+      if (!sited.has(siteKey(index.fileOf(statement), count.span))) {
         const value = known(statement.count);
         if (typeof value === "number" && !isRepeatCount(value))
           diagnostics[index.fileOf(statement)]!.push(
