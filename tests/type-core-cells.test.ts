@@ -317,6 +317,14 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "warning-runtime-check",
     "handler",
   ],
+  // F7b, C12 (Astra B3): a receiver that may be a list or a dict owes the dict key only as a check; a dict an error
+  [
+    "C12 remove on a possible list or dict",
+    'let flag = askBoolean "flag"\nfunction selected {\n  if flag { return [1] }\n  return dict {key: 1}\n}\nsay selected().remove(1)\nexit',
+    "warning-runtime-check",
+    "unknown",
+  ],
+  ["C12 remove on a dict", "let d = dict {key: 1}\nsay d.remove(1)\nexit", "compile-error", "-"],
 ];
 
 test("the core gives the expected outcome for the programs beside the set", () => {

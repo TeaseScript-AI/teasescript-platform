@@ -757,8 +757,24 @@ export class Consumers {
           c.site,
           name === "removeAt" ? "removeAt" : `the count of ${name}`,
         );
-      if (name === "remove" && this.#kindsOf(c.receiver, node).some((item) => item.tag === "dict"))
-        this.#consume(c.arguments[0], node, c.site, TEXT, "a dict key at remove", ["string"]);
+      if (name === "remove") {
+        // C12: a dict's key is text; where the receiver may also be a list or a set (or unknown), whose `remove` takes
+        // any value, only a check, as an index use owes one
+        const kinds = this.#kindsOf(c.receiver, node);
+        if (kinds.some((item) => item.tag === "dict"))
+          this.#consume(
+            c.arguments[0],
+            node,
+            c.site,
+            TEXT,
+            "a dict key at remove",
+            ["string"],
+            "operator",
+            "operand",
+            [],
+            kinds.some((item) => item.tag !== "dict" && item.tag !== "null"),
+          );
+      }
       // F7a: an element selection
       if (name === "removeFirst" || name === "removeLast")
         this.#selection(c.receiver, node, c.site, `.${name}()`);
