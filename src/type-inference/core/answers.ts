@@ -59,8 +59,8 @@ import { Values } from "./values.js";
  * backend read: per source occurrence its items, route, place and obligations; per place its admitted type, contract,
  * ingresses and definitions; the projections and properties of a value; the bridge to the adapters' operand views;
  * and the whole program's diagnostics, checks, graph, budget counters and deferred bindings. Here admission is one
- * pass: decided types, the boundary checks of external data (C9) and narrowing (§13) join in their steps, and the
- * fields they own say so.
+ * pass: decided types, the boundary checks of external data (C9) other than those of a store into a written place, and
+ * narrowing (§13) join in their steps, and the fields they own say so.
  */
 
 /** The parts of one pass of the analysis: each reads the others through it. */
@@ -139,7 +139,7 @@ export interface PlaceAnswer {
     readonly elements: readonly Item[];
     readonly emptiness: "held" | "open";
   };
-  /** Every ingress store into the place (C9): admission's, with the boundary checks. */
+  /** The boundary checks of the ingress stores into the place (C9): here those of a written place (A1). */
   readonly ingresses: readonly Obligation[];
   /**
    * The definitions the exact path uses (X2–X7): the live list in region order, F5a's loop-exit adds among them; the
@@ -431,6 +431,7 @@ class CoreAnswers implements Answers {
         if (list === undefined) this.#obligations.set(at, [diagnostic.obligation]);
         else list.push(diagnostic.obligation);
       }
+    if (exhausted === null) for (const list of consumers.boundaries.values()) checks.push(...list);
     this.checks = checks;
     const deferredParameters: PlaceId[] = [];
     const deferredResults: PlaceId[] = [];
@@ -549,7 +550,7 @@ class CoreAnswers implements Answers {
         elements: withoutEmpty(elements),
         emptiness: elements.some((item) => item.tag === "empty") ? "open" : "held",
       },
-      ingresses: [],
+      ingresses: this.#consumers.boundaries.get(keyOf(id, path)) ?? [],
       // the exact service's list, not the raw stores (Astra B8)
       definitions: {
         list: lists.definitionsOf(key).list,

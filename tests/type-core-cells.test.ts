@@ -360,41 +360,48 @@ test("external data in a choice's options or in a literal is warned at its own e
     return [
       record.outcome,
       ...record.diagnostics.map((diagnostic) => `${diagnostic.kind}@${diagnostic.site.offset}`),
-      ...record.checks.map((check) => `${check.kind}@${check.site.offset}`),
+      ...record.checks.map(
+        (check) => `${check.boundary ? "boundary" : check.kind}@${check.site.offset}`,
+      ),
     ];
   };
-  // r4.43 (1): an external option of a choice, as an external element of a literal
+  // r4.43 (1): an external option of a choice, as an external element of a literal; C9 r4.29: its boundary check there
   assert.deepEqual(sited("let chosen: integer = askChoice [hostValue, 2]\nexit"), [
     "warning-runtime-check",
     "written-target@33",
     "copy-type@33",
+    "boundary@33",
   ]);
   assert.deepEqual(sited("let chosen: integer = askChoice [2, hostValue]\nexit"), [
     "warning-runtime-check",
     "written-target@36",
     "copy-type@36",
+    "boundary@36",
   ]);
   assert.deepEqual(sited("let pool: integer?[] = [hostValue, null, 7]\nexit"), [
     "warning-runtime-check",
     "written-target@24",
     "copy-type@24",
+    "boundary@24",
   ]);
   // V30 §19: a choice object gives its `value` (or its `text` without one), so its external value is the site
   assert.deepEqual(
     sited(
       'let chosen: integer = askChoice [{text: "A", value: hostValue}, {text: "B", value: 2}]\nexit',
     ),
-    ["warning-runtime-check", "written-target@52", "copy-type@52"],
+    ["warning-runtime-check", "written-target@52", "copy-type@52", "boundary@52"],
   );
   assert.deepEqual(sited('let chosen: integer = askChoice {text: "A", value: hostValue}\nexit'), [
     "warning-runtime-check",
     "written-target@51",
     "copy-type@51",
+    "boundary@51",
   ]);
   assert.deepEqual(sited("let chosen: integer = askChoice [{text: hostValue}]\nexit"), [
     "warning-runtime-check",
     "written-target@40",
     "copy-type@40",
+    "boundary@40",
   ]);
   // an external option read through a projection sits at its own expression (Astra B6-r2), in a choice and a literal
   assert.deepEqual(sited("let chosen: integer = askChoice [hostValue.field, 2]\nexit"), [
@@ -403,6 +410,7 @@ test("external data in a choice's options or in a literal is warned at its own e
     "member-read@33",
     "copy-type@33",
     "null-check@33",
+    "boundary@33",
   ]);
   assert.deepEqual(sited("let chosen: integer = [hostValue.field, 2][0]\nexit"), [
     "warning-runtime-check",
@@ -410,6 +418,7 @@ test("external data in a choice's options or in a literal is warned at its own e
     "member-read@23",
     "copy-type@23",
     "null-check@23",
+    "boundary@23",
   ]);
   // the selected value's site, not the first external expression in the option: a choice object's `value` beside an
   // external `text`, read whole or through a projection, alone or in a list; its `text` without a value
@@ -423,6 +432,7 @@ test("external data in a choice's options or in a literal is warned at its own e
       "copy-type@63",
       "null-check@39",
       "null-check@63",
+      "boundary@63",
     ],
   );
   assert.deepEqual(
@@ -437,6 +447,7 @@ test("external data in a choice's options or in a literal is warned at its own e
       "copy-type@71",
       "null-check@40",
       "null-check@71",
+      "boundary@71",
     ],
   );
   assert.deepEqual(
@@ -451,6 +462,7 @@ test("external data in a choice's options or in a literal is warned at its own e
       "copy-type@72",
       "null-check@41",
       "null-check@72",
+      "boundary@72",
     ],
   );
   assert.deepEqual(sited("let chosen: integer = askChoice {text: hostValue.label}\nexit"), [
@@ -459,6 +471,7 @@ test("external data in a choice's options or in a literal is warned at its own e
     "member-read@39",
     "copy-type@39",
     "null-check@39",
+    "boundary@39",
   ]);
   // r4.43 (3): options held in a variable follow the copy reading: the store into the written place
   assert.deepEqual(sited("let opts = [hostValue, 1]\nlet answer: integer = askChoice opts\nexit"), [
@@ -496,16 +509,18 @@ test("a choice's option reached through index and property projections is select
           .map((diagnostic) => `${diagnostic.kind}@${diagnostic.site.offset}`),
         ...record.checks
           .filter((check) => check.kind === "copy-type")
-          .map((check) => `${check.kind}@${check.site.offset}`),
+          .map((check) => `${check.boundary ? "boundary" : check.kind}@${check.site.offset}`),
       ];
     });
     assert.deepEqual(both[1], both[0], `${form}: both orders`);
     return both[0]!;
   };
+  // the warning's check and C9's boundary check at the selected external value (r4.29)
   const at = (offset: number): string[] => [
     "warning-runtime-check",
     `written-target@${offset}`,
     `copy-type@${offset}`,
+    `boundary@${offset}`,
   ];
   // an option inside an index or a property projection, with and without a projection of the result
   assert.deepEqual(

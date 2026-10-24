@@ -54,8 +54,9 @@ import type { Work } from "./solver.js";
  * items. The quiet path answers first: a consumer that every kind of the contract fits, with no `unknown`, asks
  * nothing more (§3.3). Otherwise: all items definite and none fits is an error; some item does not fit, or an
  * `unknown` is present, a warning with one obligation per offending kind (§4); all fit, quiet. Here: C2 to C6, C11,
- * C12, the iterable of a `for`, F19a's speaker accesses, ADR 1.5's null default, and C1 and C7 against written types
- * (A1, A9). Decided types, the boundary checks of external data (C9), C8 and C10 are admission's.
+ * C12, the iterable of a `for`, F19a's speaker accesses, ADR 1.5's null default, C1 and C7 against written types
+ * (A1, A9), and C9's boundary check where external data a store brings enters a written place. Decided types, the other
+ * boundary checks, C8 and C10 are admission's.
  */
 
 const BOOLEAN: ReadonlySet<ItemTag> = new Set(["boolean"]);
@@ -188,6 +189,9 @@ const SELECT: unique symbol = Symbol("select");
 
 export class Consumers {
   readonly diagnostics: CoreDiagnostic[] = [];
+  /** The boundary checks of external data (C9), by the key they enter: here those a store into a written place owes. */
+  readonly boundaries = new Map<Key, Obligation[]>();
+  readonly #boundarySites = new Set<string>();
   /** The values a consumer answered by the quiet path (§3.3). */
   readonly quiet = new Set<PlaceId>();
   /** Each consumer read's demand and the work it was the first to compute (S3 §5: a counter only here). */
@@ -301,6 +305,29 @@ export class Consumers {
         `validate the stored value of ${label} against ${against.join("|")}`,
       ),
     );
+  }
+
+  /**
+   * C9: the boundary check of external data where it enters, one per ingress expression and destination, against the
+   * destination's own kinds (r4.29: inside a literal too).
+   */
+  #boundary(key: Key, site: SourceSite, label: string, against: readonly ItemTag[]): void {
+    const at = `${siteKey(site)}|${key}`;
+    if (this.#boundarySites.has(at)) return;
+    this.#boundarySites.add(at);
+    const list = this.boundaries.get(key);
+    const check: Obligation = {
+      ...this.#obligation(
+        "copy-type",
+        site,
+        label,
+        against.map((tag) => requiredKind(tag)),
+        `validate external data entering ${label} against ${against.join("|")}`,
+      ),
+      boundary: true,
+    };
+    if (list === undefined) this.boundaries.set(key, [check]);
+    else list.push(check);
   }
 
   /** S4: a possible null owes a null-check at every consumer, against what the place needs. */
@@ -555,6 +582,11 @@ export class Consumers {
           }
         }
         const items = this.#valueAt(d, at);
+        // C9 at a written destination (A1): each external value the store brings owes its boundary check where it enters,
+        // whatever the store's own outcome; a value read from another variable entered by that variable's store (S6)
+        if (items.some(isExternal))
+          for (const site of this.#ingressSites(d, at))
+            this.#boundary(keyOf(root, path), site, label, nullable ? [...tags, "null"] : tags);
         const bad = items.filter(
           (item) =>
             item.cert === "def" && concrete(item) && !tags.some((tag) => fits(item.tag, tag, true)),
@@ -758,15 +790,25 @@ export class Consumers {
    * in source order.
    */
   #ingressSite(d: Definition, at: readonly string[]): SourceSite {
+    return this.#ingressSites(d, at)[0] ?? d.site;
+  }
+
+  /** Every external value's own expression that `#ingressSite`'s walk reaches, in source order. */
+  #ingressSites(d: Definition, at: readonly string[]): SourceSite[] {
     const { program, definitions } = this.pass;
-    if (d.kind !== "whole" || d.value === undefined) return d.site;
+    if (d.kind !== "whole" || d.value === undefined) return [];
+    const found: SourceSite[] = [];
     // a value and what remains to read of it: path steps, `OPTIONS` (the value holds a choice's options) and `SELECT`
     // (the value is an option: its selected value)
     const pending: (readonly [PlaceId, readonly ReadStep[]])[] = [[d.value, at]];
     while (pending.length > 0) {
       const [value, steps] = pending.pop()!;
       program.work.charge("checks");
-      if (definitions.ingress.has(value)) return program.place(value).site ?? d.site;
+      if (definitions.ingress.has(value)) {
+        const site = program.place(value).site;
+        if (site !== null) found.push(site);
+        continue;
+      }
       const [step, ...rest] = steps;
       const next: (readonly [PlaceId, readonly ReadStep[]])[] = [];
       if (program.hasOf.has(value) || program.cellOwner.has(value)) {
@@ -802,7 +844,7 @@ export class Consumers {
       }
       for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
     }
-    return d.site;
+    return found;
   }
 
   #siteAt(
