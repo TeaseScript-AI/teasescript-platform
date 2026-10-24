@@ -320,7 +320,6 @@ interface PrefixFrame {
   inner: PrefixStores | undefined;
   other: boolean;
   cut: boolean;
-  readonly subPlaces: Set<Key>;
 }
 
 /** An entry to add to a prefix's stores. */
@@ -416,6 +415,8 @@ export class Contract {
   };
   readonly #prefix = new Map<Key, PrefixStores>();
   readonly #subPaths = new Map<Key, ReadonlySet<string>>();
+  readonly #aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
+  readonly #projectedLayers = new Map<string, SubLayer | null>();
   readonly #keys = new Map<Key, Identity>();
   readonly #identities = new Map<PlaceId, Identity>();
   readonly #aliases = new Map<PlaceId, { readonly key: Key; readonly guarded: boolean }>();
@@ -1310,7 +1311,6 @@ export class Contract {
       inner: undefined,
       other: false,
       cut: false,
-      subPlaces: new Set(),
     });
     const entryId = (e: EntryDraft): string =>
       e.key !== undefined
@@ -1427,23 +1427,9 @@ export class Contract {
             ...(e.guarded ? { guarded: true } : {}),
             ingress: e.ingress,
           });
-          // a source's own stores listed once per prefix, however many of its stores copy it (§8 r4.15)
-          const sub = keyOf(copiedPlace, projection);
-          work.charge("invSteps");
-          if (f.subPlaces.has(sub)) subDef(f, sub);
-          else {
-            f.subPlaces.add(sub);
-            for (const below of this.#keysOfPlace(copiedPlace)) {
-              const path = keyPath(below);
-              work.charge("invSteps");
-              if (
-                path.length > projection.length &&
-                projection.every((step, index) => path[index] === step) &&
-                (definitions.byKey.get(below) ?? []).some((d) => lists.live(d))
-              )
-                addSub(f, path[projection.length]!, sub);
-            }
-          }
+          // a source's own stores below the path, listed once per source and path and shared by every prefix that
+          // copies it there (§8 r4.15, r4.38)
+          addSubs(f, this.#projectedLayer(copiedPlace, projection));
         }
         continue;
       }
@@ -1459,14 +1445,9 @@ export class Contract {
             work.charge("invSteps");
             yield* adding(this, f, { ...e, w: f.w, guarded: e.guarded, ingress: e.ingress });
           }
-          addSubs(f, inner.subs);
-          const sub = keyOf(keyPlace(f.ck!), []);
-          work.charge("invSteps");
-          if (f.subPlaces.has(sub)) subDef(f, sub);
-          else {
-            f.subPlaces.add(sub);
-            for (const step of this.#subFirstOf(keyPlace(f.ck!))) addSub(f, step, sub);
-          }
+          // the source's own stores below its root over the sources it inherits, one layer per source shared by its
+          // copies (r4.38: k copies of a source edited at k fields are k inheritances, not k × k listings)
+          addSubs(f, this.#aliasLayer(inner, keyPlace(f.ck!)));
         }
       }
       if (f.i < f.defs.length) {
@@ -1586,6 +1567,41 @@ export class Contract {
       else stack.at(-1)!.cut = true;
       if (stack.length > 0) stack.at(-1)!.inner = stores;
     }
+  }
+
+  /** The layer an alias of `place` inherits: the place's own stores below its root over the place's sources, once. */
+  #aliasLayer(inner: PrefixStores, place: PlaceId): SubLayer | null {
+    if (this.#aliasLayers.has(inner)) return this.#aliasLayers.get(inner)!;
+    const own = new Map<string, Set<Key>>();
+    for (const step of this.#subFirstOf(place)) {
+      this.pass.program.work.charge("invSteps");
+      own.set(step, new Set([keyOf(place, [])]));
+    }
+    const layer = this.#layer(own, inner.subs);
+    this.#aliasLayers.set(inner, layer);
+    return layer;
+  }
+
+  /** The layer a projected copy of `place` at `projection` takes: the place's own live stores below the path, once. */
+  #projectedLayer(place: PlaceId, projection: readonly string[]): SubLayer | null {
+    const id = `${place}|${projection.join(".")}`;
+    if (this.#projectedLayers.has(id)) return this.#projectedLayers.get(id)!;
+    const { program, definitions, lists } = this.pass;
+    const sub = keyOf(place, projection);
+    const own = new Map<string, Set<Key>>();
+    for (const below of this.#keysOfPlace(place)) {
+      const path = keyPath(below);
+      program.work.charge("invSteps");
+      if (
+        path.length > projection.length &&
+        projection.every((step, index) => path[index] === step) &&
+        (definitions.byKey.get(below) ?? []).some((d) => lists.live(d))
+      )
+        own.set(path[projection.length]!, new Set([sub]));
+    }
+    const layer = this.#layer(own, null);
+    this.#projectedLayers.set(id, layer);
+    return layer;
   }
 
   /** A prefix's layer: its own sources over the layer it inherits, indexed by their first steps; none if it adds none. */
