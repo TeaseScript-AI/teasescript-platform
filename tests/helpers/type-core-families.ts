@@ -1350,16 +1350,20 @@ export interface KnownProduct extends WorkFamily {
 }
 
 /**
- * W34's two remaining combinations (TABLE r4.41, PLAN §6b), accepted at S4 as measured products like W13: more than
- * four sources tested at one path, each with more than four anchors in one tree, read there many times; and sources
- * copied from more than four shared roots, stored at one path every copy reads (review r5's generators).
+ * W34's two remaining combinations, gated known limits by the owner's decision (TABLE r4.45, PLAN §6b): more than four
+ * sources tested at one path, each with more than four anchors in one tree, read there many times; and sources copied
+ * from more than four shared roots, stored at one path every copy reads (review r5's generators). The gate is a
+ * regression check on the 64 → 128 growth step only (3.37 and 2.53), not a bound at larger sizes: 128 → 256 already
+ * grows 3.62 and 2.82. They are reconsidered when a realistic script shows both dimensions; a change to that lookup
+ * re-measures them and proposes the gate with its counts, never retunes it; the linear alternative is a separate PR
+ * after S4.
  */
 export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "W34-known-tested-anchors",
     measures:
       "§13.3 W34 r4.41: k sources each tested and redefined through five copies in one tree, read at k fields",
-    // 114,408 / 347,528 / 1,170,120 / 4,240,712 units at k = 32 … 256 (review r5: 110,646 / 335,894 / 1,130,454)
+    // 114,507 / 347,723 / 1,170,507 / 4,241,483 units at k = 32 … 256 (review r5: 110,646 / 335,894 / 1,130,454)
     measured: 3.37,
     program: (k) =>
       main(
@@ -1380,7 +1384,7 @@ export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
     name: "W34-known-stored-roots",
     measures:
       "§13.3 W34 r4.41: k sources copied from five shared roots, each stored at the path every copy reads",
-    // 49,587 / 113,555 / 285,139 / 801,619 units at k = 32 … 256 (review r5: 113,562 / 285,146 / 801,626 from 64)
+    // 49,782 / 113,942 / 285,910 / 803,158 units at k = 32 … 256 (review r5: 113,562 / 285,146 / 801,626 from 64)
     measured: 2.53,
     program: (k) =>
       main(

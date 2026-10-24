@@ -90,8 +90,9 @@ test("every W34 variant's work and each of its counters grow with the program in
 });
 
 /**
- * W34's two known products (TABLE r4.41, PLAN §6b): accepted at S4 as measured, like W13, so this gate holds each to its
- * measured doubling in either order and catches a regression; it asserts no linearity for them.
+ * W34's two known products, gated known limits by the owner's decision (TABLE r4.45, PLAN §6b): a regression check on
+ * the 64 → 128 growth step only, each held to its measured doubling in either order (3.37 and 2.53); not a bound at
+ * larger sizes (128 → 256 grows 3.62 and 2.82), and no linearity is asserted for them.
  */
 test("W34's two known products grow no faster than measured", () => {
   const steep: string[] = [];
