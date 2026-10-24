@@ -142,7 +142,12 @@ export class CoreProgram {
     this.graph = collectGraph(request);
     this.flow = buildFlowGraph(request.files);
     this.dom = dominators(this.flow);
+    // the graph and its dominators are setup work of the analysis (TABLE §8): their nodes, their edges, and a step per
+    // node and edge of the dominator search
+    const edges = this.flow.nodes.reduce((sum, node) => sum + node.successors.length, 0);
     this.work.charge("graphNodes", this.flow.nodes.length);
+    this.work.charge("graphEdges", edges);
+    this.work.charge("domSteps", this.flow.nodes.length + edges);
     this.places = this.graph.places;
     this.constraints = this.graph.constraints;
     const regions = new Map<string, FunctionRegion>();

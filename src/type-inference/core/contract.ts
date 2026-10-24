@@ -1,5 +1,5 @@
 import { CONVERSIONS, isConversion } from "../../conversions.js";
-import { VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
+import { hasIdentity, VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
 import type { PlaceId, PlaceKind, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import { keyOf, keyPath, keyPlace, sortCost, type Definition, type Key } from "./definitions.js";
@@ -34,13 +34,11 @@ import type { Demand, Work } from "./solver.js";
  * identity, in one holder per source and projection, whose references compose and are never copied (r4.23).
  */
 
-/** F19a: the reference kinds (V30 §12, §37): an access through one has no modelled member. */
-export const REFERENCE: ReadonlySet<ItemTag> = new Set([
-  "speaker",
-  "timer",
-  "media",
-  "messageHandle",
-]);
+/**
+ * F19a: the reference kinds (V30 §12, §37), the kinds whose values have an identity: a speaker and every handle; an
+ * access through one has no modelled member.
+ */
+export const REFERENCE: ReadonlySet<ItemTag> = new Set(VALUE_KIND_NAMES.filter(hasIdentity));
 
 /** F25: the declared results of the built-in methods the core models. */
 export const METHOD_RESULT: Readonly<Record<string, readonly ValueKind[]>> = {
@@ -130,7 +128,7 @@ export function typeTags(term: TypeTerm): ItemTag[] {
 export type TypeAt =
   { readonly term: TypeTerm } | { readonly place: PlaceId; readonly rest: readonly string[] };
 
-export function typeAtPath(term: TypeTerm, path: readonly string[]): TypeAt | null {
+function typeAtPath(term: TypeTerm, path: readonly string[]): TypeAt | null {
   if (path.length === 0) return { term };
   const [step, ...rest] = path;
   // an optional or union collection: its members' elements
@@ -1515,7 +1513,7 @@ export class Contract {
   }
 
   /** A holder's reads grouped once: per base key the groups by callable and file, in dominator and source order. */
-  #groupsOf(
+  #readGroups(
     reads: Holder["reads"],
   ): Map<
     Key,
@@ -1639,7 +1637,7 @@ export class Contract {
    */
   #readsAt(reads: Holder["reads"], rest: readonly string[]): boolean {
     const { program, guards } = this.pass;
-    const byBase = this.#groupsOf(reads);
+    const byBase = this.#readGroups(reads);
     const visit = (group: ReadGroup, tested: Key): boolean => {
       program.work.charge("eventSteps");
       this.facts.markVisits += 1;

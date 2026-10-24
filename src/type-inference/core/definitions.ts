@@ -98,7 +98,7 @@ export function sortCost(count: number): number {
 }
 
 /** The index of the first of the sorted positions at least `target`. */
-export function lowerBound(positions: readonly number[], target: number): number {
+function lowerBound(positions: readonly number[], target: number): number {
   let low = 0;
   let high = positions.length;
   while (low < high) {
@@ -657,7 +657,7 @@ function append<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 }
 
 /** How many of the sorted positions lie in [low, high], by two binary searches. */
-export function positionsWithin(
+function positionsWithin(
   positions: readonly number[],
   low: number,
   high: number,
