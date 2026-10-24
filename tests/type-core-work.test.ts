@@ -53,8 +53,12 @@ test("every sampled family's work grows with its program, not with a product of 
  * W34 (TABLE §13.3, r4.33–r4.38): every variant in the source order and with the consumers' and the solver's orders
  * reversed, its total and each counter of at least 200 units per doubling of the source. A counter is the raw count of
  * one structure's steps, so a copy walked per field or a mark set made per copy shows in its own counter where the
- * total would hide it; the full series to k = 1,024 is the step's evidence, outside CI.
+ * total would hide it; a counter may carry its structure's log factor (a sort, a table of jumps: 2.33 at these sizes
+ * where nothing else is charged to it), a product of two dimensions measures 3 and more. The full series to k = 1,024
+ * is the step's evidence, outside CI.
  */
+const COUNTER_DOUBLING = 2.35;
+
 test("every W34 variant's work and each of its counters grow with the program in either order", () => {
   const steep: string[] = [];
   for (const family of W34_VARIANTS)
@@ -71,7 +75,7 @@ test("every W34 variant's work and each of its counters grow with the program in
         if (
           counter !== "syntaxNodes" &&
           after >= 200 &&
-          doubling(small.counts.get(counter) ?? 0, after) > DOUBLING
+          doubling(small.counts.get(counter) ?? 0, after) > COUNTER_DOUBLING
         )
           steep.push(
             `${name} ${counter}: ${doubling(small.counts.get(counter) ?? 0, after).toFixed(3)}`,

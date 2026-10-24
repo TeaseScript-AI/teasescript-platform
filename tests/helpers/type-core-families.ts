@@ -931,6 +931,16 @@ const W34_LINKS: readonly (readonly [string, (index: number) => string])[] = [
     "interleaved-stores",
     (i: number) => `if flagHost { box${i}.f${i} = 2 }\nlet box${i + 1} = box${i}`,
   ],
+  ["exit-tested", (i: number) => `if box${i}.f0 == null { exit }\nlet box${i + 1} = box${i}`],
+  [
+    "exit-tested-own-fields",
+    (i: number) => `if box${i}.f${i} == null { exit }\nlet box${i + 1} = box${i}`,
+  ],
+  [
+    "guarded-siblings",
+    (i: number) =>
+      `if box${i}.f0 != null {\nlet side${i} = box${i}\nrepeat side${i}.f0 {}\n}\nlet box${i + 1} = box${i}\nrepeat box${i + 1}.f0 {}`,
+  ],
 ];
 
 /**
@@ -939,7 +949,10 @@ const W34_LINKS: readonly (readonly [string, (index: number) => string])[] = [
  * on the source before each copy (of one field, of the copy's own field, guarding a read), through an alias, nested a
  * level, tested after each copy, with a conditional store below each source (tested and not); and k sibling copies of
  * one record under tests of their own fields (one test, two nested, an unrelated test before the copy, one `and` chain
- * over all k fields). Every copy is resolved once and read once per field: k + k, never k × k.
+ * over all k fields). Review round 2's shapes beside them: chains after early exits on one field (read at the others,
+ * and every copy read at it) and on each copy's own field, guarded sibling copies along a chain, k unrelated edited
+ * records with one field name, k edited siblings of one copy, k copies of one record edited at k fields. Every copy is
+ * resolved once and read once per field: k + k, never k × k.
  */
 export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link]): WorkFamily => ({
   name: `W34-${variant}`,
@@ -956,6 +969,60 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
           (literal) => `{inner: ${literal}}`,
           (i) => `inner.f${i}`,
           (i) => `if box${i}.inner.f0 != null {}\nlet box${i + 1} = box${i}`,
+        ),
+      ),
+  },
+  {
+    name: "W34-exit-tested-every-copy",
+    measures: "§13.3 W34 r4.38: a chain's marks found per path, each copy read once",
+    program: (k) =>
+      main(
+        lines(
+          `let box0 = {${fields(k, () => "1")}}`,
+          `if flagHost { box0 = {${fields(k, () => "null")}} }`,
+          rows(k, (i) => `if box${i}.f0 == null { exit }\nlet box${i + 1} = box${i}`),
+          rows(k, (i) => `repeat box${i + 1}.f0 {}`),
+        ),
+      ),
+  },
+  {
+    name: "W34-independent-stores",
+    measures: "§13.3 W34 r4.38: a store's stop found per path within its own copies",
+    program: (k) =>
+      main(
+        rows(
+          k,
+          (i) => `let r${i} = {f0: 1.5}\nr${i}.f0 = 1\nlet a${i} = r${i}\nrepeat a${i}.f0 {}`,
+        ),
+      ),
+  },
+  {
+    name: "W34-sibling-stores",
+    measures: "§13.3 W34 r4.38: a store's stop found per path within its own copies",
+    program: (k) =>
+      main(
+        lines(
+          "let seed = {f0: 1, f1: 1}",
+          "if flagHost { seed = {f0: null, f1: null} }",
+          "let base = seed",
+          rows(
+            k,
+            (i) =>
+              `let a${i} = base\nif flagHost { a${i}.f0 = 2 }\nlet b${i} = a${i}\nrepeat b${i}.f0 {}\nrepeat b${i}.f1 {}`,
+          ),
+        ),
+      ),
+  },
+  {
+    name: "W34-fan-stores",
+    measures: "§13.3 W34 r4.38: a store's stop found per path within its own copies",
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          `if flagHost { root = {${fields(k, () => "null")}} }`,
+          rows(k, (i) => `if flagHost { root.f${i} = 2 }`),
+          rows(k, (i) => `let copy${i} = root\nrepeat copy${i}.f${i} {}`),
         ),
       ),
   },

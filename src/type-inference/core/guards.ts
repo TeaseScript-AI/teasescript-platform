@@ -53,10 +53,7 @@ export class GuardIndex {
   readonly belowTested = new Set<Key>();
   /** The tested keys q below each key, per relative path q, and the longest such path (§8 r4.23's holders). */
   #testedRelative: Map<string, Set<Key>> | null = null;
-  #byPlace: {
-    readonly branches: ReadonlyMap<PlaceId, ReadonlyMap<Callable | null, Regions<FlowNode>>>;
-    readonly operands: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>>;
-  } | null = null;
+  #byPlace: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> | null = null;
   #testedLength = 0;
 
   public constructor(readonly program: CoreProgram) {
@@ -296,81 +293,60 @@ export class GuardIndex {
     return false;
   }
 
+  /** Every branch a test guards: its tested key, the callable it stands in, and its entry (W34's copy forest). */
+  public *branchRegions(): Generator<{
+    readonly key: Key;
+    readonly callable: Callable | null;
+    readonly entry: FlowNode;
+  }> {
+    for (const [key, byCallable] of this.#branches)
+      for (const [callable, regions] of byCallable)
+        for (const entry of regions.list) yield { key, callable, entry };
+  }
+
   /**
-   * Whether a test of some key of the place guards a node (W34 r4.38: a copy read there may carry a mark of its source,
-   * which `narrowed` then asks at the read's path): a binary search in each of the place's two indexes, built once
-   * from the per-key ones, never a scan of the place's tested paths.
+   * Whether an operand region of a test of some key of the place holds a node (W34 r4.38: a copy read there may carry
+   * a mark of its source, which `narrowed` then asks at the read's path): a binary search in the place's regions,
+   * merged once from the per-key ones, never a scan of the place's tested paths.
    */
-  public testedAround(place: PlaceId, node: FlowNode): boolean {
+  public operandAround(place: PlaceId, node: FlowNode): boolean {
     const program = this.program;
-    if (!program.reached(node)) return false;
-    const { branches, operands } = this.#placeIndex();
+    if (!program.reached(node) || node.span === null) return false;
+    const regions = this.#placeOperands().get(place)?.get(node.file);
     program.work.charge("eventSteps");
-    const entries = branches.get(place)?.get(program.callableAt(node));
-    if (
-      entries !== undefined &&
-      this.encloses(entries, (entry) => program.position(entry), program.position(node))
-    )
-      return true;
-    const regions = node.span === null ? undefined : operands.get(place)?.get(node.file);
     return (
       regions !== undefined &&
-      node.span !== null &&
       this.encloses(regions, (region) => region.start, node.span.start.offset)
     );
   }
 
-  /** The per-key regions merged per place: its tests' branch entries per callable, its operand regions per file. */
-  #placeIndex(): {
-    readonly branches: ReadonlyMap<PlaceId, ReadonlyMap<Callable | null, Regions<FlowNode>>>;
-    readonly operands: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>>;
-  } {
+  /** The operand regions of each place's tests per file, merged from the per-key ones and sorted, once. */
+  #placeOperands(): ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> {
     if (this.#byPlace !== null) return this.#byPlace;
     const program = this.program;
-    const merge = <G, T>(
-      source: ReadonlyMap<Key, ReadonlyMap<G, Regions<T>>>,
-      start: (entry: T) => number,
-      end: (entry: T) => number,
-    ): Map<PlaceId, Map<G, Regions<T>>> => {
-      const lists = new Map<PlaceId, Map<G, T[]>>();
-      for (const [key, byGroup] of source)
-        for (const [group, regions] of byGroup) {
-          program.work.charge("indexSteps", regions.list.length);
-          let byPlace = lists.get(keyPlace(key));
-          if (byPlace === undefined) lists.set(keyPlace(key), (byPlace = new Map()));
-          const list = byPlace.get(group);
-          if (list === undefined) byPlace.set(group, [...regions.list]);
-          else list.push(...regions.list);
-        }
-      const merged = new Map<PlaceId, Map<G, Regions<T>>>();
-      for (const [place, byGroup] of lists) {
-        const sorted = new Map<G, Regions<T>>();
-        for (const [group, list] of byGroup) {
-          program.work.charge("indexSteps", sortCost(list.length));
-          list.sort((a, b) => start(a) - start(b));
-          let last = -1;
-          sorted.set(group, {
-            list,
-            ends: list.map((entry) => (last = Math.max(last, end(entry)))),
-          });
-        }
-        merged.set(place, sorted);
+    const lists = new Map<PlaceId, Map<number, OperandRegion[]>>();
+    for (const [key, byFile] of this.#operands)
+      for (const [file, regions] of byFile) {
+        program.work.charge("indexSteps", regions.list.length);
+        let byPlace = lists.get(keyPlace(key));
+        if (byPlace === undefined) lists.set(keyPlace(key), (byPlace = new Map()));
+        const list = byPlace.get(file);
+        if (list === undefined) byPlace.set(file, [...regions.list]);
+        else list.push(...regions.list);
       }
-      return merged;
-    };
-    this.#byPlace = {
-      branches: merge(
-        this.#branches,
-        (entry) => program.position(entry),
-        (entry) => program.positionEnd(entry),
-      ),
-      operands: merge(
-        this.#operands,
-        (region) => region.start,
-        (region) => region.end,
-      ),
-    };
-    return this.#byPlace;
+    const merged = new Map<PlaceId, Map<number, Regions<OperandRegion>>>();
+    for (const [place, byFile] of lists) {
+      const sorted = new Map<number, Regions<OperandRegion>>();
+      for (const [file, list] of byFile) {
+        program.work.charge("indexSteps", sortCost(list.length));
+        list.sort((x, y) => x.start - y.start);
+        let last = -1;
+        sorted.set(file, { list, ends: list.map((region) => (last = Math.max(last, region.end))) });
+      }
+      merged.set(place, sorted);
+    }
+    this.#byPlace = merged;
+    return merged;
   }
 
   /**
