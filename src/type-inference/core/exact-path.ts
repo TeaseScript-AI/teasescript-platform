@@ -41,7 +41,7 @@ export type ExactAnswer =
 const ANY_PATH = "*";
 
 /*
- * Four tuning constants (TABLE r4.41): each picks which of two indexes answers a read, never the answer. Four keeps the
+ * Three tuning constants (TABLE r4.41): each picks which of two indexes answers a read, never the answer. Four keeps the
  * common shapes on the per-source path; W34's two known products stand where more than four sources, anchors or trees
  * meet at one path (PLAN §6b).
  */
@@ -54,9 +54,6 @@ const FEW_PLACES = 4;
 
 /** The anchors of a source whose copies a path's spans hold run by run; beyond, the source is asked at the read. */
 const FEW_ANCHORS = 4;
-
-/** The callables a tested key's branches stand in that a read asks one by one; beyond, by the key's guarded exits. */
-const FEW_CALLABLES = 4;
 
 /**
  * A whole copy of a place (W34): the copy, the source it reads and where, and what the source holds there for every
@@ -261,8 +258,10 @@ export class ExactPath {
   #bySource: Map<PlaceId, Map<Callable | null, CopyLink[]>> | null = null;
   /** Per source and callable, those copies' intervals of the walk, nested (built as asked). */
   readonly #sourceSpans = new Map<PlaceId, Map<Callable | null, NestedSpans<CopyLink>>>();
-  /** Per tested key, its guarded exits, nested (built as asked). */
+  /** Per tested key, its guarded exits, nested (built once its callables have been asked as often as it has exits). */
   readonly #exitSpans = new Map<Key, NestedSpans<number> | null>();
+  /** Per tested key whose guarded exits are not built: its exits in its callables, and the callables asked so far. */
+  readonly #exitBudget = new Map<Key, { readonly exits: number; asked: number }>();
 
   public constructor(readonly pass: CorePass) {}
 
@@ -901,18 +900,19 @@ export class ExactPath {
    * The depth of the nearest copy at or above `copy`, of its source, whose read a branch of a test of the source at the
    * path holds, or -1. A chain's reads in one callable are nested in the dominator tree and a branch is a dominator
    * subtree, so a branch that holds an earlier copy's read there holds the nearest one's; a chain enters a callable once
-   * (a return to one closes a copy cycle, which the walk stops). So in each callable the nearest copy decides: for a key
-   * tested in a few callables, each is asked by its nearest copy at or above `copy`; for one tested in more, the read's
-   * own callable is, and the other callables by the key's guarded exits (the copies a chain leaves them from, which
-   * are the nearest copies there of every chain that reaches another callable), nested once per key.
+   * (a return to one closes a copy cycle, which the walk stops). So in each callable the nearest copy decides. Each
+   * tested callable is asked by its nearest copy at or above `copy` until a key's callables have been asked as often as
+   * the key has exits there; then the read's own callable is, and the others by the key's guarded exits (the copies a
+   * chain leaves them from: the nearest copies there of every chain that reaches another callable), nested once per
+   * key. A key so costs at most its exits before its index, and its index once.
    */
   #guardedDepth(forest: CopyForest, copy: CopyLink, path: string): number {
     const { guards, program } = this.pass;
     const key = keyOf(copy.source, path === "" ? [] : path.split("."));
     const callables = guards.branchCallables(key);
     if (callables === undefined) return -1;
-    const asked =
-      callables.size <= FEW_CALLABLES ? [...callables.keys()] : [program.callableAt(copy.read)];
+    const exits = this.#exitsWhenDue(forest, key, callables);
+    const asked = exits === undefined ? [...callables.keys()] : [program.callableAt(copy.read)];
     let found = -1;
     for (const callable of asked) {
       program.work.charge("exactQueries");
@@ -920,12 +920,33 @@ export class ExactPath {
       if (nearest !== null && nearest.depth > found && guards.branchHolds(key, nearest.read))
         found = nearest.depth;
     }
-    if (callables.size > FEW_CALLABLES)
-      found = Math.max(
-        found,
-        this.#guardedExits(forest, key, callables)?.innermost(copy.enter) ?? -1,
-      );
+    if (exits !== undefined) found = Math.max(found, exits?.innermost(copy.enter) ?? -1);
     return found;
+  }
+
+  /**
+   * A key's guarded exits once its callables have been asked one by one more often than it has exits in them, else
+   * `undefined` (the asks of this read counted).
+   */
+  #exitsWhenDue(
+    forest: CopyForest,
+    key: Key,
+    callables: ReadonlyMap<Callable | null, unknown>,
+  ): NestedSpans<number> | null | undefined {
+    if (this.#exitSpans.has(key)) return this.#exitSpans.get(key)!;
+    let budget = this.#exitBudget.get(key);
+    if (budget === undefined) {
+      let exits = 0;
+      for (const callable of callables.keys()) {
+        this.pass.program.work.charge("exactQueries");
+        exits += forest.exits.get(keyPlace(key))?.get(callable)?.links.length ?? 0;
+      }
+      this.#exitBudget.set(key, (budget = { exits, asked: 0 }));
+    }
+    budget.asked += callables.size;
+    if (budget.asked <= budget.exits) return undefined;
+    this.#exitBudget.delete(key);
+    return this.#guardedExits(forest, key, callables);
   }
 
   /**
