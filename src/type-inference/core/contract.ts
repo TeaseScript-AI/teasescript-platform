@@ -256,8 +256,8 @@ interface PrefixEntry {
  * The sources a prefix's reads take apart from its entries (§8 r4.15: a replaced alias source's own stores below its
  * root, kept apart by their first step), as a layer over the one its prefix inherits: an alias shares its source's
  * layer and adds only its own sources (r4.38), so k aliases each adding a field are k small layers, never k maps of up
- * to k fields. A layer knows its depth and its ancestors 2^i layers up, so a read asks the layers that list its first
- * step by their depth.
+ * to k fields. A layer knows its depth and its ancestors 2^i layers up, and its root which layers on it list each
+ * first step at each depth, so a read asks those layers only.
  */
 interface SubLayer {
   /** Its own sources by their first step. */
@@ -265,8 +265,12 @@ interface SubLayer {
   readonly parent: SubLayer | null;
   readonly depth: number;
   readonly jumps: readonly SubLayer[];
+  /** The layer at depth 0 it stands on, `null` for that one itself. */
+  readonly root: SubLayer | null;
   /** The one source every source of it and its ancestors is, if there is one. */
   readonly only: Key | null;
+  /** At its root: per first step and depth, the layers on it that list the step. */
+  readonly byStep: Map<string, Map<number, Set<SubLayer>>>;
 }
 
 /** What a prefix stores into the keys below it. */
@@ -411,7 +415,6 @@ export class Contract {
     markVisits: 0,
   };
   readonly #prefix = new Map<Key, PrefixStores>();
-  readonly #layersByStep = new Map<string, Map<number, Set<SubLayer>>>();
   readonly #subPaths = new Map<Key, ReadonlySet<string>>();
   readonly #keys = new Map<Key, Identity>();
   readonly #identities = new Map<PlaceId, Identity>();
@@ -1608,12 +1611,15 @@ export class Contract {
       parent,
       depth: parent === null ? 0 : parent.depth + 1,
       jumps,
+      root: parent === null ? null : (parent.root ?? parent),
       only: only ?? null,
+      byStep: new Map(),
     };
+    const index = (layer.root ?? layer).byStep;
     for (const step of own.keys()) {
       work.charge("invSteps");
-      let byDepth = this.#layersByStep.get(step);
-      if (byDepth === undefined) this.#layersByStep.set(step, (byDepth = new Map()));
+      let byDepth = index.get(step);
+      if (byDepth === undefined) index.set(step, (byDepth = new Map()));
       const layers = byDepth.get(layer.depth);
       if (layers === undefined) byDepth.set(layer.depth, new Set([layer]));
       else layers.add(layer);
@@ -1665,7 +1671,7 @@ export class Contract {
     const work = this.pass.program.work;
     const step = rest[0]!;
     const found = new Map<Key, Set<Definition | null>>();
-    for (const [depth, layers] of this.#layersByStep.get(step) ?? []) {
+    for (const [depth, layers] of (top.root ?? top).byStep.get(step) ?? []) {
       work.charge("invSteps");
       if (depth > top.depth) continue;
       const layer = this.#ancestorAt(top, depth);
