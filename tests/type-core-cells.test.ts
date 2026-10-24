@@ -137,3 +137,88 @@ test("the comparison fails a record whose second check is replaced by a copy of 
   assert.deepEqual(recordDifferences(record.expected, actual), []);
   assert.notDeepEqual(recordDifferences(altered, actual), []);
 });
+
+/**
+ * Programs beside the set, for cells whose transfers the set leaves untested (review r1): per program its cell, the
+ * outcome and the diagnostics' context words in order.
+ */
+const CONTROLS: readonly (readonly [string, string, string, string])[] = [
+  // §3.2: the mark travels with the value through a conversion, a length, a dict's keys and a declared result
+  [
+    "§3.2 guarded conversion",
+    "let xs = null\nif xs != null { let wrong: string = xs.toSet() }",
+    "warning-runtime-check",
+    "branch branch branch",
+  ],
+  [
+    "§3.2 guarded length",
+    "let xs = [1]\nif xs != null { let wrong: string = xs.length }",
+    "warning-runtime-check",
+    "branch",
+  ],
+  [
+    "§3.2 guarded dict keys",
+    "let xs = dict {x: 1}\nif xs != null { for key in xs { let wrong: integer = key } }",
+    "warning-runtime-check",
+    "branch",
+  ],
+  [
+    "§3.2 guarded declared result",
+    "let xs = [1]\nif xs != null { let wrong: string = xs.count() }",
+    "warning-runtime-check",
+    "branch",
+  ],
+  ["§3.2 unguarded length", "let xs = [1]\nlet wrong: string = xs.length", "compile-error", "-"],
+  // F21: a dead call is no site and binds nothing
+  [
+    "F21 one live call beside a dead one",
+    "function take(x) { repeat x {} }\ntake(1)\nif false { take(1.5) }",
+    "valid",
+    "",
+  ],
+  [
+    "F21 two live calls",
+    "function take(x) { repeat x {} }\ntake(1)\ntake(1.5)",
+    "warning-runtime-check",
+    "deferred-parameter",
+  ],
+  // X6, X7 (r4.10): a helper only blocks run stores as block code does, one ordinary code runs too as a call
+  [
+    "X6 a helper only a later block runs",
+    'let n = 1\nfunction change { n = 1.5 }\nfunction unrelated { say "hello" }\nunrelated()\nlet shown: integer = n\nshowPermanentButton "x" { change() }',
+    "valid",
+    "",
+  ],
+  [
+    "X7 a helper only an earlier block runs",
+    'let n = 1\nfunction change { n = 1.5 }\nfunction unrelated { say "hello" }\nshowPermanentButton "x" { change() }\nunrelated()\nlet shown: integer = n',
+    "warning-runtime-check",
+    "handler",
+  ],
+  [
+    "X6 a helper ordinary code runs too",
+    'let n = 1\nfunction change { n = 1.5 }\nchange()\nlet shown: integer = n\nshowPermanentButton "x" { change() }',
+    "warning-runtime-check",
+    "call",
+  ],
+  [
+    "X6 a helper's helper ordinary code runs too",
+    'let n = 1\nfunction change { n = 1.5 }\nfunction outer { change() }\nshowPermanentButton "x" { outer() }\nouter()\nlet shown: integer = n',
+    "warning-runtime-check",
+    "call",
+  ],
+];
+
+test("the core gives the expected outcome for the programs beside the set", () => {
+  const got = CONTROLS.map(([name, source]) => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const record = compactAnalysis(request);
+    const contexts = record.diagnostics.map((diagnostic) => diagnostic.context ?? "-").join(" ");
+    return `${name}: ${record.outcome} [${contexts}]`;
+  });
+  assert.deepEqual(
+    got,
+    CONTROLS.map(([name, , outcome, contexts]) => `${name}: ${outcome} [${contexts}]`),
+  );
+});

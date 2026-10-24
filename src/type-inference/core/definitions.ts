@@ -190,11 +190,18 @@ export class DefinitionIndex {
           work.charge("indexSteps");
           append(this.byValue, d.value, d);
         }
-    // the owner sets (X6): a live store by a callable other than its key's declaring activation
+    // the owner sets (X6): a live store by a callable other than its key's declaring activation that ordinary code may
+    // run; a helper only blocks run stores as their code does (X7, r4.10)
+    const ordinary = this.#ordinaryCallables();
     for (const d of this.storeDefs) {
       work.charge("ownerSteps", d.path.length + 1);
       const owner = program.flow.ownerOf(d.node.region);
-      if (!program.live(d.node) || owner === null || owner === this.declaringCallable(d.place))
+      if (
+        !program.live(d.node) ||
+        owner === null ||
+        owner === this.declaringCallable(d.place) ||
+        !ordinary.has(owner)
+      )
         continue;
       this.#foreignAt.add(d.key);
       this.#foreignBelow.add(d.key);
@@ -214,6 +221,37 @@ export class DefinitionIndex {
         append(this.#keysBelow, keyOf(place, path.slice(0, length)), key);
       }
     }
+  }
+
+  /**
+   * The callables ordinary code may run: each one no block runs, and each one a live call or transfer outside block
+   * code in one of them, or in the startup, enters; a worklist over those edges, each once.
+   */
+  #ordinaryCallables(): ReadonlySet<Callable> {
+    const { flow, work } = this.program;
+    const ordinary = new Set(flow.callables.filter((callable) => !flow.blockCalled.has(callable)));
+    const queue = [...ordinary];
+    const reach = (callable: Callable): void => {
+      work.charge("ownerSteps");
+      if (ordinary.has(callable)) return;
+      ordinary.add(callable);
+      queue.push(callable);
+    };
+    const onward = new Map<Callable, Callable[]>();
+    const started: Callable[] = [];
+    const edge = (at: FlowNode, region: number, callees: readonly Callable[]): void => {
+      work.charge("ownerSteps");
+      if (!this.program.live(at) || this.program.handlerOf(at) !== null) return;
+      const caller = flow.callableOf(region);
+      for (const callee of callees)
+        if (caller === null) started.push(callee);
+        else append(onward, caller, callee);
+    };
+    for (const site of flow.sites) edge(site.callIn, site.caller, site.callees);
+    for (const jump of flow.jumps) edge(jump.node, jump.node.region, jump.files);
+    for (const callable of started) reach(callable);
+    while (queue.length > 0) for (const callee of onward.get(queue.pop()!) ?? []) reach(callee);
+    return ordinary;
   }
 
   #add(d: Omit<Definition, "uid">, cell = false): Definition {
@@ -315,6 +353,9 @@ export class DefinitionIndex {
   /** F21, F22: each argument is a whole store into its parameter at the parameter's binding node in the callee. */
   #arguments(constraint: Extract<CoreProgram["constraints"][number], { kind: "call" }>): void {
     const program = this.program;
+    // F21: a dead call binds nothing
+    const call = program.exprAt(constraint.site);
+    if (call !== null && !program.live(call)) return;
     const fn = program.functionOf(constraint.fn);
     const region = program.functionRegion(constraint.fn);
     const bind = (parameter: PlaceId | undefined, argument: PlaceId): void => {
@@ -692,6 +733,7 @@ export class DefinitionLists {
   readonly #sorted = new Map<Key, SortedDefinitions>();
   readonly #events = new Map<Key, number[]>();
   readonly #certain = new Map<Definition, boolean>();
+  readonly #singleSite = new Map<number, boolean>();
 
   public constructor(
     readonly index: DefinitionIndex,
@@ -899,9 +941,16 @@ export class DefinitionLists {
   /** F21: a function with one live call site and no recursion binds its parameters exactly. */
   public singleSite(fn: number | undefined): boolean {
     if (fn === undefined) return false;
-    const region = this.#program.functionRegion(fn);
-    return (
-      region !== undefined && region.sites.length === 1 && !this.#program.flow.recursive.has(region)
-    );
+    const known = this.#singleSite.get(fn);
+    if (known !== undefined) return known;
+    const program = this.#program;
+    const region = program.functionRegion(fn);
+    program.work.charge("indexSteps", (region?.sites.length ?? 0) + 1);
+    const single =
+      region !== undefined &&
+      region.sites.filter((site) => program.live(site.callIn)).length === 1 &&
+      !program.flow.recursive.has(region);
+    this.#singleSite.set(fn, single);
+    return single;
   }
 }
