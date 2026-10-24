@@ -103,27 +103,28 @@ export function memberResult(name: string): readonly ValueKind[] | undefined {
   return Object.hasOwn(MEMBERS, name) ? MEMBERS[name] : undefined;
 }
 
-/** What an interaction gives: F25's declared answer, or one of its options' values (`askChoice`). */
+/**
+ * What an interaction gives: F25's declared answer, or one of its options' values (`askChoice`), which enters as
+ * external data (C9). Any other interaction's answer is the runtime's.
+ */
 export type InteractionCategory =
   { readonly kind: "asks"; readonly result: ValueKind } | { readonly kind: "options" };
 
-/** The interactions with a declared answer, by the collector's interaction kinds. */
+/** The interactions with a declared answer, by the collector's interaction kinds: the oracle's adapter rows. */
 const ASKS: Readonly<Record<string, ValueKind>> = {
-  integer: "integer",
-  boolean: "boolean",
   text: "string",
+  password: "string",
+  number: "number",
+  integer: "integer",
+  date: "date",
+  time: "time",
+  datetime: "datetime",
+  boolean: "boolean",
 };
 
-/** The interactions whose answer is external data (C9): a choice's selected option. */
-const EXTERNAL_INTERACTIONS: ReadonlySet<string> = new Set(["choice"]);
-
-export function interactionCategory(name: string): InteractionCategory {
-  return Object.hasOwn(ASKS, name) ? { kind: "asks", result: ASKS[name]! } : { kind: "options" };
-}
-
-/** Whether an interaction's answer enters as external data (C9). */
-export function interactionIsExternal(name: string): boolean {
-  return EXTERNAL_INTERACTIONS.has(name);
+export function interactionCategory(name: string): InteractionCategory | undefined {
+  if (Object.hasOwn(ASKS, name)) return { kind: "asks", result: ASKS[name]! };
+  return name === "choice" ? { kind: "options" } : undefined;
 }
 
 /** What a conversion gives: a value of its result kind (with its default or `null`), or parsed external data. */

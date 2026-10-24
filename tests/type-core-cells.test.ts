@@ -233,6 +233,14 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "warning-runtime-check",
     "call",
   ],
+  // F25: every ask with a declared answer gives it, as its adapter row says
+  ["F25 a date answer", 'let d = askDate "When?"\nlet w: integer = d', "compile-error", "-"],
+  [
+    "F25 a password answer",
+    'let p = askPassword "Word?"\nlet w: integer = p',
+    "compile-error",
+    "-",
+  ],
   // F25: a declared result is the receiver kind's own: text's `reverse` gives text, a list's `null`
   ["F25 a text's reversed text", 'let s = "abc".reverse()\nsay s.uppercase()', "valid", ""],
   [

@@ -2,7 +2,7 @@ import type { ForStatement } from "../../ast.js";
 import type { PlaceId, SourceSite } from "../graph.js";
 import type { Callable, FlowLoop, FlowNode } from "./flow-graph.js";
 import { makeItem, type ContextWord, type Item, type Writer } from "./items.js";
-import { conversionCategory, interactionIsExternal, methodCategory } from "./method-categories.js";
+import { conversionCategory, interactionCategory, methodCategory } from "./method-categories.js";
 import { siteKey, type CoreProgram } from "./program.js";
 
 /*
@@ -459,7 +459,7 @@ export class DefinitionIndex {
           ((constraint.contract.family === "conversion" &&
             conversionCategory(constraint.contract.name)?.kind === "parses") ||
             (constraint.contract.family === "interaction" &&
-              interactionIsExternal(constraint.contract.name))))
+              interactionCategory(constraint.contract.name)?.kind === "options")))
       )
         this.ingress.add(constraint.result);
     for (const [occurrence, binding] of program.occurrenceOf)

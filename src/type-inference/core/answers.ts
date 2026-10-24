@@ -563,7 +563,7 @@ class CoreAnswers implements Answers {
               pending.push({ value: c.receiver, path: ["element", ...path] });
           } else if (family === "operator" && name === "+" && path[0] === "element")
             for (const argument of c.arguments) pending.push({ value: argument, path });
-          else if (family === "interaction" && interactionCategory(name).kind === "options")
+          else if (family === "interaction" && interactionCategory(name)?.kind === "options")
             // F25: `askChoice`'s answer is an option's value
             for (const argument of c.arguments)
               pending.push({ value: argument, path: ["element", "value", ...path] });
