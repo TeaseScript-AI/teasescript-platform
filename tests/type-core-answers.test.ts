@@ -184,3 +184,18 @@ test("a place's definitions are the exact path's live list in region order (Astr
     ["whole", "add", "add exit"],
   );
 });
+
+test("a property named as an internal step keeps its name in the answers (Astra B1)", () => {
+  const { answers, node } = analysed('let box = {element: 1, iteration: "a"}\nsay box\nexit');
+  const box = node("box");
+  assert.deepEqual(
+    [...answers.properties(box)].map(
+      ([name, items]) => `${name}: ${items.map((item) => item.tag).join(",")}`,
+    ),
+    ["element: integer", "iteration: string"],
+  );
+  assert.deepEqual(
+    answers.project(box, { property: "iteration" }).map((item) => item.tag),
+    ["string"],
+  );
+});

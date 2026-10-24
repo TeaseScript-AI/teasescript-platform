@@ -326,6 +326,27 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "unknown",
   ],
   ["C12 remove on a dict", "let d = dict {key: 1}\nsay d.remove(1)\nexit", "compile-error", "-"],
+  // F11, F12, C2, C5 (Astra B1): a property named as an internal step is the object's property
+  [
+    "C2 a property named iteration of the wrong kind",
+    'let box = {iteration: "bad"}\nrepeat box.iteration {}\nexit',
+    "compile-error",
+    "-",
+  ],
+  ["C5 a property named entry", "let box = {entry: 1}\nrepeat box.entry {}\nexit", "valid", ""],
+  ["C5 a property named index", "let box = {index: 1}\nrepeat box.index {}\nexit", "valid", ""],
+  [
+    "F13 a store into a property named element",
+    "let box = {element: 1}\nbox.element = 2\nrepeat box.element {}\nexit",
+    "valid",
+    "",
+  ],
+  [
+    "F13 a wrong store into a property named element",
+    "let box = {element: 1}\nbox.element = 2.5\nrepeat box.element {}\nexit",
+    "compile-error",
+    "-",
+  ],
 ];
 
 /** C1's warning and check for external data stored into a written place, by site (TABLE r4.43, C9 r4.29). */

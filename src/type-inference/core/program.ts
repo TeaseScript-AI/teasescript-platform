@@ -64,6 +64,22 @@ export type ValueConstraint = Extract<
 
 export type HasConstraint = Extract<Constraint, { readonly kind: "has" }>;
 
+/**
+ * The steps a projection takes that are no property (`ProjectionStep`, graph.ts): a key's path keeps a property of one
+ * of these names apart from them (Astra B1), so `box.iteration` is `box`'s property, not a loop's visit.
+ */
+const INTERNAL_STEPS: ReadonlySet<string> = new Set(["element", "entry", "index", "iteration"]);
+
+/** A property as a key's step: its name, quoted where it is an internal step's name (no identifier has a quote). */
+export function propertyStep(name: string): string {
+  return INTERNAL_STEPS.has(name) ? `'${name}` : name;
+}
+
+/** A key's step as its author wrote it: a quoted property's name. */
+export function propertyName(step: string): string {
+  return step.startsWith("'") ? step.slice(1) : step;
+}
+
 /** The steps of an index or an entry; with the selections, `xs.element` in the contract's vocabulary (TABLE §10.5 r4.10). */
 const ELEMENT_STEPS: ReadonlySet<string> = new Set(["index", "entry"]);
 
@@ -197,7 +213,10 @@ export class CoreProgram {
         case "project":
           this.projOf.set(constraint.into, {
             owner: constraint.owner,
-            step: typeof constraint.step === "object" ? constraint.step.property : constraint.step,
+            step:
+              typeof constraint.step === "object"
+                ? propertyStep(constraint.step.property)
+                : constraint.step,
             node: this.exprAt(constraint.site),
           });
           break;

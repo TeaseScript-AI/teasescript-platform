@@ -32,7 +32,7 @@ import { firstWriter, makeItem, REASON, type Item, type ItemTag, type Writer } f
 import { interactionCategory, selectsElement } from "./method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
-import { siteKey, stepName, type ValueConstraint } from "./program.js";
+import { propertyName, propertyStep, siteKey, stepName, type ValueConstraint } from "./program.js";
 import {
   elementStep,
   explainingItem,
@@ -332,7 +332,7 @@ export class Consumers {
                 (item) => item.tag,
               ),
             )
-          : projection.step;
+          : propertyName(projection.step);
       return `${this.#keyLabel(projection.owner, depth + 1)}.${step}`;
     }
     const result = this.#resultOfCall.get(value);
@@ -675,7 +675,8 @@ export class Consumers {
     for (const has of program.hasOf.get(value) ?? []) {
       const term =
         has.type.kind === "object"
-          ? (has.type.properties ?? []).find((property) => property.name === step)?.type
+          ? (has.type.properties ?? []).find((property) => propertyStep(property.name) === step)
+              ?.type
           : step === "element" &&
               (has.type.kind === "list" || has.type.kind === "set" || has.type.kind === "dict")
             ? has.type.element
@@ -1031,7 +1032,9 @@ export class Consumers {
       return;
     }
     const property = typeof c.step === "object" ? c.step.property : c.step;
-    if (property !== "index" && typeof c.step !== "object") return;
+    // an index step (`xs[i]`) is no object's member; a property named `index` is (Astra B1)
+    const indexStep = c.step === "index";
+    if (!indexStep && typeof c.step !== "object") return;
     if (typeof c.step === "object") this.#defaultNull(c.owner, node, c.site);
     // §3.3: every receiver kind has the member, and every source the property
     {
@@ -1044,7 +1047,7 @@ export class Consumers {
           (tag) =>
             tag !== "null" &&
             !REFERENCE.has(tag) &&
-            (tag === "object" ? property !== "index" : hasProperty(tag, property)),
+            (tag === "object" ? !indexStep : hasProperty(tag, property)),
         ) &&
         !own.some((item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0) &&
         !(
@@ -1094,7 +1097,7 @@ export class Consumers {
       if (missing.length > 0) extra.push([missing[0]!, `has .${property} before the read`]);
     }
     const takes = (tag: ItemTag): boolean =>
-      tag === "object" ? property !== "index" : hasProperty(tag, property);
+      tag === "object" ? !indexStep : hasProperty(tag, property);
     this.#memberChecks(
       this.#own(c.owner, c.site),
       label,
@@ -1610,7 +1613,8 @@ export class Consumers {
       const label =
         owner !== undefined
           ? this.#keyLabel(owner)
-          : program.place(d.place).label + (recvPath.length > 0 ? `.${recvPath.join(".")}` : "");
+          : program.place(d.place).label +
+            (recvPath.length > 0 ? `.${recvPath.map(propertyName).join(".")}` : "");
       // what the store needs of its receiver: a property store an object, an element store a list or a dict, an add
       // its method (C5b: `x.missing = 2` with x a whole number fails at runtime)
       const property = d.kind === "whole" ? (d.path.at(-1) ?? null) : null;
@@ -1708,7 +1712,9 @@ function requiredKind(tag: ItemTag): RequiredKind {
 /** The fields of a literal's type: an object's properties, a collection's element. */
 function fieldsOf(term: TypeTerm): readonly (readonly [string, TypeTerm])[] {
   if (term.kind === "object")
-    return (term.properties ?? []).map((property) => [property.name, property.type] as const);
+    return (term.properties ?? []).map(
+      (property) => [propertyStep(property.name), property.type] as const,
+    );
   if (term.kind === "list" || term.kind === "set" || term.kind === "dict")
     return [["element", term.element]];
   return [];
@@ -1718,7 +1724,7 @@ function fieldsOf(term: TypeTerm): readonly (readonly [string, TypeTerm])[] {
 function termPlace(term: TypeTerm, step: string): PlaceId | null {
   const at =
     term.kind === "object"
-      ? (term.properties ?? []).find((property) => property.name === step)?.type
+      ? (term.properties ?? []).find((property) => propertyStep(property.name) === step)?.type
       : step === "element" && (term.kind === "list" || term.kind === "set" || term.kind === "dict")
         ? term.element
         : undefined;

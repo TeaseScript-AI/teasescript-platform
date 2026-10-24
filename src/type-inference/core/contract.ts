@@ -31,7 +31,7 @@ import {
   type Writer,
 } from "./items.js";
 import { operationItems, type Operator } from "./operator-table.js";
-import { stepName, type ValueConstraint } from "./program.js";
+import { propertyStep, stepName, type ValueConstraint } from "./program.js";
 import type { Decision, Demand, Work } from "./solver.js";
 
 /*
@@ -168,7 +168,7 @@ function typeAtPath(term: TypeTerm, path: readonly string[]): TypeAt | null {
       ? { place: term.element.place, rest }
       : typeAtPath(term.element, rest);
   if (term.kind === "object" && term.properties !== null) {
-    const property = term.properties.find((candidate) => candidate.name === step);
+    const property = term.properties.find((candidate) => propertyStep(candidate.name) === step);
     if (property === undefined) return null;
     return property.type.kind === "ref"
       ? { place: property.type.place, rest }
@@ -2304,11 +2304,18 @@ export class Contract {
         let objects = index.objects.get(path);
         if (objects === undefined)
           index.objects.set(path, (objects = { list: [], count: new Map() }));
-        const names = new Set((term.properties ?? []).map((property) => property.name));
+        const names = new Set(
+          (term.properties ?? []).map((property) => propertyStep(property.name)),
+        );
         objects.list.push({ names, token: site });
         for (const name of names) objects.count.set(name, (objects.count.get(name) ?? 0) + 1);
         for (const property of [...(term.properties ?? [])].reverse())
-          pending.push({ kind: "term", site, term: property.type, path: at(path, property.name) });
+          pending.push({
+            kind: "term",
+            site,
+            term: property.type,
+            path: at(path, propertyStep(property.name)),
+          });
       } else if (term.kind === "list" || term.kind === "set" || term.kind === "dict") {
         const element = term.element;
         if (element.kind === "ref" && (definitions.cellDefs.get(element.place) ?? []).length === 0)

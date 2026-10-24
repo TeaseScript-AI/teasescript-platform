@@ -29,7 +29,14 @@ import type { Callable, FlowGraph, FlowNode } from "./flow-graph.js";
 import { GuardIndex } from "./guards.js";
 import { HandlerIndex } from "./handlers.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
-import { CoreProgram, siteKey, stepName, type CoreAnalysisRequest } from "./program.js";
+import {
+  CoreProgram,
+  propertyName,
+  propertyStep,
+  siteKey,
+  stepName,
+  type CoreAnalysisRequest,
+} from "./program.js";
 import {
   outcomeOf,
   type CoreDiagnostic,
@@ -481,7 +488,7 @@ class CoreAnswers implements Answers {
     const value = this.#valueOf(node);
     if (value === null) return [];
     // a dict's entries are its element path (the collector's step names)
-    const path = typeof step === "string" ? stepName(step) : step.property;
+    const path = typeof step === "string" ? stepName(step) : propertyStep(step.property);
     return this.#run(this.#pass.values.valueItems(value, node, [path]));
   }
 
@@ -490,7 +497,7 @@ class CoreAnswers implements Answers {
     const out = new Map<string, readonly Item[]>();
     if (value === null) return out;
     for (const name of [...this.#propertyNames(value)].sort())
-      out.set(name, this.#run(this.#pass.values.valueItems(value, node, [name])));
+      out.set(name, this.#run(this.#pass.values.valueItems(value, node, [propertyStep(name)])));
     return out;
   }
 
@@ -596,7 +603,7 @@ class CoreAnswers implements Answers {
         const index = contract.literalIndex(task.literal);
         const at = task.path.join(".");
         for (const object of index.objects.get(at)?.list ?? [])
-          for (const name of object.names) names.add(name);
+          for (const name of object.names) names.add(propertyName(name));
         // the reads and calls standing at the path or above it, followed at the rest of the path: asked by the path's
         // prefixes, or by the stands of a map that has fewer (a deep path beside few stands, a shallow one beside many)
         for (const map of [index.reads, index.others])
@@ -621,7 +628,7 @@ class CoreAnswers implements Answers {
       const path = keyPath(key);
       for (const below of definitions.keysBelow(key)) {
         const step = keyPath(below)[path.length];
-        if (step !== undefined && step !== "element") names.add(step);
+        if (step !== undefined && step !== "element") names.add(propertyName(step));
       }
       for (let length = 0; length <= path.length; length += 1) {
         const rest = path.slice(length);

@@ -8,6 +8,7 @@ import {
   type ItemTag,
   type Writer,
 } from "./items.js";
+import { propertyName } from "./program.js";
 
 /**
  * The structured result of the coarse core (checkpoint 9, TABLE §3.4, §4, §10.5): the outcome, the diagnostics with
@@ -146,7 +147,7 @@ export function elementStep(receiver: readonly ItemTag[]): "element" | "entry" {
  * `packet.result`) and its steps, as `state.party.element.hp`.
  */
 export function targetName(label: string, steps: readonly string[]): string {
-  return [label, ...steps].join(".");
+  return [label, ...steps.map(propertyName)].join(".");
 }
 
 /** A site in a record: its file's path and its span's offsets. */
