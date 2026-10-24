@@ -267,3 +267,73 @@ test("a chain of whole copies read at k fields resolves each copy once (W34)", (
       `${counter}: ${small.get(counter)} at 8, ${large.get(counter)} at 32`,
     );
 });
+
+/**
+ * §8: the prefix index and the handler index do work linear in the copies and reads (review r1): an edited record
+ * copied through k aliases inherits its source once per alias, not under each of its k fields; k reads of a record
+ * with k stores below it look a block's stores up by the read's path (X7), never by the keys below it.
+ */
+const INDEXES: readonly [string, "invSteps" | "eventSteps", (k: number) => string][] = [
+  [
+    "an edited record through k aliases",
+    "invSteps",
+    (k) =>
+      `let root = {${many(k, (i) => `f${i}: 2.0`, ", ")}}\n${many(k, (i) => `root.f${i} = 3.0`)}\nlet a0 = root\n${many(k - 1, (i) => `let a${i + 1} = a${i}`)}\nlet out: integer = a${k - 1}.f0\nexit`,
+  ],
+  [
+    "k reads of a record with k stores below it beside a block",
+    "eventSteps",
+    (k) =>
+      `let other = 1\nshowPermanentButton "x" { other = 2 }\nlet state = {${many(k, (i) => `f${i}: 1`, ", ")}}\n${many(k, (i) => `state.f${i} = 2`)}\nstate = {${many(k, (i) => `f${i}: 3`, ", ")}}\n${many(k, () => "repeat state {}")}`,
+  ],
+];
+
+test("the prefix index and the handler index grow with the copies and reads, not their square", () => {
+  const growing = INDEXES.filter(([, counter, program]) => {
+    // from 32 to 128 a linear count grows four times, a square sixteen times (at 8 the square term is still small)
+    const small = analysed(program(32)).budget.counts.get(counter) ?? 0;
+    const large = analysed(program(128)).budget.counts.get(counter) ?? 0;
+    return large > 6 * Math.max(1, small);
+  });
+  assert.deepEqual(
+    growing.map(([shape]) => shape),
+    [],
+  );
+});
+
+/**
+ * Native resilience (TABLE §8): flat chains of 8,192 links run through every walk along aliases, copies, wrappers and
+ * default sources on explicit stacks or loops (review r1: the default-source and alias-root walks recursed natively).
+ */
+const CHAINS: readonly [string, string, (k: number) => string][] = [
+  [
+    "copies of a text read at its length",
+    "valid",
+    (k) => `let v0 = "text"\n${many(k, (i) => `let v${i + 1} = v${i}`)}\nsay v${k}.length`,
+  ],
+  [
+    "aliases of a record read under a test",
+    "warning-runtime-check",
+    (k) =>
+      `let root = {n: 2.0}\nlet a0 = root\n${many(k - 1, (i) => `let a${i + 1} = a${i}`)}\nif a${k - 1}.n is integer {\n  let picked = a${k - 1}\n  let out: integer = picked.n\n}\nexit`,
+  ],
+  [
+    "copies stored twice",
+    "compile-error",
+    (k) =>
+      `let flag = askBoolean "f"\nlet b0 = {n: 2.0}\n${many(k, (i) => `let b${i + 1} = b${i}\nif flag { b${i + 1} = b${i} }`)}\nlet out: integer = b${k}.n\nexit`,
+  ],
+  [
+    "records wrapping the one before",
+    "compile-error",
+    (k) =>
+      `let w0 = {n: 2.0}\nif w0.n is integer { say "ok" }\n${many(k, (i) => `let w${i + 1} = {x: w${i}}`)}\nlet out: integer = w${k}.x.n\nexit`,
+  ],
+];
+
+test("flat chains of 8,192 links analyse without native recursion", () => {
+  assert.deepEqual(
+    CHAINS.map(([shape, , program]) => `${shape}: ${analysed(program(8192)).outcome}`),
+    CHAINS.map(([shape, outcome]) => `${shape}: ${outcome}`),
+  );
+});

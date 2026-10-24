@@ -207,13 +207,19 @@ export function termAt(term: TypeTerm, path: readonly string[]): TypeTerm | null
 }
 
 /** A source of a mark: one holder per source identity and projection (§8 r4.23). */
+/** A holder's reference to another, seen from `shift` below it. */
+interface HolderReference {
+  readonly to: Holder;
+  readonly shift: readonly string[];
+}
+
 interface Holder {
   readonly id: string;
   /** Its own reads: a stored read of a key with a tested key below it, at the path it stands at. */
   readonly reads: { readonly value: PlaceId; readonly path: readonly string[] }[];
   readonly readSeen: Set<PlaceId>;
   /** Its references, by the path below it where they stand: another holder, seen from `shift` below it. */
-  readonly refsAt: Map<string, { readonly to: Holder; readonly shift: readonly string[] }[]>;
+  readonly refsAt: Map<string, HolderReference[]>;
   readonly refSeen: Set<string>;
   /** The paths of a literal's guarded reads. */
   readonly guarded: Set<string>;
@@ -258,6 +264,13 @@ export interface PrefixStores {
   readonly cut: boolean;
   deep?: Map<string, Set<Key>>;
 }
+
+/**
+ * A computation of the identity layer (a value's or a key's identity, a prefix's stores, a literal's index and
+ * signature): it yields each such computation it needs first, which runs on an explicit stack, and memoises its own
+ * answer, so a flat chain of k wrappers or copies is k frames there, never k native ones.
+ */
+type IdentityWork = Generator<() => IdentityWork, void, void>;
 
 /** A prefix's stores while they are collected: one frame per prefix on an explicit stack. */
 interface PrefixFrame {
@@ -371,6 +384,7 @@ export class Contract {
     markVisits: 0,
   };
   readonly #prefix = new Map<Key, PrefixStores>();
+  readonly #sources = new WeakMap<Map<string, Set<Key>>, readonly Key[]>();
   readonly #keys = new Map<Key, Identity>();
   readonly #identities = new Map<PlaceId, Identity>();
   readonly #aliases = new Map<PlaceId, { readonly key: Key; readonly guarded: boolean }>();
@@ -1019,93 +1033,134 @@ export class Contract {
 
   /**
    * The key a place is an alias of: one whole store of a copy or of a call's result, no store below it, no written
-   * type, its aliases followed, with the guard bit along the chain (§3.2). A cycle of aliases stops at itself.
+   * type, its aliases followed, with the guard bit along the chain (§3.2). A cycle of aliases stops at itself. A loop up
+   * the chain to a place answered or no alias, then each link answered from the top.
    */
   #rootOfPlace(place: PlaceId): { readonly key: Key; readonly guarded: boolean } {
     const known = this.#aliases.get(place);
     if (known !== undefined) return known;
-    const unaliased = { key: keyOf(place, []), guarded: false };
-    this.#aliases.set(place, unaliased);
-    this.pass.program.work.charge("invSteps");
-    const stores = (this.pass.definitions.byKey.get(keyOf(place, [])) ?? []).filter((d) =>
-      this.pass.lists.live(d),
-    );
-    const one =
-      stores.length === 1 &&
-      stores[0]!.kind === "whole" &&
-      this.#keysOfPlace(place).length === 1 &&
-      this.#copyOnly(place) &&
-      writtenOf(this.pass.program.place(place).kind) === null;
-    const copied = one ? this.copiedKey(stores[0]!.value!) : null;
-    const up = copied ?? (one ? this.resultKey(stores[0]!.value!) : null);
-    let root = unaliased;
-    if (up !== null) {
-      const top = this.#rootOfPlace(keyPlace(up));
-      root = {
-        key: keyOf(keyPlace(top.key), [...keyPath(top.key), ...keyPath(up)]),
-        guarded:
-          top.guarded || (copied !== null && this.pass.guards.guardedRead(stores[0]!.value!)),
-      };
+    const { definitions, lists, program, guards } = this.pass;
+    const chain: { readonly place: PlaceId; readonly up: Key; readonly guarded: boolean }[] = [];
+    let at = place;
+    let top: { readonly key: Key; readonly guarded: boolean };
+    for (;;) {
+      const unaliased = { key: keyOf(at, []), guarded: false };
+      this.#aliases.set(at, unaliased);
+      program.work.charge("invSteps");
+      const stores = (definitions.byKey.get(keyOf(at, [])) ?? []).filter((d) => lists.live(d));
+      const one =
+        stores.length === 1 &&
+        stores[0]!.kind === "whole" &&
+        this.#keysOfPlace(at).length === 1 &&
+        this.#copyOnly(at) &&
+        writtenOf(program.place(at).kind) === null;
+      const copied = one ? this.copiedKey(stores[0]!.value!) : null;
+      const up = copied ?? (one ? this.resultKey(stores[0]!.value!) : null);
+      if (up === null) {
+        top = unaliased;
+        break;
+      }
+      chain.push({
+        place: at,
+        up,
+        guarded: copied !== null && guards.guardedRead(stores[0]!.value!),
+      });
+      const answered = this.#aliases.get(keyPlace(up));
+      if (answered !== undefined) {
+        top = answered;
+        break;
+      }
+      at = keyPlace(up);
     }
-    this.#aliases.set(place, root);
-    return root;
+    for (let index = chain.length - 1; index >= 0; index -= 1) {
+      const link = chain[index]!;
+      top = {
+        key: keyOf(keyPlace(top.key), [...keyPath(top.key), ...keyPath(link.up)]),
+        guarded: top.guarded || link.guarded,
+      };
+      this.#aliases.set(link.place, top);
+    }
+    return this.#aliases.get(place)!;
   }
 
   /**
    * A key's source identity: the key itself through its aliases, and a place of whole copies of one source followed
-   * to that source; with its holder (§8 r4.15, r4.23).
+   * to that source; with its holder (§8 r4.15, r4.23). A loop along those places, then each answered from the last.
    */
   public keyIdentity(key: Key): Identity {
-    const known = this.#keys.get(key);
-    if (known !== undefined) return known;
-    // a copy cycle stops here
-    this.#keys.set(key, { id: `k${key}`, key, guarded: false, holder: this.#holderOfKey(key) });
-    this.pass.program.work.charge("invSteps");
-    const top = this.#rootOfPlace(keyPlace(key));
-    const rooted = keyOf(keyPlace(top.key), [...keyPath(top.key), ...keyPath(key)]);
-    let identity: Identity = {
-      id: `k${rooted}`,
-      key: rooted,
-      guarded: top.guarded,
-      holder: this.#holderOfKey(rooted),
-    };
-    const place = keyPlace(rooted);
-    if (
-      top.key === keyOf(place, []) &&
-      this.#copyOnly(place) &&
-      writtenOf(this.pass.program.place(place).kind) === null
-    ) {
-      const stores = this.prefixStores(keyOf(place, []));
-      const entry =
-        stores.list.length === 1 &&
-        !stores.other &&
-        (stores.subs === null || stores.subs.size === 0)
-          ? stores.list[0]!
-          : null;
-      const path = keyPath(rooted);
-      if (entry !== null && entry.key !== undefined) {
-        const inner = this.keyIdentity(
-          keyOf(keyPlace(entry.key), [...keyPath(entry.key), ...path]),
-        );
-        identity = {
-          id: inner.id,
-          key: rooted,
-          guarded: identity.guarded || entry.guarded || inner.guarded,
-          holder: inner.holder,
-        };
-      } else if (entry !== null && entry.value !== undefined) {
-        const at = [...(entry.at ?? []), ...path];
-        const source = this.identityOf(entry.value);
-        identity = {
-          id: `${source.id}@${at.join(".")}`,
-          key: rooted,
-          guarded: identity.guarded || entry.guarded,
-          holder: this.#holderAt(source.holder, at),
-        };
+    if (!this.#keys.has(key)) this.#settle(this.#keyIdentityWork(key));
+    return this.#keys.get(key)!;
+  }
+
+  *#keyIdentityWork(key: Key): IdentityWork {
+    if (this.#keys.has(key)) return;
+    const { program } = this.pass;
+    const chain: { readonly key: Key; readonly rooted: Key; readonly guarded: boolean }[] = [];
+    let at = key;
+    let last: Identity;
+    for (;;) {
+      // a copy cycle stops here
+      this.#keys.set(at, { id: `k${at}`, key: at, guarded: false, holder: this.#holderOfKey(at) });
+      program.work.charge("invSteps");
+      const top = this.#rootOfPlace(keyPlace(at));
+      const rooted = keyOf(keyPlace(top.key), [...keyPath(top.key), ...keyPath(at)]);
+      let identity: Identity = {
+        id: `k${rooted}`,
+        key: rooted,
+        guarded: top.guarded,
+        holder: this.#holderOfKey(rooted),
+      };
+      const place = keyPlace(rooted);
+      let inner: Key | null = null;
+      if (
+        top.key === keyOf(place, []) &&
+        this.#copyOnly(place) &&
+        writtenOf(program.place(place).kind) === null
+      ) {
+        const stores = yield* this.#needPrefix(keyOf(place, []));
+        const entry =
+          stores.list.length === 1 &&
+          !stores.other &&
+          (stores.subs === null || stores.subs.size === 0)
+            ? stores.list[0]!
+            : null;
+        const path = keyPath(rooted);
+        if (entry !== null && entry.key !== undefined) {
+          inner = keyOf(keyPlace(entry.key), [...keyPath(entry.key), ...path]);
+          chain.push({ key: at, rooted, guarded: identity.guarded || entry.guarded });
+        } else if (entry !== null && entry.value !== undefined) {
+          const within = [...(entry.at ?? []), ...path];
+          const source = yield* this.#needValue(entry.value);
+          identity = {
+            id: `${source.id}@${within.join(".")}`,
+            key: rooted,
+            guarded: identity.guarded || entry.guarded,
+            holder: this.#holderAt(source.holder, within),
+          };
+        }
       }
+      if (inner === null) {
+        this.#keys.set(at, identity);
+        last = identity;
+        break;
+      }
+      const answered = this.#keys.get(inner);
+      if (answered !== undefined) {
+        last = answered;
+        break;
+      }
+      at = inner;
     }
-    this.#keys.set(key, identity);
-    return identity;
+    for (let index = chain.length - 1; index >= 0; index -= 1) {
+      const link = chain[index]!;
+      last = {
+        id: last.id,
+        key: link.rooted,
+        guarded: link.guarded || last.guarded,
+        holder: last.holder,
+      };
+      this.#keys.set(link.key, last);
+    }
   }
 
   /**
@@ -1113,13 +1168,17 @@ export class Contract {
    * value itself; the read's guard an annotation.
    */
   public identityOf(value: PlaceId): Identity {
-    const known = this.#identities.get(value);
-    if (known !== undefined) return known;
+    if (!this.#identities.has(value)) this.#settle(this.#identityWork(value));
+    return this.#identities.get(value)!;
+  }
+
+  *#identityWork(value: PlaceId): IdentityWork {
+    if (this.#identities.has(value)) return;
     this.pass.program.work.charge("invSteps");
     let identity: Identity;
     const copied = this.copiedKey(value);
     if (copied !== null) {
-      const source = this.keyIdentity(copied);
+      const source = yield* this.#needKey(copied);
       identity = {
         id: source.id,
         key: source.key,
@@ -1129,10 +1188,10 @@ export class Contract {
     } else {
       const result = this.resultKey(value);
       if (result !== null) {
-        const source = this.keyIdentity(result);
+        const source = yield* this.#needKey(result);
         identity = { id: source.id, key: result, guarded: false, holder: source.holder };
       } else if (this.pass.program.hasOf.has(value)) {
-        const id = this.literalSignature(value);
+        const id = yield* this.#needSignature(value);
         identity = {
           id,
           key: null,
@@ -1142,7 +1201,49 @@ export class Contract {
       } else identity = { id: `v${value}`, key: null, guarded: false, holder: null };
     }
     this.#identities.set(value, identity);
-    return identity;
+  }
+
+  /** Runs a computation of the identity layer and those it needs on an explicit stack. */
+  #settle(work: IdentityWork): void {
+    const stack: IdentityWork[] = [work];
+    while (stack.length > 0) {
+      const step = stack.at(-1)!.next();
+      if (step.done === true) stack.pop();
+      else stack.push(step.value());
+    }
+  }
+
+  /** A key's identity inside the identity layer: computed first where it is not known (a cycle's is its stop). */
+  *#needKey(key: Key): Generator<() => IdentityWork, Identity, void> {
+    if (!this.#keys.has(key)) yield () => this.#keyIdentityWork(key);
+    return this.#keys.get(key)!;
+  }
+
+  *#needValue(value: PlaceId): Generator<() => IdentityWork, Identity, void> {
+    if (!this.#identities.has(value)) yield () => this.#identityWork(value);
+    return this.#identities.get(value)!;
+  }
+
+  *#needPrefix(prefix: Key): Generator<() => IdentityWork, PrefixStores, void> {
+    if (!this.#prefix.has(prefix)) yield () => this.#prefixWork(prefix);
+    return this.#prefix.get(prefix)!;
+  }
+
+  *#needIndex(literal: PlaceId): Generator<() => IdentityWork, LiteralIndex, void> {
+    if (!this.#literals.has(literal)) yield () => this.#indexWork(literal);
+    return this.#literals.get(literal)!;
+  }
+
+  *#needSignature(literal: PlaceId): Generator<() => IdentityWork, string, void> {
+    if (!this.#signatures.has(literal)) yield () => this.#signatureWork(literal);
+    return this.#signatures.get(literal)!;
+  }
+
+  /** The identities an entry draft's id and holder read, computed first. */
+  *#ready(e: EntryDraft): IdentityWork {
+    if (e.key !== undefined) yield* this.#needKey(e.key);
+    else if (e.elem !== undefined) yield* this.#needValue(e.elem);
+    else if (e.value !== undefined) yield* this.#needValue(e.value);
   }
 
   // ------------------------------------------------------------------------------------------- the prefix index
@@ -1155,8 +1256,12 @@ export class Contract {
    * memoised per pass; a key still open (a copy cycle) stays an entry, which the solver's fixpoint then closes.
    */
   public prefixStores(prefix: Key): PrefixStores {
-    const known = this.#prefix.get(prefix);
-    if (known !== undefined) return known;
+    if (!this.#prefix.has(prefix)) this.#settle(this.#prefixWork(prefix));
+    return this.#prefix.get(prefix)!;
+  }
+
+  *#prefixWork(prefix: Key): IdentityWork {
+    if (this.#prefix.has(prefix)) return;
     const { program, definitions, lists, guards } = this.pass;
     const work = program.work;
     const frame = (pk: Key): PrefixFrame => ({
@@ -1235,6 +1340,11 @@ export class Contract {
           entry.ingress = program.scope.ingress.union(entry.ingress, ingress);
       }
     };
+    // an entry with the identities it reads computed first
+    const adding = function* (contract: Contract, f: PrefixFrame, e: EntryDraft): IdentityWork {
+      yield* contract.#ready(e);
+      add(f, e);
+    };
     const own = (f: PrefixFrame): Map<string, Set<Key>> => {
       if (f.subs === null) f.subs = new Map();
       else if (f.shared) {
@@ -1249,14 +1359,16 @@ export class Contract {
       return f.subs;
     };
     const subDef = (f: PrefixFrame, sub: Key): void => {
+      work.charge("invSteps");
       let set = f.subDefs.get(sub);
       if (set === undefined) f.subDefs.set(sub, (set = new Set()));
       set.add(f.d);
     };
-    // one inherited map is shared, not copied
+    // one inherited map is shared, not copied, and its sources take the store once each (an edited record copied
+    // through k aliases lists its source under k first steps: k insertions per alias would be k × k)
     const addSubs = (f: PrefixFrame, subs: Map<string, Set<Key>> | null): void => {
       if (subs === null || subs.size === 0 || f.subs === subs) return;
-      for (const [, set] of subs) for (const sub of set) subDef(f, sub);
+      for (const sub of this.#sourcesOf(subs)) subDef(f, sub);
       if (f.subs === null) {
         f.subs = subs;
         f.shared = true;
@@ -1281,7 +1393,6 @@ export class Contract {
     };
     const open = new Set<Key>([prefix]);
     const stack: PrefixFrame[] = [frame(prefix)];
-    let result: PrefixStores | undefined;
     while (stack.length > 0) {
       const f = stack.at(-1)!;
       if (f.inner !== undefined && f.proj !== null) {
@@ -1292,18 +1403,15 @@ export class Contract {
         f.inner = undefined;
         f.proj = null;
         const copiedPlace = keyPlace(f.ck!);
-        let ownSubsOnly = true;
         // the root's own stores below it only (rescanned below at the path), no source inherited through the alias
-        if (inner.subs !== null)
-          for (const [, set] of inner.subs)
-            for (const sub of set) {
-              work.charge("invSteps");
-              if (sub !== keyOf(copiedPlace, [])) ownSubsOnly = false;
-            }
+        const ownSubsOnly =
+          inner.subs === null ||
+          this.#sourcesOf(inner.subs).every((sub) => sub === keyOf(copiedPlace, []));
         const e = inner.list.length === 1 && !inner.other && ownSubsOnly ? inner.list[0]! : null;
-        if (e === null || (e.key === undefined && e.value === undefined)) add(f, { key: f.ck! });
+        if (e === null || (e.key === undefined && e.value === undefined))
+          yield* adding(this, f, { key: f.ck! });
         else {
-          add(f, {
+          yield* adding(this, f, {
             ...(e.key !== undefined
               ? { key: keyOf(keyPlace(e.key), [...keyPath(e.key), ...projection]) }
               : { value: e.value!, at: [...(e.at ?? []), ...projection] }),
@@ -1335,12 +1443,12 @@ export class Contract {
       if (f.inner !== undefined) {
         const inner = f.inner;
         f.inner = undefined;
-        if (inner.list.length > 1 || inner.other) add(f, { key: f.ck! });
+        if (inner.list.length > 1 || inner.other) yield* adding(this, f, { key: f.ck! });
         else {
           // the copied entries keep their identity, so their marks are their holders: nothing to carry
           for (const e of inner.list) {
             work.charge("invSteps");
-            add(f, { ...e, w: f.w, guarded: e.guarded, ingress: e.ingress });
+            yield* adding(this, f, { ...e, w: f.w, guarded: e.guarded, ingress: e.ingress });
           }
           addSubs(f, inner.subs);
           const sub = keyOf(keyPlace(f.ck!), []);
@@ -1360,14 +1468,14 @@ export class Contract {
         f.d = d;
         if (d.kind === "const") {
           f.other = true;
-          add(f, { unk: REASON.opaque });
+          yield* adding(this, f, { unk: REASON.opaque });
           continue;
         }
         if (d.kind === "add") {
           f.other = true;
           // an add's marks stand below the inserted value
-          const source = this.identityOf(d.value!);
-          add(f, {
+          const source = yield* this.#needValue(d.value!);
+          yield* adding(this, f, {
             elem: d.value!,
             at: d.how === "elements" ? ["element"] : [],
             guarded: source.guarded,
@@ -1376,7 +1484,7 @@ export class Contract {
         }
         if (d.kind !== "whole") {
           f.other = true;
-          add(f, { empty: true });
+          yield* adding(this, f, { empty: true });
           continue;
         }
         if (d.how === "argument" || d.how === "parameter default") {
@@ -1388,22 +1496,22 @@ export class Contract {
             parameter.written === null &&
             !lists.singleSite(d.fn)
           )
-            add(f, { unk: REASON.deferred });
-          const source = this.identityOf(d.value!);
-          add(f, { value: d.value!, guarded: source.guarded });
+            yield* adding(this, f, { unk: REASON.deferred });
+          const source = yield* this.#needValue(d.value!);
+          yield* adding(this, f, { value: d.value!, guarded: source.guarded });
           continue;
         }
         const copied = this.copiedKey(d.value!);
         if (copied === null) {
           // a call's result is its callee's result key (F20, §8 r4.13): k stores of one function's result, one entry
           const result = this.resultKey(d.value!);
-          add(f, result !== null ? { key: result } : { value: d.value! });
+          yield* adding(this, f, result !== null ? { key: result } : { value: d.value! });
           continue;
         }
         // §3.2: a copy read under a guard is one marked entry of its source, its aliases followed (r4.6)
         if (guards.guardedRead(d.value!)) {
-          const source = this.identityOf(d.value!);
-          add(f, { key: source.key!, guarded: true });
+          const source = yield* this.#needValue(d.value!);
+          yield* adding(this, f, { key: source.key!, guarded: true });
           continue;
         }
         // §3.2 (r4.15, r4.23): a copy of a record with a tested key below it is a mark of its source's holder
@@ -1422,7 +1530,7 @@ export class Contract {
           }
           if (direct || open.has(root) || !this.#copyOnly(keyPlace(copied))) {
             if (open.has(root)) f.cut = true;
-            add(f, { key: copied });
+            yield* adding(this, f, { key: copied });
             continue;
           }
           f.ck = copied;
@@ -1438,7 +1546,7 @@ export class Contract {
         }
         if (open.has(copied) || !this.#copyOnly(keyPlace(copied))) {
           if (open.has(copied)) f.cut = true;
-          add(f, { key: copied });
+          yield* adding(this, f, { key: copied });
           continue;
         }
         f.ck = copied;
@@ -1465,9 +1573,23 @@ export class Contract {
       if (!stores.cut || stack.length === 0) this.#prefix.set(f.pk, stores);
       else stack.at(-1)!.cut = true;
       if (stack.length > 0) stack.at(-1)!.inner = stores;
-      else result = stores;
     }
-    return result!;
+  }
+
+  /** The distinct sources a map of sources by first step lists, once per map (a finished map never changes). */
+  #sourcesOf(subs: Map<string, Set<Key>>): readonly Key[] {
+    let sources = this.#sources.get(subs);
+    if (sources === undefined) {
+      const found = new Set<Key>();
+      for (const [, set] of subs)
+        for (const sub of set) {
+          this.pass.program.work.charge("invSteps");
+          found.add(sub);
+        }
+      sources = [...found];
+      this.#sources.set(subs, sources);
+    }
+    return sources;
   }
 
   /**
@@ -1777,60 +1899,129 @@ export class Contract {
 
   /**
    * How many leading steps of a path a holder's answer can depend on: the longest tested path, its guarded literal
-   * paths, and each reference's place plus what the referenced holder needs beyond the shift; a cycle: no limit.
+   * paths, and each reference's place plus what the referenced holder needs beyond the shift; a cycle: no limit. A walk
+   * on an explicit stack, each holder once.
    */
   #depthOf(holder: Holder): number {
     if (holder.depth !== undefined) return holder.depth;
-    holder.depth = Infinity;
-    let depth = this.pass.guards.testedLength();
-    for (const at of holder.guarded) depth = Math.max(depth, at === "" ? 0 : at.split(".").length);
-    for (const [at, references] of holder.refsAt)
-      for (const reference of references) {
-        this.pass.program.work.charge("invSteps");
-        depth = Math.max(
-          depth,
-          (at === "" ? 0 : at.split(".").length) +
-            Math.max(0, this.#depthOf(reference.to) - reference.shift.length),
+    const { guards, program } = this.pass;
+    const steps = (at: string): number => (at === "" ? 0 : at.split(".").length);
+    const stack: {
+      readonly holder: Holder;
+      readonly references: readonly (readonly [string, HolderReference])[];
+      index: number;
+      depth: number;
+    }[] = [];
+    const open = (each: Holder): void => {
+      each.depth = Infinity;
+      let depth = guards.testedLength();
+      for (const at of each.guarded) depth = Math.max(depth, steps(at));
+      stack.push({
+        holder: each,
+        references: [...each.refsAt].flatMap(([at, list]) =>
+          list.map((reference) => [at, reference] as const),
+        ),
+        index: 0,
+        depth,
+      });
+    };
+    open(holder);
+    while (stack.length > 0) {
+      const top = stack.at(-1)!;
+      if (top.index < top.references.length) {
+        const [at, reference] = top.references[top.index]!;
+        if (reference.to.depth === undefined) {
+          open(reference.to);
+          continue;
+        }
+        top.index += 1;
+        program.work.charge("invSteps");
+        top.depth = Math.max(
+          top.depth,
+          steps(at) + Math.max(0, reference.to.depth - reference.shift.length),
         );
+        continue;
       }
-    holder.depth = depth;
-    return depth;
+      stack.pop();
+      top.holder.depth = top.depth;
+    }
+    return holder.depth!;
   }
 
   /**
    * §3.2: a holder's mark at `path` (memoised per holder and the leading steps it can depend on): a literal's guarded
    * read at a prefix, the references standing at a prefix (each asked once, for the rest under its shift), its own
-   * reads.
+   * reads. A walk on an explicit stack: a holder's ask waits on the references it asks.
    */
   #marksAt(holder: Holder | null, path: readonly string[]): boolean {
     if (holder === null) return false;
     this.#collectMarks();
     const work = this.pass.program.work;
-    // every ask, an answered one too
-    work.charge("eventSteps");
-    const depth = this.#depthOf(holder);
-    const rest = path.length > depth ? path.slice(0, depth) : path;
-    const memoKey = rest.join(".");
-    holder.memo ??= new Map();
-    const known = holder.memo.get(memoKey);
-    if (known !== undefined) return known;
-    // a reference back to itself answers no
-    holder.memo.set(memoKey, false);
-    work.charge("eventSteps", 1 + rest.length);
-    let hit = false;
-    for (let length = 0; length <= rest.length && !hit; length += 1) {
-      const at = rest.slice(0, length).join(".");
-      if (holder.guarded.has(at)) hit = true;
-      for (const reference of holder.refsAt.get(at) ?? []) {
+    const stack: {
+      readonly holder: Holder;
+      readonly rest: readonly string[];
+      readonly memoKey: string;
+      length: number;
+      references: readonly HolderReference[];
+      index: number;
+      hit: boolean;
+    }[] = [];
+    // an ask: its answer if known, else a frame for it
+    const ask = (asked: Holder, at: readonly string[]): boolean | undefined => {
+      // every ask, an answered one too
+      work.charge("eventSteps");
+      const depth = this.#depthOf(asked);
+      const rest = at.length > depth ? at.slice(0, depth) : at;
+      const memoKey = rest.join(".");
+      asked.memo ??= new Map();
+      const known = asked.memo.get(memoKey);
+      if (known !== undefined) return known;
+      // a reference back to itself answers no
+      asked.memo.set(memoKey, false);
+      work.charge("eventSteps", 1 + rest.length);
+      stack.push({
+        holder: asked,
+        rest,
+        memoKey,
+        length: 0,
+        references: asked.refsAt.get("") ?? [],
+        index: 0,
+        hit: asked.guarded.has(""),
+      });
+      return undefined;
+    };
+    let answer = ask(holder, path);
+    while (stack.length > 0) {
+      const frame = stack.at(-1)!;
+      if (answer === true) frame.hit = true;
+      answer = undefined;
+      if (frame.index < frame.references.length) {
+        const reference = frame.references[frame.index++]!;
         work.charge("eventSteps");
         this.facts.markVisits += 1;
-        if (!hit && this.#marksAt(reference.to, [...reference.shift, ...rest.slice(length)]))
-          hit = true;
+        if (!frame.hit)
+          answer = ask(reference.to, [...reference.shift, ...frame.rest.slice(frame.length)]);
+        continue;
       }
+      if (!frame.hit && frame.length < frame.rest.length) {
+        frame.length += 1;
+        const at = frame.rest.slice(0, frame.length).join(".");
+        if (frame.holder.guarded.has(at)) frame.hit = true;
+        frame.references = frame.holder.refsAt.get(at) ?? [];
+        frame.index = 0;
+        continue;
+      }
+      if (
+        !frame.hit &&
+        frame.holder.reads.length > 0 &&
+        this.#readsAt(frame.holder.reads, frame.rest)
+      )
+        frame.hit = true;
+      frame.holder.memo!.set(frame.memoKey, frame.hit);
+      stack.pop();
+      answer = frame.hit;
     }
-    if (!hit && holder.reads.length > 0 && this.#readsAt(holder.reads, rest)) hit = true;
-    holder.memo.set(memoKey, hit);
-    return hit;
+    return answer!;
   }
 
   /**
@@ -1880,8 +2071,12 @@ export class Contract {
    * collections. A query reads only the entries at its path and its prefixes.
    */
   public literalIndex(literal: PlaceId): LiteralIndex {
-    const known = this.#literals.get(literal);
-    if (known !== undefined) return known;
+    if (!this.#literals.has(literal)) this.#settle(this.#indexWork(literal));
+    return this.#literals.get(literal)!;
+  }
+
+  *#indexWork(literal: PlaceId): IdentityWork {
+    if (this.#literals.has(literal)) return;
     const { program, definitions, guards } = this.pass;
     const index: LiteralIndex = {
       terms: new Map(),
@@ -1938,7 +2133,7 @@ export class Contract {
         }
         // §8 r4.13, r4.15: a call is a read of its callee's result key (F20) and a read its source: k calls of one
         // function, k copies of one source, are one entry at the path, their guards and ingress its annotations
-        const source = this.identityOf(value);
+        const source = yield* this.#needValue(value);
         if (this.copiedKey(value) === null) {
           if (source.key === null) {
             put(index.others, path, { g, value });
@@ -2009,7 +2204,6 @@ export class Contract {
       }
     }
     this.#literals.set(literal, index);
-    return index;
   }
 
   /**
@@ -2018,9 +2212,13 @@ export class Contract {
    * marks of its reads are never identity (r4.17).
    */
   public literalSignature(literal: PlaceId): string {
-    const known = this.#signatures.get(literal);
-    if (known !== undefined) return known;
-    const index = this.literalIndex(literal);
+    if (!this.#signatures.has(literal)) this.#settle(this.#signatureWork(literal));
+    return this.#signatures.get(literal)!;
+  }
+
+  *#signatureWork(literal: PlaceId): IdentityWork {
+    if (this.#signatures.has(literal)) return;
+    const index = yield* this.#needIndex(literal);
     let plain = index.references.size === 0;
     const parts: string[] = [];
     const paths = new Set([
@@ -2034,10 +2232,10 @@ export class Contract {
       parts.push(`${path}:${[...(index.terms.get(path)?.keys() ?? [])].sort().join(",")}`);
       for (const entry of index.reads.get(path) ?? []) {
         if (entry.ingress !== undefined) plain = false;
-        parts.push(`r${this.identityOf(entry.value).id}`);
+        parts.push(`r${(yield* this.#needValue(entry.value)).id}`);
       }
       for (const entry of index.others.get(path) ?? []) {
-        const id = this.identityOf(entry.value).id;
+        const id = (yield* this.#needValue(entry.value)).id;
         if (id.startsWith("v") || this.pass.definitions.ingressStore.has(entry.value))
           plain = false;
         parts.push(`o${id}`);
@@ -2048,7 +2246,6 @@ export class Contract {
     parts.push(`empty:${[...index.empty].sort().join(",")}`);
     const signature = plain ? `l${parts.join(";")}` : `v${literal}`;
     this.#signatures.set(literal, signature);
-    return signature;
   }
 
   /** F11: the first object at the path without the property, once per (path, property): its token, or `null`. */

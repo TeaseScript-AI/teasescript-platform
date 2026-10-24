@@ -1333,40 +1333,49 @@ export class Consumers {
    * unguarded.
    */
   #defaultSource(key: Key, at: FlowNode): { readonly key: Key; readonly at: FlowNode } | null {
-    const memoKey = `${key}|${at.id}`;
-    if (this.#defaults.has(memoKey)) return this.#defaults.get(memoKey)!;
-    // a copy cycle leads to no parameter
-    this.#defaults.set(memoKey, null);
     const { program, lists, guards } = this.pass;
-    program.work.charge("checks");
+    // a loop along the copies, each step memoised with the chain's answer
+    const visited: string[] = [];
     let found: { readonly key: Key; readonly at: FlowNode } | null = null;
-    const place = program.place(keyPlace(key)).kind;
-    if (guards.narrowed(key, at)) found = null;
-    else if (place.kind === "parameter" && keyPath(key).length === 0)
-      found = place.written === null ? { key, at } : null;
-    else {
-      const reaching = lists.reachingDef(key, at);
-      const copy =
-        reaching !== null &&
-        reaching.def.kind === "whole" &&
-        reaching.def.value !== undefined &&
-        reaching.def.how !== "argument" &&
-        reaching.def.how !== "parameter default" &&
-        lists.eventBetween(key, reaching.def.node, at) === null;
-      // the copy's value at the rest of the path, through its literal's fields
-      let value: PlaceId | undefined = copy ? reaching.def.value : undefined;
-      for (const step of copy ? reaching.rest : []) {
-        const children = value === undefined ? [] : this.#literalStores(value, step);
-        value = children.length === 1 ? children[0]!.value : undefined;
-        if (value === undefined) break;
+    let next: { readonly key: Key; readonly at: FlowNode } | null = { key, at };
+    while (next !== null) {
+      const step: { readonly key: Key; readonly at: FlowNode } = next;
+      next = null;
+      const memoKey = `${step.key}|${step.at.id}`;
+      if (this.#defaults.has(memoKey)) {
+        found = this.#defaults.get(memoKey)!;
+        break;
       }
-      const copied = value === undefined ? null : this.pass.contract.copiedKey(value);
-      found =
-        copied === null || reaching === null
-          ? null
-          : this.#defaultSource(copied, reaching.def.node);
+      // a copy cycle leads to no parameter
+      this.#defaults.set(memoKey, null);
+      visited.push(memoKey);
+      program.work.charge("checks");
+      const place = program.place(keyPlace(step.key)).kind;
+      if (guards.narrowed(step.key, step.at)) found = null;
+      else if (place.kind === "parameter" && keyPath(step.key).length === 0)
+        found = place.written === null ? step : null;
+      else {
+        const reaching = lists.reachingDef(step.key, step.at);
+        const copy =
+          reaching !== null &&
+          reaching.def.kind === "whole" &&
+          reaching.def.value !== undefined &&
+          reaching.def.how !== "argument" &&
+          reaching.def.how !== "parameter default" &&
+          lists.eventBetween(step.key, reaching.def.node, step.at) === null;
+        // the copy's value at the rest of the path, through its literal's fields
+        let value: PlaceId | undefined = copy ? reaching.def.value : undefined;
+        for (const part of copy ? reaching.rest : []) {
+          const children = value === undefined ? [] : this.#literalStores(value, part);
+          value = children.length === 1 ? children[0]!.value : undefined;
+          if (value === undefined) break;
+        }
+        const copied = value === undefined ? null : this.pass.contract.copiedKey(value);
+        found = null;
+        if (copied !== null && reaching !== null) next = { key: copied, at: reaching.def.node };
+      }
     }
-    this.#defaults.set(memoKey, found);
+    for (const memoKey of visited) this.#defaults.set(memoKey, found);
     return found;
   }
 

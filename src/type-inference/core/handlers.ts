@@ -28,6 +28,8 @@ const offsetOf = (node: FlowNode): number => node.span?.start.offset ?? -1;
 export class HandlerIndex {
   /** The keys with a definition in block code (F24's handler stores). */
   readonly #handlerKeys = new Set<Key>();
+  /** The keys above one: a prefix of a handler store's key. */
+  readonly #handlerAbove = new Set<Key>();
   readonly #facts = new Map<Callable, Registrations>();
 
   public constructor(
@@ -40,6 +42,11 @@ export class HandlerIndex {
       for (const d of list) {
         work.charge("indexSteps");
         if (!d.node.dead && program.inBlockCode(d.node)) this.#handlerKeys.add(key);
+      }
+    for (const key of this.#handlerKeys)
+      for (const prefix of prefixesOf(key)) {
+        work.charge("indexSteps");
+        this.#handlerAbove.add(prefix);
       }
     const handlers = flow.regions.filter((region) => region.kind === "handler");
     work.charge("eventSteps", 2 * handlers.length + 3 * flow.callables.length + flow.sites.length);
@@ -123,12 +130,14 @@ export class HandlerIndex {
       }
   }
 
-  /** Whether the key, a prefix or a key below it has a store in block code (F24). */
+  /** Whether the key, a prefix or a key below it has a store in block code (F24): a lookup per step of its path. */
   public handlerTouches(key: Key): boolean {
+    const prefixes = prefixesOf(key);
+    this.program.work.charge("eventSteps", prefixes.length + 1);
     return (
       this.#handlerKeys.has(key) ||
-      prefixesOf(key).some((prefix) => this.#handlerKeys.has(prefix)) ||
-      this.definitions.keysBelow(key).some((below) => this.#handlerKeys.has(below))
+      this.#handlerAbove.has(key) ||
+      prefixes.some((prefix) => this.#handlerKeys.has(prefix))
     );
   }
 
