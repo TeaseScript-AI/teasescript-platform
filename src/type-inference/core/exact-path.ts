@@ -40,6 +40,12 @@ export type ExactAnswer =
 /** A path step no definition names: the exact path every path below a source shares that no key below it overlaps. */
 const ANY_PATH = "*";
 
+/*
+ * Three tuning constants (TABLE r4.41): each picks which of two indexes answers a read, never the answer. Four keeps the
+ * common shapes on the per-source path; W34's two known products stand where more than four sources, anchors or trees
+ * meet at one path (PLAN §6b).
+ */
+
 /** The trees of the copy forest a source with several anchors is listed under one by one; beyond, under all. */
 const FEW_TREES = 4;
 
