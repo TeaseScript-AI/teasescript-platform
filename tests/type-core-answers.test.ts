@@ -161,6 +161,23 @@ test("a read's route is the path its answer took (Astra B5)", () => {
     route("let seed = {f: 1.5}\nlet rows = [seed]\nsay rows.first.f\nexit", "rows.first.f"),
     "contract",
   );
+  // F14: an object's own `length` takes its field's route; a collection's is computed
+  assert.equal(
+    route(
+      "let seed = {length: 1.5}\nlet rows = [seed]\nsay rows.first.length\nexit",
+      "rows.first.length",
+    ),
+    "contract",
+  );
+  assert.equal(
+    route(
+      'let flag = askBoolean "f"\nlet box = {length: 1}\nif flag { box.length = 1.5 }\nsay box.length\nexit',
+      "box.length",
+    ),
+    "contract",
+  );
+  assert.equal(route("let box = {length: 1}\nsay box.length\nexit", "box.length"), "exact");
+  assert.equal(route("let items = [1, 2]\nsay items.length\nexit", "items.length"), "exact");
 });
 
 test("a place's definitions are the exact path's live list in region order (Astra B8)", () => {

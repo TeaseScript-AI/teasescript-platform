@@ -100,8 +100,9 @@ export class Values {
 
   /**
    * The route the value of a place at a node took at a path, read from the routes recorded as it was answered (its
-   * items are asked first): a read's own, through projections, a call's result read, a literal's (F12); an operation's
-   * value is computed, `exact`.
+   * items are asked first): a read's own, through projections, a call's result read, a literal's (F12); a length's,
+   * its owner's own field's where the owner is an object (F14; a computed length is `exact`); an operation's value is
+   * computed, `exact`.
    */
   public valueRoute(value: PlaceId, node: FlowNode | null, rest: readonly string[]): ReadRoute {
     const { program, contract } = this.pass;
@@ -110,8 +111,11 @@ export class Values {
     let path = rest;
     let at = node;
     for (let projection = program.projOf.get(value); projection !== undefined;) {
-      if (projection.step === "iteration" || measuresLength(projection.step)) return "exact";
-      path = [stepName(projection.step), ...path];
+      if (projection.step === "iteration") return "exact";
+      path = [
+        measuresLength(projection.step) ? projection.step : stepName(projection.step),
+        ...path,
+      ];
       at = projection.node ?? at;
       value = projection.owner;
       projection = program.projOf.get(value);
