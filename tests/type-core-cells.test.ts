@@ -377,6 +377,23 @@ test("external data in a choice's options or in a literal is warned at its own e
     "written-target@24",
     "copy-type@24",
   ]);
+  // V30 §19: a choice object gives its `value` (or its `text` without one), so its external value is the site
+  assert.deepEqual(
+    sited(
+      'let chosen: integer = askChoice [{text: "A", value: hostValue}, {text: "B", value: 2}]\nexit',
+    ),
+    ["warning-runtime-check", "written-target@52", "copy-type@52"],
+  );
+  assert.deepEqual(sited('let chosen: integer = askChoice {text: "A", value: hostValue}\nexit'), [
+    "warning-runtime-check",
+    "written-target@51",
+    "copy-type@51",
+  ]);
+  assert.deepEqual(sited("let chosen: integer = askChoice [{text: hostValue}]\nexit"), [
+    "warning-runtime-check",
+    "written-target@40",
+    "copy-type@40",
+  ]);
   // r4.43 (3): options held in a variable follow the copy reading: the store into the written place
   assert.deepEqual(sited("let opts = [hostValue, 1]\nlet answer: integer = askChoice opts\nexit"), [
     "warning-runtime-check",
