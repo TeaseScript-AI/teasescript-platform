@@ -25,9 +25,10 @@ import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import type { TypeAnalysisRequest, TypeCheckResult } from "../src/type-inference/backend.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
 
 // The coarse core on the test-only candidate route (the port plan's S5): source, candidate compile, plan, runtime.
@@ -171,6 +172,24 @@ test("C1's copy check and C9's boundary check run where external data enters a w
 
   // the root compile, on the production default, does not warn: the candidate is reached only by its entry
   assert.deepEqual(sited(compileSource(source, OPTIONS)), []);
+
+  // in the core's record, one boundary check per ingress, where it lands: the whole value's place, not each place below
+  // it (TABLE §4 C9; these whole-collection shapes are outside the slice, the literal's element inside it)
+  for (const [shape, boundary] of [
+    ["let pool: integer[] = hostValue\nexit\n", 'pool ["list"] @22'],
+    ["let xs: integer[][] = [hostValue]\nexit\n", 'xs.element ["list"] @23'],
+    ["let pool: integer?[] = [hostValue, null, 7]\nexit\n", 'pool.element ["integer","null"] @24'],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source: shape }]);
+    assert.ok(request !== null);
+    assert.deepEqual(
+      compactAnalysis(request)
+        .checks.filter((check) => check.boundary)
+        .map((check) => `${check.target} ${JSON.stringify(check.against)} @${check.site.offset}`),
+      [boundary],
+      shape,
+    );
+  }
 });
 
 test("C2's integer check of a count and an index warns with TSV011 and runs at the use", () => {
@@ -280,6 +299,16 @@ test("a program outside the slice is rejected with one TSC011 error and no plan"
     ['let n = 1\nn = "x"\nexit\n', 4],
     // a possible null, whose required check comes with narrowing (S10)
     ["let flag = true\nlet n: integer? = null\nif flag {\n  n = 2\n}\nrepeat n {}\nexit\n", 66],
+    // A4 (S6): a copy of a variable with a written type, or of a part of one, decided by that type; with and without a
+    // later store, whole, through an index, inside a list, and by an assignment
+    ['let a: integer[] = []\nlet b = a\nb = ["bad"]\nexit\n', 30],
+    ["let a: integer[] = []\nlet b = a\nexit\n", 30],
+    ["let a: integer[][] = [[]]\nlet b = a[0]\nexit\n", 34],
+    ["let a: integer = 1\nlet b = [a]\nexit\n", 28],
+    ["let b = 1\nlet a: integer = 2\nb = a\nexit\n", 33],
+    // C9 (S6): external data stored as a whole collection, whose elements' checks are admission's
+    ["let pool: integer[] = hostValue\nexit\n", 22],
+    ["let xs: integer[][] = [hostValue]\nexit\n", 23],
   ] as const) {
     const compiled = candidate(source);
     assert.deepEqual(sited(compiled), [`error TSC011@${offset}`], source);
@@ -350,6 +379,60 @@ test("the candidate's facts list every binding, read and value of the program wi
     [facts.functions, facts.speakers, facts.uncheckedProperties, facts.storage],
     [[], [], [], []],
   );
+
+  // parentheses, nested element reads and a kind without parts keep their whole types
+  const shapes = coreRequest([
+    {
+      path: "main.tease",
+      source:
+        "let a = (1)\nlet b = [(2)]\nlet c = [[[[3]]]][0]\nlet r: range = hostValue\nlet q: range = r\nexit\n",
+    },
+  ]);
+  assert.ok(shapes !== null);
+  const shaped = CORE_BACKEND.analyze(shapes);
+  assert.deepEqual(sited({ diagnostics: shaped.checked.diagnostics.flat() }), [
+    "warning TSV041@62",
+  ]);
+  const typed = shaped.facts();
+  assert.deepEqual(
+    typed.bindings.map((binding) => `${binding.name}: ${binding.type}`),
+    ["a: integer", "b: list<integer>", "c: list<list<list<integer>>>", "r: range", "q: range"],
+  );
+  assert.deepEqual(
+    typed.values
+      .filter((value) =>
+        ["parenthesizedExpression", "indexExpression", "identifier"].includes(value.kind),
+      )
+      .map((value) => `${value.site.start} ${value.kind} ${value.type}`),
+    [
+      "8 parenthesizedExpression integer",
+      "21 parenthesizedExpression integer",
+      "34 indexExpression list<list<list<integer>>>",
+      "62 identifier unknown",
+      "87 identifier range",
+    ],
+  );
+});
+
+test("a program the work allowance stops after its analysis is rejected, never accepted without its facts", () => {
+  const request = coreRequest([
+    {
+      path: "main.tease",
+      source: "let xs: integer?[] = [hostValue, null, 7]\nlet n = 1\nrepeat n {}\nexit\n",
+    },
+  ]);
+  assert.ok(request !== null);
+  const outcomes = new Set<string>();
+  for (let allowance = 20; allowance <= 4_000; allowance += 20) {
+    const outcome = withTestAllowance(allowance, () => CORE_BACKEND.analyze(request));
+    if (outcome.checked.diagnostics.flat().some((diagnostic) => diagnostic.code === "TSC011"))
+      outcomes.add("rejected");
+    else {
+      assert.doesNotThrow(() => outcome.facts(), String(allowance));
+      outcomes.add("accepted");
+    }
+  }
+  assert.deepEqual([...outcomes].sort(), ["accepted", "rejected"]);
 });
 
 /** A type check result as JSON-safe data, its syntax keys by their spans. */

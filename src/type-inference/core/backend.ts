@@ -1,11 +1,4 @@
-import type {
-  Block,
-  Expression,
-  LetStatement,
-  Program,
-  Statement,
-  TypeAnnotation,
-} from "../../ast.js";
+import type { Block, Expression, Program, Statement, TypeAnnotation } from "../../ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "../../diagnostics.js";
 import type { SourceSpan } from "../../source.js";
 import type {
@@ -51,7 +44,9 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
       const after = outsideAnswers(answers, index, core.files, globals);
       if (after !== null) return rejected(core, after);
       const checked = coreCheckResult(answers, index, core);
-      return { checked, facts: () => coreFacts(answers, index, core) };
+      // computed here, so that a question past the allowance rejects the program instead of failing a later caller
+      const facts = coreFacts(answers, index, core);
+      return { checked, facts: () => facts };
     } catch (error) {
       // the questions after the analysis spend the same allowance (TABLE §8); its fallback is S8's
       if (!(error instanceof BudgetExhausted)) throw error;
@@ -282,25 +277,37 @@ function outsideAnswers(
         what: "a value that may be null here",
       };
   }
-  // admission (S6): a variable without a written type takes one settled family, without external data, at every depth
-  // (A3); one that copies a variable with a written type, or a part of one, is decided by that type (A4), so it holds
-  // one kind there
+  // admission (S6): a variable without a written type that copies a variable with a written type, or a part of one, is
+  // decided by that type (A4), which the slice does not carry; such a copy is outside it
   const lets = declarations(answers, index);
-  const copies = new Set<LetStatement>();
-  for (const statement of index.statements)
-    if (statement.kind === "letStatement" || statement.kind === "assignmentStatement") {
-      let value = statement.kind === "letStatement" ? statement.initializer : statement.value;
-      while (value.kind === "parenthesizedExpression" || value.kind === "indexExpression")
-        value = value.kind === "parenthesizedExpression" ? value.expression : value.object;
-      if (value.kind !== "identifier") continue;
-      const read = answers.at(nodeOf(answers, index, value))?.place;
-      const source = read === null || read === undefined ? undefined : lets.get(read.id);
-      if (source === undefined || source.typeAnnotation === null) continue;
-      const destination = answers.at(nodeOf(answers, index, statement))?.place;
-      const declaration =
-        destination === null || destination === undefined ? undefined : lets.get(destination.id);
-      if (declaration !== undefined) copies.add(declaration);
-    }
+  for (const statement of index.statements) {
+    if (statement.kind !== "letStatement" && statement.kind !== "assignmentStatement") continue;
+    const destination = answers.at(nodeOf(answers, index, statement))?.place;
+    const declaration =
+      destination === null || destination === undefined ? undefined : lets.get(destination.id);
+    if (declaration === undefined || declaration.typeAnnotation !== null) continue;
+    // the reads whose value the store carries: through parentheses, list elements and the lists an index reads
+    const pending: Expression[] = [
+      statement.kind === "letStatement" ? statement.initializer : statement.value,
+    ];
+    for (let value = pending.pop(); value !== undefined; value = pending.pop())
+      if (value.kind === "parenthesizedExpression") pending.push(value.expression);
+      else if (value.kind === "indexExpression") pending.push(value.object);
+      else if (value.kind === "listLiteral")
+        for (const element of value.elements) pending.push(element);
+      else if (value.kind === "identifier") {
+        const read = answers.at(nodeOf(answers, index, value))?.place;
+        const source = read === null || read === undefined ? undefined : lets.get(read.id);
+        if (source !== undefined && source.typeAnnotation !== null)
+          return {
+            file: index.fileOf(value),
+            span: value.span,
+            what: `this copy of '${value.name}', which has a written type, into '${declaration.name.name}', which has none`,
+          };
+      }
+  }
+  // admission (S6): a variable without a written type takes one settled family, without external data, at every depth
+  // (A3)
   for (const statement of index.lets)
     if (statement.typeAnnotation === null) {
       const place = answers.at(nodeOf(answers, index, statement))?.place;
@@ -308,8 +315,7 @@ function outsideAnswers(
       for (let path: string[] = [...place.path]; path.length < 256; path = [...path, "element"]) {
         const kinds = withoutEmpty([...answers.place(place.id, path).contract.kinds]);
         const tags = kinds.map((item) => item.tag);
-        const single = new Set(tags.filter((tag) => tag !== "null")).size <= 1;
-        if (tags.includes("unknown") || !settledFamily(tags) || (copies.has(statement) && !single))
+        if (tags.includes("unknown") || !settledFamily(tags))
           return {
             file: index.fileOf(statement),
             span: statement.name.span,
@@ -331,12 +337,19 @@ function outsideAnswers(
           what: "a list whose elements do not settle one type",
         };
     }
-  // C9 (S6): a host value is read only where a store brings it into a written place, which checks it there
-  const boundaries = new Set(
-    answers.checks
-      .filter((check) => check.boundary)
-      .map((check) => `${check.site.file}:${check.site.start}:${check.site.end}`),
-  );
+  // C9 (S6): a host value is read only where a store brings it into a written place, which checks it there; stored
+  // whole as a collection, what its elements owe beside the boundary check is admission's
+  const boundaries = new Set<string>();
+  for (const check of answers.checks)
+    if (check.boundary) {
+      if (check.against.some((kind) => kind === "list" || kind === "set" || kind === "dict"))
+        return {
+          file: check.site.file,
+          span: index.spanAt(check.site),
+          what: "external data stored as a whole collection",
+        };
+      boundaries.add(`${check.site.file}:${check.site.start}:${check.site.end}`);
+    }
   for (const read of index.reads)
     if (globals.has(read.name)) {
       const file = index.fileOf(read);

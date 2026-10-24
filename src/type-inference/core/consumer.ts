@@ -19,8 +19,7 @@ import type { TypeCheckPlan } from "../../plan/model.js";
 import type { SourceSpan } from "../../source.js";
 import { KnownValues } from "../../static-evaluation.js";
 import {
-  isScalarKind,
-  NULL_TYPE,
+  members,
   openType,
   typeFromAnnotation,
   union,
@@ -32,7 +31,7 @@ import { typePlan } from "../../type-plans.js";
 import { VALUE_KINDS } from "../../value-kinds.js";
 import type { FactSite, RuntimeCheckSite, SolvedTypeFacts, TypeCheckResult } from "../backend.js";
 import type { PlaceId, SourceSite } from "../graph.js";
-import type { Answers } from "./answers.js";
+import { closedType, type Answers } from "./answers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import type { Item, ItemTag } from "./items.js";
 import type { CoreAnalysisRequest } from "./program.js";
@@ -89,6 +88,8 @@ export class SliceIndex {
           const statement = entry.statement;
           this.#file.set(statement, file);
           this.statements.push(statement);
+          const key = siteKey(file, statement.span);
+          if (!this.#statementsBySite.has(key)) this.#statementsBySite.set(key, statement);
           switch (statement.kind) {
             case "letStatement":
               this.lets.push(statement);
@@ -145,9 +146,6 @@ export class SliceIndex {
           }
         }
       }
-      for (const statement of this.statements)
-        if (this.#file.get(statement) === file && !this.#bySite.has(siteKey(file, statement.span)))
-          this.#statementsBySite.set(siteKey(file, statement.span), statement);
     });
   }
 
@@ -422,27 +420,39 @@ function unreachable(answers: Answers, index: SliceIndex): Set<Statement> {
   );
 }
 
-/** A type of these kinds for the facts, `element` a list's element type (`?` for no kind). */
+/**
+ * A type of these kinds for the facts: each kind's closed type (`closedType`), a collection's with `element` as its
+ * element type; no kind is `?`. The slice's variables hold one kind or one numeric family, so one element type serves.
+ */
 function typeOfKinds(tags: readonly ItemTag[], element: StaticType): StaticType {
   const kinds = [...new Set(tags)].filter((tag) => tag !== "empty");
   if (kinds.length === 0) return openType();
   return union(
-    kinds.map((tag): StaticType => {
-      if (tag === "null") return NULL_TYPE;
-      if (tag === "list") return { kind: "list", element };
-      if (tag !== "unknown" && isScalarKind(tag)) return { kind: "scalar", name: tag };
-      return UNKNOWN_TYPE;
-    }),
+    kinds.map((tag): StaticType =>
+      tag === "list" || tag === "set" || tag === "dict"
+        ? { kind: tag, element }
+        : (closedType(tag) ?? UNKNOWN_TYPE),
+    ),
   );
 }
 
-/** A place's type at a path: its contract's kinds, and a list's elements' below it, built from the deepest up. */
+/** The element type of a collection type: the union of its collection members' elements, `unknown` without one. */
+function elementOf(type: StaticType): StaticType {
+  const elements = members(type).flatMap((part) =>
+    part.kind === "list" || part.kind === "set" || part.kind === "dict" ? [part.element] : [],
+  );
+  return elements.length === 0 ? UNKNOWN_TYPE : union(elements);
+}
+
+const COLLECTIONS: ReadonlySet<ItemTag> = new Set(["list", "set", "dict"]);
+
+/** A place's type at a path: its contract's kinds, and a collection's elements' below it, built from the deepest up. */
 function placeType(answers: Answers, id: PlaceId, path: readonly string[]): StaticType {
   const levels: ItemTag[][] = [];
   for (let at = [...path]; levels.length < 256; at = [...at, "element"]) {
     const tags = answers.place(id, at).contract.kinds.map((item) => item.tag);
     levels.push(tags);
-    if (!tags.includes("list")) break;
+    if (!tags.some((tag) => COLLECTIONS.has(tag))) break;
   }
   let type: StaticType = openType();
   for (let depth = levels.length - 1; depth >= 0; depth -= 1)
@@ -457,26 +467,31 @@ export function coreFacts(
   request: CoreAnalysisRequest,
 ): SolvedTypeFacts {
   void request;
-  // each expression's type after its operands' (the walk's order reversed), so nesting needs no native recursion
+  // each expression's type after its operands' (the walk's order reversed), so nesting needs no native recursion: the
+  // occurrence's kinds, a collection's element type from its literal, its place, or the list its index reads
   const types = new Map<Expression, StaticType>();
+  const typeOf = (expression: Expression): StaticType => types.get(expression) ?? UNKNOWN_TYPE;
   for (const expression of [...index.expressions].reverse()) {
-    const node = nodeOf(answers, index, expression);
-    const answer = answers.at(node);
+    if (expression.kind === "parenthesizedExpression") {
+      types.set(expression, typeOf(expression.expression));
+      continue;
+    }
+    const answer = answers.at(nodeOf(answers, index, expression));
+    // a read of a place with a written type holds that type: every store into it is checked against it (C1, A1)
+    const place = answer?.place ?? null;
+    if (place !== null && answers.place(place.id, place.path).admitted.by === "written") {
+      types.set(expression, placeType(answers, place.id, place.path));
+      continue;
+    }
     const tags = answer?.items.map((item) => item.tag) ?? ["unknown"];
     let element: StaticType = UNKNOWN_TYPE;
-    if (tags.includes("list"))
+    if (tags.some((tag) => COLLECTIONS.has(tag)))
       if (expression.kind === "listLiteral")
         element =
-          expression.elements.length === 0
-            ? openType()
-            : union(expression.elements.map((child) => types.get(child) ?? UNKNOWN_TYPE));
-      else if (answer?.place !== null && answer?.place !== undefined)
-        element = placeType(answers, answer.place.id, [...answer.place.path, "element"]);
-      else
-        element = typeOfKinds(
-          answers.project(node, "element").map((item) => item.tag),
-          UNKNOWN_TYPE,
-        );
+          expression.elements.length === 0 ? openType() : union(expression.elements.map(typeOf));
+      else if (expression.kind === "indexExpression")
+        element = elementOf(elementOf(typeOf(expression.object)));
+      else if (place !== null) element = placeType(answers, place.id, [...place.path, "element"]);
     types.set(expression, typeOfKinds(tags, element));
   }
   const lets = declarations(answers, index);
@@ -515,7 +530,7 @@ export function coreFacts(
     .map((expression) => ({
       site: factSite(index.fileOf(expression), expression.span),
       kind: expression.kind,
-      type: typeKey(types.get(expression) ?? UNKNOWN_TYPE, true, true),
+      type: typeKey(typeOf(expression), true, true),
     }))
     .sort((a, b) => bySite(a, b) || (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0));
   return {

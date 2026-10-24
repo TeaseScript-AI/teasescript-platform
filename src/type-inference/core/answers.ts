@@ -330,7 +330,7 @@ function isPlain(kind: ValueKind): kind is PlainKind {
 }
 
 /** An item's kind as a closed type of the adapters (the structure below it is asked through `project`). */
-function closedType(tag: ItemTag): StaticType | null {
+export function closedType(tag: ItemTag): StaticType | null {
   if (tag === "unknown" || tag === "empty") return null;
   if (tag === "null") return NULL_TYPE;
   if (isScalarKind(tag)) return { kind: "scalar", name: tag };
