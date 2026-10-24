@@ -5,8 +5,11 @@ import type { DynamicWhy, PlaceId } from "../graph.js";
 import { BudgetExhausted, checkNesting, type BudgetLimit, type WorkCounter } from "./budget.js";
 import { Consumers } from "./consumers.js";
 import {
+  ASKED,
   Contract,
   defaultOf,
+  METHOD_RESULT,
+  REMOVALS,
   typeTags,
   termAt,
   writtenOf,
@@ -479,89 +482,108 @@ class CoreAnswers implements Answers {
   }
 
   /**
-   * The names of a value's known properties (S3 §1): those the keys below its source store, and those the objects of
-   * its literals have at its path. A source is a key, or a literal at a path: a value is followed through its
-   * projections to a copied key, a call's result key or a literal; a key to its prefixes' stores and their sources'
-   * own stores; a literal to the reads and calls standing at its path or above it. Each source once.
+   * The names of a value's known properties (S3 §1): those the keys below its sources store, and those the objects of
+   * its literals have at its path. One worklist of sources, each once: a value read further at a path is followed
+   * through its projections and the operations that pass a value on (the value side's transfers) to a copied key, a
+   * call's result key or a literal; a key to its prefixes' stores and their sources' own stores; a literal to the
+   * reads and calls standing at its path or above it.
    */
   #propertyNames(value: PlaceId): ReadonlySet<string> {
     const { program, contract, definitions } = this.#pass;
     const names = new Set<string>();
-    const pending: (
-      { readonly key: Key } | { readonly literal: PlaceId; readonly path: readonly string[] }
-    )[] = [];
+    type Task =
+      | { readonly value: PlaceId; readonly path: readonly string[] }
+      | { readonly key: Key }
+      | { readonly literal: PlaceId; readonly path: readonly string[] };
+    const pending: Task[] = [{ value, path: [] }];
     const seen = new Set<string>();
-    // a value read further at a path: its key or its literal, through the projections that hold it and the operations
-    // that pass a value on as it is (F10's conversions, F17a's fallback, a `get`'s element or default, a load's or
-    // `fromJson`'s default, `+`'s elements)
-    const follow = (start: PlaceId, path: readonly string[]): void => {
-      let base = start;
-      const steps: string[] = [...path];
-      for (;;) {
-        const source = contract.copiedKey(base) ?? contract.resultKey(base);
+    const kinds = (of: PlaceId): ReadonlySet<string> =>
+      new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag));
+    while (pending.length > 0) {
+      const task = pending.pop()!;
+      const id =
+        "key" in task
+          ? `k${task.key}`
+          : "literal" in task
+            ? `l${task.literal}|${task.path.join(".")}`
+            : `v${task.value}|${task.path.join(".")}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if ("value" in task) {
+        const { path } = task;
+        const at = task.value;
+        const source = contract.copiedKey(at) ?? contract.resultKey(at);
         if (source !== null) {
-          pending.push({ key: keyOf(keyPlace(source), [...keyPath(source), ...steps]) });
-          return;
-        }
-        if (program.hasOf.has(base)) {
-          pending.push({ literal: base, path: steps });
-          return;
-        }
-        const projection = program.projOf.get(base);
-        if (projection !== undefined) {
-          // F27: a loop visits the elements; F11: an object's own `length` is its property
-          steps.unshift(projection.step === "iteration" ? "element" : stepName(projection.step));
-          base = projection.owner;
+          pending.push({ key: keyOf(keyPlace(source), [...keyPath(source), ...path]) });
           continue;
         }
-        const c = program.opOf.get(base);
-        if (c === undefined) return;
+        if (program.hasOf.has(at)) {
+          pending.push({ literal: at, path });
+          continue;
+        }
+        const projection = program.projOf.get(at);
+        if (projection !== undefined) {
+          // F27: a loop visits a list's or a set's elements (a dict's keys and a range's numbers hold none); F11: an
+          // object's own `length` is its property
+          if (projection.step === "iteration") {
+            const of = kinds(projection.owner);
+            if (of.has("list") || of.has("set"))
+              pending.push({ value: projection.owner, path: ["element", ...path] });
+          } else
+            pending.push({ value: projection.owner, path: [stepName(projection.step), ...path] });
+          continue;
+        }
+        const c = program.opOf.get(at);
+        if (c === undefined) continue;
         if (c.kind === "fallback") {
-          follow(c.left, steps);
-          follow(c.right, steps);
+          pending.push({ value: c.left, path }, { value: c.right, path });
         } else if (c.kind === "get") {
-          follow(c.receiver, ["element", ...steps]);
-          follow(c.fallback, steps);
+          pending.push(
+            { value: c.receiver, path: ["element", ...path] },
+            { value: c.fallback, path },
+          );
         } else if (c.kind === "load") {
-          if (c.fallback !== null) follow(c.fallback, steps);
+          if (c.fallback !== null) pending.push({ value: c.fallback, path });
         } else if (c.kind === "operation") {
           const { family, name } = c.contract;
           const fallback = defaultOf(c);
-          if (name === "fromJson" && fallback !== undefined) follow(fallback, steps);
-          else if (
-            family === "method" &&
-            ["toSet", "toList", "take", "takeLast"].includes(name) &&
-            c.receiver !== null &&
-            steps[0] === "element"
-          )
-            follow(c.receiver, steps);
-          else if (family === "operator" && name === "+" && steps[0] === "element")
-            for (const argument of c.arguments) follow(argument, steps);
-        }
-        return;
-      }
-    };
-    follow(value, []);
-    while (pending.length > 0) {
-      const source = pending.pop()!;
-      if ("literal" in source) {
-        const id = `l${source.literal}|${source.path.join(".")}`;
-        if (seen.has(id)) continue;
-        seen.add(id);
-        const index = contract.literalIndex(source.literal);
-        for (const object of index.objects.get(source.path.join("."))?.list ?? [])
-          for (const name of object.names) names.add(name);
-        for (let length = 0; length <= source.path.length; length += 1) {
-          const at = source.path.slice(0, length).join(".");
-          const rest = source.path.slice(length);
-          for (const entry of [...(index.reads.get(at) ?? []), ...(index.others.get(at) ?? [])])
-            follow(entry.value, rest);
+          if (name === "fromJson" && fallback !== undefined)
+            pending.push({ value: fallback, path });
+          else if (family === "method" && c.receiver !== null) {
+            // F10: a conversion's elements; F7: a removal's element (`remove` a dict's, a list's gives `null`)
+            if (["toSet", "toList", "take", "takeLast"].includes(name) && path[0] === "element")
+              pending.push({ value: c.receiver, path });
+            else if (
+              REMOVALS.has(name) &&
+              METHOD_RESULT[name] === undefined &&
+              (name !== "remove" || kinds(c.receiver).has("dict"))
+            )
+              pending.push({ value: c.receiver, path: ["element", ...path] });
+          } else if (family === "operator" && name === "+" && path[0] === "element")
+            for (const argument of c.arguments) pending.push({ value: argument, path });
+          else if (family === "interaction" && ASKED[name] === undefined)
+            // F25: `askChoice`'s answer is an option's value
+            for (const argument of c.arguments)
+              pending.push({ value: argument, path: ["element", "value", ...path] });
         }
         continue;
       }
-      const key = source.key;
-      if (seen.has(`k${key}`)) continue;
-      seen.add(`k${key}`);
+      if ("literal" in task) {
+        const index = contract.literalIndex(task.literal);
+        const at = task.path.join(".");
+        for (const object of index.objects.get(at)?.list ?? [])
+          for (const name of object.names) names.add(name);
+        // the reads and calls standing at the path or above it, followed at the rest of the path
+        for (const map of [index.reads, index.others])
+          for (const [stand, entries] of map) {
+            const depth = stand === "" ? 0 : stand.split(".").length;
+            if (stand !== "" && at !== stand && !at.startsWith(`${stand}.`)) continue;
+            for (const entry of entries)
+              pending.push({ value: entry.value, path: task.path.slice(depth) });
+          }
+        continue;
+      }
+      const key = task.key;
       const place = keyPlace(key);
       const path = keyPath(key);
       for (const below of definitions.keysBelow(key)) {
@@ -578,7 +600,7 @@ class CoreAnswers implements Answers {
           const at = [...(entry.at ?? []), ...rest];
           if (entry.key !== undefined)
             pending.push({ key: keyOf(keyPlace(entry.key), [...keyPath(entry.key), ...at]) });
-          else if (entry.value !== undefined) follow(entry.value, at);
+          else if (entry.value !== undefined) pending.push({ value: entry.value, path: at });
         }
       }
     }

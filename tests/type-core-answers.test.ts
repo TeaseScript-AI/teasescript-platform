@@ -69,6 +69,14 @@ test("the properties of a projected value and of a call's result are known", () 
     ["say {length: {value: 2}}.length", "{length: {value: 2}}.length"],
     ["for item in [{value: 2}] { say item }", "item"],
     ["say ([{value: 2}] + [{value: 2}])[0]", "([{value: 2}] + [{value: 2}])[0]"],
+    // removals' elements and a choice's option value (review r4)
+    ["let xs = [{value: 2}]\nsay xs.removeFirst()", "xs.removeFirst()"],
+    ["let xs = [{value: 2}]\nsay xs.removeAt(0)", "xs.removeAt(0)"],
+    ['let d = dict {key: {value: 2}}\nsay d.remove("key")', 'd.remove("key")'],
+    [
+      'say askChoice [{text: "A", value: {value: 2}}]',
+      'askChoice [{text: "A", value: {value: 2}}]',
+    ],
   ] as const) {
     const held = analysed(source);
     const properties = held.answers.properties(held.node(text));
@@ -78,6 +86,21 @@ test("the properties of a projected value and of a call's result are known", () 
       text,
     );
   }
+});
+
+test("a value that holds no object has no properties, and a deep chain of operations is walked", () => {
+  // a dict's keys, a list's removed value (review r4)
+  for (const [source, text] of [
+    ["for item in dict {key: {value: 2}} { say item }", "item"],
+    ["let xs = [{value: 2}]\nlet gone = xs.remove({value: 2})\nsay gone", "gone"],
+  ] as const) {
+    const held = analysed(source);
+    assert.deepEqual([...held.answers.properties(held.node(text)).keys()], [], text);
+  }
+  // 4,096 fallbacks of one record: an explicit worklist, never the native stack
+  const expression = ["{value: 2}", ...Array<string>(4096).fill("null")].join(" otherwise ");
+  const deep = analysed(`say ${expression}`);
+  assert.deepEqual([...deep.answers.properties(deep.node(expression)).keys()], ["value"]);
 });
 
 test("a statement that stores answers for the place it stores into", () => {
