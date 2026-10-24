@@ -10,7 +10,14 @@ import type {
 } from "../backend.js";
 import { analyseCore, type Answers } from "./answers.js";
 import { BudgetExhausted } from "./budget.js";
-import { coreCheckResult, coreFacts, declarations, nodeOf, SliceIndex } from "./consumer.js";
+import {
+  coreCheckResult,
+  coreFacts,
+  declarations,
+  nodeOf,
+  SLICE_DEPTH,
+  SliceIndex,
+} from "./consumer.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 
@@ -107,20 +114,24 @@ function rejected(request: CoreAnalysisRequest, outside: Outside): TypeAnalysisO
 
 /** The written types of the slice: named types, `T?` and `T[]` of them. */
 function annotationOutside(annotation: TypeAnnotation): TypeAnnotation | null {
-  const pending = [annotation];
-  for (let next = pending.pop(); next !== undefined; next = pending.pop())
-    switch (next.kind) {
+  const pending: [TypeAnnotation, number][] = [[annotation, 0]];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const [type, depth] = next;
+    switch (type.kind) {
       case "namedType":
         break;
       case "optionalType":
-        pending.push(next.value);
+        pending.push([type.value, depth]);
         break;
       case "listType":
-        pending.push(next.element);
+        // a list at the facts' deepest depth (`SLICE_DEPTH`)
+        if (depth + 1 >= SLICE_DEPTH) return type;
+        pending.push([type.element, depth + 1]);
         break;
       default:
-        return next;
+        return type;
     }
+  }
   return null;
 }
 
@@ -312,7 +323,7 @@ function outsideAnswers(
     if (statement.typeAnnotation === null) {
       const place = answers.at(nodeOf(answers, index, statement))?.place;
       if (place === null || place === undefined) continue;
-      for (let path: string[] = [...place.path]; path.length < 256; path = [...path, "element"]) {
+      for (let path: string[] = [...place.path]; ; path = [...path, "element"]) {
         const kinds = withoutEmpty([...answers.place(place.id, path).contract.kinds]);
         const tags = kinds.map((item) => item.tag);
         if (tags.includes("unknown") || !settledFamily(tags))
@@ -322,6 +333,12 @@ function outsideAnswers(
             what: `the variable '${statement.name.name}', whose stores do not settle one type`,
           };
         if (!tags.includes("list")) break;
+        if (path.length + 1 >= SLICE_DEPTH)
+          return {
+            file: index.fileOf(statement),
+            span: statement.name.span,
+            what: `the variable '${statement.name.name}', whose lists nest deeper than the slice follows`,
+          };
       }
     }
   // A8 (S6): a list literal that no store brings whole into a written place holds one settled family

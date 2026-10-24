@@ -175,18 +175,25 @@ test("C1's copy check and C9's boundary check run where external data enters a w
 
   // in the core's record, one boundary check per ingress, where it lands: the whole value's place, not each place below
   // it (TABLE §4 C9; these whole-collection shapes are outside the slice, the literal's element inside it)
-  for (const [shape, boundary] of [
+  for (const [shape, ...boundaries] of [
     ["let pool: integer[] = hostValue\nexit\n", 'pool ["list"] @22'],
     ["let xs: integer[][] = [hostValue]\nexit\n", 'xs.element ["list"] @23'],
     ["let pool: integer?[] = [hostValue, null, 7]\nexit\n", 'pool.element ["integer","null"] @24'],
+    // two ingresses into one place: two checks, each at its own host value
+    [
+      "let n: integer[] = [hostValue, hostValue]\nexit\n",
+      'n.element ["integer"] @20',
+      'n.element ["integer"] @31',
+    ],
   ] as const) {
     const request = coreRequest([{ path: "main.tease", source: shape }]);
     assert.ok(request !== null);
     assert.deepEqual(
       compactAnalysis(request)
         .checks.filter((check) => check.boundary)
-        .map((check) => `${check.target} ${JSON.stringify(check.against)} @${check.site.offset}`),
-      [boundary],
+        .map((check) => `${check.target} ${JSON.stringify(check.against)} @${check.site.offset}`)
+        .sort(),
+      boundaries,
       shape,
     );
   }
@@ -309,6 +316,12 @@ test("a program outside the slice is rejected with one TSC011 error and no plan"
     // C9 (S6): external data stored as a whole collection, whose elements' checks are admission's
     ["let pool: integer[] = hostValue\nexit\n", 22],
     ["let xs: integer[][] = [hostValue]\nexit\n", 23],
+    // lists nested as deep as the facts' walk (256 levels), inferred or written
+    [
+      `let a = ${"[".repeat(256)}1${"]".repeat(256)}\na = ${"[".repeat(256)}"bad"${"]".repeat(256)}\nexit\n`,
+      4,
+    ],
+    [`let a: integer${"[]".repeat(256)} = []\nexit\n`, 7],
   ] as const) {
     const compiled = candidate(source);
     assert.deepEqual(sited(compiled), [`error TSC011@${offset}`], source);
@@ -378,6 +391,16 @@ test("the candidate's facts list every binding, read and value of the program wi
   assert.deepEqual(
     [facts.functions, facts.speakers, facts.uncheckedProperties, facts.storage],
     [[], [], [], []],
+  );
+
+  // one level less than the walk: complete to the element kind
+  const deep = coreRequest([
+    { path: "main.tease", source: `let a = ${"[".repeat(255)}1${"]".repeat(255)}\nexit\n` },
+  ]);
+  assert.ok(deep !== null);
+  assert.equal(
+    CORE_BACKEND.analyze(deep).facts().bindings[0]!.type,
+    `${"list<".repeat(255)}integer${">".repeat(255)}`,
   );
 
   // parentheses, nested element reads and a kind without parts keep their whole types

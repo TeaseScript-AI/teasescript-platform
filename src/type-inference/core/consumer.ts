@@ -446,13 +446,21 @@ function elementOf(type: StaticType): StaticType {
 
 const COLLECTIONS: ReadonlySet<ItemTag> = new Set(["list", "set", "dict"]);
 
+/**
+ * The deepest nesting of collections whose element types the slice's facts follow: a place or a written type with a
+ * collection at this depth is outside the slice (`backend.ts` rejects it), so no fact is cut short.
+ */
+export const SLICE_DEPTH = 256;
+
 /** A place's type at a path: its contract's kinds, and a collection's elements' below it, built from the deepest up. */
 function placeType(answers: Answers, id: PlaceId, path: readonly string[]): StaticType {
   const levels: ItemTag[][] = [];
-  for (let at = [...path]; levels.length < 256; at = [...at, "element"]) {
+  for (let at = [...path]; ; at = [...at, "element"]) {
     const tags = answers.place(id, at).contract.kinds.map((item) => item.tag);
     levels.push(tags);
     if (!tags.some((tag) => COLLECTIONS.has(tag))) break;
+    if (at.length + 1 >= SLICE_DEPTH)
+      throw new Error("A place of the slice holds collections deeper than its facts follow.");
   }
   let type: StaticType = openType();
   for (let depth = levels.length - 1; depth >= 0; depth -= 1)
