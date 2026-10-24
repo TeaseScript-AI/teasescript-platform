@@ -46,6 +46,9 @@ const FEW_TREES = 4;
 /** The sources tested at one path that a read asks one by one; beyond, by the path's spans. */
 const FEW_PLACES = 4;
 
+/** The anchors of a source whose copies a path's spans hold run by run; beyond, the source is asked at the read. */
+const FEW_ANCHORS = 4;
+
 /**
  * A whole copy of a place (W34): the copy, the source it reads and where, and what the source holds there for every
  * path no key below it overlaps (`top`): the copy it comes from (`up`), another whole store, no exact definition (the
@@ -141,14 +144,6 @@ class NestedSpans<T> {
     return at < 0 ? null : this.#item[at]!;
   }
 
-  /** The items of the intervals holding `point`, the innermost first. */
-  public *holding(point: number): Generator<T> {
-    for (let at = this.#innermost(point); at >= 0; at = this.#jumps[0]![at]!) {
-      this.work.charge("exactQueries");
-      yield this.#item[at]!;
-    }
-  }
-
   #innermost(point: number): number {
     let low = 0;
     let high = this.#start.length;
@@ -190,6 +185,8 @@ interface CopyForest {
   readonly placesBuilt: Map<PlaceId, NestedSpans<CopyAnchor>>;
   /** Per path (`""` the source itself), the sources a branch tests at the path. */
   readonly markPlaces: ReadonlyMap<string, ReadonlySet<PlaceId>>;
+  /** Per path with spans, per tree, the sources tested there with several anchors, asked one by one. */
+  readonly markSeveral: ReadonlyMap<string, ReadonlyMap<number, ReadonlySet<PlaceId>>>;
   /**
    * Per path that more than a few sources are tested at, the copies a test of their source at the path guards, as
    * spans of the walk; a read at a path fewer sources are tested at asks each one's copy on its chain.
@@ -388,9 +385,23 @@ export class ExactPath {
         stack.push({ list: children(link), next: 0 });
       }
     };
-    const origins = [...anchors.entries()].filter(([uid]) => !links.has(uid));
-    for (const [, anchor] of origins) walk(anchor.copies);
-    for (const root of roots) if (root.top.kind !== "origin") walk([root]);
+    // one tree per source of the origins and of the roots without a record-level definition, so a source redefined
+    // many times stands in few trees
+    const tops = new Map<PlaceId, CopyLink[]>();
+    for (const [uid, anchor] of anchors)
+      if (!links.has(uid)) {
+        const list = tops.get(anchor.place);
+        if (list === undefined) tops.set(anchor.place, [...anchor.copies]);
+        else list.push(...anchor.copies);
+      }
+    const loose = new Map<PlaceId, CopyLink[]>();
+    for (const root of roots)
+      if (root.top.kind !== "origin") {
+        const list = loose.get(root.source);
+        if (list === undefined) loose.set(root.source, [root]);
+        else list.push(root);
+      }
+    for (const list of [...tops.values(), ...loose.values()]) walk(list);
     const anchorsOf = new Map<PlaceId, CopyAnchor[]>();
     for (const [uid, anchor] of anchors) {
       const owner = links.get(uid);
@@ -412,6 +423,16 @@ export class ExactPath {
     const atSeveral = new Map<string, Map<number, Set<PlaceId>>>();
     const belowSeveral = new Map<string, Map<number, Set<PlaceId>>>();
     const treesOf = new Map<PlaceId, ReadonlySet<number>>();
+    // the trees a source's anchors stand in; beyond a few, every tree (`-1`)
+    const treesOfPlace = (place: PlaceId, own: readonly CopyAnchor[]): ReadonlySet<number> => {
+      let trees = treesOf.get(place);
+      if (trees === undefined) {
+        const found = new Set(own.map((anchor) => anchor.copies[0]!.tree));
+        work.charge("exactQueries", own.length);
+        treesOf.set(place, (trees = found.size > FEW_TREES ? new Set([-1]) : found));
+      }
+      return trees;
+    };
     const add = (
       places: Map<string, Set<PlaceId>>,
       spans: Map<string, Span<CopyAnchor>[]>,
@@ -436,12 +457,7 @@ export class ExactPath {
       // per tree its sources; a source whose anchors stand in more than a few trees under every tree (`-1`)
       let byTree = several.get(path);
       if (byTree === undefined) several.set(path, (byTree = new Map()));
-      let inTrees = treesOf.get(place);
-      if (inTrees === undefined) {
-        const found = new Set(own.map((anchor) => anchor.copies[0]!.tree));
-        work.charge("exactQueries", own.length);
-        treesOf.set(place, (inTrees = found.size > FEW_TREES ? new Set([-1]) : found));
-      }
+      const inTrees = treesOfPlace(place, own);
       for (const tree of inTrees) {
         work.charge("exactQueries");
         const inTree = byTree.get(tree);
@@ -496,9 +512,24 @@ export class ExactPath {
     }
     const markSpans = new Map<string, Span<number>[]>();
     const runs = new Map<string, readonly Span<number>[]>();
+    // a source with several anchors is asked at the read, by its own nested anchors, per tree
+    const markSeveral = new Map<string, Map<number, Set<PlaceId>>>();
     const register = (key: Key, callable: number, low: number, high: number): void => {
       if ((markPlaces.get(keyPath(key).join("."))?.size ?? 0) <= FEW_PLACES) return;
       const place = keyPlace(key);
+      const own = anchorsOf.get(place) ?? [];
+      if (own.length > FEW_ANCHORS) {
+        const path = keyPath(key).join(".");
+        let byTree = markSeveral.get(path);
+        if (byTree === undefined) markSeveral.set(path, (byTree = new Map()));
+        for (const tree of treesOfPlace(place, own)) {
+          work.charge("exactQueries");
+          const inTree = byTree.get(tree);
+          if (inTree === undefined) byTree.set(tree, new Set([place]));
+          else inTree.add(place);
+        }
+        return;
+      }
       const id = `${place}|${callable}|${low}|${high}`;
       let found = runs.get(id);
       if (found === undefined) {
@@ -547,6 +578,7 @@ export class ExactPath {
       anchorsOf,
       placesBuilt: new Map(),
       markPlaces,
+      markSeveral,
       markSpans,
       anchorsBuilt: new Map(),
       marksBuilt: new Map(),
@@ -681,15 +713,25 @@ export class ExactPath {
           link.enter,
         );
         if (depth !== undefined && depth !== null && depth > floor) return true;
-        continue;
       }
-      // each source tested at the path: its copies on the chain, the nearest first
-      for (const place of places)
-        for (const anchor of this.#placeAnchors(forest, place).holding(link.enter)) {
-          if (anchor.depth <= floor) break;
-          const copy = this.#copyOn(anchor, link);
-          if (guards.narrowed(keyOf(place, rest.slice(0, length)), copy.read)) return true;
-        }
+      // each source asked: its nearest copy on the chain, whose read every other copy's of it dominates there, so a
+      // test's branch that holds one of them holds it
+      const asked =
+        places.size > FEW_PLACES
+          ? [
+              ...(forest.markSeveral.get(path)?.get(link.tree) ?? []),
+              ...(forest.markSeveral.get(path)?.get(-1) ?? []),
+            ]
+          : places;
+      for (const place of asked) {
+        const anchor = this.#placeAnchors(forest, place).innermost(link.enter);
+        if (
+          anchor !== null &&
+          anchor.depth > floor &&
+          guards.narrowed(keyOf(place, rest.slice(0, length)), this.#copyOn(anchor, link).read)
+        )
+          return true;
+      }
     }
     // a chain without an exact definition at its root: the root's own read, as its general walk marks it
     const root = link.root!;

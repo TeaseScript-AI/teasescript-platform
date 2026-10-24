@@ -964,7 +964,9 @@ const W34_LINKS: readonly (readonly [string, (index: number) => string])[] = [
  * and every copy read at it) and on each copy's own field, guarded sibling copies along a chain, k unrelated edited
  * records with one field name, k edited siblings of one copy, k copies of one record edited at k fields; round 3's:
  * one source defined k times, each definition copied after an early exit (on one field, on its own field) or with k
- * stores below the source, and k sources of two copied definitions each. Every copy is resolved once and read once per field: k + k, never k × k.
+ * stores below the source, and k sources of two copied definitions each; round 4's: a source redefined from its own
+ * copies under one test, k sources of five copied definitions each, a source tested at k paths and redefined k times
+ * beside four more sources tested there. Every copy is resolved once and read once per field: k + k, never k × k.
  */
 export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link]): WorkFamily => ({
   name: `W34-${variant}`,
@@ -1085,6 +1087,61 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
           k,
           (i) =>
             `let r${i} = {f0: 1.5}\nlet b${i} = r${i}\nr${i} = {f0: 2.5}\nr${i}.f0 = 1\nlet a${i} = r${i}\nrepeat a${i}.f0 {}\nrepeat b${i}.f0 {}`,
+        ),
+      ),
+  },
+  {
+    name: "W34-redefined-through-copies",
+    measures: "§13.3 W34 r4.38: a source redefined from its own copies k times, one test of it",
+    program: (k) =>
+      main(
+        lines(
+          `let base = {${fields(k, () => "1")}}`,
+          `if flagHost { base = {${fields(k, () => "null")}} }`,
+          "let seed = base",
+          'if seed != null { say "tested" }',
+          rows(k, (i) => `let a${i} = seed\nseed = a${i}`),
+          rows(k, (i) => `repeat seed.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "W34-redefined-five-times-independent",
+    measures:
+      "§13.3 W34 r4.38: k sources of five copied definitions each, a store at one shared path",
+    program: (k) =>
+      main(
+        lines(
+          rows(
+            k,
+            (i) =>
+              `let seed${i} = {f0: 1.5}\nlet a${i}_0 = seed${i}\n${rows(4, (j) => `seed${i} = {f0: 2.5}\nlet a${i}_${j + 1} = seed${i}`)}\nseed${i}.f0 = 1`,
+          ),
+          rows(k, (i) => `repeat a${i}_0.f0 {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "W34-redefined-beside-tested-sources",
+    measures:
+      "§13.3 W34 r4.38: a source tested at k paths and redefined k times beside four sources tested there",
+    program: (k) =>
+      main(
+        lines(
+          `let base = {${fields(k, () => "1")}}`,
+          `if flagHost { base = {${fields(k, () => "null")}} }`,
+          rows(
+            4,
+            (j) =>
+              `let side${j} = base\n${rows(k, (i) => `if side${j}.f${i} == null { say "side" }`)}`,
+          ),
+          "let seed = base",
+          rows(k, (i) => `if seed.f${i} == null { exit }`),
+          rows(k, (i) => `seed = base\nlet a${i} = seed`),
+          rows(k, (i) => `repeat a${i}.f${i} {}`),
+          "exit",
         ),
       ),
   },
