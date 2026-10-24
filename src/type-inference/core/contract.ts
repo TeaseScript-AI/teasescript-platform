@@ -130,7 +130,7 @@ const HELD_REFERENCE: Item = Object.freeze(makeItem("unknown", null, { reasons: 
  * holds nothing a step below), and held for the second; so a receiver whose reference comes only round its own cycle
  * is a reference's.
  */
-export const RECEIVER: Decision = {
+const RECEIVER: Decision = {
   choose: (input) => (input.some((item) => REFERENCE.has(item.tag)) ? "reference" : "other"),
   answer: (choice, input) => (choice === "reference" ? [...input, HELD_REFERENCE] : input),
 };
