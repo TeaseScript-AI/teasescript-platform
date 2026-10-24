@@ -334,6 +334,29 @@ test("a result's record has the expectation set's shape, survives JSON, and comp
   assert.throws(() => coreRecord(called!.result, ["main.tease"]), /no file 1/u);
 });
 
+test("two warnings owing alike list their obligation twice, and a check alike to one of them not again", () => {
+  // `x + "a"` with `x` a possible text and an unknown: one operand obligation per offending kind, alike (§4)
+  const owed: Omit<Obligation, "boundary"> = {
+    kind: "operand",
+    target: "x",
+    against: ["integer", "number"],
+    on: "check the operand of + when it runs",
+    site: at(10, 11),
+  };
+  const text = makeItem("string", writer("assignment", 2), { cert: "pos" });
+  const record = coreRecord(
+    result(
+      [warning("operator", text, owed), warning("operator", unknown(REASON.external, 4), owed)],
+      [{ ...owed, boundary: false }],
+    ),
+    ["main.tease"],
+  );
+  assert.deepEqual(
+    record.runtimeChecks.map((check) => `${check.kind} ${check.target} ${check.site.offset}`),
+    ["operand x 10", "operand x 10"],
+  );
+});
+
 test("the comparison counts each check and asserts only the contexts the set names", () => {
   const ingress = (offset: number) => ({
     kind: "copy-type" as const,

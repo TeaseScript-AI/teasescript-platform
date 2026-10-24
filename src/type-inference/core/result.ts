@@ -8,6 +8,7 @@ import {
   type ItemTag,
   type Writer,
 } from "./items.js";
+import { propertyName } from "./program.js";
 
 /**
  * The structured result of the coarse core (checkpoint 9, TABLE §3.4, §4, §10.5): the outcome, the diagnostics with
@@ -146,7 +147,7 @@ export function elementStep(receiver: readonly ItemTag[]): "element" | "entry" {
  * `packet.result`) and its steps, as `state.party.element.hp`.
  */
 export function targetName(label: string, steps: readonly string[]): string {
-  return [label, ...steps].join(".");
+  return [label, ...steps.map(propertyName)].join(".");
 }
 
 /** A site in a record: its file's path and its span's offsets. */
@@ -181,7 +182,8 @@ export interface RecordDiagnostic {
 
 /**
  * A result as JSON-safe data in the shape of the expectation set's records (`disposition.md` with TABLE §10.5): sites
- * by file path, writers as tokens, and `runtimeChecks` holding every warning's obligation and every other check once.
+ * by file path, writers as tokens, and `runtimeChecks` holding every warning's obligation, one per warning, and every
+ * other check once.
  */
 export interface CoreRecord {
   readonly outcome: CoreOutcome;
@@ -226,13 +228,16 @@ export function coreRecord(result: CoreResult, paths: readonly string[]): CoreRe
           obligation: obligation(diagnostic.obligation),
         },
   );
-  const runtimeChecks = new Map<string, RecordObligation>();
-  for (const check of [
-    ...diagnostics.flatMap((diagnostic) =>
-      diagnostic.obligation === undefined ? [] : [diagnostic.obligation],
-    ),
-    ...result.checks.map(obligation),
-  ])
-    runtimeChecks.set(JSON.stringify(check), check);
-  return { outcome: result.outcome, diagnostics, runtimeChecks: [...runtimeChecks.values()] };
+  // each diagnostic's obligation, also where two read alike (§4: a diagnostic per obligation), then every other check once
+  const runtimeChecks = diagnostics.flatMap((diagnostic) =>
+    diagnostic.obligation === undefined ? [] : [diagnostic.obligation],
+  );
+  const listed = new Set(runtimeChecks.map((check) => JSON.stringify(check)));
+  for (const check of result.checks.map(obligation)) {
+    const key = JSON.stringify(check);
+    if (listed.has(key)) continue;
+    listed.add(key);
+    runtimeChecks.push(check);
+  }
+  return { outcome: result.outcome, diagnostics, runtimeChecks };
 }
