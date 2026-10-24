@@ -19,7 +19,9 @@ import {
   mergeItems,
 } from "../src/type-inference/core/items.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
+import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { operationItems } from "../src/type-inference/core/operator-table.js";
+import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { ItemSource } from "./helpers/type-core-items.js";
 
@@ -157,4 +159,27 @@ test("an analysis stopped anywhere, its setup included, publishes its stop", () 
   );
   assert.ok(inSetup > 0, "some stop falls in the setup");
   assert.equal(withTestAllowance(total, () => analyseCore(request())).outcome, "valid");
+});
+
+/**
+ * A known limit until S8 (the lead's ruling): a recursive record type, whose record alternative itself holds the
+ * recursion, is followed at ever deeper paths, so this terminating program stops at the work allowance (30,000,001
+ * units, 10 to 14 s, in both orders). S8's fallback turns the stop into warnings with runtime checks; the candidate
+ * repair is a depth bound from the program's own structure, deeper paths answered `unknown`. Pinned here: the stop is
+ * clean, in both orders.
+ */
+test("a recursive record type stops cleanly with budget-error, in either order (a known limit until S8)", () => {
+  const source =
+    "function f(n: integer) {\n  if n == 0 { return {custom: 1} }\n  if n == 1 { return {custom: f(0)} }\n  return f(n - 1).custom\n}\nrepeat f(3) {}\nexit";
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const got = [false, true].map((reversed) => {
+    const run = (): ReturnType<typeof analyseCore> =>
+      withTestAllowance(100_000, () =>
+        withSolverSeam({ reverseWorklist: reversed }, () => analyseCore(request)),
+      );
+    const answers = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+    return `${answers.outcome} ${answers.budget.exhausted} ${answers.diagnostics.length}`;
+  });
+  assert.deepEqual(got, ["budget-error work 0", "budget-error work 0"]);
 });
