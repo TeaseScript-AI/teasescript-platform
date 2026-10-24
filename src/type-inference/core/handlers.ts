@@ -78,7 +78,9 @@ export class HandlerIndex {
       if (into === undefined) callers.set(to, [[from, at]]);
       else into.push([from, at]);
     };
+    // only a call that can run registers (G1(b), r4.25), as only a transfer that can run does
     for (const site of flow.sites) {
+      if (site.callIn.dead) continue;
       const caller = flow.callableOf(site.caller);
       if (caller !== null) for (const callee of site.callees) edge(caller, site.callIn, callee);
     }

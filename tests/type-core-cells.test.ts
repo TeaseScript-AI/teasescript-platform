@@ -304,6 +304,19 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "warning-runtime-check",
     "unknown unknown unknown unknown",
   ],
+  // X7, H1, G1(b) (r4.25; Astra B4): a dead call registers no handler; a live one before the read does
+  [
+    "X7 a registration only a dead call makes before the read",
+    'let n = 1\nfunction register { showPermanentButton "x" { n = 1.5 } }\nif false { register() }\nlet whole: integer = n\nregister()\nexit',
+    "valid",
+    "",
+  ],
+  [
+    "X7 a registration a live call makes before the read",
+    'let n = 1\nfunction register { showPermanentButton "x" { n = 1.5 } }\nregister()\nlet whole: integer = n\nexit',
+    "warning-runtime-check",
+    "handler",
+  ],
 ];
 
 test("the core gives the expected outcome for the programs beside the set", () => {
