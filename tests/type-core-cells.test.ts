@@ -328,6 +328,42 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
   ["C12 remove on a dict", "let d = dict {key: 1}\nsay d.remove(1)\nexit", "compile-error", "-"],
 ];
 
+/** C1's warning and check for external data stored into a written place, by site (TABLE r4.43, C9 r4.29). */
+test("external data in a choice's options or in a literal is warned at its own expression", () => {
+  const sited = (source: string): readonly string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const record = compactAnalysis(request);
+    return [
+      record.outcome,
+      ...record.diagnostics.map((diagnostic) => `${diagnostic.kind}@${diagnostic.site.offset}`),
+      ...record.checks.map((check) => `${check.kind}@${check.site.offset}`),
+    ];
+  };
+  // r4.43 (1): an external option of a choice, as an external element of a literal
+  assert.deepEqual(sited("let chosen: integer = askChoice [hostValue, 2]\nexit"), [
+    "warning-runtime-check",
+    "written-target@33",
+    "copy-type@33",
+  ]);
+  assert.deepEqual(sited("let chosen: integer = askChoice [2, hostValue]\nexit"), [
+    "warning-runtime-check",
+    "written-target@36",
+    "copy-type@36",
+  ]);
+  assert.deepEqual(sited("let pool: integer?[] = [hostValue, null, 7]\nexit"), [
+    "warning-runtime-check",
+    "written-target@24",
+    "copy-type@24",
+  ]);
+  // r4.43 (3): options held in a variable follow the copy reading: the store into the written place
+  assert.deepEqual(sited("let opts = [hostValue, 1]\nlet answer: integer = askChoice opts\nexit"), [
+    "warning-runtime-check",
+    "written-target@48",
+    "copy-type@48",
+  ]);
+});
+
 test("the core gives the expected outcome for the programs beside the set", () => {
   const got = CONTROLS.map(([name, source]) => {
     const request = coreRequest([{ path: "main.tease", source }]);

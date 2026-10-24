@@ -8,7 +8,15 @@ import * as text from "../adapters/text.js";
 import type { MemberRules } from "../adapters/views.js";
 import type { Constraint, PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { MEMBER_KINDS, OWN_SELECTION, REFERENCE, termAt, typeTags, writtenOf } from "./contract.js";
+import {
+  choiceLabels,
+  MEMBER_KINDS,
+  OWN_SELECTION,
+  REFERENCE,
+  termAt,
+  typeTags,
+  writtenOf,
+} from "./contract.js";
 import {
   keyOf,
   keyPath,
@@ -21,7 +29,7 @@ import {
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { firstWriter, makeItem, REASON, type Item, type ItemTag, type Writer } from "./items.js";
-import { selectsElement } from "./method-categories.js";
+import { interactionCategory, selectsElement } from "./method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
 import { siteKey, stepName, type ValueConstraint } from "./program.js";
@@ -596,7 +604,12 @@ export class Consumers {
         // one copy-type diagnostic per offending kind, its earliest writer (§4, F28); against the destination's
         // required kinds, a written optional type's null among them
         for (const { item } of offendingKinds(offending))
-          this.#storeWarning(d.site, label, item, nullable ? [...tags, "null"] : tags);
+          this.#storeWarning(
+            isExternal(item) ? this.#ingressSite(d, at) : d.site,
+            label,
+            item,
+            nullable ? [...tags, "null"] : tags,
+          );
         // S4: a possible null owes a null-check, a definite one an error
         if (!nullable) {
           const external = items.some(isExternal);
@@ -707,6 +720,48 @@ export class Consumers {
           pending.push([children[position]!.value!, children[position]!.node ?? node, index + 1]);
     }
     return null;
+  }
+
+  /**
+   * C1 with C9 r4.29 and r4.43: where external data a store brings enters, for its warning and check: the external
+   * value's own expression inside the stored literal at the path, among a choice's literal options (an option, or an
+   * element of a list or set option; a labelled option gives its label), or inside a literal a projection reads; else
+   * the store, as for a copy of a variable (r4.43's bound options). The first in source order.
+   */
+  #ingressSite(d: Definition, at: readonly string[]): SourceSite {
+    const { program, definitions } = this.pass;
+    if (d.kind !== "whole" || d.value === undefined) return d.site;
+    const pending: [PlaceId, readonly string[]][] = [[d.value, at]];
+    while (pending.length > 0) {
+      const [value, path] = pending.pop()!;
+      program.work.charge("checks");
+      if (path.length === 0 && definitions.ingress.has(value))
+        return program.place(value).site ?? d.site;
+      const next: [PlaceId, readonly string[]][] = [];
+      if (program.hasOf.has(value) || program.cellOwner.has(value)) {
+        if (path.length > 0)
+          for (const child of this.#literalChildren(value, path[0]!))
+            next.push([child.value!, path.slice(1)]);
+      } else if (program.projOf.has(value)) {
+        const projection = program.projOf.get(value)!;
+        if (projection.step !== "iteration")
+          next.push([projection.owner, [stepName(projection.step), ...path]]);
+      } else {
+        const c = program.opOf.get(value);
+        if (
+          c?.kind === "operation" &&
+          c.contract.family === "interaction" &&
+          interactionCategory(c.contract.name)?.kind === "options"
+        ) {
+          const labels = choiceLabels(c);
+          for (const [index, argument] of c.arguments.entries())
+            if (labels[index] === undefined)
+              next.push([argument, path], [argument, ["element", ...path]]);
+        }
+      }
+      for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
+    }
+    return d.site;
   }
 
   #siteAt(

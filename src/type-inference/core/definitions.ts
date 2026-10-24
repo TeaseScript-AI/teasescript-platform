@@ -2,7 +2,7 @@ import type { ForStatement } from "../../ast.js";
 import type { PlaceId, SourceSite } from "../graph.js";
 import type { Callable, FlowLoop, FlowNode } from "./flow-graph.js";
 import { makeItem, type ContextWord, type Item, type Writer } from "./items.js";
-import { conversionCategory, interactionCategory, methodCategory } from "./method-categories.js";
+import { conversionCategory, methodCategory } from "./method-categories.js";
 import { siteKey, type CoreProgram } from "./program.js";
 
 /*
@@ -445,7 +445,8 @@ export class DefinitionIndex {
   }
 
   /**
-   * C9: the values external data enters by (a load, `fromJson`, `askChoice`, a read of a host global) and each one's
+   * C9: the values external data enters by (a load, `fromJson`, a read of a host global; an `askChoice` only through an
+   * option that is one, r4.43) and each one's
    * ingress store: the whole store of the value, or of the value that carries it there (the outermost literal holding
    * it, a property or element read of it, the fallback whose direct value it is). A fallback or default carries
    * nothing to its operation's store (C10): data there names its own read.
@@ -456,10 +457,8 @@ export class DefinitionIndex {
       if (
         constraint.kind === "load" ||
         (constraint.kind === "operation" &&
-          ((constraint.contract.family === "conversion" &&
-            conversionCategory(constraint.contract.name)?.kind === "parses") ||
-            (constraint.contract.family === "interaction" &&
-              interactionCategory(constraint.contract.name)?.kind === "options")))
+          constraint.contract.family === "conversion" &&
+          conversionCategory(constraint.contract.name)?.kind === "parses")
       )
         this.ingress.add(constraint.result);
     for (const [occurrence, binding] of program.occurrenceOf)

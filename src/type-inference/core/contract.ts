@@ -2151,7 +2151,7 @@ export class Contract {
     return entry.guarded || this.#marksAt(entry.holder, rest) ? marked(annotated) : annotated;
   }
 
-  /** C9: external data that entered by a load, `fromJson`, `askChoice` or a host read names its ingress store. */
+  /** C9: external data that entered by a load, `fromJson` or a host read names its ingress store. */
   public entered(value: PlaceId, items: readonly Item[]): readonly Item[] {
     const store = this.pass.definitions.ingressStore.get(value);
     if (store === undefined) return items;
