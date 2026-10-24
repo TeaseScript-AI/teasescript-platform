@@ -70,8 +70,8 @@ export interface CorePass {
   readonly solver: Solver;
 }
 
-function createPass(request: CoreAnalysisRequest): CorePass {
-  const program = new CoreProgram(request);
+function createPass(program: CoreProgram): CorePass {
+  program.index();
   const definitions = new DefinitionIndex(program);
   const parts: {
     program: CoreProgram;
@@ -201,18 +201,23 @@ export interface Answers {
 
 /** The analysis of a project by the coarse core: its answers, published after its last pass. */
 export function analyseCore(request: CoreAnalysisRequest): Answers {
-  const pass = createPass(request);
-  const consumers = new Consumers(pass);
+  const program = new CoreProgram(request);
+  let analysed: { readonly pass: CorePass; readonly consumers: Consumers } | null = null;
   let exhausted: BudgetLimit | null = null;
   try {
     // the nesting limit stops the analysis before any of it (TABLE §8; S3 §5's third stop)
-    checkNesting(pass.program.nesting);
-    consumers.check();
+    checkNesting(program.nesting);
+    const pass = createPass(program);
+    analysed = { pass, consumers: new Consumers(pass) };
+    analysed.consumers.check();
   } catch (error) {
     if (!(error instanceof BudgetExhausted)) throw error;
     exhausted = error.limit;
   }
-  return new CoreAnswers(pass, consumers, exhausted);
+  // a stop in the setup leaves nothing to ask: the answers are the stop's
+  return analysed === null
+    ? new StoppedAnswers(program, exhausted!)
+    : new CoreAnswers(analysed.pass, analysed.consumers, exhausted);
 }
 
 /** The core's result in S2's record shape, derived from its answers: the diagnostics, and the checks none owns. */
@@ -232,7 +237,7 @@ export function solveDemands(
   request: CoreAnalysisRequest,
   keys: readonly string[],
 ): (readonly Item[])[] {
-  const pass = createPass(request);
+  const pass = createPass(new CoreProgram(request));
   return keys.map((key) => {
     pass.solver.run(demandWork(pass, key));
     // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store)
@@ -328,6 +333,56 @@ function closedType(tag: ItemTag): StaticType | null {
 /** Why an unknown is one, as the adapters name it (ADR 0021 rule 1.7). */
 function dynamicWhy(reasons: number): DynamicWhy {
   return (reasons & REASON.external) !== 0 ? "host" : "unknown member";
+}
+
+/**
+ * The answers of an analysis stopped before its consumers ran (TABLE §8): `budget-error` with no diagnostics, the
+ * graph and the ledger as far as they came; each question raises the stop again, as a question after any stop does.
+ */
+class StoppedAnswers implements Answers {
+  readonly outcome: CoreOutcome = "budget-error";
+  readonly diagnostics: readonly CoreDiagnostic[] = [];
+  readonly checks: readonly Obligation[] = [];
+  readonly graph: FlowGraph;
+  readonly dominators: Dominators;
+  readonly budget: BudgetAnswer;
+  readonly deferred = { parameters: [], results: [] };
+  readonly #limit: BudgetLimit;
+
+  public constructor(program: CoreProgram, limit: BudgetLimit) {
+    this.graph = program.flow;
+    this.dominators = program.dom;
+    this.#limit = limit;
+    this.budget = {
+      total: program.work.total,
+      allowance: program.work.allowance,
+      counts: program.work.counts(),
+      exhausted: limit,
+      demands: [],
+      finished: [],
+      facts: { prefixEntries: 0, literalEntries: 0, markNodes: 0, markVisits: 0 },
+    };
+  }
+
+  public at(): OccurrenceAnswer | null {
+    throw new BudgetExhausted(this.#limit);
+  }
+
+  public place(): PlaceAnswer {
+    throw new BudgetExhausted(this.#limit);
+  }
+
+  public project(): readonly Item[] {
+    throw new BudgetExhausted(this.#limit);
+  }
+
+  public properties(): ReadonlyMap<string, readonly Item[]> {
+    throw new BudgetExhausted(this.#limit);
+  }
+
+  public view(): CoreView {
+    throw new BudgetExhausted(this.#limit);
+  }
 }
 
 class CoreAnswers implements Answers {

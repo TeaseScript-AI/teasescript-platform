@@ -125,3 +125,36 @@ test("an analysis stopped in its consumers publishes its stop, computing nothing
     { outcome: "budget-error", exhausted: "work", deferred: { parameters: [], results: [] } },
   );
 });
+
+test("an analysis stopped anywhere, its setup included, publishes its stop", () => {
+  // files that each call every file (W13's call graph) beside a function: setup, solver and consumers all charge
+  const part = 'call "parts/*.tease"\nend';
+  const files = [
+    {
+      path: "main.tease",
+      source: 'function f(p) {\n  repeat p {}\n}\nf(2)\ncall "parts/*.tease"\nexit',
+    },
+    ...Array.from({ length: 6 }, (_, i) => ({ path: `parts/f${i}.tease`, source: part })),
+  ];
+  const request = (): NonNullable<ReturnType<typeof coreRequest>> => {
+    const made = coreRequest(files);
+    assert.ok(made !== null);
+    return made;
+  };
+  const total = analyseCore(request()).budget.total;
+  const stops: string[] = [];
+  let inSetup = 0;
+  for (let step = 1; step < 32; step += 1) {
+    const stopped = withTestAllowance(Math.floor((total * step) / 32), () =>
+      analyseCore(request()),
+    );
+    stops.push(`${stopped.outcome} ${stopped.budget.exhausted} ${stopped.diagnostics.length}`);
+    if (!stopped.budget.counts.has("frames")) inSetup += 1;
+  }
+  assert.deepEqual(
+    stops,
+    Array.from({ length: 31 }, () => "budget-error work 0"),
+  );
+  assert.ok(inSetup > 0, "some stop falls in the setup");
+  assert.equal(withTestAllowance(total, () => analyseCore(request())).outcome, "valid");
+});

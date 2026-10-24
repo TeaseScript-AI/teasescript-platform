@@ -168,25 +168,30 @@ export class CoreProgram {
   readonly #parameterPlaces = new Map<string, PlaceId>();
   readonly #sources: readonly string[];
 
+  /** The input's graphs, built uncharged; `index` charges them and indexes the rest, so a stop there keeps them. */
   public constructor(request: CoreAnalysisRequest) {
     const syntax = measureSyntax(request.files.map((file) => file.program));
     this.syntaxNodes = syntax.nodes;
     this.nesting = syntax.nesting;
     this.work = ledgerFor(this.syntaxNodes);
-    this.work.charge("syntaxNodes", this.syntaxNodes);
     this.scope = { work: this.work, ingress: new IngressGraph() };
     this.#sources = request.files.map((file) => file.source);
     this.graph = collectGraph(request);
     this.flow = buildFlowGraph(request.files);
     this.dom = dominators(this.flow);
-    // the graph and its dominators are setup work of the analysis (TABLE §8): their nodes, their edges, and a step per
-    // node and edge of the dominator search
+    this.places = this.graph.places;
+    this.constraints = this.graph.constraints;
+  }
+
+  /** The setup work of the analysis (TABLE §8), charged, and the indexes: once, before anything reads them. */
+  public index(): void {
+    this.work.charge("syntaxNodes", this.syntaxNodes);
+    // the graph and its dominators are setup work too: their nodes, their edges, and a step per node and edge of the
+    // dominator search
     const edges = this.flow.nodes.reduce((sum, node) => sum + node.successors.length, 0);
     this.work.charge("graphNodes", this.flow.nodes.length);
     this.work.charge("graphEdges", edges);
     this.work.charge("domSteps", this.flow.nodes.length + edges);
-    this.places = this.graph.places;
-    this.constraints = this.graph.constraints;
     const regions = new Map<string, FunctionRegion>();
     for (const region of this.flow.regions)
       if (region.kind === "function")
