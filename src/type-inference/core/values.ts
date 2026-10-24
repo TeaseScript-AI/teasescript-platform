@@ -1,21 +1,16 @@
-import { CONVERSIONS, isConversion } from "../../conversions.js";
 import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import {
-  ASKED,
   carried,
   conversionKind,
   defaultOf,
   emptyAt,
   ingressNull,
-  METHOD_RESULT,
   ONLY_NULL,
   OPAQUE_MEMBER,
   operatorOf,
   plusElements,
   REFERENCE,
-  REMOVALS,
-  SELECTIONS,
   typedDefault,
   unknownItem,
   withOwnSelection,
@@ -24,6 +19,16 @@ import { keyOf, keyPath, keyPlace, type ForLoopFacts, type Key } from "./definit
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
+import {
+  builtinResult,
+  conversionCategory,
+  declaredResult,
+  interactionCategory,
+  measuresLength,
+  memberResult,
+  methodCategory,
+  selectsElement,
+} from "./method-categories.js";
 import { alternatives, EMPTY, makeItem, mergeItems, REASON, weaken, type Item } from "./items.js";
 import { operationItems } from "./operator-table.js";
 import { stepName, type ValueConstraint } from "./program.js";
@@ -108,12 +113,13 @@ export class Values {
       const at = projection.node ?? node;
       if (projection.step === "iteration")
         return yield* this.#iteration(projection.owner, at, rest);
-      if (projection.step === "length") return yield* this.#length(projection.owner, at, rest);
+      if (measuresLength(projection.step))
+        return yield* this.#length(projection.owner, at, projection.step, rest);
       const elements = yield* this.valueItems(projection.owner, at, [
         stepName(projection.step),
         ...rest,
       ]);
-      if (!SELECTIONS.has(projection.step)) return elements;
+      if (!selectsElement(projection.step)) return elements;
       const owners = withoutEmpty(yield* this.valueItems(projection.owner, at, []));
       return withOwnSelection(elements, owners, this.pass);
     }
@@ -166,7 +172,12 @@ export class Values {
    * F14: a text's or a collection's length is a whole number, as certain as the receiver; an object's own `length` is
    * its property (F11); a kind without it gives nothing (C5b reports it).
    */
-  *#length(owner: PlaceId, node: FlowNode | null, rest: readonly string[]): Work<readonly Item[]> {
+  *#length(
+    owner: PlaceId,
+    node: FlowNode | null,
+    step: string,
+    rest: readonly string[],
+  ): Work<readonly Item[]> {
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.valueItems(owner, node, []))) {
       if (
@@ -183,7 +194,7 @@ export class Values {
             ),
           );
       } else if (item.tag === "object") {
-        const own = yield* this.valueItems(owner, node, ["length", ...rest]);
+        const own = yield* this.valueItems(owner, node, [step, ...rest]);
         out.push(...(item.cert === "def" ? own : weaken(own)));
       } else if (item.tag === "unknown") out.push(item);
     }
@@ -374,29 +385,27 @@ export class Values {
       if (rest.length > 0) return [];
       const fallback = defaultOf(c);
       return [
-        makeItem(name === "script" ? "script" : "string"),
+        makeItem(builtinResult(name)),
         ...(fallback === undefined ? [] : yield* this.valueItems(fallback, at, [])),
       ];
     }
-    // F7a–c, F25
-    if (
-      family === "method" &&
-      (REMOVALS.has(name) || METHOD_RESULT[name] !== undefined) &&
-      c.receiver !== null
-    ) {
-      const declared = METHOD_RESULT[name];
+    const method = family === "method" && c.receiver !== null ? methodCategory(name) : undefined;
+    // F7a–c, F25: a declared result, or what a removal gives
+    if (method !== undefined && c.receiver !== null && method.gives.kind !== "copy") {
+      const gives = method.gives;
       for (const item of withoutEmpty(yield* this.valueItems(c.receiver, at, []))) {
-        if (declared !== undefined) {
+        if (gives.kind === "declared") {
+          const kinds = declaredResult(name, gives.kinds, item.tag === "string");
           if (rest.length === 0)
             out.push(
-              ...declared.map((tag) =>
+              ...kinds.map((tag) =>
                 carried(
-                  { ...makeItem(tag), cert: declared.length === 1 ? item.cert : ("pos" as const) },
+                  { ...makeItem(tag), cert: kinds.length === 1 ? item.cert : ("pos" as const) },
                   [item],
                 ),
               ),
             );
-        } else if (name === "remove" && item.tag !== "dict") {
+        } else if (gives.fromList === "null" && item.tag !== "dict") {
           if (rest.length === 0)
             out.push(carried(makeItem("null", null, { cert: item.cert }), [item]));
         } else if (COLLECTIONS.has(item.tag))
@@ -407,21 +416,18 @@ export class Values {
       }
       return out;
     }
-    // F10: a `take` may hold none
-    if (
-      family === "method" &&
-      ["toSet", "toList", "take", "takeLast"].includes(name) &&
-      c.receiver !== null
-    ) {
+    // F10: a copy of the elements, which may hold none where it takes a count
+    if (method !== undefined && c.receiver !== null && method.gives.kind === "copy") {
+      const copy = method.gives;
       const held = yield* this.valueItems(
         c.receiver,
         at,
         rest.length === 0 ? [] : ["element", ...rest.slice(1)],
       );
       return [
-        ...(rest.length === 0 ? [carried(makeItem(name === "toSet" ? "set" : "list"), held)] : []),
+        ...(rest.length === 0 ? [carried(makeItem(copy.into), held)] : []),
         ...held.filter((item) => rest.length > 0 || (item.tag !== "list" && item.tag !== "set")),
-        ...(name.startsWith("take") && rest.length === 1 ? [EMPTY] : []),
+        ...(copy.mayHoldNone && rest.length === 1 ? [EMPTY] : []),
       ];
     }
     if (family === "operator" && name === "+" && rest.length > 0) {
@@ -442,18 +448,18 @@ export class Values {
     if (family === "logic" || family === "comparison" || family === "typeTest")
       return rest.length > 0 ? [] : [makeItem("boolean")];
     // F25: the result or the default
-    if (family === "conversion" && isConversion(name) && CONVERSIONS[name].result !== "unknown") {
+    const conversion = family === "conversion" ? conversionCategory(name) : undefined;
+    if (conversion?.kind === "converts") {
       if (rest.length > 0) return [];
-      const conversion = CONVERSIONS[name];
       const kind = conversionKind(conversion.result);
       const fallback = defaultOf(c);
       if (fallback !== undefined)
         return [makeItem(kind), ...(yield* this.valueItems(fallback, at, []))];
-      return conversion.fallback?.type === "optional"
+      return conversion.optional
         ? [makeItem(kind, null, { cert: "pos" }), makeItem("null", null, { cert: "pos" })]
         : [makeItem(kind)];
     }
-    if (name === "fromJson") {
+    if (conversion?.kind === "parses") {
       const expected = yield* contract.expectedOf(c, rest);
       if (expected !== null) return [...expected];
       const fallback = defaultOf(c);
@@ -462,10 +468,11 @@ export class Values {
         : [...(yield* this.defaultKinds(fallback, at, rest)), ...emptyAt(rest)];
     }
     // F25: the built-in's declared result
-    if (family === "interaction" && ASKED[name] !== undefined)
-      return rest.length === 0 ? [makeItem(ASKED[name])] : [];
+    const interaction = family === "interaction" ? interactionCategory(name) : undefined;
+    if (interaction?.kind === "asks")
+      return rest.length === 0 ? [makeItem(interaction.result)] : [];
     // askChoice: each option's value, an object option's `value` field
-    if (family === "interaction") {
+    if (interaction?.kind === "options") {
       for (const argument of c.arguments) {
         out.push(
           ...(yield* this.valueItems(argument, at, rest)).filter(
@@ -483,7 +490,8 @@ export class Values {
       }
       return out;
     }
-    if (family === "member" && name === "length") return [makeItem("integer")];
+    const member = family === "member" ? memberResult(name) : undefined;
+    if (member !== undefined) return member.map((kind) => makeItem(kind));
     // F19a: a handle's members are the runtime's
     if (family === "timer" || family === "media")
       return rest.length === 0 ? [makeItem(family)] : [OPAQUE_MEMBER];

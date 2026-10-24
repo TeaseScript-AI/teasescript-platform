@@ -233,6 +233,14 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "warning-runtime-check",
     "call",
   ],
+  // F25: a declared result is the receiver kind's own: text's `reverse` gives text, a list's `null`
+  ["F25 a text's reversed text", 'let s = "abc".reverse()\nsay s.uppercase()', "valid", ""],
+  [
+    "F25 a list's reverse gives null",
+    "let xs = [1, 2]\nlet r = xs.reverse()\nsay r + 1",
+    "compile-error",
+    "-",
+  ],
 ];
 
 test("the core gives the expected outcome for the programs beside the set", () => {

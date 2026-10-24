@@ -8,15 +8,7 @@ import * as text from "../adapters/text.js";
 import type { MemberRules } from "../adapters/views.js";
 import type { Constraint, PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import {
-  MEMBER_KINDS,
-  OWN_SELECTION,
-  REFERENCE,
-  SELECTIONS,
-  termAt,
-  typeTags,
-  writtenOf,
-} from "./contract.js";
+import { MEMBER_KINDS, OWN_SELECTION, REFERENCE, termAt, typeTags, writtenOf } from "./contract.js";
 import {
   keyOf,
   keyPath,
@@ -29,6 +21,7 @@ import {
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { firstWriter, makeItem, REASON, type Item, type ItemTag, type Writer } from "./items.js";
+import { selectsElement } from "./method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
 import { siteKey, stepName, type ValueConstraint } from "./program.js";
@@ -984,7 +977,7 @@ export class Consumers {
         ) &&
         !own.some((item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0) &&
         !(
-          SELECTIONS.has(property) &&
+          selectsElement(property) &&
           quiet.some((tag) => tag === "list" || tag === "set" || tag === "object")
         )
       ) {
@@ -996,7 +989,7 @@ export class Consumers {
     const label = this.#keyLabel(c.owner);
     // C6: a selection on a collection, or on an unknown receiver that may be one
     if (
-      SELECTIONS.has(property) &&
+      selectsElement(property) &&
       owners.some(
         (item) => item.tag === "list" || item.tag === "set" || isOpaque(item) || isExternal(item),
       )
@@ -1005,7 +998,7 @@ export class Consumers {
     // C5a, C5b, F19a, F15; C5c: a property some source lacks, its own obligation (an error where no known source has it)
     const objects = owners.some((item) => item.tag === "object");
     const extra: Offending[] = [];
-    if (objects && SELECTIONS.has(property))
+    if (objects && selectsElement(property))
       // F11 (r4.4): an object's own `first`, `last` or `random`: opaque, the member obligation, never an error
       extra.push([OWN_SELECTION, `has its own .${property}`]);
     else if (objects && typeof c.step === "object") {

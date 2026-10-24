@@ -5,16 +5,14 @@ import type { DynamicWhy, PlaceId } from "../graph.js";
 import { BudgetExhausted, checkNesting, type BudgetLimit, type WorkCounter } from "./budget.js";
 import { Consumers } from "./consumers.js";
 import {
-  ASKED,
   Contract,
   defaultOf,
-  METHOD_RESULT,
-  REMOVALS,
   typeTags,
   termAt,
   writtenOf,
   type ContractFacts,
 } from "./contract.js";
+import { conversionCategory, interactionCategory, methodCategory } from "./method-categories.js";
 import {
   DefinitionIndex,
   DefinitionLists,
@@ -547,21 +545,25 @@ class CoreAnswers implements Answers {
         } else if (c.kind === "operation") {
           const { family, name } = c.contract;
           const fallback = defaultOf(c);
-          if (name === "fromJson" && fallback !== undefined)
+          if (
+            family === "conversion" &&
+            conversionCategory(name)?.kind === "parses" &&
+            fallback !== undefined
+          )
             pending.push({ value: fallback, path });
           else if (family === "method" && c.receiver !== null) {
-            // F10: a conversion's elements; F7: a removal's element (`remove` a dict's, a list's gives `null`)
-            if (["toSet", "toList", "take", "takeLast"].includes(name) && path[0] === "element")
+            // F10: a copy's elements; F7: a removal's element (from a dict its value, a list's may give `null`)
+            const gives = methodCategory(name)?.gives;
+            if (gives?.kind === "copy" && path[0] === "element")
               pending.push({ value: c.receiver, path });
             else if (
-              REMOVALS.has(name) &&
-              METHOD_RESULT[name] === undefined &&
-              (name !== "remove" || kinds(c.receiver).has("dict"))
+              gives?.kind === "removed" &&
+              (gives.fromList === "element" || kinds(c.receiver).has("dict"))
             )
               pending.push({ value: c.receiver, path: ["element", ...path] });
           } else if (family === "operator" && name === "+" && path[0] === "element")
             for (const argument of c.arguments) pending.push({ value: argument, path });
-          else if (family === "interaction" && ASKED[name] === undefined)
+          else if (family === "interaction" && interactionCategory(name).kind === "options")
             // F25: `askChoice`'s answer is an option's value
             for (const argument of c.arguments)
               pending.push({ value: argument, path: ["element", "value", ...path] });

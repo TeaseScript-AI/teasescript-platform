@@ -21,6 +21,7 @@ import {
   type HandlerRegion,
 } from "./flow-graph.js";
 import { IngressGraph, type ItemScope, type Writer } from "./items.js";
+import { selectsElement } from "./method-categories.js";
 
 /**
  * The input of the coarse core's analysis (checkpoint 9): the project's files with what the analysis reads beside their
@@ -63,12 +64,12 @@ export type ValueConstraint = Extract<
 
 export type HasConstraint = Extract<Constraint, { readonly kind: "has" }>;
 
-/** The steps every selection or index is in the contract's vocabulary: `xs.element` (TABLE §10.5 r4.10). */
-const ELEMENT_STEPS: ReadonlySet<string> = new Set(["first", "last", "random", "index", "entry"]);
+/** The steps of an index or an entry; with the selections, `xs.element` in the contract's vocabulary (TABLE §10.5 r4.10). */
+const ELEMENT_STEPS: ReadonlySet<string> = new Set(["index", "entry"]);
 
 /** A projection's step as a key's step: every selection and index is `element` (TABLE §1, F12). */
 export function stepName(step: string): string {
-  return ELEMENT_STEPS.has(step) ? "element" : step;
+  return ELEMENT_STEPS.has(step) || selectsElement(step) ? "element" : step;
 }
 
 /** The key of a source site: its file and its span's offsets. */

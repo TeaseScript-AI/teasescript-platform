@@ -2,6 +2,7 @@ import type { ForStatement } from "../../ast.js";
 import type { PlaceId, SourceSite } from "../graph.js";
 import type { Callable, FlowLoop, FlowNode } from "./flow-graph.js";
 import { makeItem, type ContextWord, type Item, type Writer } from "./items.js";
+import { conversionCategory, interactionIsExternal, methodCategory } from "./method-categories.js";
 import { siteKey, type CoreProgram } from "./program.js";
 
 /*
@@ -90,8 +91,6 @@ export interface ForLoopFacts {
   readonly node: FlowNode;
 }
 
-const REMOVALS: ReadonlySet<string> = new Set(["removeAt", "remove", "removeFirst", "removeLast"]);
-
 /** The number of comparisons a sort of `count` elements is charged. */
 export function sortCost(count: number): number {
   return count <= 1 ? count : count * Math.ceil(Math.log2(count));
@@ -175,10 +174,12 @@ export class DefinitionIndex {
       else if (
         constraint.kind === "operation" &&
         constraint.contract.family === "method" &&
-        typeof constraint.receiver === "number" &&
-        (constraint.contract.name === "clear" || REMOVALS.has(constraint.contract.name))
-      )
-        this.#removal(constraint.receiver, constraint.contract.name, constraint.site);
+        typeof constraint.receiver === "number"
+      ) {
+        const effect = methodCategory(constraint.contract.name)?.receiver;
+        if (effect !== undefined)
+          this.#removal(constraint.receiver, constraint.contract.name, effect, constraint.site);
+      }
     }
     this.#parameterDefaults(parameterDefaults);
     this.#ingress();
@@ -386,7 +387,7 @@ export class DefinitionIndex {
       bind(program.parameterPlace(constraint.fn, named.name), named.value);
   }
 
-  #removal(receiver: PlaceId, name: string, site: SourceSite): void {
+  #removal(receiver: PlaceId, name: string, effect: "clears" | "removes", site: SourceSite): void {
     const program = this.program;
     const target = program.targetRoot(program.occurrenceOf.get(receiver) ?? receiver);
     const node = program.effectNode(site);
@@ -395,7 +396,7 @@ export class DefinitionIndex {
     const key = keyOf(target.root, target.path);
     this.storeDefs.push(
       this.#add({
-        kind: name === "clear" ? "clear" : "weaken",
+        kind: effect === "clears" ? "clear" : "weaken",
         weak: target.path.includes("element"),
         key,
         place: target.root,
@@ -455,9 +456,10 @@ export class DefinitionIndex {
       if (
         constraint.kind === "load" ||
         (constraint.kind === "operation" &&
-          (constraint.contract.name === "fromJson" ||
+          ((constraint.contract.family === "conversion" &&
+            conversionCategory(constraint.contract.name)?.kind === "parses") ||
             (constraint.contract.family === "interaction" &&
-              constraint.contract.name === "choice")))
+              interactionIsExternal(constraint.contract.name))))
       )
         this.ingress.add(constraint.result);
     for (const [occurrence, binding] of program.occurrenceOf)

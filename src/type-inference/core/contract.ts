@@ -1,4 +1,3 @@
-import { CONVERSIONS, isConversion } from "../../conversions.js";
 import { hasIdentity, VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
 import type { PlaceId, PlaceKind, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
@@ -6,6 +5,16 @@ import { keyOf, keyPath, keyPlace, sortCost, type Definition, type Key } from ".
 import { withoutEmpty, withWriter } from "./exact-path.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
+import {
+  builtinResult,
+  conversionCategory,
+  declaredResult,
+  interactionCategory,
+  measuresLength,
+  memberResult,
+  methodCategory,
+  selectsElement,
+} from "./method-categories.js";
 import {
   EMPTY,
   firstWriter,
@@ -39,39 +48,6 @@ import type { Decision, Demand, Work } from "./solver.js";
  * access through one has no modelled member.
  */
 export const REFERENCE: ReadonlySet<ItemTag> = new Set(VALUE_KIND_NAMES.filter(hasIdentity));
-
-/** F25: the declared results of the built-in methods the core models. */
-export const METHOD_RESULT: Readonly<Record<string, readonly ValueKind[]>> = {
-  contains: ["boolean"],
-  count: ["integer"],
-  indexOf: ["integer", "null"],
-  lastIndexOf: ["integer", "null"],
-  join: ["string"],
-  uppercase: ["string"],
-  lowercase: ["string"],
-  trim: ["string"],
-  sort: ["null"],
-  shuffle: ["null"],
-  reverse: ["null"],
-  clear: ["null"],
-};
-
-/** F25: `askInteger`, `askBoolean`, `askText`. */
-export const ASKED: Readonly<Record<string, ValueKind>> = {
-  integer: "integer",
-  boolean: "boolean",
-  text: "string",
-};
-
-export const REMOVALS: ReadonlySet<string> = new Set([
-  "removeAt",
-  "remove",
-  "removeFirst",
-  "removeLast",
-]);
-
-/** C6: the element selections; on an object, its own property of that name (F11). */
-export const SELECTIONS: ReadonlySet<string> = new Set(["first", "last", "random"]);
 
 const COLLECTIONS: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "object"]);
 
@@ -643,12 +619,13 @@ export class Contract {
     if (projection !== undefined) {
       if (projection.step === "iteration")
         return yield* this.#contractIteration(projection.owner, rest);
-      if (projection.step === "length") return yield* this.#contractLength(projection.owner, rest);
+      if (measuresLength(projection.step))
+        return yield* this.#contractLength(projection.owner, projection.step, rest);
       const elements = yield* this.contractOfValueAt(projection.owner, [
         stepName(projection.step),
         ...rest,
       ]);
-      if (!SELECTIONS.has(projection.step)) return elements;
+      if (!selectsElement(projection.step)) return elements;
       const owners = withoutEmpty(yield* this.contractOfValue(projection.owner));
       return withOwnSelection(elements, owners, this.pass);
     }
@@ -678,9 +655,10 @@ export class Contract {
       // a property read, a loop's visit, a length
       if (projection.step === "iteration")
         return yield* this.#contractIteration(projection.owner, []);
-      if (projection.step === "length") return yield* this.#contractLength(projection.owner, []);
+      if (measuresLength(projection.step))
+        return yield* this.#contractLength(projection.owner, projection.step, []);
       const elements = yield* this.contractOfValueAt(projection.owner, [stepName(projection.step)]);
-      if (!SELECTIONS.has(projection.step)) return elements;
+      if (!selectsElement(projection.step)) return elements;
       const owners = withoutEmpty(yield* this.contractOfValue(projection.owner));
       return withOwnSelection(elements, owners, this.pass);
     }
@@ -728,7 +706,7 @@ export class Contract {
   }
 
   /** F14: a text's or a collection's length is a whole number; an object's own `length` is its property (F11). */
-  *#contractLength(owner: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
+  *#contractLength(owner: PlaceId, step: string, rest: readonly string[]): Work<readonly Item[]> {
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.contractOfValue(owner))) {
       if (
@@ -739,7 +717,7 @@ export class Contract {
       ) {
         if (rest.length === 0) out.push(carried(makeItem("integer", item.writer), [item]));
       } else if (item.tag === "object")
-        out.push(...(yield* this.contractOfValueAt(owner, ["length", ...rest])));
+        out.push(...(yield* this.contractOfValueAt(owner, [step, ...rest])));
       else if (item.tag === "unknown") out.push(item);
     }
     return mergeItems(out, this.pass.program.scope);
@@ -796,24 +774,26 @@ export class Contract {
       const fallback = defaultOf(c);
       return mergeItems(
         [
-          makeItem(name === "script" ? "script" : "string"),
+          makeItem(builtinResult(name)),
           ...(fallback === undefined ? [] : yield* this.contractOfValue(fallback)),
         ],
         scope,
       );
     }
-    // F7a–c, F25
-    if (
-      family === "method" &&
-      (REMOVALS.has(name) || METHOD_RESULT[name] !== undefined) &&
-      c.receiver !== null
-    ) {
+    const method = family === "method" && c.receiver !== null ? methodCategory(name) : undefined;
+    // F7a–c, F25: a declared result, or what a removal gives
+    if (method !== undefined && c.receiver !== null && method.gives.kind !== "copy") {
+      const gives = method.gives;
       const out: Item[] = [];
       for (const item of withoutEmpty(yield* this.contractOfValue(c.receiver))) {
-        const declared = METHOD_RESULT[name];
-        if (declared !== undefined) {
-          if (rest.length === 0) out.push(...declared.map((tag) => carried(makeItem(tag), [item])));
-        } else if (name === "remove" && item.tag !== "dict") {
+        if (gives.kind === "declared") {
+          if (rest.length === 0)
+            out.push(
+              ...declaredResult(name, gives.kinds, item.tag === "string").map((tag) =>
+                carried(makeItem(tag), [item]),
+              ),
+            );
+        } else if (gives.fromList === "null" && item.tag !== "dict") {
           if (rest.length === 0) out.push(carried(makeItem("null"), [item]));
         } else if (COLLECTIONS.has(item.tag))
           out.push(
@@ -823,46 +803,39 @@ export class Contract {
       }
       return mergeItems(out, scope);
     }
-    // F10: a `take` may hold none
-    if (
-      family === "method" &&
-      ["toSet", "toList", "take", "takeLast"].includes(name) &&
-      c.receiver !== null
-    )
+    // F10: a copy of the elements, which may hold none where it takes a count
+    if (method !== undefined && c.receiver !== null && method.gives.kind === "copy") {
+      const copy = method.gives;
       return rest.length === 0
-        ? [
-            carried(
-              makeItem(name === "toSet" ? "set" : "list"),
-              yield* this.contractOfValue(c.receiver),
-            ),
-          ]
+        ? [carried(makeItem(copy.into), yield* this.contractOfValue(c.receiver))]
         : [
             ...(yield* this.contractOfValueAt(c.receiver, ["element", ...rest.slice(1)])),
-            ...(name.startsWith("take") && rest.length === 1 ? [EMPTY] : []),
+            ...(copy.mayHoldNone && rest.length === 1 ? [EMPTY] : []),
           ];
+    }
     if (family === "operator" && name === "+" && rest.length > 0) {
       const operands: (readonly Item[])[] = [];
       for (const argument of c.arguments)
         operands.push(yield* this.contractOfValueAt(argument, rest));
       return plusElements(operands, rest, this.pass);
     }
-    if (family === "conversion" && isConversion(name) && CONVERSIONS[name].result !== "unknown") {
+    const conversion = family === "conversion" ? conversionCategory(name) : undefined;
+    if (conversion?.kind === "converts") {
       if (rest.length > 0) return [];
-      const conversion = CONVERSIONS[name];
       const fallback = defaultOf(c);
       return mergeItems(
         [
           makeItem(conversionKind(conversion.result)),
           ...(fallback !== undefined
             ? yield* this.contractOfValue(fallback)
-            : conversion.fallback?.type === "optional"
+            : conversion.optional
               ? [makeItem("null")]
               : []),
         ],
         scope,
       );
     }
-    if (name === "fromJson") {
+    if (conversion?.kind === "parses") {
       const fallback = defaultOf(c);
       return (
         (yield* this.expectedOf(c, rest)) ?? [
@@ -873,9 +846,10 @@ export class Contract {
         ]
       );
     }
-    if (family === "interaction" && ASKED[name] !== undefined)
-      return rest.length === 0 ? [makeItem(ASKED[name])] : [];
-    if (family === "interaction") {
+    const interaction = family === "interaction" ? interactionCategory(name) : undefined;
+    if (interaction?.kind === "asks")
+      return rest.length === 0 ? [makeItem(interaction.result)] : [];
+    if (interaction?.kind === "options") {
       const out: Item[] = [];
       for (const argument of c.arguments) {
         out.push(
@@ -905,7 +879,8 @@ export class Contract {
     }
     if (family === "logic" || family === "comparison" || family === "typeTest")
       return [makeItem("boolean")];
-    if (family === "member" && name === "length") return [makeItem("integer")];
+    const member = family === "member" ? memberResult(name) : undefined;
+    if (member !== undefined) return member.map((kind) => makeItem(kind));
     // F19a: a handle's member is opaque
     if (family === "timer" || family === "media") return [makeItem(family)];
     if (family === "range") return [makeItem("range")];
