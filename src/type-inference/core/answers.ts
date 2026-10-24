@@ -356,7 +356,8 @@ class CoreAnswers implements Answers {
     this.checks = checks;
     const deferredParameters: PlaceId[] = [];
     const deferredResults: PlaceId[] = [];
-    for (const fn of program.graph.functions) {
+    // after a stop the ledger is spent: nothing more is computed, so no binding is published as deferred
+    for (const fn of exhausted === null ? program.graph.functions : []) {
       if (!pass.lists.singleSite(fn.id))
         for (const parameter of fn.parameters) {
           const kind = program.place(parameter).kind;

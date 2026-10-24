@@ -18,7 +18,9 @@ import {
   itemsSignature,
   mergeItems,
 } from "../src/type-inference/core/items.js";
+import { analyseCore } from "../src/type-inference/core/answers.js";
 import { operationItems } from "../src/type-inference/core/operator-table.js";
+import { coreRequest } from "./helpers/type-core-analysis.js";
 import { ItemSource } from "./helpers/type-core-items.js";
 
 // The work budget (TABLE §8; the reference model's `budget-check.mjs`, checks 1 and 2): the counters sum to the charged
@@ -105,5 +107,21 @@ test("a test allowance holds for every ledger made inside it, and only there", (
   assert.throws(
     () => withTestAllowance(50, () => workload(ledgerFor(0))),
     (error: unknown) => error instanceof BudgetExhausted,
+  );
+});
+
+test("an analysis stopped in its consumers publishes its stop, computing nothing more after it", () => {
+  // forty functions, most of whose call sites the stopped consumers never counted (their single-site memo empty)
+  const source = `${Array.from({ length: 40 }, (_, i) => `function f${i}(p) {\n  repeat p {}\n}\nf${i}(${i})`).join("\n")}\nexit`;
+  const request = (): NonNullable<ReturnType<typeof coreRequest>> => {
+    const made = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(made !== null);
+    return made;
+  };
+  const total = analyseCore(request()).budget.total;
+  const stopped = withTestAllowance(Math.floor(total * 0.95), () => analyseCore(request()));
+  assert.deepEqual(
+    { outcome: stopped.outcome, exhausted: stopped.budget.exhausted, deferred: stopped.deferred },
+    { outcome: "budget-error", exhausted: "work", deferred: { parameters: [], results: [] } },
   );
 });
