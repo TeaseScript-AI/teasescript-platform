@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DICT_METHODS, type DictMethod } from "../src/dict-operations.js";
-import { LIST_METHODS, type ListMethod, type ListMethodResult } from "../src/list-methods.js";
-import { TEXT_METHODS, type TextMethod, type TextResult } from "../src/text-operations.js";
+import { LIST_METHODS, type ListMethod } from "../src/list-methods.js";
+import { TEXT_METHODS, type TextMethod } from "../src/text-operations.js";
 import { declaredResult, methodCategory } from "../src/type-inference/core/method-categories.js";
 
 /*
@@ -21,7 +21,7 @@ const DICTS: readonly DictMethod[] = Object.values(DICT_METHODS);
 /** The methods whose additions the graph already holds as stores into the receiver's elements (`collector.ts`). */
 const STORED = new Set(["add", "addAll"]);
 
-const DECLARED: Readonly<Partial<Record<ListMethodResult | TextResult, string>>> = {
+const DECLARED: Readonly<Record<string, string>> = {
   null: "null",
   boolean: "boolean",
   integer: "integer",
@@ -61,9 +61,7 @@ test("a method's category gives what the contract of each receiver kind that has
             : gives.fromList
           : `${gives.into}${gives.mayHoldNone ? " or none" : ""}`;
     const expected =
-      gives.kind === "declared"
-        ? DECLARED[result as keyof typeof DECLARED]
-        : `${result}${counts ? " or none" : ""}`;
+      gives.kind === "declared" ? DECLARED[result] : `${result}${counts ? " or none" : ""}`;
     if (given !== expected) wrong.push(`${owner} ${name}: ${given}, declared ${result}`);
   };
   for (const method of LISTS)
