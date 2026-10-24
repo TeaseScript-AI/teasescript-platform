@@ -25,7 +25,7 @@ import {
 } from "./definitions.js";
 import type { Dominators } from "./dominators.js";
 import { ExactPath, withoutEmpty } from "./exact-path.js";
-import type { FlowGraph, FlowNode } from "./flow-graph.js";
+import type { Callable, FlowGraph, FlowNode } from "./flow-graph.js";
 import { GuardIndex } from "./guards.js";
 import { HandlerIndex } from "./handlers.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
@@ -128,8 +128,17 @@ export interface PlaceAnswer {
   };
   /** Every ingress store into the place (C9): admission's, with the boundary checks. */
   readonly ingresses: readonly Obligation[];
-  /** The definition list in region order the exact path uses. */
-  readonly definitions: readonly Definition[];
+  /**
+   * The definitions the exact path uses (X2–X7): the live list in region order, F5a's loop-exit adds among them; the
+   * activation that owns the place (`null`: a global's); whether another callable stores the key, a prefix or a key
+   * below it; and the key's own events by position in the dominator walk.
+   */
+  readonly definitions: {
+    readonly list: readonly Definition[];
+    readonly owner: Callable | null;
+    readonly ownedAway: boolean;
+    readonly events: { readonly stores: readonly number[]; readonly calls: readonly number[] };
+  };
 }
 
 /** An operand view for the kept adapters, with the certainty of its items (every item definite). */
@@ -439,7 +448,7 @@ class CoreAnswers implements Answers {
   }
 
   public place(id: PlaceId, path: readonly string[] = []): PlaceAnswer {
-    const { program, contract, definitions } = this.#pass;
+    const { program, contract, definitions, lists } = this.#pass;
     const key: Key = keyOf(id, path);
     const written = writtenOf(program.place(id).kind);
     const term = written === null ? null : termAt(written, path);
@@ -455,7 +464,13 @@ class CoreAnswers implements Answers {
         emptiness: elements.some((item) => item.tag === "empty") ? "open" : "held",
       },
       ingresses: [],
-      definitions: definitions.byKey.get(key) ?? [],
+      // the exact service's list, not the raw stores (Astra B8)
+      definitions: {
+        list: lists.definitionsOf(key).list,
+        owner: definitions.declaringCallable(id),
+        ownedAway: definitions.ownedAway(key),
+        events: lists.ownEvents(key),
+      },
     };
   }
 

@@ -162,3 +162,25 @@ test("a read's route is the path its answer took (Astra B5)", () => {
     "contract",
   );
 });
+
+test("a place's definitions are the exact path's live list in region order (Astra B8)", () => {
+  const dead = analysed("let n = 1\nif false { n = 2 }\nsay n\nexit");
+  const binding = dead.answers.at(dead.node("let n = 1", "statement"))?.place;
+  assert.ok(binding);
+  const deadList = dead.answers.place(binding.id).definitions;
+  // the dead assignment is no definition
+  assert.deepEqual(
+    deadList.list.map((d) => d.site.start),
+    [8],
+  );
+  assert.equal(deadList.ownedAway, false);
+  // F5a: the loop's exit add is one, after the initializer and the body's add
+  const loop = analysed("let output = []\nfor n in [1] { output.add(n) }\nsay output\nexit");
+  const output = loop.answers.at(loop.node("let output = []", "statement"))?.place;
+  assert.ok(output);
+  const list = loop.answers.place(output.id).definitions.list;
+  assert.deepEqual(
+    list.map((d) => `${d.kind}${d.orig === undefined ? "" : " exit"}`),
+    ["whole", "add", "add exit"],
+  );
+});

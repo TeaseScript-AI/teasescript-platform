@@ -920,6 +920,24 @@ export class DefinitionLists {
     return word;
   }
 
+  /**
+   * X6: a key's own events as the exact path reads them, by position in the dominator walk: the stores of the key, of
+   * the keys below it and of its prefixes outside block code, and the call sites where another callable stores it.
+   */
+  public ownEvents(key: Key): {
+    readonly stores: readonly number[];
+    readonly calls: readonly number[];
+  } {
+    const stores = [...this.#eventList(key)];
+    for (const prefix of prefixesOf(key)) stores.push(...this.definitionsOf(prefix).eventPositions);
+    this.#program.work.charge("eventSteps", sortCost(stores.length));
+    stores.sort((a, b) => a - b);
+    return {
+      stores: stores.filter((position, index) => index === 0 || stores[index - 1] !== position),
+      calls: this.index.ownedAway(key) ? this.index.sitePositions : [],
+    };
+  }
+
   /** The word of the first own event of a key strictly after `a` and not after `b`, or `null`. */
   public eventBetween(key: Key, a: FlowNode, b: FlowNode): ContextWord | null {
     return this.eventIn(key, this.spanBetween(a, b));
