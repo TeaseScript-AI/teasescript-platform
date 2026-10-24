@@ -504,8 +504,8 @@ class CoreAnswers implements Answers {
         const rest = path.slice(length);
         const stores = contract.prefixStores(keyOf(place, path.slice(0, length)));
         // the sources' own stores below their roots
-        for (const [, sources] of stores.subs ?? [])
-          for (const sub of sources) pending.push(keyOf(keyPlace(sub), [...keyPath(sub), ...rest]));
+        for (const sub of contract.subSources(stores))
+          pending.push(keyOf(keyPlace(sub), [...keyPath(sub), ...rest]));
         for (const entry of stores.list) {
           const at = [...(entry.at ?? []), ...rest];
           const inner =

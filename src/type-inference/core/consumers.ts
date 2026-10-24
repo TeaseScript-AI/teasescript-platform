@@ -508,7 +508,7 @@ export class Consumers {
         for (const entry of stored.list)
           if (offends(this.#run(contract.entryAt(entry, rest)))) take(entry.ds);
         for (const sub of contract.relevantSubs(stored, rest))
-          if (offends(this.#run(contract.subAt(sub, rest)))) take(stored.subDefs.get(sub) ?? []);
+          if (offends(this.#run(contract.subAt(sub.key, rest)))) take(sub.defs);
       }
       const ordered = [...candidates.values()].sort(
         (a, b) => this.#sourceOrder(a.d) - this.#sourceOrder(b.d),
@@ -1522,7 +1522,7 @@ export class Consumers {
       for (const entry of stored.list)
         if (!(lacks && has)) see(this.#run(contract.entryAt(entry, below)));
       for (const sub of contract.relevantSubs(stored, below))
-        if (!(lacks && has)) see(this.#run(contract.subAt(sub, below)));
+        if (!(lacks && has)) see(this.#run(contract.subAt(sub.key, below)));
     }
     const presence = { state: lacks ? (has ? "some" : "none") : "all", literal } as const;
     this.#presence.set(memoKey, presence);
