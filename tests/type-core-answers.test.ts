@@ -222,3 +222,25 @@ test("a property named as an internal step keeps its name in the answers (Astra 
     ["check that box is a object with a store of .element before the store"],
   );
 });
+
+test("a handle's own length is the runtime's member, its consumer's check kept (F14, F19a)", () => {
+  const read = (setup: string, text: string): string => {
+    const { answers, node } = analysed(`${setup}\nrepeat ${text} {}\nexit`);
+    const at = answers.at(node(text));
+    const diagnostics = answers.diagnostics.map((d) => `${d.kind} ${d.class}`).sort();
+    const checks = answers.checks.map((check) => check.kind).sort();
+    return `${at?.route}: ${at?.items.map((item) => item.tag).join(",")}; ${diagnostics.join(", ")}; ${checks.join(", ")}`;
+  };
+  const opaque =
+    "contract: unknown; integer-use warning-runtime-check, member-read warning-runtime-check; integer-check, null-check";
+  assert.deepEqual(
+    [
+      read("speaker vera { length: 2 }\nlet alias = vera", "alias.length"),
+      read("let alias = timer async hidden 1 s {}", "alias.length"),
+      read('let alias = say "hi"', "alias.length"),
+      // the ordinary member: the same
+      read("speaker vera { custom: 2 }\nlet alias = vera", "alias.custom"),
+    ],
+    [opaque, opaque, opaque, opaque],
+  );
+});

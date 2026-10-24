@@ -844,7 +844,8 @@ export class Contract {
         item.tag === "dict"
       ) {
         if (rest.length === 0) out.push(carried(makeItem("integer", item.writer), [item]));
-      } else if (item.tag === "object")
+      } else if (item.tag === "object" || REFERENCE.has(item.tag))
+        // an object's own `length` (F11), a reference's member (F19a)
         out.push(...(yield* this.contractOfValueAt(owner, [step, ...rest])));
       else if (item.tag === "unknown") out.push(item);
     }

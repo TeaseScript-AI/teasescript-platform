@@ -14,6 +14,7 @@ import {
   operatorOf,
   plusElements,
   RECEIVER,
+  REFERENCE,
   typedDefault,
   unknownItem,
   withoutMissing,
@@ -277,7 +278,8 @@ export class Values {
               [item],
             ),
           );
-      } else if (item.tag === "object") {
+      } else if (item.tag === "object" || REFERENCE.has(item.tag)) {
+        // an object's own `length` (F11), a reference's member (F19a)
         const own = yield* this.valueItems(owner, node, [step, ...rest]);
         out.push(...(item.cert === "def" ? own : weaken(own)));
       } else if (item.tag === "unknown") out.push(item);
