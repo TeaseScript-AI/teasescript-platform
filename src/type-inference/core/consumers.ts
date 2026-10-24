@@ -177,6 +177,15 @@ export function withConsumerOrder<T>(order: <U>(list: readonly U[]) => U[], call
   }
 }
 
+/** What C1's site walk reads of a value: a path step, or a choice's options and an option's selected value. */
+type ReadStep = string | typeof OPTIONS | typeof SELECT;
+
+/** The walk's step into a choice's options (no path step: a step name is never a symbol). */
+const OPTIONS: unique symbol = Symbol("options");
+
+/** The walk's step from a choice's option to its selected value (V30 §19). */
+const SELECT: unique symbol = Symbol("select");
+
 export class Consumers {
   readonly diagnostics: CoreDiagnostic[] = [];
   /** The values a consumer answered by the quiet path (§3.3). */
@@ -740,60 +749,43 @@ export class Consumers {
 
   /**
    * C1 with C9 r4.29 and r4.43: where external data a store brings enters, for its warning and check: the external
-   * value's own expression inside the stored literal at the path, along a choice's selected value, or inside a literal
-   * a projection reads, a projection below an external value keeping its site; else the store, as for a copy of a
-   * variable (r4.43's bound options). A choice's option is reached first, through the literals and the index and
-   * property projections around it, and only then selected (V30 §19: a list's or a set's elements are options, a
-   * choice object gives its `value`, or its `text` without one, any other option itself; a labelled option gives its
-   * label) and read at the path. The first in source order.
+   * value's own expression, found by applying to the stored value, step by step, what the store reads of it, the way the
+   * value transfer composes it: a literal's child for a path step, a projection's owner with the projection's step
+   * before the rest, a choice's options (a list's or a set's elements, else the argument itself; a labelled option gives
+   * its label) each selected (V30 §19: a choice object's `value`, or its `text` without one, else the option itself)
+   * before the rest, also where a choice is another choice's option or projected, and an external value's own site
+   * whatever remains. A variable read stops it: the store, as for a copy of a variable (r4.43's bound options). The first
+   * in source order.
    */
   #ingressSite(d: Definition, at: readonly string[]): SourceSite {
     const { program, definitions } = this.pass;
     if (d.kind !== "whole" || d.value === undefined) return d.site;
-    // a value read at `path`; `option`: the steps inside it that still lead to a choice's option, or `null` past it
-    interface Visit {
-      readonly value: PlaceId;
-      readonly path: readonly string[];
-      readonly option: readonly string[] | null;
-    }
-    const pending: Visit[] = [{ value: d.value, path: at, option: null }];
+    // a value and what remains to read of it: path steps, `OPTIONS` (the value holds a choice's options) and `SELECT`
+    // (the value is an option: its selected value)
+    const pending: (readonly [PlaceId, readonly ReadStep[]])[] = [[d.value, at]];
     while (pending.length > 0) {
-      const { value, path, option } = pending.pop()!;
+      const [value, steps] = pending.pop()!;
       program.work.charge("checks");
-      // the external expression itself, also where a projection reads below it (`hostValue.field`), an option's too
       if (definitions.ingress.has(value)) return program.place(value).site ?? d.site;
-      const next: Visit[] = [];
-      const literal = program.hasOf.has(value) || program.cellOwner.has(value);
-      if (literal && option !== null && option.length === 0) {
-        const elements = this.#literalChildren(value, "element");
-        if (elements.length > 0)
-          for (const child of elements) next.push({ value: child.value!, path, option: [] });
-        else {
+      const [step, ...rest] = steps;
+      const next: (readonly [PlaceId, readonly ReadStep[]])[] = [];
+      if (program.hasOf.has(value) || program.cellOwner.has(value)) {
+        if (step === OPTIONS) {
+          const elements = this.#literalChildren(value, "element");
+          if (elements.length === 0) next.push([value, [SELECT, ...rest]]);
+          for (const child of elements) next.push([child.value!, [SELECT, ...rest]]);
+        } else if (step === SELECT) {
           const valued = this.#literalChildren(value, "value");
           const selected = valued.length > 0 ? valued : this.#literalChildren(value, "text");
-          if (selected.length === 0) next.push({ value, path, option: null });
-          for (const child of selected) next.push({ value: child.value!, path, option: null });
-        }
-      } else if (literal) {
-        const steps = option ?? path;
-        if (steps.length > 0)
-          for (const child of this.#literalChildren(value, steps[0]!))
-            next.push(
-              option === null
-                ? { value: child.value!, path: steps.slice(1), option: null }
-                : { value: child.value!, path, option: steps.slice(1) },
-            );
+          if (selected.length === 0) next.push([value, rest]);
+          for (const child of selected) next.push([child.value!, rest]);
+        } else if (step !== undefined)
+          for (const child of this.#literalChildren(value, step)) next.push([child.value!, rest]);
       } else if (program.projOf.has(value)) {
         const projection = program.projOf.get(value)!;
-        if (projection.step !== "iteration") {
-          const step = stepName(projection.step);
-          next.push(
-            option === null
-              ? { value: projection.owner, path: [step, ...path], option: null }
-              : { value: projection.owner, path, option: [step, ...option] },
-          );
-        }
-      } else if (option === null) {
+        if (projection.step !== "iteration")
+          next.push([projection.owner, [stepName(projection.step), ...steps]]);
+      } else {
         const c = program.opOf.get(value);
         if (
           c?.kind === "operation" &&
@@ -802,7 +794,7 @@ export class Consumers {
         ) {
           const labels = choiceLabels(c);
           for (const [index, argument] of c.arguments.entries())
-            if (labels[index] === undefined) next.push({ value: argument, path, option: [] });
+            if (labels[index] === undefined) next.push([argument, [OPTIONS, ...steps]]);
         }
       }
       for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);

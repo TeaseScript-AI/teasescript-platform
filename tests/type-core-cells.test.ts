@@ -524,6 +524,20 @@ test("a choice's option reached through index and property projections is select
   );
   assert.deepEqual(sites('askChoice [{text: "A", value: hostValue.field}][0]'), at(52));
   assert.deepEqual(sites('askChoice {option: {text: "A", value: hostValue.field}}.option'), at(60));
+  // a choice as another choice's option (Astra B6-r4), beside its literal analogue; a returned choice object read
+  // through the outer choice's selection; a returned text-only option's length
+  assert.deepEqual(sites("askChoice [(askChoice [hostValue.field, 1]), 2]"), at(45));
+  assert.deepEqual(sites("[(askChoice [hostValue.field, 1]), 2][0]"), at(35));
+  assert.deepEqual(
+    sites(
+      '(askChoice [(askChoice {text: "inner", value: {text: hostValue.label, value: {text: hostValue.field}}})]).text',
+    ),
+    at(106),
+  );
+  assert.deepEqual(
+    sites('(askChoice [(askChoice {text: "inner", value: {text: hostValue.label}})]).length'),
+    at(75),
+  );
   // the controls: the literal analogues and the direct choice object
   assert.deepEqual(
     sites("[{text: hostValue.label, value: {text: hostValue.field}}][0].value.text"),
@@ -537,6 +551,85 @@ test("a choice's option reached through index and property projections is select
     sites("(askChoice {text: hostValue.label, value: {text: hostValue.field}}).text"),
     at(71),
   );
+});
+
+test("C1's site follows a choice's selection as its value does, over options, wrappers, nesting and paths (Astra B6-r4)", () => {
+  // the C1 sites of `let chosen: integer = <expression>`, in both orders: the n-th `hostValue`, the store, or none
+  const sites = (expression: string): string[] => {
+    const source = `let chosen: integer = ${expression}\nexit`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, expression);
+    const both = [false, true].map((reversed) => {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const offsets = [
+        ...record.diagnostics.filter((d) => d.kind === "written-target").map((d) => d.site.offset),
+        ...record.checks
+          .filter((check) => check.kind === "copy-type")
+          .map((check) => check.site.offset),
+      ];
+      return offsets.map((offset) =>
+        source.startsWith("hostValue", offset)
+          ? `hostValue #${source.slice(0, offset).split("hostValue").length - 1}`
+          : offset === 22
+            ? "the store"
+            : `@${offset}`,
+      );
+    });
+    assert.deepEqual(both[1], both[0], `${expression}: both orders`);
+    return both[0]!;
+  };
+  // option kinds, with the step that selects their value (V30 §19)
+  const kinds: readonly (readonly [string, string, boolean])[] = [
+    ["hostValue", "", true],
+    ["hostValue.field", "", true],
+    ['{text: "A", value: hostValue.field}', ".value", true],
+    ["{text: hostValue.label}", ".text", true],
+    ['{text: "A", value: 3}', ".value", false],
+  ];
+  const wrappers: readonly ((option: string) => string)[] = [
+    (option) => option,
+    (option) => `[${option}][0]`,
+    (option) => `{option: ${option}}.option`,
+    (option) => `{option: [${option}]}.option[0]`,
+  ];
+  // a choice over the wrapped option, and its literal analogue: the same selection written as projections
+  const nestings: readonly (readonly [
+    (w: string) => string,
+    (w: string, select: string) => string,
+  ])[] = [
+    [(w) => `askChoice [${w}]`, (w, select) => `[${w}][0]${select}`],
+    [(w) => `askChoice [(askChoice [${w}])]`, (w, select) => `[[${w}][0]${select}][0]`],
+    [
+      (w) => `askChoice [(askChoice {text: "inner", value: ${w}})]`,
+      (w, select) => `[{text: "inner", value: ${w}}.value${select}][0]`,
+    ],
+  ];
+  const differing: string[] = [];
+  let external = 0;
+  for (const [option, select, isExternal] of kinds)
+    for (const wrap of wrappers)
+      for (const [choice, analogue] of nestings)
+        for (const path of ["", ".text", ".length"]) {
+          const chosen = `(${choice(wrap(option))})${path}`;
+          const literal = `(${analogue(wrap(option), select)})${path}`;
+          const expected = sites(literal);
+          if (
+            isExternal &&
+            expected.every((site) => site === "hostValue #0") &&
+            expected.length > 0
+          )
+            external += 1;
+          const got = sites(chosen);
+          if (JSON.stringify(got) !== JSON.stringify(expected))
+            differing.push(
+              `${chosen}: ${got.join(", ")} (its literal analogue: ${expected.join(", ")})`,
+            );
+        }
+  assert.deepEqual(differing, []);
+  // every external option's analogue sites C1 at its own external expression: 4 kinds × 4 wrappers × 3 × 3
+  assert.equal(external, 144);
 });
 
 test("the core gives the expected outcome for the programs beside the set", () => {
