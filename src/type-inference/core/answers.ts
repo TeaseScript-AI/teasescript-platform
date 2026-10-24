@@ -1,7 +1,7 @@
 import { NULL_TYPE, UNKNOWN_TYPE, isScalarKind, type StaticType } from "../../static-types.js";
 import { VALUE_KINDS, type PlainKind, type ValueKind } from "../../value-kinds.js";
 import type { OperandView } from "../adapters/relation.js";
-import type { DynamicWhy, PlaceId } from "../graph.js";
+import type { DynamicWhy, PlaceId, SourceSite } from "../graph.js";
 import { BudgetExhausted, checkNesting, type BudgetLimit, type WorkCounter } from "./budget.js";
 import { Consumers } from "./consumers.js";
 import {
@@ -193,6 +193,11 @@ export interface Answers {
     readonly parameters: readonly PlaceId[];
     readonly results: readonly PlaceId[];
   };
+  /**
+   * The input of the known values (S3 §2, group V): each read of an unwritten `let` or `global` that counts as its
+   * initializer, by the read's site key, with the initializer's site (the collector's links; no type answer).
+   */
+  readonly initializers: ReadonlyMap<string, SourceSite>;
   at(node: FlowNode): OccurrenceAnswer | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
   /** The occurrence answer at a path step below a value: a collection's `element`, a dict's `entry`, a property. */
@@ -341,6 +346,17 @@ function dynamicWhy(reasons: number): DynamicWhy {
   return (reasons & REASON.external) !== 0 ? "host" : "unknown member";
 }
 
+/** The collector's known-value links: each linked read's site key, with its initializer's site. */
+function initializersOf(program: CoreProgram): Map<string, SourceSite> {
+  const links = new Map<string, SourceSite>();
+  for (const c of program.constraints)
+    if (c.kind === "knownValue") {
+      const site = program.places[c.occurrence]?.site;
+      if (site !== null && site !== undefined) links.set(siteKey(site), c.initializer);
+    }
+  return links;
+}
+
 /**
  * The answers of an analysis stopped before its consumers ran (TABLE §8): `budget-error` with no diagnostics, the
  * graph and the ledger as far as they came; each question raises the stop again, as a question after any stop does.
@@ -353,11 +369,13 @@ class StoppedAnswers implements Answers {
   readonly dominators: Dominators;
   readonly budget: BudgetAnswer;
   readonly deferred = { parameters: [], results: [] };
+  readonly initializers: ReadonlyMap<string, SourceSite>;
   readonly #limit: BudgetLimit;
 
   public constructor(program: CoreProgram, limit: BudgetLimit) {
     this.graph = program.flow;
     this.dominators = program.dom;
+    this.initializers = initializersOf(program);
     this.#limit = limit;
     this.budget = {
       total: program.work.total,
@@ -408,6 +426,7 @@ class CoreAnswers implements Answers {
     readonly parameters: readonly PlaceId[];
     readonly results: readonly PlaceId[];
   };
+  readonly initializers: ReadonlyMap<string, SourceSite>;
   readonly #pass: CorePass;
   readonly #consumers: Consumers;
   readonly #obligations = new Map<string, Obligation[]>();
@@ -419,6 +438,7 @@ class CoreAnswers implements Answers {
     const program = pass.program;
     this.graph = program.flow;
     this.dominators = program.dom;
+    this.initializers = initializersOf(program);
     this.diagnostics = exhausted === null ? [...consumers.diagnostics] : [];
     this.outcome = exhausted === null ? outcomeOf(this.diagnostics) : "budget-error";
     // each warning's obligation, one per warning (§4), then the boundary checks no warning owes
