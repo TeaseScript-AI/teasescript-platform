@@ -9,10 +9,10 @@ import { recordDifferences, type CompactRecord } from "./helpers/type-core-recor
  * The coarse core against its independent expectation set (checkpoint 9, TABLE §10.2, §10.5; the port plan's §3.1):
  * per record the outcome, the diagnostics as (kind, class, site, asserted context) and the checks as (kind, target,
  * required kinds, boundary, site) multisets. The step that builds the core's analysis (M4 S4) completes the cells
- * below; a record is asserted when every cell it tests is among them. Admission (A2–A9), the boundary checks of
- * external data (C9), fallbacks and defaults (C10), saves (C8), loads (F18, F19), the adapters' cell (C13), the
- * budget's fallback (B1), stage 3b (§13), and the cells and work families that measure admission (F28, S5, S6, P1, H8;
- * W3, W5, W15, W26) join with their steps.
+ * below; a record is asserted when every cell it tests is among them. Admission (A2–A8; A1 and A9, against written
+ * types, are S4's), the boundary checks of external data (C9), fallbacks and defaults (C10), saves (C8), loads (F18,
+ * F19), the adapters' cell (C13), the budget's fallback (B1), stage 3b (§13), and the cells and work families that
+ * measure admission (F28, S5, S6, P1, H8; W3, W5, W15, W26) join with their steps.
  */
 const COMPLETED: ReadonlySet<string> = new Set([
   // the transfers (§2)
@@ -21,8 +21,8 @@ const COMPLETED: ReadonlySet<string> = new Set([
   ...["F25", "F26a", "F26b", "F27a", "F27b", "F27c"],
   // the reads (§3): the exact path, the contract with its guard mark, the quiet path, the context words
   ...["X1", "X2", "X3", "X4", "X5", "X6", "X7", "R", "§3.2", "§3.3", "§3.4"],
-  // the consumers (§4), C1 and C7 against written types
-  ...["C1", "C2", "C3", "C4", "C5", "C5a", "C5b", "C5c", "C6", "C7", "C11", "C12"],
+  // the consumers (§4), C1 and C7 against written types, and admission against written types (A1, A9)
+  ...["C1", "C2", "C3", "C4", "C5", "C5a", "C5b", "C5c", "C6", "C7", "C11", "C12", "A1", "A9"],
   // ownership and placement (§6), the exact answers (§7), the graph's rules (G1), the result's names (§10.5)
   ...[
     "O1",
