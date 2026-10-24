@@ -723,11 +723,29 @@ export class Contract {
     );
   }
 
-  /** A projected source's stores below its path start after the path. */
+  /**
+   * A projected source's stores below its path start after the path: a demand, once per source and path, whatever
+   * number of its copies read there (r4.46 (3)).
+   */
   public *subAt(sub: Key, rest: readonly string[]): Work<readonly Item[]> {
-    this.pass.program.work.charge("invSteps");
+    const site = this.pass.program.places[keyPlace(sub)]?.site ?? null;
+    return yield {
+      key: `s|${sub}|${rest.join(".")}`,
+      kind: "contract",
+      file: site?.file ?? -1,
+      offset: site?.start ?? -1,
+      make: () => this.#subAt(sub, rest),
+    };
+  }
+
+  *#subAt(sub: Key, rest: readonly string[]): Work<readonly Item[]> {
+    const { program } = this.pass;
+    program.work.charge("invSteps");
     const base = keyPath(sub);
-    return yield* this.#contractAlong(keyPlace(sub), [...base, ...rest], base.length + 1);
+    return mergeItems(
+      yield* this.#contractAlong(keyPlace(sub), [...base, ...rest], base.length + 1),
+      program.scope,
+    );
   }
 
   /** The kinds at a path of a value: a literal's field, a copied record's field. */
@@ -1733,22 +1751,20 @@ export class Contract {
     return layer;
   }
 
-  /** The layer a projected copy of `place` at `projection` takes: the place's own live stores below the path, once. */
+  /**
+   * The layer a projected copy of `place` at `projection` takes: the place's own live stores below the path, once, from
+   * the keys below the path alone (r4.46 (3): never the place's whole key set per copy).
+   */
   #projectedLayer(place: PlaceId, projection: readonly string[]): SubLayer | null {
     const id = `${place}|${projection.join(".")}`;
     if (this.#projectedLayers.has(id)) return this.#projectedLayers.get(id)!;
     const { program, definitions, lists } = this.pass;
     const sub = keyOf(place, projection);
     const own = new Map<string, Set<Key>>();
-    for (const below of this.#keysOfPlace(place)) {
-      const path = keyPath(below);
+    for (const below of definitions.keysBelow(sub)) {
       program.work.charge("invSteps");
-      if (
-        path.length > projection.length &&
-        projection.every((step, index) => path[index] === step) &&
-        (definitions.byKey.get(below) ?? []).some((d) => lists.live(d))
-      )
-        own.set(path[projection.length]!, new Set([sub]));
+      if ((definitions.byKey.get(below) ?? []).some((d) => lists.live(d)))
+        own.set(keyPath(below)[projection.length]!, new Set([sub]));
     }
     const layer = this.#layer(own, null);
     this.#projectedLayers.set(id, layer);
@@ -1806,22 +1822,17 @@ export class Contract {
     return at;
   }
 
-  /** The relative paths of a source's live keys below it, once per source. */
+  /** The relative paths of a source's live keys below it, once per source, from the keys below it alone (r4.46 (3)). */
   #ownPaths(sub: Key): ReadonlySet<string> {
     const known = this.#subPaths.get(sub);
     if (known !== undefined) return known;
     const { program, definitions, lists } = this.pass;
     const paths = new Set<string>();
     const base = keyPath(sub);
-    for (const below of this.#keysOfPlace(keyPlace(sub))) {
-      const path = keyPath(below);
+    for (const below of definitions.keysBelow(sub)) {
       program.work.charge("invSteps");
-      if (
-        path.length > base.length &&
-        base.every((step, index) => path[index] === step) &&
-        (definitions.byKey.get(below) ?? []).some((d) => lists.live(d))
-      )
-        paths.add(path.slice(base.length).join("."));
+      if ((definitions.byKey.get(below) ?? []).some((d) => lists.live(d)))
+        paths.add(keyPath(below).slice(base.length).join("."));
     }
     this.#subPaths.set(sub, paths);
     return paths;

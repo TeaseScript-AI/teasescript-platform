@@ -248,7 +248,7 @@ export function solveDemands(
 }
 
 /**
- * The computation that demands `key` (`c|`, `rc|`, `cv|`, `def|`, `cop|`, `lit|`, `op|`, `dk|`, `dn|`, `vdk|`,
+ * The computation that demands `key` (`c|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `lit|`, `op|`, `dk|`, `dn|`, `vdk|`,
  * `vdn|`, as the parts write them).
  */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
@@ -257,6 +257,10 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   switch (kind) {
     case "c":
       return contract.contractOf(parts.join("|"));
+    case "s": {
+      const rest = parts[2] === "" || parts[2] === undefined ? [] : parts[2].split(".");
+      return contract.subAt(`${parts[0]}|${parts[1] ?? ""}`, rest);
+    }
     case "rc":
       return contract.receiverKinds(parts.join("|"));
     case "cv":

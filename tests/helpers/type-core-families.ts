@@ -527,6 +527,24 @@ function w41(k: number, terminal: "return" | "exit" | "end"): readonly SourceFil
   ];
 }
 
+/**
+ * One root with k sibling fields, each stored, projected into its own variable and read through it (#1026): a record's
+ * fields, a dict's values under computed keys, or fields stored and read two steps below the projection.
+ */
+function w44(k: number, variant: "fields" | "dict" | "deep"): string {
+  const below = variant === "deep" ? ".g.v" : ".v";
+  const field = (i: number): string => (variant === "dict" ? `[key${i}]` : `.f${i}`);
+  return lines(
+    variant === "dict"
+      ? `let root = dict{${fields(k, () => "{v: 1}")}}`
+      : `let root = {${fields(k, () => (variant === "deep" ? "{g: {v: 1}}" : "{v: 1}"))}}`,
+    ...(variant === "dict" ? [rows(k, (i) => `let key${i} = "f${i}"`)] : []),
+    rows(k, (i) => `root${field(i)}${below} = 2`),
+    rows(k, (i) => `let p${i} = root${field(i)}\nrepeat p${i}${below} {}`),
+    "exit",
+  );
+}
+
 export const WORK_FAMILIES: readonly WorkFamily[] = [
   {
     name: "W1",
@@ -874,6 +892,11 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
       file("tail.tease", "end"),
     ],
   },
+  ...(["fields", "dict", "deep"] as const).map((variant) => ({
+    name: `W44-${variant}`,
+    measures: "r4.46 (3): a projected copy's stores found below its path alone",
+    program: (k: number) => main(w44(k, variant)),
+  })),
 ];
 
 /** A W34 chain: a k-field record replaced by one of nulls under the flag, k whole copies, the last read at k fields. */
