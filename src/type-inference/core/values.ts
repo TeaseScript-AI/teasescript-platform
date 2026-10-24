@@ -370,6 +370,9 @@ export class Values {
             : possible;
         }),
       ];
+    } else if (c.kind === "get" && heldReference(yield* contract.valueReceiver(c.receiver))) {
+      // F19a before F17b: a receiver that may be a reference has the runtime's `get`, no default merged beside it
+      out = [OPAQUE_MEMBER];
     } else if (c.kind === "get") {
       const receiver = withoutEmpty(yield* this.valueItems(c.receiver, at, ["element", ...rest]));
       const fallbackAt = program.exprAt(program.places[c.fallback]?.site ?? c.site);

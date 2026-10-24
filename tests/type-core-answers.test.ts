@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
+import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
+import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 
 /**
@@ -288,5 +290,44 @@ test("a receiver that may be a reference answers by F19a before its exact value 
       `contract: ${opaque}`,
       "value: unknown; member-read warning-runtime-check; null-check",
     ],
+  );
+});
+
+test("a `get` on a receiver that may be a reference is the runtime's, no default beside it (F19a before F17b)", () => {
+  const vera = "speaker vera { length: 2 }\n";
+  const read = (setup: string, call: string, after: string): string[] =>
+    [false, true].map((reversed) => {
+      const source = `${vera}${setup}\nrepeat ${call} {}\n${after}exit`;
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null, source);
+      const run = (): Answers =>
+        withSolverSeam({ reverseWorklist: reversed }, () => analyseCore(request));
+      const answers = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const node = answers.graph.nodes.find(
+        (candidate) =>
+          candidate.kind === "expression" &&
+          candidate.span !== null &&
+          source.slice(candidate.span.start.offset, candidate.span.end.offset) === call,
+      );
+      assert.ok(node !== undefined, call);
+      const at = answers.at(node);
+      const diagnostics = answers.diagnostics.map((d) => `${d.kind} ${d.class}`).sort();
+      const checks = answers.checks.map((check) => check.kind).sort();
+      return `${at?.route}: ${at?.items.map((item) => item.tag).join(",")}; ${diagnostics.join(", ")}; ${checks.join(", ")}`;
+    });
+  const opaque =
+    "value: unknown; integer-use warning-runtime-check, member-read warning-runtime-check; integer-check, null-check";
+  const got: string[] = [];
+  for (const [setup, after] of [
+    ["let alias: integer[]|speaker = [1]", ""],
+    ["let alias = [1]", "alias = vera\n"],
+    ["let alias = vera", ""],
+  ] as const)
+    for (const call of ['alias.get(0, default: "bad")', "alias.get(0)"])
+      got.push(...read(setup, call, after));
+  // three receivers, with and without a default, in both orders
+  assert.deepEqual(
+    got,
+    Array.from({ length: 12 }, () => opaque),
   );
 });

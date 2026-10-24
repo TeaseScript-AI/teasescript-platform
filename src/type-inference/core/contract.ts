@@ -886,6 +886,9 @@ export class Contract {
       );
       return mergeItems([...left, ...(yield* this.contractOfValueAt(c.right, rest))], scope);
     }
+    // F19a before F17b: a receiver that may be a reference has the runtime's `get`, no default merged beside it
+    if (c.kind === "get" && heldReference(yield* this.valueReceiver(c.receiver)))
+      return [unknownItem(REASON.opaque)];
     if (c.kind === "get")
       return mergeItems(
         [
