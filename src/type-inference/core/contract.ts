@@ -136,17 +136,30 @@ export const RECEIVER: Decision = {
 };
 
 /**
- * Whether a receiver's item may hold something a structural step below reads: not a scalar, `null`, a reference kind or
- * the runtime's opaque member (an unknown for no other reason), whose members are the runtime's (F19a).
+ * Whether a receiver's item has a structure a step below is read from, through the stores into it: a record or a
+ * collection. A scalar or `null` has none; a reference's members are the runtime's (F19a); an unknown's members are
+ * unknown for its own reasons, from its own ingress (`belowUnknown`), whatever those reasons are.
  */
 function holdsBelow(item: Item): boolean {
-  if (item.tag === "unknown") return item.reasons !== REASON.opaque;
   return (
+    item.tag !== "unknown" &&
     item.tag !== "empty" &&
     item.tag !== "null" &&
     !isScalarKind(item.tag) &&
     !REFERENCE.has(item.tag)
   );
+}
+
+/** What a step below an unknown holds: an unknown for the same reasons, from the same ingress (F15, C9). */
+function belowUnknown(item: Item): Item {
+  return makeItem("unknown", item.writer, {
+    cert: item.cert,
+    reasons: item.reasons,
+    context: item.context,
+    ...(item.ingress === undefined ? {} : { ingress: item.ingress }),
+    ...(item.loose === true ? { loose: true } : {}),
+    ...(item.guarded === true ? { guarded: true } : {}),
+  });
 }
 
 /** F19a (r4.44): whether a receiver's kinds, as a `RECEIVER` demand answers them, are a reference's. */
@@ -500,11 +513,8 @@ export class Contract {
       }
     }
     const along = yield* this.#contractAlong(place, path, 0, receiver.floor);
-    // below a prefix that holds a reference or the runtime's member, the runtime's member (F19a)
-    return mergeItems(
-      receiver.opaque ? [...along, unknownItem(REASON.opaque)] : along,
-      program.scope,
-    );
+    // below a prefix without a structure, what its unknowns and references hold there
+    return mergeItems([...along, ...receiver.below], program.scope);
   }
 
   /** The contract's answer to a read (§3.2): every kind as an item, definite only by P3; the read's word. */
@@ -562,30 +572,38 @@ export class Contract {
   /**
    * One walk of a key's receivers (its prefixes, each a `RECEIVER` demand): whether one is decided a reference's
    * (F19a, r4.44), and else the longest prefix whose kinds hold nothing a step below can be read from (none yet, or
-   * only scalars, `null`, reference kinds and the runtime's opaque members, whose members are the runtime's), -1 for
-   * none, and whether it holds a reference or such a member (`opaque`: what a path below it holds is the runtime's). A
-   * path below such a value holds nothing else, so the contract asks no shorter prefix's stores: a recursive projection
-   * waits for its receiver's answer instead of asking ever deeper paths through it before its component can close
-   * (Astra B2, and the open solve of r4.44, which reads every receiver as a record); the read reruns when the prefix
-   * gains a kind that holds the step (C5 reports a member read the kinds lack).
+   * only scalars, `null`, reference kinds and unknowns: no record or collection, `holdsBelow`), -1 for none, and what
+   * a path below it holds instead (`below`: each unknown's own, `belowUnknown`, and a reference's member, the
+   * runtime's). A path below such a value holds nothing else, so the contract asks no shorter prefix's stores: the
+   * stores through a prefix are followed only for its record and collection alternatives, so a recursive projection is
+   * not followed below a receiver without one (Astra B2, B2-r2, and the open solve of r4.44, which reads every receiver
+   * as a record); the read reruns when the prefix gains a kind with a structure (C5 reports a member read the kinds
+   * lack).
    */
   *#receiver(
     key: Key,
-  ): Work<{ readonly reference: boolean; readonly floor: number; readonly opaque: boolean }> {
+  ): Work<{
+    readonly reference: boolean;
+    readonly floor: number;
+    readonly below: readonly Item[];
+  }> {
     const place = keyPlace(key);
     const path = keyPath(key);
     let floor = -1;
-    let opaque = false;
+    let below: readonly Item[] = [];
     for (let length = 0; length < path.length; length += 1) {
       this.pass.program.work.charge("invSteps");
       const items = yield* this.receiverKinds(keyOf(place, path.slice(0, length)));
-      if (heldReference(items)) return { reference: true, floor, opaque };
+      if (heldReference(items)) return { reference: true, floor, below };
       if (!items.some(holdsBelow)) {
         floor = length;
-        opaque = items.some((item) => item.tag === "unknown" || REFERENCE.has(item.tag));
+        below = [
+          ...items.filter((item) => item.tag === "unknown").map(belowUnknown),
+          ...(items.some((item) => REFERENCE.has(item.tag)) ? [unknownItem(REASON.opaque)] : []),
+        ];
       }
     }
-    return { reference: false, floor, opaque };
+    return { reference: false, floor, below };
   }
 
   /** A receiver's contract as a demand of its own, with F19a's decision whether it is a reference's (r4.44). */

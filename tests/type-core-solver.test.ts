@@ -289,8 +289,9 @@ test("a recursive projection of a reference or a record closes its component", (
 const NARRATOR = 'speaker narrator { value: "Hello" }\n';
 
 /**
- * Programs whose receiver gains a reference kind only round its own cycle (r4.44), one whose receiver holds a reference
- * from outside the cycle beside a record round it, and the record-only control, with their diagnostics.
+ * Programs whose receiver gains a reference kind only round its own cycle (r4.44), whose receiver holds a reference from
+ * outside the cycle beside a record, a nested record or an external leaf round it (B2, B2-r2), and the record-only
+ * control, with their diagnostics.
  */
 const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[] = [
   [
@@ -319,6 +320,26 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
     ["integer-use f(false)", "integer-use f(false)", "member-read g(true)", "member-read g(true)"],
   ],
   [
+    "a reference returned or read further round the cycle (Astra B2)",
+    "speaker narrator { custom: 1 }\nfunction f(flag: boolean) {\n  if flag { return narrator }\n  return f(true).custom\n}\nrepeat f(false) {}\nexit",
+    ["integer-use f(false)", "integer-use f(false)", "member-read f(true)", "member-read f(true)"],
+  ],
+  [
+    "a reference from outside the cycle beside a nested record round it",
+    "speaker narrator { custom: 1 }\nfunction g(flag: boolean) {\n  if flag { return narrator }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return {custom: {custom: 1}} }\n  return g(true).custom\n}\nrepeat f(false) {}\nexit",
+    ["integer-use f(false)", "integer-use f(false)", "member-read g(true)", "member-read g(true)"],
+  ],
+  [
+    "a reference from outside the cycle beside a loaded leaf round it (B2-r2)",
+    'speaker narrator { custom: 1 }\nfunction g(flag: boolean) {\n  if flag { return narrator }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return {custom: fromJson("1", default: null, files: false)} }\n  return g(true).custom\n}\nrepeat f(false) {}\nexit',
+    ["integer-use f(false)", "integer-use f(false)", "member-read g(true)", "member-read g(true)"],
+  ],
+  [
+    "a reference from outside the cycle beside a host value round it (B2-r2)",
+    "speaker narrator { custom: 1 }\nfunction g(flag: boolean) {\n  if flag { return narrator }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return {custom: hostValue} }\n  return g(true).custom\n}\nrepeat f(false) {}\nexit",
+    ["integer-use f(false)", "integer-use f(false)", "member-read g(true)", "member-read g(true)"],
+  ],
+  [
     "the record-only control",
     "function g(flag: boolean) {\n  if flag { return {custom: 2} }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return {custom: 1} }\n  return g(true).custom\n}\nrepeat f(false) {}\nexit",
     ["integer-use f(false)", "member-read g(true)"],
@@ -327,13 +348,14 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
 
 /**
  * r4.44: F19a's test of a receiver is a decision of its component, made once on the completed open solve (every
- * receiver read as a record, a prefix that holds only references or the runtime's members holding nothing below) and
- * held for the second, so a reference that reaches its receiver only round its own cycle makes the access opaque: a
- * warning with its runtime obligations; a reference from outside the cycle keeps its ordinary answer. The first three
- * stopped with `budget-error` on `2941d76d8` under a 10,000-unit allowance (with no component closed) and at the real
- * allowance after 4 to 20 s; the fourth on `30477f011` (the open solve asked ever deeper paths below the runtime's
- * member) where `2941d76d8` took 809 and 843 units. Here, in the two orders: 1,482 and 1,502; 1,482 and 1,486; 1,372
- * and 1,422; 1,870 and 1,568; the record-only control 1,281 and 1,248 units (1,070 and 1,128 on `2941d76d8`).
+ * receiver read as a record) and held for the second, so a reference that reaches its receiver only round its own cycle
+ * makes the access opaque: a warning with its runtime obligations; a reference from outside the cycle keeps its ordinary
+ * answer. B2, B2-r2: the stores through a receiver are followed only for its records and collections, its unknowns
+ * projected with their own reasons and ingress and its references the runtime's, so the open solve is finite whatever
+ * the leaf. On `2941d76d8` the first three stopped with `budget-error` (4 to 20 s at the real allowance); on
+ * `30477f011` the fourth; on `5a10f3a27` the loaded and host leaves. Here, in the two orders: 1,498 and 1,518; 1,498 and
+ * 1,502; 1,412 and 1,319; 1,871 and 1,568; 669 and 643; 3,078 and 2,575; 1,987 and 1,681; 1,877 and 1,576; the
+ * record-only control 1,288 and 1,255 units.
  */
 test("a reference that reaches its receiver only round its own cycle is decided once, its access opaque", () => {
   const got: string[] = [];
@@ -366,4 +388,29 @@ test("a reference that reaches its receiver only round its own cycle is decided 
   }
   assert.deepEqual(got, want);
   assert.deepEqual(differing, []);
+});
+
+test("an external value read below its record without a cycle keeps its reasons and ingress (B2-r2's control)", () => {
+  const source =
+    "function f(flag: boolean) {\n  return {custom: hostValue}\n}\nrepeat f(true).custom.custom {}\nexit";
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const got = [false, true].map((reversed) => {
+    const run = (): ReturnType<typeof analyseCore> =>
+      withSolverSeam({ reverseWorklist: reversed }, () => analyseCore(request));
+    const answers = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+    return answers.diagnostics
+      .map((d) => `${d.kind} ${d.class} ${source.slice(d.site.start, d.site.end)}`)
+      .sort();
+  });
+  const want = [
+    "integer-use warning-runtime-check f(true).custom.custom",
+    "member-read warning-runtime-check f(true).custom",
+  ];
+  assert.deepEqual(got, [want, want]);
+  const record = compactAnalysis(request);
+  assert.deepEqual(
+    record.diagnostics.map((d) => d.context),
+    record.diagnostics.map(() => "unknown"),
+  );
 });
