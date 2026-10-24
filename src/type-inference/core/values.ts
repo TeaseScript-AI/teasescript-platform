@@ -6,13 +6,14 @@ import {
   conversionKind,
   defaultOf,
   emptyAt,
+  heldReference,
   ingressNull,
   isMissing,
   ONLY_NULL,
   OPAQUE_MEMBER,
   operatorOf,
   plusElements,
-  REFERENCE,
+  RECEIVER,
   typedDefault,
   unknownItem,
   withoutMissing,
@@ -429,6 +430,19 @@ export class Values {
     };
   }
 
+  /** A method's receiver's value at `at` as a demand of its own, with F19a's decision (r4.44). */
+  public *methodReceiver(receiver: PlaceId, at: FlowNode | null): Work<readonly Item[]> {
+    const site = this.pass.program.places[receiver]?.site ?? null;
+    return yield {
+      key: `vm|${receiver}|${at?.id ?? "-"}`,
+      kind: "value",
+      file: site?.file ?? -1,
+      offset: site?.start ?? -1,
+      make: () => this.valueItems(receiver, at, []),
+      decision: RECEIVER,
+    };
+  }
+
   *#operation(
     c: Extract<ValueConstraint, { readonly kind: "operation" }>,
     at: FlowNode | null,
@@ -437,11 +451,13 @@ export class Values {
     const { program, contract } = this.pass;
     const { family, name } = c.contract;
     const out: Item[] = [];
-    if (family === "method" && c.receiver !== null) {
-      // F19a: a reference's method is opaque
-      const receiver = yield* this.valueItems(c.receiver, at, []);
-      if (receiver.some((item) => REFERENCE.has(item.tag))) return [OPAQUE_MEMBER];
-    }
+    // F19a: a reference's method is opaque, a decision of its component (r4.44)
+    if (
+      family === "method" &&
+      c.receiver !== null &&
+      heldReference(yield* this.methodReceiver(c.receiver, at))
+    )
+      return [OPAQUE_MEMBER];
     // F26b (r5): `"${v}"` is always text
     if (family === "interpolation") return rest.length === 0 ? [makeItem("string")] : [];
     // a message's handle (F19a)

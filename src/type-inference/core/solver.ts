@@ -18,8 +18,9 @@ import { itemsSignature, type IngressCell, type Item, type ItemScope } from "./i
  * the reverse order).
  *
  * That needs answers monotone in what they read. A choice that is not (a `Decision`: F18/F19's default without kinds
- * gives `unknown`) is made on a completed input: at once outside every component; inside one, the component is solved
- * first with every choice open and, where a choice then changes an answer, again from bottom with the choices held.
+ * gives `unknown`; F19a's receiver that holds a reference kind has opaque members) is made on a completed input: at
+ * once outside every component; inside one, the component is solved first with every choice open and, where a choice
+ * then changes an answer, again from bottom with the choices held (r4.40, r4.44).
  */
 
 /** What a demand asks, which orders the members of one component at one site (S3 §1). */

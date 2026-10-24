@@ -120,6 +120,26 @@ export const OWN_SELECTION: Item = Object.freeze(
 /** F19a: a reference's member, the runtime's. */
 export const OPAQUE_MEMBER: Item = OWN_SELECTION;
 
+/** F19a (r4.44): what a receiver's kinds hold beside them where its component decided it a reference (`RECEIVER`). */
+const HELD_REFERENCE: Item = Object.freeze(makeItem("unknown", null, { reasons: REASON.opaque }));
+
+/**
+ * F19a (r4.44): a receiver's kinds (the input) and the choice, on its completed kinds, whether it holds a reference
+ * kind, whose members are opaque: `HELD_REFERENCE` beside its kinds where it does. Inside a component it is made once
+ * on the completed open solve, in which every receiver is read as a record (a prefix that holds only reference kinds
+ * holds nothing a step below), and held for the second; so a receiver whose reference comes only round its own cycle
+ * is a reference's.
+ */
+export const RECEIVER: Decision = {
+  choose: (input) => (input.some((item) => REFERENCE.has(item.tag)) ? "reference" : "other"),
+  answer: (choice, input) => (choice === "reference" ? [...input, HELD_REFERENCE] : input),
+};
+
+/** F19a (r4.44): whether a receiver's kinds, as a `RECEIVER` demand answers them, are a reference's. */
+export function heldReference(items: readonly Item[]): boolean {
+  return items.includes(HELD_REFERENCE);
+}
+
 /** The collector's operation of an operator: unary minus is the table's `neg`. */
 export function operatorOf(constraint: ValueConstraint): Operator | null {
   if (constraint.kind !== "operation") return null;
@@ -521,11 +541,12 @@ export class Contract {
   }
 
   /**
-   * One walk of a key's receivers: whether one holds a reference kind (F19a), and else the longest prefix whose kinds
-   * hold nothing a step below can be read from (none yet, or only scalars and `null`), -1 for none. A path below such a
-   * value holds nothing, so the contract asks no shorter prefix's stores: a recursive projection waits for its
-   * receiver's answer instead of asking ever deeper paths through it before its component can close (Astra B2); the
-   * read reruns when the prefix gains a kind that holds the step (C5 reports a member read the kinds lack).
+   * One walk of a key's receivers (its prefixes, each a `RECEIVER` demand): whether one is decided a reference's
+   * (F19a, r4.44), and else the longest prefix whose kinds hold nothing a step below can be read from (none yet, or
+   * only scalars, `null` and reference kinds, whose members are F19a's), -1 for none. A path below such a value holds
+   * nothing, so the contract asks no shorter prefix's stores: a recursive projection waits for its receiver's answer
+   * instead of asking ever deeper paths through it before its component can close (Astra B2); the read reruns when the
+   * prefix gains a kind that holds the step (C5 reports a member read the kinds lack).
    */
   *#receiver(key: Key): Work<{ readonly reference: boolean; readonly floor: number }> {
     const place = keyPlace(key);
@@ -533,18 +554,47 @@ export class Contract {
     let floor = -1;
     for (let length = 0; length < path.length; length += 1) {
       this.pass.program.work.charge("invSteps");
-      const items = yield* this.contractOf(keyOf(place, path.slice(0, length)));
-      if (items.some((item) => REFERENCE.has(item.tag))) return { reference: true, floor };
+      const items = yield* this.receiverKinds(keyOf(place, path.slice(0, length)));
+      if (heldReference(items)) return { reference: true, floor };
       if (
         !items.some(
           (item) =>
             item.tag === "unknown" ||
-            (item.tag !== "empty" && item.tag !== "null" && !isScalarKind(item.tag)),
+            (item.tag !== "empty" &&
+              item.tag !== "null" &&
+              !isScalarKind(item.tag) &&
+              !REFERENCE.has(item.tag)),
         )
       )
         floor = length;
     }
     return { reference: false, floor };
+  }
+
+  /** A receiver's contract as a demand of its own, with F19a's decision whether it is a reference's (r4.44). */
+  public *receiverKinds(key: Key): Work<readonly Item[]> {
+    const site = this.pass.program.places[keyPlace(key)]?.site ?? null;
+    return yield {
+      key: `rc|${key}`,
+      kind: "contract",
+      file: site?.file ?? -1,
+      offset: site?.start ?? -1,
+      make: () => this.contractOf(key),
+      decision: RECEIVER,
+    };
+  }
+
+  /** A method's receiver's contract as a demand of its own, with F19a's decision (r4.44). */
+  public *methodReceiver(receiver: PlaceId): Work<readonly Item[]> {
+    const site = this.pass.program.places[receiver]?.site ?? null;
+    return yield {
+      key: `cm|${receiver}`,
+      kind: "contract",
+      file: site?.file ?? -1,
+      offset: site?.start ?? -1,
+      make: () => this.contractOfValue(receiver),
+      decision: RECEIVER,
+    };
   }
 
   /**
@@ -816,11 +866,13 @@ export class Contract {
     }
     if (c.kind !== "operation") return [unknownItem(REASON.external)];
     const { family, name } = c.contract;
-    // F19a: a reference's method is opaque
-    if (family === "method" && c.receiver !== null) {
-      const receiver = yield* this.contractOfValue(c.receiver);
-      if (receiver.some((item) => REFERENCE.has(item.tag))) return [unknownItem(REASON.opaque)];
-    }
+    // F19a: a reference's method is opaque, a decision of its component (r4.44)
+    if (
+      family === "method" &&
+      c.receiver !== null &&
+      heldReference(yield* this.methodReceiver(c.receiver))
+    )
+      return [unknownItem(REASON.opaque)];
     // F26b (r5): always text
     if (family === "interpolation") return rest.length === 0 ? [makeItem("string")] : [];
     // a message's handle (F19a)

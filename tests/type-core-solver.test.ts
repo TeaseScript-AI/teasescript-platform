@@ -285,3 +285,70 @@ test("a recursive projection of a reference or a record closes its component", (
     }
   assert.deepEqual(got, want);
 });
+
+const NARRATOR = 'speaker narrator { value: "Hello" }\n';
+
+/** Programs whose receiver gains a reference kind only round its own cycle (r4.44), with their diagnostics. */
+const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[] = [
+  [
+    "a record holding a reference, read through two functions",
+    `${NARRATOR}function g(flag: boolean) {\n  if flag { return {custom: narrator} }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return g(true).custom }\n  return g(false).custom\n}\nrepeat f(false) {}\nexit`,
+    ["integer-use f(false)", "member-read g(false)", "member-read g(true)"],
+  ],
+  [
+    "the same in the other declaration order",
+    `${NARRATOR}function f(flag: boolean) {\n  if flag { return g(true).custom }\n  return g(false).custom\n}\nfunction g(flag: boolean) {\n  if flag { return {custom: narrator} }\n  return f(true)\n}\nrepeat f(false) {}\nexit`,
+    ["integer-use f(false)", "member-read g(false)", "member-read g(true)"],
+  ],
+  [
+    "a list holding a reference, its method's result returned",
+    `${NARRATOR}function f(flag: boolean) {\n  if flag { return [narrator] }\n  return f(true).removeFirst()\n}\nrepeat f(false) {}\nexit`,
+    [
+      "integer-use f(false)",
+      "integer-use f(false)",
+      "member-read f(true)",
+      "member-read f(true).removeFirst()",
+    ],
+  ],
+];
+
+/**
+ * r4.44: F19a's test of a receiver is a decision of its component, made once on the completed open solve (every
+ * receiver read as a record) and held for the second, so a reference that reaches its receiver only round its own
+ * cycle makes the access opaque: a warning with its runtime obligations. On `2941d76d8` each stopped with
+ * `budget-error` under a 10,000-unit allowance (with no component closed) and at the real allowance after 4 to 20 s;
+ * here they take 1,359 and 1,379, 1,359 and 1,363, and 1,133 and 1,216 units in the two orders, the components six,
+ * six and seven members.
+ */
+test("a reference that reaches its receiver only round its own cycle is decided once, its access opaque", () => {
+  const got: string[] = [];
+  const want: string[] = [];
+  const differing: string[] = [];
+  for (const [name, source, diagnostics] of REFERENCE_CYCLES) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, name);
+    for (const reversed of [false, true]) {
+      let solved = 0;
+      const run = (): ReturnType<typeof analyseCore> =>
+        withTestAllowance(10_000, () =>
+          withSolverSeam(
+            { reverseWorklist: reversed, onComponent: (component) => (solved += component.length) },
+            () => analyseCore(request),
+          ),
+        );
+      const answers = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const label = `${name}${reversed ? " reversed" : ""}`;
+      const found = answers.diagnostics
+        .map((d) => `${d.kind} ${d.class} ${source.slice(d.site.start, d.site.end)}`)
+        .sort();
+      got.push(
+        `${label}: ${answers.outcome}, ${solved > 0 ? "closed" : "none"}; ${found.join(", ")}`,
+      );
+      const expected = diagnostics.map((d) => d.replace(" ", " warning-runtime-check "));
+      want.push(`${label}: warning-runtime-check, closed; ${expected.join(", ")}`);
+    }
+    differing.push(...componentDifferences(name, request).differing);
+  }
+  assert.deepEqual(got, want);
+  assert.deepEqual(differing, []);
+});
