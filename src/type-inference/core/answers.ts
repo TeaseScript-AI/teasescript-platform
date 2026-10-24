@@ -9,6 +9,8 @@ import {
   DefinitionIndex,
   DefinitionLists,
   keyOf,
+  keyPath,
+  keyPlace,
   type Definition,
   type Key,
 } from "./definitions.js";
@@ -18,7 +20,7 @@ import type { FlowGraph, FlowNode } from "./flow-graph.js";
 import { GuardIndex } from "./guards.js";
 import { HandlerIndex } from "./handlers.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
-import { CoreProgram, siteKey, type CoreAnalysisRequest } from "./program.js";
+import { CoreProgram, siteKey, stepName, type CoreAnalysisRequest } from "./program.js";
 import {
   outcomeOf,
   type CoreDiagnostic,
@@ -162,8 +164,11 @@ export interface Answers {
   };
   at(node: FlowNode): OccurrenceAnswer | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
-  /** The occurrence answer at a path step below a value: `element`, `entry`, a property. */
-  project(node: FlowNode, step: string): readonly Item[];
+  /** The occurrence answer at a path step below a value: a collection's `element`, a dict's `entry`, a property. */
+  project(
+    node: FlowNode,
+    step: "element" | "entry" | { readonly property: string },
+  ): readonly Item[];
   /** The known properties of an object value, with their answers. */
   properties(node: FlowNode): ReadonlyMap<string, readonly Item[]>;
   view(node: FlowNode): CoreView;
@@ -303,6 +308,7 @@ class CoreAnswers implements Answers {
   readonly #pass: CorePass;
   readonly #consumers: Consumers;
   readonly #obligations = new Map<string, Obligation[]>();
+  #stores: Map<FlowNode, Definition> | null = null;
 
   public constructor(pass: CorePass, consumers: Consumers, exhausted: BudgetLimit | null) {
     this.#pass = pass;
@@ -365,33 +371,63 @@ class CoreAnswers implements Answers {
 
   public at(node: FlowNode): OccurrenceAnswer | null {
     const { program, values, exact } = this.#pass;
+    if (node.span === null) return null;
+    const obligations =
+      this.#obligations.get(
+        siteKey({ file: node.file, start: node.span.start.offset, end: node.span.end.offset }),
+      ) ?? [];
     const value = this.#valueOf(node);
-    if (value === null || node.span === null) return null;
+    if (value === null) {
+      // a statement that stores: the place it stores into, with the stored value's items
+      const d = this.#storeAt(node);
+      return d === null
+        ? null
+        : {
+            items: d.value === undefined ? [] : this.#run(values.valueItems(d.value, node, [])),
+            route: "value",
+            place: { id: d.place, path: d.path },
+            obligations,
+            narrowing: null,
+          };
+    }
     const items = this.#run(values.valueItems(value, node, []));
-    const binding = program.occurrenceOf.get(value);
-    const target =
-      program.projOf.has(value) || binding !== undefined
-        ? program.targetRoot(binding ?? value)
-        : null;
+    // a read of a binding or of a path below one; a projection of a literal, a call or an operation is no place
+    let base = value;
+    for (
+      let projection = program.projOf.get(base);
+      projection !== undefined;
+      projection = program.projOf.get(base)
+    )
+      base = projection.owner;
+    const target = program.occurrenceOf.has(base) ? program.targetRoot(value) : null;
     let route: Route = "value";
-    if (binding !== undefined) {
-      const key = keyOf(binding, []);
+    if (target !== null)
       route = this.#consumers.quiet.has(value)
         ? "quiet"
-        : "def" in exact.exactPath(key, program.occNode.get(value) ?? node)
+        : "def" in
+            exact.exactPath(
+              keyOf(target.root, target.path),
+              program.occNode.get(value) ?? program.projOf.get(value)?.node ?? node,
+            )
           ? "exact"
           : "contract";
-    }
     return {
       items,
       route,
-      place: target === null ? null : { id: binding ?? target.root, path: target.path },
-      obligations:
-        this.#obligations.get(
-          siteKey({ file: node.file, start: node.span.start.offset, end: node.span.end.offset }),
-        ) ?? [],
+      place: target === null ? null : { id: target.root, path: target.path },
+      obligations,
       narrowing: null,
     };
+  }
+
+  /** The store a statement makes, by its node: its first live store definition there. */
+  #storeAt(node: FlowNode): Definition | null {
+    if (this.#stores === null) {
+      this.#stores = new Map();
+      for (const d of this.#pass.definitions.storeDefs)
+        if (!this.#stores.has(d.node) && this.#pass.lists.live(d)) this.#stores.set(d.node, d);
+    }
+    return this.#stores.get(node) ?? null;
   }
 
   public place(id: PlaceId, path: readonly string[] = []): PlaceAnswer {
@@ -415,39 +451,76 @@ class CoreAnswers implements Answers {
     };
   }
 
-  public project(node: FlowNode, step: string): readonly Item[] {
+  public project(
+    node: FlowNode,
+    step: "element" | "entry" | { readonly property: string },
+  ): readonly Item[] {
     const value = this.#valueOf(node);
     if (value === null) return [];
-    return this.#run(this.#pass.values.valueItems(value, node, [step]));
+    // a dict's entries are its element path (the collector's step names)
+    const path = typeof step === "string" ? stepName(step) : step.property;
+    return this.#run(this.#pass.values.valueItems(value, node, [path]));
   }
 
   public properties(node: FlowNode): ReadonlyMap<string, readonly Item[]> {
-    const { program, contract, definitions } = this.#pass;
     const value = this.#valueOf(node);
     const out = new Map<string, readonly Item[]>();
     if (value === null) return out;
-    const names = new Set<string>();
-    const binding = program.occurrenceOf.get(value);
-    if (binding !== undefined) {
-      const key = keyOf(binding, []);
-      for (const below of definitions.keysBelow(key)) {
-        const step = below.slice(below.indexOf("|") + 1).split(".")[0];
-        if (step !== undefined && step !== "element") names.add(step);
-      }
-      for (const entry of contract.prefixStores(key).list)
-        if (
-          entry.value !== undefined &&
-          (entry.at ?? []).length === 0 &&
-          program.hasOf.has(entry.value)
-        )
-          for (const object of contract.literalIndex(entry.value).objects.get("")?.list ?? [])
-            for (const name of object.names) names.add(name);
-    } else if (program.hasOf.has(value))
-      for (const object of contract.literalIndex(value).objects.get("")?.list ?? [])
-        for (const name of object.names) names.add(name);
-    for (const name of [...names].sort())
+    for (const name of [...this.#propertyNames(value)].sort())
       out.set(name, this.#run(this.#pass.values.valueItems(value, node, [name])));
     return out;
+  }
+
+  /**
+   * The names of a value's known properties (S3 §1): those the keys below its source store, and those the objects of
+   * its literal, or of the literals its source's stores hold at its path, have; a source stored from another key, and
+   * a copied source's own stores below its root, are followed to that key, each key once.
+   */
+  #propertyNames(value: PlaceId): ReadonlySet<string> {
+    const { program, contract, definitions } = this.#pass;
+    const names = new Set<string>();
+    const literalNames = (literal: PlaceId, path: readonly string[]): void => {
+      for (const object of contract.literalIndex(literal).objects.get(path.join("."))?.list ?? [])
+        for (const name of object.names) names.add(name);
+    };
+    const source = contract.copiedKey(value) ?? contract.resultKey(value);
+    if (source === null) {
+      if (program.hasOf.has(value)) literalNames(value, []);
+      return names;
+    }
+    const pending: Key[] = [source];
+    const seen = new Set<Key>();
+    while (pending.length > 0) {
+      const key = pending.pop()!;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const place = keyPlace(key);
+      const path = keyPath(key);
+      for (const below of definitions.keysBelow(key)) {
+        const step = keyPath(below)[path.length];
+        if (step !== undefined && step !== "element") names.add(step);
+      }
+      for (let length = 0; length <= path.length; length += 1) {
+        const rest = path.slice(length);
+        const stores = contract.prefixStores(keyOf(place, path.slice(0, length)));
+        // the sources' own stores below their roots
+        for (const [, sources] of stores.subs ?? [])
+          for (const sub of sources) pending.push(keyOf(keyPlace(sub), [...keyPath(sub), ...rest]));
+        for (const entry of stores.list) {
+          const at = [...(entry.at ?? []), ...rest];
+          const inner =
+            entry.key !== undefined
+              ? entry.key
+              : entry.value === undefined
+                ? null
+                : (contract.copiedKey(entry.value) ?? contract.resultKey(entry.value));
+          if (inner !== null) pending.push(keyOf(keyPlace(inner), [...keyPath(inner), ...at]));
+          else if (entry.value !== undefined && program.hasOf.has(entry.value))
+            literalNames(entry.value, at);
+        }
+      }
+    }
+    return names;
   }
 
   public view(node: FlowNode): CoreView {
