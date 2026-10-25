@@ -89,6 +89,34 @@ test("a project diagnostic without its own file still gets a row", () => {
   );
 });
 
+test("paths that differ only by `\\` or by a drive-like folder's case keep their own rows", () => {
+  // A file URI would merge them: on Windows `\` becomes a folder separator, and a drive-like first folder is
+  // lowercased. The overview keeps every path as written.
+  const paths = [
+    "main.tease",
+    "rooms/cellar.tease",
+    "rooms\\cellar.tease",
+    "C:/room.tease",
+    "c:/room.tease",
+  ];
+  let files: readonly ProjectFileView[] = [];
+  watchProjectDiagnostics(
+    paths.map((path) => ({ path, model: new FakeModel("exit") })),
+    { Error: 8, Warning: 4 },
+    (published) => (files = published),
+  ).dispose();
+  assert.deepEqual(
+    files.map((file) => [file.path, file.markers.map((marker) => marker.code)]),
+    [
+      ["main.tease", []],
+      ["C:/room.tease", []],
+      ["c:/room.tease", []],
+      ["rooms/cellar.tease", []],
+      ["rooms\\cellar.tease", ["TSC009"]],
+    ],
+  );
+});
+
 test("tag queries search the package images the project is watched with", () => {
   const models = [{ path: "main.tease", model: new FakeModel('showImage tagged "garden"\nexit') }];
   const codes = (images?: readonly { path: string; keywords: readonly string[] }[]) => {
