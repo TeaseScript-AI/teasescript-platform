@@ -31,7 +31,7 @@ export class ProjectNames {
   /** The tags of each file that runs something, by path, when they are known. */
   readonly tags = new Map<string, ReadonlyMap<string, number | null>>();
 
-  /** The files that tagged picks with the same facts may choose (see `#taggedCandidates`), by those facts. */
+  /** The files that tagged picks with the same facts may choose (see `taggedCandidates`), by those facts. */
   readonly taggedPicks = new Map<string, readonly string[]>();
 
   /**
