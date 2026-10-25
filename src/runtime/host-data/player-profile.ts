@@ -1,6 +1,12 @@
 import { PERSON_FIELDS, SPEAKER_NAME_LISTS, speakerPropertyValue } from "../../speaker-terms.js";
+import type { PlanSourceLocation } from "../../plan/model.js";
+import type { SourceSpan as RichSourceSpan } from "../../source.js";
+import type { TemporalContext } from "../../temporal.js";
 import type { SerializableRuntimeList } from "../values/serializable-values.js";
 import { isPlainRecord } from "../values/plain-data.js";
+import { derivedDisplayName } from "../values/speaker-text.js";
+
+type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /**
  * A person field of the player profile (V30 §37): text, or for a name list a list of at least one text. The player
@@ -86,10 +92,13 @@ export function clonePlayerProfile(
 export function playerProfileFieldValue(
   playerProfile: readonly RuntimePlayerProfileFieldSnapshot[],
   name: string,
+  span: SourceSpan,
+  context: TemporalContext,
 ): string | SerializableRuntimeList | undefined {
   return speakerPropertyValue(
     (own) => playerProfile.find((field) => field.name === own)?.value,
     name,
+    () => derivedDisplayName(playerProfile, span, context, "displayName"),
   );
 }
 

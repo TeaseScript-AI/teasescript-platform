@@ -17,7 +17,7 @@ import {
 } from "../values/temporal-operations.js";
 import type { ExpressionPlan } from "../../plan/model.js";
 import { anglePropertyMessage } from "../../angle.js";
-import { speakerPropertySource, speakerPropertyValue } from "../../speaker-terms.js";
+import { speakerPropertySources, speakerPropertyValue } from "../../speaker-terms.js";
 import { RuntimeFault } from "../errors.js";
 import { quotedText } from "../values/value-text.js";
 import { messageText } from "../values/text-length.js";
@@ -37,7 +37,8 @@ import {
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
 } from "../values/serializable-values.js";
-import type { RuntimeSpeakerSnapshot } from "../snapshot/state.js";
+import { currentTemporalContext, type RuntimeSpeakerSnapshot } from "../snapshot/state.js";
+import { derivedDisplayName } from "../values/speaker-text.js";
 import {
   isAngle,
   isCalendarDuration,
@@ -106,6 +107,7 @@ export function elementIndex(
 }
 
 function getSpeakerProperty(
+  evaluator: Evaluator,
   speaker: RuntimeSpeakerSnapshot,
   name: string,
   span: SourceSpan,
@@ -113,6 +115,13 @@ function getSpeakerProperty(
   const property = speakerPropertyValue(
     (own) => speaker.properties.find((item) => item.name === own)?.value,
     name,
+    () =>
+      derivedDisplayName(
+        speaker.properties,
+        span,
+        currentTemporalContext(evaluator.snapshot),
+        "displayName",
+      ),
   );
   if (property === undefined)
     throw fault("TSR017", `Speaker '${speaker.identifier}' has no property '${name}'.`, span);
@@ -151,16 +160,14 @@ export function getProperty(
   if (isObject(value)) return getObjectProperty(evaluator, value, name, span, object);
   if (isSpeakerReference(value)) {
     const speaker = speakerById(evaluator, value.speakerId, span);
-    // A value that a speaker reads through another property, such as a term its gender gives, comes from that one.
+    // A value that a speaker reads through other properties, such as a term its gender gives, comes from those.
     if (evaluator.trace !== null)
-      evaluator.readState(
-        value,
-        speakerPropertySource(
-          (own) => speaker.properties.some((property) => property.name === own),
-          name,
-        ),
-      );
-    return getSpeakerProperty(speaker, name, span);
+      for (const source of speakerPropertySources(
+        (own) => speaker.properties.find((property) => property.name === own)?.value,
+        name,
+      ))
+        evaluator.readState(value, source);
+    return getSpeakerProperty(evaluator, speaker, name, span);
   }
   if (evaluator.trace !== null) evaluator.readState(value, name);
   if (isList(value) || isSet(value))

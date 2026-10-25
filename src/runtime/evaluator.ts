@@ -381,7 +381,12 @@ export class Evaluator {
         );
         return this.snapshot.debugMode;
       case "playerProfileField": {
-        const value = playerProfileFieldValue(this.snapshot.playerProfile, expression.name);
+        const value = playerProfileFieldValue(
+          this.snapshot.playerProfile,
+          expression.name,
+          expression.span,
+          currentTemporalContext(this.snapshot),
+        );
         if (value === undefined)
           throw fault(
             "TSR017",

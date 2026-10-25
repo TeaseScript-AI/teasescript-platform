@@ -58,41 +58,80 @@ export const PERSON_FIELDS: ReadonlySet<string> = new Set([
 
 /**
  * What a speaker whose own properties `own` gives reads as its property `name`: its own value; else for `title` its
- * `shortTitle` and for `shortTitle` its `title`; else for a term the default of its gender (see {@link GENDER_TERMS});
- * else `undefined`.
+ * `shortTitle` and for `shortTitle` its `title`; else for `displayName` the name that `displayName` gives (see
+ * {@link displayNameParts}); else for a term the default of its gender (see {@link GENDER_TERMS}); else `undefined`.
  */
 export function speakerPropertyValue<T>(
   own: (name: string) => T | undefined,
   name: string,
+  displayName: () => string | undefined,
 ): T | string | undefined {
   const value = own(name);
   if (value !== undefined) return value;
   if (name === "title") return own("shortTitle");
   if (name === "shortTitle") return own("title");
+  if (name === "displayName") return displayName();
   const term = GENDER_TERMS.get(name);
   if (term === undefined) return undefined;
   const gender = own("gender");
   return gender === "male" ? term[0] : gender === "female" ? term[1] : undefined;
 }
 
+/** The fields that give a speaker without a `displayName` of its own the one it reads (V30 §37). */
+const DISPLAY_NAME_FIELDS: readonly string[] = ["title", "shortTitle", "firstName", "lastName"];
+
 /**
- * The property that a speaker reads its property `name` from, when `has` tells which properties it has of its own:
- * `name` itself, or the one {@link speakerPropertyValue} falls back to.
+ * The parts of the `displayName` that a speaker without one of its own reads and shows (V30 §37), when `has` tells which
+ * properties it has of its own: the non-empty texts of its `title`, else its `shortTitle`, its `firstName`, and its
+ * `lastName`, in that order, each as `text` shows the field it names, or `null` for one it lacks or that shows nothing.
+ * Joined by spaces they are the name. `undefined` when it has none of these fields.
  */
-export function speakerPropertySource(has: (name: string) => boolean, name: string): string {
-  if (has(name)) return name;
-  if (name === "title" && has("shortTitle")) return "shortTitle";
-  if (name === "shortTitle" && has("title")) return "title";
-  return GENDER_TERMS.has(name) ? "gender" : name;
+export function displayNameParts(
+  has: (name: string) => boolean,
+  text: (name: string) => string | null,
+): string[] | undefined {
+  if (!DISPLAY_NAME_FIELDS.some(has)) return undefined;
+  return [text("title") ?? text("shortTitle"), text("firstName"), text("lastName")].filter(
+    (part): part is string => part !== null && part.length > 0,
+  );
 }
 
 /**
- * The properties other than `name` that a speaker reads through `name` (see {@link speakerPropertySource}), whose
- * values a store into `name` therefore changes too: the terms it lacks for `gender`, and the other title.
+ * The properties that a speaker whose own properties `own` gives reads its property `name` from: `name` itself, or the
+ * ones {@link speakerPropertyValue} falls back to.
+ */
+export function speakerPropertySources<T>(
+  own: (name: string) => T | undefined,
+  name: string,
+): string[] {
+  const has = (field: string) => own(field) !== undefined;
+  if (has(name)) return [name];
+  if (name === "title" && has("shortTitle")) return ["shortTitle"];
+  if (name === "shortTitle" && has("title")) return ["title"];
+  if (name === "displayName" && DISPLAY_NAME_FIELDS.some(has)) {
+    // The fields that `displayNameParts` reads: `shortTitle` only when `title` shows nothing.
+    const read: string[] = [];
+    displayNameParts(has, (field) => {
+      const value = own(field);
+      if (value === undefined) return null;
+      read.push(field);
+      return value === null ? null : field;
+    });
+    return read;
+  }
+  return [GENDER_TERMS.has(name) ? "gender" : name];
+}
+
+/**
+ * The properties other than `name` that a speaker reads through `name` (see {@link speakerPropertySources}), whose
+ * values a store into `name` may therefore change too: the terms it lacks for `gender`, the other title, and a
+ * `displayName` it lacks for a field that gives one.
  */
 export function propertiesReadThrough(has: (name: string) => boolean, name: string): string[] {
   if (name === "gender") return [...GENDER_TERMS.keys()].filter((term) => !has(term));
-  if (name === "title" && !has("shortTitle")) return ["shortTitle"];
-  if (name === "shortTitle" && !has("title")) return ["title"];
-  return [];
+  const through: string[] = [];
+  if (name === "title" && !has("shortTitle")) through.push("shortTitle");
+  if (name === "shortTitle" && !has("title")) through.push("title");
+  if (DISPLAY_NAME_FIELDS.includes(name) && !has("displayName")) through.push("displayName");
+  return through;
 }

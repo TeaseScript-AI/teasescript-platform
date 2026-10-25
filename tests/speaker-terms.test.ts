@@ -284,3 +284,68 @@ test("a field that some declaration or store may give a speaker compiles, also t
     [],
   );
 });
+
+test("a speaker without a displayName of its own reads the name its messages show (V30 §37)", () => {
+  // Its non-empty title, else shortTitle, then firstName and lastName, joined by spaces: read through the speaker's name,
+  // a parameter, and `speaker` in its own message, which shows the same name. A store into a field changes it, and a
+  // displayName of its own replaces it.
+  const result = runValidSource(
+    [
+      'speaker vera {\n    title: "Mistress"\n    firstName: "Vera"\n}',
+      'speaker anna {\n    shortTitle: "Miss"\n    firstName: ""\n    lastName: "Gray"\n}',
+      "function name(s: speaker) {\n    return s.displayName\n}",
+      "say vera.displayName",
+      "say name(anna)",
+      'say as vera "${speaker.displayName}"',
+      'vera.lastName = "Black"',
+      "say vera.displayName",
+      'vera.displayName = "V"',
+      "say vera.displayName",
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(sayTexts(result), [
+    "Mistress Vera",
+    "Miss Gray",
+    "Mistress Vera",
+    "Mistress Vera Black",
+    "V",
+  ]);
+  assert.deepEqual(
+    result.events.flatMap((event) =>
+      event.kind === "say" && event.speaker !== null ? [event.speaker.displayName] : [],
+    ),
+    ["Mistress Vera"],
+  );
+  // A speaker that only some paths give a field is checked when the script reads the name.
+  const unnamed = runValidSource(
+    'speaker vera {\n    color: "red"\n}\nspeaker anna {\n    firstName: "Anna"\n}\nlet current = anna\nsay current.displayName\ncurrent = vera\nsay current.displayName\nexit',
+  );
+  assert.deepEqual(sayTexts(unnamed), ["Anna"]);
+  assert.equal(unnamed.snapshot.failure?.message, "Speaker 'vera' has no property 'displayName'.");
+});
+
+test("a store into a name field keeps the displayName that a receiver read before", () => {
+  // The receiver of `replace` reads the name its fields give before its argument changes one of them, also one the
+  // speaker did not have; every boundary, also while the function waits, goes through a JSON checkpoint.
+  for (const [declaration, change, renamed] of [
+    ['firstName: "Vera"', 'vera.firstName = "Xena"', "Xena"],
+    ['shortTitle: "Vera"', 'current.shortTitle = "Xena"', "Xena"],
+    ['lastName: "Vera"', 'vera.title = "Xena"', "Xena Vera"],
+  ] as const) {
+    const source = [
+      `speaker vera {\n    ${declaration}\n}`,
+      "let current = vera",
+      `function suffix {\n    ${change}\n    wait 1 ms\n    return "!"\n}`,
+      'say vera.displayName.replace("V", suffix())',
+      "say vera.displayName",
+      "exit",
+    ].join("\n");
+    const equivalent = assertRuntimeResumeEquivalent(source);
+    assert.deepEqual(
+      equivalent.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      ["!era", renamed],
+      source,
+    );
+  }
+});

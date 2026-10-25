@@ -483,12 +483,12 @@ say "I am your ${speaker.title}."
 **Syntax:** `firstName` `lastName` `title` `shortTitle` `displayName` `alias` `gender` `color` `font` `avatar`
 `presentation` `bubble` `prose` `defaultSaySkippable` · custom fields
 
-- **Gives:** the chat name is `displayName`, else title, first and last name, else the identifier. `title` and
-  `shortTitle` stand in for each other. A custom field's first assignment fixes its type.
+- **Gives:** the chat name is `displayName`, else title, first and last name, else the identifier; an unset
+  `displayName` reads as title, first and last name. `title` and `shortTitle` stand in for each other. A custom field's
+  first assignment fixes its type.
 - **Fails:** reading a custom field that some path to the read has not set, or a built-in field that no path has
   set. A built-in field set on only some paths is checked at runtime.
-- **Status:** Partly built: reading an unset `displayName` fails instead of giving the derived name ·
-  [names](specifications/accepted-syntaxes-v30.md#names-titles-and-presentation)
+- **Status:** Implemented · [names](specifications/accepted-syntaxes-v30.md#names-titles-and-presentation)
 
 ```tease
 mistress.shortTitle = "Miss"
