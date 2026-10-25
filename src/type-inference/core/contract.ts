@@ -324,11 +324,16 @@ export interface PrefixStores {
   readonly subs: SubLayer | null;
   /** It holds something other than whole stores of copies. */
   readonly other: boolean;
-  /** The prefix's stores that brought each source of its own layer, and those that brought the inherited layers. */
-  readonly subDefs: ReadonlyMap<Key, ReadonlySet<Definition | null>>;
+  /** The prefix's stores that brought `subs`. */
   readonly inheritedBy: ReadonlySet<Definition | null>;
-  /** Whether `subs` is the prefix's own layer. */
-  readonly ownLayer: boolean;
+  /**
+   * The further layers its stores join it to (a copy of one source, then of another), each referenced with the stores
+   * that brought it, never flattened into a layer of its own (r4.46 (3)).
+   */
+  readonly also: readonly {
+    readonly layer: SubLayer;
+    readonly defs: ReadonlySet<Definition | null>;
+  }[];
   readonly cut: boolean;
 }
 
@@ -354,11 +359,10 @@ interface PrefixFrame {
   readonly seen: Map<string, number>;
   w: Writer | null;
   d: Definition | null;
-  readonly subDefs: Map<Key, Set<Definition | null>>;
-  /** Its own sources by first step, the layer it inherits, and its stores that inherited it. */
-  own: Map<string, Set<Key>> | null;
+  /** The layer it inherits and its stores that inherited it; the further layers, each with its stores. */
   inherit: SubLayer | null;
   readonly inheritedBy: Set<Definition | null>;
+  readonly also: Map<SubLayer, Set<Definition | null>>;
   ck: Key | null;
   proj: readonly string[] | null;
   inner: PrefixStores | undefined;
@@ -1435,7 +1439,10 @@ export class Contract {
       ) {
         const stores = yield* this.#needPrefix(keyOf(place, []));
         const entry =
-          stores.list.length === 1 && !stores.other && stores.subs === null
+          stores.list.length === 1 &&
+          !stores.other &&
+          stores.subs === null &&
+          stores.also.length === 0
             ? stores.list[0]!
             : null;
         const path = keyPath(rooted);
@@ -1595,10 +1602,9 @@ export class Contract {
       seen: new Map(),
       w: null,
       d: null,
-      subDefs: new Map(),
-      own: null,
       inherit: null,
       inheritedBy: new Set(),
+      also: new Map(),
       ck: null,
       proj: null,
       inner: undefined,
@@ -1668,13 +1674,8 @@ export class Contract {
       yield* contract.#ready(e);
       add(f, e);
     };
-    const subDef = (f: PrefixFrame, sub: Key): void => {
-      work.charge("invSteps");
-      let set = f.subDefs.get(sub);
-      if (set === undefined) f.subDefs.set(sub, (set = new Set()));
-      set.add(f.d);
-    };
-    // an inherited layer is shared, never copied; a second one, a join of two copies, is taken into the frame's own
+    // an inherited layer is shared, never copied; a further one, a join of two copies, is referenced beside it with the
+    // stores that brought it, never flattened per destination (r4.46 (3))
     const addSubs = (f: PrefixFrame, layer: SubLayer | null): void => {
       if (layer === null) return;
       work.charge("invSteps");
@@ -1683,17 +1684,12 @@ export class Contract {
         f.inheritedBy.add(f.d);
         return;
       }
-      for (let at: SubLayer | null = layer; at !== null; at = at.parent)
-        for (const [step, set] of at.own) for (const sub of set) addSub(f, step, sub);
-    };
-    const addSub = (f: PrefixFrame, step: string, sub: Key): void => {
-      work.charge("invSteps");
-      subDef(f, sub);
-      if (f.own === null) f.own = new Map();
-      let set = f.own.get(step);
-      if (set === undefined) f.own.set(step, (set = new Set()));
-      if (!set.has(sub)) this.facts.prefixEntries += 1;
-      set.add(sub);
+      let defs = f.also.get(layer);
+      if (defs === undefined) {
+        f.also.set(layer, (defs = new Set()));
+        this.facts.prefixEntries += 1;
+      }
+      defs.add(f.d);
     };
     const open = new Set<Key>([prefix]);
     const stack: PrefixFrame[] = [frame(prefix)];
@@ -1708,7 +1704,9 @@ export class Contract {
         f.proj = null;
         const copiedPlace = keyPlace(f.ck!);
         // the root's own stores below it only (rescanned below at the path), no source inherited through the alias
-        const ownSubsOnly = inner.subs === null || inner.subs.only === keyOf(copiedPlace, []);
+        const ownSubsOnly =
+          inner.also.length === 0 &&
+          (inner.subs === null || inner.subs.only === keyOf(copiedPlace, []));
         const e = inner.list.length === 1 && !inner.other && ownSubsOnly ? inner.list[0]! : null;
         if (e === null || (e.key === undefined && e.value === undefined))
           yield* adding(this, f, { key: f.ck! });
@@ -1741,6 +1739,7 @@ export class Contract {
           // the source's own stores below its root over the sources it inherits, one layer per source shared by its
           // copies (r4.38: k copies of a source edited at k fields are k inheritances, not k × k listings)
           addSubs(f, this.#aliasLayer(inner, keyPlace(f.ck!)));
+          for (const joined of inner.also) addSubs(f, joined.layer);
         }
       }
       if (f.i < f.defs.length) {
@@ -1844,14 +1843,12 @@ export class Contract {
       }
       stack.pop();
       open.delete(f.pk);
-      const subs = this.#layer(f.own, f.inherit);
       const stores: PrefixStores = {
         list: f.out,
-        subs,
+        subs: f.inherit,
         other: f.other,
-        subDefs: f.subDefs,
         inheritedBy: f.inheritedBy,
-        ownLayer: subs !== f.inherit,
+        also: [...f.also].map(([layer, defs]) => ({ layer, defs })),
         cut: f.cut,
       };
       // a result cut at an open copy cycle depends on where the query entered it: kept only for its own query, so
@@ -1964,47 +1961,50 @@ export class Contract {
 
   /**
    * The sources a prefix's property reads apart from the shared entries: those listed under the property's first step
-   * with stores of their own at the property's path or above it below their root; the layers asked are the prefix's
-   * own and, per depth at which a layer lists the step, the prefix's ancestor there.
+   * with stores of their own at the property's path or above it below their root; per layer the prefix inherits or
+   * joins (one lookup each), the layers asked are that layer and, per depth at which a layer lists the step, its
+   * ancestor there, with the stores that brought that layer.
    */
   public relevantSubs(stores: PrefixStores, rest: readonly string[]): readonly SubSource[] {
-    const top = stores.subs;
-    if (top === null || rest.length === 0) return [];
+    if (rest.length === 0) return [];
     const work = this.pass.program.work;
     const step = rest[0]!;
     const found = new Map<Key, Set<Definition | null>>();
-    for (const [depth, layers] of (top.root ?? top).byStep.get(step) ?? []) {
-      work.charge("invSteps");
-      if (depth > top.depth) continue;
-      const layer = this.#ancestorAt(top, depth);
-      if (!layers.has(layer)) continue;
-      for (const sub of layer.own.get(step) ?? []) {
+    const tops = [
+      ...(stores.subs === null ? [] : [{ layer: stores.subs, defs: stores.inheritedBy }]),
+      ...stores.also,
+    ];
+    for (const { layer: top, defs: brought } of tops)
+      for (const [depth, layers] of (top.root ?? top).byStep.get(step) ?? []) {
         work.charge("invSteps");
-        const own = this.#ownPaths(sub);
-        let held = false;
-        for (let length = 1; length <= rest.length && !held; length += 1) {
+        if (depth > top.depth) continue;
+        const layer = this.#ancestorAt(top, depth);
+        if (!layers.has(layer)) continue;
+        for (const sub of layer.own.get(step) ?? []) {
           work.charge("invSteps");
-          held = own.has(rest.slice(0, length).join("."));
+          const own = this.#ownPaths(sub);
+          let held = false;
+          for (let length = 1; length <= rest.length && !held; length += 1) {
+            work.charge("invSteps");
+            held = own.has(rest.slice(0, length).join("."));
+          }
+          if (!held) continue;
+          let defs = found.get(sub);
+          if (defs === undefined) found.set(sub, (defs = new Set()));
+          for (const d of brought) defs.add(d);
         }
-        if (!held) continue;
-        let defs = found.get(sub);
-        if (defs === undefined) found.set(sub, (defs = new Set()));
-        for (const d of stores.ownLayer && layer === top
-          ? (stores.subDefs.get(sub) ?? [])
-          : stores.inheritedBy)
-          defs.add(d);
       }
-    }
     return [...found]
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([key, defs]) => ({ key, defs }));
   }
 
-  /** Every source of a prefix's layers (the answers' properties). */
+  /** Every source of a prefix's layers, inherited and joined (the answers' properties). */
   public subSources(stores: PrefixStores): Key[] {
     const out = new Set<Key>();
-    for (let layer = stores.subs; layer !== null; layer = layer.parent)
-      for (const [, set] of layer.own) for (const sub of set) out.add(sub);
+    for (const top of [stores.subs, ...stores.also.map((joined) => joined.layer)])
+      for (let layer = top; layer !== null; layer = layer.parent)
+        for (const [, set] of layer.own) for (const sub of set) out.add(sub);
     return [...out];
   }
 
