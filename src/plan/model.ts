@@ -718,7 +718,7 @@ export type InteractionUiPayload =
     }
   | ({
       readonly kind: "image";
-      /** The question, which the asking speaker said; the Player also shows it on the camera viewfinder. */
+      /** The question, which the asking speaker said. */
       readonly question: string | null;
       readonly hint: string | null;
       readonly accessibleName: InteractionAccessibleName;
