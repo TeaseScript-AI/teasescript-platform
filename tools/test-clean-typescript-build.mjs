@@ -20,7 +20,7 @@ const sourceAfterRename = resolve(fixtureRoot, "tests/renamed.test.ts");
 const outputBeforeRename = resolve(fixtureRoot, "dist/tests/obsolete.test.js");
 const outputAfterRename = resolve(fixtureRoot, "dist/tests/renamed.test.js");
 const playerArtifact = resolve(fixtureRoot, "dist/player-app/required.txt");
-const editorArtifact = resolve(fixtureRoot, "dist/editor/required.txt");
+const playerTestModulesArtifact = resolve(fixtureRoot, "dist/player-test-modules/required.txt");
 
 const repositoryPackage = JSON.parse(readFileSync(resolve(repositoryRoot, "package.json"), "utf8"));
 
@@ -41,7 +41,7 @@ try {
   mkdirSync(resolve(fixtureRoot, "tools"));
   mkdirSync(resolve(fixtureRoot, "tests"));
   mkdirSync(resolve(fixtureRoot, "dist/player-app"), { recursive: true });
-  mkdirSync(resolve(fixtureRoot, "dist/editor"), { recursive: true });
+  mkdirSync(resolve(fixtureRoot, "dist/player-test-modules"), { recursive: true });
   cpSync(
     resolve(repositoryRoot, "tools/clean-compiled-tests.mjs"),
     resolve(fixtureRoot, "tools/clean-compiled-tests.mjs"),
@@ -69,7 +69,7 @@ try {
   writeFileSync(resolve(fixtureRoot, "tests/required.test.ts"), "export {};\n");
   writeFileSync(sourceBeforeRename, "export {};\n");
   writeFileSync(playerArtifact, "required player artifact\n");
-  writeFileSync(editorArtifact, "required editor artifact\n");
+  writeFileSync(playerTestModulesArtifact, "required Player test modules artifact\n");
 
   buildTypeScript();
   assert.equal(existsSync(outputBeforeRename), true);
@@ -89,7 +89,7 @@ try {
   buildTypeScript();
   assert.equal(existsSync(outputAfterRename), false);
   assert.equal(existsSync(playerArtifact), true);
-  assert.equal(existsSync(editorArtifact), true);
+  assert.equal(existsSync(playerTestModulesArtifact), true);
 } finally {
   rmSync(fixtureRoot, { force: true, recursive: true });
 }

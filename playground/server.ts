@@ -438,13 +438,6 @@ function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | nul
     const playerBuildRoot = resolve(roots.distRoot, "player-app");
     return resolveInside(playerBuildRoot, relativePath);
   }
-  if (pathname === "/editor" || pathname === "/editor/") {
-    const editorBuildRoot = resolve(roots.distRoot, "editor");
-    return { root: editorBuildRoot, path: resolve(editorBuildRoot, "index.html") };
-  }
-  if (pathname.startsWith("/editor/")) {
-    return resolveInside(resolve(roots.distRoot, "editor"), pathname.slice("/editor/".length));
-  }
   if (pathname.startsWith("/dist/")) {
     return resolveInside(roots.distRoot, pathname.slice("/dist/".length));
   }

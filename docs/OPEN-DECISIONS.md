@@ -84,8 +84,7 @@ Current constraints: [`CODE-EDITOR.md`](CODE-EDITOR.md), [`ARCHITECTURE.md`](ARC
 - Whether editor-neutral tooling later gains CLI, LSP, or IDE consumers and the smallest stable adapter boundary they
   require.
 - Source storage, version history, Git-backed workflows, collaboration, conflict resolution, and Laravel persistence.
-- Final package/import/library linkage and metadata transport; the current Monaco POC does not establish those
-  contracts.
+- Final package/import/library linkage and metadata transport.
 
 ## Player and interactions
 

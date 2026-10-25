@@ -4,30 +4,32 @@ The future browser editor owns source authoring: syntax highlighting, diagnostic
 and integration with compiler/runtime tooling. Runtime inspection and diagnostic execution belong to
 [`DEBUGGER.md`](DEBUGGER.md); the editor may embed those controls without owning debugger semantics.
 
-The Monaco browser editor POC is a separate editor-owned Vue/Vite surface under `editor/vue/`, whose build the
-playground server serves on `/editor/`; it consumes the
-editor-neutral tooling through thin Monaco providers and registers `.tease` presentation without becoming a second
-correctness grammar. It follows the [language design intent](TEASESCRIPT.md#language-design-intent) for the
-[creator audience](PRODUCT.md), keeping the beginner-facing surface focused instead of exposing every Monaco feature.
-It opens a small sample project, or with `?package=<id>` a package of the playground server's development package root
-(see the repository `README.md`), and compiles all files as one project, with the package's images, after every edit;
-edits stay in the page. A file overview lists each
-file with the title, author, description, and tags of its header ([V30 §41](specifications/accepted-syntaxes-v30.md#41-headers-and-tags))
-and its diagnostic count; selecting a file opens it.
-It colours `.tease` by the compiler's token classes (`classifyTokens` in `src/language-tooling.ts`) in Monaco's own
-theme colours; its own tokenizer marks only strings and line comments, which Monaco's bracket matching and quote
-closing read. The Player's palette (`player/theme/palette.ts`) holds the code colours as contrast-checked roles,
-`syntax-keyword`, `syntax-name`, `syntax-string`, `syntax-number`, `syntax-comment`, and `syntax-operator`, which the
-[random draw picker](DEBUGGER.md#random-draws) applies to the same classes; the editor should adopt these roles later
-(owner direction, #512) instead of keeping colours of its own. Hover and signature help of a conversion, numeric,
-angle, random, clock, or list function call, such as `toNumber(...)`, `round(...)`, `sin(...)`, `chance(...)`,
-`getDate()`, or `sum(...)`, of a method that only text has, such as `name.trim()`, of a method of date and time values,
-such as `started.toISO()`, of one that only lists and sets have, such as `items.shuffle()`, and of one that only timers
-and media have, such as `music.pause()`, come from its contract in `src/conversions.ts`, `src/numeric-functions.ts`,
+There is no editor UI at present. The Monaco proof-of-concept page under `editor/`, which the playground server served
+on `/editor/`, was removed on the owner's decision of 2026-10-25; the last `main` commit that contains it is
+`138f7108f`. Its `editor/monaco.ts` (`registerTeaseScriptLanguage` and `watchProject`, about 168 lines) is the Monaco
+language registration that a future Monaco-based editor can restore from that commit; it went with the page because it
+needs the `monaco-editor` package. The editor-neutral tooling and the Monaco adapters remain for the future editor,
+whose name is pending (#574).
+
+`src/language-tooling.ts`, public through `src/index.ts`, provides diagnostics, completions, hover, signature help,
+formatting, and token classes for a document, and a project overview that compiles all files as one project, with the
+package's images, and gives each file its header
+([V30 §41](specifications/accepted-syntaxes-v30.md#41-headers-and-tags)) and diagnostics. The adapters under
+`src/editor/` map these to Monaco's shapes, register them as Monaco providers, and watch editor models for the project
+overview; they do not import Monaco, whose values the caller passes in, and are not a second correctness grammar. Token
+colours come from the compiler's classes (`classifyTokens`) as semantic tokens. The Player's palette
+(`player/theme/palette.ts`) holds the code colours as contrast-checked roles, `syntax-keyword`, `syntax-name`,
+`syntax-string`, `syntax-number`, `syntax-comment`, and `syntax-operator`, which the
+[random draw picker](DEBUGGER.md#random-draws) applies to the same classes; the future editor should adopt these roles
+(owner direction, #512) instead of keeping colours of its own. Hover and signature help of a conversion, numeric, angle,
+random, clock, or list function call, such as `toNumber(...)`, `round(...)`, `sin(...)`, `chance(...)`, `getDate()`, or
+`sum(...)`, of a method that only text has, such as `name.trim()`, of a method of date and time values, such as
+`started.toISO()`, of one that only lists and sets have, such as `items.shuffle()`, and of one that only timers and
+media have, such as `music.pause()`, come from its contract in `src/conversions.ts`, `src/numeric-functions.ts`,
 `src/random-functions.ts`, `src/temporal-builtins.ts`, `src/list-function-rules.ts`, `src/text-operations.ts`,
-`src/list-methods.ts`, or `src/handle-members.ts`, and those of a command cover its
-arguments as the parser reads them and name the options of the parser's tables in `src/parser.ts`, which the parser and
-the name pass check.
+`src/list-methods.ts`, or `src/handle-members.ts`, and those of a command cover its arguments as the parser reads them
+and name the options of the parser's tables in `src/parser.ts`, which the parser and the name pass check.
+
 The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
 textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
 validated checkpoint save/restore. Its Player panel provides the first Standard interaction and chat-pacing control POC
