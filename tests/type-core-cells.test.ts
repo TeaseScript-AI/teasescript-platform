@@ -1713,3 +1713,68 @@ test("a range's list holds its whole numbers", () => {
   }
   assert.deepEqual(differing, []);
 });
+
+/**
+ * TABLE r4.47 (1), F15, §3.4 (Astra's D1 on #1028): a method without a category answers the runtime's opaque `unknown`
+ * on a receiver of a known kind, and on what the core cannot know keeps that value's own reasons, so a chain of such
+ * methods stays opaque (the word `unmodelled`), with no external data and no boundary; a modelled method in the chain
+ * gives its declared result. Both orders.
+ */
+test("a chain of methods without a category stays opaque", () => {
+  const cases: readonly (readonly [string, string, readonly string[], readonly string[]])[] = [
+    [
+      "two methods without a category",
+      'let n: integer = "  alpha  ".trimStart().trimEnd()\nexit',
+      [
+        "copy-type n [integer] @17",
+        'null-check "  alpha  ".trimStart() [non-null] @17',
+        "warning-runtime-check",
+      ],
+      ["written-target warning-runtime-check unmodelled @17"],
+    ],
+    [
+      "a modelled method, then one without a category",
+      'let n: integer = "  alpha  ".uppercase().trimStart()\nexit',
+      ["copy-type n [integer] @17", "warning-runtime-check"],
+      ["written-target warning-runtime-check unmodelled @17"],
+    ],
+    [
+      "one without a category, then a modelled method",
+      'let n: integer = "  alpha  ".trimStart().uppercase()\nexit',
+      ["compile-error", 'null-check "  alpha  ".trimStart() [non-null] @17'],
+      ["written-target compile-error null @17"],
+    ],
+    [
+      "a receiver of a known kind or an opaque answer",
+      'let s = "a"\nlet t = s\nif askBoolean "f" { t = s.trimStart() }\nlet n: integer = t.trimEnd()\nexit',
+      ["copy-type n [integer] @79", "null-check t [non-null] @79", "warning-runtime-check"],
+      ["written-target warning-runtime-check unmodelled @79"],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, expected, words] of cases)
+    for (const reversed of [false, true]) {
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null, `${name}: its source parses and resolves`);
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      // its outcome and checks, and the words of its value's diagnostics
+      const got = [
+        record.outcome,
+        ...record.checks.map(
+          (check) =>
+            `${check.kind} ${check.target} [${check.against.join(", ")}]${check.boundary ? " boundary" : ""} @${check.site.offset}`,
+        ),
+      ].sort();
+      const worded = record.diagnostics.map(
+        (d) => `${d.kind} ${d.class} ${d.context} @${d.site.offset}`,
+      );
+      if (
+        JSON.stringify(got) !== JSON.stringify(expected) ||
+        words.some((word) => !worded.includes(word))
+      )
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${[...got, ...worded].join("; ")}`);
+    }
+  assert.deepEqual(differing, []);
+});

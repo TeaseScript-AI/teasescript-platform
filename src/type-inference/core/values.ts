@@ -712,12 +712,14 @@ export class Values {
       return rest.length === 0 ? [makeItem(shown)] : shown === "duration" ? [] : [OPAQUE_MEMBER];
     // a range: its elements are its kind's (`kindElement`), nothing stands below it by path
     if (family === "range") return rest.length === 0 ? [makeItem("range")] : [];
-    // a method without a category: its declared result per receiver kind (F25), else the runtime's on a receiver of
-    // known kinds (C2: its consumers keep their checks); on what the core cannot know, what that holds
+    // a method without a category, per receiver alternative: its declared result per receiver kind (F25), else the
+    // runtime's opaque answer on a known kind (C2: its consumers keep their checks, r4.47 (1)); what the core cannot know
+    // keeps its own reasons
     if (family === "method" && c.receiver !== null) {
       const receiver = withoutEmpty(yield* this.valueItems(c.receiver, at, []));
-      if (receiver.length > 0 && receiver.every((item) => item.tag !== "unknown"))
+      if (receiver.length > 0)
         return receiver.flatMap((item) => {
+          if (item.tag === "unknown") return [item];
           const declared = declaredMethod(item.tag, name);
           if (declared === undefined) return [OPAQUE_MEMBER];
           return rest.length > 0

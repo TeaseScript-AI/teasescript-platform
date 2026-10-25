@@ -1217,13 +1217,14 @@ export class Contract {
     const shown = shownResult(name);
     if (shown !== undefined) return [makeItem(shown)];
     if (family === "range") return [makeItem("range")];
-    // a method without a category: its declared result per receiver kind (F25), else the runtime's on a receiver of
-    // known kinds
+    // a method without a category, per receiver alternative: its declared result per receiver kind (F25), else the
+    // runtime's opaque answer on a known kind (r4.47 (1)); what the core cannot know keeps its own reasons
     if (family === "method" && c.receiver !== null) {
       const receiver = withoutEmpty(yield* this.contractOfValue(c.receiver));
-      if (receiver.length > 0 && receiver.every((item) => item.tag !== "unknown"))
+      if (receiver.length > 0)
         return mergeItems(
           receiver.map((item) => {
+            if (item.tag === "unknown") return item;
             const declared = declaredMethod(item.tag, name);
             return declared === undefined
               ? unknownItem(REASON.opaque)
