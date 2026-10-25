@@ -1076,6 +1076,36 @@ export class Admission {
     return this.#depths.get(key)!;
   }
 
+  /**
+   * A cell element's value as the cell holds it, for sharing a literal's verdicts (F2): a literal holding no source by
+   * its structure (the contract's signature), a copy by the definition its read reaches there (its exact path), through
+   * the copies that definition stores; `null` for any other, whose value may differ from cell to cell.
+   */
+  #held(d: Definition): string | null {
+    const { contract, exact, program } = this.pass;
+    if (d.value === undefined) return "";
+    if (program.hasOf.has(d.value))
+      return this.#valueStructure(d.value).sources.length === 0
+        ? contract.identityOf(d.value).id
+        : null;
+    let key = contract.copiedKey(d.value);
+    let node = d.node;
+    const seen = new Set<string>();
+    while (key !== null && !seen.has(`${key}|${node.id}`)) {
+      program.work.charge("indexSteps");
+      seen.add(`${key}|${node.id}`);
+      const answer = exact.exactPath(key, node);
+      if (!("def" in answer)) return null;
+      const { def, rest } = answer;
+      const copied =
+        def.kind === "whole" && def.value !== undefined ? contract.copiedKey(def.value) : null;
+      if (copied === null) return `${def.uid}@${rest.join(".")}`;
+      key = keyOf(keyPlace(copied), [...keyPath(copied), ...rest]);
+      node = def.node;
+    }
+    return null;
+  }
+
   /** The paths below a literal's element its known structure gives (F2), and `also`, each once. */
   #pathsBelow(value: PlaceId, also: readonly (readonly string[])[]): (readonly string[])[] {
     const work = this.pass.program.work;
@@ -1431,8 +1461,8 @@ export class Admission {
     const { program, definitions, contract } = this.pass;
     const family = (tag: ItemTag): ItemTag => (NUMERIC.has(tag) ? "number" : tag);
     type Decided = Map<string, { readonly tags: readonly ItemTag[]; readonly written: boolean }>;
-    // per landing and its elements' source identities, a cell's deciders and offending elements and paths (F2): a cell
-    // of the same identities landing there decides and offends as it does, each at its own elements' sites
+    // per landing and its elements' values as their cells hold them, a cell's deciders and offending elements and paths
+    // (F2): a cell of the same values landing there decides and offends as it does, each at its own elements' sites
     const cells = new Map<
       string,
       { readonly first: Decided; readonly verdicts: (readonly [number, readonly string[]])[] }
@@ -1445,10 +1475,8 @@ export class Admission {
       if (owner?.kind !== "cell" || list.length < 2 || contract.landsIn(owner.owner, []) !== null)
         continue;
       const landing = list.some(named) ? this.#landing(owner.owner) : null;
-      const memo =
-        landing === null
-          ? null
-          : `${landing}|${list.map((d) => (d.value === undefined ? "" : contract.identityOf(d.value).id)).join(",")}`;
+      const held = landing === null ? [] : list.map((d) => this.#held(d));
+      const memo = landing === null || held.includes(null) ? null : `${landing}|${held.join(",")}`;
       const cached = memo === null ? undefined : cells.get(memo);
       const first: Decided = cached?.first ?? new Map();
       // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole

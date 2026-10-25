@@ -2851,3 +2851,51 @@ test("named external data in a literal is warned and checked at its store where 
   }
   assert.deepEqual(differing, []);
 });
+
+test("a literal's verdicts are shared only where its named elements hold the same values, in both orders (round 11 B1)", () => {
+  // per program its errors' sites: the second literal, after the named value became text, at both its elements (A8
+  // against its text, C1 against the whole numbers the first literal decided)
+  const programs: readonly (readonly [string, string, readonly number[]])[] = [
+    [
+      "stores",
+      'let a = hostValue\nlet xs = []\nxs = [a, 1]\na = "bad"\nxs = [a, 1]\nexit',
+      [58, 61],
+    ],
+    [
+      "adds",
+      'let a = hostValue\nlet xs = []\nxs.add([a, 1])\na = "bad"\nxs.add([a, 1])\nexit',
+      [62, 66],
+    ],
+    [
+      "addAll",
+      'let a = hostValue\nlet xs = []\nxs.addAll([[a, 1]])\na = "bad"\nxs.addAll([[a, 1]])\nexit',
+      [70, 75],
+    ],
+    [
+      "text first",
+      'let a = "bad"\nlet xs = []\nxs = [a, 1]\na = hostValue\nxs = [a, 1]\nexit',
+      [35],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, sites] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const forward = compactAnalysis(request);
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder(
+        (list) => [...list].reverse(),
+        () => compactAnalysis(request),
+      ),
+    );
+    const errors = forward.diagnostics
+      .filter((diagnostic) => diagnostic.class === "compile-error")
+      .map((diagnostic) => diagnostic.site.offset)
+      .sort((x, y) => x - y);
+    if (JSON.stringify(errors) !== JSON.stringify(sites))
+      differing.push(`${name}: @${errors.join(", @")}`);
+    if (recordDifferences(forward, reversed).length > 0)
+      differing.push(`${name} reversed: ${recordDifferences(forward, reversed).join("; ")}`);
+  }
+  assert.deepEqual(differing, []);
+});
