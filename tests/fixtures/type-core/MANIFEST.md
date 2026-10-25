@@ -7,22 +7,23 @@ commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; not
 ## Refresh (M4 step S6)
 
 Opus, 2026-10-25, builder for M4 step S6 (lead Fable). `cells.jsonl` is regenerated from the expectation set at
-`01eccb2f1a7da537…` (1,874 gate records, 9 deferred) by the same tooling, unchanged: `convert.py` (`eef78c11…`) with
-`collection-rewrites.json` (`981e40ee…`), the host rewrite and the four collection rewrites below. 197 records are
-rewritten (193 prefixed files and the four collection records); `cells-deferred.jsonl` is unchanged. The set's
-previous revision `716ac7091de2b95e…` differs only in five records' reason texts, which compact records do not carry:
-both convert to the same bytes, and the checks below hold for both.
+`60751a0f17a0f8cf…` (1,888 gate records, 9 deferred; TABLE r4.48) by the same tooling, unchanged: `convert.py`
+(`eef78c11…`) with `collection-rewrites.json` (`981e40ee…`), the host rewrite and the four collection rewrites below.
+197 records are rewritten (193 prefixed files and the four collection records); `cells-deferred.jsonl` is unchanged.
+Against the set's previous revision `01eccb2f1a7da537…` (1,874 records; `716ac7091de2b95e…` before it differs in five
+reason texts only) it adds the 14 records `cp9-cells/s4/s6/returns/…` and `cp9-cells/s4/s6/defaults/…`; the other
+1,874 compact records are byte-identical.
 
 The exit condition, rerun on the laptop worker with the reference model round 19d (`points14.mjs` `2edb329e…`) on a
 compiler build of `main` `6187eb145`, in both demand orders:
 - zero skipped records;
 - preservation equality (`verify.py`'s invariance check, every record's model output moved through the remapping
-  against its output on the rewritten record): 1,874 of 1,874;
-- the fixture against the model's compacted records on the rewritten set: 1,842 the same, the 9 adapter records apart,
-  and 23 different, all `cp9-cells/s4/followup/…` records of TABLE r4.47 that round 19d predates (the lead's comparator
-  gives the same 23 on the original set);
-- boundary checks and ingress stores one to one in 1,860 records, 4 more consumed in place, 3 more with a store owing
-  none, and 7 different, the same follow-up records (clock reads, r4.47 (5)).
+  against its output on the rewritten record): 1,888 of 1,888;
+- the fixture against the model's compacted records on the rewritten set: 1,850 the same, the 9 adapter records apart,
+  and 29 different, records round 19d predates: the 23 `cp9-cells/s4/followup/…` records of TABLE r4.47 and 6 of the
+  14 `cp9-cells/s4/s6/…` records of r4.48 (the research folder's later model, `d0d44513…`, differs in those 6 only);
+- boundary checks and ingress stores one to one in 1,874 records, 4 more consumed in place, 3 more with a store owing
+  none, and 7 different, follow-up records (clock reads, r4.47 (5)).
 
 The sections below are S0's record of the method; the file table names the refreshed fixture.
 
@@ -39,7 +40,7 @@ rerun on it: zero skips and zero differences in both orders.
 
 | file | SHA-256 | content |
 |---|---|---|
-| `cells.jsonl` | `ebae3eaaf6890f1818c8f1a5d5c6fb975c3ade743c7634e1fd22b807b56ec0b3` | the 1,874 gate records, 1,002,122 bytes (S6's refresh; S0's snapshot `cea67bb6…`, 1,782 records) |
+| `cells.jsonl` | `722fddd6222ff1bfd4574a7b96dab8bb2dad228af4c8a39d19a2eb68344685d9` | the 1,888 gate records, 1,007,701 bytes (S6's refresh; S0's snapshot `cea67bb6…`, 1,782 records) |
 | `cells-deferred.jsonl` | `f6db26a8f33612c5f57d2506cc322b0e925318a7e943e6cd18426fabd52d8e4e` | the 9 deferred-syntax records, never in the gate |
 | `convert.py` | `eef78c1122233e97806cf3423a13bbbe65347131624faae19cdce1ef0eec7ba8` | the converter: deterministic (two runs byte-identical), one record per line, fixed key order |
 | `collection-rewrites.json` | `981e40ee4a1490609eb4e78f9a3095d514edc256acfe580dc77e628ab03970c2` | the four collection rewrites, all `confirmed: true` |
