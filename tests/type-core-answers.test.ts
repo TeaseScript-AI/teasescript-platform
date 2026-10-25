@@ -349,3 +349,44 @@ test("a `get` on a receiver that may be a reference is the runtime's, no default
   // three receivers, with and without a default, in both orders
   assert.deepEqual(got, want);
 });
+
+/**
+ * S3 §1 (review: Astra's D2): a decided place's admitted answer names the site of the contribution that decided it
+ * (A2's earliest definite one, a literal's earliest element, A4's copy), for the deciding line S8's sentences name; a
+ * written place has none. Both orders.
+ */
+test("a decided place publishes the site of the contribution that decided it", () => {
+  for (const [source, statement, path, decider] of [
+    ["let n = 3\nn = hostValue\nexit", "let n = 3", [], "3"],
+    [
+      "let whole: integer = 1\nlet xs = [2.5, whole]\nxs = [3.5]\nexit",
+      "let xs = [2.5, whole]",
+      ["element"],
+      "2.5",
+    ],
+    ["let typed: integer = 1\nlet copy = typed\ncopy = 2\nexit", "let copy = typed", [], "typed"],
+  ] as const)
+    for (const reversed of [false, true]) {
+      const run = (): ReturnType<typeof analysed> =>
+        withSolverSeam({ reverseWorklist: reversed }, () => analysed(source));
+      const { answers, node } = reversed
+        ? withConsumerOrder((list) => [...list].reverse(), run)
+        : run();
+      const place = answers.at(node(statement, "statement"))?.place;
+      assert.ok(place, `${source}: its place`);
+      const admitted = answers.place(place.id, path).admitted;
+      assert.ok(admitted.by === "decided", `${source}: decided`);
+      const at = source.indexOf(decider, source.indexOf(statement));
+      assert.deepEqual(
+        admitted.decider === null
+          ? null
+          : { start: admitted.decider.start, end: admitted.decider.end },
+        { start: at, end: at + decider.length },
+        `${source}${reversed ? " reversed" : ""}`,
+      );
+    }
+  const { answers, node } = analysed("let w: integer = 1\nexit");
+  const place = answers.at(node("let w: integer = 1", "statement"))?.place;
+  assert.ok(place);
+  assert.deepEqual(answers.place(place.id).admitted, { by: "written", kinds: ["integer"] });
+});

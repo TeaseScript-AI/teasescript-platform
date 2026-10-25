@@ -139,6 +139,8 @@ export class Admission {
   }[] = [];
   /** Whether each decision admits `null` (a copy of a written type without one does not, A4). */
   readonly #nullable = new Map<Key, boolean>();
+  /** The site of the contribution each decision took (S3 §1's admitted answer), `null` for a written type. */
+  readonly #deciderSites = new Map<Key, SourceSite | null>();
   readonly #copies = new Map<
     PlaceId,
     readonly { readonly path: readonly string[]; readonly term: TypeTerm }[]
@@ -420,6 +422,7 @@ export class Admission {
       writtenTags === null ? null : writtenTags.filter((tag) => tag !== "null");
     let byWritten = writtenTags !== null;
     let decider: Definition | null = null;
+    let deciderSite: SourceSite | null = null;
     // an inferred root whose every store's contract is plain scalar kinds of one family accepts every store
     if (tags === null && path.length === 0 && !this.#a4Keys.has(keyOf(root, []))) {
       let plain = true;
@@ -518,6 +521,7 @@ export class Admission {
               evaluate(d, at).some((item) => item.tag === "null"));
           byWritten = true;
           decider = d;
+          deciderSite = first?.site ?? d.site;
           break;
         }
         // an unknown beside a kind does not decide; a null beside one does (A8)
@@ -527,6 +531,7 @@ export class Admission {
         if (definite.length > 0) {
           tags = [...new Set(definite.map((item) => item.tag))];
           decider = d;
+          deciderSite = first?.site ?? d.site;
           break;
         }
       }
@@ -542,6 +547,7 @@ export class Admission {
       tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
     this.decided.set(key, tags);
     this.#nullable.set(key, nullable);
+    this.#deciderSites.set(key, deciderSite);
     const decidedTags = tags;
     const offends = (items: readonly Item[]): boolean =>
       items.some((item) =>
@@ -636,6 +642,14 @@ export class Admission {
       kinds.some((item) => item.tag === "null")
       ? [...tags, "null"]
       : tags;
+  }
+
+  /**
+   * The site of the contribution that decided a place's path (A2's earliest definite one, A4's copy), `null` where no
+   * store decided it (a written type, or the contract's kinds, C9 r4.12).
+   */
+  public deciderAt(place: PlaceId, path: readonly string[]): SourceSite | null {
+    return this.#deciderSites.get(keyOf(place, path)) ?? null;
   }
 
   /** Whether no store on the path or a prefix of it was rejected (A6) or copies a written binding (A4). */
