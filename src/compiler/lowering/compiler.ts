@@ -11,24 +11,18 @@ import type {
   InteractionExpression,
   SpeakerDeclaration,
   IfStatement,
-  SwitchCase,
   SwitchStatement,
   FileTarget,
   ScriptTarget,
 } from "../../ast.js";
-import { createSourceSpan, type SourceSpan } from "../../source.js";
+import type { SourceSpan } from "../../source.js";
 import type {
   AssignmentTargetPlan,
   CompiledFunctionDefinition,
   ExpressionPlan,
   Instruction,
-  JumpIfFalseInstruction,
-  JumpInstruction,
-  LoopControlInstruction,
-  LoopStartInstruction,
   PrepareParameterDefaultInstruction,
   TemplatePartPlan,
-  TemporaryExpressionPlan,
   TypeCheckPlan,
   PreparedFormShape,
   PlanLabel,
@@ -64,6 +58,13 @@ import {
   lowerLoadTask,
 } from "./calls.js";
 import { lowerFileStoreTask, lowerLockTask } from "./file-store-and-lock.js";
+import {
+  compileIf,
+  compileSwitch,
+  compileLoop,
+  lowerFallbackTask,
+  lowerLogicalExpressionTask,
+} from "./control-flow.js";
 import {
   isPlayerProfile,
   unwrapParentheses,
@@ -145,7 +146,7 @@ interface RegisteredHandler {
 
 /** The public members serve `compile-program.ts` and the modules beside this file, and are internal to the compiler. */
 export class InstructionCompiler {
-  readonly #loops: Array<{
+  public readonly loops: Array<{
     readonly loopId: number;
     readonly continueTarget: number;
     readonly breaks: number[];
@@ -180,7 +181,7 @@ export class InstructionCompiler {
 
   #emitTransfer(mode: "goto" | "call", target: FileTarget | ScriptTarget, span: SourceSpan): void {
     if (target.kind === "scriptTarget") {
-      const lowered = this.#lowerExpression(target.expression);
+      const lowered = this.lowerExpression(target.expression);
       this.instructions.push({
         kind: "transfer",
         mode,
@@ -217,7 +218,7 @@ export class InstructionCompiler {
     public readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> = new Map(),
     public readonly instructions: Instruction[] = [],
     public readonly functions: CompiledFunctionDefinition[] = [],
-    private readonly counters: LoweringCounters = { nextLoopId: 1, nextTemporaryId: 1 },
+    public readonly counters: LoweringCounters = { nextLoopId: 1, nextTemporaryId: 1 },
     public readonly project: ProjectFunctions = { global: new Map(), foreignCalls: [] },
     /** The files each glob target may pick, from semantic validation. */
     private readonly picks: ReadonlyMap<FileTarget, readonly string[]> = new Map(),
@@ -313,14 +314,14 @@ export class InstructionCompiler {
   public readonly selfHandleByInitializer = new Map<MediaParts, string>();
 
   public compileStatements(statements: readonly Statement[]): void {
-    runCompileTask(this.#compileStatements(statements));
+    runCompileTask(this.compileStatementsTask(statements));
   }
 
-  *#compileStatements(statements: readonly Statement[]): CompileTask<void> {
-    for (const statement of statements) yield* compileChild(this.#compileStatement(statement));
+  public *compileStatementsTask(statements: readonly Statement[]): CompileTask<void> {
+    for (const statement of statements) yield* compileChild(this.compileStatement(statement));
   }
 
-  *#compileStatement(statement: Statement): CompileTask<void> {
+  public *compileStatement(statement: Statement): CompileTask<void> {
     const start = this.instructions.length;
     yield* compileChild(this.#compileStatementKind(statement));
     this.trace?.statements.set(statement, { start, end: this.instructions.length });
@@ -334,7 +335,7 @@ export class InstructionCompiler {
       case "globalStatement":
         // A global gets its start value before the story runs; with `default:`, the declaration assigns here.
         if (statement.assignment !== null)
-          yield* compileChild(this.#compileStatement(statement.assignment));
+          yield* compileChild(this.compileStatement(statement.assignment));
         return;
       case "speakerSetterStatement":
         this.instructions.push({
@@ -350,7 +351,7 @@ export class InstructionCompiler {
         yield* compileChild(lowerShowButtonTask(this, statement, false));
         return;
       case "waitStatement": {
-        const lowered = this.#lowerExpression(statement.duration);
+        const lowered = this.lowerExpression(statement.duration);
         this.instructions.push({
           kind: "wait",
           command: "wait",
@@ -376,7 +377,7 @@ export class InstructionCompiler {
         this.instructions.push({ kind: "stopAudio", span: copySpan(statement.span) });
         return;
       case "showImageStatement": {
-        const lowered = this.#lowerExpression(statement.image);
+        const lowered = this.lowerExpression(statement.image);
         this.instructions.push({
           kind: "showImage",
           image: lowered.plan,
@@ -417,7 +418,7 @@ export class InstructionCompiler {
         return;
       }
       case "deleteStatement": {
-        const key = this.#lowerExpression(statement.key);
+        const key = this.lowerExpression(statement.key);
         this.instructions.push({
           kind: "storageWrite",
           value: null,
@@ -458,7 +459,7 @@ export class InstructionCompiler {
         if (initializer.kind === "playMediaExpression") {
           this.selfHandleByInitializer.set(initializer, statement.name.name);
         }
-        const lowered = this.#lowerExpression(statement.initializer);
+        const lowered = this.lowerExpression(statement.initializer);
         this.instructions.push({
           kind: "declareBinding",
           name: statement.name.name,
@@ -486,7 +487,7 @@ export class InstructionCompiler {
                 { plan: target.plan, temporaryIds: [] },
                 statement.target.span,
               );
-        const value = this.#lowerExpression(statement.value);
+        const value = this.lowerExpression(statement.value);
         const assigned: ExpressionPlan =
           statement.operator === "="
             ? value.plan
@@ -515,7 +516,7 @@ export class InstructionCompiler {
           this.instructions.push({ kind: "copyPlayerProfile", span: copySpan(statement.span) });
           return;
         }
-        const lowered = this.#lowerExpression(statement.expression);
+        const lowered = this.lowerExpression(statement.expression);
         this.instructions.push({
           kind: "evaluate",
           expression: lowered.plan,
@@ -525,14 +526,15 @@ export class InstructionCompiler {
         return;
       }
       case "ifStatement":
-        yield* compileChild(this.#compileIf(statement));
+        yield* compileChild(compileIf(this, statement));
         return;
       case "switchStatement":
-        yield* compileChild(this.#compileSwitch(statement));
+        yield* compileChild(compileSwitch(this, statement));
         return;
       case "repeatStatement":
         yield* compileChild(
-          this.#compileLoop(
+          compileLoop(
+            this,
             statement,
             "repeat",
             statement.count,
@@ -544,7 +546,8 @@ export class InstructionCompiler {
         return;
       case "forStatement":
         yield* compileChild(
-          this.#compileLoop(
+          compileLoop(
+            this,
             statement,
             "for",
             statement.iterable,
@@ -557,7 +560,8 @@ export class InstructionCompiler {
         return;
       case "whileStatement":
         yield* compileChild(
-          this.#compileLoop(
+          compileLoop(
+            this,
             statement,
             "while",
             statement.condition,
@@ -569,7 +573,7 @@ export class InstructionCompiler {
         return;
       case "breakStatement":
       case "continueStatement": {
-        const loop = this.#loops.at(-1);
+        const loop = this.loops.at(-1);
         if (loop === undefined) {
           throw new TypeError("Semantically invalid loop control reached compilation.");
         }
@@ -589,7 +593,7 @@ export class InstructionCompiler {
           this.instructions.push({ kind: "returnVoid", span: copySpan(statement.span) });
           return;
         }
-        const lowered = this.#lowerExpression(statement.value);
+        const lowered = this.lowerExpression(statement.value);
         this.instructions.push({
           kind: "returnValue",
           value: lowered.plan,
@@ -602,209 +606,6 @@ export class InstructionCompiler {
         throw new TypeError("Nested function declaration reached compilation.");
     }
     statement satisfies never;
-  }
-
-  *#compileIf(statement: Extract<Statement, { kind: "ifStatement" }>): CompileTask<void> {
-    const lowered = this.#lowerExpression(statement.condition);
-    const conditional = this.instructions.length;
-    const conditionalInstruction: JumpIfFalseInstruction = {
-      kind: "jumpIfFalse",
-      condition: lowered.plan,
-      target: -1,
-      span: copySpan(statement.condition.span),
-    };
-    this.instructions.push(conditionalInstruction);
-    this.originate(conditional, { kind: "if", statement });
-    this.emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
-    yield* compileChild(this.#compileBlock(statement.thenBlock));
-    if (statement.elseBlock === null) {
-      const falseCleanup = this.instructions.length;
-      this.instructions[conditional] = { ...conditionalInstruction, target: falseCleanup };
-      this.emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
-      return;
-    }
-
-    const jump = this.instructions.length;
-    const jumpInstruction: JumpInstruction = {
-      kind: "jump",
-      target: -1,
-      span: copySpan(statement.span),
-    };
-    this.instructions.push(jumpInstruction);
-    const falseCleanup = this.instructions.length;
-    this.instructions[conditional] = { ...conditionalInstruction, target: falseCleanup };
-    this.emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
-    if (statement.elseBlock.kind === "ifStatement") {
-      yield* compileChild(this.#compileStatement(statement.elseBlock));
-    } else {
-      yield* compileChild(this.#compileBlock(statement.elseBlock));
-    }
-    this.instructions[jump] = { ...jumpInstruction, target: this.instructions.length };
-  }
-
-  /**
-   * Evaluates the switched value once into a temporary, then tests the cases in order. The temporary is cleared before
-   * any case block runs, so it never stays live across a pause, `return`, `break`, or `continue` in a block.
-   */
-  *#compileSwitch(statement: SwitchStatement): CompileTask<void> {
-    const subject = this.#lowerExpression(statement.subject);
-    const subjectTemporary = this.allocateTemporary();
-    this.instructions.push({
-      kind: "storeTemporary",
-      temporaryId: subjectTemporary,
-      value: subject.plan,
-      expectBoolean: false,
-      span: copySpan(statement.subject.span),
-    });
-    this.emitTemporaryCleanup(subject.temporaryIds, statement.subject.span);
-    const jumpsToEnd: { readonly index: number; readonly instruction: JumpInstruction }[] = [];
-    for (const [index, switchCase] of statement.cases.entries()) {
-      const valuesSpan =
-        switchCase.typeTest?.span ??
-        createSourceSpan(switchCase.values[0]!.span.start, switchCase.values.at(-1)!.span.end);
-      const conditional = this.instructions.length;
-      const conditionalInstruction: JumpIfFalseInstruction = {
-        kind: "jumpIfFalse",
-        condition: this.#caseCondition(switchCase, subjectTemporary, valuesSpan),
-        target: -1,
-        span: copySpan(valuesSpan),
-      };
-      this.instructions.push(conditionalInstruction);
-      this.originate(conditional, { kind: "case", statement, index });
-      this.emitTemporaryCleanup([subjectTemporary], valuesSpan);
-      yield* compileChild(this.#compileBlock(switchCase.body));
-      const jump: JumpInstruction = { kind: "jump", target: -1, span: copySpan(switchCase.span) };
-      jumpsToEnd.push({ index: this.instructions.length, instruction: jump });
-      this.instructions.push(jump);
-      this.instructions[conditional] = {
-        ...conditionalInstruction,
-        target: this.instructions.length,
-      };
-    }
-    this.emitTemporaryCleanup([subjectTemporary], statement.subject.span);
-    if (statement.defaultBlock !== null) {
-      yield* compileChild(this.#compileBlock(statement.defaultBlock));
-    }
-    const end = this.instructions.length;
-    for (const { index, instruction } of jumpsToEnd) {
-      this.instructions[index] = { ...instruction, target: end };
-    }
-  }
-
-  /** `subject == value` for each literal and `subject in range` for each range, or-ed. */
-  #caseCondition(
-    switchCase: SwitchCase,
-    subjectTemporary: number,
-    valuesSpan: SourceSpan,
-  ): ExpressionPlan {
-    if (switchCase.typeTest !== null)
-      return typeTestPlan(switchCase.typeTest, {
-        kind: "temporary",
-        temporaryId: subjectTemporary,
-        span: copySpan(valuesSpan),
-      });
-    const tests = switchCase.values.map((expression): ExpressionPlan => {
-      const value = unwrapParentheses(expression);
-      const subject = (): ExpressionPlan => ({
-        kind: "temporary",
-        temporaryId: subjectTemporary,
-        span: copySpan(expression.span),
-      });
-      if (value.kind !== "rangeExpression") {
-        return {
-          kind: "binary",
-          operator: "==",
-          left: subject(),
-          right: this.#lowerExpression(value).plan,
-          span: copySpan(expression.span),
-        };
-      }
-      return {
-        kind: "binary",
-        operator: "in",
-        left: subject(),
-        right: this.#lowerExpression(value).plan,
-        span: copySpan(expression.span),
-      };
-    });
-    return tests.reduce((left, right): ExpressionPlan => ({
-      kind: "binary",
-      operator: "or",
-      left,
-      right,
-      span: copySpan(valuesSpan),
-    }));
-  }
-
-  *#compileBlock(block: Block): CompileTask<void> {
-    this.instructions.push({ kind: "enterScope", span: copySpan(block.span) });
-    yield* compileChild(this.#compileStatements(block.statements));
-    this.instructions.push({ kind: "leaveScope", span: copySpan(block.span) });
-  }
-
-  *#compileLoop(
-    statement: LoopStatement,
-    loopKind: "repeat" | "for" | "while",
-    expression: Expression,
-    body: Block,
-    variable: string | null,
-    span: SourceSpan,
-    valueVariable?: string,
-  ): CompileTask<void> {
-    const loopId = this.counters.nextLoopId;
-    this.counters.nextLoopId += 1;
-    const continueTarget = this.instructions.length;
-    const lowered = this.#lowerExpression(expression);
-    const start = this.instructions.length;
-    const loopContinueTarget = loopKind === "while" ? continueTarget : start;
-    const instruction: LoopStartInstruction =
-      loopKind === "for"
-        ? {
-            kind: "loopStart",
-            loopKind,
-            loopId,
-            variable: variable!,
-            ...(valueVariable === undefined ? {} : { valueVariable }),
-            expression: lowered.plan,
-            continueTarget: loopContinueTarget,
-            target: -1,
-            span: copySpan(span),
-          }
-        : {
-            kind: "loopStart",
-            loopKind,
-            loopId,
-            expression: lowered.plan,
-            continueTarget: loopContinueTarget,
-            target: -1,
-            span: copySpan(span),
-          };
-    this.instructions.push(instruction);
-    this.originate(start, { kind: "loop", statement });
-    this.emitTemporaryCleanup(lowered.temporaryIds, expression.span);
-    const breaks: number[] = [];
-    const context = { loopId, continueTarget: instruction.continueTarget, breaks };
-    this.#loops.push(context);
-    yield* compileChild(this.#compileStatements(body.statements));
-    this.instructions.push({
-      kind: "loopControl",
-      action: "continue",
-      loopId,
-      target: context.continueTarget,
-      span: copySpan(body.span),
-    });
-    this.#loops.pop();
-    const falseCleanup = this.instructions.length;
-    this.instructions[start] = { ...instruction, target: falseCleanup };
-    this.emitTemporaryCleanup(lowered.temporaryIds, expression.span);
-    const exit = this.instructions.length;
-    for (const index of context.breaks) {
-      // EVIDENCE: break indices are recorded only when emitting loopControl instructions above.
-      this.instructions[index] = {
-        ...(this.instructions[index] as LoopControlInstruction),
-        target: exit,
-      };
-    }
   }
 
   /** `showCamera [stage]` shows the camera view. */
@@ -910,7 +711,7 @@ export class InstructionCompiler {
       };
       this.instructions.push(prepareInstruction);
       if (parameter.defaultValue !== null) {
-        const lowered = this.#lowerExpression(parameter.defaultValue);
+        const lowered = this.lowerExpression(parameter.defaultValue);
         this.instructions.push({
           kind: "bindDefaultParameter",
           functionId: registered.id,
@@ -955,7 +756,7 @@ export class InstructionCompiler {
     });
   }
 
-  #lowerExpression(expression: Expression): LoweredExpression {
+  public lowerExpression(expression: Expression): LoweredExpression {
     return runCompileTask(this.lowerExpressionTask(expression));
   }
 
@@ -1059,14 +860,14 @@ export class InstructionCompiler {
       (expression.operator === "and" || expression.operator === "or") &&
       this.emitsInstructions(expression)
     ) {
-      return yield* compileChild(this.#lowerLogicalExpressionTask(expression));
+      return yield* compileChild(lowerLogicalExpressionTask(this, expression));
     }
     if (
       expression.kind === "binaryExpression" &&
       expression.operator === "otherwise" &&
       this.emitsInstructions(expression.right)
     ) {
-      return yield* compileChild(this.#lowerFallbackTask(expression));
+      return yield* compileChild(lowerFallbackTask(this, expression));
     }
     switch (expression.kind) {
       case "booleanLiteral":
@@ -1317,7 +1118,7 @@ export class InstructionCompiler {
     if (expression.kind === "indexExpression") {
       const object = this.#lowerAssignmentObject(expression.object);
       const index = this.materializeExpression(
-        this.#lowerExpression(expression.index),
+        this.lowerExpression(expression.index),
         expression.index.span,
       );
       return {
@@ -1334,7 +1135,7 @@ export class InstructionCompiler {
   }
 
   #lowerAssignmentObject(expression: Expression): LoweredExpression {
-    const lowered = this.#lowerExpression(expression);
+    const lowered = this.lowerExpression(expression);
     return this.prepareReferenceExpression(lowered, expression.span);
   }
 
@@ -1425,139 +1226,6 @@ export class InstructionCompiler {
               span: copySpan(root.span),
             },
       temporaryIds: elements.flatMap((item) => item.temporaryIds),
-    };
-  }
-
-  /**
-   * `a otherwise b` whose fallback runs as instructions, such as an ask: the value waits in a temporary, and the fallback
-   * runs only when it is null and then takes its place, as a `load` default does (V30 §18).
-   */
-  *#lowerFallbackTask(
-    expression: Extract<Expression, { kind: "binaryExpression" }>,
-  ): CompileTask<LoweredExpression> {
-    const left = yield* compileChild(this.lowerExpressionTask(expression.left));
-    const resultTemporary = this.allocateTemporary();
-    this.instructions.push({
-      kind: "storeTemporary",
-      temporaryId: resultTemporary,
-      value: left.plan,
-      expectBoolean: false,
-      span: copySpan(expression.left.span),
-    });
-    const result: TemporaryExpressionPlan = {
-      kind: "temporary",
-      temporaryId: resultTemporary,
-      span: copySpan(expression.span),
-    };
-    const conditional = this.instructions.length;
-    const conditionalInstruction: JumpIfFalseInstruction = {
-      kind: "jumpIfFalse",
-      condition: {
-        kind: "binary",
-        operator: "==",
-        left: result,
-        right: { kind: "literal", value: null, span: copySpan(expression.span) },
-        span: copySpan(expression.span),
-      },
-      target: -1,
-      span: copySpan(expression.span),
-    };
-    this.instructions.push(conditionalInstruction);
-    this.originate(conditional, { kind: "operand", expression });
-    const right = yield* compileChild(this.lowerExpressionTask(expression.right));
-    this.instructions.push({
-      kind: "storeTemporary",
-      temporaryId: resultTemporary,
-      value: right.plan,
-      expectBoolean: false,
-      span: copySpan(expression.right.span),
-    });
-    this.instructions[conditional] = {
-      ...conditionalInstruction,
-      target: this.instructions.length,
-    };
-    return {
-      plan: result,
-      temporaryIds: [...left.temporaryIds, ...right.temporaryIds, resultTemporary],
-    };
-  }
-
-  *#lowerLogicalExpressionTask(
-    expression: Extract<Expression, { kind: "binaryExpression" }>,
-  ): CompileTask<LoweredExpression> {
-    const left = yield* compileChild(this.lowerExpressionTask(expression.left));
-    const resultTemporary = this.allocateTemporary();
-    this.instructions.push({
-      kind: "storeTemporary",
-      temporaryId: resultTemporary,
-      value: left.plan,
-      expectBoolean: true,
-      span: copySpan(expression.left.span),
-    });
-    const condition: TemporaryExpressionPlan = {
-      kind: "temporary",
-      temporaryId: resultTemporary,
-      span: copySpan(expression.left.span),
-    };
-    if (expression.operator === "and") {
-      const conditional = this.instructions.length;
-      const conditionalInstruction: JumpIfFalseInstruction = {
-        kind: "jumpIfFalse",
-        condition,
-        target: -1,
-        span: copySpan(expression.span),
-      };
-      this.instructions.push(conditionalInstruction);
-      this.originate(conditional, { kind: "operand", expression });
-      const right = yield* compileChild(this.lowerExpressionTask(expression.right));
-      this.instructions.push({
-        kind: "storeTemporary",
-        temporaryId: resultTemporary,
-        value: right.plan,
-        expectBoolean: true,
-        span: copySpan(expression.right.span),
-      });
-      this.instructions[conditional] = {
-        ...conditionalInstruction,
-        target: this.instructions.length,
-      };
-      return {
-        plan: { ...condition, span: copySpan(expression.span) },
-        temporaryIds: [...left.temporaryIds, ...right.temporaryIds, resultTemporary],
-      };
-    }
-    const conditional = this.instructions.length;
-    const conditionalInstruction: JumpIfFalseInstruction = {
-      kind: "jumpIfFalse",
-      condition,
-      target: -1,
-      span: copySpan(expression.span),
-    };
-    this.instructions.push(conditionalInstruction);
-    this.originate(conditional, { kind: "operand", expression });
-    const skipRight = this.instructions.length;
-    const skipRightInstruction: JumpInstruction = {
-      kind: "jump",
-      target: -1,
-      span: copySpan(expression.span),
-    };
-    this.instructions.push(skipRightInstruction);
-    this.instructions[conditional] = {
-      ...conditionalInstruction,
-      target: this.instructions.length,
-    };
-    const right = yield* compileChild(this.lowerExpressionTask(expression.right));
-    this.instructions.push({
-      kind: "storeTemporary",
-      temporaryId: resultTemporary,
-      value: right.plan,
-      expectBoolean: true,
-      span: copySpan(expression.right.span),
-    });
-    this.instructions[skipRight] = { ...skipRightInstruction, target: this.instructions.length };
-    return {
-      plan: { ...condition, span: copySpan(expression.span) },
-      temporaryIds: [...left.temporaryIds, ...right.temporaryIds, resultTemporary],
     };
   }
 
