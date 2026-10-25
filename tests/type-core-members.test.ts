@@ -192,20 +192,33 @@ function members(): Member[] {
 
 /**
  * The consumer a result's kind requires (C2, C1): a count for a whole number, a written place of its kind otherwise;
- * a collection's element through `first` into its own consumer. With the reads whose items the test inspects.
+ * a collection's element through `first` into its own consumer. With the collection read and its element read.
  */
-function consumed(read: string, result: Result): { statement: string; element?: string } {
+function consumed(
+  read: string,
+  result: Result,
+): { readonly statement: string; readonly value: string; readonly collection?: string } {
   if (result.element !== undefined) {
-    const element = result.nullable === true ? `(${read} otherwise []).first` : `${read}.first`;
-    return { statement: consumed(element, result.element).statement, element };
+    const collection = result.nullable === true ? `(${read} otherwise [])` : read;
+    const element = consumed(`${collection}.first`, result.element);
+    return { ...element, collection };
   }
   return {
     statement:
       result.kind === "integer" && result.nullable !== true
         ? `repeat ${read} {}`
         : `let x: ${result.kind}${result.nullable === true ? " | null" : ""} = ${read}`,
+    value: read,
   };
 }
+
+/** A check as the test compares it: its kind, target, required kinds and site. */
+const checkText = (check: {
+  readonly kind: string;
+  readonly target: string;
+  readonly against: readonly string[];
+  readonly site: { readonly offset: number };
+}): string => `${check.kind} ${check.target} [${check.against.join(", ")}] @${check.site.offset}`;
 
 test("every member a receiver kind has answers its declared result to a consumer of its kind, never nothing", () => {
   const failing: string[] = [];
@@ -235,45 +248,82 @@ test("every member a receiver kind has answers its declared result to a consumer
         const answers = withSolverSeam({ reverseWorklist: reversed }, () =>
           reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run(),
         );
+        // the statement's reads by their text, with their published items, emptiness marks included
+        const statementAt = source.lastIndexOf(use.statement);
+        const siteOf = (at: string) => statementAt + use.statement.indexOf(at);
         const itemsAt = (at: string) => {
           const node = answers.graph.nodes.find(
             (candidate) =>
               candidate.kind === "expression" &&
               candidate.span !== null &&
+              candidate.span.start.offset === siteOf(at) &&
               source.slice(candidate.span.start.offset, candidate.span.end.offset) === at,
           );
-          return (node === undefined ? null : answers.at(node))?.items.filter(
-            (item) => item.tag !== "empty",
-          );
+          return (node === undefined ? null : answers.at(node))?.items ?? [];
         };
-        const items = itemsAt(text);
         const kinds = (found: readonly { readonly tag: string }[]) =>
           found.map((item) => item.tag).join("|");
-        if (items === undefined || items.length === 0) failing.push(`${name}: no items`);
+        const unknown = (found: readonly { readonly tag: string }[]) =>
+          found.some((item) => item.tag === "unknown");
+        const items = itemsAt(text).filter((item) => item.tag !== "empty");
+        if (items.length === 0) failing.push(`${name}: no items`);
         else if (
           items.some((item) => item.tag === "unknown" && (item.reasons & REASON.external) !== 0)
         )
           failing.push(`${name}: external data`);
         else if (member.exact === true && items.some((item) => item.tag !== member.result.kind))
           failing.push(`${name}: ${kinds(items)}, not ${member.result.kind}`);
-        // a consumer of the declared kind is never an error: a wrong kind is (Astra's B1 on #1028)
-        const outcome = coreRecord(coreResult(answers), ["main.tease"]).outcome;
-        if (outcome === "compile-error") failing.push(`${name}: ${use.statement} errs`);
-        if (
-          member.exact === true &&
-          use.element !== undefined &&
-          member.result.element !== undefined
-        ) {
-          const elements = itemsAt(use.element);
-          if (
-            elements === undefined ||
-            elements.length === 0 ||
-            elements.some((item) => item.tag !== member.result.element!.kind)
-          )
-            failing.push(
-              `${name}: its element ${kinds(elements ?? [])}, not ${member.result.element.kind}`,
-            );
+        // the consumer's obligations, from its operand's answer: its kind's check where the answer is no kind it knows,
+        // a selection's empty check where the collection may hold none, its null check where the collection is
+        // unknown; quiet where the declared kind fits (C1, C2, C6). A consumer of the declared kind never errs.
+        const expected: string[] = [];
+        const value = itemsAt(use.value);
+        // F19a: a handle's member read owes its receiver's null check, where the read stands in the consumer
+        if (route === "bound" && Object.hasOwn(HANDLE_MEMBERS, member.receiver))
+          expected.push(`null-check r [non-null] @${siteOf(use.value)}`);
+        const declared = member.result.element ?? member.result;
+        if (unknown(value))
+          expected.push(
+            declared.kind === "integer" && declared.nullable !== true
+              ? `integer-check ${use.value} [integer] @${siteOf(use.value)}`
+              : `copy-type x [${declared.kind}${declared.nullable === true ? ", null" : ""}] @${siteOf(use.value)}`,
+          );
+        if (use.collection !== undefined) {
+          const inner = use.collection.startsWith("(")
+            ? use.collection.slice(1, -1)
+            : use.collection;
+          const label = inner;
+          const collection = itemsAt(inner);
+          if (unknown(collection))
+            expected.push(`null-check ${label} [non-null] @${siteOf(inner)}`);
+          if (unknown(collection) || value.some((item) => item.tag === "empty"))
+            expected.push(`empty-check ${label} [list] @${siteOf(use.value)}`);
+          if (member.exact === true && member.result.element !== undefined) {
+            const elements = value.filter((item) => item.tag !== "empty");
+            if (elements.length === 0 || elements.some((item) => item.tag !== declared.kind))
+              failing.push(`${name}: its element ${kinds(elements)}, not ${declared.kind}`);
+          }
         }
+        const record = coreRecord(coreResult(answers), ["main.tease"]);
+        const sites = new Set([
+          siteOf(use.value),
+          ...(use.collection === undefined
+            ? []
+            : [
+                siteOf(
+                  use.collection.startsWith("(") ? use.collection.slice(1, -1) : use.collection,
+                ),
+              ]),
+        ]);
+        const got = record.runtimeChecks
+          .filter((check) => sites.has(check.site.offset))
+          .map(checkText)
+          .sort();
+        if (JSON.stringify(got) !== JSON.stringify(expected.sort()))
+          failing.push(
+            `${name}: ${got.join("; ") || "quiet"}, not ${expected.join("; ") || "quiet"}`,
+          );
+        if (record.outcome === "compile-error") failing.push(`${name}: ${use.statement} errs`);
       }
   }
   assert.deepEqual(failing, []);
