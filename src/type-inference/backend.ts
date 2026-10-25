@@ -3,6 +3,7 @@ import type {
   CallArgument,
   CallExpression,
   Expression,
+  FileTarget,
   FunctionParameter,
   GlobalStatement,
   Identifier,
@@ -32,18 +33,28 @@ import type { RegistryView } from "./registry-view.js";
  * The boundary in front of the type analysis of a project (ADR 0021): the compiler hands it the parsed files and what
  * name checking found, and takes back what lowering and the checks that follow the plan consume. A backend decides
  * every type the analysis infers and checks every value against them; the compiler never sees how. The legacy backend
- * (`legacy-rounds.ts`) checks in whole-program rounds; the constraint backend (O4) collects constraints, solves them
- * once, and checks once. Both produce the same `TypeCheckResult`, so the compiler, lowering, and the plan checks are
- * written once.
+ * (`legacy-rounds.ts`) checks in whole-program rounds; the coarse core (O4, `core/backend.ts`) answers every read once
+ * from the project's flow graph. Both produce the same `TypeCheckResult`, so the compiler, lowering, and the plan checks
+ * are written once.
  */
 export interface TypeAnalysisBackend {
-  readonly name: "legacy" | "constraints";
+  readonly name: "legacy" | "core";
   analyze(request: TypeAnalysisRequest): TypeAnalysisOutcome;
+}
+
+/** A file of the project as the analysis reads it. The legacy backend reads its path and program only. */
+export interface TypeAnalysisFile {
+  readonly path: string;
+  readonly program: Program;
+  /** The file's text, which names the operands an obligation checks (the coarse core: TABLE §10.5). */
+  readonly source?: string;
+  /** The files each glob target may start, from name checking, as the lowering takes them (TABLE G1(f)). */
+  readonly picks?: ReadonlyMap<FileTarget, readonly string[]>;
 }
 
 export interface TypeAnalysisRequest {
   /** The project's files with their parsed programs, in project order. */
-  readonly files: readonly { readonly path: string; readonly program: Program }[];
+  readonly files: readonly TypeAnalysisFile[];
   readonly options: TypeCheckOptions;
   /**
    * What the constraint-based analysis reads instead of keeping lists of its own: the value-kind registry and the

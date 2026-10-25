@@ -1619,9 +1619,9 @@ function edgeKey(from: FlowNode, to: FlowNode): number {
  * P7: the value a condition always has by its literals, as the type check reads conditions (`conditionShape`): a
  * boolean literal, `not` of one, or `and` and `or` that their literal operands decide; `null` when a run decides it.
  */
-function literalTruth(
+export function literalTruth(
   expression: Expression,
-  known: Map<Expression, boolean | null>,
+  known: Map<Expression, boolean | null> = new Map(),
 ): boolean | null {
   return runCompileTask(literalTruthTask(expression, known));
 }
@@ -1673,10 +1673,10 @@ function literalCount(expression: Expression): number | null {
 }
 
 /** P7: how often a body runs by its literals: never, exactly once, at least once, or `null` when a run decides. */
-type LiteralRounds = "none" | "one" | "some" | null;
+export type LiteralRounds = "none" | "one" | "some" | null;
 
 /** P7: the rounds of a `repeat` whose count its literals give. */
-function literalRounds(count: Expression): LiteralRounds {
+export function literalRounds(count: Expression): LiteralRounds {
   const value = literalCount(count);
   if (value === null) return null;
   return value <= 0 ? "none" : value === 1 ? "one" : value > 1 ? "some" : null;

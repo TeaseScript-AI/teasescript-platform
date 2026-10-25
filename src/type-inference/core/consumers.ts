@@ -54,8 +54,9 @@ import type { Work } from "./solver.js";
  * items. The quiet path answers first: a consumer that every kind of the contract fits, with no `unknown`, asks
  * nothing more (§3.3). Otherwise: all items definite and none fits is an error; some item does not fit, or an
  * `unknown` is present, a warning with one obligation per offending kind (§4); all fit, quiet. Here: C2 to C6, C11,
- * C12, the iterable of a `for`, F19a's speaker accesses, ADR 1.5's null default, and C1 and C7 against written types
- * (A1, A9). Decided types, the boundary checks of external data (C9), C8 and C10 are admission's.
+ * C12, the iterable of a `for`, F19a's speaker accesses, ADR 1.5's null default, C1 and C7 against written types
+ * (A1, A9), and C9's boundary check where external data a store brings enters a written place. Decided types, the other
+ * boundary checks, C8 and C10 are admission's.
  */
 
 const BOOLEAN: ReadonlySet<ItemTag> = new Set(["boolean"]);
@@ -188,6 +189,9 @@ const SELECT: unique symbol = Symbol("select");
 
 export class Consumers {
   readonly diagnostics: CoreDiagnostic[] = [];
+  /** The boundary checks of external data (C9), by the key they enter: here those a store into a written place owes. */
+  readonly boundaries = new Map<Key, Obligation[]>();
+  readonly #boundarySites = new Set<string>();
   /** The values a consumer answered by the quiet path (§3.3). */
   readonly quiet = new Set<PlaceId>();
   /** Each consumer read's demand and the work it was the first to compute (S3 §5: a counter only here). */
@@ -303,6 +307,29 @@ export class Consumers {
     );
   }
 
+  /**
+   * C9: the boundary check of external data where it enters, one per ingress expression and destination, against the
+   * destination's own kinds (r4.29: inside a literal too).
+   */
+  #boundary(key: Key, site: SourceSite, label: string, against: readonly ItemTag[]): void {
+    const at = `${siteKey(site)}|${key}`;
+    if (this.#boundarySites.has(at)) return;
+    this.#boundarySites.add(at);
+    const list = this.boundaries.get(key);
+    const check: Obligation = {
+      ...this.#obligation(
+        "copy-type",
+        site,
+        label,
+        against.map((tag) => requiredKind(tag)),
+        `validate external data entering ${label} against ${against.join("|")}`,
+      ),
+      boundary: true,
+    };
+    if (list === undefined) this.boundaries.set(key, [check]);
+    else list.push(check);
+  }
+
   /** S4: a possible null owes a null-check at every consumer, against what the place needs. */
   #nullWarning(
     kind: DiagnosticKind,
@@ -399,9 +426,10 @@ export class Consumers {
   /**
    * C1, C7 against a written type (A1, A9): every store into a place with a written type at the path, every argument
    * of a written parameter and every return of a written result is checked against that type, the store's value at its
-   * node by §3. A definite contribution that does not fit is an error at the store (the innermost offending expression
-   * inside literals, r4.35); a value none of whose kinds fits is an error even when every item is possible (ADR 1.7),
-   * never under a guard; otherwise one `copy-type` per offending kind and a `null-check` for a possible null.
+   * node by §3. A definite element of a collection literal none of whose kinds fits is an error at that element (A8); a
+   * value none of whose kinds fits is an error even when every item is possible (ADR 1.7), at the innermost offending
+   * expression inside literals (r4.35), never under a guard; otherwise one `copy-type` per offending kind, whatever its
+   * certainty, and a `null-check` for a possible null.
    */
   #writtenStores(): void {
     const { program, definitions, lists, contract } = this.pass;
@@ -555,10 +583,12 @@ export class Consumers {
           }
         }
         const items = this.#valueAt(d, at);
-        const bad = items.filter(
-          (item) =>
-            item.cert === "def" && concrete(item) && !tags.some((tag) => fits(item.tag, tag, true)),
-        );
+        // C9 at a written destination (A1): each external value the store brings owes its boundary check where it enters,
+        // whatever the store's own outcome; a value read from another variable entered by that variable's store (S6)
+        if (items.some(isExternal))
+          for (const { site, lands } of this.#ingressSites(d, at))
+            if (lands)
+              this.#boundary(keyOf(root, path), site, label, nullable ? [...tags, "null"] : tags);
         const nulls = items.filter((item) => item.tag === "null");
         // A8: a collection literal stored into a written element type admits each element by the scalar rule: a
         // definite element none of whose kinds fits is an error at that element
@@ -575,21 +605,6 @@ export class Consumers {
             : null;
         if (wrong !== null) {
           this.#error("written-target", program.place(wrong.value!).site ?? d.site);
-          continue;
-        }
-        // a definite contribution that does not fit (at the innermost offending expression, r4.35)
-        if (bad.length > 0) {
-          this.#error(
-            "written-target",
-            this.#siteAt(d, at, (elements) =>
-              elements.some(
-                (item) =>
-                  item.cert === "def" &&
-                  concrete(item) &&
-                  !tags.some((tag) => fits(item.tag, tag, true)),
-              ),
-            ),
-          );
           continue;
         }
         const fitsAny = (item: Item): boolean =>
@@ -615,12 +630,12 @@ export class Consumers {
           );
           continue;
         }
+        // some kind fits: every concrete kind that does not, definite or possible, owes its check (TABLE §4, r4.46: two
+        // definite answers, one fitting, warn)
         const offending = items
           .filter(
             (item) =>
-              (item.cert === "pos" &&
-                concrete(item) &&
-                !tags.some((tag) => fits(item.tag, tag, true))) ||
+              (concrete(item) && !tags.some((tag) => fits(item.tag, tag, true))) ||
               (item.tag === "unknown" &&
                 (at.length === 0 ? isOpaque(item) || isExternal(item) : contributes(item))),
           )
@@ -758,36 +773,60 @@ export class Consumers {
    * in source order.
    */
   #ingressSite(d: Definition, at: readonly string[]): SourceSite {
+    return this.#ingressSites(d, at)[0]?.site ?? d.site;
+  }
+
+  /**
+   * Every external value's own expression that `#ingressSite`'s walk reaches, in source order, and whether the value, or
+   * what the store reads of it, lands at `at` itself: a value the store brings whole into a place above `at` (`pool`
+   * for `pool.element` in `let pool: integer[] = hostValue`) enters there, so its boundary check is that place's (C9).
+   */
+  #ingressSites(
+    d: Definition,
+    at: readonly string[],
+  ): { readonly site: SourceSite; readonly lands: boolean }[] {
     const { program, definitions } = this.pass;
-    if (d.kind !== "whole" || d.value === undefined) return d.site;
-    // a value and what remains to read of it: path steps, `OPTIONS` (the value holds a choice's options) and `SELECT`
-    // (the value is an option: its selected value)
-    const pending: (readonly [PlaceId, readonly ReadStep[]])[] = [[d.value, at]];
+    if (d.kind !== "whole" || d.value === undefined) return [];
+    const found: { readonly site: SourceSite; readonly lands: boolean }[] = [];
+    // a value, what remains to read of it (path steps, `OPTIONS`: the value holds a choice's options, `SELECT`: the value
+    // is an option, its selected value), and how many of the remaining steps are steps of `at` the literals have not
+    // taken yet: a projection's or a choice's steps go before them
+    const pending: (readonly [PlaceId, readonly ReadStep[], number])[] = [[d.value, at, at.length]];
     while (pending.length > 0) {
-      const [value, steps] = pending.pop()!;
+      const [value, steps, below] = pending.pop()!;
       program.work.charge("checks");
-      if (definitions.ingress.has(value)) return program.place(value).site ?? d.site;
+      if (definitions.ingress.has(value)) {
+        const site = program.place(value).site;
+        if (site !== null) found.push({ site, lands: below === 0 });
+        continue;
+      }
       const [step, ...rest] = steps;
-      const next: (readonly [PlaceId, readonly ReadStep[]])[] = [];
+      const left = Math.min(below, rest.length);
+      const next: (readonly [PlaceId, readonly ReadStep[], number])[] = [];
       if (program.hasOf.has(value) || program.cellOwner.has(value)) {
         if (step === OPTIONS) {
           const elements = this.#literalChildren(value, "element");
-          if (elements.length === 0) next.push([value, [SELECT, ...rest]]);
-          for (const child of elements) next.push([child.value!, [SELECT, ...rest]]);
+          if (elements.length === 0) next.push([value, [SELECT, ...rest], left]);
+          for (const child of elements) next.push([child.value!, [SELECT, ...rest], left]);
         } else if (step === SELECT) {
           const valued = this.#literalChildren(value, "value");
           const selected = valued.length > 0 ? valued : this.#literalChildren(value, "text");
-          if (selected.length === 0) next.push([value, rest]);
-          for (const child of selected) next.push([child.value!, rest]);
+          if (selected.length === 0) next.push([value, rest, left]);
+          for (const child of selected) next.push([child.value!, rest, left]);
         } else if (step !== undefined)
-          for (const child of this.#literalChildren(value, step)) next.push([child.value!, rest]);
+          for (const child of this.#literalChildren(value, step))
+            next.push([child.value!, rest, left]);
       } else if (program.projOf.has(value)) {
         const projection = program.projOf.get(value)!;
         if (projection.step !== "iteration")
-          next.push([projection.owner, [stepName(projection.step), ...steps]]);
+          next.push([projection.owner, [stepName(projection.step), ...steps], below]);
         // r4.46 (2): an element of a dict's `values` is one of its values, and so is each option they give a choice
         if (dictList(projection.step) === "values" && (step === "element" || step === OPTIONS))
-          next.push([projection.owner, step === "element" ? steps : ["element", SELECT, ...rest]]);
+          next.push([
+            projection.owner,
+            step === "element" ? steps : ["element", SELECT, ...rest],
+            below,
+          ]);
       } else {
         const c = program.opOf.get(value);
         if (
@@ -797,12 +836,12 @@ export class Consumers {
         ) {
           const labels = choiceLabels(c);
           for (const [index, argument] of c.arguments.entries())
-            if (labels[index] === undefined) next.push([argument, [OPTIONS, ...steps]]);
+            if (labels[index] === undefined) next.push([argument, [OPTIONS, ...steps], below]);
         }
       }
       for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
     }
-    return d.site;
+    return found;
   }
 
   #siteAt(

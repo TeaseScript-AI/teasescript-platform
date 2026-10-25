@@ -37,6 +37,7 @@ import {
 } from "./method-categories.js";
 import {
   EMPTY,
+  firstContext,
   firstWriter,
   makeItem,
   mergeItems,
@@ -2693,8 +2694,13 @@ export class Contract {
     const out: Item[] = [];
     // the read passes an element step over a copy (F12: X3)
     let overCopy = false;
-    for (const [tag, token] of index.terms.get(rest.join(".")) ?? [])
+    // the contributions the read gathers: past an element step, several of them are several elements, of which
+    // positions do not tell which one (F12)
+    let sources = 0;
+    for (const [tag, token] of index.terms.get(rest.join(".")) ?? []) {
       out.push(makeItem(tag, token));
+      sources += 1;
+    }
     for (let length = 0; length <= rest.length; length += 1) {
       program.work.charge("invSteps");
       const path = rest.slice(0, length).join(".");
@@ -2728,8 +2734,10 @@ export class Contract {
         else
           for (const entry of index.exact.get(path) ?? [])
             out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, below)));
-        for (const entry of index.others.get(path) ?? [])
+        const others = index.others.get(path) ?? [];
+        for (const entry of others)
           out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, below)));
+        sources += (copies ?? index.exact.get(path) ?? []).length + others.length;
       }
       // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
       const step = rest[length];
@@ -2768,10 +2776,17 @@ export class Contract {
     // S3 §1's route: past an element step over a copy the contract answered (F12)
     if (exact && overCopy) this.#overCopy.add(`${literal}|${rest.join(".")}|${node?.id ?? "-"}`);
     // §3.4 r4.11: the X word is the read's (`member` past an element step over a copy), shared by every known-kind
-    // item, definite ones included, whatever its writer; an unknown keeps its reason's word
-    return overCopy
+    // item, definite ones included, whatever its writer; an unknown keeps its reason's word. Past an element step that
+    // gathers several elements the element read makes each kind only possible: its word too, by the precedence
+    if (overCopy)
+      return out.map((item) =>
+        item.tag === "unknown" || item.tag === "empty" ? item : { ...item, context: "member" },
+      );
+    return exact && sources > 1 && (inElement || rest.includes("element"))
       ? out.map((item) =>
-          item.tag === "unknown" || item.tag === "empty" ? item : { ...item, context: "member" },
+          item.tag === "unknown" || item.tag === "empty"
+            ? item
+            : { ...item, context: firstContext(item.context, "member") },
         )
       : out;
   }

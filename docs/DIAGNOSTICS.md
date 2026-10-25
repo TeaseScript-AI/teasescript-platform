@@ -25,7 +25,8 @@ The codes that more than one owner reports are listed in
 - **parser** (`src/parser.ts`): the structure of the source, with the file header (`src/script-header.ts`) and the
   check that number and duration literals are finite.
 - **name pass** (`src/semantic.ts`): names, scopes, placement, and what the structure of a command allows.
-- **type checker** (`src/type-checker.ts`): types and values.
+- **type checker** (`src/type-checker.ts`): types and values. The coarse core (`src/type-inference/core/`), which
+  replaces it, is reached only through a test-only compile route so far.
 - **compiler** (`src/compiler.ts`): the project's file paths and images, waits written in days or weeks, the check of
   the compiled plan, and the host's call stack.
 - **lowering** (`src/compiler/`): the instruction plan.
@@ -129,7 +130,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV008` | `break` or `continue` outside a loop | error | name pass |
 | `TSV009` | Chained range | error | name pass |
 | `TSV010` | Invalid range bound or empty range | error | type checker |
-| `TSV011` | Invalid wait, timer, repeat count, pacing, or timeout | error | type checker |
+| `TSV011` | Invalid wait, timer, repeat count, pacing, or timeout | error or warning | type checker |
 | `TSV012` | Invalid `for` loop source | error | type checker |
 | `TSV013` | Duplicate function | error | name pass |
 | `TSV014` | Duplicate parameter | error | name pass |
@@ -155,9 +156,9 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV038` | Invalid storage key | error | type checker |
 | `TSV039` | Invalid prefill | error | type checker |
 | `TSV040` | List where text is shown | error | type checker |
-| `TSV041` | Type mismatch | error | type checker |
+| `TSV041` | Type mismatch | error or warning | type checker |
 | `TSV042` | Value that cannot be shown | error | type checker |
-| `TSV043` | Unsupported operand, method, or property | error | type checker, plan analysis |
+| `TSV043` | Unsupported operand, method, or property | error or warning | type checker, plan analysis |
 | `TSV044` | Mixed types | error | type checker |
 | `TSV045` | Negative list index | error | type checker |
 | `TSV046` | Test with a constant result | warning | type checker |

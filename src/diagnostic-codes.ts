@@ -182,7 +182,7 @@ export const DIAGNOSTIC_CODES = {
   TSV010: entry(["type checker"], "error", "Invalid range bound or empty range", DOCS.values),
   TSV011: entry(
     ["type checker"],
-    "error",
+    ["error", "warning"],
     "Invalid wait, timer, repeat count, pacing, or timeout",
     DOCS.values,
   ),
@@ -237,12 +237,12 @@ export const DIAGNOSTIC_CODES = {
   TSV038: entry(["type checker"], "error", "Invalid storage key", DOCS.values),
   TSV039: entry(["type checker"], "error", "Invalid prefill", DOCS.values),
   TSV040: entry(["type checker"], "error", "List where text is shown", DOCS.values),
-  TSV041: entry(["type checker"], "error", "Type mismatch", DOCS.values),
+  TSV041: entry(["type checker"], ["error", "warning"], "Type mismatch", DOCS.values),
   TSV042: entry(["type checker"], "error", "Value that cannot be shown", DOCS.values),
   TSV043: {
     ...entry(
       ["type checker", "plan analysis"],
-      "error",
+      ["error", "warning"],
       "Unsupported operand, method, or property",
       DOCS.values,
     ),

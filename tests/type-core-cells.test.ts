@@ -360,7 +360,10 @@ test("external data in a choice's options or in a literal is warned at its own e
     return [
       record.outcome,
       ...record.diagnostics.map((diagnostic) => `${diagnostic.kind}@${diagnostic.site.offset}`),
-      ...record.checks.map((check) => `${check.kind}@${check.site.offset}`),
+      // C1's checks; C9's boundary checks are asserted with their cell
+      ...record.checks
+        .filter((check) => !check.boundary)
+        .map((check) => `${check.kind}@${check.site.offset}`),
     ];
   };
   // r4.43 (1): an external option of a choice, as an external element of a literal
@@ -495,7 +498,7 @@ test("a choice's option reached through index and property projections is select
           .filter((diagnostic) => diagnostic.kind === "written-target")
           .map((diagnostic) => `${diagnostic.kind}@${diagnostic.site.offset}`),
         ...record.checks
-          .filter((check) => check.kind === "copy-type")
+          .filter((check) => check.kind === "copy-type" && !check.boundary)
           .map((check) => `${check.kind}@${check.site.offset}`),
       ];
     });

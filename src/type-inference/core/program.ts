@@ -1,5 +1,5 @@
 import type { FileTarget, Program } from "../../ast.js";
-import type { TypeAnalysisRequest } from "../backend.js";
+import type { TypeAnalysisFile, TypeAnalysisRequest } from "../backend.js";
 import { collectGraph } from "../collector.js";
 import type {
   Constraint,
@@ -24,13 +24,11 @@ import { IngressGraph, type ItemScope, type Writer } from "./items.js";
 import { selectsElement } from "./method-categories.js";
 
 /**
- * The input of the coarse core's analysis (checkpoint 9): the project's files with what the analysis reads beside their
- * programs. The name pass's picks are the files each glob target may start, which the flow graph takes as the lowering
- * does (TABLE G1(f)); the source text names the operands an obligation checks (§10.5: `x` in `x / 4`).
+ * The input of the coarse core's analysis (checkpoint 9): the request's files with both fields the core reads beside
+ * their programs. The name pass's picks are the files each glob target may start, which the flow graph takes as the
+ * lowering does (TABLE G1(f)); the source text names the operands an obligation checks (§10.5: `x` in `x / 4`).
  */
-export interface CoreFile {
-  readonly path: string;
-  readonly program: Program;
+export interface CoreFile extends TypeAnalysisFile {
   readonly source: string;
   readonly picks: ReadonlyMap<FileTarget, readonly string[]>;
 }
