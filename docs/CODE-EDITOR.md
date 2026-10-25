@@ -6,8 +6,10 @@ and integration with compiler/runtime tooling. Runtime inspection and diagnostic
 
 There is no editor UI at present. The Monaco proof-of-concept page under `editor/`, which the playground server served
 on `/editor/`, was removed on the owner's decision of 2026-10-25; the last `main` commit that contains it is
-`138f7108f`. The editor-neutral tooling and the Monaco adapters remain for the future editor, whose name is pending
-(#574).
+`138f7108f`. Its `editor/monaco.ts` (`registerTeaseScriptLanguage` and `watchProject`, about 168 lines) is the Monaco
+language registration that a future Monaco-based editor can restore from that commit; it went with the page because it
+needs the `monaco-editor` package. The editor-neutral tooling and the Monaco adapters remain for the future editor,
+whose name is pending (#574).
 
 `src/language-tooling.ts`, public through `src/index.ts`, provides diagnostics, completions, hover, signature help,
 formatting, and token classes for a document, and a project overview that compiles all files as one project, with the
