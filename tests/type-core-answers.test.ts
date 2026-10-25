@@ -390,3 +390,95 @@ test("a decided place publishes the site of the contribution that decided it", (
   assert.ok(place);
   assert.deepEqual(answers.place(place.id).admitted, { by: "written", kinds: ["integer"] });
 });
+
+test("a value an add or an addAll inserts has its properties, never the collection itself (N1)", () => {
+  // per program the read and its property names, each answered as its projection, in both orders
+  const added = "let xs = []\nxs.add({value: 2})\n";
+  const programs: readonly (readonly [string, string, string, readonly string[]])[] = [
+    ["a list's add", `${added}say xs.first`, "xs.first", ["value"]],
+    [
+      "a set's add",
+      "let xs = set[]\nxs.add({value: 2})\nfor entry in xs {\n  say entry.value\n}",
+      "entry",
+      ["value"],
+    ],
+    [
+      "a named record added",
+      "let r = {value: 2}\nlet xs = []\nxs.add(r)\nsay xs.first",
+      "xs.first",
+      ["value"],
+    ],
+    [
+      "a literal's addAll",
+      "let xs = []\nxs.addAll([{value: 2}])\nsay xs.first",
+      "xs.first",
+      ["value"],
+    ],
+    [
+      "a named list's addAll",
+      "let ys = [{value: 2}]\nlet xs = []\nxs.addAll(ys)\nsay xs.first",
+      "xs.first",
+      ["value"],
+    ],
+    [
+      "an add in a loop",
+      "let xs = []\nfor i in [1, 2] {\n  xs.add({value: i})\n}\nsay xs.first",
+      "xs.first",
+      ["value"],
+    ],
+    ["a copied collection", `${added}let ys = xs\nsay ys.first`, "ys.first", ["value"]],
+    [
+      "a returned collection",
+      "function make {\n  let xs = []\n  xs.add({value: 2})\n  return xs\n}\nlet ys = make()\nsay ys.first",
+      "ys.first",
+      ["value"],
+    ],
+    [
+      "a handler's add",
+      "let xs = []\ntimer async hidden 1 s { xs.add({value: 2}) }\nsay xs.first",
+      "xs.first",
+      ["value"],
+    ],
+    [
+      "a nested collection",
+      "let xss = []\nxss.add([{value: 2}])\nsay xss.first.first",
+      "xss.first.first",
+      ["value"],
+    ],
+    [
+      "a nested record",
+      "let xs = []\nxs.add({inner: {value: 2}})\nsay xs.first.inner",
+      "xs.first.inner",
+      ["value"],
+    ],
+    ["a removed record", `${added}let r = xs.removeFirst()\nsay r`, "r", ["value"]],
+    // the controls: a literal's element; the collections themselves and scalar elements have none
+    ["a literal's element", "let xs = [{value: 2}]\nsay xs.first", "xs.first", ["value"]],
+    ["the collection", `${added}say xs`, "xs", []],
+    ["a scalar added", "let xs = []\nxs.add(2)\nsay xs.first", "xs.first", []],
+    ["the inner collection", "let xss = []\nxss.add([{value: 2}])\nsay xss.first", "xss.first", []],
+    ["the collection of an addAll", "let xs = []\nxs.addAll([{value: 2}])\nsay xs", "xs", []],
+    [
+      "a record holding a collection added to",
+      "let box = {list: []}\nbox.list.add({value: 2})\nsay box",
+      "box",
+      ["list"],
+    ],
+  ];
+  for (const [name, body, text, names] of programs) {
+    const answered = (): string => {
+      const { answers, node } = analysed(`${body}\nexit`);
+      const properties = answers.properties(node(text));
+      assert.deepEqual([...properties.keys()], names, name);
+      for (const [property, items] of properties)
+        assert.deepEqual(items, answers.project(node(text), { property }), `${name}: ${property}`);
+      return JSON.stringify(
+        [...properties].map(([property, items]) => [property, items.map((item) => item.tag)]),
+      );
+    };
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder((list) => [...list].reverse(), answered),
+    );
+    assert.equal(reversed, answered(), name);
+  }
+});

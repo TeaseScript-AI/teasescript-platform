@@ -671,7 +671,7 @@ class CoreAnswers implements Answers {
 
   /**
    * The names of a value's known properties (S3 §1): those the keys below its sources store, and those the objects of
-   * its literals have at its path. One worklist of sources, each once: a value read further at a path is followed
+   * its literals and of the values its collections' adds insert have at its path. One worklist of sources, each once: a value read further at a path is followed
    * through its projections and the operations that pass a value on (the value side's transfers) to a copied key, a
    * call's result key or a literal; a key to its prefixes' stores and their sources' own stores; a literal to the
    * reads and calls standing at its path or above it.
@@ -819,6 +819,10 @@ class CoreAnswers implements Answers {
           if (entry.key !== undefined)
             pending.push({ key: keyOf(keyPlace(entry.key), [...keyPath(entry.key), ...at]) });
           else if (entry.value !== undefined) pending.push({ value: entry.value, path: at });
+          // an added value stands at the collection's element, an `addAll`'s at its own (as `entryAt` reads it), never
+          // at the collection itself
+          else if (entry.elem !== undefined && rest[0] === "element")
+            pending.push({ value: entry.elem, path: [...(entry.at ?? []), ...rest.slice(1)] });
         }
       }
     }
