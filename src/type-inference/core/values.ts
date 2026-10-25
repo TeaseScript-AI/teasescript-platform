@@ -238,10 +238,11 @@ export class Values {
       if (item.tag === "dict" && dictList(step) !== undefined) {
         if (after.length === 0) out.push(of("list"));
         else if (after[0] === "element") {
+          // a key is text from the list's contract, possible: no literal holds a derived list's element (r4.47, P3)
           const below =
             dictList(step) === "keys"
               ? after.length === 1
-                ? [of("string")]
+                ? weaken([of("string")])
                 : []
               : yield* this.#through(value, node, [...before, ...after], at);
           // the list's own selection takes its own emptiness (open); a deeper selection's marker is that selection's

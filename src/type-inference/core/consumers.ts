@@ -360,6 +360,11 @@ export class Consumers {
     const projection =
       program.projOf.get(value) ??
       (this.#getOf.has(value) ? { owner: this.#getOf.get(value)!, step: "index" } : undefined);
+    // a read through a dict's `values` or `keys`, a new list each read and no place, is named by its own text (r4.47)
+    if (projection !== undefined && this.#derived(value)) {
+      const site = program.places[value]?.site ?? null;
+      if (site !== null) return program.textAt(site);
+    }
     if (projection !== undefined && depth < 256) {
       // a selection, index or `get` is `element` (an object's own `first` too, F11), a dict's value `entry`
       const step =
@@ -376,6 +381,25 @@ export class Consumers {
     if (result !== undefined) return program.place(result).label;
     const site = program.places[value]?.site ?? null;
     return site === null ? "the value" : program.textAt(site);
+  }
+
+  /** Whether a projection chain passes a dict's `values` or `keys`: a derived list, which no place holds. */
+  #derived(value: PlaceId): boolean {
+    const { program, contract } = this.pass;
+    let at: PlaceId = value;
+    for (let depth = 0; depth < 256; depth += 1) {
+      const projection =
+        program.projOf.get(at) ??
+        (this.#getOf.has(at) ? { owner: this.#getOf.get(at)!, step: "index" } : undefined);
+      if (projection === undefined) return false;
+      if (
+        dictList(propertyName(projection.step)) !== undefined &&
+        this.#run(contract.contractOfValue(projection.owner)).some((item) => item.tag === "dict")
+      )
+        return true;
+      at = projection.owner;
+    }
+    return false;
   }
 
   /** A place's path in the same vocabulary: an element step below a dict is its `entry`. */

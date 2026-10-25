@@ -863,14 +863,17 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `empty-check dict{k: "bad"}.values [list] @${at("dict")}`,
       ],
     ],
+    // r4.47 (7), F12 with P3: an element read from an open derived list is possible, so a key is possible text, a
+    // warning with its check; §10.5, r4.46 (2): a target through a dict's list is its source text, no key of the dict
     [
       "a dict's keys",
       "let d = dict{k: 1}\nrepeat d.keys.first {}\nexit",
       (at) => [
-        "compile-error",
-        `integer-use compile-error @${at("d.keys")}`,
+        "warning-runtime-check",
+        `integer-use warning-runtime-check @${at("d.keys")}`,
         `member-read warning-runtime-check @${at("d.keys")}`,
         `empty-check d.keys [list] @${at("d.keys")}`,
+        `integer-check d.keys.first [integer] @${at("d.keys")}`,
       ],
     ],
     [
@@ -902,19 +905,20 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `member-read warning-runtime-check @${at("d.values")}`,
         `member-read warning-runtime-check @${at("d.values")}`,
         `empty-check d.values [list] @${at("d.values")}`,
-        `empty-check d.values.element.values [list] @${at("d.values")}`,
+        `empty-check d.values.first.values [list] @${at("d.values")}`,
       ],
     ],
     [
       "a dict's keys below its values",
       "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.first.keys.first {}\nexit",
       (at) => [
-        "compile-error",
-        `integer-use compile-error @${at("d.values")}`,
+        "warning-runtime-check",
+        `integer-use warning-runtime-check @${at("d.values")}`,
         `member-read warning-runtime-check @${at("d.values")}`,
         `member-read warning-runtime-check @${at("d.values")}`,
         `empty-check d.values [list] @${at("d.values")}`,
-        `empty-check d.values.element.keys [list] @${at("d.values")}`,
+        `empty-check d.values.first.keys [list] @${at("d.values")}`,
+        `integer-check d.values.first.keys.first [integer] @${at("d.values")}`,
       ],
     ],
     [
@@ -926,8 +930,8 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `member-read warning-runtime-check @${at("d.values")}`,
         `member-read warning-runtime-check @${at("d.values")}`,
         `empty-check d.values [list] @${at("d.values")}`,
-        `empty-check d.values.element.values [list] @${at("d.values")}`,
-        `empty-check d.values.element.values.element.values [list] @${at("d.values")}`,
+        `empty-check d.values.first.values [list] @${at("d.values")}`,
+        `empty-check d.values.first.values.first.values [list] @${at("d.values")}`,
       ],
     ],
     [
@@ -938,7 +942,7 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `member-read warning-runtime-check @${at("d.values")}`,
         `member-read warning-runtime-check @${at("d.values")}`,
         `empty-check d.values [list] @${at("d.values")}`,
-        `empty-check d.values.element.values [list] @${at("d.values")}`,
+        `empty-check d.values.first.values [list] @${at("d.values")}`,
       ],
     ],
     [
@@ -973,7 +977,7 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `integer-use warning-runtime-check @${at("d.values.first {}")}`,
         `empty-check d.values [list] @${at("d.values.first is")}`,
         `empty-check d.values [list] @${at("d.values.first {}")}`,
-        `integer-check d.values.element [integer] @${at("d.values.first {}")}`,
+        `integer-check d.values.first [integer] @${at("d.values.first {}")}`,
       ],
     ],
     // r4.43: C1's site at the external value among the options a dict's values give a choice
@@ -999,7 +1003,7 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `null-check o [non-null] @${at("o.keys.first")}`,
         `empty-check o.keys [list] @${at("o.keys.first")}`,
         `null-check o.keys [non-null] @${at("o.keys.first")}`,
-        `integer-check o.keys.element [integer] @${at("o.keys.first")}`,
+        `integer-check o.keys.first [integer] @${at("o.keys.first")}`,
       ],
     ],
     // the same through an operation and a literal: the receiver's completed contract decides (review r3)
@@ -1015,9 +1019,9 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `integer-use warning-runtime-check @${at("(o otherwise")}`,
         `null-check o otherwise null [non-null] @${at("o otherwise")}`,
         `null-check o otherwise null [non-null] @${at("o otherwise")}`,
-        `empty-check o otherwise null.keys [list] @${at("(o otherwise")}`,
-        `null-check o otherwise null.keys [non-null] @${at("(o otherwise")}`,
-        `integer-check o otherwise null.keys.element [integer] @${at("(o otherwise")}`,
+        `empty-check (o otherwise null).keys [list] @${at("(o otherwise")}`,
+        `null-check (o otherwise null).keys [non-null] @${at("(o otherwise")}`,
+        `integer-check (o otherwise null).keys.first [integer] @${at("(o otherwise")}`,
       ],
     ],
     // a path through eight objects' own `values` is read once per step, as any property's (review r2: it exhausted the

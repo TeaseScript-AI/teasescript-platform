@@ -895,7 +895,9 @@ export class Contract {
           if (dictList(step) === "values") {
             const below = yield* read([...before, ...after], at);
             out.push(...(after.length === 1 ? withoutEmpty(below) : below));
-          } else if (after.length === 1) out.push(carried(makeItem("string", item.writer), [item]));
+          } else if (after.length === 1)
+            // a key is text, possible: no literal holds a derived list's element (r4.47, P3)
+            out.push(carried(makeItem("string", item.writer, { cert: "pos" }), [item]));
           if (after.length === 1) out.push(EMPTY);
         }
       } else if (declared !== undefined) {
