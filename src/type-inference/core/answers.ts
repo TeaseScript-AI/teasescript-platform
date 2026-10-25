@@ -590,7 +590,7 @@ class CoreAnswers implements Answers {
       | { readonly literal: PlaceId; readonly path: readonly string[] };
     const pending: Task[] = [{ value, path: [] }];
     const seen = new Set<string>();
-    const kinds = (of: PlaceId): ReadonlySet<string> =>
+    const kinds = (of: PlaceId): ReadonlySet<ItemTag> =>
       new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag));
     while (pending.length > 0) {
       const task = pending.pop()!;
@@ -627,7 +627,7 @@ class CoreAnswers implements Answers {
             // r4.46 (2): a dict's `values` holds its values (its `keys` text); an object's own property of the name;
             // a receiver that may be a reference has the runtime's members, none known (F19a)
             const of = kinds(projection.owner);
-            if ([...of].some((tag) => REFERENCE.has(tag as ItemTag))) continue;
+            if ([...of].some((tag) => REFERENCE.has(tag))) continue;
             if (of.has("object"))
               pending.push({ value: projection.owner, path: [projection.step, ...path] });
             if (of.has("dict") && dictList(projection.step) === "values" && path[0] === "element")
