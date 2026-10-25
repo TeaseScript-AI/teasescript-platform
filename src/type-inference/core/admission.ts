@@ -1,19 +1,14 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import {
-  choiceLabels,
-  defaultOf,
-  heldReference,
-  REFERENCE,
-  termAt,
-  typeTags,
-  writtenOf,
-} from "./contract.js";
+import { carried, keepsOwn, operandsOf, type Dispatch } from "./carriers.js";
+import { defaultOf, heldReference, termAt, typeTags, writtenOf } from "./contract.js";
 import {
   keyOf,
   keyPath,
   keyPlace,
   prefixesOf,
+  SELECTED_TEXT,
+  SELECTED_VALUE,
   sortCost,
   type Definition,
   type Key,
@@ -21,13 +16,8 @@ import {
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, writerKey, type IngressNode, type Item, type ItemTag } from "./items.js";
-import {
-  conversionCategory,
-  dictList,
-  interactionCategory,
-  methodCategory,
-} from "./method-categories.js";
-import { propertyStep, stepName } from "./program.js";
+import { conversionCategory, dictList } from "./method-categories.js";
+import { propertyStep } from "./program.js";
 import { elementStep, type Obligation, type RequiredKind } from "./result.js";
 import type { Work } from "./solver.js";
 import { getProof } from "./values.js";
@@ -969,108 +959,24 @@ export class Admission {
     return keyOf(keyPlace(key), path);
   }
 
-  /**
-   * The values a value carries, each with the path into it the value is (the walk of `answers.ts` `#propertyNames`):
-   * a projection its owner at its step (a loop variable a list's or a set's element, a dict's `values` its elements, its
-   * `keys` none, F12, F27, r4.46 (2)), `otherwise` both sides, `get` its receiver's element and its default (F17b), a
-   * load's and a parse's default (C10), a copy of a collection's elements its receiver (F10: `take`, `takeLast`,
-   * `toList`, `toSet`), a removal its receiver's element (F7), a list's `+` its operands, `askChoice` its unlabelled
-   * options' values (V30 §19); `strip` is the path below the value still to read.
-   */
+  /** The value side's decisions the carrier table asks before it carries (`carriers.ts`). */
+  readonly #dispatch: Dispatch = {
+    kinds: (of) =>
+      new Set(this.#run(this.pass.contract.contractOfValue(of)).map((item) => item.tag)),
+    reference: (receiver) => heldReference(this.#run(this.pass.contract.valueReceiver(receiver))),
+  };
+
+  /** The values a value carries, with the path into each its value is read at: the carrier table's (`carried`). */
   #carriersOf(
     value: PlaceId,
     strip: readonly string[],
   ): readonly (readonly [PlaceId, readonly string[]])[] {
-    const { program, contract } = this.pass;
-    const kinds = (of: PlaceId): ReadonlySet<ItemTag> =>
-      new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag));
-    // (an operation the receiver's or the key's decision leaves its own value carries nothing: F19a, F19)
-    if (this.#keepsOwn(value)) return [];
-    // (a copy of the elements and a `+` give their operands' elements, nothing else of them)
-    const elements = strip.length === 0 || strip[0] === "element";
-    const projection = program.projOf.get(value);
-    if (projection !== undefined) {
-      const { owner, step } = projection;
-      if (step === "iteration") {
-        const of = kinds(owner);
-        return of.has("list") || of.has("set") ? [[owner, ["element", ...strip]]] : [];
-      }
-      const list = dictList(step);
-      if (list === undefined) return [[owner, [stepName(step), ...strip]]];
-      const of = kinds(owner);
-      if ([...of].some((tag) => REFERENCE.has(tag))) return [];
-      const out: (readonly [PlaceId, readonly string[]])[] = [];
-      if (of.has("object")) out.push([owner, [step, ...strip]]);
-      if (of.has("dict") && list === "values" && elements) out.push([owner, strip]);
-      return out;
-    }
-    const c = program.opOf.get(value);
-    if (c === undefined) return [];
-    if (c.kind === "fallback")
-      return [
-        [c.left, strip],
-        [c.right, strip],
-      ];
-    if (c.kind === "get")
-      return [
-        [c.receiver, ["element", ...strip]],
-        [c.fallback, strip],
-      ];
-    if (c.kind === "load") return c.fallback === null ? [] : [[c.fallback, strip]];
-    if (c.kind !== "operation") return [];
-    const { family, name } = c.contract;
-    if (family === "conversion" && conversionCategory(name)?.kind === "parses") {
-      const fallback = defaultOf(c);
-      return fallback === undefined ? [] : [[fallback, strip]];
-    }
-    if (family === "method" && c.receiver !== null) {
-      const gives = methodCategory(name)?.gives;
-      if (gives?.kind === "copy" && elements) return [[c.receiver, strip]];
-      if (
-        gives?.kind === "removed" &&
-        (gives.fromList === "element" || kinds(c.receiver).has("dict"))
-      )
-        return [[c.receiver, ["element", ...strip]]];
-      return [];
-    }
-    if (family === "operator" && name === "+" && elements)
-      return c.arguments.map((argument) => [argument, strip] as const);
-    if (family === "interaction" && interactionCategory(name)?.kind === "options") {
-      const labels = choiceLabels(c);
-      return c.arguments.flatMap((argument, index) =>
-        labels[index] === undefined
-          ? [
-              [argument, ["value", ...strip]] as const,
-              [argument, ["element", "value", ...strip]] as const,
-            ]
-          : [],
-      );
-    }
-    return [];
+    return carried(this.pass.program, value, strip, this.#dispatch);
   }
 
-  /**
-   * F19a, F19: whether the receiver's or the key's decision leaves a value's operation its own value, before any operand
-   * is selected or a written type carried: a projection, a `get` or a method of a receiver that may be a reference (the
-   * runtime's member, opaque), a `load` of a computed key (external data, whatever its default), the decisions the value
-   * side and the contract take first (`valueReceiver`'s RECEIVER decision).
-   */
+  /** Whether the receiver's or the key's decision leaves a value's operation its own value (F19a, F19: `keepsOwn`). */
   #keepsOwn(value: PlaceId): boolean {
-    const { program, contract } = this.pass;
-    const reference = (receiver: PlaceId): boolean =>
-      heldReference(this.#run(contract.valueReceiver(receiver)));
-    const projection = program.projOf.get(value);
-    if (projection !== undefined)
-      return projection.step !== "iteration" && reference(projection.owner);
-    const c = program.opOf.get(value);
-    if (c?.kind === "get") return reference(c.receiver);
-    if (c?.kind === "load") return c.key === null;
-    return (
-      c?.kind === "operation" &&
-      c.contract.family === "method" &&
-      c.receiver !== null &&
-      reference(c.receiver)
-    );
+    return keepsOwn(this.pass.program, value, this.#dispatch);
   }
 
   /** A stored value's own structure: its literals' fields and elements at every depth, and their sources (F2). */
@@ -1383,6 +1289,9 @@ export class Admission {
       }
       this.#fields.set(term, fields);
     }
+    // V30 §19: a choice object's selected value, its `value` where it has one, else its `text`
+    if (step === SELECTED_VALUE) return fields.get("value");
+    if (step === SELECTED_TEXT) return fields.has("value") ? undefined : fields.get("text");
     return fields.get(step);
   }
 
@@ -1778,6 +1687,87 @@ export class Admission {
       if (level.operand === c.receiver) return surely ? !reached : !only;
       return level.operand !== c.fallback || (surely ? only : reached);
     });
+  }
+
+  /**
+   * A store's contributions at `at`, in evaluation order: the stops of the one walk (`#stopsOf`, the carrier table's)
+   * standing at the path or above it, each with the rest of the path to read into it, the ones its operations may give
+   * (S: `#chosen`, a live read). The obligations come from these, as the decider does (invariant O).
+   */
+  #contributions(
+    d: Definition,
+    at: readonly string[],
+  ): readonly { readonly stop: Stop; readonly rest: readonly string[] }[] {
+    if (d.value === undefined) return [];
+    const stops = this.#stopsOf(d.value, d.node);
+    const out: { stop: Stop; rest: readonly string[] }[] = [];
+    for (let length = 0; length <= at.length; length += 1) {
+      const key = at.slice(0, length).join(".");
+      for (const map of [stops.written, stops.values, stops.literals])
+        for (const stop of map.get(key) ?? []) {
+          this.pass.program.work.charge("checks");
+          if (stop.via.length === 0 || this.#selects(stop))
+            out.push({ stop, rest: at.slice(length) });
+        }
+    }
+    return out.sort((a, b) => a.stop.order - b.stop.order);
+  }
+
+  /**
+   * C1's site for external data a store brings at `at`: the first ingress among its contributions, read through
+   * projections of it or not, that is no operation's own read (C10: a fallback or a default names its own read), else
+   * the store's own site (the set's sites for named data at a decided place).
+   */
+  public ingressSiteOf(d: Definition, at: readonly string[]): SourceSite {
+    const { program, definitions } = this.pass;
+    if (d.kind !== "whole") return d.site;
+    for (const { stop } of this.#contributions(d, at)) {
+      if (
+        stop.via.some((level) =>
+          operandsOf(program, level.value).some(
+            (operand) => operand.own && operand.operand === level.operand,
+          ),
+        )
+      )
+        continue;
+      // (a contribution read through projections of its source stands where that source does)
+      let value = stop.value;
+      for (
+        let projection = program.projOf.get(value);
+        projection !== undefined && projection.step !== "iteration";
+        projection = program.projOf.get(value)
+      )
+        value = projection.owner;
+      if (definitions.ingress.has(value)) return program.places[value]?.site ?? d.site;
+    }
+    return d.site;
+  }
+
+  /**
+   * Where a store's value at `at` carries external data another store brought, as a whole value (r4.50 (1)): the first
+   * read among its contributions of a source no store validates (its own contract holds no kind), whose items there are
+   * external; `null` where none does. Inline data is the store's own ingress (C9's boundary), and a member of a value
+   * whose kinds are unknown owes C5's obligation at its access (A7): neither counts.
+   */
+  public namedExternalSite(d: Definition, at: readonly string[]): SourceSite | null {
+    const { program, contract, values } = this.pass;
+    for (const { stop, rest } of this.#contributions(d, at)) {
+      const binding = program.occurrenceOf.get(stop.value);
+      if (binding === undefined) continue;
+      const path = [...stop.strip, ...rest];
+      if (
+        path.length > 0 &&
+        !withoutEmpty(this.#run(contract.contractOfValue(stop.value))).some(
+          (item) => item.tag !== "unknown",
+        )
+      )
+        continue;
+      if (withoutEmpty(this.#run(contract.contractOf(keyOf(binding, path)))).some(concrete))
+        continue;
+      if (this.#run(values.valueItems(stop.value, stop.node, path)).some(isExternal))
+        return program.places[stop.value]?.site ?? d.site;
+    }
+    return null;
   }
 
   /** Whether a value's own expression runs: its flow node is live (an operand an operation never selects is not). */

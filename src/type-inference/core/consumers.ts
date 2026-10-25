@@ -20,7 +20,6 @@ import {
 } from "./admission.js";
 import type { CorePass } from "./answers.js";
 import {
-  choiceLabels,
   defaultOf,
   heldReference,
   MEMBER_KINDS,
@@ -29,7 +28,7 @@ import {
   termAt,
   typeTags,
 } from "./contract.js";
-import { keyOf, keyPath, keyPlace, type Definition, type Key } from "./definitions.js";
+import { keyOf, keyPath, keyPlace, type Key } from "./definitions.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { firstWriter, makeItem, REASON, type Item, type ItemTag, type Writer } from "./items.js";
@@ -37,7 +36,6 @@ import {
   builtinResult,
   conversionCategory,
   dictList,
-  interactionCategory,
   selectsElement,
 } from "./method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
@@ -167,15 +165,6 @@ export function withConsumerOrder<T>(order: <U>(list: readonly U[]) => U[], call
     consumerOrder = null;
   }
 }
-
-/** What C1's site walk reads of a value: a path step, or a choice's options and an option's selected value. */
-type ReadStep = string | typeof OPTIONS | typeof SELECT;
-
-/** The walk's step into a choice's options (no path step: a step name is never a symbol). */
-const OPTIONS: unique symbol = Symbol("options");
-
-/** The walk's step from a choice's option to its selected value (V30 §19). */
-const SELECT: unique symbol = Symbol("select");
 
 export class Consumers {
   readonly diagnostics: CoreDiagnostic[] = [];
@@ -452,13 +441,26 @@ export class Consumers {
       if (decision.published) {
         for (const { d, at } of decision.candidates) {
           this.#reading = d.node;
-          const site = this.#namedExternal(d, at);
+          const site = admission.namedExternalSite(d, at);
           if (site === null) continue;
           const named = admission
             .valueAt(d, at)
             .filter((item) => isExternal(item) && !admission.ownIngress(item, d));
+          const against = admission.admitted(root, path);
           for (const { item } of offendingKinds(named))
-            this.#storeWarning(site, label, item, admission.admitted(root, path));
+            this.#storeWarning(site, label, item, against);
+          // C9: the named data's own ingress keeps its boundary, as at a decided store
+          for (const item of named)
+            admission.boundaryFor(
+              item,
+              this.#obligation(
+                "copy-type",
+                site,
+                label,
+                against.map(requiredKind),
+                `validate ${label} against ${against.join("|")}`,
+              ),
+            );
         }
         continue;
       }
@@ -588,7 +590,7 @@ export class Consumers {
             !isExternal(item)
               ? d.site
               : d.kind === "whole"
-                ? this.#ingressSite(d, at)
+                ? admission.ingressSiteOf(d, at)
                 : admission.cellSited(d.site, item, d),
             label,
             later(item),
@@ -649,117 +651,6 @@ export class Consumers {
    * whatever remains. A variable read stops it: the store, as for a copy of a variable (r4.43's bound options). The first
    * in source order.
    */
-  /**
-   * Where a store's value at `at` carries external data another store brought, as a whole value (r4.50 (1)): the first
-   * read of it, in source order, through the literals, projections and value-carrying operations (`otherwise`, `get`)
-   * of the value; `null` where none does. External data a store brings inline is its own ingress (C9's boundary), and a
-   * member of a value whose kinds are unknown owes C5's obligation at its access (A7): neither is followed.
-   */
-  #namedExternal(d: Definition, at: readonly string[]): SourceSite | null {
-    const { program, definitions, values, contract } = this.pass;
-    if (d.value === undefined) return null;
-    const pending: (readonly [PlaceId, readonly string[]])[] = [[d.value, at]];
-    while (pending.length > 0) {
-      const [value, steps] = pending.pop()!;
-      program.work.charge("checks");
-      if (definitions.ingress.has(value)) continue;
-      const next: (readonly [PlaceId, readonly string[]])[] = [];
-      if (program.occurrenceOf.has(value)) {
-        const site = program.place(value).site;
-        const known = withoutEmpty(this.#run(contract.contractOfValue(value))).some(
-          (item) => item.tag !== "unknown",
-        );
-        // (a source whose own contract holds a kind meets C1 at its own stores, its external data checked there)
-        const source = withoutEmpty(
-          this.#run(contract.contractOf(keyOf(program.occurrenceOf.get(value)!, steps))),
-        );
-        if (
-          site !== null &&
-          (steps.length === 0 || known) &&
-          !source.some((item) => concrete(item)) &&
-          this.#run(values.valueItems(value, program.exprAt(site) ?? d.node, steps)).some(
-            isExternal,
-          )
-        )
-          return site;
-      } else if (program.hasOf.has(value) || program.cellOwner.has(value)) {
-        const [step, ...rest] = steps;
-        if (step !== undefined)
-          for (const child of this.admission.literalChildren(value, step))
-            next.push([child.value!, rest]);
-      } else if (program.projOf.has(value)) {
-        const { owner, step } = program.projOf.get(value)!;
-        if (step !== "iteration") next.push([owner, [stepName(step), ...steps]]);
-      } else {
-        const c = program.opOf.get(value);
-        if (c?.kind === "fallback") next.push([c.left, steps], [c.right, steps]);
-        else if (c?.kind === "get")
-          next.push([c.receiver, ["element", ...steps]], [c.fallback, steps]);
-      }
-      for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
-    }
-    return null;
-  }
-
-  #ingressSite(d: Definition, at: readonly string[]): SourceSite {
-    const { program, definitions } = this.pass;
-    if (d.kind !== "whole" || d.value === undefined) return d.site;
-    let found: SourceSite | null = null;
-    // a value and what remains to read of it (path steps, `OPTIONS`: the value holds a choice's options, `SELECT`: the
-    // value is an option, its selected value)
-    const pending: (readonly [PlaceId, readonly ReadStep[]])[] = [[d.value, at]];
-    while (pending.length > 0) {
-      const [value, steps] = pending.pop()!;
-      program.work.charge("checks");
-      if (definitions.ingress.has(value)) {
-        // the first the walk reaches, in source order
-        found = program.place(value).site;
-        if (found !== null) break;
-        continue;
-      }
-      const [step, ...rest] = steps;
-      const next: (readonly [PlaceId, readonly ReadStep[]])[] = [];
-      if (program.hasOf.has(value) || program.cellOwner.has(value)) {
-        if (step === OPTIONS) {
-          const elements = this.admission.literalChildren(value, "element");
-          if (elements.length === 0) next.push([value, [SELECT, ...rest]]);
-          for (const child of elements) next.push([child.value!, [SELECT, ...rest]]);
-        } else if (step === SELECT) {
-          const valued = this.admission.literalChildren(value, "value");
-          const selected =
-            valued.length > 0 ? valued : this.admission.literalChildren(value, "text");
-          if (selected.length === 0) next.push([value, rest]);
-          for (const child of selected) next.push([child.value!, rest]);
-        } else if (step !== undefined)
-          for (const child of this.admission.literalChildren(value, step))
-            next.push([child.value!, rest]);
-      } else if (program.projOf.has(value)) {
-        const projection = program.projOf.get(value)!;
-        if (projection.step !== "iteration")
-          next.push([projection.owner, [stepName(projection.step), ...steps]]);
-        // r4.46 (2): an element of a dict's `values` is one of its values, and so is each option they give a choice
-        if (dictList(projection.step) === "values" && (step === "element" || step === OPTIONS))
-          next.push([projection.owner, step === "element" ? steps : ["element", SELECT, ...rest]]);
-      } else {
-        const c = program.opOf.get(value);
-        // a fallback's direct value is what it carries (C10: its fallback names its own read); a `get` reads an element
-        if (c?.kind === "fallback") next.push([c.left, steps]);
-        else if (c?.kind === "get") next.push([c.receiver, ["element", ...steps]]);
-        else if (
-          c?.kind === "operation" &&
-          c.contract.family === "interaction" &&
-          interactionCategory(c.contract.name)?.kind === "options"
-        ) {
-          const labels = choiceLabels(c);
-          for (const [index, argument] of c.arguments.entries())
-            if (labels[index] === undefined) next.push([argument, [OPTIONS, ...steps]]);
-        }
-      }
-      for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
-    }
-    return found ?? d.site;
-  }
-
   // ----------------------------------------------------------------------------------------- operations
 
   /** The consumers that operations and projections are: C2–C6, C11, C12, C13's iterable, ADR 1.5. */

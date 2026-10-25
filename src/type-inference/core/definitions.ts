@@ -1,13 +1,9 @@
 import type { ForStatement } from "../../ast.js";
 import type { PlaceId, SourceSite } from "../graph.js";
+import { operandsOf, type Operand } from "./carriers.js";
 import type { Callable, FlowLoop, FlowNode } from "./flow-graph.js";
 import { makeItem, writerKey, type ContextWord, type Item, type Writer } from "./items.js";
-import {
-  conversionCategory,
-  dictList,
-  interactionCategory,
-  methodCategory,
-} from "./method-categories.js";
+import { conversionCategory, dictList, methodCategory } from "./method-categories.js";
 import { propertyStep, siteKey, type CoreProgram } from "./program.js";
 
 /*
@@ -504,38 +500,17 @@ export class DefinitionIndex {
         this.ingress.add(constraint.result);
     for (const [occurrence, binding] of program.occurrenceOf)
       if (program.isHost(binding)) this.ingress.add(occurrence);
+    // the carrier table's operands, upwards: each value to the carrier that holds it and how (`carriers.ts`), an own read
+    // (a fallback's or a default's, C10) where the walk stops; an iteration and a length hold no copy of their operand
     const ownOperand = new Set<PlaceId>();
-    const readOfValue = new Map<PlaceId, PlaceId>();
-    const choiceOfOption = new Map<PlaceId, PlaceId>();
-    for (const constraint of program.constraints) {
-      for (const operand of [
-        constraint.kind === "fallback" ? constraint.right : undefined,
-        constraint.kind === "get" || constraint.kind === "load" ? constraint.fallback : undefined,
-        "named" in constraint
-          ? constraint.named.find((argument) => argument.name === "default")?.value
-          : undefined,
-      ])
-        if (typeof operand === "number") ownOperand.add(operand);
-      if (
-        constraint.kind === "project" &&
-        constraint.step !== "iteration" &&
-        !(typeof constraint.step === "object" && constraint.step.property === "length")
-      )
-        readOfValue.set(constraint.owner, constraint.into);
-      else if (constraint.kind === "get" && typeof constraint.receiver === "number")
-        readOfValue.set(constraint.receiver, constraint.result);
-      else if (
-        constraint.kind === "operation" &&
-        constraint.contract.family === "interaction" &&
-        interactionCategory(constraint.contract.name)?.kind === "options"
-      ) {
-        // an unlabelled option gives its buttons' values (V30 §19); a label gives its own kind
-        const options = constraint.evidence?.kind === "choice" ? constraint.evidence.options : [];
-        constraint.arguments.forEach((argument, index) => {
-          if (options[index]?.label === null) choiceOfOption.set(argument, constraint.result);
-        });
+    const upOf = new Map<PlaceId, { readonly carrier: PlaceId; readonly operand: Operand }>();
+    for (const carrier of [...program.projOf.keys(), ...program.opOf.keys()])
+      for (const operand of operandsOf(program, carrier)) {
+        program.work.charge("indexSteps");
+        if (operand.kind === "iteration" || operand.below[0] === "length") continue;
+        if (operand.own) ownOperand.add(operand.operand);
+        if (!upOf.has(operand.operand)) upOf.set(operand.operand, { carrier, operand });
       }
-    }
     const storeOfValue = new Map<PlaceId, Definition>();
     for (const d of [...this.storeDefs, ...this.transferDefs])
       if (
@@ -558,7 +533,7 @@ export class DefinitionIndex {
     const carrierOf = (value: PlaceId): PlaceId | undefined => {
       const cell = cellOfValue.get(value);
       if (cell !== undefined) return program.cellOwner.get(cell)!.owner;
-      return readOfValue.get(value) ?? this.fallbackOf.get(value) ?? choiceOfOption.get(value);
+      return upOf.get(value)?.carrier;
     };
     for (const value of this.ingress) {
       let current = value;
@@ -585,11 +560,15 @@ export class DefinitionIndex {
           steps.push(owner.kind === "property" ? propertyStep(owner.name) : "element");
           objects.push(owner.kind === "property" ? owner.owner : null);
           carried = true;
-        } else if (readOfValue.has(current)) {
-          // r4.46 (2): a dict literal's `values` holds its values at the element step, its `keys` none of them
-          const listed = (program.hasOf.get(current) ?? []).some((has) => has.type.kind === "dict")
-            ? dictList(program.projOf.get(readOfValue.get(current)!)?.step ?? "")
-            : undefined;
+        } else if (upOf.get(current)!.operand.below.length === 1) {
+          // a projection, a `get`'s receiver or a removal: one step into the operand; r4.46 (2): a dict literal's
+          // `values` holds its values at the element step, its `keys` none of them
+          const { carrier, operand } = upOf.get(current)!;
+          const listed =
+            operand.kind === "projection" &&
+            (program.hasOf.get(current) ?? []).some((has) => has.type.kind === "dict")
+              ? dictList(program.projOf.get(carrier)?.step ?? "")
+              : undefined;
           if (listed === "keys") break;
           if (listed !== "values") {
             suffix.pop();
@@ -597,7 +576,7 @@ export class DefinitionIndex {
             steps.pop();
             objects.pop();
           }
-        } else if (choiceOfOption.has(current)) {
+        } else if (upOf.get(current)!.operand.kind === "choice") {
           // an option's own value, an element of its list, or a choice object's `value` (its `text` without one)
           const at = way.at(-1) === "element" ? 2 : 1;
           const step = way.at(-at);

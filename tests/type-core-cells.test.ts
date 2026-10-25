@@ -2998,8 +2998,12 @@ test("a value any carrier gives brings its elements' types, decided and checked 
       (diagnostic) =>
         diagnostic.kind === "written-target" && diagnostic.class === "warning-runtime-check",
     );
+    // (a removal's possible element decides nothing, F7, yet the elements are published with the literal's whole
+    // numbers, so the named host data owes its check: C9 r4.12, r4.50 (1))
     const expected =
-      possible.has(carrier) || external.has(carrier) ? "valid" : "warning-runtime-check";
+      (possible.has(carrier) && carrier !== "removeFirst") || external.has(carrier)
+        ? "valid"
+        : "warning-runtime-check";
     if (carried.outcome !== expected || warned !== (expected === "warning-runtime-check"))
       differing.push(`${carrier}, host data: ${carried.outcome}`);
   }
@@ -3053,7 +3057,14 @@ test("a literal's own elements decide through the operations that carry it, unde
     ["takeLast", "let xs = [1, a].takeLast(1)", "warning-runtime-check", checked],
     ["toSet", "let xs = [1, a].toSet()", "warning-runtime-check", checked],
     ["+", "let xs = [1, a] + []", "warning-runtime-check", checked],
-    ["removeFirst", "let xs = [[1, a]].removeFirst()", "valid", []],
+    // (a removal's possible element decides nothing, F7, but the place is published with the literal's whole numbers,
+    // so the named host value owes its check there: C9 r4.12, r4.50 (1))
+    [
+      "removeFirst",
+      "let xs = [[1, a]].removeFirst()",
+      "warning-runtime-check",
+      ["a [unknown] B @8", "xs.element [integer] @32"],
+    ],
   ];
   const differing: string[] = [];
   for (const [name, store, outcome, expected] of programs) {

@@ -4,28 +4,23 @@ import type { OperandView } from "../adapters/relation.js";
 import type { DynamicWhy, PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { BudgetExhausted, checkNesting, type BudgetLimit, type WorkCounter } from "./budget.js";
 import { Consumers } from "./consumers.js";
+import { carried, type Dispatch } from "./carriers.js";
 import {
-  choiceLabels,
   Contract,
-  defaultOf,
-  REFERENCE,
+  heldReference,
   typeTags,
   termAt,
   writtenOf,
   type ContractFacts,
 } from "./contract.js";
-import {
-  conversionCategory,
-  dictList,
-  interactionCategory,
-  methodCategory,
-} from "./method-categories.js";
+import { dictList } from "./method-categories.js";
 import {
   DefinitionIndex,
   DefinitionLists,
   keyOf,
   keyPath,
   keyPlace,
+  recordPath,
   type Definition,
   type Key,
 } from "./definitions.js";
@@ -693,8 +688,10 @@ class CoreAnswers implements Answers {
       | { readonly literal: PlaceId; readonly path: readonly string[] };
     const pending: Task[] = [{ value, path: [] }];
     const seen = new Set<string>();
-    const kinds = (of: PlaceId): ReadonlySet<ItemTag> =>
-      new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag));
+    const dispatch: Dispatch = {
+      kinds: (of) => new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag)),
+      reference: (receiver) => heldReference(this.#run(contract.valueReceiver(receiver))),
+    };
     while (pending.length > 0) {
       const task = pending.pop()!;
       const id =
@@ -710,79 +707,19 @@ class CoreAnswers implements Answers {
         const at = task.value;
         const source = contract.copiedKey(at) ?? contract.resultKey(at);
         // r4.46 (2): through a dict's `values` the projections are followed (a dict's values are its elements)
+        // (a choice's selected value is read as its record's `value` or `text`, as the literal's records say: V30 §19)
         if (source !== null && !keyPath(source).some((step) => dictList(step) !== undefined)) {
-          pending.push({ key: keyOf(keyPlace(source), [...keyPath(source), ...path]) });
+          pending.push({ key: keyOf(keyPlace(source), [...keyPath(source), ...recordPath(path)]) });
           continue;
         }
         if (program.hasOf.has(at)) {
-          pending.push({ literal: at, path });
+          pending.push({ literal: at, path: recordPath(path) });
           continue;
         }
-        const projection = program.projOf.get(at);
-        if (projection !== undefined) {
-          // F27: a loop visits a list's or a set's elements (a dict's keys and a range's numbers hold none); F11: an
-          // object's own `length` is its property
-          if (projection.step === "iteration") {
-            const of = kinds(projection.owner);
-            if (of.has("list") || of.has("set"))
-              pending.push({ value: projection.owner, path: ["element", ...path] });
-          } else if (dictList(projection.step) !== undefined) {
-            // r4.46 (2): a dict's `values` holds its values (its `keys` text); an object's own property of the name;
-            // a receiver that may be a reference has the runtime's members, none known (F19a)
-            const of = kinds(projection.owner);
-            if ([...of].some((tag) => REFERENCE.has(tag))) continue;
-            if (of.has("object"))
-              pending.push({ value: projection.owner, path: [projection.step, ...path] });
-            if (of.has("dict") && dictList(projection.step) === "values" && path[0] === "element")
-              pending.push({ value: projection.owner, path });
-          } else
-            pending.push({ value: projection.owner, path: [stepName(projection.step), ...path] });
-          continue;
-        }
-        const c = program.opOf.get(at);
-        if (c === undefined) continue;
-        if (c.kind === "fallback") {
-          pending.push({ value: c.left, path }, { value: c.right, path });
-        } else if (c.kind === "get") {
-          pending.push(
-            { value: c.receiver, path: ["element", ...path] },
-            { value: c.fallback, path },
-          );
-        } else if (c.kind === "load") {
-          if (c.fallback !== null) pending.push({ value: c.fallback, path });
-        } else if (c.kind === "operation") {
-          const { family, name } = c.contract;
-          const fallback = defaultOf(c);
-          if (
-            family === "conversion" &&
-            conversionCategory(name)?.kind === "parses" &&
-            fallback !== undefined
-          )
-            pending.push({ value: fallback, path });
-          else if (family === "method" && c.receiver !== null) {
-            // F10: a copy's elements; F7: a removal's element (from a dict its value, a list's may give `null`)
-            const gives = methodCategory(name)?.gives;
-            if (gives?.kind === "copy" && path[0] === "element")
-              pending.push({ value: c.receiver, path });
-            else if (
-              gives?.kind === "removed" &&
-              (gives.fromList === "element" || kinds(c.receiver).has("dict"))
-            )
-              pending.push({ value: c.receiver, path: ["element", ...path] });
-          } else if (family === "operator" && name === "+" && path[0] === "element")
-            for (const argument of c.arguments) pending.push({ value: argument, path });
-          else if (family === "interaction" && interactionCategory(name)?.kind === "options") {
-            // V30 §19: `askChoice`'s answer is a button's value: a whole choice object's or an element's (a label
-            // is text or a number)
-            const labels = choiceLabels(c);
-            for (const [index, argument] of c.arguments.entries())
-              if (labels[index] === undefined)
-                pending.push(
-                  { value: argument, path: ["value", ...path] },
-                  { value: argument, path: ["element", "value", ...path] },
-                );
-          }
-        }
+        // the carrier table's operands, after the value side's decisions (`carriers.ts`: F12, F27, r4.46 (2), F17b,
+        // C10, F10, F7, a list's `+`, V30 §19's choice; nothing through an operation that keeps its own value, F19a)
+        for (const [operand, rest] of carried(program, at, path, dispatch))
+          pending.push({ value: operand, path: rest });
         continue;
       }
       if ("literal" in task) {
