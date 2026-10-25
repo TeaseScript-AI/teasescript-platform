@@ -162,7 +162,7 @@ export class Admission {
   readonly #structures = new Map<string, Structure>();
   readonly #depths = new Map<Key, number>();
   #keyBound: number | null = null;
-  #byRoot: Map<PlaceId, (readonly string[])[]> | null = null;
+  #below: Map<Key, (readonly string[])[]> | null = null;
   readonly #takeables = new WeakMap<
     ReadonlySet<Definition | null>,
     { readonly wholes: readonly Definition[]; readonly adds: readonly Definition[] }[]
@@ -1027,8 +1027,8 @@ export class Admission {
    * lands (a read's path, A2): there a named element's fields are compared too (TABLE q12: a field is copy-only until
    * a literal or a read reaches it).
    */
-  #sharedPaths(literal: PlaceId, list: readonly Definition[]): (readonly string[])[] {
-    const { program, definitions } = this.pass;
+  #sharedPaths(landing: Key | null, list: readonly Definition[]): (readonly string[])[] {
+    const { program } = this.pass;
     const out = new Map<string, readonly string[]>();
     const put = (path: readonly string[]): void => {
       program.work.charge("indexSteps");
@@ -1036,14 +1036,23 @@ export class Admission {
     };
     for (const d of list)
       if (d.value !== undefined) for (const path of this.#valueStructure(d.value).paths) put(path);
-    // where the literal lands: the store holding it, through the literals around it
+    if (landing !== null) for (const path of this.#decidedBelow(landing)) put(path);
+    return [...out.values()];
+  }
+
+  /**
+   * Where a collection literal's elements land: the store holding the literal, through the literals around it, at its
+   * element step; `null` for a literal no store holds.
+   */
+  #landing(literal: PlaceId): Key | null {
+    const { program, definitions } = this.pass;
     const steps: string[] = [];
     for (let value = literal; ;) {
       program.work.charge("indexSteps");
       const d = (definitions.byValue.get(value) ?? []).find(
         (store) => store.kind === "whole" || store.kind === "add",
       );
-      if (d === undefined) break;
+      if (d === undefined) return null;
       if (program.cellOwner.has(d.place)) {
         const kind = program.place(d.place).kind;
         steps.push(kind.kind === "property" ? propertyStep(kind.name) : "element");
@@ -1051,31 +1060,28 @@ export class Admission {
         continue;
       }
       // (an `addAll`'s literal's elements are the destination's own elements)
-      const at = [
+      return keyOf(d.place, [
         ...(d.kind === "add" && d.how === "elements" ? d.path : this.#destPath(d)),
         ...steps.reverse(),
         "element",
-      ];
-      for (const path of this.#decidedBelow(d.place))
-        if (path.length > at.length && at.every((step, index) => path[index] === step))
-          put(path.slice(at.length));
-      break;
+      ]);
     }
-    return [...out.values()];
   }
 
-  /** The paths admission decides at a place (`groups`), by place, once. */
-  #decidedBelow(place: PlaceId): readonly (readonly string[])[] {
-    if (this.#byRoot === null) {
-      this.#byRoot = new Map();
-      for (const { root, path } of this.groups()) {
-        this.pass.program.work.charge("indexSteps");
-        const paths = this.#byRoot.get(root);
-        if (paths === undefined) this.#byRoot.set(root, [path]);
-        else paths.push(path);
-      }
+  /** The paths admission decides (`groups`) below a key, indexed once by every prefix of each. */
+  #decidedBelow(key: Key): readonly (readonly string[])[] {
+    if (this.#below === null) {
+      this.#below = new Map();
+      for (const { root, path } of this.groups())
+        for (let length = 0; length < path.length; length += 1) {
+          this.pass.program.work.charge("indexSteps");
+          const prefix = keyOf(root, path.slice(0, length));
+          const paths = this.#below.get(prefix);
+          if (paths === undefined) this.#below.set(prefix, [path.slice(length)]);
+          else paths.push(path.slice(length));
+        }
     }
-    return this.#byRoot.get(place) ?? [];
+    return this.#below.get(key) ?? [];
   }
 
   /** A literal's term at one step: an object's property by its step, a collection's element; built once per literal. */
@@ -1351,14 +1357,27 @@ export class Admission {
   ): void {
     const { program, definitions, contract } = this.pass;
     const family = (tag: ItemTag): ItemTag => (NUMERIC.has(tag) ? "number" : tag);
+    type Decided = Map<string, { readonly tags: readonly ItemTag[]; readonly written: boolean }>;
+    // per landing and its elements' source identities, a cell's deciders and offending elements and paths (F2): a cell
+    // of the same identities landing there decides and offends as it does, each at its own elements' sites
+    const cells = new Map<
+      string,
+      { readonly first: Decided; readonly verdicts: (readonly [number, readonly string[]])[] }
+    >();
+    // a named element: one whose structure holds a source (a copy, a call)
+    const named = (d: Definition): boolean =>
+      d.value !== undefined && this.#valueStructure(d.value).sources.length > 0;
     for (const [cell, list] of order([...definitions.cellDefs])) {
       const owner = program.cellOwner.get(cell);
       if (owner?.kind !== "cell" || list.length < 2 || contract.landsIn(owner.owner, []) !== null)
         continue;
-      const first = new Map<
-        string,
-        { readonly tags: readonly ItemTag[]; readonly written: boolean }
-      >();
+      const landing = list.some(named) ? this.#landing(owner.owner) : null;
+      const memo =
+        landing === null
+          ? null
+          : `${landing}|${list.map((d) => (d.value === undefined ? "" : contract.identityOf(d.value).id)).join(",")}`;
+      const cached = memo === null ? undefined : cells.get(memo);
+      const first: Decided = cached?.first ?? new Map();
       // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
       // number fits a written integer, a fraction does not), an earliest element's by their family
       const offends = (at: string, tags: readonly ItemTag[]): boolean => {
@@ -1383,14 +1402,18 @@ export class Admission {
         error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site));
         this.reject(d, cell, path);
       };
+      if (cached !== undefined) {
+        for (const [index, path] of cached.verdicts) offended(list[index]!, path);
+        continue;
+      }
+      const verdicts: (readonly [number, readonly string[]])[] = [];
+      if (memo !== null) cells.set(memo, { first, verdicts });
       // a named element's paths: its source's elements, and a record's fields where the literal's own records or a read
       // decide them, never copy-only (A2, TABLE q12); per source identity (the contract's: k copies or k wrappers of one
       // record are one), the paths below its first element where it offends, where each later one offends too (F2)
-      const named = (d: Definition): boolean =>
-        d.value !== undefined && this.#valueStructure(d.value).sources.length > 0;
-      const shared = list.some(named) ? this.#sharedPaths(owner.owner, list) : [];
+      const shared = list.some(named) ? this.#sharedPaths(landing, list) : [];
       const offending = new Map<string, (readonly string[])[]>();
-      for (const d of list) {
+      for (const [index, d] of list.entries()) {
         if (d.value === undefined) continue;
         const identity = named(d) ? contract.identityOf(d.value).id : null;
         const known = identity === null ? undefined : offending.get(identity);
@@ -1416,9 +1439,13 @@ export class Admission {
           }
           if (!offends(at, own)) continue;
           offended(d, path);
+          verdicts.push([index, path]);
           if (path.length > 0) found.push(path);
         }
-        for (const path of known ?? []) offended(d, path);
+        for (const path of known ?? []) {
+          offended(d, path);
+          verdicts.push([index, path]);
+        }
       }
     }
   }
