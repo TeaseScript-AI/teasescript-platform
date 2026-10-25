@@ -1183,7 +1183,11 @@ picks.add("three")    // compile error
   or dict settle nothing. A written type settles the type from the start and is strict.
 - A store of another type is a compile error at that store. It names the line and the type that decided the place, for
   a variable that started without a type also its declaration, and it suggests a written union. The place keeps its
-  type: the compiler ignores the rejected value, and later uses are checked against the decided type.
+  type: the compiler ignores the rejected value, and later uses are checked against the decided type. A property that
+  reaches a place only through copies of whole objects is checked at the first direct read or store of that property in
+  that place, not at the copy, and the compile error there names the copy or store that brought a value of another
+  type. After `let xs = [a, b]`, where `a.n` holds a number and `b.n` text, the compile error is at the first read or
+  store of `xs[i].n`.
 - The decided type holds wherever the place is used, also before the value that decided it, such as in a function body
   or in another file. A read inside an expression sees the value at that point of evaluation, as the runtime does. A
   copy is a new value: `let b = a`, `a.toSet()`, or a property read into a variable starts with what the source holds
@@ -1526,7 +1530,7 @@ if box.n != null {
 ```
 
 ### Compile errors, warnings, and checks when the script runs
-**Status:** Accepted (owner decisions, 2026-10-19, 2026-10-21, and 2026-10-23)
+**Status:** Accepted (owner decisions, 2026-10-19, 2026-10-21, 2026-10-23, and 2026-10-25)
 
 Valid code always compiles. Valid code meets the language's syntax, type, and required-check rules, and a compile
 error names a violation of one of them, such as a value that may be `null` used without any check. Where the compiler
@@ -1566,12 +1570,12 @@ warns instead of giving a false error, and the copy is checked when the script r
 The required-check rules are not affected: a use that needs a check and has none on some route stays a compile error,
 as `n + 1` does after `let n = 1` and `if askBoolean "Clear?" { n = null }` ([narrowing](#type-tests-and-narrowing)).
 
-The compiler never hangs. It has a temporary work budget: where a place exceeds it, that place, and the checks that
-need what it would have found, are checked when the script runs, with a compiler warning there. Every other use, also
-of the same variable or function, is still checked at compile time, and a known violation of a rule stays a compile
-error. A shape that is very unrealistic for a real script, now or in the future, stops with a compile error instead,
-the one case in which code that meets the rules does not compile; the limit leaves generous room above realistic
-scripts, also larger future ones.
+The compiler never hangs and never rejects a script because it is too large or too deeply nested for the analysis.
+Where a place exceeds the compiler's work budget, that place, and the checks that need what the compiler would have
+found, are checked when the script runs, with a compiler warning there; every other use, also of the same variable or
+function, is still checked at compile time, and a known violation of a rule stays a compile error. When a script
+exceeds the compiler's total budget, the compiler stops proving: what it has found stays, every check it has not
+decided is made when the script runs, and one compiler warning says so.
 
 ### Implicit conversions
 
