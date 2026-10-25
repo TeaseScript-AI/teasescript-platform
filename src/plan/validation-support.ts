@@ -98,3 +98,22 @@ export function planError(
 ): PlanValidationError {
   return Object.freeze({ code, message, path });
 }
+
+export function fieldsByKind(
+  entries: readonly (readonly [kind: string, ...fields: string[]])[],
+): ReadonlyMap<string, readonly string[]> {
+  return new Map(entries.map(([kind, ...fields]) => [kind, ["kind", "span", ...fields]]));
+}
+
+export function validateTemporaryId(
+  value: unknown,
+  path: string,
+  temporaryCount: number,
+  errors: PlanValidationError[],
+): void {
+  if (!positiveSafeInteger(value) || value > temporaryCount) {
+    errors.push(
+      planError("TSC002", "Temporary reference is outside the plan's temporary range.", path),
+    );
+  }
+}
