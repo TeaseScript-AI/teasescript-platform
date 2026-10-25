@@ -159,7 +159,7 @@ A player moves the saved data of every script this browser has played, or of the
 photos, by hand and offline to another browser or device through Player Settings
 ([Player UI](ui/PLAYER-UI.md#player-settings)); `player/storage-transfer.ts` owns the format and `player/saved-data.ts`
 lists and opens the scopes. It is not a session checkpoint and carries no session position, timers, transcript, or RNG
-state. The document is UTF-8 JSON with exactly these fields:
+state; a session moves with the [session transfer](#session-transfer). The document is UTF-8 JSON with exactly these fields:
 
 ```json
 { "format": "teasescript-script-storage", "version": 2,
@@ -199,6 +199,52 @@ failure leaves that scope's previous data. A script whose values were replaced l
 with the imported values. Scripts replace one after another, and a failure of one
 leaves the others to continue, so the import reports which scripts kept their previous data. Earlier media records are never overwritten, and photos left unreferenced are reclaimed
 later.
+
+### Session transfer
+
+A player moves the session they play by hand and offline to another browser or device, where Continue goes on with it
+as after a reload, through Player Settings ([Player UI](ui/PLAYER-UI.md#player-settings)); `player/session-transfer.ts`
+owns the format. The session travels as its canonical checkpoint, which the runtime exports and restores
+(`createPlayerRuntimeRestorePoint` and `restorePlayerRuntimeSession`), not in a second save format. The document is
+UTF-8 JSON with exactly these fields:
+
+```json
+{ "format": "teasescript-session", "version": 1,
+  "scope": "<host storage scope>", "name": "<title or null>",
+  "checkpoint": { "format": "teasescript-checkpoint", "version": "<current revision>", "plan": {}, "snapshot": {} },
+  "events": [{ "sequence": 1, "kind": "say" }],
+  "entries": [{ "key": "player.photo", "value": "captured-media:<uuid>:1" }],
+  "media": [{ "reference": "captured-media:<uuid>:1", "kind": "image", "type": "image/png", "width": 24,
+              "height": 16, "durationMs": null, "byteLength": 68, "data": "<unpadded base64url>" }] }
+```
+
+`checkpoint` is the checkpoint as the runtime writes it, at the current [revision](RUNTIME.md#format-evolution);
+`events` are the events that led to it, from which the transcript is rebuilt; `entries` are the script's saved values,
+read after the saves the session issued; `media` holds, once each, every photo, recording, or file that the checkpoint,
+the events, or the values reference and this browser holds, under that reference, with its kind, type, width and height
+or duration where it has them, and bytes. Any other reference stays ordinary text and is only counted. The session
+exported is the one that runs or waits, or the one Continue goes on with; a debug room's session stays in its browser,
+and a state the runtime cannot export, such as one holding a list too long to enumerate or to write, is refused. The
+file (`<script>-session.teasesession.json.gz`) and the text are encoded as saved data's are, with the same
+`TSST1.gzip.` prefix and plain-JSON fallback, and one import reads both formats.
+
+Reading treats the data as external input: the decoding of saved data, the exact field sets, each event checked as a
+kept session's are (`interpreterEventProblem`, increasing sequence), the storage-entry validation, each medium's
+reference shape and `byteLength`, a medium's kind agreeing with its type and valid dimensions or duration, as for a
+stored record, and each medium being used detect damage; the checkpoint is then restored as the runtime restores
+checkpoint JSON, which validates its plan and snapshot. Only the Player of the script of `scope` that keeps sessions
+takes it, outside the debug room, and only when the checkpoint's plan is the script's plan, as a kept session's must
+be. Another script, another checkpoint revision, another plan, a damaged state, a session that has ended, and a medium
+whose reference this browser already holds with other contents are refused with that reason before anything changes.
+
+After the player confirms, a session of the script in progress ends. Each medium is held under its own reference, so
+nothing in the checkpoint changes. The values then replace the script's saved data at once, their media stored first,
+as a save stores them, and the session replaces the one the Player keeps for the script, with the media only it uses,
+so the start page and a later reload offer Continue ([Session start and user
+activation](ui/PLAYER-UI.md#session-start-and-user-activation)). The session is kept only with every medium it uses.
+When the values cannot be saved, nothing is imported. When the session kept before cannot be replaced, the values stay
+imported and Continue goes on with that earlier session; when the imported session or one of its media cannot be kept,
+the values stay imported and Start begins a new session with them.
 
 Ordinary Player use does not expose arbitrary manual checkpoint/restore points as a rewind mechanism. The runtime/Player
 creates and restores supported checkpoints according to the session lifecycle. Developer/debug tooling may expose

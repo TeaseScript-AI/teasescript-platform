@@ -223,7 +223,7 @@ export class CapturedMediaStore {
       } catch (error) {
         // An earlier attempt may have committed it before failing later; insert-only writes never overwrite.
         const stored = await this.#repository.get(this.#namespace, reference).catch(() => null);
-        if (validRecord(stored, this.#namespace, reference) === null)
+        if (validCapturedMediaRecord(stored, this.#namespace, reference) === null)
           throw new CapturedMediaNotStoredError("The captured media could not be stored.", {
             cause: error,
           });
@@ -248,7 +248,7 @@ export class CapturedMediaStore {
    */
   restoreSessionMedia(reference: string, stored: StoredCapturedMedia | null): void {
     if (this.#records.has(reference)) return;
-    const record = validRecord(stored, this.#namespace, reference);
+    const record = validCapturedMediaRecord(stored, this.#namespace, reference);
     if (record !== null) this.#records.set(reference, record);
   }
 
@@ -324,7 +324,7 @@ export class CapturedMediaStore {
     const loading = repository
       .get(this.#namespace, reference)
       .then(
-        (stored) => validRecord(stored, this.#namespace, reference),
+        (stored) => validCapturedMediaRecord(stored, this.#namespace, reference),
         // An unreadable record behaves like a missing one for this run.
         () => null,
       )
@@ -364,8 +364,8 @@ function describe(record: CapturedMediaRecord): CapturedMediaEntry {
   return entry;
 }
 
-/** Validates stored external data and keeps only validated fields. */
-function validRecord(
+/** Validates a stored record of `namespace` and `reference`, external data, and keeps only validated fields. */
+export function validCapturedMediaRecord(
   stored: StoredCapturedMedia | null,
   namespace: string,
   reference: string,

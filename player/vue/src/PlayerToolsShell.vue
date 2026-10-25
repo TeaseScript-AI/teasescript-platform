@@ -41,8 +41,9 @@ import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
 import SavedDataExport from "./SavedDataExport.vue";
 import SavedDataImport from "./SavedDataImport.vue";
-import type { SavedDataImportReview } from "./usePlayerSession";
+import type { SavedDataImportReview, SessionExport, SessionImportReview } from "./usePlayerSession";
 import type { SavedScript, StorageBundle } from "../../storage-transfer.js";
+import type { SessionTransfer } from "../../session-transfer.js";
 import {
   computed,
   nextTick,
@@ -65,15 +66,20 @@ const props = defineProps<{
   fullscreen: boolean;
   /**
    * The script's saved data when the host persists it: exporting is always possible, importing ends a session in
-   * progress after confirmation, and clearing is possible only while no session runs.
+   * progress after confirmation, and clearing is possible only while no session runs. Export and import also take the
+   * session, to continue it in another browser.
    */
   savedData?: {
     readonly export: () => Promise<readonly SavedScript[]>;
+    /** The session's export, with why it is unavailable now, or `null` when it is available. */
+    readonly session: { readonly unavailable: string | null; readonly read: () => Promise<SessionExport> };
     readonly import: {
       readonly available: boolean;
       readonly sessionInProgress: boolean;
       readonly review: (bundle: StorageBundle) => Promise<SavedDataImportReview>;
       readonly commit: (review: SavedDataImportReview, chosen: ReadonlySet<string>) => Promise<void>;
+      readonly reviewSession: (transfer: SessionTransfer) => Promise<SessionImportReview>;
+      readonly commitSession: (review: SessionImportReview) => Promise<void>;
     };
     /** Clearing the shown script's saved data, when the host keeps it; possible only while no session runs. */
     readonly clear: { readonly available: boolean; readonly run: () => Promise<boolean> } | null;
@@ -967,16 +973,18 @@ async function updateSidebarVisibility(open: boolean) {
                     >
                       <h3 class="font-medium">Saved data</h3>
                       <p>
-                        What the scripts you play saved in this browser. Export and import take every script at once,
-                        or the ones you tick.
+                        What the scripts you play saved in this browser. Export and import also move a session to
+                        another browser.
                       </p>
                       <div class="flex flex-wrap gap-2">
-                        <SavedDataExport :read="savedData.export" />
+                        <SavedDataExport :read="savedData.export" :session="savedData.session" />
                         <SavedDataImport
                           :available="savedData.import.available"
                           :session-in-progress="savedData.import.sessionInProgress"
                           :review="savedData.import.review"
                           :commit="savedData.import.commit"
+                          :review-session="savedData.import.reviewSession"
+                          :commit-session="savedData.import.commitSession"
                         />
                       </div>
                       <template v-if="savedData.clear">

@@ -298,22 +298,29 @@ accident, and every load in the debug room with it on; the development preview's
 
 Player Settings also contains a **Saved data** section, on every Player page whatever script it shows. Saved data
 belongs to the player, like an account's: **Export…** and **Import…** take the saved data of every script this browser
-has played at once, or of the scripts the player keeps ticked ([format](../DATA-AND-API.md#saved-data-transfer)). It is
-not a session checkpoint.
+has played at once, or of the scripts the player keeps ticked ([format](../DATA-AND-API.md#saved-data-transfer)), which
+is not a session checkpoint, or the session the player plays, to continue it in another browser
+([format](../DATA-AND-API.md#session-transfer)).
 
-**Export…** reads every script's saved data freshly, also during a session, so saves already stored count. It lists each
-script that has saved values, by its title when a Player has shown it, otherwise by its storage scope, with its values,
-photos, and size; all are ticked, with **Select all** and **Select none**, and a long list scrolls. It warns that the
-export can contain private photos and offers two tabs for the ticked scripts: **File** prepares one file and then
-downloads it from the player's own press of **Download file**; **Text** shows the data in a read-only field with
-**Copy** and **Select text**, and when copying is refused or unavailable it selects the text for copying with the
-browser. Every change of the ticks prepares them again. Nothing leaves the browser except through these player actions,
-and closing the dialog releases the prepared file and text.
+**Export…** offers **Saved data**, chosen when it opens, or **This session**, which says why it is unavailable while no
+session runs or waits for Continue, and in the debug room. Saved data is read freshly for every script, also during a
+session, so saves already stored count. It lists each script that has saved values, by its title when a Player has
+shown it, otherwise by its storage scope, with its values, photos, and size; all are ticked, with **Select all** and
+**Select none**, and a long list scrolls; and it warns that the export can contain private photos. This session takes
+the session as it is when it is chosen, the one that runs or waits or the one Continue goes on with: it names the
+script, counts the saved values, photos, and any recordings and files the export takes along, and warns that the export
+contains the session's messages and answers and can contain private photos. A session whose state this browser cannot
+write as it is now, such as one holding a list too long to save, is refused with that reason. Two tabs follow for the
+choice: **File** prepares one file and then downloads it from the player's own press of **Download file**; **Text**
+shows the data in a read-only field with **Copy** and **Select text**, and when copying is refused or unavailable it
+selects the text for copying with the browser. Every change of the choice or the ticks prepares the export again.
+Nothing leaves the browser except through these player actions, and closing the dialog releases the prepared file and
+text.
 
-**Import…** reads one exported file, chosen with **Choose file…** or dropped on its drop area in the **File** tab, or
-pasted text after **Review import** in the **Text** tab; a file dropped elsewhere on the dialog is ignored. Everything,
-every script's values and every photo, is checked before anything changes, and a problem, such as damaged data, is shown
-with nothing changed. The review asks "Replace the saved data of the ticked scripts? This cannot be undone.", lists the
+**Import…** reads one exported file, of saved data or a session, chosen with **Choose file…** or dropped on its drop
+area in the **File** tab, or pasted text after **Review import** in the **Text** tab; a file dropped elsewhere on the
+dialog is ignored. Everything, every script's values and every photo, is checked before anything changes, and a
+problem, such as damaged data, is shown with nothing changed. For saved data, the review asks "Replace the saved data of the ticked scripts? This cannot be undone.", lists the
 file's scripts, all ticked, each marked **New** or **Replaces saved data** with its counts and the shown script marked
 **This script**, and suggests exporting first; unticked scripts keep their saved data. Each script's data goes into its
 own saved data and never another's. When the shown script is ticked while its session runs, waits for Continue, or is
@@ -322,6 +329,15 @@ leaves the session running. Confirming replaces each ticked script's saved data 
 then offers Start, which begins a new session with the imported data, and leaves a session of another script running.
 A script that cannot be imported keeps its saved data, and the dialog names it. Import is unavailable while saved data
 is imported or cleared.
+
+An exported session is taken only by the Player of its script outside the debug room. A session of another script, of
+another version of this script or of the Player, one that is damaged, and one that has ended are refused with that
+reason. Its review asks "Import this session? This cannot be undone.", names the script with what the
+session brings, says that it replaces this script's saved values and any session kept for it in this browser, and
+suggests exporting first. While a session of the script runs, waits for Continue, or is starting, the confirmation is
+**End session and import** and says that unsaved progress is lost; otherwise it is **Import session**. Confirming ends
+that session, replaces the script's saved data with the session's, keeps the session in this browser as a reload would
+find it, and offers Continue, which goes on where the session was exported.
 
 When the host persists the shown script's storage, the section also offers **Clear saved script data**, which removes,
 after a confirmation, only the values this script saved for later runs; Player Settings, checkpoints, account data, and
@@ -461,8 +477,12 @@ goes on from the last kept point, with those photos as session media again; a st
 stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
 a kept session whose events the engine's `interpreterEventProblem` refuses, such as a message without its markup or an
 answer without its form, is not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
-moment after an answer, can be lost. A saved-data import of the script discards its kept session
-([transfer](../DATA-AND-API.md#saved-data-transfer)). A script a host prepares without its plan, such as a development
+moment after an answer, can be lost. A state this browser cannot write, such as one holding a list too long to save,
+is not kept, and in the normal room the session kept before is discarded, so a reload never goes on from an earlier
+point as if it were the current one; while the session runs or waits, a warning [notice](#player-notices) says that a
+reload would lose it, until a later state is kept. A saved-data import of the script discards its kept session
+([transfer](../DATA-AND-API.md#saved-data-transfer)); a session import replaces it ([Player Settings](#player-settings)).
+A script a host prepares without its plan, such as a development
 scenario, keeps none. The debug room has a start page of its own, with its restarts
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-room)). Start and Continue
 also record the wall clock and the player's time zone and numeric date and time presentation, resolved again at each:
@@ -473,9 +493,10 @@ If the browser still refuses required audible playback, the Player surfaces a de
 does not silently substitute muted playback or report the audio as played: refused audio reports no progress, so its
 cues and settlement wait, and an **Enable audio** [player notice](#player-notices) retries playback from the user's
 click. In the Player the
-session is created only when Start is activated; Continue resumes a kept session. Keeping a session across browsers or
-devices, and reconciling a continued session's view of saved data with saves made meanwhile, such as in another tab,
-are tracked in #469.
+session is created only when Start is activated; Continue resumes a kept session. A player moves a session to another
+browser or device by hand with its export ([Player Settings](#player-settings)); keeping sessions in step across
+browsers or devices, and reconciling a continued session's view of saved data with saves made meanwhile, such as in
+another tab, are not implemented.
 
 While a session plays, the Player keeps the screen on with the browser's screen wake lock, so a long wait without input
 does not let the screen dim, turn off, or lock. It asks for the lock at the Start or Continue click, also when a camera
@@ -548,7 +569,7 @@ audio, is labelled **Needs action**, offers no dismiss control, and disappears o
 
 The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
 (info: saved progress is not kept), a failed script-storage write (warning, for the run it happened in; a new
-Start withdraws it), an image request that allows only the camera where no camera can be used (warning,
+Start withdraws it), a session this browser cannot keep for a reload (warning, withdrawn once a later state is kept), an image request that allows only the camera where no camera can be used (warning,
 withdrawn when the request ends), a media file the script refers to that the Player cannot use (warning, see
 [Stage and media presentation](#stage-and-media-presentation)), and a session stopped by an error (error, with
 **Details**; see [Session end and failure](#session-end-and-failure)). Each level also has a theme status colour, following
