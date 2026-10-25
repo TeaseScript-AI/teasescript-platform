@@ -100,8 +100,9 @@ test("a value that holds no object has no properties, and a deep chain of operat
   for (const [source, text] of [
     ["for item in dict {key: {value: 2}} { say item }", "item"],
     ["let xs = [{value: 2}]\nlet gone = xs.remove({value: 2})\nsay gone", "gone"],
-    // a receiver that may be a reference has the runtime's members (F19a; #1027 review r4)
-    ["let d = dict {k: {value: 2}}\nd = player\nsay d.values.first", "d.values.first"],
+    // a receiver that may be a reference has the runtime's members (F19a; #1027 review r4); a written union keeps the
+    // reference, where a store of one into the dict's place would be admission's error and be ignored (A6)
+    ["let d: object dict | speaker = dict {k: {value: 2}}\nsay d.values.first", "d.values.first"],
   ] as const) {
     const held = analysed(source);
     assert.deepEqual([...held.answers.properties(held.node(text)).keys()], [], text);
@@ -221,10 +222,10 @@ test("a property named as an internal step keeps its name in the answers (Astra 
     answers.project(box, { property: "iteration" }).map((item) => item.tag),
     ["string"],
   );
-  // a store's member checks name the property as written
+  // a store's member checks name the property as written (the receiver's boundary check beside them is C9's)
   const stored = analysed("let box = hostValue\nbox.element = 1\nexit").answers;
   assert.deepEqual(
-    stored.checks.map((check) => check.on),
+    stored.checks.filter((check) => !check.boundary).map((check) => check.on),
     ["check that box is a object with a store of .element before the store"],
   );
 });
@@ -262,6 +263,8 @@ test("a receiver that may be a reference answers by F19a before its exact value 
   const vera = "speaker vera { length: 2 }\n";
   const opaque =
     "unknown; integer-use warning-runtime-check, member-read warning-runtime-check; integer-check, null-check";
+  const maybeVera =
+    "function h(flag: boolean): integer[]|speaker {\n  if flag { return vera }\n  return [1]\n}\n";
   assert.deepEqual(
     [
       // a written union with text or a list, and a late store of the speaker
@@ -273,12 +276,14 @@ test("a receiver that may be a reference answers by F19a before its exact value 
         `${vera}let alias: integer[]|speaker = [1]\nrepeat alias.length {}\nexit`,
         "alias.length",
       ),
-      read(`${vera}let alias = [1]\nrepeat alias.length {}\nalias = vera\nexit`, "alias.length"),
-      // a function's result that may be the speaker or a list: no integer beside the member
+      // (a late store that may be the speaker: a definite one would be admission's error and be ignored, A6)
       read(
-        `${vera}function h(flag: boolean) {\n  if flag { return vera }\n  return [1]\n}\nrepeat h(true).length {}\nexit`,
-        "h(true).length",
+        `${vera}${maybeVera}let alias = [1]\nrepeat alias.length {}\nalias = h(true)\nexit`,
+        "alias.length",
       ),
+      // a function's result that may be the speaker or a list: no integer beside the member (a written result: two
+      // returns of different kinds would be admission's error, ADR 0021 1.5)
+      read(`${vera}${maybeVera}repeat h(true).length {}\nexit`, "h(true).length"),
       // the pure reference, and a method of a written union
       read(`${vera}let alias = vera\nrepeat alias.length {}\nexit`, "alias.length"),
       read(
@@ -289,7 +294,8 @@ test("a receiver that may be a reference answers by F19a before its exact value 
     [
       `contract: ${opaque}`,
       `contract: ${opaque}`,
-      `contract: ${opaque}`,
+      // the late store's own check against the list the place is decided by (C1)
+      "contract: unknown; integer-use warning-runtime-check, member-read warning-runtime-check, written-target warning-runtime-check; copy-type, integer-check, null-check",
       `value: ${opaque}`,
       `contract: ${opaque}`,
       "value: unknown; member-read warning-runtime-check; null-check",
@@ -321,17 +327,25 @@ test("a `get` on a receiver that may be a reference is the runtime's, no default
     });
   const opaque =
     "value: unknown; integer-use warning-runtime-check, member-read warning-runtime-check; integer-check, null-check";
+  // a late store that may be the speaker owes its own check against the list the place is decided by (C1); a definite
+  // speaker there would be admission's error and be ignored (A6)
+  const late =
+    "value: unknown; integer-use warning-runtime-check, member-read warning-runtime-check, written-target warning-runtime-check; copy-type, integer-check, null-check";
   const got: string[] = [];
-  for (const [setup, after] of [
-    ["let alias: integer[]|speaker = [1]", ""],
-    ["let alias = [1]", "alias = vera\n"],
-    ["let alias = vera", ""],
+  const want: string[] = [];
+  for (const [setup, after, expected] of [
+    ["let alias: integer[]|speaker = [1]", "", opaque],
+    [
+      "function h(flag: boolean): integer[]|speaker {\n  if flag { return vera }\n  return [1]\n}\nlet alias = [1]",
+      "alias = h(true)\n",
+      late,
+    ],
+    ["let alias = vera", "", opaque],
   ] as const)
-    for (const call of ['alias.get(0, default: "bad")', "alias.get(0)"])
+    for (const call of ['alias.get(0, default: "bad")', "alias.get(0)"]) {
       got.push(...read(setup, call, after));
+      want.push(expected, expected);
+    }
   // three receivers, with and without a default, in both orders
-  assert.deepEqual(
-    got,
-    Array.from({ length: 12 }, () => opaque),
-  );
+  assert.deepEqual(got, want);
 });

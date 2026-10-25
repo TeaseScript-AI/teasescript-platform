@@ -325,10 +325,12 @@ test("a recursive projection of a reference or a record closes its component", (
       "warning-runtime-check",
       0,
     ],
+    // (its second return, a whole number into the result its first return decides as a record, is admission's error,
+    // ADR 0021 1.5)
     [
       "a record read further",
       "function f(flag: boolean) {\n  if flag { return {custom: 1} }\n  return f(true).custom\n}\nrepeat f(false) {}\nexit",
-      "warning-runtime-check",
+      "compile-error",
       3,
     ],
   ];
@@ -360,18 +362,30 @@ const NARRATOR = 'speaker narrator { value: "Hello" }\n';
 /**
  * Programs whose receiver gains a reference kind only round its own cycle (r4.44), whose receiver holds a reference from
  * outside the cycle beside a record, a nested record or an external leaf round it (B2, B2-r2), and the record-only
- * control, with their diagnostics.
+ * control, with their diagnostics (a class `warning-runtime-check` unless written). A return that may not fit the result
+ * its function's first return decides owes C1's check (A2, F23); the record-only control's, which none of its kinds
+ * fits, is an error (ADR 0021 1.5).
  */
 const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[] = [
   [
     "a record holding a reference, read through two functions",
     `${NARRATOR}function g(flag: boolean) {\n  if flag { return {custom: narrator} }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return g(true).custom }\n  return g(false).custom\n}\nrepeat f(false) {}\nexit`,
-    ["integer-use f(false)", "member-read g(false)", "member-read g(true)"],
+    [
+      "integer-use f(false)",
+      "member-read g(false)",
+      "member-read g(true)",
+      "written-target f(true)",
+    ],
   ],
   [
     "the same in the other declaration order",
     `${NARRATOR}function f(flag: boolean) {\n  if flag { return g(true).custom }\n  return g(false).custom\n}\nfunction g(flag: boolean) {\n  if flag { return {custom: narrator} }\n  return f(true)\n}\nrepeat f(false) {}\nexit`,
-    ["integer-use f(false)", "member-read g(false)", "member-read g(true)"],
+    [
+      "integer-use f(false)",
+      "member-read g(false)",
+      "member-read g(true)",
+      "written-target f(true)",
+    ],
   ],
   [
     "a list holding a reference, its method's result returned",
@@ -381,37 +395,81 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
       "integer-use f(false)",
       "member-read f(true)",
       "member-read f(true).removeFirst()",
+      "written-target f(true).removeFirst()",
     ],
   ],
   [
     "a reference from outside the cycle beside a record round it",
     "speaker narrator { custom: 1 }\nfunction g(flag: boolean) {\n  if flag { return narrator }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return {custom: 1} }\n  return g(true).custom\n}\nrepeat f(false) {}\nexit",
-    ["integer-use f(false)", "integer-use f(false)", "member-read g(true)", "member-read g(true)"],
+    [
+      "integer-use f(false)",
+      "integer-use f(false)",
+      "member-read g(true)",
+      "member-read g(true)",
+      "written-target f(true)",
+      "written-target f(true)",
+      "written-target g(true).custom",
+    ],
   ],
   [
     "a reference returned or read further round the cycle (Astra B2)",
     "speaker narrator { custom: 1 }\nfunction f(flag: boolean) {\n  if flag { return narrator }\n  return f(true).custom\n}\nrepeat f(false) {}\nexit",
-    ["integer-use f(false)", "integer-use f(false)", "member-read f(true)", "member-read f(true)"],
+    [
+      "integer-use f(false)",
+      "integer-use f(false)",
+      "member-read f(true)",
+      "member-read f(true)",
+      "written-target f(true).custom",
+    ],
   ],
   [
     "a reference from outside the cycle beside a nested record round it",
     "speaker narrator { custom: 1 }\nfunction g(flag: boolean) {\n  if flag { return narrator }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return {custom: {custom: 1}} }\n  return g(true).custom\n}\nrepeat f(false) {}\nexit",
-    ["integer-use f(false)", "integer-use f(false)", "member-read g(true)", "member-read g(true)"],
+    [
+      "integer-use f(false)",
+      "integer-use f(false)",
+      "member-read g(true)",
+      "member-read g(true)",
+      "written-target f(true)",
+      "written-target f(true)",
+      "written-target g(true).custom",
+    ],
   ],
   [
     "a reference from outside the cycle beside a loaded leaf round it (B2-r2)",
     'speaker narrator { custom: 1 }\nfunction g(flag: boolean) {\n  if flag { return narrator }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return {custom: fromJson("1", default: null, files: false)} }\n  return g(true).custom\n}\nrepeat f(false) {}\nexit',
-    ["integer-use f(false)", "integer-use f(false)", "member-read g(true)", "member-read g(true)"],
+    [
+      "integer-use f(false)",
+      "integer-use f(false)",
+      "member-read g(true)",
+      "member-read g(true)",
+      "written-target f(true)",
+      "written-target f(true)",
+      "written-target g(true).custom",
+    ],
   ],
   [
     "a reference from outside the cycle beside a host value round it (B2-r2)",
     "speaker narrator { custom: 1 }\nfunction g(flag: boolean) {\n  if flag { return narrator }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return {custom: hostValue} }\n  return g(true).custom\n}\nrepeat f(false) {}\nexit",
-    ["integer-use f(false)", "integer-use f(false)", "member-read g(true)", "member-read g(true)"],
+    [
+      "integer-use f(false)",
+      "integer-use f(false)",
+      "member-read g(true)",
+      "member-read g(true)",
+      "written-target f(true)",
+      "written-target f(true)",
+      "written-target g(true).custom",
+    ],
   ],
   [
     "the record-only control",
     "function g(flag: boolean) {\n  if flag { return {custom: 2} }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return {custom: 1} }\n  return g(true).custom\n}\nrepeat f(false) {}\nexit",
-    ["integer-use f(false)", "member-read g(true)"],
+    [
+      "integer-use f(false)",
+      "member-read g(true)",
+      "written-target compile-error g(true).custom",
+      "written-target f(true)",
+    ],
   ],
 ];
 
@@ -450,8 +508,13 @@ test("a reference that reaches its receiver only round its own cycle is decided 
       got.push(
         `${label}: ${answers.outcome}, ${solved > 0 ? "closed" : "none"}; ${found.join(", ")}`,
       );
-      const expected = diagnostics.map((d) => d.replace(" ", " warning-runtime-check "));
-      want.push(`${label}: warning-runtime-check, closed; ${expected.join(", ")}`);
+      const expected = diagnostics
+        .map((d) => (d.includes(" compile-error ") ? d : d.replace(" ", " warning-runtime-check ")))
+        .sort();
+      const outcome = expected.some((d) => d.includes(" compile-error "))
+        ? "compile-error"
+        : "warning-runtime-check";
+      want.push(`${label}: ${outcome}, closed; ${expected.join(", ")}`);
     }
     differing.push(...componentDifferences(name, request).differing);
   }
