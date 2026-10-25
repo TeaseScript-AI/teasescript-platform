@@ -401,6 +401,12 @@ interface ValueEntry {
   readonly value: PlaceId;
 }
 
+/** Whether a store goes below a property named `value`, and one named `text` (V30 §19). */
+export interface StoredChoiceKeys {
+  readonly value: boolean;
+  readonly text: boolean;
+}
+
 /** A choice object's property its button value reads (V30 §19), or none. */
 type Selected = { readonly name: string; readonly type: TypeTerm } | null;
 
@@ -496,7 +502,7 @@ export class Contract {
   >();
   readonly #lands = new Map<string, TypeTerm | null>();
   #placeKeys: Map<PlaceId, Key[]> | null = null;
-  #choiceKeysStored: boolean | null = null;
+  #choiceKeysStored: StoredChoiceKeys | null = null;
   #subFirst: Map<PlaceId, Set<string>> | null = null;
   #collected = false;
 
@@ -1171,7 +1177,7 @@ export class Contract {
           c,
           rest,
           (value, path) => this.contractOfValueAt(value, path),
-          !this.choiceKeysStored(),
+          this.choiceKeysStored(),
         ),
         scope,
       );
@@ -1333,20 +1339,21 @@ export class Contract {
   }
 
   /**
-   * Whether a store goes below a property named `value` or `text` (a choice object changed after it is made): then a
-   * held choice object's button value is read by its keys, not per record (V30 §19).
+   * Per key, whether a store goes below a property named `value`, and one named `text` (a choice object changed after it
+   * is made): then a held choice object's button value is read by that key, not per record (V30 §19).
    */
-  public choiceKeysStored(): boolean {
+  public choiceKeysStored(): StoredChoiceKeys {
     if (this.#choiceKeysStored === null) {
-      this.#choiceKeysStored = false;
+      let value = false;
+      let text = false;
       for (const [key] of this.pass.definitions.byKey) {
         this.pass.program.work.charge("invSteps");
         const path = keyPath(key);
-        if (path.includes("value") || path.includes("text")) {
-          this.#choiceKeysStored = true;
-          break;
-        }
+        value ||= path.includes("value");
+        text ||= path.includes("text");
+        if (value && text) break;
       }
+      this.#choiceKeysStored = { value, text };
     }
     return this.#choiceKeysStored;
   }
@@ -2919,37 +2926,36 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
  * object, never by what the key's value resolves to (an empty answer is unresolved, the solver's bottom, never an absent
  * key): a written choice object (the whole option, or an element of a written list or set) by the keys it writes; one
  * the options hold without writing it (a variable's, a call's) per record alternative where its path meets the records
- * (`SELECTED_VALUE`, `SELECTED_TEXT`, the literal's objects). Where a store goes below a `value` or `text` property
- * after a record is made (`byRecord` false), the records are read by their keys: the `value`, and every record's `text`
- * where some lacks the key (F11's `missing`), neither certain.
+ * (`SELECTED_VALUE`, `SELECTED_TEXT`, the literal's objects). Where a store goes below a property of that name after
+ * a record is made (`stored`), that key is read by its key instead, as the literal's records no longer say what it
+ * holds: the `value` as its key gives it, and every record's `text` where some record lacks the `value` (F11's
+ * `missing`), possible where some has one.
  */
 export function* choiceItems(
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
   rest: readonly string[],
   read: (value: PlaceId, path: readonly string[], element?: true) => Work<readonly Item[]>,
-  byRecord: boolean,
+  stored: StoredChoiceKeys,
 ): Work<Item[]> {
   const out: Item[] = [];
   const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
   const labels = choiceLabels(c);
-  // a choice object the options hold without writing it: per record alternative its `value` or its `text`; where a store
-  // changes such records, by its keys: its `value`, and every record's `text` where some lacks the key, neither certain
+  // a choice object the options hold without writing it: per record alternative its `value` or its `text`; a key with a
+  // store below it by its key: the `value` as its key gives it, the `text` of every record where some lacks the `value`,
+  // possible where some has one
   const held = function* (option: PlaceId, at: readonly string[]): Work<void> {
-    if (byRecord) {
-      for (const step of [SELECTED_VALUE, SELECTED_TEXT])
-        out.push(...(yield* read(option, [...at, step, ...rest])));
-      return;
-    }
-    const value = withoutEmpty(yield* read(option, [...at, "value"]));
+    const value =
+      stored.value || stored.text ? withoutEmpty(yield* read(option, [...at, "value"])) : [];
     const lacking = value.some(isMissing);
     const present = withoutMissing(value);
-    const either = (items: readonly Item[]): readonly Item[] =>
-      lacking && present.length > 0 ? weaken(items) : items;
-    if (present.length > 0 || !lacking)
-      out.push(
-        ...either(rest.length === 0 ? present : yield* read(option, [...at, "value", ...rest])),
-      );
-    if (lacking) out.push(...either(yield* read(option, [...at, "text", ...rest])));
+    if (!stored.value) out.push(...(yield* read(option, [...at, SELECTED_VALUE, ...rest])));
+    else if (present.length > 0 || !lacking)
+      out.push(...(rest.length === 0 ? present : yield* read(option, [...at, "value", ...rest])));
+    if (!stored.text) out.push(...(yield* read(option, [...at, SELECTED_TEXT, ...rest])));
+    else if (lacking) {
+      const text = yield* read(option, [...at, "text", ...rest]);
+      out.push(...(present.length > 0 ? weaken(text) : text));
+    }
   };
   // a written choice object's `value`, or its `text` without one; any other option or element by its value
   const button = function* (

@@ -824,6 +824,22 @@ test("a choice object's value is selected by its key, and a dict's values and ke
       'let o = {text: "A", value: 1}\no.value = "x"\nlet n: integer = askChoice o\nexit',
       (at) => ["compile-error", `written-target compile-error @${at("askChoice")}`],
     ],
+    // and a record's `text` stored after it is made; a key without a store below it stays per record (Astra on #1027)
+    [
+      "a held record whose text is stored",
+      'let o = {text: 1}\no.text = "x"\nlet n: integer = askChoice o\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at("askChoice")}`],
+    ],
+    [
+      "held records beside a value stored elsewhere",
+      'let other = {value: 0}\nother.value = 1\nlet opts = [{text: "unused", value: 1}, {text: 2}]\nrepeat askChoice opts {}\nexit',
+      () => ["valid"],
+    ],
+    [
+      "held records none of whose buttons fits, beside a value stored elsewhere",
+      'let other = {value: 0}\nother.value = 1\nlet opts = [{text: 1, value: "x"}, {text: "y"}]\nrepeat askChoice opts {}\nexit',
+      (at) => ["compile-error", `integer-use compile-error @${at("askChoice")}`],
+    ],
     // a choice object held in a variable, whose value may be a missing member: possibly its text, never certainly
     [
       "a held choice object whose value may be missing",
