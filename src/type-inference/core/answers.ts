@@ -499,8 +499,9 @@ class CoreAnswers implements Answers {
         else list.push(diagnostic.obligation);
       }
     if (exhausted === null) {
-      for (const list of consumers.admission.boundaries.values()) checks.push(...list);
-      checks.push(...consumers.admission.readChecks);
+      for (const list of consumers.admission.boundaries.values())
+        for (const check of list) checks.push(check);
+      for (const check of consumers.admission.readChecks) checks.push(check);
     }
     this.checks = checks;
     const deferredParameters: PlaceId[] = [];

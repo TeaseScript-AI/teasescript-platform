@@ -669,7 +669,7 @@ export class Admission {
     const out: Definition[] = [];
     for (const has of program.hasOf.get(value) ?? []) {
       const term = this.#termAt(has.type, step);
-      if (term?.kind === "ref") out.push(...(definitions.cellDefs.get(term.place) ?? []));
+      if (term?.kind === "ref") for (const d of definitions.cellDefs.get(term.place) ?? []) out.push(d);
     }
     program.work.charge("checks", sortCost(out.length));
     return out.sort(
@@ -916,7 +916,7 @@ export class Admission {
       seen.add(current);
       this.pass.program.work.charge("checks");
       if ("store" in current) tokens.add(writerKey(current.store));
-      else if ("parts" in current) pending.push(...current.parts);
+      else if ("parts" in current) for (const part of current.parts) pending.push(part);
       else if (current.contents !== null) pending.push(current.contents);
     }
     return tokens;
@@ -962,7 +962,7 @@ export class Admission {
         if (this.#walked.has(node)) continue;
         this.#walked.add(node);
         program.work.charge("checks");
-        if ("parts" in node) pending.push(...node.parts);
+        if ("parts" in node) for (const part of node.parts) pending.push(part);
         else if (!("store" in node)) {
           if (node.contents !== null) pending.push(node.contents);
         } else {

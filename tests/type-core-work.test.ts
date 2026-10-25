@@ -119,6 +119,17 @@ test("every admission family's work and each of its counters grow with the progr
 });
 
 /**
+ * Native resilience (TABLE §8): admission's walks over a literal of 150,000 elements beside a host value list them on
+ * the heap, never as one call's arguments (review r3: a spread of the elements overflowed the native stack).
+ */
+test("a literal of 150,000 elements beside a host value is admitted within the native stack", () => {
+  const source = `let xs: integer[] = [${Array.from({ length: 150_000 }, () => "1").join(",")}, hostValue]\nexit`;
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  assert.equal(analyseCore(request).outcome, "warning-runtime-check");
+});
+
+/**
  * W34's two known products, gated known limits by the owner's decision (TABLE r4.45, PLAN §6b): a regression check on
  * the 64 → 128 growth step only, each held to its measured doubling in either order (3.37 and 2.53); not a bound at
  * larger sizes (128 → 256 grows 3.62 and 2.82), and no linearity is asserted for them.
