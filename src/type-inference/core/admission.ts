@@ -114,6 +114,13 @@ export class Admission {
   /** The previous pass's rejected stores by the place and path each was rejected at (A6). */
   readonly #retaken = new Map<Key, Definition[]>();
   readonly #a4Keys = new Set<Key>();
+  readonly #a4Copies: {
+    readonly place: PlaceId;
+    readonly path: readonly string[];
+    readonly term: TypeTerm;
+  }[] = [];
+  /** Whether each decision admits `null` (a copy of a written type without one does not, A4). */
+  readonly #nullable = new Map<Key, boolean>();
   readonly #copies = new Map<
     PlaceId,
     readonly { readonly path: readonly string[]; readonly term: TypeTerm }[]
@@ -165,10 +172,18 @@ export class Admission {
         }
       }
     }
+    // A4: the copies of written bindings the stores and adds bring, where they land
     for (const d of definitions.storeDefs)
-      if (d.kind === "whole" && d.value !== undefined)
-        for (const { path } of this.#writtenCopies(d.value))
-          this.#a4Keys.add(keyOf(d.place, [...d.path, ...path]));
+      if ((d.kind === "whole" || d.kind === "add") && d.value !== undefined)
+        for (const { path, term } of this.#writtenCopies(d.value)) {
+          const at = [
+            ...d.path,
+            ...(d.kind === "add" && d.how !== "elements" ? ["element"] : []),
+            ...path,
+          ];
+          this.#a4Keys.add(keyOf(d.place, at));
+          this.#a4Copies.push({ place: d.place, path: at, term });
+        }
   }
 
   #run<T>(work: Work<T>): T {
@@ -270,13 +285,31 @@ export class Admission {
       if (paths === undefined) roots.set(keyPlace(key), (paths = new Set()));
       paths.add(keyPath(key).join("."));
     }
-    // A1, A8: a written collection's elements at every depth
+    // A1, A8: a written collection's elements at every depth; A4: a copied written type's paths, where the copy lands
+    // and below, whether a read asks for them or not
     for (const place of program.places) {
       const written = writtenOf(place.kind);
       const paths = roots.get(place.id);
       if (written === null || paths === undefined) continue;
       for (let path = ["element"]; termAt(written, path) !== null; path = [...path, "element"])
         paths.add(path.join("."));
+    }
+    const copied = new Map<Key, Set<TypeTerm>>();
+    for (const { place, path, term } of this.#a4Copies) {
+      // (once per landing path and written type: k copies of one binding into one literal are one)
+      const at = keyOf(place, path);
+      let terms = copied.get(at);
+      if (terms === undefined) copied.set(at, (terms = new Set()));
+      work.charge("indexSteps");
+      if (terms.has(term)) continue;
+      terms.add(term);
+      let paths = roots.get(place);
+      if (paths === undefined) roots.set(place, (paths = new Set()));
+      paths.add(path.join("."));
+      for (let below = ["element"]; termAt(term, below) !== null; below = [...below, "element"]) {
+        work.charge("indexSteps");
+        paths.add([...path, ...below].join("."));
+      }
     }
     const groups: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
     for (const [root, paths] of roots)
@@ -451,6 +484,7 @@ export class Admission {
     )
       tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
     this.decided.set(key, tags);
+    this.#nullable.set(key, nullable);
     const decidedTags = tags;
     const offends = (items: readonly Item[]): boolean =>
       items.some((item) =>
@@ -524,7 +558,8 @@ export class Admission {
    * C9 r4.12 (A1–A7): a destination's admitted type: the written type (its null included), else the decided kinds (an
    * integer decider already widened by an admitted number, a copy of a written integer never: A4), else, where
    * admission decided nothing, the contract's kinds, one family, an integer widened by an admitted number; with `null`
-   * where a null contribution is admitted; never the raw union of contributions.
+   * where a null contribution is admitted and the decision admits one (a copy of a written type without it does not);
+   * never the raw union of contributions.
    */
   public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {
     const { program, contract } = this.pass;
@@ -532,13 +567,18 @@ export class Admission {
     const term = written === null ? null : termAt(written, path);
     if (term !== null) return [...new Set(typeTags(term).filter((tag) => tag !== "unknown"))];
     const kinds = withoutEmpty(this.#run(contract.contractOf(keyOf(place, path))));
-    const decided = this.decided.get(keyOf(place, path));
+    const key = keyOf(place, path);
+    const decided = this.decided.get(key);
     let tags = [
       ...(decided ?? new Set(kinds.filter((item) => concrete(item)).map((item) => item.tag))),
     ];
     if (decided === undefined && tags.includes("integer") && kinds.some(admitsNumber))
       tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
-    return tags.length > 0 && kinds.some((item) => item.tag === "null") ? [...tags, "null"] : tags;
+    return tags.length > 0 &&
+      this.#nullable.get(key) !== false &&
+      kinds.some((item) => item.tag === "null")
+      ? [...tags, "null"]
+      : tags;
   }
 
   /** Whether no store on the path or a prefix of it was rejected (A6) or copies a written binding (A4). */

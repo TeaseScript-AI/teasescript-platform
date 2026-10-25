@@ -291,6 +291,23 @@ test("admission's decided types and C9's boundary checks compile and run on the 
         [2.5, "TSR058@66:75"],
       ],
     ],
+    // A4: a copy of a written list keeps its element type where no read asks for it (review r4: the store's check and
+    // a whole host value's took `list<number>`)
+    [
+      'let typed: integer[] = [1]\nlet copy = typed\ncopy = [[1], [2.5]][1]\nsay "after store"\nexit\n',
+      ["warning TSV041@51"],
+      ["44:66"],
+      [[null, "TSR058@51:66"]],
+    ],
+    [
+      'let typed: integer[] = [1]\nlet copy = typed\ncopy = [[1], [2.5]][0]\ncopy = hostValue\nsay "after store"\nexit\n',
+      ["warning TSV041@51", "warning TSV041@74", "warning TSV041@74"],
+      ["44:66", "67:83"],
+      [
+        [list(1), null],
+        [list(2.5), "TSR058@74:83"],
+      ],
+    ],
     // C9: external data stored whole into a written collection, checked there with its elements
     [
       "let pool: integer[] = hostValue\nexit\n",

@@ -1826,7 +1826,8 @@ test("a chain of methods without a category stays opaque", () => {
  * r2: a copied written type checks a literal's other elements by their own kinds (a whole number fits a written
  * integer, a fraction does not); a store none of whose possible kinds fits is rejected too; literals are checked at
  * any depth; a concrete misfit of a fallback is checked against the receiving union too; the lazy defaults of
- * `fileFromBase64`, `decryptText` and `decryptFile` follow C10 (ADR 0021 7.2).
+ * `fileFromBase64`, `decryptText` and `decryptFile` follow C10 (ADR 0021 7.2). Review r4: a copy of a written type is
+ * decided at every path of that type, read or not, and admits `null` only where its type or an earlier store does.
  */
 test("admission decides from the start value, keeps written copies, rejects every definite misfit, and checks fallbacks per kind", () => {
   const f =
@@ -1975,6 +1976,33 @@ test("admission decides from the start value, keeps written copies, rejects ever
       "a lazy file default of null",
       'let r = fileFromBase64("!", default: null)\nexit',
       () => ["valid"],
+    ],
+    [
+      "a copy of a written list stored a list of another kind, its elements unread",
+      'let typed: integer[] = [1]\nlet copy = typed\nlet other = ["bad"]\ncopy = other\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at("other\nexit")}`],
+    ],
+    [
+      "a copy of a written integer stored a possible null, then external data",
+      "let typed: integer = 1\nlet copy = typed\ncopy = [1, null][1]\ncopy = hostValue\nexit",
+      (at) => [
+        "warning-runtime-check",
+        `written-target warning-runtime-check @${at("[1, null]")}`,
+        `written-target warning-runtime-check @${at("hostValue")}`,
+        `null-check copy [integer] @${at("[1, null]")}`,
+        `copy-type copy [integer] @${at("hostValue")}`,
+        `copy-type copy [integer] boundary @${at("hostValue")}`,
+      ],
+    ],
+    // (a possible misfit warns at the store's value, the literal; an error would sit at its innermost expression)
+    [
+      "a set whose first element copies a written integer, a later one possibly a fraction",
+      "let typed: integer = 1\nlet xs = set[typed, [1, 2.5][1]]\nexit",
+      (at) => [
+        "warning-runtime-check",
+        `written-target warning-runtime-check @${at("set[")}`,
+        `copy-type xs.element [integer] @${at("set[")}`,
+      ],
     ],
     [
       "a default whose written contract fits",
