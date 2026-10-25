@@ -1720,8 +1720,9 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "A6-chain",
     measures: "A6: a chain of k rejections, every copy taken after its source's misfit",
-    // 496,487 / 1,914,055 units at k = 64, 128, k + 2 passes, each charging its index of the previous pass's
-    // rejections (3.9103; 3.908, 452,803 / 1,744,803, before that index was charged)
+    // 526,905 / 2,032,217 units at k = 64, 128, k + 2 passes (3.9120): each pass charges its index of the previous
+    // pass's rejections (3.908 before, 452,803 / 1,744,803) and its literals' contributions by path (3.9103 before,
+    // 496,487 / 1,914,055)
     measured: 3.92,
     program: (k) =>
       main(
