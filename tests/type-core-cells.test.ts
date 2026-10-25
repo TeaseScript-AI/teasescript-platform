@@ -1680,23 +1680,68 @@ test("a choice over a list of options takes its literal analogue's word", () => 
 
 /**
  * V30 §6, F10, F27 (Astra's B1 on #1028): a range's list holds the range's whole numbers, as the category layer declares
- * a range's elements; its element read is an integer into a count, a written integer and through `first`, bound, in a
- * loop and through a function's result of two returns, in both orders. A written text is the control.
+ * a range's elements, and maybe none, as its bounds decide (review round 3: `3..1` holds none, and its list's `first`
+ * fails at runtime with TSR018). Its element read is an integer into a count, a written integer and through `first`,
+ * bound, in a loop and through a function's result of two returns, each selection with its empty check; in both
+ * orders. A written text is the control.
  */
-test("a range's list holds its whole numbers", () => {
+test("a range's list holds its whole numbers, maybe none", () => {
   const programs: readonly (readonly [string, string, readonly string[]])[] = [
-    ["counted", "let xs = (1..3).toList()\nrepeat xs.first {}\nexit", ["valid"]],
-    ["into a written integer", "let n: integer = (1..3).toList().first\nexit", ["valid"]],
+    [
+      "counted",
+      "let xs = (1..3).toList()\nrepeat xs.first {}\nexit",
+      [
+        "empty-check xs [list] @32",
+        "member-read warning-runtime-check @32",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "into a written integer",
+      "let n: integer = (1..3).toList().first\nexit",
+      [
+        "empty-check (1..3).toList() [list] @17",
+        "member-read warning-runtime-check @17",
+        "warning-runtime-check",
+      ],
+    ],
     ["visited by a loop", "for x in (1..3).toList() { repeat x {} }\nexit", ["valid"]],
     [
       "through a function's result",
       'function make(f) {\nif f { return (1..3).toList() }\nreturn (2..4).toList()\n}\nrepeat make(askBoolean "f").first {}\nexit',
-      ["valid"],
+      [
+        "empty-check make.result [list] @83",
+        "member-read warning-runtime-check @83",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "an empty range's first",
+      "let xs = (3..1).toList()\nrepeat xs.first {}\nexit",
+      [
+        "empty-check xs [list] @32",
+        "member-read warning-runtime-check @32",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "an empty range's removal",
+      "let xs = (3..1).toList()\nrepeat xs.removeFirst() {}\nexit",
+      [
+        "empty-check xs [list] @32",
+        "member-read warning-runtime-check @32",
+        "warning-runtime-check",
+      ],
     ],
     [
       "into a written text",
       "let s: string = (1..3).toList().first\nexit",
-      ["compile-error", "written-target compile-error @16"],
+      [
+        "compile-error",
+        "empty-check (1..3).toList() [list] @16",
+        "member-read warning-runtime-check @16",
+        "written-target compile-error @16",
+      ],
     ],
   ];
   const differing: string[] = [];

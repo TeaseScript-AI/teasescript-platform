@@ -625,7 +625,10 @@ export class Values {
           ...receiver.filter((item) => !COPIED.has(item.tag)),
         ];
       const kinds = withoutEmpty(receiver);
+      const declared = kinds.some((item) => kindElement(item.tag) !== undefined);
       return [
+        // a kind's declared elements may be none (a range's bounds decide): the copy's element step keeps that mark
+        ...(declared && rest.length === 1 ? [EMPTY] : []),
         ...(rest.length === 1
           ? kinds.flatMap((item) => {
               const element = kindElement(item.tag);
