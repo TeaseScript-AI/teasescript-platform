@@ -235,6 +235,17 @@ export class Values {
     return mergeItems(out, program.scope);
   }
 
+  /** A written element of a list or set at a path, read as the list's literal reads it, below its element step (F12). */
+  *#belowElement(
+    literal: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+  ): Work<readonly Item[]> {
+    const { program, contract } = this.pass;
+    if (!program.hasOf.has(literal)) return yield* this.valueItems(literal, node, rest);
+    return alternatives(yield* contract.indexItems(literal, rest, node, true, true), program.scope);
+  }
+
   /** The value of a place at a node at a path, by the place's kind. */
   *#valueAt(value: PlaceId, node: FlowNode | null, rest: readonly string[]): Work<readonly Item[]> {
     const { program, contract } = this.pass;
@@ -625,7 +636,9 @@ export class Values {
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
     // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
     if (interaction?.kind === "options")
-      return yield* choiceItems(c, rest, (value, path) => this.valueItems(value, at, path));
+      return yield* choiceItems(c, rest, (value, path, element) =>
+        element === true ? this.#belowElement(value, at, path) : this.valueItems(value, at, path),
+      );
     const member = family === "member" ? memberResult(name) : undefined;
     if (member !== undefined) return member.map((kind) => makeItem(kind));
     // F19a: a handle's members are the runtime's

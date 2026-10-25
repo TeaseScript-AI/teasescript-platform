@@ -2624,11 +2624,12 @@ export class Contract {
     rest: readonly string[],
     node: FlowNode | null,
     exact: boolean,
+    below = false,
   ): Work<readonly Item[]> {
     const { program, definitions, values } = this.pass;
     const index = this.literalIndex(literal);
-    // an element cell: every path below lies below an element step
-    const inElement = program.cellOwner.get(literal)?.kind === "cell";
+    // an element cell, or a literal read as one (`below`): every path below lies below an element step
+    const inElement = below || program.cellOwner.get(literal)?.kind === "cell";
     const out: Item[] = [];
     // the read passes an element step over a copy (F12: X3)
     let overCopy = false;
@@ -2757,7 +2758,7 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
 export function* choiceItems(
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
   rest: readonly string[],
-  read: (value: PlaceId, path: readonly string[]) => Work<readonly Item[]>,
+  read: (value: PlaceId, path: readonly string[], element?: true) => Work<readonly Item[]>,
 ): Work<Item[]> {
   const out: Item[] = [];
   const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
@@ -2777,10 +2778,17 @@ export function* choiceItems(
     if (lacking) out.push(...either(yield* read(option, [...at, "text", ...rest])));
   };
   // a written choice object's `value`, or its `text` without one; any other option or element by its value
-  const button = function* (place: PlaceId, object: ChoiceObjectEvidence | null): Work<void> {
+  const button = function* (
+    place: PlaceId,
+    object: ChoiceObjectEvidence | null,
+    element: boolean,
+  ): Work<void> {
     const selected = object === null ? null : (object.value ?? object.text);
-    if (selected !== null) {
-      out.push(...(yield* read(selected, rest)));
+    if (object !== null && selected !== null) {
+      // an element of a written list or set reads as its literal analogue, below the list's element step (F12 r4.7)
+      const key = object.value !== null ? "value" : "text";
+      const reading = element ? read(place, [key, ...rest], true) : read(selected, rest);
+      out.push(...(yield* reading));
       return;
     }
     const items = withoutEmpty(yield* read(place, []));
@@ -2796,11 +2804,11 @@ export function* choiceItems(
     }
     const content: ChoiceOptionEvidence["content"] | undefined = evidence[index]?.content;
     if (content?.kind === "object") {
-      yield* button(argument, content.object);
+      yield* button(argument, content.object, false);
       continue;
     }
     if (content?.kind === "list" || content?.kind === "set") {
-      for (const element of content.elements) yield* button(element.place, element.object);
+      for (const element of content.elements) yield* button(element.place, element.object, true);
       continue;
     }
     // a computed option: a list's or a set's elements, a choice object, or a value

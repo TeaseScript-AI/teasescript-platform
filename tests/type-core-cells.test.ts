@@ -920,3 +920,34 @@ test("a choice object's value is selected by its key, and a dict's values and ke
   }
   assert.deepEqual(differing, []);
 });
+
+/**
+ * A choice reads a written list's element as its literal analogue does (TABLE r4.42–r4.43, the lead's ruling on #1027):
+ * a copied record below the list's element step takes its contract (F12 r4.7), with the read's word and the copy
+ * check, in both orders.
+ */
+test("a choice's written list element reads below the list's element step, as its literal analogue", () => {
+  const recordOf = (source: string): CompactRecord => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const [forward, reversed] = [false, true].map((reverse) => {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reverse }, () => compactAnalysis(request));
+      return reverse ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+    });
+    assert.deepEqual(reversed, forward, `${source}: both orders`);
+    return forward!;
+  };
+  for (const store of ["rec.f = 2.5", 'showPermanentButton "b" { rec.f = 2.5 }']) {
+    const head = `let rec = {f: 1}\n${store}\nlet n: integer = `;
+    const choice = recordOf(`${head}(askChoice [{text: "A", value: rec}]).f\nexit`);
+    assert.deepEqual(choice, recordOf(`${head}[{text: "A", value: rec}][0].value.f\nexit`));
+    assert.deepEqual(
+      [
+        choice.outcome,
+        ...choice.diagnostics.map((d) => `${d.kind} ${d.context} @${d.site.offset}`),
+      ],
+      ["warning-runtime-check", `written-target member @${head.length}`],
+    );
+  }
+});
