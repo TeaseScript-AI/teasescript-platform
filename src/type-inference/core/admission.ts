@@ -777,9 +777,8 @@ export class Admission {
         for (const path of [[], ...this.literalPaths(d.value)]) {
           const at = path.join(".");
           const decided = first.get(at);
-          const kinds = [
-            ...new Set(deciding(this.valueAt(d, path)).map((item) => family(item.tag))),
-          ];
+          const own = [...new Set(deciding(this.valueAt(d, path)).map((item) => item.tag))];
+          const kinds = [...new Set(own.map(family))];
           if (decided === undefined) {
             // A4: a copy of a written binding gives its written type, whatever it holds now
             const copied = this.#writtenCopyAt(d.value, path);
@@ -791,15 +790,23 @@ export class Admission {
             else if (kinds.length === 1) first.set(at, { tags: kinds, written: false });
             continue;
           }
-          const misfit = (tag: ItemTag): boolean =>
-            !decided.tags.some((ref) => fits(tag, ref, decided.written));
-          if (kinds.length !== 1 || !misfit(kinds[0]!)) continue;
+          // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
+          // number fits a written integer, a fraction does not), an earliest element's by their family
+          const offends = (tags: readonly ItemTag[]): boolean => {
+            const families = [...new Set(tags.map(family))];
+            return (
+              families.length === 1 &&
+              (decided.written ? tags : families).every(
+                (tag) => !decided.tags.some((ref) => fits(tag, ref, decided.written)),
+              )
+            );
+          };
+          if (!offends(own)) continue;
           const inner =
             path.length > 0
-              ? this.offendingAt(d, path, (items) => {
-                  const own = [...new Set(deciding(items).map((item) => family(item.tag)))];
-                  return own.length === 1 && misfit(own[0]!);
-                })
+              ? this.offendingAt(d, path, (items) =>
+                  offends([...new Set(deciding(items).map((item) => item.tag))]),
+                )
               : null;
           error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site));
           this.reject(d, cell, path);
