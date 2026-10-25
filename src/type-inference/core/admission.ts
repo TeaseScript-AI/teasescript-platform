@@ -456,9 +456,15 @@ export class Admission {
         work.charge("checks", scans.length);
         const copied = d.value === undefined ? null : this.#writtenCopyAt(d.value, at);
         if (copied !== null) {
+          // (its type stays strict, but a literal's `null` elements beside the copy make the place optional, ADR 0021
+          // 1.3, A8)
           const copiedTags = typeTags(copied);
           tags = copiedTags.filter((tag) => tag !== "null");
-          nullable = sawNull || copiedTags.includes("null");
+          nullable =
+            sawNull ||
+            copiedTags.includes("null") ||
+            (this.pass.program.hasOf.has(d.value!) &&
+              evaluate(d, at).some((item) => item.tag === "null"));
           byWritten = true;
           decider = d;
           break;

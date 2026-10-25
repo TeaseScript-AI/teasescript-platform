@@ -1827,7 +1827,8 @@ test("a chain of methods without a category stays opaque", () => {
  * integer, a fraction does not); a store none of whose possible kinds fits is rejected too; literals are checked at
  * any depth; a concrete misfit of a fallback is checked against the receiving union too; the lazy defaults of
  * `fileFromBase64`, `decryptText` and `decryptFile` follow C10 (ADR 0021 7.2). Review r4: a copy of a written type is
- * decided at every path of that type, read or not, and admits `null` only where its type or an earlier store does.
+ * decided at every path of that type, read or not, and admits `null` only where its type, an earlier store or a null
+ * element of the literal it stands in does.
  */
 test("admission decides from the start value, keeps written copies, rejects every definite misfit, and checks fallbacks per kind", () => {
   const f =
@@ -1992,6 +1993,17 @@ test("admission decides from the start value, keeps written copies, rejects ever
         `null-check copy [integer] @${at("[1, null]")}`,
         `copy-type copy [integer] @${at("hostValue")}`,
         `copy-type copy [integer] boundary @${at("hostValue")}`,
+      ],
+    ],
+    // a literal's `null` element beside the copy makes the element optional (ADR 0021 1.3, A8), its type strict
+    [
+      "a list whose first element copies a written integer, a later one possibly null, then external data",
+      "let typed: integer = 1\nlet xs = [typed, [1, null][1], hostValue]\nexit",
+      (at) => [
+        "warning-runtime-check",
+        `written-target warning-runtime-check @${at("hostValue")}`,
+        `copy-type xs.element [integer, null] @${at("hostValue")}`,
+        `copy-type xs.element [integer, null] boundary @${at("hostValue")}`,
       ],
     ],
     // (a possible misfit warns at the store's value, the literal; an error would sit at its innermost expression)
