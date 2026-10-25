@@ -633,6 +633,41 @@ test("parentheses answer for their content: a parenthesised count and index read
   assert.equal(runWith(hostIndex.plan, 0.5).failure, "TSR024@28:37");
 });
 
+test("a projection of a literal carries its elements' types and host data on the candidate route (round 11)", () => {
+  // A8 through the projection, direct and named; A2 across a change of the named list; C1 and C9 at the store, before
+  // any later effect
+  for (const [source, diagnostics] of [
+    ['let xs = [[[1]][0], [["bad"]][0]]\nsay "AFTER"\nexit\n', ["error TSV041@20"]],
+    [
+      'let v1 = [1]\nlet v2 = ["bad"]\nlet xs = [[v1][0], [v2][0]]\nsay "AFTER"\nexit\n',
+      ["error TSV041@49"],
+    ],
+    [
+      'let a = [1]\nlet xs = []\nxs = [[a][0], [[1]][0]]\na = ["bad"]\nxs = [[a][0], [[1]][0]]\nexit\n',
+      ["error TSV041@53"],
+    ],
+  ] as const)
+    assert.deepEqual(
+      inBothOrders(() => sited(candidate(source))),
+      diagnostics,
+      source,
+    );
+  const host = 'let a = [hostValue]\nlet xs = [[[1]][0], [a][0]]\nsay "AFTER"\nexit\n';
+  const compiled = inBothOrders(() => {
+    const result = candidate(host);
+    return {
+      diagnostics: sited(result),
+      checked: result.plan === null ? null : checkedStores(result.plan),
+    };
+  });
+  assert.deepEqual(compiled.diagnostics, ["warning TSV041@29"]);
+  const plan = candidate(host).plan;
+  assert.ok(plan !== null);
+  assert.deepEqual(runWith(plan, 2).says, ["AFTER"]);
+  const bad = runWith(plan, "bad");
+  assert.deepEqual({ says: bad.says, failed: bad.failure !== null }, { says: [], failed: true });
+});
+
 /** Runs a plan to its end, observing each reading pause's deadline: the events and the final snapshot. */
 function finish(
   plan: InstructionPlan,

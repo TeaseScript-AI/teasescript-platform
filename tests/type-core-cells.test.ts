@@ -2899,3 +2899,102 @@ test("a literal's verdicts are shared only where its named elements hold the sam
   }
   assert.deepEqual(differing, []);
 });
+
+/**
+ * The value carriers (round 11; the walk of `answers.ts` `#propertyNames`): each carrier over a direct, a named, a
+ * computed and a projected list, in a literal beside the same carrier over another list (A8), stored before and after
+ * its source changes (A2), and carrying host data with no consumer (C1, C9); in both orders. A carrier that gives
+ * possible elements (a removal, a choice's answer) decides nothing (A2), and a load's or a parse's value is the external
+ * data its boundary checks whole (A7).
+ */
+test("a value any carrier gives brings its elements' types, decided and checked as a literal's, in both orders (round 11)", () => {
+  const carriers: readonly (readonly [string, (value: string) => string])[] = [
+    ["projection", (value) => `[${value}][0]`],
+    ["otherwise", (value) => `${value} otherwise ${value}`],
+    ["get with its default", (value) => `[].get(0, default: ${value})`],
+    ["load's default", (value) => `load("k", default: ${value})`],
+    ["a parse's default", (value) => `fromJson("[]", default: ${value})`],
+    ["take", (value) => `${value}.take(1)`],
+    ["takeLast", (value) => `${value}.takeLast(1)`],
+    ["toList", (value) => `${value}.toList()`],
+    ["toSet", (value) => `${value}.toSet()`],
+    ["removeFirst", (value) => `[${value}].removeFirst()`],
+    ["+", (value) => `${value} + []`],
+    ["a choice", (value) => `askChoice [{text: "A", value: ${value}}]`],
+  ];
+  const possible = new Set(["removeFirst", "a choice"]);
+  const external = new Set(["load's default", "a parse's default"]);
+  // a list (a set for `toList`) of one element, and how the matrix's kinds of value hold it
+  const list = (carrier: string, element: string): string =>
+    carrier === "toList" ? `set[${element}]` : `[${element}]`;
+  const kinds: readonly (readonly [
+    string,
+    (name: string, literal: string) => readonly [string, string],
+  ])[] = [
+    ["direct", (_, literal) => ["", literal]],
+    ["named", (name, literal) => [`let ${name} = ${literal}\n`, name]],
+    ["computed", (name, literal) => [`function ${name} {\n  return ${literal}\n}\n`, `${name}()`]],
+    ["projected", (name, literal) => [`let ${name} = {items: ${literal}}\n`, `${name}.items`]],
+  ];
+  const differing: string[] = [];
+  const analysed = (name: string, source: string): CompactRecord => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const forward = compactAnalysis(request);
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder(
+        (items) => [...items].reverse(),
+        () => compactAnalysis(request),
+      ),
+    );
+    for (const difference of recordDifferences(forward, reversed))
+      differing.push(`${name} reversed: ${difference}`);
+    return forward;
+  };
+  const errors = (record: CompactRecord): number[] =>
+    record.diagnostics
+      .filter((diagnostic) => diagnostic.class === "compile-error")
+      .map((diagnostic) => diagnostic.site.offset);
+  for (const [carrier, carry] of carriers) {
+    // A8: the second element's text is the error inside it, where the carrier's elements are definite
+    for (const [kind, hold] of kinds) {
+      const [goodSetup, good] = hold("g", list(carrier, "1"));
+      const [badSetup, bad] = hold("b", list(carrier, '"bad"'));
+      const source = `${goodSetup}${badSetup}let xs = [${carry(good)}, ${carry(bad)}]\nsay "AFTER"\nexit`;
+      const name = `${carrier}, ${kind}`;
+      const record = analysed(name, source);
+      const second = source.indexOf(carry(bad), source.indexOf("let xs"));
+      const found = errors(record);
+      if (
+        possible.has(carrier)
+          ? record.outcome !== "valid"
+          : found.length !== 1 || found[0]! < second || found[0]! >= second + carry(bad).length
+      )
+        differing.push(`${name}: ${record.outcome} @${found.join(", @")}`);
+    }
+    // A2, A6: a named value stored before and after a change of it: the change of the decided list is the error at its
+    // text, rejected, so the second store holds whole numbers as the first does
+    const one = list(carrier, "1");
+    const changed = `let a = ${one}\nlet xs = []\nxs = [${carry("a")}, ${carry(one)}]\na = ${list(carrier, '"bad"')}\nxs = [${carry("a")}, ${carry(one)}]\nexit`;
+    const record = analysed(`${carrier}, changed`, changed);
+    if (JSON.stringify(errors(record)) !== JSON.stringify([changed.indexOf('"bad"')]))
+      differing.push(`${carrier}, changed: ${record.outcome} @${errors(record).join(", @")}`);
+    // the same, the named list host data first and text after: one record in both orders (round 11 B1's sharing)
+    analysed(
+      `${carrier}, changed from host data`,
+      changed.replace(`let a = ${one}`, `let a = ${list(carrier, "hostValue")}`),
+    );
+    // C1, C9: host data the carrier brings into the decided elements, with no consumer
+    const host = `let a = ${list(carrier, "hostValue")}\nlet xs = [${carry(one)}, ${carry("a")}]\nsay "AFTER"\nexit`;
+    const carried = analysed(`${carrier}, host data`, host);
+    const warned = carried.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.kind === "written-target" && diagnostic.class === "warning-runtime-check",
+    );
+    const expected =
+      possible.has(carrier) || external.has(carrier) ? "valid" : "warning-runtime-check";
+    if (carried.outcome !== expected || warned !== (expected === "warning-runtime-check"))
+      differing.push(`${carrier}, host data: ${carried.outcome}`);
+  }
+  assert.deepEqual(differing, []);
+});
