@@ -1,6 +1,6 @@
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "../../project-paths.js";
 import { isCanonicalTagList } from "../../tags.js";
-import type { PlanFileBoundaries } from "../instruction-stream-analyses.js";
+import type { PlanFileBoundaries } from "../instruction-stream-analyses/execution-regions.js";
 import {
   type PlanValidationError,
   isRecord,

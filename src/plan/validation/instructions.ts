@@ -2,7 +2,7 @@ import { isConversion, takesDefault, takesFiles } from "../../conversions.js";
 import { DURATION_UNITS } from "../../language-facts.js";
 import { isLazyDefaultOperation } from "../../lazy-defaults.js";
 import { lazyDefaultArgumentIndex, lazyDefaultCallOperation } from "../expression-children.js";
-import { expressionMayReferenceTemporary } from "../instruction-stream-analyses.js";
+import { expressionMayReferenceTemporary } from "../instruction-stream-analyses/instruction-facts.js";
 import {
   type PlanValidationError,
   hasExactKeys,
