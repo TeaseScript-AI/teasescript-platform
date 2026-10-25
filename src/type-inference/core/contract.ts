@@ -32,6 +32,7 @@ import {
   declaredProperty,
   dictList,
   interactionCategory,
+  kindElement,
   memberStep,
   measuresLength,
   memberResult,
@@ -1005,9 +1006,11 @@ export class Contract {
         out.push(
           ...belowSelected(yield* this.contractOfValueAt(owner, ["element", ...rest]), rest),
         );
-      else if ((item.tag === "dict" || item.tag === "range") && rest.length === 0)
+      else if ((item.tag === "dict" || kindElement(item.tag) !== undefined) && rest.length === 0)
         out.push(
-          carried(makeItem(item.tag === "dict" ? "string" : "integer", item.writer), [item]),
+          carried(makeItem(item.tag === "dict" ? "string" : kindElement(item.tag)!, item.writer), [
+            item,
+          ]),
         );
       else if (item.tag === "unknown") out.push(item);
     }
@@ -1125,15 +1128,25 @@ export class Contract {
       }
       return mergeItems(out, scope);
     }
-    // F10: a copy of the elements, which may hold none where it takes a count
+    // F10: a copy of the elements, which may hold none where it takes a count: a receiver's own elements, or those its
+    // kind declares (a range's whole numbers)
     if (method !== undefined && c.receiver !== null && method.gives.kind === "copy") {
       const copy = method.gives;
-      return rest.length === 0
-        ? [carried(makeItem(copy.into), yield* this.contractOfValue(c.receiver))]
-        : [
-            ...(yield* this.contractOfValueAt(c.receiver, ["element", ...rest.slice(1)])),
-            ...(copy.mayHoldNone && rest.length === 1 ? [EMPTY] : []),
-          ];
+      const receiver = yield* this.contractOfValue(c.receiver);
+      if (rest.length === 0) return [carried(makeItem(copy.into), receiver)];
+      const kinds = withoutEmpty(receiver);
+      return [
+        ...(rest.length === 1
+          ? kinds.flatMap((item) => {
+              const element = kindElement(item.tag);
+              return element === undefined ? [] : [carried(makeItem(element, item.writer), [item])];
+            })
+          : []),
+        ...(kinds.some((item) => kindElement(item.tag) === undefined)
+          ? yield* this.contractOfValueAt(c.receiver, ["element", ...rest.slice(1)])
+          : []),
+        ...(copy.mayHoldNone && rest.length === 1 ? [EMPTY] : []),
+      ];
     }
     if (family === "operator" && name === "+" && rest.length > 0) {
       const operands: (readonly Item[])[] = [];

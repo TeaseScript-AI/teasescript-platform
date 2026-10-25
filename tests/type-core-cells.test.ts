@@ -1677,3 +1677,39 @@ test("a choice over a list of options takes its literal analogue's word", () => 
     "the written list's word is member",
   );
 });
+
+/**
+ * V30 §6, F10, F27 (Astra's B1 on #1028): a range's list holds the range's whole numbers, as the category layer declares
+ * a range's elements; its element read is an integer into a count, a written integer and through `first`, bound, in a
+ * loop and through a function's result of two returns, in both orders. A written text is the control.
+ */
+test("a range's list holds its whole numbers", () => {
+  const programs: readonly (readonly [string, string, readonly string[]])[] = [
+    ["counted", "let xs = (1..3).toList()\nrepeat xs.first {}\nexit", ["valid"]],
+    ["into a written integer", "let n: integer = (1..3).toList().first\nexit", ["valid"]],
+    ["visited by a loop", "for x in (1..3).toList() { repeat x {} }\nexit", ["valid"]],
+    [
+      "through a function's result",
+      'function make(f) {\nif f { return (1..3).toList() }\nreturn (2..4).toList()\n}\nrepeat make(askBoolean "f").first {}\nexit',
+      ["valid"],
+    ],
+    [
+      "into a written text",
+      "let s: string = (1..3).toList().first\nexit",
+      ["compile-error", "written-target compile-error @16"],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, expected] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const got = summary(reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run());
+      if (JSON.stringify(got) !== JSON.stringify(expected))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join("; ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});

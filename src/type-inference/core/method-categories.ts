@@ -101,6 +101,16 @@ export function declaredResult(
   return receiver === "string" ? text : [...new Set([...kinds, ...text])];
 }
 
+/**
+ * V30 §6, F10, F27: the element a value holds by its kind alone, which a loop visits and a copy of its elements
+ * (`toList`) holds: a range's whole numbers. A list's or a set's elements are its own, read below it.
+ */
+const KIND_ELEMENTS: Readonly<Record<string, ValueKind>> = { range: "integer" };
+
+export function kindElement(kind: string): ValueKind | undefined {
+  return Object.hasOwn(KIND_ELEMENTS, kind) ? KIND_ELEMENTS[kind] : undefined;
+}
+
 /** C6, F11: whether a property of a list or set selects one of its elements (on an object, its own property). */
 export function selectsElement(property: string): boolean {
   return listProperty(property)?.gives === "element";

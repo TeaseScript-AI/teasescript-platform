@@ -30,6 +30,7 @@ import {
   declaredProperty,
   dictList,
   interactionCategory,
+  kindElement,
   memberStep,
   measuresLength,
   memberResult,
@@ -328,11 +329,11 @@ export class Values {
           rest,
         );
         out.push(...(item.cert === "def" ? elements : weaken(elements)));
-      } else if ((item.tag === "dict" || item.tag === "range") && rest.length === 0)
+      } else if ((item.tag === "dict" || kindElement(item.tag) !== undefined) && rest.length === 0)
         out.push(
           carried(
             {
-              ...makeItem(item.tag === "dict" ? "string" : "integer", item.writer, {
+              ...makeItem(item.tag === "dict" ? "string" : kindElement(item.tag)!, item.writer, {
                 context: item.context,
               }),
               cert: item.cert,
@@ -612,18 +613,38 @@ export class Values {
       }
       return out;
     }
-    // F10: a copy of the elements, which may hold none where it takes a count
+    // F10: a copy of the elements, which may hold none where it takes a count: a receiver's own elements, or those its
+    // kind declares (a range's whole numbers)
     if (method !== undefined && c.receiver !== null && method.gives.kind === "copy") {
       const copy = method.gives;
-      const held = yield* this.valueItems(
-        c.receiver,
-        at,
-        rest.length === 0 ? [] : ["element", ...rest.slice(1)],
-      );
+      const receiver = yield* this.valueItems(c.receiver, at, []);
+      // the receiver's own collection is not the copy's kind (a range's `toList` gives a list)
+      if (rest.length === 0)
+        return [
+          carried(makeItem(copy.into), receiver),
+          ...receiver.filter((item) => !COPIED.has(item.tag)),
+        ];
+      const kinds = withoutEmpty(receiver);
       return [
-        ...(rest.length === 0 ? [carried(makeItem(copy.into), held)] : []),
-        // the receiver's own collection is not the copy's kind (a range's `toList` gives a list)
-        ...held.filter((item) => rest.length > 0 || !COPIED.has(item.tag)),
+        ...(rest.length === 1
+          ? kinds.flatMap((item) => {
+              const element = kindElement(item.tag);
+              return element === undefined
+                ? []
+                : [
+                    carried(
+                      {
+                        ...makeItem(element, item.writer, { context: item.context }),
+                        cert: item.cert,
+                      },
+                      [item],
+                    ),
+                  ];
+            })
+          : []),
+        ...(kinds.some((item) => kindElement(item.tag) === undefined)
+          ? yield* this.valueItems(c.receiver, at, ["element", ...rest.slice(1)])
+          : []),
         ...(copy.mayHoldNone && rest.length === 1 ? [EMPTY] : []),
       ];
     }
@@ -689,7 +710,8 @@ export class Values {
     const shown = shownResult(name);
     if (shown !== undefined)
       return rest.length === 0 ? [makeItem(shown)] : shown === "duration" ? [] : [OPAQUE_MEMBER];
-    if (family === "range") return [makeItem("range")];
+    // a range: its elements are its kind's (`kindElement`), nothing stands below it by path
+    if (family === "range") return rest.length === 0 ? [makeItem("range")] : [];
     // a method without a category: its declared result per receiver kind (F25), else the runtime's on a receiver of
     // known kinds (C2: its consumers keep their checks); on what the core cannot know, what that holds
     if (family === "method" && c.receiver !== null) {
