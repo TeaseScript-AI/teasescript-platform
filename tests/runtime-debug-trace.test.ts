@@ -803,7 +803,7 @@ test("speaker and handle properties are state that every name for them reads", (
   assert.ok(!repeated.some((step) => step.target === "timer.pause()"));
 });
 
-test("a term that a speaker's gender gives, or a title read through the other one, comes from that property", () => {
+test("a term that a speaker's gender gives, a title read through the other one, or a derived displayName comes from those properties", () => {
   const played = traced(
     [
       "speaker guide {",
@@ -815,14 +815,23 @@ test("a term that a speaker's gender gives, or a title read through the other on
       "guide.gender = changed",
       'let short = "Ms"',
       "guide.shortTitle = short",
-      'say "${guide.heShe} ${guide.title} ${guide.hisHer}"',
+      'let family = "Gray"',
+      "guide.lastName = family",
+      'say "${guide.heShe} ${guide.title} ${guide.hisHer} ${guide.displayName}"',
       "exit",
     ].join("\n"),
   );
   assertComplete(played);
-  const [term, title, explicit] = causes(played.trace, outputOf(played, "he Ms their"));
+  const [term, title, explicit, name] = causes(
+    played.trace,
+    outputOf(played, "he Ms their Ms Gray"),
+  );
   assert.ok(lineage(played.trace, term!.id).some((step) => step.target === "changed"));
   assert.ok(lineage(played.trace, title!.id).some((step) => step.target === "short"));
+  const named = lineage(played.trace, name!.id);
+  assert.ok(
+    named.some((step) => step.target === "short") && named.some((step) => step.target === "family"),
+  );
   // A term set explicitly keeps its own origin.
   assert.ok(!lineage(played.trace, explicit!.id).some((step) => step.target === "changed"));
 });

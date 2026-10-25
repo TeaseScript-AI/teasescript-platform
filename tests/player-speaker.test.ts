@@ -349,12 +349,12 @@ test("a copy of the player profile keeps the value of a player field that a rece
 });
 
 test("the player profile reads like a speaker, and a field it lacks fails when the script reads it", () => {
-  const playerProfile = { gender: "female", hisHer: "their", title: "Ms" };
+  const playerProfile = { gender: "female", hisHer: "their", title: "Ms", firstName: "Alex" };
   const result = play(
-    'say "${playerProfile.heShe} ${playerProfile.hisHer} ${playerProfile.shortTitle}"\nsay playerProfile.lastName\nexit',
+    'say "${playerProfile.heShe} ${playerProfile.hisHer} ${playerProfile.shortTitle} ${playerProfile.displayName}"\nsay playerProfile.lastName\nexit',
     playerProfile,
   );
-  assert.deepEqual(said(result.events), ["she their Ms"]);
+  assert.deepEqual(said(result.events), ["she their Ms Ms Alex"]);
   assert.equal(result.snapshot.failure?.code, "TSR017");
   assert.equal(
     result.snapshot.failure?.message,

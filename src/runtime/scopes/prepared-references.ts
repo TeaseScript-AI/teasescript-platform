@@ -21,12 +21,14 @@ import {
   type SerializableRuntimeValue,
   type SerializableSpeakerReference,
 } from "../values/serializable-values.js";
-import type {
-  RuntimeBindingSnapshot,
-  RuntimeSnapshot,
-  RuntimeTemporarySnapshot,
+import {
+  currentTemporalContext,
+  type RuntimeBindingSnapshot,
+  type RuntimeSnapshot,
+  type RuntimeTemporarySnapshot,
 } from "../snapshot/state.js";
 import { speakerPropertyValue } from "../../speaker-terms.js";
+import { derivedDisplayName } from "../values/speaker-text.js";
 import { isDict, isList, isObject, isSet, isSpeakerReference } from "../values/value-predicates.js";
 import { listProperty } from "../../list-methods.js";
 import { copySpan } from "../../plan/source-location.js";
@@ -585,6 +587,13 @@ function resolvePreparedReferenceStep(
     const property = speakerPropertyValue(
       (name) => speaker.properties.find((candidate) => candidate.name === name)?.value,
       step.name,
+      () =>
+        derivedDisplayName(
+          speaker.properties,
+          INTERNAL_REFERENCE_SPAN,
+          currentTemporalContext(snapshot),
+          "displayName",
+        ),
     );
     return property === undefined
       ? { found: false, value: null }

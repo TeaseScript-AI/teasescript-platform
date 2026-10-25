@@ -12,7 +12,7 @@ import {
 import { isCalendarDuration, isTemporal } from "../values/value-predicates.js";
 import { calendarDurationProperty, temporalProperty } from "../values/temporal-operations.js";
 import { handleKindOf, isHandleProperty } from "../../handle-members.js";
-import { speakerPropertyValue } from "../../speaker-terms.js";
+import { displayNameParts, speakerPropertyValue } from "../../speaker-terms.js";
 import { serializedScopes } from "../scopes/activation-validation.js";
 
 // The prepared temporaries of a captured snapshot: prepared references with the paths they resolve, and the speaker
@@ -452,13 +452,22 @@ function serializedSpeakerProperty(
     return { found: false, value: null };
   }
   const properties = speaker.properties;
-  const value = speakerPropertyValue((candidateName) => {
+  const own = (candidateName: string) => {
     const property = properties.find(
       (candidate) =>
         isPlainRecord(candidate) && candidate.name === candidateName && "value" in candidate,
     );
     return isPlainRecord(property) ? property.value : undefined;
-  }, name);
+  };
+  // A derived `displayName` stands as an empty text here, as a handle's property does (see `derivedProperty`).
+  const value = speakerPropertyValue(own, name, () =>
+    displayNameParts(
+      (field) => own(field) !== undefined,
+      () => null,
+    ) === undefined
+      ? undefined
+      : "",
+  );
   return value === undefined ? { found: false, value: null } : { found: true, value };
 }
 

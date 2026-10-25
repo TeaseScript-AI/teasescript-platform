@@ -17,6 +17,7 @@ import {
   visibleText,
 } from "../values/value-text.js";
 import { checkTextLength, MAX_TEXT_LENGTH } from "../values/text-length.js";
+import { derivedDisplayName, optionalSpeakerString, speakerText } from "../values/speaker-text.js";
 import { formatDuration } from "../../duration.js";
 import {
   cloneCapturedSerializableValue,
@@ -71,19 +72,6 @@ export function speakerById(
   if (speaker === undefined)
     throw fault("TSR023", internalFault(`The session has no speaker with ID ${id}.`), span);
   return speaker;
-}
-
-/** A speaker's name or title as shown text, like any other shown value, or `null` when it is not set. */
-function speakerText(
-  evaluator: Evaluator,
-  speaker: RuntimeSpeakerSnapshot,
-  name: string,
-  span: SourceSpan,
-): string | null {
-  const value = speaker.properties.find((property) => property.name === name)?.value;
-  if (value === undefined || value === null || typeof value === "string" || !isVisibleScalar(value))
-    return optionalSpeakerString(speaker, name, span);
-  return visibleText(value, span, currentTemporalContext(evaluator.snapshot));
 }
 
 /**
@@ -144,10 +132,11 @@ export function outputSpeaker(
       color: normalizeColor(
         speaker.properties.find((property) => property.name === "color")?.value,
       ),
-      font: optionalSpeakerString(speaker, "font", span),
+      font: optionalSpeakerString(speaker.properties, "font", span),
       avatar: null,
     });
-  const explicit = speakerText(evaluator, speaker, "displayName", span);
+  const context = currentTemporalContext(evaluator.snapshot);
+  const explicit = speakerText(speaker.properties, "displayName", span, context);
   let displayName: string;
   let fallback = false;
   if (explicit !== null) {
@@ -160,18 +149,7 @@ export function outputSpeaker(
     }
     displayName = explicit;
   } else {
-    const parts = [
-      speakerText(evaluator, speaker, "title", span) ??
-        speakerText(evaluator, speaker, "shortTitle", span),
-      speakerText(evaluator, speaker, "firstName", span),
-      speakerText(evaluator, speaker, "lastName", span),
-    ].filter((part): part is string => part !== null && part.length > 0);
-    checkTextLength(
-      parts.reduce((length, part) => length + part.length + 1, -1),
-      "say",
-      span,
-    );
-    const derived = parts.join(" ");
+    const derived = derivedDisplayName(speaker.properties, span, context, "say") ?? "";
     displayName = derived.length === 0 ? speaker.identifier : derived;
     fallback = derived.length === 0;
   }
@@ -193,8 +171,8 @@ export function outputSpeaker(
     identifier: speaker.identifier,
     displayName,
     color: normalizeColor(speaker.properties.find((property) => property.name === "color")?.value),
-    font: optionalSpeakerString(speaker, "font", span),
-    avatar: optionalSpeakerString(speaker, "avatar", span),
+    font: optionalSpeakerString(speaker.properties, "font", span),
+    avatar: optionalSpeakerString(speaker.properties, "avatar", span),
   });
 }
 
@@ -302,28 +280,6 @@ function handleNotation(
 
 const DICT_TEXT_MESSAGE =
   '"${...}" cannot show a dict. Select one value with dict[key], or show every value with dict.values.join().';
-
-function optionalSpeakerString(
-  speaker: RuntimeSpeakerSnapshot,
-  name: string,
-  span: SourceSpan,
-): string | null {
-  const value = speaker.properties.find((property) => property.name === name)?.value;
-  if (value === undefined || value === null) return null;
-  if (isList(value) && name !== "font" && name !== "avatar")
-    throw fault(
-      "TSR030",
-      `A list cannot be the speaker's ${name}. Select one element with "\${list}" or list.random.`,
-      span,
-    );
-  if (typeof value !== "string")
-    throw fault(
-      "TSR030",
-      `Speaker property '${name}' must be text (string), but this is ${describeShownValue(value)}.`,
-      span,
-    );
-  return value;
-}
 
 export function setSpeakerProperty(
   speaker: RuntimeSpeakerSnapshot,
