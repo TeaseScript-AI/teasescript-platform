@@ -22,6 +22,7 @@ import {
 import { propertyStep, stepName } from "./program.js";
 import { elementStep, type Obligation, type RequiredKind } from "./result.js";
 import type { Work } from "./solver.js";
+import { getProof } from "./values.js";
 
 /*
  * Admission (checkpoint 9, TABLE §5) and the boundary checks of external data (C9). A place's type is decided once,
@@ -95,12 +96,16 @@ interface Stop {
   readonly via: readonly Via[];
 }
 
-/** An operation a decider was reached through: its value, node, position and the path into it (`Stop.via`). */
+/**
+ * An operation a decider was reached through: its value, node, position and the path into it, and the operand the walk
+ * took (`Stop.via`).
+ */
 interface Via {
   readonly value: PlaceId;
   readonly node: FlowNode;
   readonly path: readonly string[];
   readonly strip: readonly string[];
+  readonly operand: PlaceId;
 }
 
 /** A stored value's contributions by path (`#stopsOf`): written copies, other whole values, and literals. */
@@ -1411,12 +1416,14 @@ export class Admission {
       if (!after && !literal && term === null && this.#sourceOf(current) === null) {
         const carried = this.#carriersOf(current, strip);
         if (carried.length > 0) {
-          const through = program.projOf.has(current)
-            ? via
-            : [...via, { value: current, node: at, path, strip }];
           pending.push([current, at, path, strip, deep, via, true]);
-          for (let index = carried.length - 1; index >= 0; index -= 1)
-            pending.push([carried[index]![0], at, path, carried[index]![1], true, through, false]);
+          for (let index = carried.length - 1; index >= 0; index -= 1) {
+            const [operand, rest] = carried[index]!;
+            const through = program.projOf.has(current)
+              ? via
+              : [...via, { value: current, node: at, path, strip, operand }];
+            pending.push([operand, at, path, rest, true, through, false]);
+          }
           continue;
         }
       }
@@ -1470,12 +1477,9 @@ export class Admission {
         if (copy !== null && stop.order > copy.order) break;
         if (stop.deep && length === at.length) continue;
         const term = termAt(stop.term!, [...stop.strip, ...at.slice(length)]);
-        // (a written copy an operation carries decides only where its read is live: an operand the operation never
-        // selects is no copy of the place, while a selected copy keeps its whole written type, A4)
-        if (
-          term !== null &&
-          (stop.via.length === 0 || (this.#live(stop.value) && this.#selects(stop)))
-        )
+        // (a written copy an operation carries decides only where the operation selects it: an operand it never gives
+        // is no copy of the place, while a selected copy keeps its whole written type, A4)
+        if (term !== null && (stop.via.length === 0 || this.#selects(stop)))
           copy = { order: stop.order, term, stop };
       }
     }
@@ -1545,26 +1549,30 @@ export class Admission {
   }
 
   /**
-   * Whether each operation a written copy was reached through gives that copy where it stands: its own value there
-   * holds the copy's writers (F17b: an operand it does not select, evaluated or not, gives none of them).
+   * Whether a written copy reached through operations is selected: its own read runs, and each operation gives the
+   * operand the walk took to it, by the operation's rule, never by what the copy's items say of their writers (a written
+   * parameter's have none): a `get` its receiver's element unless the graph's literal proof leaves only its default, and
+   * its default only where that is reached (F17b); `otherwise` its fallback only where its own operand may be null
+   * (F17a); the other carriers give every operand that runs.
    */
   #selects(stop: Stop): boolean {
-    const { values } = this.pass;
-    const own = withoutEmpty(this.#run(values.valueItems(stop.value, stop.node, stop.strip)));
-    const writers = new Set(
-      own.flatMap((item) => (item.writer === null ? [] : [writerKey(item.writer)])),
-    );
-    if (writers.size === 0) return true;
-    return stop.via.every((level) =>
-      withoutEmpty(
-        this.#run(
-          values.valueItems(level.value, level.node, [
-            ...level.strip,
-            ...stop.path.slice(level.path.length),
-          ]),
-        ),
-      ).some((item) => item.writer !== null && writers.has(writerKey(item.writer))),
-    );
+    const { program, values } = this.pass;
+    if (!this.#live(stop.value)) return false;
+    return stop.via.every((level) => {
+      const c = program.opOf.get(level.value);
+      const at = c === undefined ? level.node : (program.exprAt(c.site) ?? level.node);
+      // (`otherwise` gives its fallback only where its own operand may be null, an unknown included: F17a)
+      if (c?.kind === "fallback")
+        return (
+          level.operand !== c.right ||
+          withoutEmpty(this.#run(values.valueItems(c.left, at, []))).some(
+            (item) => item.tag === "null" || item.tag === "unknown",
+          )
+        );
+      if (c?.kind !== "get") return true;
+      const { reached, only } = getProof(program, c, at);
+      return level.operand === c.receiver ? !only : level.operand !== c.fallback || reached;
+    });
   }
 
   /** Whether a value's own expression runs: its flow node is live (an operand an operation never selects is not). */

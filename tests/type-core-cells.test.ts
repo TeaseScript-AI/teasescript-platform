@@ -3187,3 +3187,65 @@ test("a written copy carried through a projection or an operation keeps its writ
   }
   assert.deepEqual(differing, []);
 });
+
+test("a written operand its operation does not give decides nothing, whether its items name writers or not (A4, F17a, F17b, Astra r2 B1)", () => {
+  // per shape (a parameter, a captured binding, a record's field, a default's default, an `otherwise` fallback; an add or
+  // a whole store) the operation gives the written operand (index 0: the copy decides, the text is the error at "ok") or
+  // another one only (index 3: the empty value decides nothing, the text decides)
+  const fill = (copy: string, store: string, typed = "typed: integer[]"): string =>
+    `function fill(${typed}) {\n  let xs = ${copy}\n  ${store}\n}\nfill([4])\nfill([6])\nexit`;
+  const shapes: readonly (readonly [string, (index: number, store: string) => string])[] = [
+    ["a parameter", (index, store) => fill(`[typed].get(${index}, default: [])`, store)],
+    [
+      "a captured binding",
+      (index, store) =>
+        `let typed: integer[] = [4]\nfunction fill {\n  let xs = [typed].get(${index}, default: [])\n  ${store}\n}\nfill()\nexit`,
+    ],
+    [
+      "a record's field",
+      (index, store) => fill(`[{data: typed}].get(${index}, default: {data: []}).data`, store),
+    ],
+    [
+      "a default's default",
+      (index, store) => fill(`[].get(0, default: [typed].get(${index}, default: []))`, store),
+    ],
+    // (`otherwise` gives its fallback where its own operand may be null: `[null][0]`, never beside `[[]][0]`)
+    [
+      "an `otherwise` fallback",
+      (index, store) => fill(`${index === 0 ? "[null][0]" : "[[]][0]"} otherwise typed`, store),
+    ],
+  ];
+  const programs: (readonly [string, string, boolean])[] = [];
+  for (const [name, shape] of shapes)
+    for (const [how, store] of [
+      ["an add", 'xs.add("ok")'],
+      ["a whole store", 'xs = ["ok"]'],
+    ] as const) {
+      programs.push([`${name}, selected, ${how}`, shape(0, store), true]);
+      programs.push([`${name}, not selected, ${how}`, shape(3, store), false]);
+    }
+  programs.push([
+    "an unwritten parameter, not selected",
+    fill("[typed].get(3, default: [])", 'xs.add("ok")', "typed"),
+    false,
+  ]);
+  const differing: string[] = [];
+  for (const [name, source, error] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const want = error ? [`compile-error@${source.indexOf('"ok"')}`] : [];
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      // (the errors only: an `otherwise` keeps its fallback's kinds as possible where it never takes it, F17a, so the
+      // later text may warn at the initializer)
+      const got = record.diagnostics
+        .filter((d) => d.class === "compile-error")
+        .map((d) => `${d.class}@${d.site.offset}`);
+      if (JSON.stringify(got) !== JSON.stringify(want))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join(" ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});
