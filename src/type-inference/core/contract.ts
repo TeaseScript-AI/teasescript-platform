@@ -499,6 +499,8 @@ export class Contract {
   readonly #holders = new Map<string, Holder>();
   readonly #literals = new Map<PlaceId, LiteralIndex>();
   readonly #signatures = new Map<PlaceId, string>();
+  /** A carrier value's identity by its shape (`#identityWork`), interned. */
+  readonly #carrierIds = new Map<string, string>();
   readonly #groups = new WeakMap<
     readonly unknown[],
     Map<Key, { readonly byCallable: Map<Callable | null, ReadGroup>; readonly list: ReadGroup[] }>
@@ -1681,13 +1683,16 @@ export class Contract {
         // a computed value (an operation's result): its own holder, so a guarded read of a copy of it is a mark there;
         // a value a carrier gives (`otherwise`, `get`, a copy of the elements, a removal, a list's `+`, a projection of
         // a computed value) by what it takes, so k such values of one source are one entry, as k copies are (F2)
+        // (interned: an identity names its inputs by their own short identities, never by their expansions)
         const carried = this.#carried(value);
         let id = `v${value}`;
         if (carried !== null) {
           const parts: string[] = [];
           for (const input of carried.of)
             parts.push(input === null ? "" : (yield* this.#needValue(input)).id);
-          id = `${carried.name}(${parts.join(",")})`;
+          const shape = `${carried.name}(${parts.join(",")})`;
+          id = this.#carrierIds.get(shape) ?? `c${this.#carrierIds.size}`;
+          this.#carrierIds.set(shape, id);
         }
         identity = {
           id,

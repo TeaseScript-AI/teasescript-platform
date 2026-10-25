@@ -156,6 +156,21 @@ test("an element read through a chain of 2,048 returned results is answered with
 });
 
 /**
+ * A value's identity names its inputs by their own identities (TABLE §8, round 12 B4): a chain of 32 `otherwise`s, each
+ * of the one before twice, is a source of 32 lines, never an identity of 2^32 characters.
+ */
+test("a chain of carriers over shared inputs is identified in linear space", () => {
+  const levels = Array.from(
+    { length: 32 },
+    (_, index) => `let a${index + 1} = a${index} otherwise a${index}`,
+  );
+  const source = `let a0 = {n: 1}\n${levels.join("\n")}\nlet xs = [a32, a32]\nlet n: integer = xs[0].n\nexit`;
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  assert.equal(analyseCore(request).outcome, "valid");
+});
+
+/**
  * W34's two known products, gated known limits by the owner's decision (TABLE r4.45, PLAN §6b): a regression check on
  * the 64 → 128 growth step only, each held to its measured doubling in either order (3.37 and 2.53); not a bound at
  * larger sizes (128 → 256 grows 3.62 and 2.82), and no linearity is asserted for them.
