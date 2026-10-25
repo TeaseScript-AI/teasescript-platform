@@ -25,15 +25,19 @@ import type { Callable, FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
 import {
   builtinResult,
+  clockResult,
   conversionCategory,
   declaredResult,
+  declaredMethod,
+  declaredProperty,
   dictList,
   interactionCategory,
-  listStep,
+  memberStep,
   measuresLength,
   memberResult,
   methodCategory,
   selectsElement,
+  shownResult,
 } from "./method-categories.js";
 import {
   EMPTY,
@@ -529,26 +533,26 @@ export class Contract {
     if (found === undefined) return [unknownItem(REASON.external)];
     if (program.isHost(place)) return [unknownItem(REASON.external)];
     if (program.speakerPlaces.has(place)) return [unknownItem(REASON.opaque)];
-    // r4.46 (2): a key through a dict's `values` or `keys` (a copy of one) holds its list
+    // a key through a member a built-in value answers by itself (a copy of `d.values`, of `date.year`)
     return yield* this.#keyThrough(key, 0);
   }
 
   /**
-   * A key's contract along a path through a dict's `values` or `keys` from the step `from` on, its receiver decided as
-   * a reference's or not once (F19a, r4.44): a reference's member is the runtime's.
+   * A key's contract along a path through a member a built-in value answers by itself from the step `from` on, its
+   * receiver decided as a reference's or not once (F19a, r4.44): a reference's member is the runtime's.
    */
   #keyThrough(key: Key, from: number): Work<readonly Item[]> {
-    const at = listStep(keyPath(key), from);
+    const at = memberStep(keyPath(key), from);
     return at < 0 ? this.#keyContract(key) : this.#keyListsAt(key, at);
   }
 
-  /** `#keyThrough` at the step `at`, the first of the key's path from its `from` on that is a dict's list. */
+  /** `#keyThrough` at the step `at`, the first of the key's path from its `from` on that a built-in value answers. */
   *#keyListsAt(key: Key, at: number): Work<readonly Item[]> {
     const place = keyPlace(key);
     const path = keyPath(key);
     const receiver = yield* this.receiverKinds(keyOf(place, path.slice(0, at)));
     if (heldReference(receiver)) return yield* this.#keyContract(key);
-    return yield* this.#dictLists(path, at, receiver, (along, start) =>
+    return yield* this.#members(path, at, receiver, (along, start) =>
       this.#keyThrough(keyOf(place, along), start),
     );
   }
@@ -822,15 +826,16 @@ export class Contract {
   }
 
   /**
-   * TABLE r4.46 (2): a value's kinds along a path through a dict's `values` (a new list of its values) or `keys` (a new
-   * list of text), from the step `from` on, where the path ends: at a literal or an operation (a projection passes its
-   * step to its owner, and a variable or a call its key to `#keyThrough`). Either list may hold none (no count proof, no
-   * `null`); an object's own property of the name is read as any property (F11), and a receiver that may be a reference
-   * has the runtime's members (F19a).
+   * A value's kinds along a path through a member a built-in value answers by itself, from the step `from` on, where
+   * the path ends: at a literal or an operation (a projection passes its step to its owner, and a variable or a call its
+   * key to `#keyThrough`). A dict's `values` is a new list of its values and its `keys` one of text (TABLE r4.46 (2)),
+   * either may hold none (no count proof, no `null`); a temporal field or a calendar duration's part gives its declared
+   * result (V30 §35); an object's own property of the name is read as any property (F11), and a receiver that may be a
+   * reference has the runtime's members (F19a).
    */
   #through(value: PlaceId, rest: readonly string[], from: number): Work<readonly Item[]> {
     const { program } = this.pass;
-    const at = listStep(rest, from);
+    const at = memberStep(rest, from);
     if (
       at < 0 ||
       program.occurrenceOf.has(value) ||
@@ -854,17 +859,17 @@ export class Contract {
     const decided = at === 0 ? yield* this.valueReceiver(value) : receiver;
     if (heldReference(decided) || decided.some((item) => REFERENCE.has(item.tag)))
       return yield* this.#through(value, rest, at + 1);
-    return yield* this.#dictLists(rest, at, receiver, (path, start) =>
+    return yield* this.#members(rest, at, receiver, (path, start) =>
       this.#through(value, path, start),
     );
   }
 
   /**
-   * The kinds along `path` whose step `at` is a dict's `values` or `keys`, given the receiver's kinds before it, by
-   * `read` (a path through such steps from a step on): the dict's lists, and an object's own property of the name read
-   * as any property.
+   * The kinds along `path` whose step `at` is a member a built-in value answers by itself, given the receiver's kinds
+   * before it, by `read` (a path through such steps from a step on): a dict's lists, a temporal field's or a calendar
+   * duration's part's declared result, and an object's own property of the name read as any property.
    */
-  *#dictLists(
+  *#members(
     path: readonly string[],
     at: number,
     receiver: readonly Item[],
@@ -874,17 +879,22 @@ export class Contract {
     const after = path.slice(at + 1);
     const out: Item[] = [];
     let own = false;
+    const step = path[at]!;
     for (const item of withoutEmpty(receiver)) {
-      if (item.tag === "dict") {
+      const declared = declaredProperty(item.tag, step);
+      if (item.tag === "dict" && dictList(step) !== undefined) {
         if (after.length === 0) out.push(carried(makeItem("list", item.writer), [item]));
         else if (after[0] === "element") {
           // the list's own selection takes its own emptiness (open); a deeper selection's marker is that selection's
-          if (dictList(path[at]!) === "values") {
+          if (dictList(step) === "values") {
             const below = yield* read([...before, ...after], at);
             out.push(...(after.length === 1 ? withoutEmpty(below) : below));
           } else if (after.length === 1) out.push(carried(makeItem("string", item.writer), [item]));
           if (after.length === 1) out.push(EMPTY);
         }
+      } else if (declared !== undefined) {
+        // a temporal field or a calendar duration's part: its declared result (V30 §35)
+        if (after.length === 0) out.push(carried(makeItem(declared, item.writer), [item]));
       } else if (item.tag === "object") own = true;
       else if (item.tag === "unknown") out.push(item);
     }
@@ -1151,6 +1161,9 @@ export class Contract {
     const interaction = family === "interaction" ? interactionCategory(name) : undefined;
     if (interaction?.kind === "asks")
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
+    // r4.47 (5): a clock read gives its declared kind, as an ask does
+    const clock = family === "clock" ? clockResult(name) : undefined;
+    if (clock !== undefined) return rest.length === 0 ? [makeItem(clock)] : [];
     // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
     if (interaction?.kind === "options")
       return mergeItems(
@@ -1177,7 +1190,25 @@ export class Contract {
     if (member !== undefined) return member.map((kind) => makeItem(kind));
     // F19a: a handle's member is opaque
     if (family === "timer" || family === "media") return [makeItem(family)];
+    // F25: a button's, a popup's or a camera's fixed result
+    const shown = shownResult(name);
+    if (shown !== undefined) return [makeItem(shown)];
     if (family === "range") return [makeItem("range")];
+    // a method without a category: its declared result per receiver kind (F25), else the runtime's on a receiver of
+    // known kinds
+    if (family === "method" && c.receiver !== null) {
+      const receiver = withoutEmpty(yield* this.contractOfValue(c.receiver));
+      if (receiver.length > 0 && receiver.every((item) => item.tag !== "unknown"))
+        return mergeItems(
+          receiver.map((item) => {
+            const declared = declaredMethod(item.tag, name);
+            return declared === undefined
+              ? unknownItem(REASON.opaque)
+              : carried(makeItem(declared, item.writer), [item]);
+          }),
+          scope,
+        );
+    }
     return [unknownItem(REASON.external)];
   }
 

@@ -1,6 +1,17 @@
 import { CONVERSIONS, isConversion, type ConversionResult } from "../../conversions.js";
 import { dictProperty } from "../../dict-operations.js";
 import { listProperty } from "../../list-methods.js";
+import {
+  CALENDAR_DURATION_PARTS,
+  CLOCK_CONTRACTS,
+  hasTemporalField,
+  hasTemporalMethod,
+  isCalendarDurationPart,
+  isClockFunction,
+  isTemporalKind,
+  TEMPORAL_FIELDS,
+  TEMPORAL_METHODS,
+} from "../../temporal-builtins.js";
 import { isTextMethod, TEXT_METHODS, type TextResult } from "../../text-operations.js";
 import type { ValueKind } from "../../value-kinds.js";
 
@@ -109,11 +120,63 @@ export function dictList(property: string): "values" | "keys" | undefined {
   return gives === "values" || gives === "keys" ? gives : undefined;
 }
 
-/** The first step of a path from `from` on that is a dict's `values` or `keys`, or -1. */
-export function listStep(path: readonly string[], from: number): number {
-  for (let index = from; index < path.length; index += 1)
-    if (dictList(path[index]!) !== undefined) return index;
+/**
+ * A built-in property with a declared result per receiver kind: a temporal value's field or a calendar duration's part
+ * (V30 §35), read from the language's tables; `undefined` where a receiver of the kind has no such property.
+ */
+export function declaredProperty(kind: string, name: string): ValueKind | undefined {
+  if (kind === "calendarDuration")
+    return isCalendarDurationPart(name) ? CALENDAR_DURATION_PARTS[name].result : undefined;
+  return isTemporalKind(kind) && hasTemporalField(kind, name)
+    ? TEMPORAL_FIELDS[name].result
+    : undefined;
+}
+
+/** r4.47 (5): a clock read's declared kind (V30 §35), as an ask's declared answer, with no external data in it. */
+export function clockResult(name: string): ValueKind | undefined {
+  return isClockFunction(name) ? CLOCK_CONTRACTS[name].result : undefined;
+}
+
+/**
+ * F25: a method with a declared result per receiver kind that the categories above do not give: a temporal value's
+ * (V30 §35), read from the language's table; `undefined` where a receiver of the kind has no such method.
+ */
+export function declaredMethod(kind: string, name: string): ValueKind | undefined {
+  return isTemporalKind(kind) && hasTemporalMethod(kind, name)
+    ? TEMPORAL_METHODS[name].result
+    : undefined;
+}
+
+/**
+ * The first step of a path from `from` on that a built-in value answers by itself, wherever the path ends: a dict's
+ * `values` or `keys`, or a declared property; -1 for none.
+ */
+export function memberStep(path: readonly string[], from: number): number {
+  for (let index = from; index < path.length; index += 1) {
+    const step = path[index]!;
+    if (
+      dictList(step) !== undefined ||
+      Object.hasOwn(TEMPORAL_FIELDS, step) ||
+      isCalendarDurationPart(step)
+    )
+      return index;
+  }
   return -1;
+}
+
+/**
+ * F25, F19a: what the other interactions give, the adapters' fixed results: a button's or a popup's duration, a
+ * permanent button's or a camera's handle.
+ */
+const SHOWN: Readonly<Record<string, ValueKind>> = {
+  showButton: "duration",
+  showPopup: "duration",
+  showPermanentButton: "permanentButton",
+  showCamera: "camera",
+};
+
+export function shownResult(name: string): ValueKind | undefined {
+  return Object.hasOwn(SHOWN, name) ? SHOWN[name] : undefined;
 }
 
 /** The members of the built-in values that give a declared result whatever their receiver: F14's `length`. */
