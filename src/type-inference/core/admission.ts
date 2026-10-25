@@ -13,7 +13,7 @@ import {
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, writerKey, type IngressNode, type Item, type ItemTag } from "./items.js";
-import { conversionCategory } from "./method-categories.js";
+import { conversionCategory, dictList, methodCategory } from "./method-categories.js";
 import { propertyStep } from "./program.js";
 import { elementStep, type Obligation, type RequiredKind } from "./result.js";
 import type { Work } from "./solver.js";
@@ -774,10 +774,65 @@ export class Admission {
 
   // ------------------------------------------------------------------------------------------- literals
 
-  /** A value's source key: the key a copy reads, a call's callee's result key (F20); `null` for any other value. */
+  /**
+   * A value's source key: the key a copy reads, a call's callee's result key (F20), the element of either an operation
+   * takes out (`get`, a removal), a dict's `values` read as its elements (r4.46 (2)); `null` for any other value and
+   * for a dict's `keys`, which hold text.
+   */
   #sourceOf(value: PlaceId): Key | null {
-    const { contract } = this.pass;
-    return contract.copiedKey(value) ?? contract.resultKey(value);
+    const { contract, program } = this.pass;
+    // through the operations that take an element out of their receiver, to the key a copy or a call reads
+    let elements = 0;
+    let current = value;
+    let key = contract.copiedKey(current) ?? contract.resultKey(current);
+    while (key === null) {
+      const c = program.opOf.get(current);
+      const receiver =
+        c?.kind === "get"
+          ? c.receiver
+          : c?.kind === "operation" &&
+              c.contract.family === "method" &&
+              c.receiver !== null &&
+              methodCategory(c.contract.name)?.gives?.kind === "removed"
+            ? c.receiver
+            : null;
+      if (receiver === null) return null;
+      program.work.charge("indexSteps");
+      elements += 1;
+      current = receiver;
+      key = contract.copiedKey(current) ?? contract.resultKey(current);
+    }
+    const path: string[] = [];
+    for (const [index, step] of keyPath(key).entries()) {
+      const list = dictList(step);
+      if (list !== undefined) {
+        program.work.charge("indexSteps");
+        const owner = withoutEmpty(
+          this.#run(contract.contractOf(keyOf(keyPlace(key), keyPath(key).slice(0, index)))),
+        );
+        if (owner.some((item) => item.tag === "dict")) {
+          if (list === "keys") return null;
+          continue;
+        }
+      }
+      path.push(step);
+    }
+    for (; elements > 0; elements -= 1) path.push("element");
+    return keyOf(keyPlace(key), path);
+  }
+
+  /**
+   * The operands a value an operation gives carries whole: a copy of a collection's elements (F10: `take`, `takeLast`,
+   * `toList`, `toSet`), a list's `+`, both sides of `otherwise`.
+   */
+  #operandsOf(value: PlaceId): readonly PlaceId[] {
+    const c = this.pass.program.opOf.get(value);
+    if (c?.kind === "fallback") return [c.left, c.right];
+    if (c?.kind !== "operation") return [];
+    const { family, name } = c.contract;
+    if (family === "method" && c.receiver !== null && methodCategory(name)?.gives?.kind === "copy")
+      return [c.receiver];
+    return family === "operator" && name === "+" ? c.arguments : [];
   }
 
   /** A stored value's own structure: its literals' fields and elements at every depth, and their sources (F2). */
@@ -862,6 +917,11 @@ export class Admission {
         const [current, at] = pending.pop()!;
         program.work.charge("indexSteps");
         if (!program.hasOf.has(current)) {
+          // a value an operation carries stands where its operands do
+          const operands = this.#operandsOf(current);
+          for (let index = operands.length - 1; index >= 0; index -= 1)
+            pending.push([operands[index]!, at]);
+          if (operands.length > 0) continue;
           // a source below the key stands there; one at the key or above it is read at the rest of the key's path
           const source = this.#sourceOf(current);
           const stands = source === null ? null : against(at);

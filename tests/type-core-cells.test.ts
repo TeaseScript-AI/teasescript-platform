@@ -2705,3 +2705,59 @@ test("a written expected type holds a default to its own kinds at every depth, k
   }
   assert.deepEqual(differing, []);
 });
+
+test("a value an operation carries of a named collection brings its element types to a literal (A8, F10, round 10 B2)", () => {
+  const after = '\nsay "AFTER"\nexit';
+  const lists = 'let a = [1]\nlet b = ["bad"]\n';
+  // per program its outcome and its errors' sites: the second element, whose source holds text
+  const programs: readonly (readonly [string, string, string, readonly number[]])[] = [
+    ["take", `${lists}let xs = [a.take(1), b.take(1)]${after}`, "compile-error", [49]],
+    ["takeLast", `${lists}let xs = [a.takeLast(1), b.takeLast(1)]${after}`, "compile-error", [53]],
+    [
+      "toList",
+      `let a = set[1]\nlet b = set["bad"]\nlet xs = [a.toList(), b.toList()]${after}`,
+      "compile-error",
+      [56],
+    ],
+    ["toSet", `${lists}let xs = [a.toSet(), b.toSet()]${after}`, "compile-error", [49]],
+    ["otherwise", `${lists}let xs = [a, b otherwise b]${after}`, "compile-error", [41]],
+    [
+      "a dict's values",
+      `let a = dict{q: [1]}\nlet b = dict{q: ["bad"]}\nlet xs = [a.values[0], b.values[0]]${after}`,
+      "compile-error",
+      [69],
+    ],
+    // whole numbers with numbers; a dict's keys are text
+    [
+      "take of whole numbers and numbers",
+      `let a = [1]\nlet b = [2.5]\nlet xs = [a.take(1), b.take(1)]${after}`,
+      "valid",
+      [],
+    ],
+    [
+      "a dict's keys",
+      `let a = dict{q: 1}\nlet b = dict{r: 2}\nlet xs = [a.keys, b.keys]${after}`,
+      "valid",
+      [],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, outcome, sites] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const errors = record.diagnostics
+        .filter((diagnostic) => diagnostic.class === "compile-error")
+        .map((diagnostic) => diagnostic.site.offset)
+        .sort((x, y) => x - y);
+      if (record.outcome !== outcome || JSON.stringify(errors) !== JSON.stringify(sites))
+        differing.push(
+          `${name}${reversed ? " reversed" : ""}: ${record.outcome} @${errors.join(", @")}`,
+        );
+    }
+  }
+  assert.deepEqual(differing, []);
+});
