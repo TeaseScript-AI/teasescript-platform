@@ -1487,8 +1487,8 @@ export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
  * Admission (TABLE §5, §10.3's admission combinations; the port plan's §3.3, M4 S6): the decided type over an empty, a
  * populated and a later mutated snapshot, several destinations of one source with different decided types, a rejected
  * destination beside its intact source, external ingresses merged with an opaque source, A5's candidates under k whole
- * presets of a record, A2's scan past external stores, and the boundary checks of a literal's external cells; each at
- * size k, linear.
+ * presets of a record, A2's scan past external stores, the width of a record's written copies, a literal's records and a
+ * replacement's misfits, and the boundary checks of a literal's external cells; each at size k, linear.
  */
 export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
@@ -1598,6 +1598,45 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
           rows(k, () => "if flagHost { state = hostValue }"),
           `state = {${fields(k, () => "0")}}`,
           rows(k, (i) => `let shown${i}: integer = state.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-wide-copies",
+    measures:
+      "A4, §8 width: one record of k fields, each a copy of one written binding, every field read",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let box = {${fields(k, () => "typed", "key")}}`,
+          rows(k, (i) => `let result${i}: integer = box.key${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-wide-elements",
+    measures: "A8, §8 width: a literal of two k-field records, each field's type one, a field read",
+    program: (k) =>
+      main(
+        lines(
+          `let rows = [{${fields(k, () => "0")}}, {${fields(k, () => "1")}}]`,
+          "let shown: integer = rows.first.f0",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A6-wide-misfits",
+    measures: "A6, r4.35, §8 width: a k-field record replaced by one whose every field misfits",
+    program: (k) =>
+      main(
+        lines(
+          `let box = {${fields(k, () => "0")}}`,
+          `box = {${fields(k, () => '"bad"')}}`,
+          rows(k, (i) => `repeat box.f${i} {}`),
           "exit",
         ),
       ),

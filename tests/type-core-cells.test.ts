@@ -75,16 +75,24 @@ test("the core gives the expected record for every record of the cells it comple
   assert.deepEqual(failures, []);
 });
 
-test("the comparison fails a record whose second check is replaced by a copy of its first", () => {
-  // the negative control of the port plan's §3.1: one check lost beside a surviving one must show
+test("the comparison fails a record whose second boundary check is replaced by a copy of its first", () => {
+  // the negative control of the port plan's §3.1: one ingress's boundary check lost beside a surviving one must show
   const record = asserted.find(
-    (candidate) =>
-      candidate.expected.checks.length >= 2 &&
-      JSON.stringify(candidate.expected.checks[0]) !== JSON.stringify(candidate.expected.checks[1]),
+    (candidate) => candidate.name === "cp9-cells/r46/m3/sol-m3b/boundary-multisite-argument",
   );
-  assert.ok(record !== undefined, "a record with two different checks");
-  const [first, , ...others] = record.expected.checks;
-  const altered: CompactRecord = { ...record.expected, checks: [first!, first!, ...others] };
+  // two arguments of external data bound to one parameter: two boundary checks, one target, two sites
+  assert.ok(record !== undefined, "the record with two external arguments");
+  const boundaries = record.expected.checks.filter((check) => check.boundary);
+  assert.equal(boundaries.length, 2);
+  assert.notDeepEqual(boundaries[0], boundaries[1]);
+  const altered: CompactRecord = {
+    ...record.expected,
+    checks: [
+      ...record.expected.checks.filter((check) => !check.boundary),
+      boundaries[0]!,
+      boundaries[0]!,
+    ],
+  };
   const actual = analysed(record);
   assert.deepEqual(recordDifferences(record.expected, actual), []);
   assert.notDeepEqual(recordDifferences(altered, actual), []);
@@ -1830,5 +1838,122 @@ test("a chain of methods without a category stays opaque", () => {
       )
         differing.push(`${name}${reversed ? " reversed" : ""}: ${[...got, ...worded].join("; ")}`);
     }
+  assert.deepEqual(differing, []);
+});
+
+/**
+ * Admission's rules over stores, literals and fallbacks that the set leaves untested (review r1 of M4 S6), each in both
+ * orders with its record, sites written as the text they start at: a declaration's start value decides before an
+ * earlier store in a function (ADR 0021 1.6); a literal's element that copies a written binding keeps its written type
+ * (A4, ADR 0021 1.3); a value none of whose kinds fits a field's, an element's or an entry's decided type errs (C1, ADR
+ * 0021 1.7); a definite misfit is rejected, so a later use sees the decided type (A6), a null into a copy of a written
+ * binding and a literal's element of another type included; C10's unknown fallback may fit the receiving written union,
+ * and each offending kind of a fallback owes its own check; a fallback whose contract fits asks nothing (§3.3).
+ */
+test("admission decides from the start value, keeps written copies, rejects every definite misfit, and checks fallbacks per kind", () => {
+  const f =
+    'function f(flag: boolean): string | boolean {\n  if flag { return "bad" }\n  return false\n}\n';
+  const programs: readonly (readonly [
+    string,
+    string,
+    (at: (text: string) => number) => string[],
+  ])[] = [
+    [
+      "a start value after an earlier store in a function",
+      'function change { n = "bad" }\nlet n = 1\nrepeat n {}\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+    ],
+    [
+      "a literal element copying a written union",
+      'let original: integer | string = 1\nlet xs = [original, "ok"]\nsay xs\nexit',
+      () => ["valid"],
+    ],
+    [
+      "a dict value copying a written union",
+      'let original: integer | string = 1\nlet d = dict{a: original, b: "ok"}\nsay d\nexit',
+      () => ["valid"],
+    ],
+    [
+      "a shared field copying a written union",
+      'let original: integer | string = 1\nlet rows = [{n: original}, {n: "ok"}]\nsay rows\nexit',
+      () => ["valid"],
+    ],
+    [
+      "no kind fitting a decided field",
+      `${f}let box = {n: 1}\nbox.n = f(true)\nsay box.n\nexit`,
+      (at) => ["compile-error", `written-target compile-error @${at("f(true)")}`],
+    ],
+    [
+      "no kind fitting a decided element or entry",
+      `${f}let xs = [1]\nxs.add(f(true))\nlet d = dict{k: 1}\nd["k"] = f(true)\nexit`,
+      (at) => [
+        "compile-error",
+        `written-target compile-error @${at("f(true))")}`,
+        `written-target compile-error @${at("f(true)\nexit")}`,
+      ],
+    ],
+    [
+      "a null into a copy of a written binding",
+      "let n: integer = 1\nlet copy = n\ncopy = null\nrepeat copy {}\nexit",
+      (at) => ["compile-error", `written-target compile-error @${at("null")}`],
+    ],
+    [
+      "a literal's element of another type",
+      'let xs = [1, "bad"]\nlet r: integer = xs.first\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+    ],
+    [
+      "a literal's nested element of another type",
+      'let xs = [{n: 1}, {n: "bad"}]\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+    ],
+    [
+      "an unknown fallback landing in a written union",
+      "let r: integer | string = [1, null][1] otherwise hostValue\nexit",
+      (at) => [
+        "warning-runtime-check",
+        `written-target warning-runtime-check @${at("[1, null]")}`,
+        `written-target warning-runtime-check @${at("hostValue")}`,
+        `copy-type r [integer, string] @${at("[1, null]")}`,
+        `copy-type hostValue [integer, number, string] @${at("hostValue")}`,
+        `copy-type hostValue [unknown] boundary @${at("hostValue")}`,
+      ],
+    ],
+    [
+      "a fallback of two other kinds",
+      `${f}let x = [1, null][1] otherwise f(true)\nexit`,
+      (at) => [
+        "warning-runtime-check",
+        `written-target warning-runtime-check @${at("f(true)")}`,
+        `written-target warning-runtime-check @${at("f(true)")}`,
+        `copy-type f.result [number] @${at("f(true)")}`,
+        `copy-type f.result [number] @${at("f(true)")}`,
+      ],
+    ],
+    [
+      "a default whose written contract fits",
+      "let fallback: integer = hostValue\nlet result = [1].get(2, default: fallback)\nexit",
+      (at) => [
+        "warning-runtime-check",
+        `written-target warning-runtime-check @${at("hostValue")}`,
+        `copy-type fallback [integer] @${at("hostValue")}`,
+        `copy-type fallback [integer] boundary @${at("hostValue")}`,
+      ],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, expect] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const expected = expect((text) => source.indexOf(text)).sort();
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const got = summary(record);
+      if (JSON.stringify(got) !== JSON.stringify(expected))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join("; ")}`);
+    }
+  }
   assert.deepEqual(differing, []);
 });
