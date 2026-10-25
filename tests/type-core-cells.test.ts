@@ -3302,3 +3302,48 @@ test("a projection of a written binding keeps its written type at the projected 
   }
   assert.deepEqual(differing, []);
 });
+
+test("literals of typed ingresses share their conflict paths only by the type their defaults give (A8, F18, Astra r2 D-W1)", () => {
+  // a literal of one default's ingresses beside one of two defaults: the second still errs at the ingress of the other
+  // default, as alone; a `load` beside a parse of one default, two classes of one kind, offends nowhere
+  const seeds = 'let seed = {n: 1}\nlet other = {n: "x"}\nlet xs = []\n';
+  const programs: readonly (readonly [string, string, string | null])[] = [
+    [
+      "loads, shared then mixed",
+      `${seeds}xs.add([load("a", default: seed), load("b", default: seed)])\nxs.add([load("c", default: seed), load("d", default: other)])\nrepeat xs[0][0].n {}\nexit`,
+      'load("d"',
+    ],
+    [
+      "loads, mixed alone",
+      `${seeds}xs.add([load("c", default: seed), load("d", default: other)])\nrepeat xs[0][0].n {}\nexit`,
+      'load("d"',
+    ],
+    [
+      "parses, shared then mixed",
+      `${seeds}xs.add([fromJson("{}", default: seed), fromJson("{}", default: seed)])\nxs.add([fromJson("{}", default: seed), fromJson("{}", default: other)])\nrepeat xs[0][0].n {}\nexit`,
+      'fromJson("{}", default: other)',
+    ],
+    [
+      "a load beside a parse of one default",
+      `${seeds}xs.add([load("a", default: seed), fromJson("{}", default: seed)])\nxs.add([load("c", default: seed), load("d", default: seed)])\nrepeat xs[0][0].n {}\nexit`,
+      null,
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, offending] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const want = offending === null ? [] : [`compile-error@${source.indexOf(offending)}`];
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const got = record.diagnostics
+        .filter((d) => d.class === "compile-error")
+        .map((d) => `${d.class}@${d.site.offset}`);
+      if (JSON.stringify(got) !== JSON.stringify(want))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join(" ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});

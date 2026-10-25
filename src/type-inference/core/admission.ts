@@ -190,6 +190,8 @@ export class Admission {
   readonly #whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
   readonly #stops = new Map<PlaceId, Stops>();
+  /** The expected types of typed ingresses by identity, for `#conflictClass`. */
+  readonly #termIds = new Map<TypeTerm, string>();
   /** The own structure of each stored value (`v`) and source key (`k`), and each source key's element depth, F2. */
   readonly #structures = new Map<string, Structure>();
   readonly #depths = new Map<Key, number>();
@@ -1715,8 +1717,9 @@ export class Admission {
     // a named element: one whose structure holds a source (a copy, a call, what a carrier takes of either)
     const named = (d: Definition): boolean =>
       d.value !== undefined && this.#valueStructure(d.value).sources.length > 0;
-    // per landing and the distinct source identities of a literal's elements (the contract's, flow-insensitive), the
-    // paths below them where their contracts hold more than one kind: only there can one element offend another (F2)
+    // per landing and the distinct classes of a literal's elements' contracts (flow-insensitive: a source identity, or
+    // a typed ingress's type and default), the paths below them where their contracts hold more than one kind: only there
+    // can one element offend another (F2)
     const conflicts = new Map<string, readonly (readonly string[])[]>();
     for (const [cell, list] of order([...definitions.cellDefs])) {
       const owner = program.cellOwner.get(cell);
@@ -1729,14 +1732,18 @@ export class Admission {
         // (elements of one source identity hold one value: none offends another)
         if (distinct.length === 1) continue;
         const landing = this.#landing(owner.owner);
-        const key = `${landing ?? ""}|${distinct.join(",")}`;
+        const classes = list.map((d) =>
+          d.value === undefined ? "" : this.#conflictClass(d.value),
+        );
+        const kinds = [...new Set(classes)].sort();
+        const key = `${landing ?? ""}|${kinds.join(",")}`;
         let paths = conflicts.get(key);
         if (paths === undefined) {
           const firstOf = new Map<string, Definition>();
-          for (const [index, id] of ids.entries())
-            if (!firstOf.has(id)) firstOf.set(id, list[index]!);
-          program.work.charge("checks", ids.length);
-          const representatives = distinct.map((id) => firstOf.get(id)!);
+          for (const [index, kind] of classes.entries())
+            if (!firstOf.has(kind)) firstOf.set(kind, list[index]!);
+          program.work.charge("checks", classes.length);
+          const representatives = kinds.map((kind) => firstOf.get(kind)!);
           const kept: (readonly string[])[] = [];
           for (const path of this.#pathsBelow(representatives[0]!.value!, [
             ...this.#sharedPaths(landing, representatives),
@@ -1817,6 +1824,35 @@ export class Admission {
         for (const path of known ?? []) offended(d, path);
       }
     }
+  }
+
+  /**
+   * The class of a literal element's contracts, for the conflict paths of `literalElements` (§8): a `load` or a parse is
+   * typed by its expected type, else by its default (F18), so the k ingresses of one typed default have one class and
+   * share one discovery, while each keeps its own identity and its boundary check (C9, §8 r4.15); any other value its
+   * source identity. Values of one class have the same kinds at every path.
+   */
+  #conflictClass(value: PlaceId): string {
+    const { program, contract } = this.pass;
+    const c = program.opOf.get(value);
+    if (c === undefined) return contract.identityOf(value).id;
+    let fallback: PlaceId | undefined;
+    if (c.kind === "load" && c.key !== null) fallback = c.fallback ?? undefined;
+    else if (
+      c.kind === "operation" &&
+      c.contract.family === "conversion" &&
+      conversionCategory(c.contract.name)?.kind === "parses"
+    )
+      fallback = defaultOf(c);
+    else return contract.identityOf(value).id;
+    const expected = (c.kind === "load" ? c.receiver : null) ?? contract.landsIn(c.result, []);
+    let term = "";
+    if (expected !== null) {
+      term = this.#termIds.get(expected) ?? `t${this.#termIds.size}`;
+      this.#termIds.set(expected, term);
+    }
+    const by = c.kind === "load" ? "load" : c.contract.name;
+    return `f18|${by}|${term}|${fallback === undefined ? "" : contract.identityOf(fallback).id}`;
   }
 
   // ------------------------------------------------------------------------------------------- C9

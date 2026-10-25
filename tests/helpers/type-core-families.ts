@@ -1858,3 +1858,28 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
       ),
   },
 ];
+
+/**
+ * Product (c) of W34's class: k literals of two typed ingresses (a `load` or a parse) of one k-field record default
+ * added to one list, every field read. The solver's demands are S4's product, as on `main` (each literal holding an
+ * ingress its own identity, TABLE §8 r4.15: k contract entries for each of the k reads), so the total is not gated as
+ * linear; admission's own counters are (Astra r2 D-W1: the literals' conflict discovery is shared by their typed
+ * defaults' class).
+ */
+export const ADMISSION_INGRESS_PRESETS: readonly WorkFamily[] = [
+  ["A8-added-load-presets", 'load("k", default: seed)'],
+  ["A8-added-parse-presets", 'fromJson("{}", default: seed)'],
+].map(([name, ingress]) => ({
+  name: name!,
+  measures: `§8, A8: k literals of two \`${ingress}\` added to one list, every field read (Codex r12, Astra r2 D-W1)`,
+  program: (k: number) =>
+    main(
+      lines(
+        `let seed = {${fields(k, () => "1")}}`,
+        "let xs = []",
+        rows(k, () => `xs.add([${ingress}, ${ingress}])`),
+        rows(k, (i) => `let shown${i}: integer = xs[0][0].f${i}`),
+        "exit",
+      ),
+    ),
+}));

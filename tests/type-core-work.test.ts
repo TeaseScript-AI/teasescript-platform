@@ -7,6 +7,7 @@ import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import {
   ADMISSION_FAMILIES,
+  ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   W34_KNOWN_PRODUCTS,
   W34_VARIANTS,
@@ -116,6 +117,31 @@ test("every admission family's work and each of its counters grow with the progr
       const doubling = (2 * (large.total / small.total)) / scale;
       if (doubling > family.measured)
         steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
+    }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * Product (c) of W34's class (`ADMISSION_INGRESS_PRESETS`): the solver's demands are S4's product, ungated here as on
+ * `main`; admission's own counters, its checks and its index steps, grow with the program in either order (they grew
+ * 3.23 and 2.65 per doubling while each literal's conflict discovery asked its own ingresses' contracts at every path).
+ */
+test("admission's work on literals of typed ingresses of one default grows with the program in either order", () => {
+  const steep: string[] = [];
+  for (const family of ADMISSION_INGRESS_PRESETS)
+    for (const reversed of [false, true]) {
+      const small = analysed(family, 64, reversed).budget;
+      const large = analysed(family, 128, reversed).budget;
+      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+      for (const counter of ["checks", "indexSteps"] as const) {
+        const doubling =
+          (2 * ((large.counts.get(counter) ?? 0) / Math.max(1, small.counts.get(counter) ?? 0))) /
+          scale;
+        if (doubling > COUNTER_DOUBLING)
+          steep.push(
+            `${family.name}${reversed ? " reversed" : ""} ${counter}: ${doubling.toFixed(3)}`,
+          );
+      }
     }
   assert.deepEqual(steep, []);
 });
