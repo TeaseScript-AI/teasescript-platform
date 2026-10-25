@@ -452,25 +452,10 @@ export class Admission {
     const { program, definitions, lists, contract } = this.pass;
     const work = program.work;
     const place = program.place(root);
-    if (
-      place.kind.kind === "cell" ||
-      place.kind.kind === "property" ||
-      program.cellOwner.has(root) ||
-      program.hasOf.has(root)
-    )
-      return null;
+    const inputs = this.#inputs(root, path);
+    if (inputs === null) return null;
+    const { direct, prefixes } = inputs;
     const key = keyOf(root, path);
-    const direct = (definitions.candidates.get(key) ?? []).filter(
-      (candidate) => !this.#besideDefault(candidate.d),
-    );
-    const prefixes: { readonly key: Key; readonly rest: readonly string[] }[] = [];
-    for (let length = 0; length < path.length; length += 1) {
-      work.charge("checks");
-      const prefix = keyOf(root, path.slice(0, length));
-      if ((definitions.byKey.get(prefix) ?? []).some((d) => d.kind === "whole" || d.kind === "add"))
-        prefixes.push({ key: prefix, rest: path.slice(length) });
-    }
-    if (direct.length === 0 && prefixes.length === 0) return null;
     const written = writtenOf(place.kind);
     const term = written === null ? null : termAt(written, path);
     // A9, C7: every argument and return into a written parameter or result is a candidate
@@ -521,13 +506,6 @@ export class Admission {
         return null;
       }
     }
-    const seen = new Map<string, Item[]>();
-    const evaluate = (d: Definition, at: readonly string[]): Item[] => {
-      const memoKey = `${d.uid}|${at.join(".")}`;
-      let items = seen.get(memoKey);
-      if (items === undefined) seen.set(memoKey, (items = this.valueAt(d, at)));
-      return items;
-    };
     // A2: a path whose contract holds no kind (an unknown, a null) has no definite contribution to decide it, and no
     // store needs a scan (the contract holds every live store's kinds); a copy of a written binding on the path still
     // decides (A4), and a store rejected there is decided again (A6)
@@ -540,78 +518,8 @@ export class Admission {
       return null;
     }
     if (tags === null) {
-      // A2: the earliest definite contribution in source order decides, a lazy merge of the direct stores and the
-      // prefixes' whole stores and adds; A4: a copy of a written binding is decided by its type
-      // (each list is in source order and read only as far as the scan goes: a prefix's stores are listed once per pass)
-      const own = direct.filter(
-        (candidate) =>
-          ((candidate.d.how !== "argument" || lists.singleSite(candidate.d.fn)) &&
-            candidate.d.kind !== "add") ||
-          candidate.at.length === 0,
-      );
-      own.sort((a, b) => this.sourceOrder(a.d) - this.sourceOrder(b.d));
-      work.charge("checks", direct.length + sortCost(own.length));
-      const scans: {
-        readonly ds: readonly Definition[];
-        readonly at: (index: number) => readonly string[];
-      }[] = [{ ds: own.map((candidate) => candidate.d), at: (index) => own[index]!.at }];
-      for (const { key: prefix, rest } of prefixes)
-        scans.push({ ds: this.#wholeOf(prefix, false), at: () => rest });
-      for (const { key: prefix, rest } of prefixes)
-        if (rest[0] === "element") {
-          const adds = this.#wholeOf(prefix, true);
-          scans.push({
-            ds: adds,
-            at: (index) => (adds[index]!.how !== "elements" ? rest.slice(1) : rest),
-          });
-        }
-      const positions = scans.map(() => 0);
-      let sawNull = false;
-      for (;;) {
-        let best = -1;
-        for (let index = 0; index < scans.length; index += 1)
-          if (
-            positions[index]! < scans[index]!.ds.length &&
-            (best < 0 ||
-              this.sourceOrder(scans[index]!.ds[positions[index]!]!) <
-                this.sourceOrder(scans[best]!.ds[positions[best]!]!))
-          )
-            best = index;
-        if (best < 0) break;
-        const position = positions[best]!++;
-        const d = scans[best]!.ds[position]!;
-        const at = scans[best]!.at(position);
-        work.charge("checks", scans.length);
-        const first = d.value === undefined ? null : this.#earliestDecider(d.value, d.node, at);
-        const copied = first?.term ?? null;
-        if (copied !== null) {
-          // (its type stays strict, but a literal's `null` elements beside the copy make the place optional, ADR 0021
-          // 1.3, A8)
-          const copiedTags = typeTags(copied);
-          tags = copiedTags.filter((tag) => tag !== "null");
-          nullable =
-            sawNull ||
-            copiedTags.includes("null") ||
-            (this.pass.program.hasOf.has(d.value!) &&
-              evaluate(d, at).some((item) => item.tag === "null"));
-          byWritten = true;
-          decider = d;
-          deciderSite = first?.site ?? d.site;
-          break;
-        }
-        // an unknown beside a kind does not decide, unless a literal's own element decides beside it; a null beside one
-        // does (A8)
-        const items = evaluate(d, at);
-        const definite =
-          first === null && items.some((item) => item.tag === "unknown") ? [] : deciding(items);
-        sawNull ||= items.some((item) => item.tag === "null");
-        if (definite.length > 0) {
-          tags = [...new Set(definite.map((item) => item.tag))];
-          decider = d;
-          deciderSite = first?.site ?? d.site;
-          break;
-        }
-      }
+      const found = this.#scan(direct, prefixes);
+      if (found !== null) ({ tags, nullable, byWritten, decider, site: deciderSite } = found);
     }
     if (tags === null) return null;
     // the decided family (ADR 1.2): an integer decider with a number admitted at the path decides numbers (r4.28); a
@@ -695,6 +603,142 @@ export class Admission {
   }
 
   /**
+   * The stores a place's path is decided from (§5): its direct candidates (a store beside an unannotated parameter's
+   * default none, F21) and the prefixes of the path whole stores or adds reach; `null` for a literal's own cell or
+   * property, and where none reaches it.
+   */
+  #inputs(
+    root: PlaceId,
+    path: readonly string[],
+  ): {
+    readonly direct: readonly Candidate[];
+    readonly prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[];
+  } | null {
+    const { program, definitions } = this.pass;
+    const place = program.place(root);
+    if (
+      place.kind.kind === "cell" ||
+      place.kind.kind === "property" ||
+      program.cellOwner.has(root) ||
+      program.hasOf.has(root)
+    )
+      return null;
+    const direct = (definitions.candidates.get(keyOf(root, path)) ?? []).filter(
+      (candidate) => !this.#besideDefault(candidate.d),
+    );
+    const prefixes: { readonly key: Key; readonly rest: readonly string[] }[] = [];
+    for (let length = 0; length < path.length; length += 1) {
+      program.work.charge("checks");
+      const prefix = keyOf(root, path.slice(0, length));
+      if ((definitions.byKey.get(prefix) ?? []).some((d) => d.kind === "whole" || d.kind === "add"))
+        prefixes.push({ key: prefix, rest: path.slice(length) });
+    }
+    return direct.length === 0 && prefixes.length === 0 ? null : { direct, prefixes };
+  }
+
+  /**
+   * A2, A4: the earliest contribution in source order that decides a path, with what it decides: a lazy merge of the
+   * direct stores and the prefixes' whole stores and adds, each read only as far as the scan goes; `null` where none
+   * decides.
+   */
+  #scan(
+    direct: readonly Candidate[],
+    prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[],
+  ): {
+    readonly tags: ItemTag[];
+    readonly nullable: boolean;
+    readonly byWritten: boolean;
+    readonly decider: Definition;
+    readonly site: SourceSite | null;
+  } | null {
+    const { program, lists } = this.pass;
+    const work = program.work;
+    const seen = new Map<string, Item[]>();
+    const evaluate = (d: Definition, at: readonly string[]): Item[] => {
+      const memoKey = `${d.uid}|${at.join(".")}`;
+      let items = seen.get(memoKey);
+      if (items === undefined) seen.set(memoKey, (items = this.valueAt(d, at)));
+      return items;
+    };
+    // A2: the earliest definite contribution in source order decides, a lazy merge of the direct stores and the
+    // prefixes' whole stores and adds; A4: a copy of a written binding is decided by its type
+    // (each list is in source order and read only as far as the scan goes: a prefix's stores are listed once per pass)
+    const own = direct.filter(
+      (candidate) =>
+        ((candidate.d.how !== "argument" || lists.singleSite(candidate.d.fn)) &&
+          candidate.d.kind !== "add") ||
+        candidate.at.length === 0,
+    );
+    own.sort((a, b) => this.sourceOrder(a.d) - this.sourceOrder(b.d));
+    work.charge("checks", direct.length + sortCost(own.length));
+    const scans: {
+      readonly ds: readonly Definition[];
+      readonly at: (index: number) => readonly string[];
+    }[] = [{ ds: own.map((candidate) => candidate.d), at: (index) => own[index]!.at }];
+    for (const { key: prefix, rest } of prefixes)
+      scans.push({ ds: this.#wholeOf(prefix, false), at: () => rest });
+    for (const { key: prefix, rest } of prefixes)
+      if (rest[0] === "element") {
+        const adds = this.#wholeOf(prefix, true);
+        scans.push({
+          ds: adds,
+          at: (index) => (adds[index]!.how !== "elements" ? rest.slice(1) : rest),
+        });
+      }
+    const positions = scans.map(() => 0);
+    let sawNull = false;
+    for (;;) {
+      let best = -1;
+      for (let index = 0; index < scans.length; index += 1)
+        if (
+          positions[index]! < scans[index]!.ds.length &&
+          (best < 0 ||
+            this.sourceOrder(scans[index]!.ds[positions[index]!]!) <
+              this.sourceOrder(scans[best]!.ds[positions[best]!]!))
+        )
+          best = index;
+      if (best < 0) break;
+      const position = positions[best]!++;
+      const d = scans[best]!.ds[position]!;
+      const at = scans[best]!.at(position);
+      work.charge("checks", scans.length);
+      const first = d.value === undefined ? null : this.#earliestDecider(d.value, d.node, at);
+      const copied = first?.term ?? null;
+      if (copied !== null) {
+        // (its type stays strict, but a literal's `null` elements beside the copy make the place optional, ADR 0021
+        // 1.3, A8)
+        const copiedTags = typeTags(copied);
+        return {
+          tags: copiedTags.filter((tag) => tag !== "null"),
+          nullable:
+            sawNull ||
+            copiedTags.includes("null") ||
+            (this.pass.program.hasOf.has(d.value!) &&
+              evaluate(d, at).some((item) => item.tag === "null")),
+          byWritten: true,
+          decider: d,
+          site: first?.site ?? d.site,
+        };
+      }
+      // an unknown beside a kind does not decide, unless a literal's own element decides beside it; a null beside one
+      // does (A8)
+      const items = evaluate(d, at);
+      const definite =
+        first === null && items.some((item) => item.tag === "unknown") ? [] : deciding(items);
+      sawNull ||= items.some((item) => item.tag === "null");
+      if (definite.length > 0)
+        return {
+          tags: [...new Set(definite.map((item) => item.tag))],
+          nullable: true,
+          byWritten: false,
+          decider: d,
+          site: first?.site ?? d.site,
+        };
+    }
+    return null;
+  }
+
+  /**
    * C9 r4.12 (A1–A7): a destination's admitted type: the written type (its null included), else the decided kinds (an
    * integer decider already widened by an admitted number, a copy of a written integer never: A4), else, where
    * admission decided nothing, the contract's kinds, one family, an integer widened by an admitted number; with `null`
@@ -722,11 +766,23 @@ export class Admission {
   }
 
   /**
-   * The site of the contribution that decided a place's path (A2's earliest definite one, A4's copy), `null` where no
-   * store decided it (a written type, or the contract's kinds, C9 r4.12).
+   * The site of the contribution that decided a place's path (A2's earliest definite one, A4's copy, S3 §1), `null`
+   * where no store decides it. A path A3 settled without a scan (a settled family, a plain scalar root) has its earliest
+   * definite contribution found here, once, where an answer asks for it.
    */
   public deciderAt(place: PlaceId, path: readonly string[]): SourceSite | null {
-    return this.#deciderSites.get(keyOf(place, path)) ?? null;
+    const key = keyOf(place, path);
+    if (!this.#deciderSites.has(key)) {
+      const inputs = this.#inputs(place, path);
+      const below = path.length > 0 && this.#run(this.pass.contract.refReceiver(key));
+      this.#deciderSites.set(
+        key,
+        inputs === null || below
+          ? null
+          : (this.#scan(inputs.direct, inputs.prefixes)?.site ?? null),
+      );
+    }
+    return this.#deciderSites.get(key)!;
   }
 
   /** Whether no store on the path or a prefix of it was rejected (A6) or copies a written binding (A4). */

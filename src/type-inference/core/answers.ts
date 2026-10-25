@@ -132,11 +132,11 @@ export interface OccurrenceAnswer {
 }
 
 /**
- * A place's admitted type (A1–A9): its written type; else the kinds admission decided it by, with the site of the
- * contribution that decided (S3 §1: A2's earliest definite one, A4's copy), or for a place no store decides its
- * contract's kinds (one family where admission found nothing to check; no decider site), `null` among them where a
- * `null` contribution is admitted (C9 r4.12): the type its boundary checks are against; `undecided` where it has no
- * kind (an unknown only, or no store).
+ * A place's admitted type (A1–A9): its written type; else the kinds admission decided it by, or its contract's kinds
+ * where admission found nothing to check (one family, A3), with the site of the contribution that decided (S3 §1: A2's
+ * earliest definite one, A4's copy; `null` where no store decides), `null` among the kinds where a `null` contribution
+ * is admitted (C9 r4.12): the type its boundary checks are against; `undecided` where it has no kind (an unknown only,
+ * or no store).
  */
 export type AdmittedType =
   | { readonly by: "written"; readonly kinds: readonly ItemTag[] }
@@ -643,10 +643,18 @@ class CoreAnswers implements Answers {
 
   #admitted(id: PlaceId, path: readonly string[], term: TypeTerm | null): AdmittedType {
     if (term !== null) return { by: "written", kinds: typeTags(term) };
-    const kinds = this.#consumers.admission.admitted(id, path);
+    const { admission } = this.#consumers;
+    const kinds = admission.admitted(id, path);
+    // (the decider's site is found where it is read: A3's settled paths have no scan to keep it from)
     return kinds.length === 0
       ? { by: "undecided" }
-      : { by: "decided", kinds, decider: this.#consumers.admission.deciderAt(id, path) };
+      : {
+          by: "decided",
+          kinds,
+          get decider(): SourceSite | null {
+            return admission.deciderAt(id, path);
+          },
+        };
   }
 
   public project(

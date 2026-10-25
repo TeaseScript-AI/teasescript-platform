@@ -351,9 +351,9 @@ test("a `get` on a receiver that may be a reference is the runtime's, no default
 });
 
 /**
- * S3 §1 (review: Astra's D2): a decided place's admitted answer names the site of the contribution that decided it
- * (A2's earliest definite one, a literal's earliest element, A4's copy), for the deciding line S8's sentences name; a
- * written place has none. Both orders.
+ * S3 §1 (review: Astra's D2, round 2's D1): a decided place's admitted answer names the site of the contribution that
+ * decided it (A2's earliest definite one, a literal's earliest element, A4's copy), also where A3 settled the path
+ * without a scan, for the deciding line S8's sentences name; a written place has none. Both orders.
  */
 test("a decided place publishes the site of the contribution that decided it", () => {
   for (const [source, statement, path, decider] of [
@@ -365,6 +365,11 @@ test("a decided place publishes the site of the contribution that decided it", (
       "2.5",
     ],
     ["let typed: integer = 1\nlet copy = typed\ncopy = 2\nexit", "let copy = typed", [], "typed"],
+    // (paths A3 settles without a scan: a plain scalar root, a settled family below a literal; Astra r2 D1)
+    ["let n = 6\nexit", "let n = 6", [], "6"],
+    ["let n = 6\nn = 7.5\nexit", "let n = 6", [], "6"],
+    ["let xs = [6]\nexit", "let xs = [6]", ["element"], "6"],
+    ["let r = {nested: {n: 6}}\nexit", "let r = {nested: {n: 6}}", ["nested", "n"], "6"],
   ] as const)
     for (const reversed of [false, true]) {
       const run = (): ReturnType<typeof analysed> =>
