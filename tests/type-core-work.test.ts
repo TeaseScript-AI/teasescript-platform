@@ -100,8 +100,10 @@ test("every W34, W44 and W45 variant's work and each of its counters grow with t
 
 /**
  * Admission (TABLE §5, §10.3; the port plan's §3.3): its decisions, rejections, candidates and boundary checks, gated as
- * W34 is; A6's chain of dependent rejections, which takes a pass per link (§8's accepted product of passes and stores,
- * each pass charged), held to its measured doubling instead.
+ * W34 is; A6's chain of dependent rejections, which takes a pass per link (§8's passes × stores, each pass charged), is
+ * a gated known limit by the owner's decision (TABLE r4.49, option A): a regression check on the 64 → 128 step only,
+ * at its measured doubling, not a bound at larger sizes; a change to admission's passes re-measures and proposes the
+ * gate with its counts, never retunes it.
  */
 test("every admission family's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters(ADMISSION_FAMILIES), []);

@@ -1711,15 +1711,17 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
 
 /**
  * A6's chain of k dependent rejections (Sol's twelve-step witness at size k): each copy reads its source after the
- * source's misfit, so each rejection shows only in the pass after the one before it, k passes in all: the TABLE's
- * accepted product of passes and stores (§8), each pass charged; its doubling at k = 64 → 128 as measured.
+ * source's misfit, so each rejection shows only in the pass after the one before it, k passes in all: TABLE §8's
+ * passes × stores, each pass charged. A gated known limit by the owner's decision (TABLE r4.49, option A): its doubling
+ * at k = 64 → 128 as measured, re-measured and proposed with its counts on a change to admission's passes, never
+ * retuned; its trigger, a realistic script reaching the allowance through cascading rejections.
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "A6-chain",
     measures: "A6: a chain of k rejections, every copy taken after its source's misfit",
     // 496,487 / 1,914,055 units at k = 64, 128, k + 2 passes, each charging its index of the previous pass's
-    // rejections (3.9103; 3.908 before that index was charged)
+    // rejections (3.9103; 3.908, 452,803 / 1,744,803, before that index was charged)
     measured: 3.92,
     program: (k) =>
       main(
