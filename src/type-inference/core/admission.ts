@@ -315,6 +315,17 @@ export class Admission {
               ...path,
             ]),
           );
+    // C9: where each ingress store's external data stands below its destination, decided with the store whether a
+    // consumer reads the place or not (the owner's F1)
+    for (const [token, d] of definitions.storeByToken) {
+      if (!lists.live(d)) continue;
+      for (const way of definitions.ingressWays.get(token)?.values() ?? []) {
+        work.charge("indexSteps");
+        // (an `addAll`'s literal's elements are the destination's own elements)
+        const below = d.kind === "add" && d.how === "elements" ? way.slice(1) : way;
+        if (below.length > 0) tracked.add(keyOf(d.place, [...this.#destPath(d), ...below]));
+      }
+    }
     for (const key of [...tracked])
       for (const prefix of prefixesOf(key)) {
         work.charge("indexSteps");
@@ -505,10 +516,7 @@ export class Admission {
         const d = scans[best]!.ds[position]!;
         const at = scans[best]!.at(position);
         work.charge("checks", scans.length);
-        const first =
-          d.value === undefined
-            ? null
-            : this.#earliestDecider(d.value, d.node, at, evaluate(d, at));
+        const first = d.value === undefined ? null : this.#earliestDecider(d.value, d.node, at);
         const copied = first?.term ?? null;
         if (copied !== null) {
           // (its type stays strict, but a literal's `null` elements beside the copy make the place optional, ADR 0021
@@ -525,9 +533,11 @@ export class Admission {
           deciderSite = first?.site ?? d.site;
           break;
         }
-        // an unknown beside a kind does not decide; a null beside one does (A8)
+        // an unknown beside a kind does not decide, unless a literal's own element decides beside it; a null beside one
+        // does (A8)
         const items = evaluate(d, at);
-        const definite = items.some((item) => item.tag === "unknown") ? [] : deciding(items);
+        const definite =
+          first === null && items.some((item) => item.tag === "unknown") ? [] : deciding(items);
         sawNull ||= items.some((item) => item.tag === "null");
         if (definite.length > 0) {
           tags = [...new Set(definite.map((item) => item.tag))];
@@ -743,6 +753,12 @@ export class Admission {
 
   // ------------------------------------------------------------------------------------------- literals
 
+  /** A value's source key: the key a copy reads, a call's callee's result key (F20); `null` for any other value. */
+  #sourceOf(value: PlaceId): Key | null {
+    const { contract } = this.pass;
+    return contract.copiedKey(value) ?? contract.resultKey(value);
+  }
+
   /** The paths a literal's structure contributes: its objects' fields and its collections' elements, at every depth. */
   public literalPaths(value: PlaceId): string[][] {
     const { program, definitions } = this.pass;
@@ -893,8 +909,9 @@ export class Admission {
   #stopsOf(value: PlaceId, node: FlowNode): Stops {
     const known = this.#stops.get(value);
     if (known !== undefined) return known;
-    const { program, definitions } = this.pass;
+    const { program, definitions, contract } = this.pass;
     const stops: Stops = { written: new Map(), values: new Map(), literals: new Map() };
+    const sources = new Set<string>();
     const pending: [PlaceId, FlowNode, readonly string[]][] = [[value, node, []]];
     for (let order = 0; pending.length > 0; order += 1) {
       const [current, at, path] = pending.pop()!;
@@ -904,6 +921,12 @@ export class Admission {
       const literal = term === null && program.hasOf.has(current);
       const map = term !== null ? stops.written : literal ? stops.literals : stops.values;
       const key = path.join(".");
+      // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2)
+      if (path.length > 0 && map === stops.values && this.#sourceOf(current) !== null) {
+        const identity = `${key}|${contract.identityOf(current).id}`;
+        if (sources.has(identity)) continue;
+        sources.add(identity);
+      }
       const stop: Stop = { order, value: current, node: at, term };
       const list = map.get(key);
       if (list === undefined) map.set(key, [stop]);
@@ -932,16 +955,16 @@ export class Admission {
   /**
    * A2, A4, A8 (ADR 0021 1.1–1.3): the earliest contribution in evaluation order that decides a stored value's path: a
    * copy of a written binding (its written type at the rest of the path), or a value whose items there are of definite
-   * kinds; a `null` or an unknown decides nothing, and a later copy never comes before an earlier definite element. The
-   * place's decision and the literal's own elements (`literalElements`) both take it, so they cannot pick opposite
-   * deciders. `union` is the stored value's items at the path: where it holds an unknown, no value decides it (A8), so
-   * only a copy is looked for. `null` where nothing on the path decides.
+   * kinds; a `null` or an unknown decides nothing, and a value an unknown may stand beside (a read, a copy, a call)
+   * neither, while a literal's other elements still may (A8: `[1, hostValue]`'s elements are whole numbers, Sol's
+   * records for the owner's F1); a later copy never comes before an earlier definite element. The place's decision and
+   * the literal's own elements (`literalElements`) both take it, so they cannot pick opposite deciders. `null` where
+   * nothing on the path decides.
    */
   #earliestDecider(
     value: PlaceId,
     node: FlowNode,
     at: readonly string[],
-    union: readonly Item[],
   ): { readonly term: TypeTerm | null; readonly site: SourceSite | null } | null {
     const { program, values } = this.pass;
     const stops = this.#stopsOf(value, node);
@@ -958,8 +981,6 @@ export class Admission {
         if (term !== null) copy = { order: stop.order, term, stop };
       }
     }
-    if (union.some((item) => item.tag === "unknown"))
-      return copy === null ? null : { term: copy.term, site: siteOf(copy.stop) };
     // the values in evaluation order, those standing above the path's end with its rest, the literals at its end
     const lists: { readonly list: readonly Stop[]; readonly length: number }[] = [];
     for (let length = 0; length <= at.length; length += 1) {
@@ -987,7 +1008,8 @@ export class Admission {
       const items = withoutEmpty(
         this.#run(values.valueItems(next.value, next.node, at.slice(lists[best]!.length))),
       );
-      if (deciding(items).length > 0) return { term: null, site: siteOf(next) };
+      if (!items.some((item) => item.tag === "unknown") && deciding(items).length > 0)
+        return { term: null, site: siteOf(next) };
     }
   }
 
@@ -1047,8 +1069,7 @@ export class Admission {
           if (decided === undefined) {
             // A4: a copy of a written binding gives its written type, whatever it holds now, where it is the earliest
             // decider on the path
-            const copied =
-              this.#earliestDecider(d.value, d.node, path, this.valueAt(d, path))?.term ?? null;
+            const copied = this.#earliestDecider(d.value, d.node, path)?.term ?? null;
             if (copied !== null)
               first.set(at, {
                 tags: typeTags(copied).filter((tag) => tag !== "null" && tag !== "unknown"),

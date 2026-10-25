@@ -411,18 +411,23 @@ test("external data in a choice's options or in a literal is warned at its own e
     "copy-type@39",
     "null-check@39",
   ]);
-  // r4.43 (3): options held in a variable follow the copy reading: the store into the written place
+  // r4.43 (3): options held in a variable follow the copy reading: the store into the written place; the literal's
+  // host element is checked against its whole numbers where it is stored (the owner's F1)
   assert.deepEqual(sited("let opts = [hostValue, 1]\nlet answer: integer = askChoice opts\nexit"), [
     "warning-runtime-check",
+    "written-target@12",
     "written-target@48",
+    "copy-type@12",
     "copy-type@48",
   ]);
   assert.deepEqual(
     sited("let opts = [hostValue.field, 1]\nlet answer: integer = askChoice opts\nexit"),
     [
       "warning-runtime-check",
+      "written-target@12",
       "written-target@54",
       "member-read@12",
+      "copy-type@12",
       "copy-type@54",
       "null-check@12",
     ],
@@ -2366,65 +2371,91 @@ test("an argument beside a default meets its own boundary, never the default's",
   assert.deepEqual(differing, []);
 });
 
-test("external data a literal carries is checked at its store where a type is admitted, read or not (C9, the owner's F1)", () => {
+test("external data a literal carries is warned and checked at its store where a type is admitted, read or not (C1, C9, the owner's F1)", () => {
   const after = '\nsay "AFTER"\nexit';
-  // per program its outcome and its boundary checks, as target, kinds and site
+  // per program its outcome and its copy checks, as target, kinds, boundary (B) and site: C1's at the host expression
+  // against the literal's decided elements, and C9's boundary there
+  const at = (target: string, kinds: string, site: number): string[] => [
+    `${target} [${kinds}] @${site}`,
+    `${target} [${kinds}] B @${site}`,
+  ];
   const programs: readonly (readonly [string, string, string, readonly string[]])[] = [
-    ["a list", `let xs = [1, hostValue]${after}`, "valid", ["xs.element [integer] @13"]],
+    [
+      "a list",
+      `let xs = [1, hostValue]${after}`,
+      "warning-runtime-check",
+      at("xs.element", "integer", 13),
+    ],
     [
       "a list read nowhere live",
       `let xs = [1, hostValue]\nif false { repeat xs[0] {} }${after}`,
       "warning-runtime-check",
-      ["xs.element [integer] @13"],
+      at("xs.element", "integer", 13),
     ],
     [
       "a list, host data first",
       `let xs = [hostValue, 1]${after}`,
-      "valid",
-      ["xs.element [integer] @10"],
+      "warning-runtime-check",
+      at("xs.element", "integer", 10),
     ],
-    ["a list of texts", `let xs = ["a", hostValue]${after}`, "valid", ["xs.element [string] @15"]],
+    [
+      "a list of texts",
+      `let xs = ["a", hostValue]${after}`,
+      "warning-runtime-check",
+      at("xs.element", "string", 15),
+    ],
     [
       "a nested list",
       `let xs = [[1, hostValue]]${after}`,
-      "valid",
-      ["xs.element.element [integer] @14"],
+      "warning-runtime-check",
+      at("xs.element.element", "integer", 14),
     ],
     [
       "a nested list's later element",
       `let xs = [[1], [hostValue]]${after}`,
-      "valid",
-      ["xs.element.element [integer] @16"],
+      "warning-runtime-check",
+      at("xs.element.element", "integer", 16),
     ],
     [
       "a copied list",
       `let ys = [1, hostValue]\nlet xs = ys${after}`,
-      "valid",
-      ["ys.element [integer] @13"],
+      "warning-runtime-check",
+      at("ys.element", "integer", 13),
     ],
-    ["a set", `let xs = set[1, hostValue]${after}`, "valid", ["xs.element [integer] @16"]],
-    ["a dict", `let xs = dict{a: 1, b: hostValue}${after}`, "valid", ["xs.entry [integer] @23"]],
+    [
+      "a set",
+      `let xs = set[1, hostValue]${after}`,
+      "warning-runtime-check",
+      at("xs.element", "integer", 16),
+    ],
+    [
+      "a dict",
+      `let xs = dict{a: 1, b: hostValue}${after}`,
+      "warning-runtime-check",
+      at("xs.entry", "integer", 23),
+    ],
     [
       "a list of records",
       `let xs = [{n: 1}, {n: hostValue}]${after}`,
-      "valid",
-      ["xs.element [object] @22"],
+      "warning-runtime-check",
+      ["xs.element.n [integer] @22", "xs.element [object] B @22"],
     ],
     [
       "a returned list",
       `function g {\n  return [1, hostValue]\n}\nlet xs = g()${after}`,
-      "valid",
-      ["g.result.element [integer] @26"],
+      "warning-runtime-check",
+      at("g.result.element", "integer", 26),
     ],
     [
       "a passed list",
       `function f(p) {\n  say "x"\n}\nf([1, hostValue])${after}`,
-      "valid",
-      ["f.p.element [integer] @34"],
+      "warning-runtime-check",
+      at("f.p.element", "integer", 34),
     ],
     // where no type is admitted, nothing is checked until a consumer asks
     ["a list of host data alone", `let xs = [hostValue, hostValue]${after}`, "valid", []],
     ["a record of host data alone", `let o = {n: hostValue}${after}`, "valid", []],
+    ["a record of host data beside a number", `let r = {n: hostValue, m: 1}${after}`, "valid", []],
     [
       "a returned record of host data",
       `function packet {\n  return {amount: hostValue}\n}\nlet data = packet()${after}`,
@@ -2440,16 +2471,19 @@ test("external data a literal carries is checked at its store where a type is ad
       const run = (): CompactRecord =>
         withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
       const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
-      const boundaries = record.checks
-        .filter((check) => check.boundary)
-        .map((check) => `${check.target} [${check.against.join(", ")}] @${check.site.offset}`)
+      const copies = record.checks
+        .filter((check) => check.kind === "copy-type")
+        .map(
+          (check) =>
+            `${check.target} [${check.against.join(", ")}]${check.boundary ? " B" : ""} @${check.site.offset}`,
+        )
         .sort();
       if (
         record.outcome !== outcome ||
-        JSON.stringify(boundaries) !== JSON.stringify([...expected].sort())
+        JSON.stringify(copies) !== JSON.stringify([...expected].sort())
       )
         differing.push(
-          `${name}${reversed ? " reversed" : ""}: ${record.outcome}; ${boundaries.join("; ")}`,
+          `${name}${reversed ? " reversed" : ""}: ${record.outcome}; ${copies.join("; ")}`,
         );
     }
   }
