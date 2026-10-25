@@ -2784,17 +2784,18 @@ export class Contract {
       // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
       const step = rest[length];
       if (step === SELECTED_VALUE || step === SELECTED_TEXT) {
-        out.push(
-          ...(yield* this.#selectedAt(
-            index,
-            path,
-            step === SELECTED_VALUE,
-            rest.slice(length + 1),
-            node,
-            exact,
-            elementAbove,
-          )),
+        const selected = yield* this.#selectedAt(
+          index,
+          path,
+          step === SELECTED_VALUE,
+          rest.slice(length + 1),
+          node,
+          exact,
+          elementAbove,
         );
+        out.push(...selected.items);
+        // each alternative a selection takes is a contribution of the read (§3.4: several past an element step)
+        sources += selected.sources;
         break;
       }
       if (length === rest.length) break;
@@ -2837,7 +2838,8 @@ export class Contract {
    * V30 §19, TABLE r4.46 (1): the button values of the options a literal holds at `path`, read at `after` below them,
    * per record alternative: the `value` of a record that has the key (`byValue`), the `text` of one that has none (the
    * property's own cell, its sources kept); a value that is no record is its own button's value, and a record whose keys
-   * are unknown, or a reference, has the runtime's (both with the `value`s).
+   * are unknown, or a reference, has the runtime's (both with the `value`s). With the number of alternatives it chooses
+   * among, whichever key it reads: each is a contribution of the read (§3.4: the element step over the options).
    */
   *#selectedAt(
     index: LiteralIndex,
@@ -2847,20 +2849,23 @@ export class Contract {
     node: FlowNode | null,
     exact: boolean,
     below: boolean,
-  ): Work<readonly Item[]> {
+  ): Work<{ readonly items: readonly Item[]; readonly sources: number }> {
     const out: Item[] = [];
+    const terms = [...(index.terms.get(path) ?? [])].filter(([tag]) => tag !== "object");
+    const objects = index.objects.get(path)?.list ?? [];
+    const sources = terms.length + objects.length + (index.references.has(path) ? 1 : 0);
     if (byValue && after.length === 0)
-      for (const [tag, token] of index.terms.get(path) ?? [])
-        if (tag !== "object") out.push(makeItem(tag, token));
+      for (const [tag, token] of terms) out.push(makeItem(tag, token));
     if (byValue && index.references.has(path))
       out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
-    for (const object of index.objects.get(path)?.list ?? []) {
+    for (const object of objects) {
       this.pass.program.work.charge("invSteps");
       this.facts.selectionVisits += 1;
       const { selected } = object;
-      if (object.term.properties === null) {
-        if (byValue) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
-      } else if ((selected?.name === "value") !== byValue) continue;
+      if (object.term.properties === null ? !byValue : (selected?.name === "value") !== byValue)
+        continue;
+      if (object.term.properties === null)
+        out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
       else if (selected === null)
         out.push(
           exact
@@ -2874,7 +2879,7 @@ export class Contract {
         if (at !== null) for (const tag of typeTags(at)) out.push(makeItem(tag, object.token));
       }
     }
-    return out;
+    return { items: out, sources };
   }
 
   /**
@@ -2992,7 +2997,16 @@ export function* choiceItems(
       continue;
     }
     if (content?.kind === "list" || content?.kind === "set") {
-      for (const element of content.elements) yield* button(element.place, element.object, true);
+      // written choice objects alone: together below the list's element step, as its literal analogue reads them
+      // (§3.4: several elements), each by the keys it writes, which no store reaches before the choice
+      if (
+        content.elements.length > 0 &&
+        content.elements.every((element) => element.object !== null)
+      )
+        for (const step of [SELECTED_VALUE, SELECTED_TEXT])
+          out.push(...(yield* read(argument, ["element", step, ...rest])));
+      else
+        for (const element of content.elements) yield* button(element.place, element.object, true);
       continue;
     }
     // a computed option: a list's or a set's elements, a choice object, or a value

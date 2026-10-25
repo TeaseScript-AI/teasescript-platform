@@ -1250,3 +1250,64 @@ test("a selection consumes only its own emptiness mark below get, a loop's visit
   }
   assert.deepEqual(differing, []);
 });
+
+/**
+ * §3.4, X3 (the lead's ruling on #1026's follow-up): a choice's button value, selected by key past the element step over
+ * its options, carries the word `member` as its literal analogue does, written or held, and with options of both keys;
+ * a whole option object, no element step, is the control. Kinds, warnings and checks are the analogue's; both orders.
+ */
+test("a choice over a list of options takes its literal analogue's word", () => {
+  const pairs: readonly (readonly [string, string, string])[] = [
+    [
+      "a written list",
+      'let result: integer = askChoice [{text: "A", value: 2}, {text: "B", value: 2.5}]\nexit',
+      'let result: integer = [{text: "A", value: 2}, {text: "B", value: 2.5}][0].value\nexit',
+    ],
+    [
+      "a held list",
+      'let opts = [{text: "A", value: 2}, {text: "B", value: 2.5}]\nlet result: integer = askChoice opts\nexit',
+      'let opts = [{text: "A", value: 2}, {text: "B", value: 2.5}]\nlet result: integer = opts[0].value\nexit',
+    ],
+    [
+      "a whole option object",
+      'let result: integer = askChoice {text: "A", value: 2.5}\nexit',
+      'let result: integer = {text: "A", value: 2.5}.value\nexit',
+    ],
+  ];
+  // its outcome, then its diagnostics with their words and its checks
+  const record = (source: string, reversed: boolean): string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const run = (): CompactRecord =>
+      withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+    const got = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+    return [
+      got.outcome,
+      ...got.diagnostics.map((d) => `${d.kind} ${d.class} ${d.context ?? "-"} @${d.site.offset}`),
+      ...got.checks.map(
+        (check) =>
+          `${check.kind} ${check.target} [${check.against.join(", ")}] @${check.site.offset}`,
+      ),
+    ];
+  };
+  const differing: string[] = [];
+  for (const reversed of [false, true]) {
+    for (const [name, choice, analogue] of pairs)
+      if (JSON.stringify(record(choice, reversed)) !== JSON.stringify(record(analogue, reversed)))
+        differing.push(
+          `${name}${reversed ? " reversed" : ""}: ${record(choice, reversed).join("; ")}`,
+        );
+    // options of both keys have no single analogue: the same word, by the same element step
+    const mixed = record(
+      'let result: integer = askChoice [{text: "A", value: 2}, {text: 2.5}]\nexit',
+      reversed,
+    );
+    if (!mixed.includes("written-target warning-runtime-check member @22"))
+      differing.push(`options of both keys${reversed ? " reversed" : ""}: ${mixed.join("; ")}`);
+  }
+  assert.deepEqual(differing, []);
+  assert.ok(
+    record(pairs[0]![1], false).includes("written-target warning-runtime-check member @22"),
+    "the written list's word is member",
+  );
+});
