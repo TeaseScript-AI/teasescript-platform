@@ -638,8 +638,12 @@ export class Values {
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
     // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
     if (interaction?.kind === "options")
-      return yield* choiceItems(c, rest, (value, path, element) =>
-        element === true ? this.#belowElement(value, at, path) : this.valueItems(value, at, path),
+      return yield* choiceItems(
+        c,
+        rest,
+        (value, path, element) =>
+          element === true ? this.#belowElement(value, at, path) : this.valueItems(value, at, path),
+        !contract.choiceKeysStored(),
       );
     const member = family === "member" ? memberResult(name) : undefined;
     if (member !== undefined) return member.map((kind) => makeItem(kind));

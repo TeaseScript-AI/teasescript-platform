@@ -778,6 +778,39 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `null-check pick.result [non-null] @${at("pick(flag)")}`,
       ],
     ],
+    // choice objects held in a variable, a container or a parameter: each record its own `value` or `text`, never
+    // another record's `text` (#1027 review, Astra D1)
+    [
+      "held records with a value and without one",
+      'let opts = [{text: "unused", value: 1}, {text: 2}]\nrepeat askChoice opts {}\nexit',
+      () => ["valid"],
+    ],
+    [
+      "held records that do not fit",
+      'let opts = [{text: 1, value: "bad"}, {text: "also bad"}]\nrepeat askChoice opts {}\nexit',
+      (at) => ["compile-error", `integer-use compile-error @${at("askChoice")}`],
+    ],
+    [
+      "held records in a dict under a computed key",
+      'let key = "pick"\nlet choices = dict{[key]: {text: "A", value: 3}, other: {text: 4}}\nrepeat askChoice choices.values {}\nexit',
+      () => ["valid"],
+    ],
+    [
+      "held records from a parameter of two calls",
+      'function pick(opts) { return askChoice opts }\nrepeat pick([{text: "unused", value: 1}]) {}\nrepeat pick([{text: 2}]) {}\nexit',
+      () => ["valid"],
+    ],
+    [
+      "a held record from a result",
+      'function make(n) {\n  if n > 0 { return {text: "unused", value: n} }\n  return {text: 2}\n}\nrepeat askChoice make(1) {}\nexit',
+      () => ["valid"],
+    ],
+    // a record's `value` stored after it is made is read by its key
+    [
+      "a held record whose value is stored",
+      'let o = {text: "A", value: 1}\no.value = "x"\nlet n: integer = askChoice o\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at("askChoice")}`],
+    ],
     // a choice object held in a variable, whose value may be a missing member: possibly its text, never certainly
     [
       "a held choice object whose value may be missing",

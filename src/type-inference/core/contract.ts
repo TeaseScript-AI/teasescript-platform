@@ -393,7 +393,11 @@ export interface LiteralIndex {
   readonly objects: Map<
     string,
     {
-      readonly list: { readonly names: Set<string>; readonly token: Writer }[];
+      readonly list: {
+        readonly names: Set<string>;
+        readonly token: Writer;
+        readonly term: Extract<TypeTerm, { readonly kind: "object" }>;
+      }[];
       readonly count: Map<string, number>;
     }
   >;
@@ -462,6 +466,7 @@ export class Contract {
   >();
   readonly #lands = new Map<string, TypeTerm | null>();
   #placeKeys: Map<PlaceId, Key[]> | null = null;
+  #choiceKeysStored: boolean | null = null;
   #subFirst: Map<PlaceId, Set<string>> | null = null;
   #collected = false;
 
@@ -1123,7 +1128,12 @@ export class Contract {
     // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
     if (interaction?.kind === "options")
       return mergeItems(
-        yield* choiceItems(c, rest, (value, path) => this.contractOfValueAt(value, path)),
+        yield* choiceItems(
+          c,
+          rest,
+          (value, path) => this.contractOfValueAt(value, path),
+          !this.choiceKeysStored(),
+        ),
         scope,
       );
     if (rest.length > 0) return [unknownItem(REASON.opaque)];
@@ -1263,6 +1273,25 @@ export class Contract {
       !program.cellOwner.has(place) &&
       !program.hasOf.has(place)
     );
+  }
+
+  /**
+   * Whether a store goes below a property named `value` or `text` (a choice object changed after it is made): then a
+   * held choice object's button value is read by its keys, not per record (V30 §19).
+   */
+  public choiceKeysStored(): boolean {
+    if (this.#choiceKeysStored === null) {
+      this.#choiceKeysStored = false;
+      for (const [key] of this.pass.definitions.byKey) {
+        this.pass.program.work.charge("invSteps");
+        const path = keyPath(key);
+        if (path.includes("value") || path.includes("text")) {
+          this.#choiceKeysStored = true;
+          break;
+        }
+      }
+    }
+    return this.#choiceKeysStored;
   }
 
   /** The keys of a place that have definitions. */
@@ -2511,7 +2540,7 @@ export class Contract {
         const names = new Set(
           (term.properties ?? []).map((property) => propertyStep(property.name)),
         );
-        objects.list.push({ names, token: site });
+        objects.list.push({ names, token: site, term });
         for (const name of names) objects.count.set(name, (objects.count.get(name) ?? 0) + 1);
         for (const property of [...(term.properties ?? [])].reverse())
           pending.push({
@@ -2673,6 +2702,20 @@ export class Contract {
         for (const entry of index.others.get(path) ?? [])
           out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, below)));
       }
+      // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
+      if (length < rest.length && rest[length] === SELECTED) {
+        out.push(
+          ...(yield* this.#selectedAt(
+            index,
+            path,
+            rest.slice(length + 1),
+            node,
+            exact,
+            elementAbove,
+          )),
+        );
+        break;
+      }
       if (length === rest.length) break;
       // F11: an object here without the next step contributes `missing`; a reference, an opaque member (F19a)
       const lacking = this.#lackingAt(index, path, rest[length]!);
@@ -2700,6 +2743,48 @@ export class Contract {
           item.tag === "unknown" || item.tag === "empty" ? item : { ...item, context: "member" },
         )
       : out;
+  }
+
+  /**
+   * V30 §19, TABLE r4.46 (1): the button values of the options a literal holds at `path`, read at `after` below them,
+   * per record alternative: a record's `value` where it has the key, its `text` where it has none (the property's own
+   * cell, its sources kept); a value that is no record is its own button's value; a record whose keys are unknown, or a
+   * reference, has the runtime's.
+   */
+  *#selectedAt(
+    index: LiteralIndex,
+    path: string,
+    after: readonly string[],
+    node: FlowNode | null,
+    exact: boolean,
+    below: boolean,
+  ): Work<readonly Item[]> {
+    const out: Item[] = [];
+    if (after.length === 0)
+      for (const [tag, token] of index.terms.get(path) ?? [])
+        if (tag !== "object") out.push(makeItem(tag, token));
+    if (index.references.has(path)) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
+    for (const object of index.objects.get(path)?.list ?? []) {
+      this.pass.program.work.charge("invSteps");
+      const properties = object.term.properties;
+      const selected =
+        properties?.find((property) => property.name === "value") ??
+        properties?.find((property) => property.name === "text");
+      if (properties === null) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
+      else if (selected === undefined)
+        out.push(
+          exact
+            ? makeItem("unknown", object.token, { reasons: REASON.missing, context: "missing" })
+            : unknownItem(REASON.missing, object.token),
+        );
+      else if (selected.type.kind === "ref")
+        out.push(...(yield* this.indexItems(selected.type.place, after, node, exact, below)));
+      else {
+        const at = termAt(selected.type, after);
+        if (at !== null) for (const tag of typeTags(at)) out.push(makeItem(tag, object.token));
+      }
+    }
+    return out;
   }
 
   /**
@@ -2750,24 +2835,38 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
 }
 
 /**
+ * The path step of a choice object's button value (V30 §19, TABLE r4.46 (1)): per record alternative its `value` where
+ * it has the key and its `text` where it has none, answered where the path meets the records (a literal's objects),
+ * never a key with stores of its own.
+ */
+export const SELECTED = "#select";
+
+/**
  * V30 §19, TABLE r4.46 (1): an `askChoice`'s answer at `rest`, read by `read`: per option its label's kind, or each of
  * its buttons' values. Whether a choice object gives its `value` or its `text` is decided by the key's presence in the
  * object, never by what the key's value resolves to (an empty answer is unresolved, the solver's bottom, never an absent
  * key): a written choice object (the whole option, or an element of a written list or set) by the keys it writes; one
- * the options hold without writing it (a variable's, a call's) by its records: its `value`, and its `text` where a record
- * of it lacks the key (F11's `missing`).
+ * the options hold without writing it (a variable's, a call's) per record alternative where its path meets the records
+ * (`SELECTED`, the literal's objects). Where a store goes below a `value` or `text` property after a record is made
+ * (`byRecord` false), the records are read by their keys: the `value`, and every record's `text` where some lacks the
+ * key (F11's `missing`), neither certain.
  */
 export function* choiceItems(
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
   rest: readonly string[],
   read: (value: PlaceId, path: readonly string[], element?: true) => Work<readonly Item[]>,
+  byRecord: boolean,
 ): Work<Item[]> {
   const out: Item[] = [];
   const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
   const labels = choiceLabels(c);
-  // a choice object the options hold without writing it; where some of its records lack the key and some have it,
-  // neither the values nor the texts are certain
+  // a choice object the options hold without writing it: per record alternative its `value` or its `text`; where a store
+  // changes such records, by its keys: its `value`, and every record's `text` where some lacks the key, neither certain
   const held = function* (option: PlaceId, at: readonly string[]): Work<void> {
+    if (byRecord) {
+      out.push(...(yield* read(option, [...at, SELECTED, ...rest])));
+      return;
+    }
     const value = withoutEmpty(yield* read(option, [...at, "value"]));
     const lacking = value.some(isMissing);
     const present = withoutMissing(value);
