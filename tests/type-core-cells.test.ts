@@ -1848,11 +1848,17 @@ test("a chain of methods without a category stays opaque", () => {
  * (A4, ADR 0021 1.3); a value none of whose kinds fits a field's, an element's or an entry's decided type errs (C1, ADR
  * 0021 1.7); a definite misfit is rejected, so a later use sees the decided type (A6), a null into a copy of a written
  * binding and a literal's element of another type included; C10's unknown fallback may fit the receiving written union,
- * and each offending kind of a fallback owes its own check; a fallback whose contract fits asks nothing (§3.3).
+ * and each offending kind of a fallback owes its own check; a fallback whose contract fits asks nothing (§3.3). Review
+ * r2: a copied written type checks a literal's other elements by their own kinds (a whole number fits a written
+ * integer, a fraction does not); a store none of whose possible kinds fits is rejected too; literals are checked at
+ * any depth; a concrete misfit of a fallback is checked against the receiving union too; the lazy defaults of
+ * `fileFromBase64`, `decryptText` and `decryptFile` follow C10 (ADR 0021 7.2).
  */
 test("admission decides from the start value, keeps written copies, rejects every definite misfit, and checks fallbacks per kind", () => {
   const f =
     'function f(flag: boolean): string | boolean {\n  if flag { return "bad" }\n  return false\n}\n';
+  const nest = (depth: number, value: string): string =>
+    `${"[".repeat(depth)}${value}${"]".repeat(depth)}`;
   const programs: readonly (readonly [
     string,
     string,
@@ -1926,9 +1932,75 @@ test("admission decides from the start value, keeps written copies, rejects ever
         "warning-runtime-check",
         `written-target warning-runtime-check @${at("f(true)")}`,
         `written-target warning-runtime-check @${at("f(true)")}`,
-        `copy-type f.result [number] @${at("f(true)")}`,
-        `copy-type f.result [number] @${at("f(true)")}`,
+        `copy-type f.result [integer, number] @${at("f(true)")}`,
+        `copy-type f.result [integer, number] @${at("f(true)")}`,
       ],
+    ],
+    [
+      "a written integer copied beside a whole number",
+      "let n: integer = 1\nlet xs = [n, 2]\nrepeat xs[0] {}\nlet rows = [{n: n}, {n: 2}]\nexit",
+      () => ["valid"],
+    ],
+    [
+      "a written integer copied beside a fraction",
+      "let n: integer = 1\nlet xs = [n, 2.5]\nexit",
+      (at) => ["compile-error", `written-target compile-error @${at("2.5")}`],
+    ],
+    [
+      "a written union copied beside a whole number",
+      'let n: integer | string = "a"\nlet d = dict{first: n, second: 2}\nexit',
+      () => ["valid"],
+    ],
+    [
+      "no possible kind fitting a decided field",
+      `${f}let box = {n: 1}\nbox.n = f(true)\nrepeat box.n {}\nexit`,
+      (at) => ["compile-error", `written-target compile-error @${at("f(true)")}`],
+    ],
+    [
+      "a deep literal's element of another type",
+      `let xs = [${nest(300, "1")}, ${nest(300, '"bad"')}]\nexit`,
+      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+    ],
+    [
+      "a deep literal's element copying a written union",
+      `let typed: integer | string = 1\nlet xs = [${nest(300, "typed")}, ${nest(300, '"ok"')}]\nexit`,
+      () => ["valid"],
+    ],
+    [
+      "a default's other kind beside the receiving union",
+      'function alternate(flag: boolean): string | integer {\n  if flag { return "allowed" }\n  return 2\n}\nlet r: boolean | string = toBoolean("bad", default: alternate(true))\nexit',
+      (at) => [
+        "warning-runtime-check",
+        `written-target warning-runtime-check @${at("toBoolean")}`,
+        `written-target warning-runtime-check @${at("alternate(true)")}`,
+        `copy-type r [boolean, string] @${at("toBoolean")}`,
+        `copy-type alternate.result [boolean, string] @${at("alternate(true)")}`,
+      ],
+    ],
+    [
+      "a lazy file default of another kind",
+      'let r = fileFromBase64("!", default: false)\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at("false")}`],
+    ],
+    [
+      "a lazy decryption default of external data",
+      'let r = decryptText("!", password: "p", default: hostValue)\nexit',
+      (at) => [
+        "warning-runtime-check",
+        `written-target warning-runtime-check @${at("hostValue")}`,
+        `copy-type hostValue [string] @${at("hostValue")}`,
+        `copy-type hostValue [unknown] boundary @${at("hostValue")}`,
+      ],
+    ],
+    [
+      "a lazy decryption default landing in a written union",
+      'let r: string | boolean = decryptFile("!", password: "p", default: false)\nexit',
+      () => ["valid"],
+    ],
+    [
+      "a lazy file default of null",
+      'let r = fileFromBase64("!", default: null)\nexit',
+      () => ["valid"],
     ],
     [
       "a default whose written contract fits",

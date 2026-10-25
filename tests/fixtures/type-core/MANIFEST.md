@@ -7,9 +7,11 @@ commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; not
 ## Refresh (M4 step S6)
 
 Opus, 2026-10-25, builder for M4 step S6 (lead Fable). `cells.jsonl` is regenerated from the expectation set at
-`716ac7091de2b95e…` (1,874 gate records, 9 deferred) by the same tooling, unchanged: `convert.py` (`eef78c11…`) with
+`01eccb2f1a7da537…` (1,874 gate records, 9 deferred) by the same tooling, unchanged: `convert.py` (`eef78c11…`) with
 `collection-rewrites.json` (`981e40ee…`), the host rewrite and the four collection rewrites below. 197 records are
-rewritten (193 prefixed files and the four collection records); `cells-deferred.jsonl` is unchanged.
+rewritten (193 prefixed files and the four collection records); `cells-deferred.jsonl` is unchanged. The set's
+previous revision `716ac7091de2b95e…` differs only in five records' reason texts, which compact records do not carry:
+both convert to the same bytes, and the checks below hold for both.
 
 The exit condition, rerun on the laptop worker with the reference model round 19d (`points14.mjs` `2edb329e…`) on a
 compiler build of `main` `6187eb145`, in both demand orders:

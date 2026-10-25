@@ -213,7 +213,7 @@ export function nodeOf(
 }
 
 /** The `let` that declares each variable of the slice, by its place. */
-export function declarations(answers: Answers, index: SliceIndex): Map<PlaceId, LetStatement> {
+function declarations(answers: Answers, index: SliceIndex): Map<PlaceId, LetStatement> {
   const found = new Map<PlaceId, LetStatement>();
   for (const statement of index.lets) {
     const place = answers.at(nodeOf(answers, index, statement))?.place;
