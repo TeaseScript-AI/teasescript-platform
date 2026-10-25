@@ -77,6 +77,8 @@ interface Stop {
   readonly order: number;
   readonly value: PlaceId;
   readonly node: FlowNode;
+  /** The path below the stored value it stands at. */
+  readonly path: readonly string[];
   /** A copy of a written binding's written type, else `null`. */
   readonly term: TypeTerm | null;
   /** The path into the value its contribution stands at (a projection's step into its owner, F12). */
@@ -1299,8 +1301,9 @@ export class Admission {
   }
 
   /**
-   * A4: the copies of written bindings a stored value holds, with their paths, directly or through the literals that
-   * hold them, in element order; once per value.
+   * A4: the copies of written bindings a stored value holds, with their paths, directly, through the literals that hold
+   * them, or through the values that carry them (a projection, an operation: its written type at the path read into
+   * it), in element order; once per value.
    */
   #writtenCopies(
     value: PlaceId,
@@ -1309,22 +1312,31 @@ export class Admission {
     if (known !== undefined) return known;
     const { program, definitions } = this.pass;
     const out: { path: readonly string[]; term: TypeTerm }[] = [];
-    const pending: [PlaceId, readonly string[]][] = [[value, []]];
+    const pending: [PlaceId, readonly string[], readonly string[]][] = [[value, [], []]];
     while (pending.length > 0) {
-      const [current, path] = pending.pop()!;
+      const [current, path, strip] = pending.pop()!;
       program.work.charge("indexSteps");
       const binding = program.occurrenceOf.get(current);
       if (binding !== undefined) {
-        const term = writtenOf(program.place(binding).kind);
+        const written = writtenOf(program.place(binding).kind);
+        const term = written === null ? null : termAt(written, strip);
         if (term !== null) out.push({ path, term });
         continue;
       }
-      const next: [PlaceId, readonly string[]][] = [];
-      for (const has of program.hasOf.get(current) ?? [])
-        for (const [name, term] of fieldsOf(has.type))
-          if (term.kind === "ref")
-            for (const d of definitions.cellDefs.get(term.place) ?? [])
-              next.push([d.value!, [...path, name]]);
+      const next: [PlaceId, readonly string[], readonly string[]][] = [];
+      if (program.hasOf.has(current))
+        for (const has of program.hasOf.get(current)!) {
+          const on = strip.length > 0 ? this.#termAt(has.type, strip[0]!) : undefined;
+          const fields: readonly (readonly [string, TypeTerm])[] =
+            strip.length === 0 ? fieldsOf(has.type) : on === undefined ? [] : [[strip[0]!, on]];
+          for (const [name, term] of fields)
+            if (term.kind === "ref")
+              for (const d of definitions.cellDefs.get(term.place) ?? [])
+                next.push([d.value!, strip.length === 0 ? [...path, name] : path, strip.slice(1)]);
+        }
+      else
+        for (const [carried, rest] of this.#carriersOf(current, strip))
+          next.push([carried, path, rest]);
       for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
     }
     this.#copies.set(value, out);
@@ -1370,9 +1382,10 @@ export class Admission {
       readonly string[],
       boolean,
       readonly Via[],
-    ])[] = [[value, node, [], [], false, []]];
+      boolean,
+    ])[] = [[value, node, [], [], false, [], false]];
     for (let order = 0; pending.length > 0; order += 1) {
-      const [current, at, path, strip, deep, via] = pending.pop()!;
+      const [current, at, path, strip, deep, via, after] = pending.pop()!;
       program.work.charge("indexSteps");
       const binding = program.occurrenceOf.get(current);
       const term = binding === undefined ? null : writtenOf(program.place(binding).kind);
@@ -1388,18 +1401,24 @@ export class Admission {
             strip.slice(1),
             deep,
             via,
+            false,
           ]);
         continue;
       }
       // a projection or another carrier is its own contribution at the path, and below it what it carries (F12), an
       // operation's under the certainty of its own value
-      if (!literal && term === null && this.#sourceOf(current) === null) {
+      // its own contribution comes after what it carries, so a written copy it selects precedes its snapshot (A4)
+      if (!after && !literal && term === null && this.#sourceOf(current) === null) {
         const carried = this.#carriersOf(current, strip);
-        const through = program.projOf.has(current)
-          ? via
-          : [...via, { value: current, node: at, path, strip }];
-        for (let index = carried.length - 1; index >= 0; index -= 1)
-          pending.push([carried[index]![0], at, path, carried[index]![1], true, through]);
+        if (carried.length > 0) {
+          const through = program.projOf.has(current)
+            ? via
+            : [...via, { value: current, node: at, path, strip }];
+          pending.push([current, at, path, strip, deep, via, true]);
+          for (let index = carried.length - 1; index >= 0; index -= 1)
+            pending.push([carried[index]![0], at, path, carried[index]![1], true, through, false]);
+          continue;
+        }
       }
       const map = term !== null ? stops.written : literal ? stops.literals : stops.values;
       const key = path.join(".");
@@ -1409,7 +1428,7 @@ export class Admission {
         if (sources.has(identity)) continue;
         sources.add(identity);
       }
-      const stop: Stop = { order, value: current, node: at, term, strip, deep, via };
+      const stop: Stop = { order, value: current, node: at, path, term, strip, deep, via };
       const list = map.get(key);
       if (list === undefined) map.set(key, [stop]);
       else list.push(stop);
@@ -1417,7 +1436,7 @@ export class Admission {
       const next = cells(current, null);
       for (let index = next.length - 1; index >= 0; index -= 1) {
         const [d, step] = next[index]!;
-        pending.push([d.value!, d.node ?? at, [...path, step], [], false, via]);
+        pending.push([d.value!, d.node ?? at, [...path, step], [], false, via, false]);
       }
     }
     this.#stops.set(value, stops);
@@ -1453,7 +1472,10 @@ export class Admission {
         const term = termAt(stop.term!, [...stop.strip, ...at.slice(length)]);
         // (a written copy an operation carries decides only where its read is live: an operand the operation never
         // selects is no copy of the place, while a selected copy keeps its whole written type, A4)
-        if (term !== null && (stop.via.length === 0 || this.#live(stop.value)))
+        if (
+          term !== null &&
+          (stop.via.length === 0 || (this.#live(stop.value) && this.#selects(stop)))
+        )
           copy = { order: stop.order, term, stop };
       }
     }
@@ -1520,6 +1542,29 @@ export class Admission {
         return false;
     }
     return true;
+  }
+
+  /**
+   * Whether each operation a written copy was reached through gives that copy where it stands: its own value there
+   * holds the copy's writers (F17b: an operand it does not select, evaluated or not, gives none of them).
+   */
+  #selects(stop: Stop): boolean {
+    const { values } = this.pass;
+    const own = withoutEmpty(this.#run(values.valueItems(stop.value, stop.node, stop.strip)));
+    const writers = new Set(
+      own.flatMap((item) => (item.writer === null ? [] : [writerKey(item.writer)])),
+    );
+    if (writers.size === 0) return true;
+    return stop.via.every((level) =>
+      withoutEmpty(
+        this.#run(
+          values.valueItems(level.value, level.node, [
+            ...level.strip,
+            ...stop.path.slice(level.path.length),
+          ]),
+        ),
+      ).some((item) => item.writer !== null && writers.has(writerKey(item.writer))),
+    );
   }
 
   /** Whether a value's own expression runs: its flow node is live (an operand an operation never selects is not). */
