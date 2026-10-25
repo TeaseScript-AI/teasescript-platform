@@ -156,6 +156,7 @@ export class Admission {
   readonly #levels = new Map<string, Level>();
   readonly #pending = new Map<number, Definition>();
   readonly #typed: Definition[] = [];
+  readonly #carried: Definition[] = [];
   readonly #readSeen = new Set<PlaceId>();
   readonly #hostSeen = new Set<string>();
   readonly #walked = new Set<IngressNode>();
@@ -1249,7 +1250,8 @@ export class Admission {
   /**
    * F18, C9: the checks of loads and `fromJson` calls that no store takes in; and the stores of a typed ingress or of an
    * ingress value into a place with an admitted type (a parameter default too, r4.28; an argument or a return that
-   * carries a typed load or `fromJson`, Sol M3 r8), checked when the boundaries are published.
+   * carries a typed load or `fromJson`, Sol M3 r8), and every other ingress store, checked when the boundaries are
+   * published where they are owed.
    */
   public ingressStores(): void {
     const { program, definitions, lists } = this.pass;
@@ -1292,6 +1294,13 @@ export class Admission {
         program.live(d.node)
       )
         this.#typed.push(d);
+    // every other ingress store, a literal, a read or a choice carrying the data, where a type is admitted, whether a
+    // consumer reads the place or not (the owner's F1)
+    const scheduled = new Set(this.#typed);
+    for (const d of definitions.storeByToken.values()) {
+      program.work.charge("checks");
+      if (!scheduled.has(d) && lists.live(d) && program.live(d.node)) this.#carried.push(d);
+    }
   }
 
   /**
@@ -1309,10 +1318,24 @@ export class Admission {
     return tags.length > 0 && items.some((item) => item.tag === "null") ? [...tags, "null"] : tags;
   }
 
+  /** Whether a store owes its boundary check: some ingress it carries stands where a type is admitted (F1). */
+  #owed(d: Definition): boolean {
+    const { definitions, program } = this.pass;
+    const destination = this.#destPath(d);
+    for (const way of definitions.ingressWays.get(this.#token(d))?.values() ?? []) {
+      program.work.charge("checks");
+      // (an `addAll`'s literal's elements are the destination's own elements)
+      const below = d.kind === "add" && d.how === "elements" ? way.slice(1) : way;
+      if (this.#againstOf(d, [...destination, ...below]).length > 0) return true;
+    }
+    return false;
+  }
+
   /** The boundary checks of the ingress stores, published once every place is decided. */
   public publish(): void {
     for (const d of this.#typed)
       if (this.#againstOf(d, this.#destPath(d)).length > 0) this.boundaryAt(d);
+    for (const d of this.#carried) if (this.#owed(d)) this.boundaryAt(d);
     const { definitions } = this.pass;
     for (const d of [...this.#pending.values()].sort((a, b) => a.uid - b.uid)) {
       const path = this.#admissionPath(d);

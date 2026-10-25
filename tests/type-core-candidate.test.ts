@@ -365,6 +365,65 @@ test("admission's decided types and C9's boundary checks compile and run on the 
   }
 });
 
+test("external data a literal carries is checked at its store before any later effect, read or not (the owner's F1)", () => {
+  // per program its store checks and, per host value, the run's messages and failure: no consumer reads the list
+  for (const [source, checked, runs] of [
+    [
+      'let xs = [1, hostValue]\nsay "AFTER"\nexit\n',
+      ["0:23"],
+      [
+        [2, ["AFTER"], null],
+        ["bad", [], "TSR058@9:23"],
+      ],
+    ],
+    [
+      'let xs = [hostValue, 1]\nsay "AFTER"\nexit\n',
+      ["0:23"],
+      [
+        [2, ["AFTER"], null],
+        [1.5, [], "TSR058@9:23"],
+      ],
+    ],
+    [
+      'let xs = [[1], [hostValue]]\nsay "AFTER"\nexit\n',
+      ["0:27"],
+      [
+        [2, ["AFTER"], null],
+        ["bad", [], "TSR058@9:27"],
+      ],
+    ],
+    [
+      'let ys = [1, hostValue]\nlet xs = ys\nsay "AFTER"\nexit\n',
+      ["0:23"],
+      [
+        [2, ["AFTER"], null],
+        ["bad", [], "TSR058@9:23"],
+      ],
+    ],
+    // host data alone admits no type: nothing to check it against
+    ['let xs = [hostValue, hostValue]\nsay "AFTER"\nexit\n', [], [["bad", ["AFTER"], null]]],
+  ] as const) {
+    const compiled = inBothOrders(() => {
+      const result = candidate(source);
+      return {
+        diagnostics: sited(result),
+        checked: result.plan === null ? null : checkedStores(result.plan),
+      };
+    });
+    assert.deepEqual(compiled, { diagnostics: [], checked }, source);
+    const plan = candidate(source).plan;
+    assert.ok(plan !== null, source);
+    for (const [value, says, failure] of runs) {
+      const ran = runWith(plan, value);
+      assert.deepEqual(
+        { says: ran.says, failure: ran.failure },
+        { says, failure },
+        `${source} with ${JSON.stringify(value)}`,
+      );
+    }
+  }
+});
+
 test("C1 warns where some kind of the stored value fits and errs only where none does, in both orders (r4.46)", () => {
   // a list literal's element at an index: the items `integer` and `number`, both definite, one fitting; with a host value
   // the external item beside a `number`, and C9's boundary check at the host value. The context words (§3.4): the

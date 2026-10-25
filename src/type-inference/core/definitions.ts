@@ -8,7 +8,7 @@ import {
   interactionCategory,
   methodCategory,
 } from "./method-categories.js";
-import { siteKey, type CoreProgram } from "./program.js";
+import { propertyStep, siteKey, type CoreProgram } from "./program.js";
 
 /*
  * The definitions of the coarse core (checkpoint 9, TABLE §2, §3.1 X2–X6, §6 O, §8): every store, add, clear,
@@ -167,9 +167,13 @@ export class DefinitionIndex {
   /** C9: the values external data enters by, and the store that brought each in (its ingress store). */
   readonly ingress = new Set<PlaceId>();
   readonly ingressStore = new Map<PlaceId, Writer>();
-  /** Per ingress store's token (`writerKey`): its store, the path below its destination, its earliest carried site. */
+  /**
+   * Per ingress store's token (`writerKey`): its store, the path below its destination, the distinct paths below it
+   * its ingresses stand at, its earliest carried site.
+   */
   readonly storeByToken = new Map<string, Definition>();
   readonly ingressSuffix = new Map<string, readonly string[]>();
+  readonly ingressWays = new Map<string, Map<string, readonly string[]>>();
   readonly cellSiteOf = new Map<string, SourceSite>();
   /** A fallback's or a default's own ingress read, by its token (C10: checked at the read). */
   readonly readIngress = new Map<string, PlaceId>();
@@ -558,11 +562,12 @@ export class DefinitionIndex {
     };
     for (const value of this.ingress) {
       let current = value;
-      // the path below the store the literals add, the steps from `current` down to the value with the object literal
-      // holding each property step, and whether a literal or a choice carried the value; the paths are kept last step
-      // first, so each carrier is one step at any depth
+      // the path below the store the literals add, the steps from `current` down to the value by name and as key steps
+      // with the object literal holding each property step, and whether a literal or a choice carried the value; the
+      // paths are kept last step first, so each carrier is one step at any depth
       const suffix: string[] = [];
       const way: string[] = [];
+      const steps: string[] = [];
       const objects: (PlaceId | null)[] = [];
       let carried = false;
       while (
@@ -577,6 +582,7 @@ export class DefinitionIndex {
           if (owner.kind === "property") suffix.length = 0;
           else suffix.push("element");
           way.push(owner.kind === "property" ? owner.name : "element");
+          steps.push(owner.kind === "property" ? propertyStep(owner.name) : "element");
           objects.push(owner.kind === "property" ? owner.owner : null);
           carried = true;
         } else if (readOfValue.has(current)) {
@@ -588,6 +594,7 @@ export class DefinitionIndex {
           if (listed !== "values") {
             suffix.pop();
             way.pop();
+            steps.pop();
             objects.pop();
           }
         } else if (choiceOfOption.has(current)) {
@@ -602,6 +609,7 @@ export class DefinitionIndex {
             break;
           suffix.length = 0;
           way.length = 0;
+          steps.length = 0;
           objects.length = 0;
           carried = true;
         }
@@ -638,6 +646,10 @@ export class DefinitionIndex {
       )
         common += 1;
       this.ingressSuffix.set(key, was === undefined ? suffix : was.slice(0, common));
+      steps.reverse();
+      let ways = this.ingressWays.get(key);
+      if (ways === undefined) this.ingressWays.set(key, (ways = new Map()));
+      ways.set(steps.join("."), steps);
     }
   }
 

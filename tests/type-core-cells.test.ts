@@ -2365,3 +2365,93 @@ test("an argument beside a default meets its own boundary, never the default's",
   }
   assert.deepEqual(differing, []);
 });
+
+test("external data a literal carries is checked at its store where a type is admitted, read or not (C9, the owner's F1)", () => {
+  const after = '\nsay "AFTER"\nexit';
+  // per program its outcome and its boundary checks, as target, kinds and site
+  const programs: readonly (readonly [string, string, string, readonly string[]])[] = [
+    ["a list", `let xs = [1, hostValue]${after}`, "valid", ["xs.element [integer] @13"]],
+    [
+      "a list read nowhere live",
+      `let xs = [1, hostValue]\nif false { repeat xs[0] {} }${after}`,
+      "warning-runtime-check",
+      ["xs.element [integer] @13"],
+    ],
+    [
+      "a list, host data first",
+      `let xs = [hostValue, 1]${after}`,
+      "valid",
+      ["xs.element [integer] @10"],
+    ],
+    ["a list of texts", `let xs = ["a", hostValue]${after}`, "valid", ["xs.element [string] @15"]],
+    [
+      "a nested list",
+      `let xs = [[1, hostValue]]${after}`,
+      "valid",
+      ["xs.element.element [integer] @14"],
+    ],
+    [
+      "a nested list's later element",
+      `let xs = [[1], [hostValue]]${after}`,
+      "valid",
+      ["xs.element.element [integer] @16"],
+    ],
+    [
+      "a copied list",
+      `let ys = [1, hostValue]\nlet xs = ys${after}`,
+      "valid",
+      ["ys.element [integer] @13"],
+    ],
+    ["a set", `let xs = set[1, hostValue]${after}`, "valid", ["xs.element [integer] @16"]],
+    ["a dict", `let xs = dict{a: 1, b: hostValue}${after}`, "valid", ["xs.entry [integer] @23"]],
+    [
+      "a list of records",
+      `let xs = [{n: 1}, {n: hostValue}]${after}`,
+      "valid",
+      ["xs.element [object] @22"],
+    ],
+    [
+      "a returned list",
+      `function g {\n  return [1, hostValue]\n}\nlet xs = g()${after}`,
+      "valid",
+      ["g.result.element [integer] @26"],
+    ],
+    [
+      "a passed list",
+      `function f(p) {\n  say "x"\n}\nf([1, hostValue])${after}`,
+      "valid",
+      ["f.p.element [integer] @34"],
+    ],
+    // where no type is admitted, nothing is checked until a consumer asks
+    ["a list of host data alone", `let xs = [hostValue, hostValue]${after}`, "valid", []],
+    ["a record of host data alone", `let o = {n: hostValue}${after}`, "valid", []],
+    [
+      "a returned record of host data",
+      `function packet {\n  return {amount: hostValue}\n}\nlet data = packet()${after}`,
+      "valid",
+      [],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, outcome, expected] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const boundaries = record.checks
+        .filter((check) => check.boundary)
+        .map((check) => `${check.target} [${check.against.join(", ")}] @${check.site.offset}`)
+        .sort();
+      if (
+        record.outcome !== outcome ||
+        JSON.stringify(boundaries) !== JSON.stringify([...expected].sort())
+      )
+        differing.push(
+          `${name}${reversed ? " reversed" : ""}: ${record.outcome}; ${boundaries.join("; ")}`,
+        );
+    }
+  }
+  assert.deepEqual(differing, []);
+});
