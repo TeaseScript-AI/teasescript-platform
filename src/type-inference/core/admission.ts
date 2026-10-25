@@ -1118,31 +1118,98 @@ export class Admission {
   /**
    * A cell element's value as the cell holds it, for sharing a literal's verdicts (F2): a literal holding no source by
    * its structure (the contract's signature), a copy by the definition its read reaches there (its exact path), through
-   * the copies that definition stores; `null` for any other, whose value may differ from cell to cell.
+   * the copies that definition stores, a value a projection or an operation gives by its step or its name and the
+   * values it takes, held alike; `null` for any other (a call's result, a literal holding a source), whose value may
+   * differ from cell to cell.
    */
   #held(d: Definition): string | null {
-    const { contract, exact, program } = this.pass;
+    const { contract, definitions, exact, program } = this.pass;
     if (d.value === undefined) return "";
-    if (program.hasOf.has(d.value))
-      return this.#valueStructure(d.value).sources.length === 0
-        ? contract.identityOf(d.value).id
-        : null;
-    let key = contract.copiedKey(d.value);
-    let node = d.node;
-    const seen = new Set<string>();
-    while (key !== null && !seen.has(`${key}|${node.id}`)) {
+    const node = d.node;
+    const held = new Map<PlaceId, string | null>();
+    // the values a projection or an operation takes, and how it combines them
+    const inputs = (
+      value: PlaceId,
+    ): { readonly name: string; readonly of: readonly (PlaceId | null)[] } | null => {
+      // a literal holding a source by its shape and its cells
+      if (program.hasOf.has(value)) {
+        if (this.#valueStructure(value).sources.length === 0) return null;
+        const shape: string[] = [];
+        const of: PlaceId[] = [];
+        for (const has of program.hasOf.get(value)!) {
+          shape.push(has.type.kind);
+          for (const [name, term] of fieldsOf(has.type)) {
+            const cells = term.kind === "ref" ? (definitions.cellDefs.get(term.place) ?? []) : [];
+            shape.push(`${name}:${cells.length}`);
+            for (const cell of cells) of.push(cell.value!);
+          }
+        }
+        return { name: `[${shape.join(" ")}]`, of };
+      }
+      const projection = program.projOf.get(value);
+      if (projection !== undefined) return { name: `.${projection.step}`, of: [projection.owner] };
+      const c = program.opOf.get(value);
+      if (c === undefined) return null;
+      if (c.kind === "fallback") return { name: "otherwise", of: [c.left, c.right] };
+      if (c.kind === "get") return { name: "get", of: [c.receiver, c.key, c.fallback] };
+      if (c.kind === "load") return { name: `load ${c.key ?? ""}`, of: [c.fallback] };
+      if (c.kind !== "operation") return null;
+      return {
+        name: `${c.contract.family}.${c.contract.name}`,
+        of: [c.receiver, ...c.arguments, ...c.named.map((argument) => argument.value)],
+      };
+    };
+    const leaf = (value: PlaceId): string | null => {
+      if (program.hasOf.has(value)) return contract.identityOf(value).id;
+      let key = contract.copiedKey(value);
+      if (key === null) return null;
+      let at = node;
+      const seen = new Set<string>();
+      while (!seen.has(`${key}|${at.id}`)) {
+        program.work.charge("indexSteps");
+        seen.add(`${key}|${at.id}`);
+        const answer = exact.exactPath(key, at);
+        if (!("def" in answer)) return null;
+        const { def, rest } = answer;
+        const copied =
+          def.kind === "whole" && def.value !== undefined ? contract.copiedKey(def.value) : null;
+        if (copied === null) return `${def.uid}@${rest.join(".")}`;
+        key = keyOf(keyPlace(copied), [...keyPath(copied), ...rest]);
+        at = def.node;
+      }
+      return null;
+    };
+    // post order on an explicit stack: a value's inputs held before it
+    const stack: { readonly value: PlaceId; ready: boolean }[] = [{ value: d.value, ready: false }];
+    while (stack.length > 0) {
+      const top = stack.at(-1)!;
+      if (held.has(top.value)) {
+        stack.pop();
+        continue;
+      }
       program.work.charge("indexSteps");
-      seen.add(`${key}|${node.id}`);
-      const answer = exact.exactPath(key, node);
-      if (!("def" in answer)) return null;
-      const { def, rest } = answer;
-      const copied =
-        def.kind === "whole" && def.value !== undefined ? contract.copiedKey(def.value) : null;
-      if (copied === null) return `${def.uid}@${rest.join(".")}`;
-      key = keyOf(keyPlace(copied), [...keyPath(copied), ...rest]);
-      node = def.node;
+      const taken = contract.copiedKey(top.value) !== null ? null : inputs(top.value);
+      if (taken === null) {
+        held.set(top.value, leaf(top.value));
+        stack.pop();
+        continue;
+      }
+      if (!top.ready) {
+        top.ready = true;
+        for (const input of taken.of)
+          if (input !== null && !held.has(input)) stack.push({ value: input, ready: false });
+        continue;
+      }
+      const parts = taken.of.map((input) => (input === null ? "" : held.get(input)));
+      held.set(
+        top.value,
+        parts.some((part) => part === null || part === undefined)
+          ? null
+          : `${taken.name}(${parts.join(",")})`,
+      );
+      stack.pop();
     }
-    return null;
+    return held.get(d.value) ?? null;
   }
 
   /** The paths below a literal's element its known structure gives (F2), and `also`, each once. */

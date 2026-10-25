@@ -1489,8 +1489,8 @@ export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
  * destination beside its intact source, external ingresses merged with an opaque source, A5's candidates under k whole
  * presets of a record, A2's scan past external stores, the width of a record's written copies, a literal's records and a
  * replacement's misfits, the boundary checks of a literal's external cells, and the structure named elements bring to
- * a literal (projections of one record's lists, literals of one record's copies added to a list); each at size k,
- * linear.
+ * a literal (projections of one record's lists, literals of one record's copies, or of the values operations carry of
+ * it, added to a list); each at size k, linear.
  */
 export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
@@ -1735,6 +1735,51 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
           "let xs = []",
           rows(k, () => "xs.add([seed, seed])"),
           rows(k, (i) => `let shown${i}: integer = xs[0][0].f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-added-wrapped-presets",
+    measures:
+      "F2, A8: k literals of records wrapping one k-field record, added to one list, every field read (round 11)",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          "let xs = []",
+          rows(k, () => "xs.add([{data: seed}, {data: seed}])"),
+          rows(k, (i) => `let shown${i}: integer = xs[0][0].data.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-added-carried-presets",
+    measures:
+      "F2, A8: k literals of one k-field record that `otherwise` carries, added to one list, every field read (round 11 B4)",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          "let xs = []",
+          rows(k, () => "xs.add([seed otherwise seed, seed otherwise seed])"),
+          rows(k, (i) => `let shown${i}: integer = xs[0][0].f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-added-taken-presets",
+    measures:
+      "F2, A8: k literals of `take`s of a list of one k-field record, added to one list, every field read (round 11 B4)",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = [{${fields(k, () => "1")}}]`,
+          "let xs = []",
+          rows(k, () => "xs.add([seed.take(1), seed.take(1)])"),
+          rows(k, (i) => `let shown${i}: integer = xs[0][0][0].f${i}`),
           "exit",
         ),
       ),

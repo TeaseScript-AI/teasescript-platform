@@ -1678,8 +1678,17 @@ export class Contract {
           holder: this.#holders.get(id) ?? this.#newHolder(id),
         };
       } else {
-        // a computed value (an operation's result): its own holder, so a guarded read of a copy of it is a mark there
-        const id = `v${value}`;
+        // a computed value (an operation's result): its own holder, so a guarded read of a copy of it is a mark there;
+        // a value a carrier gives (`otherwise`, `get`, a copy of the elements, a removal, a list's `+`, a projection of
+        // a computed value) by what it takes, so k such values of one source are one entry, as k copies are (F2)
+        const carried = this.#carried(value);
+        let id = `v${value}`;
+        if (carried !== null) {
+          const parts: string[] = [];
+          for (const input of carried.of)
+            parts.push(input === null ? "" : (yield* this.#needValue(input)).id);
+          id = `${carried.name}(${parts.join(",")})`;
+        }
         identity = {
           id,
           key: null,
@@ -1689,6 +1698,30 @@ export class Contract {
       }
     }
     this.#identities.set(value, identity);
+  }
+
+  /** What a carrier's value takes, by the carrier (`#identityWork`); `null` for any other computed value. */
+  #carried(
+    value: PlaceId,
+  ): { readonly name: string; readonly of: readonly (PlaceId | null)[] } | null {
+    const { program } = this.pass;
+    const projection = program.projOf.get(value);
+    if (projection !== undefined && projection.step !== "iteration")
+      return { name: `.${projection.step}`, of: [projection.owner] };
+    const c = program.opOf.get(value);
+    if (c?.kind === "fallback") return { name: "otherwise", of: [c.left, c.right] };
+    if (c?.kind === "get") return { name: "get", of: [c.receiver, c.key, c.fallback] };
+    if (c?.kind !== "operation") return null;
+    const { family, name } = c.contract;
+    const gives =
+      family === "method" && c.receiver !== null ? methodCategory(name)?.gives : undefined;
+    if (
+      gives?.kind === "copy" ||
+      gives?.kind === "removed" ||
+      (family === "operator" && name === "+")
+    )
+      return { name: `${family}.${name}`, of: [c.receiver, ...c.arguments] };
+    return null;
   }
 
   /** Runs a computation of the identity layer and those it needs on an explicit stack. */
