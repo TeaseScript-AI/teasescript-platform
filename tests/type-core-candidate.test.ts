@@ -72,11 +72,19 @@ function inBothOrders<T>(run: () => T): T {
 
 /** A run of `plan` to its end without reading pauses, with `hostValue`: its status, messages and failure. */
 function runWith(plan: InstructionPlan, hostValue: SerializableRuntimeValue) {
+  const { said, ...ran } = runSited(plan, hostValue);
+  return { ...ran, says: said.map(({ text }) => text) };
+}
+
+/** `runWith`'s run, each message with the offset its statement starts at: an effect's place in the source. */
+function runSited(plan: InstructionPlan, hostValue: SerializableRuntimeValue) {
   const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue } }));
   const failure = result.events.find((event) => event.kind === "runtimeFailure");
   return {
     status: result.snapshot.status,
-    says: result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    said: result.events.flatMap((event) =>
+      event.kind === "say" ? [{ text: event.text, at: event.span.start.offset }] : [],
+    ),
     failure:
       failure?.kind === "runtimeFailure"
         ? `${failure.code}@${failure.span.start.offset}:${failure.span.end.offset}`
@@ -129,15 +137,29 @@ function kindsAt(type: TypePlan | null, path: readonly string[]): string[] {
   return [];
 }
 
-/** Whether a runtime value fits a checked type (the kinds this file's tests run with). */
-function fitsPlan(value: SerializableRuntimeValue, type: TypePlan | null): boolean {
-  if (type === null) return true;
-  if (type.kind === "union") return type.members.some((member) => fitsPlan(value, member));
-  if (value === null) return type.kind === "null";
-  if (typeof value === "string") return type.kind === "string";
-  if (typeof value === "boolean") return type.kind === "boolean";
+/** A checked type in full, as these tests compare it: `integer`, `list<list<integer>>`, `{name: string}`, `a|b`. */
+function typeText(type: TypePlan | null): string {
+  if (type === null) return "any";
+  if (type.kind === "union") return type.members.map(typeText).join("|");
+  if (type.kind === "list" || type.kind === "set" || type.kind === "dict")
+    return `${type.kind}<${typeText(type.element)}>`;
+  if (type.kind === "object")
+    return `{${type.properties.map(({ name, type: of }) => `${name}: ${typeText(of)}`).join(", ")}}`;
+  return type.kind;
+}
+
+/** A plan's checked stores, each as `start:end type`: the store that checks, and the whole type it checks. */
+function checksOf(plan: InstructionPlan): string[] {
+  return typeChecks(plan).map(({ so, eo, type }) => `${so}:${eo} ${typeText(type)}`);
+}
+
+/** Whether a runtime scalar is of a kind a check names (the scalars this file's tests run with). */
+function fitsKind(value: SerializableRuntimeValue, kind: string): boolean {
+  if (value === null) return kind === "null";
+  if (typeof value === "string") return kind === "string";
+  if (typeof value === "boolean") return kind === "boolean";
   if (typeof value === "number")
-    return type.kind === "number" || (type.kind === "integer" && Number.isInteger(value));
+    return kind === "number" || (kind === "integer" && Number.isInteger(value));
   return false;
 }
 
@@ -149,10 +171,11 @@ function fitsPlan(value: SerializableRuntimeValue, type: TypePlan | null): boole
  * a store's `typeCheck` discharges (S3 §4: C1's and C9's `copy-type` checks against a kind, at the store that holds
  * their site, of the kinds their target's path requires; C2's checks, and a boundary against `unknown`, are the
  * runtime's own checks at the use and of representable external data, no plan content); a record reading host data
- * runs with a value its first checked store refuses, which stops there with TSR058 before anything after it, and with
- * one every checked store accepts, which finishes. A record the route rejects (`CandidateOutsideSlice`) is counted in
- * one class, outside the candidate slice until S7–S9b widen it, by its first construct outside the slice; nobody lists
- * records, so each record the slice grows to reach is checked.
+ * runs with a host value of no kind its first checked store's checks require at the value's position, which stops with
+ * TSR058 at that store's value in the failed state, nothing said after the store, and with one of a kind every check
+ * requires there, where one exists, which halts at the end. A record the route rejects (`CandidateOutsideSlice`) is
+ * counted in one class, outside the candidate slice until S7–S9b widen it, by its first construct outside the slice;
+ * nobody lists records, so each record the slice grows to reach is checked.
  */
 test("every positive-list record the candidate route reaches lowers and runs exactly its checks, in both orders (r4.59)", (t) => {
   const kinds: Readonly<Record<string, string>> = {
@@ -162,9 +185,11 @@ test("every positive-list record the candidate route reaches lowers and runs exa
   };
   const accepted: string[] = [];
   const outside = new Map<string, number>();
+  const unfit: string[] = [];
   let positive = 0;
   let checked = 0;
-  let ran = 0;
+  let refusedRuns = 0;
+  let fittingRuns = 0;
   for (const record of readFixture()) {
     if (record.owner === "adapter" || record.cells.some((cell) => /^N\d/.test(cell))) continue;
     positive += 1;
@@ -202,7 +227,7 @@ test("every positive-list record the candidate route reaches lowers and runs exa
     // the plan's checks: per checked store, the kinds each owed check's target path requires there, and no store
     // checked without an owed check
     const stores = typeChecks(result.plan);
-    const owed = new Map<string, Set<string>>();
+    const owed = new Map<string, (readonly string[])[]>();
     for (const check of record.expected.checks) {
       if (check.kind !== "copy-type" || check.against.every((tag) => tag === "unknown")) continue;
       const store = stores
@@ -222,7 +247,7 @@ test("every positive-list record the candidate route reaches lowers and runs exa
         `${record.name}: ${check.target}'s kinds in the plan`,
       );
       const key = `${store.file}:${store.so}:${store.eo}`;
-      owed.set(key, (owed.get(key) ?? new Set()).add(check.target));
+      owed.set(key, [...(owed.get(key) ?? []), check.against]);
     }
     assert.deepEqual(
       stores.map(({ file, so, eo }) => `${file}:${so}:${eo}`).sort(),
@@ -230,37 +255,55 @@ test("every positive-list record the candidate route reaches lowers and runs exa
       `${record.name}: the checked stores`,
     );
     checked += 1;
-    // the run: a refused host value stops at the first checked store, before any later effect; an accepted one finishes
+    // the runs: the host value is the value each owed check reads at its target's path, so it is chosen by the kinds
+    // those checks require there. One of no kind the first checked store's checks require stops at that store's value
+    // with TSR058, nothing said after the store before it; one of a kind every check requires reaches the end.
     if (!record.files.some((file) => file.source.includes("hostValue")) || stores.length === 0)
       continue;
+    // (a run's messages carry offsets, not files)
+    assert.equal(record.files.length, 1, `${record.name}: one file to compare offsets in`);
     const values: readonly SerializableRuntimeValue[] = ["text", 2.5, 2, true, null];
     const first = stores[0]!;
-    const refused = values.find((value) => !fitsPlan(value, first.type));
-    if (refused !== undefined) {
-      const run = runWith(result.plan, refused);
-      assert.equal(
-        run.failure?.split("@")[0],
-        "TSR058",
-        `${record.name} with ${JSON.stringify(refused)}`,
-      );
-      assert.ok(
-        Number(run.failure!.split("@")[1]!.split(":")[0]) >= first.so,
-        `${record.name}: stops at its first checked store`,
-      );
+    const firstKinds = owed.get(`${first.file}:${first.so}:${first.eo}`)!;
+    const refused = values.find((value) =>
+      firstKinds.every((kinds) => !kinds.some((kind) => fitsKind(value, kind))),
+    );
+    assert.ok(refused !== undefined, `${record.name}: a value the first checked store refuses`);
+    // (the check's failure spans the stored value: the store after its `=`)
+    const equals = /=\s*/.exec(record.files[0]!.source.slice(first.so, first.eo))!;
+    const value = first.so + equals.index + equals[0].length;
+    const stopped = runSited(result.plan, refused);
+    assert.deepEqual(
+      {
+        status: stopped.status,
+        failure: stopped.failure,
+        saidAfter: stopped.said.filter(({ at }) => at >= first.so),
+      },
+      { status: "failed", failure: `TSR058@${value}:${first.eo}`, saidAfter: [] },
+      `${record.name} with ${JSON.stringify(refused)}`,
+    );
+    refusedRuns += 1;
+    const fitting = values.find((value) =>
+      [...owed.values()].flat().every((kinds) => kinds.some((kind) => fitsKind(value, kind))),
+    );
+    if (fitting === undefined) {
+      unfit.push(record.name);
+      continue;
     }
-    const fitting = values.find((value) => stores.every((store) => fitsPlan(value, store.type)));
-    if (fitting !== undefined)
-      assert.equal(
-        runWith(result.plan, fitting).failure,
-        null,
-        `${record.name} with ${JSON.stringify(fitting)}`,
-      );
-    ran += 1;
+    const finished = runWith(result.plan, fitting);
+    assert.deepEqual(
+      { status: finished.status, failure: finished.failure },
+      { status: "halted", failure: null },
+      `${record.name} with ${JSON.stringify(fitting)}`,
+    );
+    fittingRuns += 1;
   }
   const counted = [...outside.values()].reduce((sum, count) => sum + count, 0);
   t.diagnostic(
-    `${positive} positive-list records: ${accepted.length} on the candidate route (${checked} with a plan, ${ran} run ` +
-      `with host data), ${counted} outside the candidate slice until S7–S9b: ` +
+    `${positive} positive-list records: ${accepted.length} on the candidate route, ${checked} with a plan; of those ` +
+      `reading host data, ${refusedRuns} stop a refused value at their first checked store and ${fittingRuns} finish ` +
+      `with a fitting one (no one value fits every check of ${unfit.join(", ") || "none"}); ${counted} outside the ` +
+      "candidate slice until S7–S9b: " +
       [...outside]
         .sort((a, b) => b[1] - a[1])
         .map(([what, count]) => `${what} ${count}`)
@@ -831,15 +874,15 @@ function admittedOf(source: string, start: string): string {
 }
 
 test("a place published with a kind checks the external data stored into it, named or inline, at any endpoint (A7, C9 r4.12, r4.50 (1), R4-F1)", () => {
-  // the external reviewer's endpoint matrix: per kind (a known element, a fitting and a bad host value), projection
-  // (an index, a nested index, parentheses, an index held in a variable), host data inline or named, and without or
-  // with a later store: the place is decided by the known element (or the later store), named data warns where it is
-  // read with its check, inline data has its boundary, the declaration's store is checked, and the bad value stops
-  // there before AFTER while the fitting one reaches it
+  // the external reviewer's endpoint matrix: per kind (a known element, a fitting host value and bad ones, an integer's
+  // fractional one too), projection (an index, a nested index, parentheses, an index held in a variable), host data
+  // inline or named, and without or with a later store: the place is decided by the known element (or the later store),
+  // named data warns where it is read with its check, inline data has its boundary, the declaration's store alone checks
+  // the kind, a bad value fails at the declaration's value with nothing said, and the fitting one says AFTER and halts
   const kinds = [
-    ["1", 2, "bad"],
-    ['"a"', "b", 1],
-    ["true", false, "bad"],
+    ["1", 2, ["bad", 2.5]],
+    ['"a"', "b", [1]],
+    ["true", false, ["bad"]],
   ] as const;
   const forms = [
     (data: string): string => `[K, ${data}][1]`,
@@ -868,38 +911,37 @@ test("a place published with a kind checks the external data stored into it, nam
           // (named data warns where it is read; with a later decider, C1 warns at the stored value, inline data at
           // its host value)
           const value = declaration + "let out = ".length;
+          const end = source.indexOf("\n", declaration);
           const data = named ? source.indexOf("raw", declaration) : source.indexOf("hostValue");
           const warned = named ? (later ? value : data) : later ? data : null;
           const compiled = inBothOrders(() => {
             const result = candidate(source);
             return {
               diagnostics: sited(result),
-              declarationChecked:
-                result.plan !== null &&
-                checkedStores(result.plan).some((span) => span.startsWith(`${declaration}:`)),
+              checks: result.plan === null ? null : checksOf(result.plan),
             };
           });
           assert.deepEqual(
             compiled,
             {
               diagnostics: warned === null ? [] : [`warning TSV041@${warned}`],
-              declarationChecked: true,
+              checks: [`${declaration}:${end} ${kind}`],
             },
             source,
           );
           const plan = candidate(source).plan;
           assert.ok(plan !== null, source);
           assert.deepEqual(
-            runWith(plan, good).says,
-            ["AFTER"],
+            runWith(plan, good),
+            { status: "halted", says: ["AFTER"], failure: null },
             `${source} with ${JSON.stringify(good)}`,
           );
-          const stopped = runWith(plan, bad);
-          assert.deepEqual(
-            { says: stopped.says, code: stopped.failure?.split("@")[0] ?? null },
-            { says: [], code: "TSR058" },
-            `${source} with ${JSON.stringify(bad)}`,
-          );
+          for (const refused of bad)
+            assert.deepEqual(
+              runWith(plan, refused),
+              { status: "failed", says: [], failure: `TSR058@${value}:${end}` },
+              `${source} with ${JSON.stringify(refused)}`,
+            );
           shapes += 1;
         }
   assert.equal(shapes, 48);
@@ -916,59 +958,133 @@ test("a place published with a kind checks the external data stored into it, nam
     );
     const plan = candidate(source).plan;
     assert.ok(plan !== null, source);
-    assert.deepEqual(checkedStores(plan), [], source);
-    assert.deepEqual(runWith(plan, "bad").says, ["AFTER"], source);
+    assert.deepEqual(checksOf(plan), [], source);
+    assert.deepEqual(
+      runWith(plan, "bad"),
+      { status: "halted", says: ["AFTER"], failure: null },
+      source,
+    );
   }
 });
 
 /**
  * The owner's rule (TABLE r4.59) over a sample of the cells the candidate route reaches: host data, its slice's ingress,
  * inline and named, into a written, a decided and a published place, at a scalar and at a collection endpoint. Each
- * program compiles alike in both orders, checks the store that brings the data, finishes with a fitting value and stops
- * at that store with TSR058 before AFTER with a bad one.
+ * program compiles alike in both orders and checks exactly the store that brings the data, against the whole type its
+ * place holds there (the host value's kind at the value's position: an element's, a nested element's). A fitting host
+ * value says AFTER and halts; each bad one fails at that store's value with TSR058, nothing said.
  */
 test("a sample of the slice's cells checks host data in the plan and stops a bad value before the next effect (r4.59)", () => {
   const sample: readonly (readonly [
-    string,
-    string,
-    SerializableRuntimeValue,
-    SerializableRuntimeValue,
+    name: string,
+    body: string,
+    store: string,
+    type: string,
+    good: SerializableRuntimeValue,
+    bad: readonly SerializableRuntimeValue[],
   ])[] = [
-    ["written scalar, inline", "let n: integer = hostValue", 2, "bad"],
-    ["written scalar, named", "let raw = hostValue\nlet n: integer = raw", 2, "bad"],
-    ["written list element, inline", "let xs: integer[] = [hostValue]", 2, "bad"],
-    ["written list element, named", "let raw = hostValue\nlet xs: integer[] = [raw]", 2, 2.5],
-    ["decided list element, inline", "let xs = [1, hostValue]", 2, "bad"],
-    ["decided list element, named", "let raw = hostValue\nlet xs = [1, raw]", 2, "bad"],
-    ["decided nested list element, inline", "let xs = [[1], [hostValue]]", 2, "bad"],
-    ["decided scalar, a later store", "let n = hostValue\nn = 1", 2, "bad"],
-    ["published scalar, inline", "let n = [1, hostValue][1]", 2, "bad"],
-    ["published scalar, named", "let raw = hostValue\nlet n = [1, raw][1]", 2, "bad"],
-    ["published text, named", 'let raw = hostValue\nlet n = ["a", raw][1]', "b", 1],
-    ["published truth value, named", "let raw = hostValue\nlet n = [true, raw][1]", false, "bad"],
+    ["written scalar, inline", "let n: integer = hostValue", "", "integer", 2, ["bad", 2.5]],
+    [
+      "written scalar, named",
+      "let raw = hostValue\nlet n: integer = raw",
+      "let n",
+      "integer",
+      2,
+      ["bad", 2.5],
+    ],
+    [
+      "written list element, inline",
+      "let xs: integer[] = [hostValue]",
+      "",
+      "list<integer>",
+      2,
+      ["bad", 2.5],
+    ],
+    [
+      "written list element, named",
+      "let raw = hostValue\nlet xs: integer[] = [raw]",
+      "let xs",
+      "list<integer>",
+      2,
+      [2.5],
+    ],
+    [
+      "decided list element, inline",
+      "let xs = [1, hostValue]",
+      "",
+      "list<integer>",
+      2,
+      ["bad", 2.5],
+    ],
+    [
+      "decided list element, named",
+      "let raw = hostValue\nlet xs = [1, raw]",
+      "let xs",
+      "list<integer>",
+      2,
+      ["bad", 2.5],
+    ],
+    [
+      "decided nested list element, inline",
+      "let xs = [[1], [hostValue]]",
+      "",
+      "list<list<integer>>",
+      2,
+      ["bad", 2.5],
+    ],
+    ["decided scalar, a later store", "let n = hostValue\nn = 1", "", "integer", 2, ["bad", 2.5]],
+    ["published scalar, inline", "let n = [1, hostValue][1]", "", "integer", 2, ["bad", 2.5]],
+    [
+      "published scalar, named",
+      "let raw = hostValue\nlet n = [1, raw][1]",
+      "let n",
+      "integer",
+      2,
+      ["bad", 2.5],
+    ],
+    [
+      "published text, named",
+      'let raw = hostValue\nlet n = ["a", raw][1]',
+      "let n",
+      "string",
+      "b",
+      [1],
+    ],
+    [
+      "published truth value, named",
+      "let raw = hostValue\nlet n = [true, raw][1]",
+      "let n",
+      "boolean",
+      false,
+      ["bad"],
+    ],
   ];
-  for (const [name, body, good, bad] of sample) {
+  for (const [name, body, store, type, good, bad] of sample) {
     const source = `${body}\nsay "AFTER"\nexit\n`;
-    const compiled = inBothOrders(() => {
-      const result = candidate(source);
-      return {
-        diagnostics: sited(result),
-        checked: result.plan === null ? null : checkedStores(result.plan),
-      };
-    });
-    assert.ok(compiled.checked !== null && compiled.checked.length > 0, `${name}: a checked store`);
+    // (the checked store: the line that starts with `store`, its value after the `=`)
+    const start = source.indexOf(store);
+    const end = source.indexOf("\n", start);
+    const value = source.indexOf("=", start) + 2;
+    assert.deepEqual(
+      inBothOrders(() => {
+        const result = candidate(source);
+        return result.plan === null ? null : checksOf(result.plan);
+      }),
+      [`${start}:${end} ${type}`],
+      name,
+    );
     const plan = candidate(source).plan!;
     assert.deepEqual(
-      { says: runWith(plan, good).says, failure: runWith(plan, good).failure },
-      { says: ["AFTER"], failure: null },
+      runWith(plan, good),
+      { status: "halted", says: ["AFTER"], failure: null },
       `${name} with ${JSON.stringify(good)}`,
     );
-    const stopped = runWith(plan, bad);
-    assert.deepEqual(
-      { says: stopped.says, code: stopped.failure?.split("@")[0] ?? null },
-      { says: [], code: "TSR058" },
-      `${name} with ${JSON.stringify(bad)}`,
-    );
+    for (const refused of bad)
+      assert.deepEqual(
+        runWith(plan, refused),
+        { status: "failed", says: [], failure: `TSR058@${value}:${end}` },
+        `${name} with ${JSON.stringify(refused)}`,
+      );
   }
 });
 
