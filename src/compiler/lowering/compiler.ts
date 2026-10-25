@@ -5,7 +5,6 @@ import type {
   FunctionDeclaration,
   GlobalStatement,
   ListLiteral,
-  NamedArgument,
   ObjectLiteral,
   SetLiteral,
   Statement,
@@ -18,20 +17,16 @@ import type {
   ScriptTarget,
 } from "../../ast.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
-import { InstructionCompilationError } from "../errors.js";
 import type {
   AssignmentTargetPlan,
   CompiledFunctionDefinition,
   ExpressionPlan,
   Instruction,
   JumpIfFalseInstruction,
-  StoreTemporaryInstruction,
   JumpInstruction,
-  LockInstruction,
   LoopControlInstruction,
   LoopStartInstruction,
   PrepareParameterDefaultInstruction,
-  CallArgumentPlan,
   TemplatePartPlan,
   TemporaryExpressionPlan,
   TypeCheckPlan,
@@ -42,13 +37,10 @@ import { copiesPlayerProfile } from "../../project-globals.js";
 import {
   isAskImageCall,
   isFileStoreCall,
-  directPasswordField,
   isLockCall,
   isTakePhotoCall,
 } from "../../capture-call.js";
-import { isConversion, takesDefault, takesFiles } from "../../conversions.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
-import { boundParameterName } from "../../function-arguments.js";
 import type { RuntimeCheckSite } from "../../type-inference/backend.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
 import {
@@ -61,11 +53,17 @@ import {
   lowerOpenUrlTask,
   lowerExportTextTask,
   consumeInteractionResult,
-  prepareInteractionSpeaker,
 } from "./interactions.js";
-import { lowerInteractionTask, lowerAskQuestionTask, lowerAskImageTask } from "./asks.js";
+import { lowerInteractionTask, lowerAskImageTask } from "./asks.js";
 import { lowerSayTask } from "./say.js";
 import { lowerTimerTask, lowerPermanentButtonTask, lowerMediaTask } from "./background.js";
+import {
+  lowerUserFunctionCallTask,
+  lowerCallTask,
+  lowerLazyDefaultTask,
+  lowerLoadTask,
+} from "./calls.js";
+import { lowerFileStoreTask, lowerLockTask } from "./file-store-and-lock.js";
 import {
   isPlayerProfile,
   unwrapParentheses,
@@ -154,7 +152,7 @@ export class InstructionCompiler {
   }> = [];
 
   /** The functions this file may call: its own, with their IDs, and the global functions of other files. */
-  readonly #functionByName: ReadonlyMap<
+  public readonly functionByName: ReadonlyMap<
     string,
     { readonly id: number | null; readonly declaration: FunctionDeclaration }
   >;
@@ -216,11 +214,11 @@ export class InstructionCompiler {
    */
   public constructor(
     private readonly declarations: readonly FunctionDeclaration[],
-    private readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> = new Map(),
+    public readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> = new Map(),
     public readonly instructions: Instruction[] = [],
     public readonly functions: CompiledFunctionDefinition[] = [],
     private readonly counters: LoweringCounters = { nextLoopId: 1, nextTemporaryId: 1 },
-    private readonly project: ProjectFunctions = { global: new Map(), foreignCalls: [] },
+    public readonly project: ProjectFunctions = { global: new Map(), foreignCalls: [] },
     /** The files each glob target may pick, from semantic validation. */
     private readonly picks: ReadonlyMap<FileTarget, readonly string[]> = new Map(),
     /** The variables each timer, media, or button block shares with the code that created it. */
@@ -241,10 +239,10 @@ export class InstructionCompiler {
         declaration,
       }),
     );
-    this.#functionByName = functionByName;
+    this.functionByName = functionByName;
   }
 
-  #originate(instruction: number, origin: ControlOrigin): void {
+  public originate(instruction: number, origin: ControlOrigin): void {
     this.trace?.origins.set(instruction, origin);
   }
 
@@ -616,7 +614,7 @@ export class InstructionCompiler {
       span: copySpan(statement.condition.span),
     };
     this.instructions.push(conditionalInstruction);
-    this.#originate(conditional, { kind: "if", statement });
+    this.originate(conditional, { kind: "if", statement });
     this.emitTemporaryCleanup(lowered.temporaryIds, statement.condition.span);
     yield* compileChild(this.#compileBlock(statement.thenBlock));
     if (statement.elseBlock === null) {
@@ -672,7 +670,7 @@ export class InstructionCompiler {
         span: copySpan(valuesSpan),
       };
       this.instructions.push(conditionalInstruction);
-      this.#originate(conditional, { kind: "case", statement, index });
+      this.originate(conditional, { kind: "case", statement, index });
       this.emitTemporaryCleanup([subjectTemporary], valuesSpan);
       yield* compileChild(this.#compileBlock(switchCase.body));
       const jump: JumpInstruction = { kind: "jump", target: -1, span: copySpan(switchCase.span) };
@@ -782,7 +780,7 @@ export class InstructionCompiler {
             span: copySpan(span),
           };
     this.instructions.push(instruction);
-    this.#originate(start, { kind: "loop", statement });
+    this.originate(start, { kind: "loop", statement });
     this.emitTemporaryCleanup(lowered.temporaryIds, expression.span);
     const breaks: number[] = [];
     const context = { loopId, continueTarget: instruction.continueTarget, breaks };
@@ -882,7 +880,7 @@ export class InstructionCompiler {
   }
 
   #compileFunction(declaration: FunctionDeclaration): void {
-    const own = this.#functionByName.get(declaration.name.name);
+    const own = this.functionByName.get(declaration.name.name);
     if (own?.id === null || own?.declaration !== declaration) {
       throw new TypeError("Semantically invalid function reached compilation.");
     }
@@ -1028,20 +1026,20 @@ export class InstructionCompiler {
       return result;
     }
     if (isFileStoreCall(expression) && expression.kind === "callExpression") {
-      return yield* compileChild(this.#lowerFileStoreTask(expression));
+      return yield* compileChild(lowerFileStoreTask(this, expression));
     }
     if (isLockCall(expression) && expression.kind === "callExpression") {
-      return yield* compileChild(this.#lowerLockTask(expression));
+      return yield* compileChild(lowerLockTask(this, expression));
     }
     if (
       expression.kind === "callExpression" &&
       expression.callee.kind === "identifier" &&
-      this.#functionByName.has(expression.callee.name)
+      this.functionByName.has(expression.callee.name)
     ) {
-      return yield* compileChild(this.#lowerUserFunctionCallTask(expression));
+      return yield* compileChild(lowerUserFunctionCallTask(this, expression));
     }
     if (expression.kind === "loadExpression") {
-      return yield* compileChild(this.#lowerLoadTask(expression));
+      return yield* compileChild(lowerLoadTask(this, expression));
     }
     if (expression.kind === "tagQueryExpression") {
       // A bound or tag list that calls a function runs as instructions; the earlier operands wait in temporaries.
@@ -1167,7 +1165,7 @@ export class InstructionCompiler {
       case "indexExpression": {
         let object = yield* compileChild(this.lowerExpressionTask(expression.object));
         if (this.emitsInstructions(expression.index)) {
-          object = this.#prepareReferenceExpression(object, expression.object.span);
+          object = this.prepareReferenceExpression(object, expression.object.span);
         }
         const index = yield* compileChild(this.lowerExpressionTask(expression.index));
         return {
@@ -1184,11 +1182,12 @@ export class InstructionCompiler {
         const lazy = lazyDefaultArgument(expression);
         // A `default:` that runs as instructions runs after the call, and only when the call needs it.
         if (lazy === null || !this.emitsInstructions(lazy.argument.value))
-          return yield* compileChild(this.#lowerCallTask(expression, null));
-        const call = yield* compileChild(this.#lowerCallTask(expression, lazy.argument));
+          return yield* compileChild(lowerCallTask(this, expression, null));
+        const call = yield* compileChild(lowerCallTask(this, expression, lazy.argument));
         const span = copySpan(expression.span);
         const lowered = yield* compileChild(
-          this.#lowerLazyDefaultTask(
+          lowerLazyDefaultTask(
+            this,
             (temporaryId, defaultTemporary) => {
               this.instructions.push({
                 kind: "storeTemporary",
@@ -1293,216 +1292,6 @@ export class InstructionCompiler {
     }
   }
 
-  /**
-   * A call that may use the Player's file store (V30 §13 and §33). Its arguments are evaluated in written order into
-   * temporaries, unless they are literals, so that the instruction reads the same values when it runs again with the
-   * Player's answer; they are cleared once it gave its result. Its `default:` runs after it, only when it is used.
-   */
-  *#lowerFileStoreTask(
-    expression: Extract<Expression, { kind: "callExpression" }>,
-  ): CompileTask<LoweredExpression> {
-    if (expression.callee.kind !== "identifier")
-      throw new TypeError("A file store call reached lowering without its name.");
-    const call = expression.callee.name;
-    const conversion = isConversion(call) && takesFiles(call);
-    if (call !== "fileFromBase64" && call !== "fileToBase64" && call !== "hashFile" && !conversion)
-      throw new TypeError(`'${call}' is not a file store call.`);
-    // The default runs only when it is used, as instructions after the call.
-    const lazy = lazyDefaultArgument(expression);
-    const written = expression.arguments.filter((argument) => argument !== lazy?.argument);
-    const lowered = yield* compileChild(
-      this.lowerOrderedExpressionsTask(written.map((argument) => argument.value)),
-    );
-    const operands: Record<"value" | "files", ExpressionPlan | null> = { value: null, files: null };
-    const temporaryIds: number[] = [];
-    written.forEach((argument, index) => {
-      const operand = lowered[index]!;
-      temporaryIds.push(...operand.temporaryIds);
-      let plan = operand.plan;
-      if (plan.kind !== "temporary" && plan.kind !== "literal") {
-        const temporaryId = this.allocateTemporary();
-        this.instructions.push({
-          kind: "storeTemporary",
-          temporaryId,
-          value: plan,
-          expectBoolean: false,
-          span: copySpan(argument.value.span),
-        });
-        temporaryIds.push(temporaryId);
-        plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
-      }
-      const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
-      if (name !== "value" && name !== "files")
-        throw new TypeError(`${call}(...) reached lowering with '${name}:'.`);
-      operands[name] = plan;
-    });
-    const value = operands.value;
-    if (value === null) throw new TypeError(`${call}(...) reached lowering without its value.`);
-    const store = (destinationTemporary: number, defaultTemporary: number | null): void => {
-      this.instructions.push({
-        kind: "fileStore",
-        call,
-        value,
-        defaultTemporary,
-        files: operands.files,
-        destinationTemporary,
-        span: copySpan(expression.span),
-      });
-      this.emitTemporaryCleanup(temporaryIds, expression.span);
-    };
-    if (lazy !== null)
-      return yield* compileChild(
-        this.#lowerLazyDefaultTask(
-          store,
-          lazy.argument.value,
-          { defaultOf: lazy.operation },
-          expression,
-        ),
-      );
-    if (call === "fileFromBase64" || (conversion && takesDefault(call)))
-      throw new TypeError(`${call}(...) reached lowering without its default:.`);
-    const destinationTemporary = this.allocateTemporary();
-    store(destinationTemporary, null);
-    return {
-      plan: {
-        kind: "temporary",
-        temporaryId: destinationTemporary,
-        span: copySpan(expression.span),
-      },
-      temporaryIds: [destinationTemporary],
-    };
-  }
-
-  /**
-   * `encryptText`, `encryptFile`, `decryptText`, or `decryptFile` (V30 §13). Like a file store call, its arguments are
-   * evaluated in written order into temporaries, unless they are literals, so that every run of the instruction reads the
-   * same values; they are cleared once it gave its result. A decrypt call's default runs only when it is used, as
-   * instructions after the call.
-   */
-  *#lowerLockTask(
-    expression: Extract<Expression, { kind: "callExpression" }>,
-  ): CompileTask<LoweredExpression> {
-    if (expression.callee.kind !== "identifier")
-      throw new TypeError("A lock call reached lowering without its name.");
-    const call = expression.callee.name;
-    if (
-      call !== "encryptText" &&
-      call !== "encryptFile" &&
-      call !== "decryptText" &&
-      call !== "decryptFile"
-    )
-      throw new TypeError(`'${call}' is not a lock call.`);
-    const lazy = lazyDefaultArgument(expression);
-    const written = expression.arguments.filter((argument) => argument !== lazy?.argument);
-    const operands: Record<
-      "value" | "password" | "publicKey" | "key" | "timeLock",
-      ExpressionPlan | null
-    > = { value: null, password: null, publicKey: null, key: null, timeLock: null };
-    const temporaryIds: number[] = [];
-    let passwordField: LockInstruction["passwordField"] = null;
-    // A password field written directly says its question where `password:` stands; the arguments before it are kept
-    // in temporaries first, and those after it are evaluated after the question.
-    const fieldIndex = written.findIndex(
-      (argument) =>
-        argument.kind === "namedArgument" &&
-        argument.name.name === "password" &&
-        directPasswordField(argument.value) !== null,
-    );
-    const groups =
-      fieldIndex === -1 ? [written] : [written.slice(0, fieldIndex), written.slice(fieldIndex + 1)];
-    for (const [group, part] of groups.entries()) {
-      if (group === 1) {
-        const field = directPasswordField(written[fieldIndex]!.value)!;
-        const speakerTemporary = prepareInteractionSpeaker(
-          this,
-          field.speaker?.name ?? null,
-          field.asSpan ?? field.commandSpan,
-        );
-        const { hint } = yield* compileChild(lowerAskQuestionTask(this, field, speakerTemporary));
-        temporaryIds.push(speakerTemporary, ...(hint === null ? [] : [hint.temporaryId]));
-        passwordField = {
-          hint:
-            hint === null
-              ? null
-              : {
-                  kind: "temporary",
-                  temporaryId: hint.temporaryId,
-                  span: copySpan(field.hint!.span),
-                },
-        };
-      }
-      const lowered = yield* compileChild(
-        this.lowerOrderedExpressionsTask(part.map((argument) => argument.value)),
-      );
-      part.forEach((argument, index) => {
-        const operand = lowered[index]!;
-        temporaryIds.push(...operand.temporaryIds);
-        let plan = operand.plan;
-        if (plan.kind !== "temporary" && plan.kind !== "literal") {
-          const temporaryId = this.allocateTemporary();
-          this.instructions.push({
-            kind: "storeTemporary",
-            temporaryId,
-            value: plan,
-            expectBoolean: false,
-            span: copySpan(argument.value.span),
-          });
-          temporaryIds.push(temporaryId);
-          plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
-        }
-        const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
-        if (
-          name !== "value" &&
-          name !== "password" &&
-          name !== "publicKey" &&
-          name !== "key" &&
-          name !== "timeLock"
-        )
-          throw new TypeError(`${call}(...) reached lowering with '${name}:'.`);
-        operands[name] = plan;
-      });
-    }
-    const value = operands.value;
-    if (value === null) throw new TypeError(`${call}(...) reached lowering without its value.`);
-    const lock = (destinationTemporary: number, defaultTemporary: number | null): void => {
-      this.instructions.push({
-        kind: "lock",
-        call,
-        value,
-        password: operands.password,
-        passwordField,
-        publicKey: operands.publicKey,
-        key: operands.key,
-        timeLock: operands.timeLock,
-        defaultTemporary,
-        destinationTemporary,
-        span: copySpan(expression.span),
-      });
-      this.emitTemporaryCleanup(temporaryIds, expression.span);
-    };
-    if (lazy !== null)
-      return yield* compileChild(
-        this.#lowerLazyDefaultTask(
-          lock,
-          lazy.argument.value,
-          { defaultOf: lazy.operation },
-          expression,
-        ),
-      );
-    if (call === "decryptText" || call === "decryptFile")
-      throw new TypeError(`${call}(...) reached lowering without its default:.`);
-    const destinationTemporary = this.allocateTemporary();
-    lock(destinationTemporary, null);
-    return {
-      plan: {
-        kind: "temporary",
-        temporaryId: destinationTemporary,
-        span: copySpan(expression.span),
-      },
-      temporaryIds: [destinationTemporary],
-    };
-  }
-
   #lowerAssignmentTarget(expression: Expression): {
     readonly plan: AssignmentTargetPlan;
     readonly temporaryIds: readonly number[];
@@ -1546,7 +1335,7 @@ export class InstructionCompiler {
 
   #lowerAssignmentObject(expression: Expression): LoweredExpression {
     const lowered = this.#lowerExpression(expression);
-    return this.#prepareReferenceExpression(lowered, expression.span);
+    return this.prepareReferenceExpression(lowered, expression.span);
   }
 
   public materializeExpression(lowered: LoweredExpression, span: SourceSpan): LoweredExpression {
@@ -1564,7 +1353,10 @@ export class InstructionCompiler {
     };
   }
 
-  #prepareReferenceExpression(lowered: LoweredExpression, span: SourceSpan): LoweredExpression {
+  public prepareReferenceExpression(
+    lowered: LoweredExpression,
+    span: SourceSpan,
+  ): LoweredExpression {
     if (lowered.plan.kind === "preparedReference") return lowered;
     const temporaryId = this.allocateTemporary();
     this.instructions.push({
@@ -1636,236 +1428,6 @@ export class InstructionCompiler {
     };
   }
 
-  *#lowerUserFunctionCallTask(
-    expression: Extract<Expression, { kind: "callExpression" }>,
-  ): CompileTask<LoweredExpression> {
-    // EVIDENCE: invariant: the caller selects this path only for a registered identifier callee.
-    const name = (expression.callee as Extract<Expression, { kind: "identifier" }>).name;
-    const registered = this.#functionByName.get(name)!;
-    const temporaryIds: number[] = [];
-    const planned: CallArgumentPlan[] = [];
-    const loweredArguments = yield* compileChild(
-      this.lowerOrderedExpressionsTask(
-        expression.arguments.map((argument) => argument.value),
-        true,
-      ),
-    );
-    expression.arguments.forEach((argument, index) => {
-      const lowered = loweredArguments[index]!;
-      for (const temporaryId of lowered.temporaryIds) temporaryIds.push(temporaryId);
-      const parameterName = boundParameterName(registered.declaration.parameters, argument, index);
-      if (parameterName === undefined) {
-        throw new InstructionCompilationError(
-          "TSC003",
-          `Function '${name}' has no parameter for positional argument ${index + 1}.`,
-          argument.span,
-        );
-      }
-      planned.push({
-        parameterName,
-        value: lowered.plan,
-        span: copySpan(argument.span),
-        ...withTypeCheck(this.typeChecks.get(argument)),
-      });
-    });
-    const destinationTemporary = this.allocateTemporary();
-    const callIndex = this.instructions.length;
-    if (registered.id === null) this.project.foreignCalls.push({ instruction: callIndex, name });
-    this.instructions.push({
-      kind: "callFunction",
-      functionId: registered.id ?? 0,
-      arguments: planned,
-      destinationTemporary,
-      returnInstruction: callIndex + 1,
-      span: copySpan(expression.span),
-    });
-    if (temporaryIds.length > 0) {
-      this.instructions.push({
-        kind: "clearTemporaries",
-        temporaryIds: [...new Set(temporaryIds)],
-        span: copySpan(expression.span),
-      });
-    }
-    return {
-      plan: {
-        kind: "temporary",
-        temporaryId: destinationTemporary,
-        span: copySpan(expression.span),
-      },
-      temporaryIds: [destinationTemporary],
-    };
-  }
-
-  /**
-   * A call of a function or method other than the script's own; `omitted` is a `default:` left out to run after the call
-   * as instructions (see `#lowerLazyDefaultTask`).
-   */
-  *#lowerCallTask(
-    expression: Extract<Expression, { kind: "callExpression" }>,
-    omitted: NamedArgument | null,
-  ): CompileTask<LoweredExpression> {
-    const written = expression.arguments.filter((argument) => argument !== omitted);
-    let callee: LoweredExpression;
-    // Grouping a method does not detach it from its receiver: `(text.trim)()` calls `text.trim()`.
-    const method = unwrapParentheses(expression.callee);
-    if (method.kind === "propertyAccessExpression") {
-      let receiver = yield* compileChild(this.lowerExpressionTask(method.object));
-      if (written.some((argument) => this.emitsInstructions(argument.value))) {
-        receiver = this.#prepareReferenceExpression(receiver, method.object.span);
-        this.instructions.push({
-          kind: "validateCallReceiver",
-          receiver: receiver.plan,
-          method: method.property.name,
-          span: copySpan(method.span),
-        });
-      }
-      callee = {
-        plan: {
-          kind: "property",
-          object: receiver.plan,
-          name: method.property.name,
-          span: copySpan(method.span),
-        },
-        temporaryIds: receiver.temporaryIds,
-      };
-    } else {
-      callee = yield* compileChild(this.lowerExpressionTask(expression.callee));
-    }
-    const loweredArguments = yield* compileChild(
-      this.lowerOrderedExpressionsTask(written.map((argument) => argument.value)),
-    );
-    const argumentsList = written.map((argument, index) => ({
-      argument,
-      lowered: loweredArguments[index]!,
-    }));
-    return {
-      plan: {
-        kind: "call",
-        callee: callee.plan,
-        arguments: argumentsList.map(({ argument, lowered }) =>
-          argument.kind === "positionalArgument"
-            ? { kind: "positional", value: lowered.plan, span: copySpan(argument.span) }
-            : {
-                kind: "named",
-                name: argument.name.name,
-                value: lowered.plan,
-                span: copySpan(argument.span),
-              },
-        ),
-        // The check of a `get` default goes with the default.
-        ...(omitted === null ? withTypeCheck(this.typeChecks.get(expression)) : {}),
-        span: copySpan(expression.span),
-      },
-      temporaryIds: [
-        ...callee.temporaryIds,
-        ...argumentsList.flatMap((item) => item.lowered.temporaryIds),
-      ],
-    };
-  }
-
-  /**
-   * A `default:` that runs instructions, such as an ask, runs only when it is used (owner decision, 2026-10-16). `probe`
-   * runs the call or `load` without it, into the result's temporary, and says in the other temporary whether it needs
-   * the default. Only then do the default's instructions run, and its value takes the result's place, checked by
-   * `accept` as the call checks a default or as the load's result.
-   */
-  *#lowerLazyDefaultTask(
-    probe: (temporaryId: number, defaultTemporary: number) => void,
-    defaultValue: Expression,
-    accept: Pick<StoreTemporaryInstruction, "defaultOf" | "typeCheck">,
-    origin: Extract<ControlOrigin, { kind: "default" }>["expression"],
-  ): CompileTask<LoweredExpression> {
-    const resultTemporary = this.allocateTemporary();
-    const defaultTemporary = this.allocateTemporary();
-    probe(resultTemporary, defaultTemporary);
-    const span = copySpan(origin.span);
-    const conditional = this.instructions.length;
-    const conditionalInstruction: JumpIfFalseInstruction = {
-      kind: "jumpIfFalse",
-      condition: { kind: "temporary", temporaryId: defaultTemporary, span },
-      target: -1,
-      span,
-    };
-    this.instructions.push(conditionalInstruction);
-    this.#originate(conditional, { kind: "default", expression: origin });
-    const lowered = yield* compileChild(this.lowerExpressionTask(defaultValue));
-    this.instructions.push({
-      kind: "storeTemporary",
-      temporaryId: resultTemporary,
-      value: lowered.plan,
-      expectBoolean: false,
-      ...accept,
-      span: copySpan(defaultValue.span),
-    });
-    this.instructions[conditional] = {
-      ...conditionalInstruction,
-      target: this.instructions.length,
-    };
-    return {
-      plan: { kind: "temporary", temporaryId: resultTemporary, span },
-      temporaryIds: [...lowered.temporaryIds, defaultTemporary, resultTemporary],
-    };
-  }
-
-  /**
-   * Lowers `load`. A default that emits instructions runs only when the key is absent, or holds a value that does not
-   * fit the load's type. Any other default stays lazy inside the load plan.
-   */
-  *#lowerLoadTask(
-    expression: Extract<Expression, { kind: "loadExpression" }>,
-  ): CompileTask<LoweredExpression> {
-    const key = yield* compileChild(this.lowerExpressionTask(expression.key));
-    const defaultValue = expression.defaultValue;
-    const type = this.typeChecks.get(expression)?.type ?? null;
-    if (defaultValue === null || !this.emitsInstructions(defaultValue)) {
-      const lowered =
-        defaultValue === null ? null : yield* compileChild(this.lowerExpressionTask(defaultValue));
-      return {
-        plan: {
-          kind: "storageLoad",
-          key: key.plan,
-          default: lowered?.plan ?? null,
-          type,
-          span: copySpan(expression.span),
-        },
-        temporaryIds: [...key.temporaryIds, ...(lowered?.temporaryIds ?? [])],
-      };
-    }
-    // The default takes the place of the stored value, so it fits the load's type, or is null.
-    const check = this.typeChecks.get(expression);
-    const lowered = yield* compileChild(
-      this.#lowerLazyDefaultTask(
-        (temporaryId, defaultTemporary) => {
-          this.instructions.push({
-            kind: "storeTemporary",
-            temporaryId,
-            value: {
-              kind: "storageLoad",
-              key: key.plan,
-              default: null,
-              type,
-              span: copySpan(expression.span),
-            },
-            expectBoolean: false,
-            defaultTemporary,
-            span: copySpan(expression.span),
-          });
-        },
-        defaultValue,
-        check === undefined
-          ? {}
-          : {
-              typeCheck: {
-                type: { kind: "union", members: [check.type, { kind: "null" }] },
-                place: check.place,
-              },
-            },
-        expression,
-      ),
-    );
-    return { plan: lowered.plan, temporaryIds: [...key.temporaryIds, ...lowered.temporaryIds] };
-  }
-
   /**
    * `a otherwise b` whose fallback runs as instructions, such as an ask: the value waits in a temporary, and the fallback
    * runs only when it is null and then takes its place, as a `load` default does (V30 §18).
@@ -1901,7 +1463,7 @@ export class InstructionCompiler {
       span: copySpan(expression.span),
     };
     this.instructions.push(conditionalInstruction);
-    this.#originate(conditional, { kind: "operand", expression });
+    this.originate(conditional, { kind: "operand", expression });
     const right = yield* compileChild(this.lowerExpressionTask(expression.right));
     this.instructions.push({
       kind: "storeTemporary",
@@ -1946,7 +1508,7 @@ export class InstructionCompiler {
         span: copySpan(expression.span),
       };
       this.instructions.push(conditionalInstruction);
-      this.#originate(conditional, { kind: "operand", expression });
+      this.originate(conditional, { kind: "operand", expression });
       const right = yield* compileChild(this.lowerExpressionTask(expression.right));
       this.instructions.push({
         kind: "storeTemporary",
@@ -1972,7 +1534,7 @@ export class InstructionCompiler {
       span: copySpan(expression.span),
     };
     this.instructions.push(conditionalInstruction);
-    this.#originate(conditional, { kind: "operand", expression });
+    this.originate(conditional, { kind: "operand", expression });
     const skipRight = this.instructions.length;
     const skipRightInstruction: JumpInstruction = {
       kind: "jump",
@@ -2046,7 +1608,7 @@ export class InstructionCompiler {
         isLockCall(current.expression) ||
         (current.expression.kind === "callExpression" &&
           current.expression.callee.kind === "identifier" &&
-          this.#functionByName.has(current.expression.callee.name))
+          this.functionByName.has(current.expression.callee.name))
       ) {
         this.#instructionEmissionByExpression.set(current.expression, true);
         continue;
