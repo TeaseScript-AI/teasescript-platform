@@ -298,11 +298,11 @@ test("every member a receiver kind has answers its declared result to a consumer
             expected.push(`null-check ${label} [non-null] @${siteOf(inner)}`);
           if (unknown(collection) || value.some((item) => item.tag === "empty"))
             expected.push(`empty-check ${label} [list] @${siteOf(use.value)}`);
-          if (member.exact === true && member.result.element !== undefined) {
-            const elements = value.filter((item) => item.tag !== "empty");
-            if (elements.length === 0 || elements.some((item) => item.tag !== declared.kind))
-              failing.push(`${name}: its element ${kinds(elements)}, not ${declared.kind}`);
-          }
+          // a collection's element is never nothing either, so an empty answer cannot hide its consumer's check
+          const elements = value.filter((item) => item.tag !== "empty");
+          if (elements.length === 0) failing.push(`${name}: its element has no items`);
+          else if (member.exact === true && elements.some((item) => item.tag !== declared.kind))
+            failing.push(`${name}: its element ${kinds(elements)}, not ${declared.kind}`);
         }
         const record = coreRecord(coreResult(answers), ["main.tease"]);
         const sites = new Set([
