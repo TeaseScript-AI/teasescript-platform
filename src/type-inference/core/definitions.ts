@@ -32,6 +32,30 @@ export function keyPath(key: Key): string[] {
   return steps === "" ? [] : steps.split(".");
 }
 
+/**
+ * The path steps of a choice object's button value (V30 §19, TABLE r4.46 (1)), per record alternative: a record's
+ * `value` where it has the key (`SELECTED_VALUE`), its `text` where it has none (`SELECTED_TEXT`), answered where the
+ * path meets the records (a literal's objects). No property's step has a `#`.
+ */
+export const SELECTED_VALUE = "#value";
+export const SELECTED_TEXT = "#text";
+
+/**
+ * §3.2: a key as the record keys its selection steps read, for the tests of those keys: a test of `o.value` marks the
+ * button values that are `o`'s values, as it marks a read of `o.value`.
+ */
+export function recordKey(key: Key): Key {
+  return key.includes("#") ? keyOf(keyPlace(key), recordPath(keyPath(key))) : key;
+}
+
+export function recordPath(path: readonly string[]): readonly string[] {
+  return path.some((step) => step === SELECTED_VALUE || step === SELECTED_TEXT)
+    ? path.map((step) =>
+        step === SELECTED_VALUE ? "value" : step === SELECTED_TEXT ? "text" : step,
+      )
+    : path;
+}
+
 /** The prefixes of a key, the nearest first: `a|b.c` has `a|b` and `a|`. */
 export function prefixesOf(key: Key): Key[] {
   const place = keyPlace(key);

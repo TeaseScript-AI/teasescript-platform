@@ -5,6 +5,7 @@ import {
   keyPath,
   keyPlace,
   prefixesOf,
+  recordPath,
   sortCost,
   type Definition,
   type Key,
@@ -843,15 +844,16 @@ export class ExactPath {
   /**
    * §3.2: whether a test of its source at the path, or at a prefix of it, guards the read of a copy from `link` up to
    * `stop` (excluded): per prefix one search of the spans of the copies a branch holds, and one of those an operand region
-   * holds.
+   * holds; a choice's selection step as the record key it reads.
    */
   #markedAlong(
     forest: CopyForest,
     link: CopyLink,
-    rest: readonly string[],
+    read: readonly string[],
     stop: CopyLink | null,
   ): boolean {
     const { guards } = this.pass;
+    const rest = recordPath(read);
     const floor = stop === null ? -1 : stop.depth;
     for (let length = 0; length <= rest.length; length += 1) {
       const path = rest.slice(0, length).join(".");

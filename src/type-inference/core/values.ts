@@ -2,13 +2,12 @@ import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import {
   carried,
-  choiceLabels,
+  choiceItems,
   conversionKind,
   defaultOf,
   emptyAt,
   heldReference,
   ingressNull,
-  isMissing,
   ONLY_NULL,
   OPAQUE_MEMBER,
   operatorOf,
@@ -16,7 +15,6 @@ import {
   REFERENCE,
   typedDefault,
   unknownItem,
-  withoutMissing,
   withOwnSelection,
 } from "./contract.js";
 import { keyOf, keyPath, keyPlace, type ForLoopFacts, type Key } from "./definitions.js";
@@ -27,7 +25,9 @@ import {
   builtinResult,
   conversionCategory,
   declaredResult,
+  dictList,
   interactionCategory,
+  listStep,
   measuresLength,
   memberResult,
   methodCategory,
@@ -155,11 +155,101 @@ export class Values {
   }
 
   /** The value of a place at a node, read at the path `rest` below it. */
-  public *valueItems(
+  public valueItems(
     value: PlaceId,
     node: FlowNode | null,
     rest: readonly string[],
   ): Work<readonly Item[]> {
+    return this.#through(value, node, rest, 0);
+  }
+
+  /**
+   * TABLE r4.46 (2): a value read along a path through a dict's `values` (a new list of its values) or `keys` (a new
+   * list of text), from the step `from` on, where the path ends: at a literal or an operation (a projection passes its
+   * step to its owner, and a variable or a call its key to the key's reads, which the contract answers the same way).
+   * The lists are as certain as the dict and may hold none (no count proof, no `null`); an object's own property of the
+   * name is read as any property (F11), and a receiver that may be a reference has the runtime's members (F19a).
+   */
+  #through(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+    from: number,
+  ): Work<readonly Item[]> {
+    const { program } = this.pass;
+    const at = listStep(rest, from);
+    if (
+      at < 0 ||
+      program.occurrenceOf.has(value) ||
+      program.projOf.has(value) ||
+      program.speakerPlaces.has(value) ||
+      (program.callOutOf.has(value) && program.opOf.get(value)?.kind === "call")
+    )
+      return this.#valueAt(value, node, rest);
+    return this.#dictLists(value, node, rest, at, from);
+  }
+
+  /** `#through` at the step `at`, the first of `rest` from `from` on that is a dict's `values` or `keys`. */
+  *#dictLists(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+    at: number,
+    from: number,
+  ): Work<readonly Item[]> {
+    const { program } = this.pass;
+    const before = rest.slice(0, at);
+    const after = rest.slice(at + 1);
+    // F19a, r4.44: a receiver that may be a reference, by its completed contract, has the runtime's members
+    const contract = this.pass.contract;
+    const decided =
+      before.length === 0
+        ? yield* contract.valueReceiver(value)
+        : yield* contract.contractOfValueAt(value, before);
+    if (heldReference(decided) || decided.some((item) => REFERENCE.has(item.tag)))
+      return yield* this.#through(value, node, rest, at + 1);
+    const receiver = withoutEmpty(yield* this.#through(value, node, before, from));
+    const out: Item[] = [];
+    let own = false;
+    for (const item of receiver) {
+      if (item.tag === "dict") {
+        const of = (tag: "list" | "string"): Item =>
+          carried({ ...makeItem(tag, item.writer, { context: item.context }), cert: item.cert }, [
+            item,
+          ]);
+        if (after.length === 0) out.push(of("list"));
+        else if (after[0] === "element") {
+          const below =
+            dictList(rest[at]!) === "keys"
+              ? after.length === 1
+                ? [of("string")]
+                : []
+              : yield* this.#through(value, node, [...before, ...after], at);
+          // the list's own selection takes its own emptiness (open); a deeper selection's marker is that selection's
+          const elements = after.length === 1 ? withoutEmpty(below) : below;
+          out.push(...(item.cert === "def" ? elements : weaken(elements)));
+          if (after.length === 1) out.push(EMPTY);
+        }
+      } else if (item.tag === "object") own = true;
+      else if (item.tag === "unknown") out.push(item);
+    }
+    if (own) out.push(...(yield* this.#through(value, node, rest, at + 1)));
+    return mergeItems(out, program.scope);
+  }
+
+  /** A written element of a list or set at a path, read as the list's literal reads it, below its element step (F12). */
+  *#belowElement(
+    literal: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+  ): Work<readonly Item[]> {
+    const { program, contract } = this.pass;
+    if (!program.hasOf.has(literal)) return yield* this.valueItems(literal, node, rest);
+    return alternatives(yield* contract.indexItems(literal, rest, node, true, true), program.scope);
+  }
+
+  /** The value of a place at a node at a path, by the place's kind. */
+  *#valueAt(value: PlaceId, node: FlowNode | null, rest: readonly string[]): Work<readonly Item[]> {
     const { program, contract } = this.pass;
     if (program.speakerPlaces.has(value))
       return [makeItem("unknown", null, { reasons: REASON.opaque, context: "unmodelled" })];
@@ -227,29 +317,6 @@ export class Values {
       else if (item.tag === "unknown") out.push(item);
     }
     return mergeItems(out, this.pass.program.scope);
-  }
-
-  /**
-   * V30 §19: the value a choice object's button gives at `rest`: its `value`, and its `text` where it may have none.
-   */
-  *#choiceValue(
-    option: PlaceId,
-    node: FlowNode | null,
-    at: readonly string[],
-    rest: readonly string[],
-  ): Work<readonly Item[]> {
-    const value = withoutEmpty(yield* this.valueItems(option, node, [...at, "value"]));
-    const present = withoutMissing(value);
-    const out: Item[] = [];
-    if (present.length > 0)
-      out.push(
-        ...(rest.length === 0
-          ? present
-          : yield* this.valueItems(option, node, [...at, "value", ...rest])),
-      );
-    if (value.length === 0 || value.some(isMissing))
-      out.push(...(yield* this.valueItems(option, node, [...at, "text", ...rest])));
-    return out;
   }
 
   /**
@@ -570,28 +637,14 @@ export class Values {
     if (interaction?.kind === "asks")
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
     // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
-    if (interaction?.kind === "options") {
-      const labels = choiceLabels(c);
-      for (const [index, argument] of c.arguments.entries()) {
-        const label = labels[index];
-        if (label !== undefined) {
-          if (label !== null && rest.length === 0) out.push(makeItem(label));
-          continue;
-        }
-        const option = withoutEmpty(yield* this.valueItems(argument, at, []));
-        if (option.some((item) => item.tag === "list" || item.tag === "set"))
-          for (const item of withoutEmpty(yield* this.valueItems(argument, at, ["element"])))
-            if (item.tag === "object")
-              out.push(...(yield* this.#choiceValue(argument, at, ["element"], rest)));
-            else if (rest.length === 0 || item.tag === "unknown") out.push(item);
-        if (option.some((item) => item.tag === "object"))
-          out.push(...(yield* this.#choiceValue(argument, at, [], rest)));
-        for (const item of option)
-          if (item.tag === "list" || item.tag === "set" || item.tag === "object") continue;
-          else if (rest.length === 0 || item.tag === "unknown") out.push(item);
-      }
-      return out;
-    }
+    if (interaction?.kind === "options")
+      return yield* choiceItems(
+        c,
+        rest,
+        (value, path, element) =>
+          element === true ? this.#belowElement(value, at, path) : this.valueItems(value, at, path),
+        !contract.choiceKeysStored(),
+      );
     const member = family === "member" ? memberResult(name) : undefined;
     if (member !== undefined) return member.map((kind) => makeItem(kind));
     // F19a: a handle's members are the runtime's

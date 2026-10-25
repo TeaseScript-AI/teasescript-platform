@@ -8,12 +8,18 @@ import {
   choiceLabels,
   Contract,
   defaultOf,
+  REFERENCE,
   typeTags,
   termAt,
   writtenOf,
   type ContractFacts,
 } from "./contract.js";
-import { conversionCategory, interactionCategory, methodCategory } from "./method-categories.js";
+import {
+  conversionCategory,
+  dictList,
+  interactionCategory,
+  methodCategory,
+} from "./method-categories.js";
 import {
   DefinitionIndex,
   DefinitionLists,
@@ -248,7 +254,7 @@ export function solveDemands(
 }
 
 /**
- * The computation that demands `key` (`c|`, `rc|`, `cv|`, `def|`, `cop|`, `lit|`, `op|`, `dk|`, `dn|`, `vdk|`,
+ * The computation that demands `key` (`c|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `lit|`, `op|`, `dk|`, `dn|`, `vdk|`,
  * `vdn|`, as the parts write them).
  */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
@@ -257,6 +263,10 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   switch (kind) {
     case "c":
       return contract.contractOf(parts.join("|"));
+    case "s": {
+      const rest = parts[2] === "" || parts[2] === undefined ? [] : parts[2].split(".");
+      return contract.subAt(`${parts[0]}|${parts[1] ?? ""}`, rest);
+    }
     case "rc":
       return contract.receiverKinds(parts.join("|"));
     case "cv":
@@ -356,7 +366,13 @@ class StoppedAnswers implements Answers {
       exhausted: limit,
       demands: [],
       finished: [],
-      facts: { prefixEntries: 0, literalEntries: 0, markNodes: 0, markVisits: 0 },
+      facts: {
+        prefixEntries: 0,
+        literalEntries: 0,
+        markNodes: 0,
+        markVisits: 0,
+        selectionVisits: 0,
+      },
     };
   }
 
@@ -580,7 +596,7 @@ class CoreAnswers implements Answers {
       | { readonly literal: PlaceId; readonly path: readonly string[] };
     const pending: Task[] = [{ value, path: [] }];
     const seen = new Set<string>();
-    const kinds = (of: PlaceId): ReadonlySet<string> =>
+    const kinds = (of: PlaceId): ReadonlySet<ItemTag> =>
       new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag));
     while (pending.length > 0) {
       const task = pending.pop()!;
@@ -596,7 +612,8 @@ class CoreAnswers implements Answers {
         const { path } = task;
         const at = task.value;
         const source = contract.copiedKey(at) ?? contract.resultKey(at);
-        if (source !== null) {
+        // r4.46 (2): through a dict's `values` the projections are followed (a dict's values are its elements)
+        if (source !== null && !keyPath(source).some((step) => dictList(step) !== undefined)) {
           pending.push({ key: keyOf(keyPlace(source), [...keyPath(source), ...path]) });
           continue;
         }
@@ -612,6 +629,15 @@ class CoreAnswers implements Answers {
             const of = kinds(projection.owner);
             if (of.has("list") || of.has("set"))
               pending.push({ value: projection.owner, path: ["element", ...path] });
+          } else if (dictList(projection.step) !== undefined) {
+            // r4.46 (2): a dict's `values` holds its values (its `keys` text); an object's own property of the name;
+            // a receiver that may be a reference has the runtime's members, none known (F19a)
+            const of = kinds(projection.owner);
+            if ([...of].some((tag) => REFERENCE.has(tag))) continue;
+            if (of.has("object"))
+              pending.push({ value: projection.owner, path: [projection.step, ...path] });
+            if (of.has("dict") && dictList(projection.step) === "values" && path[0] === "element")
+              pending.push({ value: projection.owner, path });
           } else
             pending.push({ value: projection.owner, path: [stepName(projection.step), ...path] });
           continue;

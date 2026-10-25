@@ -219,6 +219,19 @@ test("the mark structures and lookups grow with the aliases, guards and wrappers
 });
 
 /**
+ * TABLE r4.46 (3), §8 (review round 5 on #1027): the property a choice object's button value reads is decided once per
+ * record where its literal is indexed, so k reads below the button value inspect each record once per read, never its
+ * properties: from 8 to 32 fields and reads a linear count grows four times, a square sixteen times.
+ */
+test("a choice's selection inspects a record's properties once, not once per read below it", () => {
+  const program = (k: number): string =>
+    `let o = {${many(k, (i) => `f${i}: 1`, ", ")}, text: "unused", value: {${many(k, (i) => `p${i}: 1`, ", ")}}}\n${many(k, (i) => `repeat (askChoice o).p${i} {}`)}\nexit`;
+  const small = facts(program(8)).selectionVisits;
+  const large = facts(program(32)).selectionVisits;
+  assert.ok(small > 0 && large <= 6 * small, `selection visits from 8 to 32: ${small}, ${large}`);
+});
+
+/**
  * r4.27: one holder per source and projection merges its contributions' guards, so a tested path's mark reaches an
  * untested sibling entry's read of that path: its error becomes a warning with its check, never silence; the same read
  * without the test errs, and so does the untested field.

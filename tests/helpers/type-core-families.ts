@@ -527,6 +527,24 @@ function w41(k: number, terminal: "return" | "exit" | "end"): readonly SourceFil
   ];
 }
 
+/**
+ * One root with k sibling fields, each stored, projected into its own variable and read through it (#1026): a record's
+ * fields, a dict's values under computed keys, or fields stored and read two steps below the projection.
+ */
+function w44(k: number, variant: "fields" | "dict" | "deep"): string {
+  const below = variant === "deep" ? ".g.v" : ".v";
+  const field = (i: number): string => (variant === "dict" ? `[key${i}]` : `.f${i}`);
+  return lines(
+    variant === "dict"
+      ? `let root = dict{${fields(k, () => "{v: 1}")}}`
+      : `let root = {${fields(k, () => (variant === "deep" ? "{g: {v: 1}}" : "{v: 1}"))}}`,
+    ...(variant === "dict" ? [rows(k, (i) => `let key${i} = "f${i}"`)] : []),
+    rows(k, (i) => `root${field(i)}${below} = 2`),
+    rows(k, (i) => `let p${i} = root${field(i)}\nrepeat p${i}${below} {}`),
+    "exit",
+  );
+}
+
 export const WORK_FAMILIES: readonly WorkFamily[] = [
   {
     name: "W1",
@@ -873,6 +891,31 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
       ...Array.from({ length: k }, (_, i) => file(`leaf${i}.tease`, 'goto "tail.tease"')),
       file("tail.tease", "end"),
     ],
+  },
+];
+
+/**
+ * W44 (r4.46 (3)): the width axis of one root's keys under projected copies, gated in both orders as W34 is; and k
+ * copies of an object's own property named as a dict's list, read at k fields below it (#1026 review r1).
+ */
+export const W44_VARIANTS: readonly WorkFamily[] = [
+  ...(["fields", "dict", "deep"] as const).map((variant) => ({
+    name: `W44-${variant}`,
+    measures: "r4.46 (3): a projected copy's stores found below its path alone",
+    program: (k: number) => main(w44(k, variant)),
+  })),
+  {
+    name: "W44-own-values",
+    measures: "§8 r4.15: copies of an object's own `values` are one source",
+    program: (k) =>
+      main(
+        lines(
+          `let root = {values: {${fields(k, () => "7")}}}`,
+          `let many = [${Array.from({ length: k }, () => "root.values").join(", ")}]`,
+          rows(k, (i) => `repeat many.first.f${i} {}`),
+          "exit",
+        ),
+      ),
   },
 ];
 

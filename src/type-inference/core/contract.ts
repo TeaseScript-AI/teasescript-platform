@@ -1,9 +1,25 @@
 import { isScalarKind } from "../../static-types.js";
 import { hasIdentity, VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
-import type { PlaceId, PlaceKind, TypeTerm } from "../graph.js";
+import type {
+  ChoiceObjectEvidence,
+  ChoiceOptionEvidence,
+  PlaceId,
+  PlaceKind,
+  TypeTerm,
+} from "../graph.js";
 import type { CorePass } from "./answers.js";
 import type { ReadRoute } from "./values.js";
-import { keyOf, keyPath, keyPlace, sortCost, type Definition, type Key } from "./definitions.js";
+import {
+  keyOf,
+  keyPath,
+  keyPlace,
+  recordPath,
+  SELECTED_TEXT,
+  SELECTED_VALUE,
+  sortCost,
+  type Definition,
+  type Key,
+} from "./definitions.js";
 import { withoutEmpty, withWriter } from "./exact-path.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
@@ -11,7 +27,9 @@ import {
   builtinResult,
   conversionCategory,
   declaredResult,
+  dictList,
   interactionCategory,
+  listStep,
   measuresLength,
   memberResult,
   methodCategory,
@@ -374,6 +392,9 @@ interface ValueEntry {
   readonly value: PlaceId;
 }
 
+/** A choice object's property its button value reads (V30 §19), or none. */
+type Selected = { readonly name: string; readonly type: TypeTerm } | null;
+
 /** One index of a literal's structure, through its nested literals at every step (§8 r4.9). */
 export interface LiteralIndex {
   /** Per path, the kinds its own terms give there, with the first literal's token. */
@@ -385,7 +406,13 @@ export interface LiteralIndex {
   readonly objects: Map<
     string,
     {
-      readonly list: { readonly names: Set<string>; readonly token: Writer }[];
+      readonly list: {
+        readonly names: Set<string>;
+        readonly token: Writer;
+        readonly term: Extract<TypeTerm, { readonly kind: "object" }>;
+        /** V30 §19: the property its button value reads, its `value`, else its `text`, or `null`. */
+        readonly selected: Selected;
+      }[];
       readonly count: Map<string, number>;
     }
   >;
@@ -429,6 +456,11 @@ export interface ContractFacts {
   literalEntries: number;
   markNodes: number;
   markVisits: number;
+  /**
+   * The record properties and records a choice's selection inspects (V30 §19): each property once where the literal
+   * index decides it, each record once per read.
+   */
+  selectionVisits: number;
 }
 
 export class Contract {
@@ -437,6 +469,7 @@ export class Contract {
     literalEntries: 0,
     markNodes: 0,
     markVisits: 0,
+    selectionVisits: 0,
   };
   readonly #prefix = new Map<Key, PrefixStores>();
   readonly #subPaths = new Map<Key, ReadonlySet<string>>();
@@ -454,6 +487,7 @@ export class Contract {
   >();
   readonly #lands = new Map<string, TypeTerm | null>();
   #placeKeys: Map<PlaceId, Key[]> | null = null;
+  #choiceKeysStored: boolean | null = null;
   #subFirst: Map<PlaceId, Set<string>> | null = null;
   #collected = false;
 
@@ -486,11 +520,40 @@ export class Contract {
   *#contractOf(key: Key): Work<readonly Item[]> {
     const { program } = this.pass;
     const place = keyPlace(key);
-    const path = keyPath(key);
     const found = program.places[place];
     if (found === undefined) return [unknownItem(REASON.external)];
     if (program.isHost(place)) return [unknownItem(REASON.external)];
     if (program.speakerPlaces.has(place)) return [unknownItem(REASON.opaque)];
+    // r4.46 (2): a key through a dict's `values` or `keys` (a copy of one) holds its list
+    return yield* this.#keyThrough(key, 0);
+  }
+
+  /**
+   * A key's contract along a path through a dict's `values` or `keys` from the step `from` on, its receiver decided as
+   * a reference's or not once (F19a, r4.44): a reference's member is the runtime's.
+   */
+  #keyThrough(key: Key, from: number): Work<readonly Item[]> {
+    const at = listStep(keyPath(key), from);
+    return at < 0 ? this.#keyContract(key) : this.#keyListsAt(key, at);
+  }
+
+  /** `#keyThrough` at the step `at`, the first of the key's path from its `from` on that is a dict's list. */
+  *#keyListsAt(key: Key, at: number): Work<readonly Item[]> {
+    const place = keyPlace(key);
+    const path = keyPath(key);
+    const receiver = yield* this.receiverKinds(keyOf(place, path.slice(0, at)));
+    if (heldReference(receiver)) return yield* this.#keyContract(key);
+    return yield* this.#dictLists(path, at, receiver, (along, start) =>
+      this.#keyThrough(keyOf(place, along), start),
+    );
+  }
+
+  /** The contract of a key from its stores and its prefixes' (§3.2). */
+  *#keyContract(key: Key): Work<readonly Item[]> {
+    const { program } = this.pass;
+    const place = keyPlace(key);
+    const path = keyPath(key);
+    const found = program.place(place);
     if (program.cellOwner.has(place) || program.hasOf.has(place))
       return yield* this.contractOfLiteral(place, path);
     // F19a: a reference's member is opaque, whatever is stored through it
@@ -723,15 +786,109 @@ export class Contract {
     );
   }
 
-  /** A projected source's stores below its path start after the path. */
+  /**
+   * A projected source's stores below its path start after the path: a demand, once per source and path, whatever
+   * number of its copies read there (r4.46 (3)).
+   */
   public *subAt(sub: Key, rest: readonly string[]): Work<readonly Item[]> {
-    this.pass.program.work.charge("invSteps");
+    const site = this.pass.program.places[keyPlace(sub)]?.site ?? null;
+    return yield {
+      key: `s|${sub}|${rest.join(".")}`,
+      kind: "contract",
+      file: site?.file ?? -1,
+      offset: site?.start ?? -1,
+      make: () => this.#subAt(sub, rest),
+    };
+  }
+
+  *#subAt(sub: Key, rest: readonly string[]): Work<readonly Item[]> {
+    const { program } = this.pass;
+    program.work.charge("invSteps");
     const base = keyPath(sub);
-    return yield* this.#contractAlong(keyPlace(sub), [...base, ...rest], base.length + 1);
+    return mergeItems(
+      yield* this.#contractAlong(keyPlace(sub), [...base, ...rest], base.length + 1),
+      program.scope,
+    );
   }
 
   /** The kinds at a path of a value: a literal's field, a copied record's field. */
-  public *contractOfValueAt(value: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
+  public contractOfValueAt(value: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
+    return this.#through(value, rest, 0);
+  }
+
+  /**
+   * TABLE r4.46 (2): a value's kinds along a path through a dict's `values` (a new list of its values) or `keys` (a new
+   * list of text), from the step `from` on, where the path ends: at a literal or an operation (a projection passes its
+   * step to its owner, and a variable or a call its key to `#keyThrough`). Either list may hold none (no count proof, no
+   * `null`); an object's own property of the name is read as any property (F11), and a receiver that may be a reference
+   * has the runtime's members (F19a).
+   */
+  #through(value: PlaceId, rest: readonly string[], from: number): Work<readonly Item[]> {
+    const { program } = this.pass;
+    const at = listStep(rest, from);
+    if (
+      at < 0 ||
+      program.occurrenceOf.has(value) ||
+      program.projOf.has(value) ||
+      program.speakerPlaces.has(value) ||
+      program.callOutOf.has(value)
+    )
+      return this.#valueAt(value, rest);
+    return this.#listsAt(value, rest, at, from);
+  }
+
+  /** `#through` at the step `at`, the first of `rest` from `from` on that is a dict's `values` or `keys`. */
+  *#listsAt(
+    value: PlaceId,
+    rest: readonly string[],
+    at: number,
+    from: number,
+  ): Work<readonly Item[]> {
+    const receiver = yield* this.#through(value, rest.slice(0, at), from);
+    // F19a, r4.44: a receiver that may be a reference has the runtime's members, decided once for a whole value
+    const decided = at === 0 ? yield* this.valueReceiver(value) : receiver;
+    if (heldReference(decided) || decided.some((item) => REFERENCE.has(item.tag)))
+      return yield* this.#through(value, rest, at + 1);
+    return yield* this.#dictLists(rest, at, receiver, (path, start) =>
+      this.#through(value, path, start),
+    );
+  }
+
+  /**
+   * The kinds along `path` whose step `at` is a dict's `values` or `keys`, given the receiver's kinds before it, by
+   * `read` (a path through such steps from a step on): the dict's lists, and an object's own property of the name read
+   * as any property.
+   */
+  *#dictLists(
+    path: readonly string[],
+    at: number,
+    receiver: readonly Item[],
+    read: (path: readonly string[], from: number) => Work<readonly Item[]>,
+  ): Work<readonly Item[]> {
+    const before = path.slice(0, at);
+    const after = path.slice(at + 1);
+    const out: Item[] = [];
+    let own = false;
+    for (const item of withoutEmpty(receiver)) {
+      if (item.tag === "dict") {
+        if (after.length === 0) out.push(carried(makeItem("list", item.writer), [item]));
+        else if (after[0] === "element") {
+          // the list's own selection takes its own emptiness (open); a deeper selection's marker is that selection's
+          if (dictList(path[at]!) === "values") {
+            const below = yield* read([...before, ...after], at);
+            out.push(...(after.length === 1 ? withoutEmpty(below) : below));
+          } else if (after.length === 1) out.push(carried(makeItem("string", item.writer), [item]));
+          if (after.length === 1) out.push(EMPTY);
+        }
+      } else if (item.tag === "object") own = true;
+      else if (item.tag === "unknown") out.push(item);
+    }
+    if (own) out.push(...(yield* read(path, at + 1)));
+    return mergeItems(out, this.pass.program.scope);
+  }
+
+  /** The kinds at a path of a value, by the value's kind. */
+  *#valueAt(value: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
     if (rest.length === 0) return yield* this.contractOfValue(value);
     const { program, guards } = this.pass;
     program.work.charge("invSteps");
@@ -833,28 +990,6 @@ export class Contract {
   }
 
   /** F14: a text's or a collection's length is a whole number; an object's own `length` is its property (F11). */
-  /**
-   * V30 §19: the value a choice object's button gives at `rest`: its `value`, and its `text` where it may have none.
-   */
-  *#choiceValue(
-    option: PlaceId,
-    at: readonly string[],
-    rest: readonly string[],
-  ): Work<readonly Item[]> {
-    const value = withoutEmpty(yield* this.contractOfValueAt(option, [...at, "value"]));
-    const present = withoutMissing(value);
-    const out: Item[] = [];
-    if (present.length > 0)
-      out.push(
-        ...(rest.length === 0
-          ? present
-          : yield* this.contractOfValueAt(option, [...at, "value", ...rest])),
-      );
-    if (value.length === 0 || value.some(isMissing))
-      out.push(...(yield* this.contractOfValueAt(option, [...at, "text", ...rest])));
-    return out;
-  }
-
   *#contractLength(owner: PlaceId, step: string, rest: readonly string[]): Work<readonly Item[]> {
     // F19a before F14: a receiver that may be a reference has the runtime's members, its `length` among them
     if (heldReference(yield* this.valueReceiver(owner)))
@@ -1012,29 +1147,16 @@ export class Contract {
     if (interaction?.kind === "asks")
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
     // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
-    if (interaction?.kind === "options") {
-      const out: Item[] = [];
-      const labels = choiceLabels(c);
-      for (const [index, argument] of c.arguments.entries()) {
-        const label = labels[index];
-        if (label !== undefined) {
-          if (label !== null && rest.length === 0) out.push(makeItem(label));
-          continue;
-        }
-        const option = withoutEmpty(yield* this.contractOfValue(argument));
-        if (option.some((item) => item.tag === "list" || item.tag === "set"))
-          for (const item of withoutEmpty(yield* this.contractOfValueAt(argument, ["element"])))
-            if (item.tag === "object")
-              out.push(...(yield* this.#choiceValue(argument, ["element"], rest)));
-            else if (rest.length === 0 || item.tag === "unknown") out.push(item);
-        if (option.some((item) => item.tag === "object"))
-          out.push(...(yield* this.#choiceValue(argument, [], rest)));
-        for (const item of option)
-          if (item.tag === "list" || item.tag === "set" || item.tag === "object") continue;
-          else if (rest.length === 0 || item.tag === "unknown") out.push(item);
-      }
-      return mergeItems(out, scope);
-    }
+    if (interaction?.kind === "options")
+      return mergeItems(
+        yield* choiceItems(
+          c,
+          rest,
+          (value, path) => this.contractOfValueAt(value, path),
+          !this.choiceKeysStored(),
+        ),
+        scope,
+      );
     if (rest.length > 0) return [unknownItem(REASON.opaque)];
     // F16: the runtime's operator table
     const operator = operatorOf(c);
@@ -1172,6 +1294,25 @@ export class Contract {
       !program.cellOwner.has(place) &&
       !program.hasOf.has(place)
     );
+  }
+
+  /**
+   * Whether a store goes below a property named `value` or `text` (a choice object changed after it is made): then a
+   * held choice object's button value is read by its keys, not per record (V30 §19).
+   */
+  public choiceKeysStored(): boolean {
+    if (this.#choiceKeysStored === null) {
+      this.#choiceKeysStored = false;
+      for (const [key] of this.pass.definitions.byKey) {
+        this.pass.program.work.charge("invSteps");
+        const path = keyPath(key);
+        if (path.includes("value") || path.includes("text")) {
+          this.#choiceKeysStored = true;
+          break;
+        }
+      }
+    }
+    return this.#choiceKeysStored;
   }
 
   /** The keys of a place that have definitions. */
@@ -1733,22 +1874,20 @@ export class Contract {
     return layer;
   }
 
-  /** The layer a projected copy of `place` at `projection` takes: the place's own live stores below the path, once. */
+  /**
+   * The layer a projected copy of `place` at `projection` takes: the place's own live stores below the path, once, from
+   * the keys below the path alone (r4.46 (3): never the place's whole key set per copy).
+   */
   #projectedLayer(place: PlaceId, projection: readonly string[]): SubLayer | null {
     const id = `${place}|${projection.join(".")}`;
     if (this.#projectedLayers.has(id)) return this.#projectedLayers.get(id)!;
     const { program, definitions, lists } = this.pass;
     const sub = keyOf(place, projection);
     const own = new Map<string, Set<Key>>();
-    for (const below of this.#keysOfPlace(place)) {
-      const path = keyPath(below);
+    for (const below of definitions.keysBelow(sub)) {
       program.work.charge("invSteps");
-      if (
-        path.length > projection.length &&
-        projection.every((step, index) => path[index] === step) &&
-        (definitions.byKey.get(below) ?? []).some((d) => lists.live(d))
-      )
-        own.set(path[projection.length]!, new Set([sub]));
+      if ((definitions.byKey.get(below) ?? []).some((d) => lists.live(d)))
+        own.set(keyPath(below)[projection.length]!, new Set([sub]));
     }
     const layer = this.#layer(own, null);
     this.#projectedLayers.set(id, layer);
@@ -1806,22 +1945,17 @@ export class Contract {
     return at;
   }
 
-  /** The relative paths of a source's live keys below it, once per source. */
+  /** The relative paths of a source's live keys below it, once per source, from the keys below it alone (r4.46 (3)). */
   #ownPaths(sub: Key): ReadonlySet<string> {
     const known = this.#subPaths.get(sub);
     if (known !== undefined) return known;
     const { program, definitions, lists } = this.pass;
     const paths = new Set<string>();
     const base = keyPath(sub);
-    for (const below of this.#keysOfPlace(keyPlace(sub))) {
-      const path = keyPath(below);
+    for (const below of definitions.keysBelow(sub)) {
       program.work.charge("invSteps");
-      if (
-        path.length > base.length &&
-        base.every((step, index) => path[index] === step) &&
-        (definitions.byKey.get(below) ?? []).some((d) => lists.live(d))
-      )
-        paths.add(path.slice(base.length).join("."));
+      if ((definitions.byKey.get(below) ?? []).some((d) => lists.live(d)))
+        paths.add(keyPath(below).slice(base.length).join("."));
     }
     this.#subPaths.set(sub, paths);
     return paths;
@@ -2184,9 +2318,10 @@ export class Contract {
   /**
    * §3.2: a holder's mark at `path` (memoised per holder and the leading steps it can depend on): a literal's guarded
    * read at a prefix, the references standing at a prefix (each asked once, for the rest under its shift), its own
-   * reads. A walk on an explicit stack: a holder's ask waits on the references it asks.
+   * reads; a choice's selection step as the record key it reads. A walk on an explicit stack: a holder's ask waits on the
+   * references it asks.
    */
-  #marksAt(holder: Holder | null, path: readonly string[]): boolean {
+  #marksAt(holder: Holder | null, read: readonly string[]): boolean {
     if (holder === null) return false;
     this.#collectMarks();
     const work = this.pass.program.work;
@@ -2223,7 +2358,7 @@ export class Contract {
       });
       return undefined;
     };
-    let answer = ask(holder, path);
+    let answer = ask(holder, recordPath(read));
     while (stack.length > 0) {
       const frame = stack.at(-1)!;
       if (answer === true) frame.hit = true;
@@ -2424,10 +2559,17 @@ export class Contract {
         let objects = index.objects.get(path);
         if (objects === undefined)
           index.objects.set(path, (objects = { list: [], count: new Map() }));
-        const names = new Set(
-          (term.properties ?? []).map((property) => propertyStep(property.name)),
-        );
-        objects.list.push({ names, token: site });
+        // its property names, and the property its button value reads, decided once per record (V30 §19)
+        const names = new Set<string>();
+        let value: Selected = null;
+        let text: Selected = null;
+        for (const property of term.properties ?? []) {
+          this.facts.selectionVisits += 1;
+          names.add(propertyStep(property.name));
+          if (property.name === "value") value ??= property;
+          else if (property.name === "text") text ??= property;
+        }
+        objects.list.push({ names, token: site, term, selected: value ?? text });
         for (const name of names) objects.count.set(name, (objects.count.get(name) ?? 0) + 1);
         for (const property of [...(term.properties ?? [])].reverse())
           pending.push({
@@ -2542,11 +2684,12 @@ export class Contract {
     rest: readonly string[],
     node: FlowNode | null,
     exact: boolean,
+    below = false,
   ): Work<readonly Item[]> {
     const { program, definitions, values } = this.pass;
     const index = this.literalIndex(literal);
-    // an element cell: every path below lies below an element step
-    const inElement = program.cellOwner.get(literal)?.kind === "cell";
+    // an element cell, or a literal read as one (`below`): every path below lies below an element step
+    const inElement = below || program.cellOwner.get(literal)?.kind === "cell";
     const out: Item[] = [];
     // the read passes an element step over a copy (F12: X3)
     let overCopy = false;
@@ -2588,6 +2731,22 @@ export class Contract {
         for (const entry of index.others.get(path) ?? [])
           out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, below)));
       }
+      // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
+      const step = rest[length];
+      if (step === SELECTED_VALUE || step === SELECTED_TEXT) {
+        out.push(
+          ...(yield* this.#selectedAt(
+            index,
+            path,
+            step === SELECTED_VALUE,
+            rest.slice(length + 1),
+            node,
+            exact,
+            elementAbove,
+          )),
+        );
+        break;
+      }
       if (length === rest.length) break;
       // F11: an object here without the next step contributes `missing`; a reference, an opaque member (F19a)
       const lacking = this.#lackingAt(index, path, rest[length]!);
@@ -2615,6 +2774,50 @@ export class Contract {
           item.tag === "unknown" || item.tag === "empty" ? item : { ...item, context: "member" },
         )
       : out;
+  }
+
+  /**
+   * V30 §19, TABLE r4.46 (1): the button values of the options a literal holds at `path`, read at `after` below them,
+   * per record alternative: the `value` of a record that has the key (`byValue`), the `text` of one that has none (the
+   * property's own cell, its sources kept); a value that is no record is its own button's value, and a record whose keys
+   * are unknown, or a reference, has the runtime's (both with the `value`s).
+   */
+  *#selectedAt(
+    index: LiteralIndex,
+    path: string,
+    byValue: boolean,
+    after: readonly string[],
+    node: FlowNode | null,
+    exact: boolean,
+    below: boolean,
+  ): Work<readonly Item[]> {
+    const out: Item[] = [];
+    if (byValue && after.length === 0)
+      for (const [tag, token] of index.terms.get(path) ?? [])
+        if (tag !== "object") out.push(makeItem(tag, token));
+    if (byValue && index.references.has(path))
+      out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
+    for (const object of index.objects.get(path)?.list ?? []) {
+      this.pass.program.work.charge("invSteps");
+      this.facts.selectionVisits += 1;
+      const { selected } = object;
+      if (object.term.properties === null) {
+        if (byValue) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
+      } else if ((selected?.name === "value") !== byValue) continue;
+      else if (selected === null)
+        out.push(
+          exact
+            ? makeItem("unknown", object.token, { reasons: REASON.missing, context: "missing" })
+            : unknownItem(REASON.missing, object.token),
+        );
+      else if (selected.type.kind === "ref")
+        out.push(...(yield* this.indexItems(selected.type.place, after, node, exact, below)));
+      else {
+        const at = termAt(selected.type, after);
+        if (at !== null) for (const tag of typeTags(at)) out.push(makeItem(tag, object.token));
+      }
+    }
+    return out;
   }
 
   /**
@@ -2664,12 +2867,98 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
   );
 }
 
+/**
+ * V30 §19, TABLE r4.46 (1): an `askChoice`'s answer at `rest`, read by `read`: per option its label's kind, or each of
+ * its buttons' values. Whether a choice object gives its `value` or its `text` is decided by the key's presence in the
+ * object, never by what the key's value resolves to (an empty answer is unresolved, the solver's bottom, never an absent
+ * key): a written choice object (the whole option, or an element of a written list or set) by the keys it writes; one
+ * the options hold without writing it (a variable's, a call's) per record alternative where its path meets the records
+ * (`SELECTED_VALUE`, `SELECTED_TEXT`, the literal's objects). Where a store goes below a `value` or `text` property
+ * after a record is made (`byRecord` false), the records are read by their keys: the `value`, and every record's `text`
+ * where some lacks the key (F11's `missing`), neither certain.
+ */
+export function* choiceItems(
+  c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+  rest: readonly string[],
+  read: (value: PlaceId, path: readonly string[], element?: true) => Work<readonly Item[]>,
+  byRecord: boolean,
+): Work<Item[]> {
+  const out: Item[] = [];
+  const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
+  const labels = choiceLabels(c);
+  // a choice object the options hold without writing it: per record alternative its `value` or its `text`; where a store
+  // changes such records, by its keys: its `value`, and every record's `text` where some lacks the key, neither certain
+  const held = function* (option: PlaceId, at: readonly string[]): Work<void> {
+    if (byRecord) {
+      for (const step of [SELECTED_VALUE, SELECTED_TEXT])
+        out.push(...(yield* read(option, [...at, step, ...rest])));
+      return;
+    }
+    const value = withoutEmpty(yield* read(option, [...at, "value"]));
+    const lacking = value.some(isMissing);
+    const present = withoutMissing(value);
+    const either = (items: readonly Item[]): readonly Item[] =>
+      lacking && present.length > 0 ? weaken(items) : items;
+    if (present.length > 0 || !lacking)
+      out.push(
+        ...either(rest.length === 0 ? present : yield* read(option, [...at, "value", ...rest])),
+      );
+    if (lacking) out.push(...either(yield* read(option, [...at, "text", ...rest])));
+  };
+  // a written choice object's `value`, or its `text` without one; any other option or element by its value
+  const button = function* (
+    place: PlaceId,
+    object: ChoiceObjectEvidence | null,
+    element: boolean,
+  ): Work<void> {
+    const selected = object === null ? null : (object.value ?? object.text);
+    if (object !== null && selected !== null) {
+      // an element of a written list or set reads as its literal analogue, below the list's element step (F12 r4.7)
+      const key = object.value !== null ? "value" : "text";
+      const reading = element ? read(place, [key, ...rest], true) : read(selected, rest);
+      out.push(...(yield* reading));
+      return;
+    }
+    const items = withoutEmpty(yield* read(place, []));
+    if (items.some((item) => item.tag === "object")) yield* held(place, []);
+    for (const item of items)
+      if (item.tag !== "object" && (rest.length === 0 || item.tag === "unknown")) out.push(item);
+  };
+  for (const [index, argument] of c.arguments.entries()) {
+    const label = labels[index];
+    if (label !== undefined) {
+      if (label !== null && rest.length === 0) out.push(makeItem(label));
+      continue;
+    }
+    const content: ChoiceOptionEvidence["content"] | undefined = evidence[index]?.content;
+    if (content?.kind === "object") {
+      yield* button(argument, content.object, false);
+      continue;
+    }
+    if (content?.kind === "list" || content?.kind === "set") {
+      for (const element of content.elements) yield* button(element.place, element.object, true);
+      continue;
+    }
+    // a computed option: a list's or a set's elements, a choice object, or a value
+    const option = withoutEmpty(yield* read(argument, []));
+    if (option.some((item) => item.tag === "list" || item.tag === "set"))
+      for (const item of withoutEmpty(yield* read(argument, ["element"])))
+        if (item.tag === "object") yield* held(argument, ["element"]);
+        else if (rest.length === 0 || item.tag === "unknown") out.push(item);
+    if (option.some((item) => item.tag === "object")) yield* held(argument, []);
+    for (const item of option)
+      if (item.tag === "list" || item.tag === "set" || item.tag === "object") continue;
+      else if (rest.length === 0 || item.tag === "unknown") out.push(item);
+  }
+  return out;
+}
+
 /** A property read that found no such property. */
-export const isMissing = (item: Item): boolean =>
+const isMissing = (item: Item): boolean =>
   item.tag === "unknown" && (item.reasons & REASON.missing) !== 0;
 
 /** Items without their missing alternative: an unknown only missing goes, one with another reason keeps that reason. */
-export function withoutMissing(items: readonly Item[]): Item[] {
+function withoutMissing(items: readonly Item[]): Item[] {
   return items.flatMap((item) =>
     !isMissing(item)
       ? [item]
