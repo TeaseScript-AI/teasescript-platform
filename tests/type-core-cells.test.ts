@@ -1260,7 +1260,9 @@ test("a selection consumes only its own emptiness mark below get, a loop's visit
  * `temporal/year-present-wrong-store` only by A6's error at the store, both admission's.
  */
 test("the set's follow-up records give their records in both orders", () => {
-  const programs: readonly (readonly [string, string, readonly string[]])[] = [
+  // per record its source, its outcome, diagnostics and checks, and the words it asserts (an unasserted word is null)
+  type Expected = readonly [string, string, readonly string[], (readonly string[])?];
+  const programs: readonly Expected[] = [
     [
       "temporal/weekday-repeat",
       'let d = toDate("2026-10-04")\nrepeat d.weekday {}\nexit\n',
@@ -1294,6 +1296,7 @@ test("the set's follow-up records give their records in both orders", () => {
         "null-check x [non-null] @72",
         "warning-runtime-check",
       ],
+      ["member-read warning-runtime-check missing @72"],
     ],
     [
       "temporal/year-present-store",
@@ -1537,6 +1540,7 @@ test("the set's follow-up records give their records in both orders", () => {
         "warning-runtime-check",
         "written-target warning-runtime-check @17",
       ],
+      ["written-target warning-runtime-check member @17"],
     ],
     [
       "fit/literal-number-written",
@@ -1554,6 +1558,10 @@ test("the set's follow-up records give their records in both orders", () => {
         "written-target warning-runtime-check @17",
         "written-target warning-runtime-check @18",
       ],
+      [
+        "written-target warning-runtime-check member @17",
+        "written-target warning-runtime-check unknown @18",
+      ],
     ],
     [
       "fit/widened-place-written",
@@ -1563,6 +1571,7 @@ test("the set's follow-up records give their records in both orders", () => {
         "warning-runtime-check",
         "written-target warning-runtime-check @42",
       ],
+      ["written-target warning-runtime-check member @42"],
     ],
     [
       "fit/scalar-overwrite-written",
@@ -1577,6 +1586,7 @@ test("the set's follow-up records give their records in both orders", () => {
         "integer-use warning-runtime-check @7",
         "warning-runtime-check",
       ],
+      ["integer-use warning-runtime-check member @7"],
     ],
     [
       "fit/literal-number-repeat",
@@ -1586,15 +1596,22 @@ test("the set's follow-up records give their records in both orders", () => {
     ["fit/literal-integer-written", "let r: integer = [2, 3][0]\nexit\n", ["valid"]],
   ];
   const differing: string[] = [];
-  for (const [name, source, expected] of programs) {
+  for (const [name, source, expected, words = []] of programs) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, `${name}: its source parses and resolves`);
     for (const reversed of [false, true]) {
       const run = (): CompactRecord =>
         withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
-      const got = summary(reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run());
-      if (JSON.stringify(got) !== JSON.stringify(expected))
-        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join("; ")}`);
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const got = summary(record);
+      const worded = record.diagnostics.map(
+        (d) => `${d.kind} ${d.class} ${d.context} @${d.site.offset}`,
+      );
+      if (
+        JSON.stringify(got) !== JSON.stringify(expected) ||
+        words.some((word) => !worded.includes(word))
+      )
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${[...got, ...worded].join("; ")}`);
     }
   }
   assert.deepEqual(differing, []);
