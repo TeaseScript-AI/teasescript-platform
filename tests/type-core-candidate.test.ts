@@ -668,6 +668,15 @@ test("a projection of a literal carries its elements' types and host data on the
   assert.deepEqual({ says: bad.says, failed: bad.failure !== null }, { says: [], failed: true });
 });
 
+test("a projected written integer list stays strict on the candidate route (A4, round 15 B3)", () => {
+  const source = 'let typed: integer[] = [1]\nlet xs = [typed][0]\nxs = [2.5]\nsay "AFTER"\nexit\n';
+  assert.deepEqual(
+    inBothOrders(() => sited(candidate(source))),
+    [`error TSV041@${source.indexOf("2.5")}`],
+  );
+  assert.equal(candidate(source).plan, null);
+});
+
 /** Runs a plan to its end, observing each reading pause's deadline: the events and the final snapshot. */
 function finish(
   plan: InstructionPlan,

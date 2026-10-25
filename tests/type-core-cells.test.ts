@@ -3145,3 +3145,45 @@ test("a written copy decides through operations only where its read runs, with i
   }
   assert.deepEqual(differing, []);
 });
+
+test("a written copy carried through a projection or an operation keeps its written type where it is selected (A4, round 15)", () => {
+  // per program its outcome: a selected written copy decides by its written type (strict integer, a union admitting
+  // text), an evaluated but unselected one decides nothing
+  const programs: readonly (readonly [string, string, string])[] = [
+    [
+      "an unselected receiver element",
+      'let typed: integer[] = [1]\nlet xs = [typed].get(2, default: [])\nxs.add("good")\nexit',
+      "valid",
+    ],
+    [
+      "a selected union through otherwise",
+      'let typed: (integer | string)[] = [1]\nlet xs = typed otherwise []\nxs.add("good")\nexit',
+      "valid",
+    ],
+    [
+      "a selected union through a projection",
+      'let typed: (integer | string)[] = [1]\nlet xs = (null otherwise {v: typed}).v\nxs.add("good")\nexit',
+      "valid",
+    ],
+    [
+      "a projected written integer list",
+      "let typed: integer[] = [1]\nlet xs = [typed][0]\nxs = [2.5]\nexit",
+      "compile-error",
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, outcome] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      if (record.outcome !== outcome || (outcome === "valid" && record.checks.length > 0))
+        differing.push(
+          `${name}${reversed ? " reversed" : ""}: ${record.outcome}, ${record.checks.length} checks`,
+        );
+    }
+  }
+  assert.deepEqual(differing, []);
+});
