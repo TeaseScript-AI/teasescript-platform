@@ -7,7 +7,6 @@ import {
 } from "../../numeric-functions.js";
 import {
   ANGLE_TYPE,
-  arithmeticType,
   INTEGER_TYPE,
   isNumeric,
   isScalar,
@@ -17,6 +16,7 @@ import {
   resolved,
   type StaticType,
 } from "../../static-types.js";
+import { arithmeticType } from "../../static-types/arithmetic.js";
 import { typeKey } from "../../storage-types.js";
 import { TEMPORAL_KINDS } from "../../temporal-builtins.js";
 import type { OperandView, OperationRelation, OperationResult } from "./relation.js";

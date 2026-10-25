@@ -4,32 +4,31 @@ import test from "node:test";
 
 import type { ScalarTypeName } from "../src/ast.js";
 import {
-  assignedType,
   containsType,
-  excludeType,
   isAssignable,
   isScalarKind,
   members,
-  narrowTo,
   nonNullType,
   NULL_TYPE,
   openType,
   optional,
-  PropertyTable,
   union,
   type ScalarValue,
   type StaticType,
 } from "../src/static-types.js";
+import { PropertyTable } from "../src/static-types/property-tables.js";
+import { assignedType, excludeType, narrowTo } from "../src/static-types/narrowing.js";
 import { typeKey } from "../src/storage-types.js";
 import type { TypeTerm } from "../src/type-inference/graph.js";
 import { TypeTable, type TypeId } from "../src/type-inference/solver/types.js";
 import { VALUE_KIND_NAMES, type ValueKind } from "../src/value-kinds.js";
 
-// The type table of O4 stage 3a (work note §2) against the legacy's algebra in `static-types.ts`, over an enumerated
-// catalog: every atom of the registry, null, unknown, never, restricted scalars, the collections of each atom, nested
-// collections, objects, and unions, to depth three. The table computes every transfer through the legacy function, so
-// what this pins is the conversion both ways: interning keeps the structure the legacy renders, and the legacy's answer
-// for the converted types is its answer for the types the catalog builds.
+// The type table of O4 stage 3a (work note §2) against the legacy's algebra in `static-types.ts` and
+// `static-types/narrowing.ts`, over an enumerated catalog: every atom of the registry, null, unknown, never, restricted
+// scalars, the collections of each atom, nested collections, objects, and unions, to depth three. The table computes
+// every transfer through the legacy function, so what this pins is the conversion both ways: interning keeps the
+// structure the legacy renders, and the legacy's answer for the converted types is its answer for the types the catalog
+// builds.
 
 interface Entry {
   readonly name: string;

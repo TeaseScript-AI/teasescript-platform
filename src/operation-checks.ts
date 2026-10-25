@@ -32,7 +32,6 @@ import { staticVisibleText, type KnownValue } from "./static-evaluation.js";
 import {
   ANGLE_TYPE,
   containsType,
-  describeValue,
   INTEGER_TYPE,
   isAssignable,
   isKnown,
@@ -44,13 +43,13 @@ import {
   REGEX_TYPE,
   resolved,
   STRING_TYPE,
-  typeName,
   union,
   valueKindOfType,
   isIdentityType,
   isShown,
   type StaticType,
 } from "./static-types.js";
+import { describeValue, typeName } from "./static-types/type-names.js";
 import {
   orderedFamily,
   unwritableJsonReason,

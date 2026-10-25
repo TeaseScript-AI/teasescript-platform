@@ -23,7 +23,7 @@ import {
 } from "../../capture-call.js";
 import { durationLiteralValue } from "../../duration.js";
 import type { RuntimeCheckSite } from "../../type-inference/backend.js";
-import { typeFromAnnotation } from "../../static-types.js";
+import { typeFromAnnotation } from "../../static-types/annotations.js";
 import { typePlan } from "../../type-plans.js";
 import {
   expressionChildren as instructionEmissionChildren,

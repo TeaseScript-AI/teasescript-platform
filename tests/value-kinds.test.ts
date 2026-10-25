@@ -10,11 +10,8 @@ import {
   validateSerializableValue,
   type SerializableRuntimeValue,
 } from "../src/runtime/values/serializable-values.js";
-import {
-  describeValue as describeType,
-  UNKNOWN_TYPE,
-  type StaticType,
-} from "../src/static-types.js";
+import { UNKNOWN_TYPE, type StaticType } from "../src/static-types.js";
+import { describeValue as describeType } from "../src/static-types/type-names.js";
 import {
   describeValue,
   hasIdentity,

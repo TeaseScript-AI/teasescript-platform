@@ -5,11 +5,11 @@ import {
   DURATION_TYPE,
   INTEGER_TYPE,
   NUMBER_TYPE,
-  PropertyTable,
   STRING_TYPE,
   UNKNOWN_TYPE,
   type StaticType,
 } from "../src/static-types.js";
+import { PropertyTable } from "../src/static-types/property-tables.js";
 import { operationRelations } from "../src/type-inference/adapters/index.js";
 import type { SyntaxEvidence } from "../src/type-inference/graph.js";
 import {

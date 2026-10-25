@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import type { Block, Expression, LetStatement, Statement } from "../../src/ast.js";
 import {
   INTEGER_TYPE,
-  joinTypes,
   members,
   resolved,
   STRING_TYPE,
@@ -11,6 +10,7 @@ import {
   UNKNOWN_TYPE,
   type StaticType,
 } from "../../src/static-types.js";
+import { joinTypes } from "../../src/static-types/join.js";
 import { typeKey } from "../../src/storage-types.js";
 import type {
   DynamicWhy,

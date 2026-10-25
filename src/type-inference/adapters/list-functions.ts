@@ -14,13 +14,13 @@ import {
   isScalar,
   members,
   NUMBER_TYPE,
-  PropertyTable,
   resolved,
   union,
   UNKNOWN_TYPE,
   valueKindOfType,
   type StaticType,
 } from "../../static-types.js";
+import { PropertyTable } from "../../static-types/property-tables.js";
 import { minMaxOfValues } from "./numeric.js";
 import type {
   OperandView,

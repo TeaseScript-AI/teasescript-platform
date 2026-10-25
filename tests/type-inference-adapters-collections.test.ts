@@ -1,14 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  INTEGER_TYPE,
-  NUMBER_TYPE,
-  optional,
-  PropertyTable,
-  STRING_TYPE,
-  union,
-} from "../src/static-types.js";
+import { INTEGER_TYPE, NUMBER_TYPE, optional, STRING_TYPE, union } from "../src/static-types.js";
+import { PropertyTable } from "../src/static-types/property-tables.js";
 import { memberOf, operationRelations } from "../src/type-inference/adapters/index.js";
 import {
   assertCase,

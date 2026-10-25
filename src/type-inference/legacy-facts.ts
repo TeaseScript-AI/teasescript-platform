@@ -1,6 +1,6 @@
 import type { Identifier, Program } from "../ast.js";
 import type { SourceSpan } from "../source.js";
-import type { Declaration } from "../static-types.js";
+import type { Declaration } from "../static-types/origins.js";
 import { typeKey, type StorageKeyType } from "../storage-types.js";
 import type { TypeChecker } from "../type-checker.js";
 import type { FactSite, SolvedTypeFacts } from "./backend.js";

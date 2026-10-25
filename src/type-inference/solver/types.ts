@@ -1,19 +1,17 @@
 import {
-  assignedType,
-  excludeType,
   isAssignable,
   isScalarKind,
   members as memberTypes,
-  narrowTo,
   nonNullType,
   NULL_TYPE,
   optional as optionalType,
-  PropertyTable,
   union,
   UNKNOWN_TYPE,
   type ScalarValue,
   type StaticType,
 } from "../../static-types.js";
+import { PropertyTable } from "../../static-types/property-tables.js";
+import { assignedType, excludeType, narrowTo } from "../../static-types/narrowing.js";
 import { VALUE_KINDS, type PlainKind, type ValueKind } from "../../value-kinds.js";
 import type { TypeTerm } from "../graph.js";
 
@@ -23,13 +21,13 @@ import type { TypeTerm } from "../graph.js";
 // adapters' `StaticType`: `toStatic` builds one object per id with shared structure, `intern` remembers every object it
 // converted and otherwise looks the structure up per kind, keyed by the parts' ids and the sorted names and values.
 //
-// Every transfer converts its arguments with `toStatic`, calls the legacy function of `static-types.ts` (`union`,
-// `narrowTo`, `excludeType`, `assignedType`, `isAssignable`, `members`, `optional`, `nonNullType`) and interns its
-// answer, remembered per argument tuple, so that the table cannot disagree with the legacy's algebra. Structure is the
-// one identity: where the legacy's `union` keeps two equal objects that have property tables (`includes` lets no such
-// object include another, so `union([o, o])` is `(o | o)`, also inside `narrowTo` and `assignedType`, which join what
-// they keep), the interned union holds the one id. A native transfer is a later performance item (work note §10), only
-// if the measurement asks for it.
+// Every transfer converts its arguments with `toStatic`, calls the legacy function of `static-types.ts` or
+// `static-types/narrowing.ts` (`union`, `narrowTo`, `excludeType`, `assignedType`, `isAssignable`, `members`,
+// `optional`, `nonNullType`) and interns its answer, remembered per argument tuple, so that the table cannot disagree
+// with the legacy's algebra. Structure is the one identity: where the legacy's `union` keeps two equal objects that
+// have property tables (`includes` lets no such object include another, so `union([o, o])` is `(o | o)`, also inside
+// `narrowTo` and `assignedType`, which join what they keep), the interned union holds the one id. A native transfer
+// is a later performance item (work note §10), only if the measurement asks for it.
 //
 // Admissible inputs are canonical types: those the legacy's constructors and transfers, the annotations and the adapters
 // produce, in which every union is the legacy's `union` of its members. `intern` canonicalizes a union it meets through
