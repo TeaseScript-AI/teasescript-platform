@@ -28,7 +28,7 @@ random, clock, or list function call, such as `toNumber(...)`, `round(...)`, `si
 media have, such as `music.pause()`, come from its contract in `src/conversions.ts`, `src/numeric-functions.ts`,
 `src/random-functions.ts`, `src/temporal-builtins.ts`, `src/list-function-rules.ts`, `src/text-operations.ts`,
 `src/list-methods.ts`, or `src/handle-members.ts`, and those of a command cover its arguments as the parser reads them
-and name the options of the parser's tables in `src/parser.ts`, which the parser and the name pass check.
+and name the options of the parser's tables in `src/parser/`, which the parser and the name pass check.
 
 The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
 textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
