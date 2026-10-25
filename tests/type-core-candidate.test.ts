@@ -687,6 +687,15 @@ test("a projection of a written nested list stays strict on the candidate route 
   assert.equal(candidate(source).plan, null);
 });
 
+test("a written scalar a singleton literal gives stays strict on the candidate route (A4, Codex r16 B1)", () => {
+  const source = 'let typed: integer = 1\nlet xs = [typed][0]\nxs = 2.5\nsay "AFTER"\nexit\n';
+  assert.deepEqual(
+    inBothOrders(() => sited(candidate(source))),
+    [`error TSV041@${source.lastIndexOf("2.5")}`],
+  );
+  assert.equal(candidate(source).plan, null);
+});
+
 /** Runs a plan to its end, observing each reading pause's deadline: the events and the final snapshot. */
 function finish(
   plan: InstructionPlan,

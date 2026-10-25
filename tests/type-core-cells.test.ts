@@ -3358,3 +3358,57 @@ test("literals of typed ingresses share their conflict paths only by the type th
   }
   assert.deepEqual(differing, []);
 });
+
+test("a written copy a carrier surely gives decides at the path's end too, an unselected one nowhere (A4, F17a, F17b, Codex r16 B1)", () => {
+  // per expression over a written `integer` (a fraction then the error) and `integer | string` (text then fits): a
+  // singleton literal's element or field, `otherwise` beside a never-null or an only-null operand, a `get` whose literal
+  // proof gives its receiver or its default; and the operands those operations do not give, where the fraction fits
+  const seed = "let seed = 1\nlet direct = seed\n";
+  const programs: (readonly [string, string, boolean])[] = [];
+  for (const expression of [
+    "[typed][0]",
+    "{n: typed}.n",
+    "typed otherwise 0",
+    "null otherwise typed",
+    "[typed].get(0, default: 0)",
+    "[].get(0, default: typed)",
+  ]) {
+    programs.push([
+      `${expression}, integer`,
+      `let typed: integer = 1\nlet xs = ${expression}\nxs = 2.5\nexit`,
+      true,
+    ]);
+    programs.push([
+      `${expression}, union`,
+      `let typed: integer | string = 1\nlet xs = ${expression}\nxs = "ok"\nexit`,
+      false,
+    ]);
+  }
+  for (const expression of [
+    "direct otherwise typed",
+    "[direct].get(0, default: typed)",
+    "[typed].get(4, default: direct)",
+  ])
+    programs.push([
+      `${expression}, not given`,
+      `${seed}let typed: integer = seed\nlet xs = ${expression}\nxs = 2.5\nexit`,
+      false,
+    ]);
+  const differing: string[] = [];
+  for (const [name, source, error] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const want = error ? [`compile-error@${source.lastIndexOf("2.5")}`] : [];
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const got = record.diagnostics
+        .filter((d) => d.class === "compile-error")
+        .map((d) => `${d.class}@${d.site.offset}`);
+      if (JSON.stringify(got) !== JSON.stringify(want))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join(" ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});

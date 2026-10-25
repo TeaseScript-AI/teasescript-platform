@@ -89,6 +89,8 @@ interface Stop {
    * projection's own value, the union of what it may select, contributes (A2: an unknown beside a kind decides nothing).
    */
   readonly deep: boolean;
+  /** Whether each literal it was read out of has it alone at the step (`[typed][0]`, never `[typed, 2][0]`). */
+  readonly single: boolean;
   /**
    * The operations it was reached through, the outermost first (`get` with its default, a copy of the elements, a
    * list's `+`, ...): its contribution decides only where each of them holds its kinds definitely (F7, F10, F17b).
@@ -1471,9 +1473,10 @@ export class Admission {
       boolean,
       readonly Via[],
       boolean,
-    ])[] = [[value, node, [], [], false, [], false]];
+      boolean,
+    ])[] = [[value, node, [], [], false, [], false, true]];
     for (let order = 0; pending.length > 0; order += 1) {
-      const [current, at, path, strip, deep, via, after] = pending.pop()!;
+      const [current, at, path, strip, deep, via, after, single] = pending.pop()!;
       program.work.charge("indexSteps");
       const written = this.#writtenSource(current, strip);
       const term = written?.term ?? null;
@@ -1490,6 +1493,7 @@ export class Admission {
             deep,
             via,
             false,
+            single && next.length === 1,
           ]);
         continue;
       }
@@ -1499,13 +1503,13 @@ export class Admission {
       if (!after && !literal && term === null && this.#sourceOf(current) === null) {
         const carried = this.#carriersOf(current, strip);
         if (carried.length > 0) {
-          pending.push([current, at, path, strip, deep, via, true]);
+          pending.push([current, at, path, strip, deep, via, true, single]);
           for (let index = carried.length - 1; index >= 0; index -= 1) {
             const [operand, rest] = carried[index]!;
             const through = program.projOf.has(current)
               ? via
               : [...via, { value: current, node: at, path, strip, operand }];
-            pending.push([operand, at, path, rest, true, through, false]);
+            pending.push([operand, at, path, rest, true, through, false, single]);
           }
           continue;
         }
@@ -1526,6 +1530,7 @@ export class Admission {
         term,
         strip: written?.strip ?? strip,
         deep,
+        single,
         via,
       };
       const list = map.get(key);
@@ -1535,7 +1540,7 @@ export class Admission {
       const next = cells(current, null);
       for (let index = next.length - 1; index >= 0; index -= 1) {
         const [d, step] = next[index]!;
-        pending.push([d.value!, d.node ?? at, [...path, step], [], false, via, false]);
+        pending.push([d.value!, d.node ?? at, [...path, step], [], false, via, false, single]);
       }
     }
     this.#stops.set(value, stops);
@@ -1567,7 +1572,10 @@ export class Admission {
       for (const stop of stops.written.get(at.slice(0, length).join(".")) ?? []) {
         program.work.charge("checks");
         if (copy !== null && stop.order > copy.order) break;
-        if (stop.deep && length === at.length) continue;
+        // (at the path's end itself a carried copy decides only where it surely is the value there: each literal it was
+        // read out of has it alone, and each operation surely gives it)
+        if (stop.deep && length === at.length && !(stop.single && this.#selects(stop, true)))
+          continue;
         const term = termAt(stop.term!, [...stop.strip, ...at.slice(length)]);
         // (a written copy an operation carries decides only where the operation selects it: an operand it never gives
         // is no copy of the place, while a selected copy keeps its whole written type, A4)
@@ -1649,12 +1657,16 @@ export class Admission {
    * its default only where that is reached (F17b); `otherwise` its own operand only where that may be a value, and its
    * fallback only where the operand may be null (F17a); the other carriers give every operand that runs.
    */
-  #selects(stop: Stop): boolean {
-    return this.#live(stop.value) && this.#chosen(stop.via);
+  #selects(stop: Stop, surely = false): boolean {
+    return this.#live(stop.value) && this.#chosen(stop.via, surely);
   }
 
-  /** Whether each operation of a chain gives the operand the walk took (`#selects`'s rule). */
-  #chosen(via: readonly Via[]): boolean {
+  /**
+   * Whether each operation of a chain gives the operand the walk took (`#selects`'s rule), or `surely` gives it: a `get`
+   * its receiver's element where its default is dead and its default where that is the only value, `otherwise` its
+   * operand where that is never null and its fallback where the operand is only null; no other carrier surely.
+   */
+  #chosen(via: readonly Via[], surely = false): boolean {
     const { program, values } = this.pass;
     return via.every((level) => {
       const c = program.opOf.get(level.value);
@@ -1663,14 +1675,15 @@ export class Admission {
       // be null, an unknown either: F17a)
       if (c?.kind === "fallback") {
         const left = withoutEmpty(this.#run(values.valueItems(c.left, at, [])));
-        return level.operand === c.left
-          ? left.some((item) => item.tag !== "null")
-          : level.operand !== c.right ||
-              left.some((item) => item.tag === "null" || item.tag === "unknown");
+        const value = left.some((item) => item.tag !== "null");
+        const absent = left.some((item) => item.tag === "null" || item.tag === "unknown");
+        if (level.operand === c.left) return value && !(surely && absent);
+        return level.operand !== c.right || (absent && !(surely && value));
       }
-      if (c?.kind !== "get") return true;
+      if (c?.kind !== "get") return !surely;
       const { reached, only } = getProof(program, c, at);
-      return level.operand === c.receiver ? !only : level.operand !== c.fallback || reached;
+      if (level.operand === c.receiver) return surely ? !reached : !only;
+      return level.operand !== c.fallback || (surely ? only : reached);
     });
   }
 
