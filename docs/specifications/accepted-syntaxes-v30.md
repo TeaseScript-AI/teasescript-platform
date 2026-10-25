@@ -2518,9 +2518,10 @@ max(scores)             // 18
 - The statistics are computed exactly and rounded once, to the number nearest the exact result, so they are the same
   on every device, also for values that cancel or are very large or very small.
 - The statistics take durations, not calendar durations, because a calendar day or month has no fixed length.
-- An empty list, and a list of one value for `stddev`, is runtime error `TSR018`. A percentage outside 0 through 100
-  is a compile error when the compiler can see it, and runtime error `TSR039` otherwise. Values of other or mixed kinds,
-  and a missing `by:` property, are compile errors when the types show them, and runtime error `TSR060` otherwise.
+- An empty list, and a list of one value for `stddev`, is a compile error when the compiler can see it, and runtime
+  error `TSR018` otherwise. A percentage outside 0 through 100 is a compile error when the compiler can see it, and
+  runtime error `TSR039` otherwise. Values of other or mixed kinds, and a missing `by:` property, are compile errors
+  when the types show them, and runtime error `TSR060` otherwise.
 
 A fair target is one the player reaches in most attempts. `percentile(recent, 10)` is the value that 90% of the recent
 attempts reached or beat, so a target there is met about nine times out of ten:
@@ -2871,7 +2872,8 @@ An ask's question is shown as `say` shows a message (owner decision on #832, 202
 `prose(options)` after `as speaker` and before the question chooses its mode, with the options of `say`
 ([§37](#message-presentation-defaults-and-overrides)), which are evaluated once, before the question. Without a mode
 the speaker's mode applies, a bubble by default. This holds for every ask that takes a question: the basic asks,
-`askBoolean`, `askForm`, `askBooleans`, and `askImage`, also when the question is `message:`.
+`askBoolean`, `askForm`, `askBooleans`, and `askImage`, also when an ask other than `askForm` names its question
+`message:`.
 
 ```text
 let name = askText prose "What is your name?"
@@ -3569,8 +3571,8 @@ The developer instruction controls tone and wording. It does not need to repeat 
 ### General input rules
 
 - `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askPassword(...)`, `askBoolean(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`, except a file input the player skips ([Skipping a file input](#skipping-a-file-input)). A [form](#forms), `askForm(...)` or
-  `askBooleans(...)`, returns `null` only when it is cancelled: by the player when written with `cancel:`, or by its
-  timeout with `onTimeout: "cancel"`.
+  `askBooleans(...)`, returns `null` only when it is cancelled: by the player when written with `cancel:`, or, for
+  `askForm(...)`, by its timeout with `onTimeout: "cancel"`.
 - Input functions complete only after valid input has been supplied, or a skip or cancellation the request allows.
 - Cancelling a file, folder, camera, microphone, image, audio, or video picker does not complete the input request.
 - `askInteger(...)` and `askIntegers(...)` reject decimal values.
@@ -4163,8 +4165,9 @@ break does not end an expression, the comma may also start the next line. Group 
 too. A compact interaction inside a `save` value ends at the `as`, which belongs to `save`:
 `save askText as "name"` asks and stores the answer, while an interaction with its own speaker clause is grouped, as in
 `save (askText as mistress "Name?") as "name"`. A default may suspend, such as
-`load "name", default: askText "Your name?"`; it starts only when the key is absent and can resume across checkpoint
-restore. The earlier form without the comma and colon, `load "k" default 0`, is a compile error that names the fix.
+`load "name", default: askText "Your name?"`; it starts only when the key holds no value that fits the load's type, and
+it can resume across checkpoint restore. The earlier form without the comma and colon, `load "k" default 0`, is a
+compile error that names the fix.
 
 Delete a value:
 
