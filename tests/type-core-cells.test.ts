@@ -2907,6 +2907,13 @@ test("a literal's verdicts are shared only where its named elements hold the sam
  * possible elements (a removal, a choice's answer) decides nothing (A2), and a load's or a parse's value is the external
  * data its boundary checks whole (A7).
  */
+/*
+ * The regressions of review rounds 11 to 17, Astra's and the external reviewer's below assert the answers layer: their
+ * programs need constructs outside the candidate slice (functions, `get`, `otherwise`, the copy methods, written unions,
+ * records), so their plan content and their runs wait for S7–S9b to widen the slice (TABLE r4.59); those inside it
+ * prove plan and run in `type-core-candidate.test.ts` (the projections of a literal, the endpoint matrix, the cell
+ * sample).
+ */
 test("a value any carrier gives brings its elements' types, decided and checked as a literal's, in both orders (round 11)", () => {
   const carriers: readonly (readonly [string, (value: string) => string])[] = [
     ["projection", (value) => `[${value}][0]`],
