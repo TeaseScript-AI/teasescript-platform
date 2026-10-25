@@ -1770,6 +1770,18 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
+    name: "A8-distinct-records",
+    measures: "F2, A8: k records of distinct fields named in one literal (round 13 B2)",
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let a${i} = {f${i}: 1}`),
+          `let xs = [${Array.from({ length: k }, (_, i) => `a${i}`).join(", ")}]`,
+          "exit",
+        ),
+      ),
+  },
+  {
     name: "A8-added-call-presets",
     measures:
       "F2, A8: k literals of one function's k-field result, added to one list, every field read (round 12 B3)",

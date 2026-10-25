@@ -1486,13 +1486,20 @@ export class Admission {
         this.#run(values.valueItems(next.value, next.node, [...next.strip, ...rest])),
       );
       const definite = items.some((item) => item.tag === "unknown") ? [] : deciding(items);
-      if (definite.length > 0 && this.#through(next.via, at, definite))
+      if (
+        definite.length > 0 &&
+        this.#through(
+          next.via,
+          at,
+          definite.map((item) => item.tag),
+        )
+      )
         return { term: null, site: siteOf(next) };
     }
   }
 
   /** Whether a decider reached through an operation decides at `at`: the operation's own value holds its kinds definitely. */
-  #through(via: Via | null, at: readonly string[], definite: readonly Item[]): boolean {
+  #through(via: Via | null, at: readonly string[], definite: readonly ItemTag[]): boolean {
     if (via === null) return true;
     const carried = withoutEmpty(
       this.#run(
@@ -1502,9 +1509,7 @@ export class Admission {
         ]),
       ),
     );
-    return definite.every((item) =>
-      carried.some((own) => own.tag === item.tag && own.cert === "def"),
-    );
+    return definite.every((tag) => carried.some((own) => own.tag === tag && own.cert === "def"));
   }
 
   /**
@@ -1566,7 +1571,11 @@ export class Admission {
         const key = `${landing ?? ""}|${distinct.join(",")}`;
         let paths = conflicts.get(key);
         if (paths === undefined) {
-          const representatives = distinct.map((id) => list[ids.indexOf(id)]!);
+          const firstOf = new Map<string, Definition>();
+          for (const [index, id] of ids.entries())
+            if (!firstOf.has(id)) firstOf.set(id, list[index]!);
+          program.work.charge("checks", ids.length);
+          const representatives = distinct.map((id) => firstOf.get(id)!);
           const kept: (readonly string[])[] = [];
           for (const path of this.#pathsBelow(representatives[0]!.value!, [
             ...this.#sharedPaths(landing, representatives),
