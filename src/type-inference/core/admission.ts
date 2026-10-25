@@ -879,8 +879,17 @@ export class Admission {
           sources.set(`${entry.below.join(".")}|${entry.key}`, entry);
           continue;
         }
-        for (const has of program.hasOf.get(current)!)
-          for (const [name, term] of fieldsOf(has.type)) {
+        for (const has of program.hasOf.get(current)!) {
+          // above the key's path only the field on it (its literal's fields indexed once), below it every field
+          const on =
+            at.length < strip.length ? this.#termAt(has.type, strip[at.length]!) : undefined;
+          const fields: readonly (readonly [string, TypeTerm])[] =
+            at.length >= strip.length
+              ? fieldsOf(has.type)
+              : on === undefined
+                ? []
+                : [[strip[at.length]!, on]];
+          for (const [name, term] of fields) {
             program.work.charge("indexSteps");
             const step = [...at, name];
             const stands = against(step);
@@ -890,6 +899,7 @@ export class Admission {
               for (const d of definitions.cellDefs.get(term.place) ?? [])
                 pending.push([d.value!, step]);
           }
+        }
       }
     }
     return { paths: [...paths.values()], sources: [...sources.values()] };

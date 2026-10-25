@@ -1488,7 +1488,8 @@ export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
  * populated and a later mutated snapshot, several destinations of one source with different decided types, a rejected
  * destination beside its intact source, external ingresses merged with an opaque source, A5's candidates under k whole
  * presets of a record, A2's scan past external stores, the width of a record's written copies, a literal's records and a
- * replacement's misfits, and the boundary checks of a literal's external cells; each at size k, linear.
+ * replacement's misfits, the boundary checks of a literal's external cells, and the structure named elements bring to
+ * a literal (projections of one record's lists); each at size k, linear.
  */
 export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
@@ -1703,6 +1704,21 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
           ),
           `let wide = [${Array.from({ length: k }, () => "hostValue").join(", ")}]`,
           "let first: integer = wide.first",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-projected-copies",
+    measures:
+      "F2, A8: k projections of a k-field record's lists named in one literal, an element read (round 10 B3)",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "[1]")}}`,
+          rows(k, (i) => `let copy${i} = seed.f${i}`),
+          `let xs = [${Array.from({ length: k }, (_, i) => `copy${i}`).join(", ")}]`,
+          "repeat xs[0][0] {}",
           "exit",
         ),
       ),
