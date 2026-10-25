@@ -23,7 +23,7 @@ const registry: Readonly<Record<string, DiagnosticCodeInfo>> = DIAGNOSTIC_CODES;
 /** The source files of each owner, from `src/`: a file, or a directory ending in `/`. */
 const OWNER_SOURCES: Readonly<Record<DiagnosticOwner, readonly string[]>> = {
   lexer: ["lexer.ts"],
-  parser: ["parser.ts", "script-header.ts", "ast-validation.ts"],
+  parser: ["parser.ts", "parser/", "script-header.ts", "ast-validation.ts"],
   "name pass": ["semantic.ts", "switch-cases.ts"],
   "type checker": [
     "type-checker.ts",
@@ -62,6 +62,8 @@ interface SourceCodes {
   readonly reported: readonly CodeUse[];
   /** String literals that end with part of a code, as `"TSW" + "099"` would build one. */
   readonly fragments: readonly CodeUse[];
+  /** The code tables that the file declares and exports, by name. */
+  readonly exportedTables: ReadonlyMap<string, ReadonlyMap<string, string>>;
 }
 
 const COMPARISONS: readonly ts.SyntaxKind[] = [
@@ -128,8 +130,9 @@ function moduleCodeConstants(
 
 /**
  * The codes of one source file, read from its syntax, so comments and messages cannot pose as reporting a code. A
- * module-level code table (`const semanticCode = { unknownVariable: "TSV002" }`) or code constant (`const
- * DAY_WAIT_CODE = "TSV061"`, or one that `exported` lists and the file imports) declares codes; the file reports one
+ * module-level code table (`const semanticCode = { unknownVariable: "TSV002" }`, or one that `importedTables` lists and
+ * the file imports) or code constant (`const DAY_WAIT_CODE = "TSV061"`, or one that `exported` lists and the file
+ * imports) declares codes; the file reports one
  * where it reads the entry or constant, and a literal elsewhere where it uses it. A code that a comparison or a type
  * names is not reported. Constants are matched by name within the file, so a local that shadows one would count as
  * reading it.
@@ -138,6 +141,7 @@ function sourceCodes(
   file: string,
   text: string,
   exported: ReadonlyMap<string, readonly string[]> = new Map(),
+  importedTables: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map(),
 ): SourceCodes {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const declarations = new Set<ts.Node>();
@@ -152,6 +156,8 @@ function sourceCodes(
     });
     for (const literal of constant.literals) declarations.add(literal);
   }
+  const tables = new Map<string, ReadonlyMap<string, string>>();
+  const exportedTables = new Map<string, ReadonlyMap<string, string>>();
   for (const statement of source.statements) {
     const bindings = ts.isImportDeclaration(statement)
       ? statement.importClause?.namedBindings
@@ -160,11 +166,15 @@ function sourceCodes(
     for (const element of bindings.elements) {
       const codes = exported.get((element.propertyName ?? element.name).text);
       if (codes !== undefined) constants.set(element.name.text, { node: element.name, codes });
+      const table = importedTables.get((element.propertyName ?? element.name).text);
+      if (table !== undefined) tables.set(element.name.text, table);
     }
   }
-  const tables = new Map<string, ReadonlyMap<string, string>>();
   for (const statement of source.statements) {
     if (!ts.isVariableStatement(statement)) continue;
+    const exportsTable =
+      statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ===
+      true;
     for (const declaration of statement.declarationList.declarations) {
       const initializer =
         declaration.initializer === undefined ? undefined : unwrap(declaration.initializer);
@@ -179,7 +189,9 @@ function sourceCodes(
         return codes?.length === 1 ? [{ key: property.name.text, code: codes[0]!, value }] : [];
       });
       if (entries.length === 0 || entries.length !== initializer.properties.length) continue;
-      tables.set(declaration.name.text, new Map(entries.map(({ key, code }) => [key, code])));
+      const table = new Map(entries.map(({ key, code }) => [key, code]));
+      tables.set(declaration.name.text, table);
+      if (exportsTable) exportedTables.set(declaration.name.text, table);
       for (const { value } of entries) declarations.add(value);
     }
   }
@@ -246,7 +258,7 @@ function sourceCodes(
     ts.forEachChild(node, visit);
   };
   visit(source);
-  return { named, reported, fragments };
+  return { named, reported, fragments, exportedTables };
 }
 
 const files = filesUnder(resolve(root, "src"), ".ts")
@@ -260,9 +272,12 @@ const exportedConstants = new Map(
       .map(([name, constant]) => [name, constant.literals.map((literal) => literal.text)] as const),
   ),
 );
+const exportedTables = new Map(
+  files.flatMap(({ file, text }) => [...sourceCodes(file, text, exportedConstants).exportedTables]),
+);
 const sources = files.map((source) => ({
   ...source,
-  ...sourceCodes(source.file, source.text, exportedConstants),
+  ...sourceCodes(source.file, source.text, exportedConstants, exportedTables),
 }));
 
 function ownersOf(file: string): string[] {
