@@ -16,7 +16,7 @@ accepted construct, updates the affected entries here in the same pull request.
 ## How to read an entry
 
 - **Syntax** shows the forms, separated by `·`. Placeholders are lowercase words (`value`, `text`, `list`), single
-  letters (`t` text, `b` boolean, `c` colour, `n` number, `v` value) and capitals (`D` a duration, `T` and `R` types).
+  letters (`t` text, `b` boolean, `c` colour, `n` integer, `v` value) and capitals (`D` a duration, `T` and `R` types).
 - **Takes** is what goes in, **Gives** what comes out or happens, **Fails** what the compiler rejects or, when it
   cannot know the value, what fails at runtime; "warns" means the script goes on. Empty fields are left out.
 - **Status:** **Implemented** works today. **Partly built** names the part that does not work yet. **Not built** is
@@ -28,7 +28,8 @@ accepted construct, updates the affected entries here in the same pull request.
 **Terms.** A *handle* controls something that keeps running: a message, an async timer or media, a permanent button.
 A *declared* type is written with `: T`; a *literal* is a value written in the source. *Narrowing*: inside
 `if x is integer` or `if x != null`, the compiler treats `x` as that type. *Scene time*, the clock of `wait` and timers,
-runs while the Player is open, also minimized, and skips the time it is closed. A block interrupts at a *safe point*:
+runs while the Player is open, also minimized, and skips the time it is closed. A timer, media or button block
+interrupts at a *safe point*:
 between steps, or while the script waits for a message, an ask, `wait`, a timer or media.
 
 ## Contents
@@ -71,7 +72,7 @@ for round in 1..=rounds {
     say "Round ${round}.", 2 s
     wait 1 s
 }
-save rounds as "lastRounds" // kept for later sessions
+save rounds as "lastRounds" // kept for later sessions (the playground forgets it)
 exit
 ```
 
@@ -344,11 +345,11 @@ say show(b: 5) // 6
 **Syntax:** `global function name(…) { }` · `global name = value` · `global name: T = value` ·
 `global name = value, default: start`
 
-- **Takes:** a start value of literals, earlier globals, simple operators and `load` with a default.
+- **Takes:** for a variable, a start value of literals, earlier globals, simple operators and `load` with a default.
 - **Gives:** a function or variable for every file; a global is set before the script starts. With `default: start`,
   `start` is the start value and the line assigns `value`, any expression, each time it runs.
-- **Fails:** a used name; calls, asks, randomness or local names in a start value; a file's names or `goto label` in
-  a global function.
+- **Fails:** a name already in use; calls, asks, randomness or local names in a start value; a file's names or
+  `goto label` in a global function.
 - **Status:** Implemented · [global variables](specifications/accepted-syntaxes-v30.md#global-variables),
   [global functions](specifications/accepted-syntaxes-v30.md#global-functions)
 
@@ -411,9 +412,9 @@ exit
 ### Tags and tagged picks
 
 **Syntax:** `goto tagged q` · `call tagged q, from: "folder/*.tease"` ·
-`findScripts(where: q, all: list, none: list, any: list, from: path)` · `findImages(where: q, all: list, none: list,
-any: list)` · `showImage tagged q` · `takePhoto(tags: ["name: 3"])`; a query `q` is `"name"` or `"name" >= value`,
-joined with `and`, `or`, `not`
+`findScripts(where: q, all: list, none: list, any: list, from: "folder/*.tease")` ·
+`findImages(where: q, all: list, none: list, any: list)` · `showImage tagged q` · `takePhoto(tags: ["name: 3"])`; a
+query `q` is `"name"` or `"name" >= value`, joined with `and`, `or`, `not`
 
 - **Gives:** a random matching file or image; `findScripts` a `script[]` and `findImages` a `string[]`, maybe empty.
   Image tags come from XMP keywords and tagged photos.
@@ -483,9 +484,9 @@ say "I am your ${speaker.title}."
 `presentation` `bubble` `prose` `defaultSaySkippable` · custom fields
 
 - **Gives:** the chat name is `displayName`, else title, first and last name, else the identifier. `title` and
-  `shortTitle` stand in for each other. A custom field's first assignment fixes its type. A speaker is a reference.
-- **Fails:** reading a built-in field that no path to the read has set (set on only some paths, it is checked at
-  runtime), or a custom field that some path has not set.
+  `shortTitle` stand in for each other. A custom field's first assignment fixes its type.
+- **Fails:** reading a custom field that some path to the read has not set, or a built-in field that no path has
+  set. A built-in field set on only some paths is checked at runtime.
 - **Status:** Partly built: reading an unset `displayName` fails instead of giving the derived name ·
   [names](specifications/accepted-syntaxes-v30.md#names-titles-and-presentation)
 
@@ -497,7 +498,7 @@ mistress.punishmentPoints += 1
 
 ### Presentation: `bubble`, `prose`
 
-**Syntax:** `say bubble(color: c, background: c, font: f) text` · `say prose(position: p, align: a, …) text` ·
+**Syntax:** `say bubble(color: c, background: c, font: f) text` · `say prose(position: t, align: t, …) text` ·
 speaker fields `presentation`, `bubble`, `prose`
 
 - **Takes:** `position` and `align` (`"left"`, `"center"`, `"right"`) for prose only; `null` inherits.
@@ -800,7 +801,8 @@ let next = toDate("2026-01-31") + 1 calendar month // 2026-02-28
 - **Gives:** a `date`, `time`, local `datetime`, or `absoluteDateTime` (a moment); getters use the player's clock and
   zone. Values show in the player's local format; `toISO` gives ISO text, `toSeconds` Unix time of a moment.
 - **Fails:** other formats; an offset in local text or none in absolute text.
-- **Status:** Implemented · [conversion](specifications/accepted-syntaxes-v30.md#construction-and-conversion)
+- **Status:** Implemented · [conversion](specifications/accepted-syntaxes-v30.md#construction-and-conversion),
+  [display](specifications/accepted-syntaxes-v30.md#display-and-technical-conversion)
 
 ```tease
 let today = getDate()
@@ -1158,7 +1160,7 @@ tasks.sort()
   a new list; `join` one text, `", "` between by default; the set operations a new list (see [Sets](#sets-seta-b)).
 - **Fails:** `join` of values that cannot be shown.
 - **Status:** Implemented. Type rule ahead: the `get` default no longer decides the type of an empty list, and a
-  default of another type needs a declared union; today it decides it, and the result takes both types ·
+  default of another type needs a declared union; today it does, and the union is inferred ·
   [§16](specifications/accepted-syntaxes-v30.md#16-lists)
 
 ```tease
@@ -1205,9 +1207,9 @@ say toys.get("gag", default: "none")
 
 ### Statistics and trends
 
-**Syntax:** `sum` `average` `median` `stddev` `(list)` · `percentile(list, p)` · each with optional
-`by: "property"` · `linearRegression(list)` · `linearRegression(list, x: "p", y: "p")` (or `y:` alone) ·
-`predict(line, x)`
+**Syntax:** `sum(list)` `average(list)` `median(list)` `stddev(list)` · `percentile(list, p)` · each with optional
+`by: "property"` · `linearRegression(list)` · `linearRegression(list, x: "property", y: "property")` (or `y:` alone)
+· `predict(line, x)`
 
 - **Takes:** numbers or exact durations (`sum` also angles), or objects with `by:`; a percentile from 0 to 100.
   Without `x:`, x is the zero-based index.
@@ -1243,9 +1245,10 @@ hideImage
 **Syntax:** `playAudio "file"` · `playAudio async repeat "file"` · `playAudio(file: f, async: true, repeat: 3 times,
 startAt: D, endAt: D, volume: v) { }`, the same for `playVideo`
 
-- **Takes:** `async:` must be the literal `true` or `false`; `repeat:` is `true`, a count (`3 times`) or a duration.
-- **Gives:** waits for the end; with `async`, gives a [media handle](#media-handles) once the file has loaded, while
-  playback continues. A file that fails to load warns and the script goes on.
+- **Takes:** `async:` must be the literal `true` or `false`; `repeat:` is `true` or `false`, a count (`3 times`) or a
+  duration.
+- **Gives:** waits for the end; with `async`, gives a [media handle](#media-handles-stopaudio) once the file has
+  loaded, while playback continues. A file that fails to load warns and the script goes on.
 - **Fails:** invalid ranges or volume (0–1); endless repeat without `async`.
 - **Status:** Partly built: video does not play in the Player yet ·
   [audio and video](specifications/accepted-syntaxes-v30.md#audio-and-video)
@@ -1255,7 +1258,7 @@ playAudio "sounds/bell.mp3"
 let music = playAudio(file: "music/track.mp3", async: true, repeat: 3 times, volume: 0.5)
 ```
 
-### Media handles
+### Media handles, `stopAudio`
 
 **Syntax:** `.pause()` `.resume()` `.stop()` · `.position` `.remaining` `.duration` `.elapsed` `.volume` `.state` ·
 `stopAudio`
@@ -1277,8 +1280,8 @@ music.volume = 0.5
 **Syntax:** `play… { at D { } beforeEnd D { } finish { } }` · `play… { statements }`
 
 - **Gives:** cue blocks run at those positions in each play-through; a plain block at the end of each play-through;
-  `finish` once after natural completion, never after a stop, a replacement or a failed load. Blocks may use the
-  play's own handle.
+  `finish` once after natural completion, never after a stop, a replacement or a failed load. Blocks may use their
+  media's handle.
 - **Fails:** `finish` with endless repeat.
 - **Status:** Implemented · [cues](specifications/accepted-syntaxes-v30.md#cues)
 
@@ -1336,8 +1339,8 @@ delete "progress"
 **Syntax:** `load(key, default: v)` · `load key, default: v`
 
 - **Gives:** the stored value, or the default (evaluated only then) when the key is missing. For a literal key, a
-  stored value of the wrong type also takes the default. A computed key has no load type: the result is unknown, and
-  the receiving variable's type check can fail.
+  stored value of the wrong type also takes the default. With a computed key the compiler cannot know the type; the
+  receiving variable checks the value at runtime, which can fail.
 - **Fails:** no default; `default: null` on a literal key without a declared type.
 - **Status:** Implemented. Type rule ahead: an object default fixes wrong fields one by one; today the whole default is
   used · [§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys)
@@ -1355,9 +1358,9 @@ let nickname: string? = load("nickname", default: null)
 - **Gives:** JSON or Base64 text; decoding gives the value, or the default for malformed input. Stored files become
   `data:` URLs unless `files: false`.
 - **Fails:** calendar durations, ranges, scripts, regexes and handles in JSON.
-- **Status:** Implemented. Type rule ahead: JSON of the wrong shape takes the default and objects stay objects; today
-  it is returned as is, so the receiving type check can fail, and objects become dicts. A default of another type
-  needs a declared union ·
+- **Status:** Implemented. Type rule ahead: JSON of the wrong shape gives the default, JSON objects decode to objects,
+  and a default of another type needs a declared union; today such JSON is returned unchanged, JSON objects decode to
+  dicts, and a default of any type is accepted ·
   [JSON](specifications/accepted-syntaxes-v30.md#json-and-base64)
 
 ```tease
@@ -1374,9 +1377,9 @@ let tasks: string[] = fromJson("[\"stand\"]", default: [])
   also `true` (the player sets it) or `false` (not used).
 - **Gives:** a SHA-256 as 64 hex digits; locked text or a locked file; decrypting gives the original, or the default
   when it does not open.
-- **Fails:** only some openers; a missing default.
-- **Status:** Implemented. Type rule ahead: a default of another type needs a declared union ·
-  [hashes](specifications/accepted-syntaxes-v30.md#hashes),
+- **Fails:** only one or two of the three; a missing default.
+- **Status:** Implemented. Type rule ahead: a default of another type needs a declared union; today the union is
+  inferred · [hashes](specifications/accepted-syntaxes-v30.md#hashes),
   [encryption](specifications/accepted-syntaxes-v30.md#encryption)
 
 ```tease
@@ -1389,8 +1392,8 @@ say decryptText(locked, password: "corner", default: "")
 **Syntax:** `fileFromBase64(text, default: v)` · `fileToBase64(file)`
 
 - **Gives:** a stored file reference (only images are shown), or the default for bad input; the file as Base64.
-- **Status:** Implemented. Type rule ahead: a default of another type needs a declared union ·
-  [stored files](specifications/accepted-syntaxes-v30.md#stored-files)
+- **Status:** Implemented. Type rule ahead: a default of another type needs a declared union; today the union is
+  inferred · [stored files](specifications/accepted-syntaxes-v30.md#stored-files)
 
 ```tease
 let file = fileFromBase64("SGVsbG8=", default: null)
@@ -1412,9 +1415,9 @@ let file = fileFromBase64("SGVsbG8=", default: null)
 **Syntax:** `showPopup message` · `showPopup(message, buttonText: t)` · `openUrl(url, buttonText: t, alwaysButton: b)`
 · `exportText(text, title: t, fileName: t)`
 
-- **Gives:** each waits for the player. `showPopup` shows a dialog outside the chat and gives the time waited;
-  `openUrl` opens the page in a new tab, with a button when the browser needs a click; `exportText` offers the text
-  to copy or download.
+- **Gives:** each waits until its action completes. `showPopup` shows a dialog outside the chat and gives the time
+  waited; `openUrl` opens the page in a new tab, with a button when the browser needs a click; `exportText` offers the
+  text to copy or download.
 - **Fails:** a URL that is not `http` or `https`.
 - **Status:** Implemented; `notify "message"` (a system notification) is not built ·
   [§31](specifications/accepted-syntaxes-v30.md#31-popups-and-system-notifications),
