@@ -172,9 +172,14 @@ export class Admission {
         }
       }
     }
-    // A4: the copies of written bindings the stores and adds bring, where they land
-    for (const d of definitions.storeDefs)
-      if ((d.kind === "whole" || d.kind === "add") && d.value !== undefined)
+    // A4: the copies of written bindings the stores, adds, returns, parameter defaults and single-site arguments bring
+    // (a multi-site argument decides nothing, F21), where they land
+    for (const d of [...definitions.storeDefs, ...definitions.transferDefs])
+      if (
+        (d.kind === "whole" || d.kind === "add") &&
+        d.value !== undefined &&
+        (d.how !== "argument" || pass.lists.singleSite(d.fn))
+      )
         for (const { path, term } of this.#writtenCopies(d.value)) {
           const at = [
             ...d.path,
@@ -239,7 +244,7 @@ export class Admission {
   /** Every place and path admission decides: the keys with definitions, below them a literal's structure, written elements. */
   public groups(): readonly { readonly root: PlaceId; readonly path: readonly string[] }[] {
     if (this.#groups !== null) return this.#groups;
-    const { program, definitions } = this.pass;
+    const { program, definitions, lists } = this.pass;
     const work = program.work;
     const tracked = new Set<Key>([...definitions.byKey.keys(), ...definitions.candidates.keys()]);
     for (const c of program.constraints)
@@ -249,16 +254,22 @@ export class Admission {
           tracked.add(keyOf(target.root, target.path));
       }
     for (const [, binding] of program.occurrenceOf) tracked.add(keyOf(binding, []));
+    // the stores, adds, returns, parameter defaults and single-site arguments into each key (a multi-site argument
+    // decides nothing, F21)
+    const reaching = [...definitions.storeDefs, ...definitions.transferDefs].filter(
+      (d) =>
+        (d.kind === "whole" || d.kind === "add") &&
+        (d.how !== "argument" || lists.singleSite(d.fn)),
+    );
     const stores = new Map<Key, number>();
-    for (const d of definitions.storeDefs)
-      if (d.kind === "whole" || d.kind === "add")
-        for (const key of [d.key, ...prefixesOf(d.key)]) {
-          work.charge("indexSteps");
-          stores.set(key, (stores.get(key) ?? 0) + 1);
-        }
+    for (const d of reaching)
+      for (const key of [d.key, ...prefixesOf(d.key)]) {
+        work.charge("indexSteps");
+        stores.set(key, (stores.get(key) ?? 0) + 1);
+      }
     // a literal's structure where another store or add reaches the place or below it
-    for (const d of definitions.storeDefs)
-      if ((d.kind === "whole" || d.kind === "add") && (stores.get(d.key) ?? 0) > 1)
+    for (const d of reaching)
+      if ((stores.get(d.key) ?? 0) > 1)
         for (const path of this.literalPaths(d.value!))
           tracked.add(
             keyOf(d.place, [
@@ -598,8 +609,9 @@ export class Admission {
   }
 
   /**
-   * A prefix's whole stores in source order (A2's lazy scan), or its adds; a single-site parameter starts as its argument.
-   * A read of a host value decides no path below it (external data, no kind and no `null`), so the scan passes none.
+   * A prefix's whole stores in source order (A2's lazy scan), returns, parameter defaults and single-site arguments among
+   * them (a single-site parameter starts as its argument), or its adds. A read of a host value decides no path below it
+   * (external data, no kind and no `null`), so the scan passes none.
    */
   #wholeOf(key: Key, add: boolean): Definition[] {
     const memoKey = `${key}|${add}`;
@@ -614,10 +626,7 @@ export class Admission {
           !this.#hostRead(d.value) &&
           (add
             ? d.kind === "add"
-            : d.kind === "whole" &&
-              d.how !== "parameter default" &&
-              d.how !== "return" &&
-              (d.how !== "argument" || lists.singleSite(d.fn))),
+            : d.kind === "whole" && (d.how !== "argument" || lists.singleSite(d.fn))),
       );
       program.work.charge("checks", sortCost(list.length));
       list.sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b));
@@ -627,8 +636,9 @@ export class Admission {
   }
 
   /**
-   * A5: the stores that brought a prefix's source, as candidates: live, no parameter default, no return, no multi-site
-   * argument (F21), and a read of a host value only against a written type (a read of one below its store owes nothing
+   * A5: the stores that brought a prefix's source, as candidates: live, no multi-site argument (F21) (a return, a
+   * parameter default and a single-site argument are stores into the result or the parameter, F20–F23), and a read of
+   * a host value only against a written type (a read of one below its store owes nothing
    * at a decided type: A7's whole-store exception leaves it the boundary check its own path's candidate owes, C9, and it
    * holds no kind and no `null`); the whole stores and the adds, once per set of stores.
    */
@@ -650,8 +660,6 @@ export class Admission {
         d !== null &&
         (byWritten || !this.#hostRead(d.value)) &&
         lists.live(d) &&
-        d.how !== "parameter default" &&
-        d.how !== "return" &&
         (d.how !== "argument" || lists.singleSite(d.fn))
       )
         if (d.kind === "whole") wholes.push(d);

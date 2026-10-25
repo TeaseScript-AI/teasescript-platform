@@ -784,9 +784,10 @@ test("a choice object's value is selected by its key, and a dict's values and ke
       'function pick(opts) { return askChoice opts }\nrepeat pick([{text: "unused", value: 1}]) {}\nrepeat pick([{text: 2}]) {}\nexit',
       () => ["valid"],
     ],
+    // (the two returns' records share `text`, of one kind: ADR 0021 1.4, 1.5)
     [
       "a held record from a result",
-      'function make(n) {\n  if n > 0 { return {text: "unused", value: n} }\n  return {text: 2}\n}\nrepeat askChoice make(1) {}\nexit',
+      "function make(n) {\n  if n > 0 { return {text: 0, value: n} }\n  return {text: 2}\n}\nrepeat askChoice make(1) {}\nexit",
       () => ["valid"],
     ],
     // §3.2: under a test of the record's `value` the button value is marked, as the read of the `value` is
@@ -1828,7 +1829,8 @@ test("a chain of methods without a category stays opaque", () => {
  * any depth; a concrete misfit of a fallback is checked against the receiving union too; the lazy defaults of
  * `fileFromBase64`, `decryptText` and `decryptFile` follow C10 (ADR 0021 7.2). Review r4: a copy of a written type is
  * decided at every path of that type, read or not, and admits `null` only where its type, an earlier store or a null
- * element of the literal it stands in does.
+ * element of the literal it stands in does. Review r5: returns, parameter defaults and single-site arguments decide the
+ * result's and the parameter's paths as stores do.
  */
 test("admission decides from the start value, keeps written copies, rejects every definite misfit, and checks fallbacks per kind", () => {
   const f =
@@ -1995,6 +1997,13 @@ test("admission decides from the start value, keeps written copies, rejects ever
         `copy-type copy [integer] boundary @${at("hostValue")}`,
       ],
     ],
+    // a return's literal decides the result's paths as a store's does: a later return of another element kind errs
+    // (ADR 0021 1.5, A8; review r5)
+    [
+      "two returns' lists of different element kinds",
+      'function g(flag: boolean) {\n  if flag { return [1] }\n  return ["x"]\n}\nlet r = g(true)\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at('"x"')}`],
+    ],
     // a literal's `null` element beside the copy makes the element optional (ADR 0021 1.3, A8), its type strict
     [
       "a list whose first element copies a written integer, a later one possibly null, then external data",
@@ -2039,6 +2048,77 @@ test("admission decides from the start value, keeps written copies, rejects ever
       const got = summary(record);
       if (JSON.stringify(got) !== JSON.stringify(expected))
         differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join("; ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});
+
+/**
+ * A4 at every carrier of a definition (review r5): a copy of a written binding that a store, a literal's element, an add,
+ * an `addAll`, a single-site argument, a parameter's default or a return brings decides its destination by the written
+ * type, read or not, so a later possible fraction there owes C1's check against `integer`, a scalar's and a collection's
+ * element's alike, and external data carried beside the copy owes its boundary against `integer` (C9). Both orders.
+ */
+test("a copy of a written type keeps it through every carrier", () => {
+  // per carrier: the program around the copy `COPY` and the later value `LATER`, and the stored value the later one's
+  // check sits at (an `addAll`'s list)
+  const carriers: readonly (readonly [string, string, string])[] = [
+    ["a store", "let d = COPY\nd = LATER\nexit", "LATER"],
+    ["an add", "let d = []\nd.add(COPY)\nd.add(LATER)\nexit", "LATER"],
+    ["an addAll", "let d = []\nd.addAll([COPY])\nd.addAll([LATER])\nexit", "[LATER]"],
+    ["a single-site argument", "function use(p) {\n  p = LATER\n}\nuse(COPY)\nexit", "LATER"],
+    ["a parameter's default", "function use(p = COPY) {\n  p = LATER\n}\nuse()\nexit", "LATER"],
+    [
+      "a return",
+      'function give {\n  if askBoolean "first?" { return COPY }\n  return LATER\n}\nlet r = give()\nexit',
+      "LATER",
+    ],
+  ];
+  const kinds: readonly (readonly [string, string, string])[] = [
+    ["a scalar", "let typed: integer = 1\n", "[1, 2.5][1]"],
+    ["a list's element", "let typed: integer[] = [1]\n", "[[1], [2.5]][1]"],
+  ];
+  // per carrier of a literal: the program around the literal `HELD` that holds the copy beside external data
+  const ingresses: readonly (readonly [string, string])[] = [
+    ["a store", "let d = HELD\nexit"],
+    ["a single-site argument", 'function use(p) {\n  say "inside"\n}\nuse(HELD)\nexit'],
+    ["a return", "function give {\n  return HELD\n}\nlet r = give()\nexit"],
+  ];
+  const programs: (readonly [string, string, string, boolean])[] = [];
+  for (const [carrier, shape, site] of carriers)
+    for (const [kind, declaration, later] of kinds)
+      programs.push([
+        `${kind} through ${carrier}`,
+        declaration + shape.replace("COPY", "typed").replace("LATER", later),
+        site.replace("LATER", later),
+        false,
+      ]);
+  for (const [carrier, shape] of ingresses)
+    programs.push([
+      `external data beside a copy through ${carrier}`,
+      `let typed: integer = 1\n${shape.replace("HELD", "[typed, hostValue]")}`,
+      "hostValue",
+      true,
+    ]);
+  const differing: string[] = [];
+  for (const [name, source, offending, boundary] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const at = source.lastIndexOf(offending);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      // the value's check against the written kind at its own site, and the boundary there for external data
+      const checked = record.checks.some(
+        (check) =>
+          check.kind === "copy-type" &&
+          check.boundary === boundary &&
+          check.site.offset === at &&
+          JSON.stringify(check.against) === '["integer"]',
+      );
+      if (record.outcome !== "warning-runtime-check" || !checked)
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${summary(record).join("; ")}`);
     }
   }
   assert.deepEqual(differing, []);

@@ -363,8 +363,8 @@ const NARRATOR = 'speaker narrator { value: "Hello" }\n';
  * Programs whose receiver gains a reference kind only round its own cycle (r4.44), whose receiver holds a reference from
  * outside the cycle beside a record, a nested record or an external leaf round it (B2, B2-r2), and the record-only
  * control, with their diagnostics (a class `warning-runtime-check` unless written). A return that may not fit the result
- * its function's first return decides owes C1's check (A2, F23); the record-only control's, which none of its kinds
- * fits, is an error (ADR 0021 1.5).
+ * its function's first return decides owes C1's check (A2, F23), at the result and at each path of the first return's
+ * literal (A8); the record-only control's, which none of its kinds fits, is an error (ADR 0021 1.5).
  */
 const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[] = [
   [
@@ -409,6 +409,7 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
       "written-target f(true)",
       "written-target f(true)",
       "written-target g(true).custom",
+      "written-target g(true).custom",
     ],
   ],
   [
@@ -432,6 +433,8 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
       "member-read g(true)",
       "written-target f(true)",
       "written-target f(true)",
+      "written-target g(true).custom",
+      "written-target g(true).custom",
       "written-target g(true).custom",
     ],
   ],
