@@ -133,10 +133,11 @@ Invalid runtime colours use `inherit` in the prepared span so enclosing text/bac
 Player themes own the exact visual mapping of accepted weight and size names.
 
 A recognized valid opening tag formats content only when a matching closer can complete a properly nested span on the
-same line. An empty extension span is valid. An unknown tag, invalid non-colour value, extra attribute, mismatched closing
-tag, or unmatched tag remains literal text. A literal malformed tag does not suppress otherwise valid inline markup around or
-inside it. In crossed input, a closing tag that does not match the currently open extension is literal; later matching
-closers may still complete their spans.
+same line. An empty extension span is valid. An unknown tag, invalid non-colour value, extra attribute of a non-colour
+tag, mismatched closing tag, or unmatched tag remains literal text. A colour tag's value runs to its `]`, so
+`[color=red extra=x]` is a colour span with an invalid colour. A literal malformed tag does not suppress otherwise valid
+inline markup around or inside it. In crossed input, a closing tag that does not match the currently open extension is
+literal; later matching closers may still complete their spans.
 
 Examples:
 
@@ -226,7 +227,7 @@ equal start and end offsets, with depth preserving the distinction between neste
 form preserves arbitrary accepted nesting without making JSON serialization recurse through an input-deep object tree.
 
 The representation distinguishes line endings, headings, quote blocks, ordered and unordered lists, inline code, the
-three Markdown-like text styles, the six bracket extensions, and validated links. Link spans contain only the validated
+three Markdown-like text styles, the five bracket extensions, and validated links. Link spans contain only the validated
 activation target. Style spans contain only the constrained values above. Line text is plain text rather than authored
 HTML. Exact TypeScript property names and serialized format versions belong to the implementation.
 
