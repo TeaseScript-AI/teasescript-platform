@@ -413,6 +413,16 @@ test("external data a literal carries is warned and checked at its store before 
         ["bad", [], "TSR058@9:23"],
       ],
     ],
+    // named, the same (round 10 B1)
+    [
+      'let a = hostValue\nlet xs = [1, a]\nsay "AFTER"\nexit\n',
+      ["warning TSV041@27"],
+      ["18:33"],
+      [
+        [2, ["AFTER"], null],
+        ["bad", [], "TSR058@27:33"],
+      ],
+    ],
     // host data alone admits no type: nothing to check it against
     ['let xs = [hostValue, hostValue]\nsay "AFTER"\nexit\n', [], [], [["bad", ["AFTER"], null]]],
   ] as const) {

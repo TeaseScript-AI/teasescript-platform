@@ -336,6 +336,19 @@ export class Admission {
           tracked.add(keyOf(d.place, [...base, ...below, ...Array<string>(depth).fill("element")]));
         }
       }
+    // a literal holding a named value (a copy, a call, what an operation carries of either) decides the paths its own
+    // structure gives with its store, read or not, so the named value's uncertain contents meet C1 there (the owner's
+    // F1, round 10 B1)
+    for (const d of reaching)
+      if ((stores.get(d.key) ?? 0) === 1 && program.hasOf.has(d.value!)) {
+        const structure = this.#valueStructure(d.value!);
+        if (structure.sources.length === 0) continue;
+        const base = [...d.path, ...(d.kind === "add" && d.how !== "elements" ? ["element"] : [])];
+        for (const path of structure.paths) {
+          work.charge("indexSteps");
+          tracked.add(keyOf(d.place, [...base, ...path]));
+        }
+      }
     // C9: where each ingress store's external data stands below its destination, decided with the store whether a
     // consumer reads the place or not (the owner's F1)
     for (const [token, d] of definitions.storeByToken) {

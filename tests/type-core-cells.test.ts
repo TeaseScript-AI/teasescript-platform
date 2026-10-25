@@ -2550,7 +2550,7 @@ test("a named collection in a literal or an add brings its elements' types to th
       "compile-error",
       [37],
     ],
-    // whole numbers with numbers; fields apart; a named record's fields admitted at their first read (A2); host data
+    // whole numbers with numbers; fields apart; a named record's fields admitted at their first read (A2)
     [
       "whole numbers and numbers",
       `let a = [1]\nlet b = [2.5]\nlet xs = [a, b]${after}`,
@@ -2575,7 +2575,13 @@ test("a named collection in a literal or an add brings its elements' types to th
       "valid",
       [],
     ],
-    ["host data", `let a = [1]\nlet b = hostValue\nlet xs = [a, b]${after}`, "valid", []],
+    // host data named in the literal: no error, C1's check against the decided lists (round 10 B1)
+    [
+      "host data",
+      `let a = [1]\nlet b = hostValue\nlet xs = [a, b]${after}`,
+      "warning-runtime-check",
+      [],
+    ],
   ];
   const differing: string[] = [];
   for (const [name, source, outcome, sites] of programs) {
@@ -2756,6 +2762,90 @@ test("a value an operation carries of a named collection brings its element type
       if (record.outcome !== outcome || JSON.stringify(errors) !== JSON.stringify(sites))
         differing.push(
           `${name}${reversed ? " reversed" : ""}: ${record.outcome} @${errors.join(", @")}`,
+        );
+    }
+  }
+  assert.deepEqual(differing, []);
+});
+
+test("named external data in a literal is warned and checked at its store where a type is decided, read or not (round 10 B1)", () => {
+  const after = '\nsay "AFTER"\nexit';
+  // per program its outcome and its copy checks, as target, kinds, boundary (B) and site: C1's at the named value
+  // against the literal's decided elements, and the boundary of the store that brought the data in, against its own
+  const programs: readonly (readonly [string, string, string, readonly string[]])[] = [
+    [
+      "a named host value",
+      `let a = hostValue\nlet xs = [1, a]${after}`,
+      "warning-runtime-check",
+      ["a [unknown] B @8", "xs.element [integer] @27"],
+    ],
+    [
+      "a named host value first",
+      `let a = hostValue\nlet xs = [a, 1]${after}`,
+      "warning-runtime-check",
+      ["a [unknown] B @8", "xs.element [integer] @27"],
+    ],
+    [
+      "a copy of a copy",
+      `let a = hostValue\nlet c = a\nlet xs = [1, c]${after}`,
+      "warning-runtime-check",
+      ["a [unknown] B @8", "xs.element [integer] @37"],
+    ],
+    [
+      "a set",
+      `let a = hostValue\nlet xs = set[1, a]${after}`,
+      "warning-runtime-check",
+      ["a [unknown] B @8", "xs.element [integer] @27"],
+    ],
+    [
+      "a dict",
+      `let a = hostValue\nlet xs = dict{p: 1, q: a}${after}`,
+      "warning-runtime-check",
+      ["a [unknown] B @8", "xs.entry [integer] @27"],
+    ],
+    [
+      "a returned host value",
+      `function g {\n  return hostValue\n}\nlet xs = [1, g()]${after}`,
+      "warning-runtime-check",
+      ["g.result [unknown] B @22", "xs.element [integer] @43"],
+    ],
+    [
+      "a named list of host data",
+      `let a = [hostValue]\nlet xs = [a, [1]]${after}`,
+      "warning-runtime-check",
+      ["a.element [unknown] B @9", "xs.element.element [integer] @29"],
+    ],
+    // where nothing is decided, nothing is checked until a consumer asks
+    [
+      "named host values alone",
+      `let a = hostValue\nlet b = hostValue\nlet xs = [a, b]${after}`,
+      "valid",
+      [],
+    ],
+    ["a record's named host field", `let a = hostValue\nlet r = {n: 1, m: a}${after}`, "valid", []],
+    ["a named whole number", `let a = 2\nlet xs = [1, a]${after}`, "valid", []],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, outcome, expected] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const copies = record.checks
+        .filter((check) => check.kind === "copy-type")
+        .map(
+          (check) =>
+            `${check.target} [${check.against.join(", ")}]${check.boundary ? " B" : ""} @${check.site.offset}`,
+        )
+        .sort();
+      if (
+        record.outcome !== outcome ||
+        JSON.stringify(copies) !== JSON.stringify([...expected].sort())
+      )
+        differing.push(
+          `${name}${reversed ? " reversed" : ""}: ${record.outcome}; ${copies.join("; ")}`,
         );
     }
   }
