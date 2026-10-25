@@ -94,14 +94,29 @@ function runSited(plan: InstructionPlan, hostValue: SerializableRuntimeValue) {
   };
 }
 
-/** The spans of the instructions that check the value they store (`typeCheck`), as `start:end`. */
-function checkedStores(plan: InstructionPlan): string[] {
-  return plan.instructions.flatMap((instruction) =>
-    (instruction.kind === "declareBinding" || instruction.kind === "assign") &&
-    instruction.typeCheck !== undefined
-      ? [`${instruction.span.so}:${instruction.span.eo}`]
-      : [],
-  );
+/**
+ * The run oracle of an enforcement test (TABLE r4.59): per host value its expected failure, `CODE@start:end`, or `null`.
+ * A run without one halts at the end; a run with one ends failed with exactly it, nothing said by a statement at or
+ * after the failing check's start.
+ */
+function assertRuns(
+  plan: InstructionPlan,
+  name: string,
+  runs: readonly (readonly [SerializableRuntimeValue, string | null])[],
+): void {
+  for (const [value, failure] of runs) {
+    const ran = runSited(plan, value);
+    const start = failure === null ? Infinity : Number(/@(\d+):/.exec(failure)![1]);
+    assert.deepEqual(
+      {
+        status: ran.status,
+        failure: ran.failure,
+        saidAfter: ran.said.flatMap(({ text, at }) => (at >= start ? [text] : [])),
+      },
+      { status: failure === null ? "halted" : "failed", failure, saidAfter: [] },
+      `${name} with ${JSON.stringify(value)}`,
+    );
+  }
 }
 
 /** A plan's stores that check their value (`typeCheck`): per instruction, its file, span and checked type. */
@@ -341,7 +356,7 @@ test("C1's copy check and C9's boundary check run where external data enters a w
   const compiled = candidate(source);
   assert.deepEqual(sited(compiled), ["warning TSV041@23"]);
   assert.ok(compiled.plan !== null);
-  assert.deepEqual(checkedStores(compiled.plan), ["0:39"]);
+  assert.deepEqual(checksOf(compiled.plan), ["0:39 integer"]);
   // a value that passes runs on; one that does not stops at the store with the runtime's error
   assert.deepEqual(runWith(compiled.plan, 2), {
     status: "halted",
@@ -353,15 +368,18 @@ test("C1's copy check and C9's boundary check run where external data enters a w
     says: [],
     failure: "TSR058@22:39",
   });
-  assert.equal(runWith(compiled.plan, 1.5).failure, "TSR058@22:39");
+  assertRuns(compiled.plan, source, [[1.5, "TSR058@22:39"]]);
 
   // the literal analogue of r4.29: the element's check against the written element type, `null` admitted
   const pool = candidate("let pool: integer?[] = [hostValue, null, 7]\nexit\n");
   assert.deepEqual(sited(pool), ["warning TSV041@24"]);
   assert.ok(pool.plan !== null);
-  assert.equal(runWith(pool.plan, null).status, "halted");
-  assert.equal(runWith(pool.plan, 3).status, "halted");
-  assert.equal(runWith(pool.plan, "x").failure, "TSR058@23:43");
+  assert.deepEqual(checksOf(pool.plan), ["0:43 list<integer|null>"]);
+  assertRuns(pool.plan, "pool", [
+    [null, null],
+    [3, null],
+    ["x", "TSR058@23:43"],
+  ]);
 
   // the root compile, on the production default, does not warn: the candidate is reached only by its entry
   assert.deepEqual(sited(compileSource(source, OPTIONS)), []);
@@ -405,7 +423,7 @@ test("admission's decided types and C9's boundary checks compile and run on the 
     [
       "let n = 1\nn = hostValue\nrepeat n {}\nexit\n",
       ["warning TSV041@14", "warning TSV011@31"],
-      ["10:23"],
+      ["10:23 integer"],
       [
         [2, null],
         [1.5, "TSR058@14:23"],
@@ -422,7 +440,7 @@ test("admission's decided types and C9's boundary checks compile and run on the 
     [
       'let xs = [1, hostValue]\nsay "after ingress"\nrepeat xs[0] {}\nexit\n',
       ["warning TSV011@51", "warning TSV041@13"],
-      ["0:23"],
+      ["0:23 list<integer>"],
       [
         [2, null],
         ["bad", "TSR058@9:23"],
@@ -431,7 +449,7 @@ test("admission's decided types and C9's boundary checks compile and run on the 
     [
       "let xs = [[1, hostValue]]\nrepeat xs[0][0] {}\nexit\n",
       ["warning TSV011@33", "warning TSV041@14"],
-      ["0:25"],
+      ["0:25 list<list<integer>>"],
       [
         [2, null],
         ["bad", "TSR058@9:25"],
@@ -442,13 +460,13 @@ test("admission's decided types and C9's boundary checks compile and run on the 
     [
       'let typed: integer = 1\nlet copy = typed\ncopy = [2, 2.5][1]\nsay "after store"\nexit\n',
       ["warning TSV041@47"],
-      ["40:58"],
+      ["40:58 integer"],
       [[null, "TSR058@47:58"]],
     ],
     [
       'let typed: integer = 1\nlet copy = typed\ncopy = [2, 2.5][0]\ncopy = hostValue\nsay "after store"\nexit\n',
       ["warning TSV041@47", "warning TSV041@66"],
-      ["40:58", "59:75"],
+      ["40:58 integer", "59:75 integer"],
       [
         [2, null],
         [2.5, "TSR058@66:75"],
@@ -459,13 +477,13 @@ test("admission's decided types and C9's boundary checks compile and run on the 
     [
       'let typed: integer[] = [1]\nlet copy = typed\ncopy = [[1], [2.5]][1]\nsay "after store"\nexit\n',
       ["warning TSV041@51"],
-      ["44:66"],
+      ["44:66 list<integer>"],
       [[null, "TSR058@51:66"]],
     ],
     [
       'let typed: integer[] = [1]\nlet copy = typed\ncopy = [[1], [2.5]][0]\ncopy = hostValue\nsay "after store"\nexit\n',
       ["warning TSV041@51", "warning TSV041@74", "warning TSV041@74"],
-      ["44:66", "67:83"],
+      ["44:66 list<integer>", "67:83 list<integer>"],
       [
         [list(1), null],
         [list(2.5), "TSR058@74:83"],
@@ -495,7 +513,7 @@ test("admission's decided types and C9's boundary checks compile and run on the 
     [
       "let pool: integer[] = hostValue\nexit\n",
       ["warning TSV041@22", "warning TSV041@22"],
-      ["0:31"],
+      ["0:31 list<integer>"],
       [
         [list(1, 2), null],
         [list("x"), "TSR058@22:31"],
@@ -517,19 +535,15 @@ test("admission's decided types and C9's boundary checks compile and run on the 
       const result = candidate(source);
       return {
         diagnostics: sited(result),
-        checked: result.plan === null ? null : checkedStores(result.plan),
+        checked: result.plan === null ? null : checksOf(result.plan),
       };
     });
     assert.deepEqual(compiled.diagnostics.sort(), [...diagnostics].sort(), source);
     assert.deepEqual(compiled.checked, checked, source);
     const plan = candidate(source).plan;
-    for (const [value, failure] of runs) {
+    if (runs.length > 0) {
       assert.ok(plan !== null, source);
-      assert.equal(
-        runWith(plan, value).failure,
-        failure,
-        `${source} with ${JSON.stringify(value)}`,
-      );
+      assertRuns(plan, source, runs);
     }
   }
 });
@@ -541,7 +555,7 @@ test("external data a literal carries is warned and checked at its store before 
     [
       'let xs = [1, hostValue]\nsay "AFTER"\nexit\n',
       ["warning TSV041@13"],
-      ["0:23"],
+      ["0:23 list<integer>"],
       [
         [2, ["AFTER"], null],
         ["bad", [], "TSR058@9:23"],
@@ -550,7 +564,7 @@ test("external data a literal carries is warned and checked at its store before 
     [
       'let xs = [hostValue, 1]\nsay "AFTER"\nexit\n',
       ["warning TSV041@10"],
-      ["0:23"],
+      ["0:23 list<integer>"],
       [
         [2, ["AFTER"], null],
         [1.5, [], "TSR058@9:23"],
@@ -559,7 +573,7 @@ test("external data a literal carries is warned and checked at its store before 
     [
       'let xs = [[1], [hostValue]]\nsay "AFTER"\nexit\n',
       ["warning TSV041@16"],
-      ["0:27"],
+      ["0:27 list<list<integer>>"],
       [
         [2, ["AFTER"], null],
         ["bad", [], "TSR058@9:27"],
@@ -568,7 +582,7 @@ test("external data a literal carries is warned and checked at its store before 
     [
       'let ys = [1, hostValue]\nlet xs = ys\nsay "AFTER"\nexit\n',
       ["warning TSV041@13"],
-      ["0:23"],
+      ["0:23 list<integer>"],
       [
         [2, ["AFTER"], null],
         ["bad", [], "TSR058@9:23"],
@@ -578,7 +592,7 @@ test("external data a literal carries is warned and checked at its store before 
     [
       'let a = hostValue\nlet xs = [1, a]\nsay "AFTER"\nexit\n',
       ["warning TSV041@27"],
-      ["18:33"],
+      ["18:33 list<integer>"],
       [
         [2, ["AFTER"], null],
         ["bad", [], "TSR058@27:33"],
@@ -591,20 +605,18 @@ test("external data a literal carries is warned and checked at its store before 
       const result = candidate(source);
       return {
         diagnostics: sited(result),
-        checked: result.plan === null ? null : checkedStores(result.plan),
+        checked: result.plan === null ? null : checksOf(result.plan),
       };
     });
     assert.deepEqual(compiled, { diagnostics: warnings, checked }, source);
     const plan = candidate(source).plan;
     assert.ok(plan !== null, source);
-    for (const [value, says, failure] of runs) {
-      const ran = runWith(plan, value);
+    for (const [value, says, failure] of runs)
       assert.deepEqual(
-        { says: ran.says, failure: ran.failure },
-        { says, failure },
+        runWith(plan, value),
+        { status: failure === null ? "halted" : "failed", says, failure },
         `${source} with ${JSON.stringify(value)}`,
       );
-    }
   }
 });
 
@@ -653,8 +665,8 @@ test("C1 warns where some kind of the stored value fits and errs only where none
     assert.deepEqual(compiled.sited, warnings, source);
     assert.ok(compiled.plan !== null, source);
     // the destination's check on the store, which the selected value passes or fails at runtime
-    assert.deepEqual(checkedStores(compiled.plan), [`0:${source.indexOf("\n")}`], source);
     const end = source.indexOf("\n");
+    assert.deepEqual(checksOf(compiled.plan), [`0:${end} integer`], source);
     if (passing === null)
       assert.deepEqual(runWith(compiled.plan, null), {
         status: "halted",
@@ -662,7 +674,11 @@ test("C1 warns where some kind of the stored value fits and errs only where none
         failure: null,
       });
     else {
-      assert.deepEqual(runWith(compiled.plan, passing).says, ["selected"], source);
+      assert.deepEqual(
+        runWith(compiled.plan, passing),
+        { status: "halted", says: ["selected"], failure: null },
+        source,
+      );
       assert.deepEqual(
         runWith(compiled.plan, failing),
         { status: "failed", says: [], failure: `TSR058@22:${end}` },
@@ -690,7 +706,8 @@ test("C1 warns where some kind of the stored value fits and errs only where none
   // the selected value that does not fit stops at the store
   const fractional = candidate('let result: integer = [2, 2.5][1]\nsay "selected"\nexit\n');
   assert.ok(fractional.plan !== null);
-  assert.equal(runWith(fractional.plan, null).failure, "TSR058@22:33");
+  assert.deepEqual(checksOf(fractional.plan), ["0:33 integer"]);
+  assertRuns(fractional.plan, "the fractional element", [[null, "TSR058@22:33"]]);
   // no kind fits: still the error, also for a literal's element written as `integer[]` (A8)
   for (const [source, error] of [
     ["let result: integer = [2.5, 3.5][0]\nexit\n", "error TSV041@22"],
@@ -727,22 +744,31 @@ test("C2's integer check warns with TSV011 at a count and TSV043 at a list index
   assert.deepEqual(sited(count), ["warning TSV041@20", "warning TSV011@49"]);
   assert.ok(count.diagnostics[1]!.message.startsWith(REPEAT_COUNT_RULE));
   assert.ok(count.plan !== null);
-  assert.deepEqual(runWith(count.plan, 2).says, ["ready", "turn", "turn"]);
+  assert.deepEqual(checksOf(count.plan), ["0:29 number"]);
+  assert.deepEqual(runWith(count.plan, 2), {
+    status: "halted",
+    says: ["ready", "turn", "turn"],
+    failure: null,
+  });
   assert.deepEqual(runWith(count.plan, 2.5), {
     status: "failed",
     says: ["ready"],
     failure: "TSR043@49:54",
   });
-  assert.equal(runWith(count.plan, "x").failure, "TSR058@20:29");
+  assertRuns(count.plan, "the count", [["x", "TSR058@20:29"]]);
 
   const index = candidate(
     "let rows = [10, 20]\nlet at: number = hostValue\nrepeat rows[at] {}\nexit\n",
   );
   assert.deepEqual(sited(index), ["warning TSV041@37", "warning TSV043@59"]);
   assert.ok(index.plan !== null);
-  assert.equal(runWith(index.plan, 1).status, "halted");
-  assert.equal(runWith(index.plan, 0.5).failure, "TSR024@59:61");
-  assert.equal(runWith(index.plan, 2).failure, "TSR025@59:61");
+  assert.deepEqual(checksOf(index.plan), ["20:46 number"]);
+  assertRuns(index.plan, "the index", [
+    [1, null],
+    [0.5, "TSR024@59:61"],
+    [2, "TSR025@59:61"],
+    ["x", "TSR058@37:46"],
+  ]);
 
   // the proven cases stay errors under the same codes
   assert.deepEqual(sited(candidate("let n = 2.5\nrepeat n {}\nexit\n")), ["error TSV011@19"]);
@@ -785,13 +811,17 @@ test("parentheses answer for their content: a parenthesised count and index read
   const host = candidate("repeat ((hostValue)) {}\nexit\n");
   assert.deepEqual(sited(host), ["warning TSV011@9"]);
   assert.ok(host.plan !== null);
-  assert.equal(runWith(host.plan, 2).status, "halted");
-  assert.equal(runWith(host.plan, 1.5).failure, "TSR043@9:18");
+  assertRuns(host.plan, "the parenthesised count", [
+    [2, null],
+    [1.5, "TSR043@9:18"],
+  ]);
   const hostIndex = candidate("let xs = [1, 2]\nlet y = xs[(hostValue)]\nexit\n");
   assert.deepEqual(sited(hostIndex), ["warning TSV043@28"]);
   assert.ok(hostIndex.plan !== null);
-  assert.equal(runWith(hostIndex.plan, 1).status, "halted");
-  assert.equal(runWith(hostIndex.plan, 0.5).failure, "TSR024@28:37");
+  assertRuns(hostIndex.plan, "the parenthesised index", [
+    [1, null],
+    [0.5, "TSR024@28:37"],
+  ]);
 });
 
 test("a projection of a literal carries its elements' types and host data on the candidate route (round 11)", () => {
@@ -818,15 +848,17 @@ test("a projection of a literal carries its elements' types and host data on the
     const result = candidate(host);
     return {
       diagnostics: sited(result),
-      checked: result.plan === null ? null : checkedStores(result.plan),
+      checked: result.plan === null ? null : checksOf(result.plan),
     };
   });
-  assert.deepEqual(compiled.diagnostics, ["warning TSV041@29"]);
+  assert.deepEqual(compiled, {
+    diagnostics: ["warning TSV041@29"],
+    checked: ["20:47 list<list<integer>>"],
+  });
   const plan = candidate(host).plan;
   assert.ok(plan !== null);
-  assert.deepEqual(runWith(plan, 2).says, ["AFTER"]);
-  const bad = runWith(plan, "bad");
-  assert.deepEqual({ says: bad.says, failed: bad.failure !== null }, { says: [], failed: true });
+  assert.deepEqual(runWith(plan, 2), { status: "halted", says: ["AFTER"], failure: null });
+  assert.deepEqual(runWith(plan, "bad"), { status: "failed", says: [], failure: "TSR058@29:47" });
 });
 
 test("a projected written integer list stays strict on the candidate route (A4, round 15 B3)", () => {
@@ -1371,11 +1403,14 @@ function finish(
 }
 
 test("a checkpoint after a passed check resumes with the same state, and the later check still runs", () => {
-  const compiled = candidate(
-    'let count: number = hostValue\nsay "checked"\nrepeat count {\n  say "turn"\n}\nexit\n',
-  );
+  const source =
+    'let count: number = hostValue\nsay "checked"\nrepeat count {\n  say "turn"\n}\nexit\n';
+  const compiled = candidate(source);
   assert.ok(compiled.plan !== null);
   const plan = compiled.plan;
+  assert.deepEqual(checksOf(plan), ["0:29 number"]);
+  // (the repeat's own count check, the runtime's: TSR043 at the count, nothing said after it)
+  const count = source.indexOf("count {");
   for (const [hostValue, ending] of [
     [2, "halted"],
     [2.5, "failed"],
@@ -1395,15 +1430,17 @@ test("a checkpoint after a passed check resumes with the same state, and the lat
     assert.deepEqual(resumed.events, direct.events, String(hostValue));
     assert.deepEqual(resumed.snapshot, direct.snapshot, String(hostValue));
     assert.equal(resumed.snapshot.status, ending);
-    if (ending === "failed")
-      assert.ok(
-        resumed.events.some((event) => event.kind === "runtimeFailure" && event.code === "TSR043"),
-      );
-    else
-      assert.deepEqual(
-        resumed.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-        ["turn", "turn"],
-      );
+    assert.deepEqual(
+      resumed.events.flatMap((event) =>
+        event.kind === "say"
+          ? [event.text]
+          : event.kind === "runtimeFailure"
+            ? [`${event.code}@${event.span.start.offset}:${event.span.end.offset}`]
+            : [],
+      ),
+      ending === "failed" ? [`TSR043@${count}:${count + "count".length}`] : ["turn", "turn"],
+      String(hostValue),
+    );
   }
 });
 
