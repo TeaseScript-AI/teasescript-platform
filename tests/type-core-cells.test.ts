@@ -10,106 +10,54 @@ import { recordDifferences, type CompactRecord } from "./helpers/type-core-recor
 /**
  * The coarse core against its independent expectation set (checkpoint 9, TABLE §10.2, §10.5; the port plan's §3.1):
  * per record the outcome, the diagnostics as (kind, class, site, asserted context) and the checks as (kind, target,
- * required kinds, boundary, site) multisets. The step that builds the core's analysis (M4 S4) completes the cells
- * below; a record is asserted when every cell it tests is among them. Admission (A2–A8; A1 and A9, against written
- * types, are S4's), the boundary checks of external data (C9), fallbacks and defaults (C10), saves (C8), loads (F18,
- * F19), the adapters' cell (C13), the budget's fallback (B1), stage 3b (§13), and the cells and work families that
- * measure admission (F28, S5, S6, P1, H8; W3, W5, W15) join with their steps.
+ * required kinds, boundary, site) multisets. Every record is asserted except the classes held back below, each named by
+ * its cell with its reason.
  */
-const COMPLETED: ReadonlySet<string> = new Set([
-  // the transfers (§2)
-  ...["F1", "F1a", "F2", "F3", "F4", "F5", "F5a", "F6", "F7a", "F7b", "F7c", "F8", "F9", "F10"],
-  ...["F11", "F12", "F13", "F14", "F16", "F17a", "F17b", "F19a", "F20", "F21", "F22", "F23", "F24"],
-  ...["F25", "F26a", "F26b", "F27a", "F27b", "F27c"],
-  // the reads (§3): the exact path, the contract with its guard mark, the quiet path, the context words
-  ...["X1", "X2", "X3", "X4", "X5", "X6", "X7", "R", "§3.2", "§3.3", "§3.4"],
-  // the consumers (§4), C1 and C7 against written types, and admission against written types (A1, A9)
-  ...["C1", "C2", "C3", "C4", "C5", "C5a", "C5b", "C5c", "C6", "C7", "C11", "C12", "A1", "A9"],
-  // ownership and placement (§6), the exact answers (§7), the graph's rules (G1), the result's names (§10.5)
-  ...[
-    "O1",
-    "O1a",
-    "O2",
-    "O3",
-    "O4",
-    "O5",
-    "O6",
-    "O7",
-    "O8",
-    "O9",
-    "O10",
-    "O11",
-    "O12",
-    "O13",
-    "O14",
-  ],
-  ...["O15", "O16", "O17", "O18", "O19", "S1", "S2", "S3", "S4", "S7", "S8", "S9"],
-  ...["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11", "L12", "L13"],
-  ...["H1", "H2", "H3", "H4", "H5", "H6", "H7", "H9", "P2", "P3", "P4", "P5", "P6", "P7"],
-  ...["G1", "§10.5"],
-  // the verdicts of the work families whose row measures only the cells above (§10.1)
-  ...[
-    "W1",
-    "W2",
-    "W4",
-    "W6",
-    "W7",
-    "W8",
-    "W9",
-    "W10",
-    "W11",
-    "W12",
-    "W13",
-    "W14",
-    "W16",
-    "W17",
-    "W18",
-    "W19",
-  ],
-  ...[
-    "W20",
-    "W21",
-    "W22",
-    "W23",
-    "W24",
-    "W25",
-    "W35",
-    "W36",
-    "W37",
-    "W38",
-    "W39",
-    "W40",
-    "W41",
-    "W42",
-    "W43",
-  ],
-]);
+function heldBack(record: FixtureRecord): string | null {
+  // the adapters' cell (C13 and the storage rules' adapter rows): the kept checks the consumer calls run with S9b
+  if (record.owner === "adapter") return "the adapters' records (S9b)";
+  // stage 3b (§13: N1–N10): narrowing definitions, N3's required checks for a possible null and for written unions, and
+  // with them S0(c)'s class of expectations that rest on the null and written-union deviation, enter with S10
+  if (record.cells.some((cell) => /^N\d/.test(cell))) return "stage 3b's cells (S10)";
+  return HELD_BY_NAME.get(record.name) ?? null;
+}
 
 /**
- * Records whose expectation rests on admission's decided types (A2–A7) or on C9's boundary placement, which the set
- * tags with their transfer cell only: they join with admission (S6).
+ * Records of the #1026 follow-up (TABLE r4.47, PR #1028: every member's declared result, the clock reads' declared
+ * kinds, the emptiness markers of a dict's `values` and `keys`, the widened place's read and a literal projection's
+ * target), held back by name until it merges, when this list empties; two of them test admission's cells too
+ * (`year-present-wrong-store`, A6; `year-string-fallback`, C10) and need its temporal member transfers first.
  */
-const ADMISSION: ReadonlyMap<string, string> = new Map([
-  ["cp9-cells/F9/filled-snapshot", "an add into a copy decided by its source's literal (A2, A6)"],
-  ["cp9-cells/F10/toSet", "an add into a converted collection decided by its elements (A2, A6)"],
-  ["cp9-cells/F10/toList", "an add into a converted collection decided by its elements (A2, A6)"],
-  ["cp9-cells/F10/take", "an add into a taken list decided by its elements (A2, A6)"],
-  ["cp9-cells/F10/takeLast", "an add into a taken list decided by its elements (A2, A6)"],
-  ["cp9-cells/F10/plus", "an add into a joined list decided by its elements (A2, A6)"],
-  ["cp9-cells/F23/return-conflict", "a function's result decided by its first return (A2, A6)"],
+const HELD_BY_NAME: ReadonlyMap<string, string> = new Map(
   [
-    "cp9-cells/F25/choice",
-    "an obsolete C9 boundary at an authored choice (withdrawn by r4.42), kept byte-identical until S6 refreshes the set",
-  ],
-]);
+    "clock/date-written",
+    "clock/time-written",
+    "clock/time-written-integer",
+    "clock/weekday-repeat",
+    "clock/weekday-written-string",
+    "clock/year-written-integer",
+    "emptiness/cleared-bound-inner",
+    "emptiness/get-outer",
+    "emptiness/iterate-inner-then-select",
+    "emptiness/key-contract-count",
+    "emptiness/keys-first",
+    "emptiness/named-values",
+    "emptiness/values-contract-route",
+    "emptiness/values-first",
+    "fit/literal-mixed-repeat",
+    "fit/widened-place-written",
+    "temporal/absolute-converted-local-field",
+    "temporal/calendar-exact-offset-repeat",
+    "temporal/weekday-repeat",
+    "temporal/year-partial-presence-store",
+    "temporal/year-present-wrong-store",
+    "temporal/year-string-fallback",
+    "temporal/year-written-string",
+  ].map((name) => [`cp9-cells/s4/followup/${name}`, "the #1026 follow-up's (PR #1028)"]),
+);
 
 const records = readFixture();
-const asserted = records.filter(
-  (record) =>
-    record.owner !== "adapter" &&
-    !ADMISSION.has(record.name) &&
-    record.cells.every((cell) => COMPLETED.has(cell)),
-);
+const asserted = records.filter((record) => heldBack(record) === null);
 
 function analysed(record: FixtureRecord): CompactRecord {
   const request = coreRequest(record.files);
@@ -118,7 +66,7 @@ function analysed(record: FixtureRecord): CompactRecord {
 }
 
 test("the core gives the expected record for every record of the cells it completes", () => {
-  assert.ok(asserted.length > 800, `asserted ${asserted.length} records`);
+  assert.ok(asserted.length > 1_100, `asserted ${asserted.length} records`);
   const failures = asserted.flatMap((record) => {
     const differences = recordDifferences(record.expected, analysed(record));
     return differences.length === 0 ? [] : [`${record.name}: ${differences.join("; ")}`];
@@ -323,7 +271,8 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
   // F7b, C12 (Astra B3): a receiver that may be a list or a dict owes the dict key only as a check; a dict an error
   [
     "C12 remove on a possible list or dict",
-    'let flag = askBoolean "flag"\nfunction selected {\n  if flag { return [1] }\n  return dict {key: 1}\n}\nsay selected().remove(1)\nexit',
+    // (a written result: two returns of different kinds would be admission's error, ADR 0021 1.5)
+    'let flag = askBoolean "flag"\nfunction selected: integer[] | integer dict {\n  if flag { return [1] }\n  return dict {key: 1}\n}\nsay selected().remove(1)\nexit',
     "warning-runtime-check",
     "unknown",
   ],
@@ -566,11 +515,17 @@ test("C1's site follows a choice's selection as its value does, over options, wr
       const run = (): CompactRecord =>
         withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
       const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      // (a record is a multiset: each list in a canonical order)
       const offsets = [
-        ...record.diagnostics.filter((d) => d.kind === "written-target").map((d) => d.site.offset),
+        ...record.diagnostics
+          .filter((d) => d.kind === "written-target")
+          .map((d) => d.site.offset)
+          .sort((a, b) => a - b),
+        // (C1's checks: C9's boundary checks are not C1's and stand where external data enters or is read)
         ...record.checks
-          .filter((check) => check.kind === "copy-type")
-          .map((check) => check.site.offset),
+          .filter((check) => check.kind === "copy-type" && !check.boundary)
+          .map((check) => check.site.offset)
+          .sort((a, b) => a - b),
       ];
       return offsets.map((offset) =>
         source.startsWith("hostValue", offset)
@@ -735,7 +690,8 @@ test("a choice object's value is selected by its key, and a dict's values and ke
     // each alternative its own: the first object's value, the second's text, never the first's text
     [
       "an omitted value beside a present one",
-      'repeat askChoice [{text: "A", value: 1}, {text: 2}] {}\nexit',
+      // (the options' shared `text` of one kind: a literal's elements share their properties' types, ADR 0021 1.4)
+      "repeat askChoice [{text: 1, value: 1}, {text: 2}] {}\nexit",
       () => ["valid"],
     ],
     // a value computed in a solver component: the choice's own result, whichever member the solve enters
@@ -785,17 +741,17 @@ test("a choice object's value is selected by its key, and a dict's values and ke
     // another record's `text` (#1027 review, Astra D1)
     [
       "held records with a value and without one",
-      'let opts = [{text: "unused", value: 1}, {text: 2}]\nrepeat askChoice opts {}\nexit',
+      "let opts = [{text: 0, value: 1}, {text: 2}]\nrepeat askChoice opts {}\nexit",
       () => ["valid"],
     ],
     [
       "held records that do not fit",
-      'let opts = [{text: 1, value: "bad"}, {text: "also bad"}]\nrepeat askChoice opts {}\nexit',
+      'let opts = [{text: "x", value: "bad"}, {text: "also bad"}]\nrepeat askChoice opts {}\nexit',
       (at) => ["compile-error", `integer-use compile-error @${at("askChoice")}`],
     ],
     [
       "held records in a dict under a computed key",
-      'let key = "pick"\nlet choices = dict{[key]: {text: "A", value: 3}, other: {text: 4}}\nrepeat askChoice choices.values {}\nexit',
+      'let key = "pick"\nlet choices = dict{[key]: {text: 0, value: 3}, other: {text: 4}}\nrepeat askChoice choices.values {}\nexit',
       () => ["valid"],
     ],
     [
@@ -818,10 +774,11 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `copy-type n [integer] @${at("askChoice")}`,
       ],
     ],
-    // a record's `value` stored after it is made is read by its key
+    // a record's `value` stored after it is made is read by its key (a number widens the place, ADR 0021 1.2; a text
+    // there would be admission's error and be ignored, A6)
     [
       "a held record whose value is stored",
-      'let o = {text: "A", value: 1}\no.value = "x"\nlet n: integer = askChoice o\nexit',
+      'let o = {text: "A", value: 1}\no.value = 2.5\nlet n: integer = askChoice o\nexit',
       (at) => ["compile-error", `written-target compile-error @${at("askChoice")}`],
     ],
     // and a record's `text` stored after it is made; a key without a store below it stays per record (Astra on #1027)
@@ -993,7 +950,8 @@ test("a choice object's value is selected by its key, and a dict's values and ke
     // F19a: a receiver that may be a reference has the runtime's members, before a dict's list (review r2)
     [
       "a dict's keys on a receiver that may be a reference",
-      'let o = dict{k: "bad"}\nif askBoolean "pick" { o = player }\nrepeat o.keys.first {}\nexit',
+      // (a written union: a store of the speaker into the dict's place would be admission's error and be ignored, A6)
+      'let o: string dict | speaker = dict{k: "bad"}\nrepeat o.keys.first {}\nexit',
       (at) => [
         "warning-runtime-check",
         `member-read warning-runtime-check @${at("o.keys.first")}`,
@@ -1009,7 +967,7 @@ test("a choice object's value is selected by its key, and a dict's values and ke
     // the same through an operation and a literal: the receiver's completed contract decides (review r3)
     [
       "a dict's keys through an operation whose receiver may be a reference",
-      'let o = dict{k: "bad"}\nrepeat (o otherwise null).keys.first {}\no = player\nexit',
+      'let o: string dict | speaker = dict{k: "bad"}\nrepeat (o otherwise null).keys.first {}\nexit',
       (at) => [
         "warning-runtime-check",
         `member-read warning-runtime-check @${at("o otherwise")}`,
