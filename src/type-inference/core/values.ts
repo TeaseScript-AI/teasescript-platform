@@ -109,6 +109,7 @@ export class Values {
             key,
             node,
             loop ? "loop" : "fail" in answer ? answer.fail : "loop",
+            loop || ("fail" in answer && answer.later === true),
           );
     route("def" in answer && !loop ? exact.defRoute(answer.def, answer.rest) : "contract");
     // §3.2: under a test of its variable a read's kinds are possible and marked, and no consumer errs on them

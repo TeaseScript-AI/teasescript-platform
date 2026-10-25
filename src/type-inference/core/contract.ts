@@ -488,6 +488,8 @@ export class Contract {
     selectionVisits: 0,
   };
   readonly #prefix = new Map<Key, PrefixStores>();
+  /** `severalElements` per key's first element step. */
+  readonly #several = new Map<Key, boolean>();
   readonly #subPaths = new Map<Key, ReadonlySet<string>>();
   readonly #aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly #projectedLayers = new Map<string, SubLayer | null>();
@@ -597,7 +599,88 @@ export class Contract {
   }
 
   /** The contract's answer to a read (§3.2): every kind as an item, definite only by P3; the read's word. */
-  public *contractRead(key: Key, node: FlowNode, context: ContextWord): Work<readonly Item[]> {
+  /**
+   * TABLE §3.4, F12 (r4.48 (5)): whether an element read at the key's first element step is answered by the contract
+   * there, that is where several element-contributing sources, or a literal with several elements, meet at that step;
+   * a single exact contribution is no such meeting. Over the collection's own stores and every prefix's, as its
+   * contract reads them; a copy's own elements by the same question; once per element step.
+   */
+  public *severalElements(key: Key): Work<boolean> {
+    const place = keyPlace(key);
+    const path = keyPath(key);
+    const step = path.indexOf("element");
+    if (step < 0) return false;
+    const memoKey = keyOf(place, path.slice(0, step + 1));
+    const known = this.#several.get(memoKey);
+    if (known !== undefined) return known;
+    // (a copy cycle back to this step adds nothing)
+    this.#several.set(memoKey, false);
+    const collection = path.slice(0, step);
+    let count = 0;
+    for (let length = collection.length; length >= 0 && count < 2; length -= 1) {
+      this.pass.program.work.charge("invSteps");
+      const stored = this.prefixStores(keyOf(place, collection.slice(0, length)));
+      const below = [...collection.slice(length), "element"];
+      for (const entry of stored.list) {
+        if (count >= 2) break;
+        count += yield* this.#elementsOf(entry, below);
+      }
+      for (const sub of this.relevantSubs(stored, below)) {
+        if (count >= 2) break;
+        this.pass.program.work.charge("invSteps");
+        if (withoutEmpty(yield* this.subAt(sub.key, below)).length > 0) count += 1;
+      }
+    }
+    this.#several.set(memoKey, count >= 2);
+    return count >= 2;
+  }
+
+  /** The elements one source entry gives at `below` (which ends with an element step), counted to two. */
+  *#elementsOf(entry: PrefixEntry, below: readonly string[]): Work<number> {
+    const { program, definitions } = this.pass;
+    program.work.charge("invSteps");
+    if (withoutEmpty(yield* this.entryAt(entry, below)).length === 0) return 0;
+    if (entry.key !== undefined)
+      return (yield* this.severalElements(
+        keyOf(keyPlace(entry.key), [...keyPath(entry.key), ...below]),
+      ))
+        ? 2
+        : 1;
+    if (entry.value === undefined || entry.elem !== undefined || !program.hasOf.has(entry.value))
+      return 1;
+    // a literal: its elements at the step, through its own fields and elements; a value it holds counts once
+    const path = [...(entry.at ?? []), ...below];
+    let values: readonly PlaceId[] = [entry.value];
+    let count = 0;
+    for (const [index, step] of path.entries()) {
+      const next: PlaceId[] = [];
+      for (const value of values) {
+        program.work.charge("invSteps");
+        const types = program.hasOf.get(value);
+        if (types === undefined) {
+          count += 1;
+          continue;
+        }
+        for (const has of types) {
+          const at = typeAtPath(has.type, [step]);
+          if (at === null || !("place" in at)) continue;
+          const cells = definitions.cellDefs.get(at.place) ?? [];
+          if (index === path.length - 1) count += cells.length;
+          else for (const d of cells) next.push(d.value!);
+        }
+      }
+      if (count >= 2) return 2;
+      values = next;
+    }
+    return Math.min(count, 2);
+  }
+
+  public *contractRead(
+    key: Key,
+    node: FlowNode,
+    context: ContextWord,
+    later = false,
+  ): Work<readonly Item[]> {
     const { program, definitions, lists } = this.pass;
     const items = yield* this.contractOf(key);
     const kinds = withoutEmpty(items);
@@ -631,7 +714,13 @@ export class Contract {
     const deferred = kinds.some(
       (item) => item.tag === "unknown" && (item.reasons & REASON.deferred) !== 0,
     );
-    const word: ContextWord = deferred ? "deferred-parameter" : context;
+    // §3.4: the word is the read's first failing condition; where `context` is a later condition's or the value's
+    // arrival (`later`), an element read the contract answers fails X3 before it (r4.48 (5))
+    const word: ContextWord = deferred
+      ? "deferred-parameter"
+      : later && path.includes("element") && (yield* this.severalElements(key))
+        ? "member"
+        : context;
     return items.map((item) =>
       item.tag === "empty"
         ? item

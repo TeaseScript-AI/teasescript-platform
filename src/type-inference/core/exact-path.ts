@@ -38,8 +38,14 @@ import type { ReadRoute } from "./values.js";
  */
 
 /** The exact path's answer: D with the path below its key, or the first failing condition's word. */
+/**
+ * A read's exact path: its definition and the rest of the path, or the word of its first failing condition; `later`
+ * where that word is a condition's after X3 (X4–X7) or the value's arrival (F20), which an element read the contract
+ * answers comes before (X3's `member`, TABLE §3.4).
+ */
 export type ExactAnswer =
-  { readonly def: Definition; readonly rest: readonly string[] } | { readonly fail: ContextWord };
+  | { readonly def: Definition; readonly rest: readonly string[] }
+  | { readonly fail: ContextWord; readonly later?: true };
 
 /** A path step no definition names: the exact path every path below a source shares that no key below it overlaps. */
 const ANY_PATH = "*";
@@ -72,7 +78,7 @@ interface CopyLink {
   top:
     | { readonly kind: "copy" | "own" }
     | { readonly kind: "origin"; readonly def: Definition }
-    | { readonly kind: "fail"; readonly word: ContextWord };
+    | { readonly kind: "fail"; readonly word: ContextWord; readonly later: boolean };
   /** The definition its source answers with, if a whole store: its anchor. */
   anchor: number | null;
   depth: number;
@@ -286,8 +292,8 @@ export class ExactPath {
     const { program, definitions, lists, handlers } = this.pass;
     program.work.charge("exactQueries");
     if (!program.live(node)) return { fail: "dead-code" }; // X1
-    // F20: a function's result is never the exact path
-    if (program.resultPlaces.has(keyPlace(key))) return { fail: "call" };
+    // F20: a function's result is never the exact path; `call` is the result's word, the value's arrival
+    if (program.resultPlaces.has(keyPlace(key))) return { fail: "call", later: true };
     const reaching = lists.reachingDef(key, node, before);
     // X2: no dominating definition; a key with stores is reached from another callable or file
     if (reaching === null)
@@ -315,6 +321,7 @@ export class ExactPath {
     // comes before any later condition's word
     const word = (found: ContextWord): ExactAnswer => ({
       fail: this.#overCopy(d, reaching.rest) ? "member" : found,
+      later: true,
     });
     const boundary = program.dom.edom(node);
     // X4
@@ -393,7 +400,8 @@ export class ExactPath {
     const roots: CopyLink[] = [];
     for (const link of links.values()) {
       const answer = this.exactPath(keyOf(link.source, [ANY_PATH]), link.read);
-      if (!("def" in answer)) link.top = { kind: "fail", word: answer.fail };
+      if (!("def" in answer))
+        link.top = { kind: "fail", word: answer.fail, later: answer.later === true };
       else if (answer.def.kind === "whole" && answer.rest.length === 1) {
         const up = links.get(answer.def.uid);
         link.up = up ?? null;
@@ -1079,7 +1087,12 @@ export class ExactPath {
         }
       } else if (stop === null && root.top.kind === "fail") {
         if (!(yield* contract.refReceiver(keyOf(root.source, rest)))) {
-          items = yield* contract.contractRead(keyOf(root.source, rest), root.read, root.top.word);
+          items = yield* contract.contractRead(
+            keyOf(root.source, rest),
+            root.read,
+            root.top.word,
+            root.top.later,
+          );
           this.#defRoutes.set(routeKey, "contract");
         }
       }

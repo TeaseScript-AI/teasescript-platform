@@ -2208,3 +2208,56 @@ test("a supplied argument and a parameter's default never constrain each other",
   }
   assert.deepEqual(differing, []);
 });
+
+/**
+ * TABLE §3.4, F12 (r4.48 (5)): the word is the read's first failing condition; an element read fails X3 (`member`)
+ * where the contract answers it, several element-contributing sources or a literal of several elements meeting at the
+ * read's element step, before a later condition's word (`branch`) and the result's own (`call`); a single exact
+ * contribution keeps the read's word. A call's result with two returns and with one, a variable's literal of two
+ * elements, a list stored in a branch beside another list and beside an empty one; both orders.
+ */
+test("an element read the contract answers is X3's member, before a later condition's word", () => {
+  const programs: readonly (readonly [string, string, string])[] = [
+    [
+      "a call's result of two returns",
+      "function f(flag: boolean) {\n  if flag { return [1] }\n  return [1.5]\n}\nrepeat f(true).first {}\nexit",
+      "member",
+    ],
+    [
+      "a call's result of one return",
+      "function f {\n  return [[1, 2.5][0]]\n}\nrepeat f().first {}\nexit",
+      "call",
+    ],
+    [
+      "a variable's literal of two elements",
+      "let xs = [1, 1.5]\nrepeat xs.first {}\nexit",
+      "member",
+    ],
+    [
+      "a list stored in a branch beside another",
+      'let xs = [1]\nif askBoolean("b") { xs = [1.5] }\nrepeat xs.first {}\nexit',
+      "member",
+    ],
+    [
+      "a list stored in a branch beside an empty one",
+      'let xs = [1.5]\nif askBoolean("b") { xs = [] }\nrepeat xs.first {}\nexit',
+      "branch",
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, word] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const words = record.diagnostics
+        .filter((diagnostic) => diagnostic.kind === "integer-use")
+        .map((diagnostic) => `${diagnostic.class} ${diagnostic.context}`);
+      if (JSON.stringify(words) !== JSON.stringify([`warning-runtime-check ${word}`]))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${words.join("; ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});
