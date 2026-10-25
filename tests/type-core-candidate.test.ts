@@ -126,14 +126,19 @@ test("every record of the set inside the slice compiles on the candidate route a
     );
     assert.equal(result.plan === null, record.expected.outcome === "compile-error", record.name);
     if (result.plan === null) continue;
-    // C1's and C9's checks run where the store that holds their site stores its value (S3 §4); C2's need no plan content
+    // C1's and C9's checks run where the store that holds their site stores its value (S3 §4); C2's need no plan content,
+    // nor a boundary check against `unknown`, the runtime's validation of representable external data for every plan
     assert.equal(record.files.length, 1, record.name);
     const stores = result.plan.instructions.filter(
       (instruction) => instruction.kind === "declareBinding" || instruction.kind === "assign",
     );
     const owed = new Set(
       record.expected.checks
-        .filter((check) => check.kind === "copy-type")
+        .filter(
+          (check) =>
+            check.kind === "copy-type" &&
+            !(check.against.length === 1 && check.against[0] === "unknown"),
+        )
         .map((check) => {
           const store = stores
             .filter(({ span }) => span.so <= check.site.offset && check.site.offset < span.eo)
@@ -204,11 +209,14 @@ test("C1's copy check and C9's boundary check run where external data enters a w
     ["let pool: integer[] = hostValue\nexit\n", 'pool ["list"] @22'],
     ["let xs: integer[][] = [hostValue]\nexit\n", 'xs.element ["list"] @23'],
     ["let pool: integer?[] = [hostValue, null, 7]\nexit\n", 'pool.element ["integer","null"] @24'],
-    // two ingresses into one place: two checks, each at its own host value
+    // two ingresses in one literal brought by one store: one check for the store, at the first (TABLE §4 C9: one per
+    // ingress store; r4.35)
+    ["let n: integer[] = [hostValue, hostValue]\nexit\n", 'n.element ["integer"] @20'],
+    // two stores, two checks
     [
-      "let n: integer[] = [hostValue, hostValue]\nexit\n",
+      "let n: integer[] = [hostValue]\nn = [hostValue]\nexit\n",
       'n.element ["integer"] @20',
-      'n.element ["integer"] @31',
+      'n.element ["integer"] @36',
     ],
   ] as const) {
     const request = coreRequest([{ path: "main.tease", source: shape }]);
@@ -221,6 +229,71 @@ test("C1's copy check and C9's boundary check run where external data enters a w
       boundaries,
       shape,
     );
+  }
+});
+
+test("admission's decided types and C9's boundary checks compile and run on the candidate route (S6)", () => {
+  const list = (...items: SerializableRuntimeValue[]): SerializableRuntimeValue => ({
+    kind: "list",
+    items,
+  });
+  for (const [source, diagnostics, checked, runs] of [
+    // A2: a decided type checks a later store, the boundary of the host value against it (C9), C2 at the count
+    [
+      "let n = 1\nn = hostValue\nrepeat n {}\nexit\n",
+      ["warning TSV041@14", "warning TSV011@31"],
+      ["10:23"],
+      [
+        [2, null],
+        [1.5, "TSR058@14:23"],
+        ["x", "TSR058@14:23"],
+      ],
+    ],
+    // A6: a definite contribution that does not fit is an error at the store
+    ['let n = 1\nn = "x"\nexit\n', ["error TSV041@14"], null, []],
+    // A4 and A8: a copy of a written binding is decided by its type, a literal's element checked against it
+    ['let a: integer[] = []\nlet b = a\nb = ["bad"]\nexit\n', ["error TSV041@37"], null, []],
+    ["let b = 1\nlet a: integer = 2\nb = a\nexit\n", [], [], []],
+    // C9: external data stored whole into a written collection, checked there with its elements
+    [
+      "let pool: integer[] = hostValue\nexit\n",
+      ["warning TSV041@22", "warning TSV041@22"],
+      ["0:31"],
+      [
+        [list(1, 2), null],
+        [list("x"), "TSR058@22:31"],
+        ["x", "TSR058@22:31"],
+      ],
+    ],
+    // C9 r4.10: a host value a consumer reads directly is checked at the read, the runtime's own validation; C2 at the use
+    [
+      "repeat hostValue {}\nexit\n",
+      ["warning TSV011@7"],
+      [],
+      [
+        [2, null],
+        [1.5, "TSR043@7:16"],
+      ],
+    ],
+  ] as const) {
+    const compiled = inBothOrders(() => {
+      const result = candidate(source);
+      return {
+        diagnostics: sited(result),
+        checked: result.plan === null ? null : checkedStores(result.plan),
+      };
+    });
+    assert.deepEqual(compiled.diagnostics.sort(), [...diagnostics].sort(), source);
+    assert.deepEqual(compiled.checked, checked, source);
+    const plan = candidate(source).plan;
+    for (const [value, failure] of runs) {
+      assert.ok(plan !== null, source);
+      assert.equal(
+        runWith(plan, value).failure,
+        failure,
+        `${source} with ${JSON.stringify(value)}`,
+      );
+    }
   }
 });
 
@@ -440,22 +513,8 @@ test("a program outside the slice throws at its first construct outside it", () 
     ["let total = 0\nfor value in [1, 2] {\n  total = value\n}\nexit\n", 14],
     // another consumer: a condition that is no boolean (C3)
     ['if 1 {\n  say "never"\n}\nexit\n', 3],
-    // another ingress: a host value that a consumer reads directly (S6's boundary)
-    ["repeat hostValue {}\nexit\n", 7],
-    // admission (S6): a variable without a written type whose stores take two types
-    ['let n = 1\nn = "x"\nexit\n', 4],
     // a possible null, whose required check comes with narrowing (S10)
     ["let flag = true\nlet n: integer? = null\nif flag {\n  n = 2\n}\nrepeat n {}\nexit\n", 66],
-    // A4 (S6): a copy of a variable with a written type, or of a part of one, decided by that type; with and without a
-    // later store, whole, through an index, inside a list, and by an assignment
-    ['let a: integer[] = []\nlet b = a\nb = ["bad"]\nexit\n', 30],
-    ["let a: integer[] = []\nlet b = a\nexit\n", 30],
-    ["let a: integer[][] = [[]]\nlet b = a[0]\nexit\n", 34],
-    ["let a: integer = 1\nlet b = [a]\nexit\n", 28],
-    ["let b = 1\nlet a: integer = 2\nb = a\nexit\n", 33],
-    // C9 (S6): external data stored as a whole collection, whose elements' checks are admission's
-    ["let pool: integer[] = hostValue\nexit\n", 22],
-    ["let xs: integer[][] = [hostValue]\nexit\n", 23],
     // lists nested as deep as the facts' walk (256 levels), inferred or written
     [
       `let a = ${"[".repeat(256)}1${"]".repeat(256)}\na = ${"[".repeat(256)}"bad"${"]".repeat(256)}\nexit\n`,

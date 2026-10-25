@@ -380,13 +380,22 @@ function runtimeChecks(answers: Answers, index: SliceIndex): Map<RuntimeCheckSit
   const lets = declarations(answers, index);
   const checks = new Map<RuntimeCheckSite, TypeCheckPlan>();
   for (const obligation of owed) {
+    // a boundary check against `unknown` is the runtime's validation of representable external data, which runs for
+    // every plan: no plan content (S3 §4)
+    if (obligation.against.length === 1 && obligation.against[0] === "unknown") continue;
     const store = index.storeOf(index.expressionAt(obligation.site));
     if (store === undefined) throw new Error("A check of the slice belongs to no store.");
     if (checks.has(store)) continue;
     const declaration = declarationOf(answers, index, lets, store);
-    if (declaration.typeAnnotation === null)
-      throw new Error("A check of the slice stores into a variable without a written type.");
-    const type = typePlan(typeFromAnnotation(declaration.typeAnnotation));
+    // the destination's own contract: its written type, else its admitted type (A1–A9, C9 r4.12)
+    const place = answers.at(nodeOf(answers, index, declaration))?.place;
+    const type = typePlan(
+      declaration.typeAnnotation !== null
+        ? typeFromAnnotation(declaration.typeAnnotation)
+        : place === null || place === undefined
+          ? UNKNOWN_TYPE
+          : admittedType(answers, place.id, place.path),
+    );
     if (type !== null) checks.set(store, { type, place: `'${declaration.name.name}'` });
   }
   return checks;
@@ -463,6 +472,29 @@ function placeType(answers: Answers, id: PlaceId, path: readonly string[]): Stat
   return type;
 }
 
+/**
+ * A place's admitted type at a path (A1–A9): per level its written or decided kinds, a place admission never decided its
+ * contract's kinds, and a collection's elements' below it, built from the deepest up.
+ */
+function admittedType(answers: Answers, id: PlaceId, path: readonly string[]): StaticType {
+  const levels: ItemTag[][] = [];
+  for (let at = [...path]; ; at = [...at, "element"]) {
+    const place = answers.place(id, at);
+    const tags =
+      place.admitted.by === "undecided"
+        ? place.contract.kinds.map((item) => item.tag)
+        : [...place.admitted.kinds];
+    levels.push(tags);
+    if (!tags.some((tag) => COLLECTIONS.has(tag))) break;
+    if (at.length + 1 >= SLICE_DEPTH)
+      throw new Error("A place of the slice holds collections deeper than its facts follow.");
+  }
+  let type: StaticType = openType();
+  for (let depth = levels.length - 1; depth >= 0; depth -= 1)
+    type = typeOfKinds(levels[depth]!, type);
+  return type;
+}
+
 /** The facts the core settled on for a program inside the slice, by source site (see `SolvedTypeFacts`). */
 export function coreFacts(
   answers: Answers,
@@ -503,12 +535,13 @@ export function coreFacts(
   const bindings = index.lets
     .map((statement) => {
       const place = answers.at(nodeOf(answers, index, statement))?.place ?? null;
+      // a binding's type: its written type, else its admitted type (every store into it is checked against it)
       const type =
         statement.typeAnnotation !== null
           ? typeFromAnnotation(statement.typeAnnotation)
           : place === null
             ? UNKNOWN_TYPE
-            : placeType(answers, place.id, place.path);
+            : admittedType(answers, place.id, place.path);
       return {
         site: factSite(index.fileOf(statement), statement.span),
         kind: statement.kind,
