@@ -847,9 +847,11 @@ export class Contract {
       if (item.tag === "dict") {
         if (after.length === 0) out.push(carried(makeItem("list", item.writer), [item]));
         else if (after[0] === "element") {
-          if (dictList(path[at]!) === "values")
-            out.push(...withoutEmpty(yield* read([...before, ...after], at)));
-          else if (after.length === 1) out.push(carried(makeItem("string", item.writer), [item]));
+          // the list's own selection takes its own emptiness (open); a deeper selection's marker is that selection's
+          if (dictList(path[at]!) === "values") {
+            const below = yield* read([...before, ...after], at);
+            out.push(...(after.length === 1 ? withoutEmpty(below) : below));
+          } else if (after.length === 1) out.push(carried(makeItem("string", item.writer), [item]));
           if (after.length === 1) out.push(EMPTY);
         }
       } else if (item.tag === "object") own = true;

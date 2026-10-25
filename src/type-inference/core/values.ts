@@ -219,12 +219,14 @@ export class Values {
           ]);
         if (after.length === 0) out.push(of("list"));
         else if (after[0] === "element") {
-          const elements =
+          const below =
             dictList(rest[at]!) === "keys"
               ? after.length === 1
                 ? [of("string")]
                 : []
-              : withoutEmpty(yield* this.#through(value, node, [...before, ...after], at));
+              : yield* this.#through(value, node, [...before, ...after], at);
+          // the list's own selection takes its own emptiness (open); a deeper selection's marker is that selection's
+          const elements = after.length === 1 ? withoutEmpty(below) : below;
           out.push(...(item.cert === "def" ? elements : weaken(elements)));
           if (after.length === 1) out.push(EMPTY);
         }

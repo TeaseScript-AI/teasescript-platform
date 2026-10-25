@@ -822,6 +822,84 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `integer-check vs.element [integer] @${at("vs.first")}`,
       ],
     ],
+    // a selection takes only its own emptiness: a deeper list's `empty-check` stays (#1027 review, Astra B1)
+    [
+      "a dict's values at depth 1",
+      "let d = dict{a: 1}\nrepeat d.values.first {}\nexit",
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("d.values")}`,
+        `empty-check d.values [list] @${at("d.values")}`,
+      ],
+    ],
+    [
+      "a dict's values at depth 2",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.first.values.first {}\nexit",
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("d.values")}`,
+        `member-read warning-runtime-check @${at("d.values")}`,
+        `empty-check d.values [list] @${at("d.values")}`,
+        `empty-check d.values.element.values [list] @${at("d.values")}`,
+      ],
+    ],
+    [
+      "a dict's keys below its values",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.first.keys.first {}\nexit",
+      (at) => [
+        "compile-error",
+        `integer-use compile-error @${at("d.values")}`,
+        `member-read warning-runtime-check @${at("d.values")}`,
+        `member-read warning-runtime-check @${at("d.values")}`,
+        `empty-check d.values [list] @${at("d.values")}`,
+        `empty-check d.values.element.keys [list] @${at("d.values")}`,
+      ],
+    ],
+    [
+      "a dict's values at depth 3",
+      "let d = dict{a: dict{x: dict{}}, b: dict{y: dict{v: 1}}}\nrepeat d.values.first.values.first.values.first {}\nexit",
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("d.values")}`,
+        `member-read warning-runtime-check @${at("d.values")}`,
+        `member-read warning-runtime-check @${at("d.values")}`,
+        `empty-check d.values [list] @${at("d.values")}`,
+        `empty-check d.values.element.values [list] @${at("d.values")}`,
+        `empty-check d.values.element.values.element.values [list] @${at("d.values")}`,
+      ],
+    ],
+    [
+      "a cleared inner dict's values",
+      "let inner = dict{v: 1}\ninner.clear()\nlet d = dict{a: inner}\nrepeat d.values.first.values.first {}\nexit",
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("d.values")}`,
+        `member-read warning-runtime-check @${at("d.values")}`,
+        `empty-check d.values [list] @${at("d.values")}`,
+        `empty-check d.values.element.values [list] @${at("d.values")}`,
+      ],
+    ],
+    [
+      "an inner dict bound before its values are read",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nlet inner = d.values.first\nrepeat inner.values.first {}\nexit",
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("d.values")}`,
+        `member-read warning-runtime-check @${at("inner.values")}`,
+        `empty-check d.values [list] @${at("d.values")}`,
+        `empty-check inner.values [list] @${at("inner.values")}`,
+      ],
+    ],
+    // the list-literal analogue: the inner list's selection keeps its check
+    [
+      "a list's lists",
+      "let d = [[], [1]]\nrepeat d.first.first {}\nexit",
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("d.first")}`,
+        `empty-check d.element [list] @${at("d.first")}`,
+      ],
+    ],
     // §3.2: under a test of its own path the read is marked, as `xs.first` is
     [
       "a dict's values under a test of their path",
