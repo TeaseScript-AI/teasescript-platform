@@ -5784,10 +5784,18 @@ This access is read-only. Script metadata is available separately:
 ```text
 let metadata = getTeaseMetadata("immutable-tease-id")
 
-metadata.firstRunAt
-metadata.lastRunAt
-metadata.runCount
+metadata.firstSessionAt
+metadata.lastSessionAt
+metadata.sessionCount
+metadata.sessions
 ```
+
+`sessions` is a list with one object per session started with Start, oldest first. Continuing a session is not a new
+session. Each object has three fields: `startedAt` is the absolute moment of Start; `finishedAt` is the absolute moment
+of `exit`, or `null` when the session has not ended with `exit`; and `playedTime` is the scene time the Tease actually
+ran in that session, without the time the Playroom was closed, as timers measure it ([§27](#27-timers)). For an
+unfinished session, `playedTime` counts up to its latest saved checkpoint. `firstSessionAt` and `lastSessionAt` are the
+`startedAt` of the first and the last session, and `sessionCount` equals `sessions.length`.
 
 Access boundaries:
 
