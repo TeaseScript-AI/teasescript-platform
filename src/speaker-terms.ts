@@ -97,15 +97,25 @@ export function displayNameParts(
 }
 
 /**
- * The properties that a speaker reads its property `name` from, when `has` tells which properties it has of its own:
- * `name` itself, or the ones {@link speakerPropertyValue} falls back to.
+ * The properties that a speaker whose own properties `own` gives reads its property `name` from: `name` itself, or the
+ * ones {@link speakerPropertyValue} falls back to.
  */
-export function speakerPropertySources(has: (name: string) => boolean, name: string): string[] {
+export function speakerPropertySources(own: (name: string) => unknown, name: string): string[] {
+  const has = (field: string) => own(field) !== undefined;
   if (has(name)) return [name];
   if (name === "title" && has("shortTitle")) return ["shortTitle"];
   if (name === "shortTitle" && has("title")) return ["title"];
-  if (name === "displayName" && DISPLAY_NAME_FIELDS.some(has))
-    return [...speakerPropertySources(has, "title"), "firstName", "lastName"].filter(has);
+  if (name === "displayName" && DISPLAY_NAME_FIELDS.some(has)) {
+    // The fields that `displayNameParts` reads: `shortTitle` only when `title` shows nothing.
+    const read: string[] = [];
+    displayNameParts(has, (field) => {
+      const value = own(field);
+      if (value === undefined) return null;
+      read.push(field);
+      return value === null ? null : field;
+    });
+    return read;
+  }
   return [GENDER_TERMS.has(name) ? "gender" : name];
 }
 

@@ -834,6 +834,26 @@ test("a term that a speaker's gender gives, a title read through the other one, 
   );
   // A term set explicitly keeps its own origin.
   assert.ok(!lineage(played.trace, explicit!.id).some((step) => step.target === "changed"));
+  // A `null` title shows nothing, so the name reads `shortTitle` and comes from it.
+  const untitled = traced(
+    [
+      "speaker guide {",
+      "    title: null",
+      '    shortTitle: "Miss"',
+      '    firstName: "Vera"',
+      "}",
+      'let chosen = "Dr"',
+      "guide.shortTitle = chosen",
+      "say guide.displayName",
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(untitled);
+  assert.ok(
+    lineage(untitled.trace, outputOf(untitled, "Dr Vera").id).some(
+      (step) => step.target === "chosen",
+    ),
+  );
 });
 
 test("a field the player copied from the player profile comes from the player profile's field, which the host gave", () => {

@@ -163,7 +163,7 @@ export function getProperty(
     // A value that a speaker reads through other properties, such as a term its gender gives, comes from those.
     if (evaluator.trace !== null)
       for (const source of speakerPropertySources(
-        (own) => speaker.properties.some((property) => property.name === own),
+        (own) => speaker.properties.find((property) => property.name === own)?.value,
         name,
       ))
         evaluator.readState(value, source);
