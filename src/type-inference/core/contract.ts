@@ -1221,20 +1221,20 @@ export class Contract {
     if (shown !== undefined) return [makeItem(shown)];
     if (family === "range") return [makeItem("range")];
     // a method without a category, per receiver alternative: its declared result per receiver kind (F25), else the
-    // runtime's opaque answer on a known kind (r4.47 (1)); what the core cannot know keeps its own reasons
+    // runtime's opaque answer on a known kind (r4.47 (1)); what the core cannot know keeps its own reasons. A receiver
+    // without items yet is a provisional bottom: the result stays the bottom (S3 §1, r4.44)
     if (family === "method" && c.receiver !== null) {
       const receiver = withoutEmpty(yield* this.contractOfValue(c.receiver));
-      if (receiver.length > 0)
-        return mergeItems(
-          receiver.map((item) => {
-            if (item.tag === "unknown") return item;
-            const declared = declaredMethod(item.tag, name);
-            return declared === undefined
-              ? unknownItem(REASON.opaque)
-              : carried(makeItem(declared, item.writer), [item]);
-          }),
-          scope,
-        );
+      return mergeItems(
+        receiver.map((item) => {
+          if (item.tag === "unknown") return item;
+          const declared = declaredMethod(item.tag, name);
+          return declared === undefined
+            ? unknownItem(REASON.opaque)
+            : carried(makeItem(declared, item.writer), [item]);
+        }),
+        scope,
+      );
     }
     return [unknownItem(REASON.external)];
   }
