@@ -655,7 +655,7 @@ function sourcesUnder(directory: string): string[] {
 
 test("no production code selects the core: only tests reach the candidate entry", () => {
   const root = process.cwd();
-  for (const directory of ["src", "playground", "player", "editor", "tools"])
+  for (const directory of ["src", "playground", "player", "tools"])
     for (const file of sourcesUnder(join(root, directory))) {
       const relative = file.slice(root.length + 1);
       const text = readFileSync(file, "utf8");

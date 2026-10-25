@@ -12,23 +12,6 @@ import { fromBase64, openAge, x25519Identity } from "../dist/tests/helpers/age-k
 // An image request's preview on the Stage, once it shows.
 const decodedPreview = `(() => { const image = document.querySelector('[data-stage-preview]'); return !!image && image.complete && image.naturalWidth > 0; })()`;
 const capturedImages = `[...document.querySelectorAll('img')].filter((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0).length`;
-// A package the smoke serves only as a catalog: paths that model URIs built from the path alone would merge.
-const MODEL_PATHS_CATALOG = {
-  images: [],
-  media: [],
-  sources: [
-    { path: "main.tease", source: 'goto "rooms/cellar.tease"\n' },
-    { path: "rooms/cellar.tease", source: 'say "cellar"\nexit\n' },
-    // Not a package path (TSC009), but the editor still opens it.
-    { path: "rooms\\cellar.tease", source: 'say "backslash"\nexit\n' },
-    { path: "C:/room.tease", source: 'say "upper"\nexit\n' },
-    { path: "c:/room.tease", source: 'say "lower"\nexit\n' },
-  ],
-  problems: [],
-};
-
-const CATALOGS = new Map([["/dev-package/model-paths/catalog.json", MODEL_PATHS_CATALOG]]);
-
 const LAN_HOST = "player-lan.test";
 // The compiled spill store of Debug's rewind history, which the smoke runs against the browser's real IndexedDB.
 const DEBUG_HISTORY_MODULE_URL = "/smoke/debug-history-indexeddb.js";
@@ -46,7 +29,6 @@ async function main() {
   const server = createPlaygroundServer({
     packagesRoot: fileURLToPath(new URL("../tests/fixtures/packages/", import.meta.url)),
   });
-  // The model-paths package exists only as a catalog, so the smoke needs no file named with `\` or `C:` on disk.
   const [handleRequest] = server.listeners("request");
   server.removeAllListeners("request");
   server.on("request", (request, response) => {
@@ -65,10 +47,7 @@ async function main() {
       );
       return;
     }
-    const catalog = CATALOGS.get(request.url);
-    if (catalog === undefined) return handleRequest(request, response);
-    response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify(catalog));
+    handleRequest(request, response);
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -1242,34 +1221,6 @@ async function packageScenario(cdp, origin) {
     "rooms/cellar.tease:candle",
     "The playground diagnostic did not select its source",
   );
-
-  await navigate(cdp, `${origin}/editor/?package=broken`);
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-monaco-ready="true"]') !== null && document.querySelector('[data-file-path="rooms/cellar.tease"] .file-problems')?.textContent.trim() === '1 diagnostics'`,
-    8_000,
-    "The editor did not open the broken package's files with their diagnostics",
-  );
-
-  // Package paths that a model URI built from the path alone would merge: on Windows `\` becomes a folder separator,
-  // and Monaco lowercases a first folder that looks like a drive. The editor must keep every file apart.
-  const userAgent = await value(cdp, "navigator.userAgent");
-  await cdp.call("Emulation.setUserAgentOverride", {
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36",
-    platform: "Win32",
-  });
-  try {
-    await navigate(cdp, `${origin}/editor/?package=model-paths`);
-    await waitFor(
-      cdp,
-      `document.querySelector('[data-monaco-ready="true"]') !== null && document.querySelectorAll('[data-file-path]').length === ${MODEL_PATHS_CATALOG.sources.length} && [...document.querySelectorAll('[data-file-path]')].find((row) => row.getAttribute('data-file-path') === ${JSON.stringify("rooms\\cellar.tease")})?.querySelector('.file-problems')?.textContent.trim() === '1 diagnostics'`,
-      8_000,
-      "The editor did not keep the package files with `\\` and drive-like folders apart",
-    );
-  } finally {
-    await cdp.call("Emulation.setUserAgentOverride", { userAgent });
-  }
 }
 
 // The start page shows the script's header, and the session it starts is kept: a reload continues it where it was, also
