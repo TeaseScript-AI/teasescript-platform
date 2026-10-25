@@ -1252,14 +1252,14 @@ test("a selection consumes only its own emptiness mark below get, a loop's visit
 });
 
 /**
- * TABLE r4.47 (#1026's follow-up): the set's records `cp9-cells/s4/followup/…` (set `b837110d8dd10bb1`) in both orders,
+ * TABLE r4.47 (#1026's follow-up): the set's records `cp9-cells/s4/followup/…` (set `716ac7091de2b95e`) in both orders,
  * as their outcome, diagnostics and checks with their sites: temporal fields and calendar parts by their declared
- * results (1), a selection's descendant emptiness (2), held choice options after a store below `value` or `text` (4).
- * Two records are S6's and left out: `temporal/year-string-fallback` differs only by C10's error at the fallback and
- * `temporal/year-present-wrong-store` only by A6's error at the store, both admission's. Beside them, clock reads give
- * their declared kind with no boundary, as an ask does (r4.47 (5)).
+ * results (1), a selection's descendant emptiness (2), held choice options after a store below `value` or `text` (4),
+ * clock reads by their declared kind with no boundary (5), and what fits a written place (6, §3.4, §10.5). Two records
+ * are S6's and left out: `temporal/year-string-fallback` differs only by C10's error at the fallback and
+ * `temporal/year-present-wrong-store` only by A6's error at the store, both admission's.
  */
-test("the set's follow-up records and clock reads give their records in both orders", () => {
+test("the set's follow-up records give their records in both orders", () => {
   const programs: readonly (readonly [string, string, readonly string[]])[] = [
     [
       "temporal/weekday-repeat",
@@ -1512,11 +1512,78 @@ test("the set's follow-up records and clock reads give their records in both ord
       ["valid"],
     ],
     [
-      "clock read: getDate() counted",
+      "clock/weekday-repeat",
       "let d = getDate()\nrepeat d.weekday {}\nexit\n",
       ["compile-error", "integer-use compile-error @25"],
     ],
-    ["clock read: getDate() into a date", "let t: date = getDate()\nexit\n", ["valid"]],
+    [
+      "clock/weekday-written-string",
+      "let d = getDate()\nlet weekdayName: string = d.weekday\nexit\n",
+      ["valid"],
+    ],
+    ["clock/date-written", "let t: date = getDate()\nexit\n", ["valid"]],
+    ["clock/year-written-integer", "let n: integer = getDate().year\nexit\n", ["valid"]],
+    ["clock/time-written", "let t: time = getTime()\nexit\n", ["valid"]],
+    [
+      "clock/time-written-integer",
+      "let t: integer = getTime()\nexit\n",
+      ["compile-error", "written-target compile-error @17"],
+    ],
+    [
+      "fit/literal-mixed-written",
+      "let r: integer = [2, 2.5][0]\nexit\n",
+      [
+        "copy-type r [integer] @17",
+        "warning-runtime-check",
+        "written-target warning-runtime-check @17",
+      ],
+    ],
+    [
+      "fit/literal-number-written",
+      "let r: integer = [2.5, 3.5][0]\nexit\n",
+      ["compile-error", "written-target compile-error @17"],
+    ],
+    [
+      "fit/external-mixed-written",
+      "let r: integer = [hostValue, 2.5][0]\nexit\n",
+      [
+        "copy-type r [integer] @17",
+        "copy-type r [integer] @18",
+        "copy-type r [integer] boundary @18",
+        "warning-runtime-check",
+        "written-target warning-runtime-check @17",
+        "written-target warning-runtime-check @18",
+      ],
+    ],
+    [
+      "fit/widened-place-written",
+      "let xs = [1]\nxs.add(1.5)\nlet r: integer = xs.first\nexit\n",
+      [
+        "copy-type r [integer] @42",
+        "warning-runtime-check",
+        "written-target warning-runtime-check @42",
+      ],
+    ],
+    [
+      "fit/scalar-overwrite-written",
+      "let n = 1\nn = 2.5\nlet r: integer = n\nexit\n",
+      ["compile-error", "written-target compile-error @35"],
+    ],
+    [
+      "fit/literal-mixed-repeat",
+      "repeat [2, 2.5][0] {}\nexit\n",
+      [
+        "integer-check [2, 2.5][0] [integer] @7",
+        "integer-use warning-runtime-check @7",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "fit/literal-number-repeat",
+      "repeat [2.5, 3.5][0] {}\nexit\n",
+      ["compile-error", "integer-use compile-error @7"],
+    ],
+    ["fit/literal-integer-written", "let r: integer = [2, 3][0]\nexit\n", ["valid"]],
   ];
   const differing: string[] = [];
   for (const [name, source, expected] of programs) {
