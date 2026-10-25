@@ -1,7 +1,6 @@
 import type { RuntimeErrorCode } from "../../diagnostic-codes.js";
 import type { InstructionPlan, PlanSourceLocation } from "../../plan/model.js";
 import { interruptFrame } from "../scopes/activations.js";
-import { cloneInteractionResult } from "../../choice-values.js";
 import { captureOrReuseInstructionPlan } from "../../plan/capture.js";
 import type { SourceSpan } from "../../source.js";
 import { copySpan } from "../../plan/source-location.js";
@@ -14,6 +13,7 @@ import {
 } from "../values/serializable-values.js";
 import type { RuntimeSnapshot, RuntimeTemporarySnapshot } from "../snapshot/state.js";
 import {
+  cloneInteractionResult,
   requiredActionCompletionEvents,
   type RuntimeActionSettlementSnapshot,
   type RuntimePendingActionSnapshot,
