@@ -254,6 +254,26 @@ test("admission's decided types and C9's boundary checks compile and run on the 
     // A4 and A8: a copy of a written binding is decided by its type, a literal's element checked against it
     ['let a: integer[] = []\nlet b = a\nb = ["bad"]\nexit\n', ["error TSV041@37"], null, []],
     ["let b = 1\nlet a: integer = 2\nb = a\nexit\n", [], [], []],
+    // C9: external data in an inferred collection, checked at its store against the elements' admitted type, at any
+    // depth (review r1: the plan held an element check of no type)
+    [
+      'let xs = [1, hostValue]\nsay "after ingress"\nrepeat xs[0] {}\nexit\n',
+      ["warning TSV011@51"],
+      ["0:23"],
+      [
+        [2, null],
+        ["bad", "TSR058@9:23"],
+      ],
+    ],
+    [
+      "let xs = [[1, hostValue]]\nrepeat xs[0][0] {}\nexit\n",
+      ["warning TSV011@33"],
+      ["0:25"],
+      [
+        [2, null],
+        ["bad", "TSR058@9:25"],
+      ],
+    ],
     // C9: external data stored whole into a written collection, checked there with its elements
     [
       "let pool: integer[] = hostValue\nexit\n",
