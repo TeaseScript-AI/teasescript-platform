@@ -87,10 +87,10 @@ interface Stop {
    */
   readonly deep: boolean;
   /**
-   * The operation it was reached through, the outermost (`get` with its default, a copy of the elements, a list's `+`,
-   * ...): its contribution decides only where that operation's own value holds its kinds definitely (F7, F10, F17b).
+   * The operations it was reached through, the outermost first (`get` with its default, a copy of the elements, a
+   * list's `+`, ...): its contribution decides only where each of them holds its kinds definitely (F7, F10, F17b).
    */
-  readonly via: Via | null;
+  readonly via: readonly Via[];
 }
 
 /** An operation a decider was reached through: its value, node, position and the path into it (`Stop.via`). */
@@ -1369,8 +1369,8 @@ export class Admission {
       readonly string[],
       readonly string[],
       boolean,
-      Via | null,
-    ])[] = [[value, node, [], [], false, null]];
+      readonly Via[],
+    ])[] = [[value, node, [], [], false, []]];
     for (let order = 0; pending.length > 0; order += 1) {
       const [current, at, path, strip, deep, via] = pending.pop()!;
       program.work.charge("indexSteps");
@@ -1395,8 +1395,9 @@ export class Admission {
       // operation's under the certainty of its own value
       if (!literal && term === null && this.#sourceOf(current) === null) {
         const carried = this.#carriersOf(current, strip);
-        const through =
-          via ?? (program.projOf.has(current) ? null : { value: current, node: at, path, strip });
+        const through = program.projOf.has(current)
+          ? via
+          : [...via, { value: current, node: at, path, strip }];
         for (let index = carried.length - 1; index >= 0; index -= 1)
           pending.push([carried[index]![0], at, path, carried[index]![1], true, through]);
       }
@@ -1450,15 +1451,9 @@ export class Admission {
         if (copy !== null && stop.order > copy.order) break;
         if (stop.deep && length === at.length) continue;
         const term = termAt(stop.term!, [...stop.strip, ...at.slice(length)]);
-        // (a written copy an operation carries decides only where the operation's value holds its type definitely)
-        if (
-          term !== null &&
-          this.#through(
-            stop.via,
-            at,
-            typeTags(term).filter((tag) => tag !== "null" && tag !== "unknown"),
-          )
-        )
+        // (a written copy an operation carries decides only where its read is live: an operand the operation never
+        // selects is no copy of the place, while a selected copy keeps its whole written type, A4)
+        if (term !== null && (stop.via.length === 0 || this.#live(stop.value)))
           copy = { order: stop.order, term, stop };
       }
     }
@@ -1507,18 +1502,32 @@ export class Admission {
     }
   }
 
-  /** Whether a decider reached through an operation decides at `at`: the operation's own value holds its kinds definitely. */
-  #through(via: Via | null, at: readonly string[], definite: readonly ItemTag[]): boolean {
-    if (via === null) return true;
-    const carried = withoutEmpty(
-      this.#run(
-        this.pass.values.valueItems(via.value, via.node, [
-          ...via.strip,
-          ...at.slice(via.path.length),
-        ]),
-      ),
-    );
-    return definite.every((tag) => carried.some((own) => own.tag === tag && own.cert === "def"));
+  /**
+   * Whether a decider reached through operations decides at `at`: each of them, outermost to innermost, holds its kinds
+   * definitely in its own value there.
+   */
+  #through(via: readonly Via[], at: readonly string[], definite: readonly ItemTag[]): boolean {
+    for (const level of via) {
+      const carried = withoutEmpty(
+        this.#run(
+          this.pass.values.valueItems(level.value, level.node, [
+            ...level.strip,
+            ...at.slice(level.path.length),
+          ]),
+        ),
+      );
+      if (!definite.every((tag) => carried.some((own) => own.tag === tag && own.cert === "def")))
+        return false;
+    }
+    return true;
+  }
+
+  /** Whether a value's own expression runs: its flow node is live (an operand an operation never selects is not). */
+  #live(value: PlaceId): boolean {
+    const { program } = this.pass;
+    const site = program.places[value]?.site ?? null;
+    const node = site === null ? null : program.exprAt(site);
+    return node === null || program.live(node);
   }
 
   /**

@@ -3108,3 +3108,40 @@ test("a written type an operation carries decides only where the operation's val
   }
   assert.deepEqual(differing, []);
 });
+
+test("a written copy decides through operations only where its read runs, with its whole written type (A4, round 14)", () => {
+  // per program its outcome: a dead written operand under an outer carrier decides nothing (the numbers widen, the host
+  // value is checked); a selected copy of a written union keeps the union, which the later text fits
+  const programs: readonly (readonly [string, string, string])[] = [
+    [
+      "a dead fallback under a get",
+      "let typed: integer[] = [1]\nlet xs = [[hostValue] otherwise typed, [1]].get(0, default: [])\nxs.add(2.5)\nexit",
+      "warning-runtime-check",
+    ],
+    [
+      "a dead default under a get",
+      "let typed: integer[] = [1]\nlet xs = [[[hostValue]].get(0, default: typed), [1]].get(0, default: [])\nxs.add(2.5)\nexit",
+      "warning-runtime-check",
+    ],
+    [
+      "a selected written union",
+      'let typed: (integer | string)[] = [1]\nlet xs = [typed].get(0, default: [])\nxs.add("good")\nexit',
+      "valid",
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, outcome] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      if (record.outcome !== outcome || (outcome === "valid" && record.checks.length > 0))
+        differing.push(
+          `${name}${reversed ? " reversed" : ""}: ${record.outcome}, ${record.checks.length} checks`,
+        );
+    }
+  }
+  assert.deepEqual(differing, []);
+});
