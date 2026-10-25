@@ -198,8 +198,12 @@ export class Admission {
   readonly #whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
   readonly #stops = new Map<PlaceId, Stops>();
-  /** A representative store's later equivalent ones (`#grouped`), and the bindings defined by one whole store. */
-  readonly #members = new Map<Definition, readonly Definition[]>();
+  /**
+   * A representative store's later equivalent ones (`#grouped`), each recorded once per pass with its representative
+   * (`#representative`), and the bindings defined by one whole store.
+   */
+  readonly #members = new Map<Definition, Definition[]>();
+  readonly #representative = new Map<Definition, Definition>();
   #definedOnce: Set<PlaceId> | null = null;
   /** The expected types of typed ingresses by identity, for `#conflictClass`. */
   readonly #termIds = new Map<TypeTerm, string>();
@@ -898,7 +902,9 @@ export class Admission {
 
   /**
    * §8: the stores of one value whole (`#copyKey`), once per pass: their earliest as the representative, the later ones
-   * its members (`#members`); a scan or a check reads the representative, and a member only where it owes something.
+   * its members (`#members`); a scan or a check reads the representative, and a member only where it owes something. A
+   * store meets the same group in every list of its key that holds it, so it is recorded once, the first time; one
+   * another list grouped under another representative stays its own store here.
    */
   #grouped(list: readonly Definition[]): Definition[] {
     const out: Definition[] = [];
@@ -912,8 +918,16 @@ export class Admission {
         out.push(d);
         continue;
       }
+      const recorded = this.#representative.get(d);
+      if (recorded === representative) continue;
+      if (recorded !== undefined) {
+        out.push(d);
+        continue;
+      }
+      this.#representative.set(d, representative);
       const members = this.#members.get(representative);
-      this.#members.set(representative, members === undefined ? [d] : [...members, d]);
+      if (members === undefined) this.#members.set(representative, [d]);
+      else members.push(d);
     }
     return out;
   }

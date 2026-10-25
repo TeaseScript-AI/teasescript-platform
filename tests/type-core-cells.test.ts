@@ -3502,6 +3502,35 @@ test("an operation the receiver's or the key's decision leaves opaque or externa
   assert.deepEqual(differing, []);
 });
 
+test("each store of one value whole owes its obligation once, however many lists group it (§8, A7, Codex r18 B1)", () => {
+  // the stores of `root` into `box` are one group (their earliest checked whole for the rest), met through the whole
+  // stores of `box` and through its candidates: each owes its warning and check once
+  const source =
+    'let root = {n: hostValue}\nlet box = {n: 1}\nbox = root\nbox = root\nrepeat box.n {}\nsay "AFTER"\nexit';
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const stores = [source.indexOf("box = root") + "box = ".length, source.lastIndexOf("root")];
+  for (const reversed of [false, true]) {
+    const run = (): CompactRecord =>
+      withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+    const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+    assert.deepEqual(
+      {
+        checks: record.checks
+          .filter((check) => check.kind === "copy-type" && !check.boundary)
+          .map((check) => `${check.target} ${check.against.join("|")} @${check.site.offset}`)
+          .sort(),
+        warnings: record.diagnostics
+          .filter((diagnostic) => diagnostic.kind === "written-target")
+          .map((diagnostic) => diagnostic.site.offset)
+          .sort((a, b) => a - b),
+      },
+      { checks: stores.map((at) => `box.n integer @${at}`), warnings: stores },
+      reversed ? "reversed" : "forward",
+    );
+  }
+});
+
 test("named external data a carrier stores into a place published with a kind owes its check there (C9 r4.12, r4.50 (1), R4-F1)", () => {
   // per carrier outside the candidate's slice (its plan and its run wait for the slice): the warning where the named
   // data is read, with a `copy-type` check against the published kind; a source decided at its own stores (a list whose
