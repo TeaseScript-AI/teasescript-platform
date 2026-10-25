@@ -79,6 +79,13 @@ interface Stop {
   readonly node: FlowNode;
   /** A copy of a written binding's written type, else `null`. */
   readonly term: TypeTerm | null;
+  /** The path into the value its contribution stands at (a projection's step into its owner, F12). */
+  readonly strip: readonly string[];
+  /**
+   * A value a projection selects: it stands for its fields and elements below the path, while at the path itself the
+   * projection's own value, the union of what it may select, contributes (A2: an unknown beside a kind decides nothing).
+   */
+  readonly deep: boolean;
 }
 
 /** A stored value's contributions by path (`#stopsOf`): written copies, other whole values, and literals. */
@@ -1352,40 +1359,76 @@ export class Admission {
     const { program, definitions, contract } = this.pass;
     const stops: Stops = { written: new Map(), values: new Map(), literals: new Map() };
     const sources = new Set<string>();
-    const pending: [PlaceId, FlowNode, readonly string[]][] = [[value, node, []]];
-    for (let order = 0; pending.length > 0; order += 1) {
-      const [current, at, path] = pending.pop()!;
-      program.work.charge("indexSteps");
-      const binding = program.occurrenceOf.get(current);
-      const term = binding === undefined ? null : writtenOf(program.place(binding).kind);
-      const literal = term === null && program.hasOf.has(current);
-      const map = term !== null ? stops.written : literal ? stops.literals : stops.values;
-      const key = path.join(".");
-      // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2)
-      if (path.length > 0 && map === stops.values && this.#sourceOf(current) !== null) {
-        const identity = `${key}|${contract.identityOf(current).id}`;
-        if (sources.has(identity)) continue;
-        sources.add(identity);
-      }
-      const stop: Stop = { order, value: current, node: at, term };
-      const list = map.get(key);
-      if (list === undefined) map.set(key, [stop]);
-      else list.push(stop);
-      if (!literal) continue;
+    // a literal's cells at a step, in evaluation order
+    const cells = (literal: PlaceId, step: string | null): (readonly [Definition, string])[] => {
       const next: (readonly [Definition, string])[] = [];
-      for (const has of program.hasOf.get(current) ?? [])
-        for (const [name, field] of fieldsOf(has.type))
+      for (const has of program.hasOf.get(literal) ?? []) {
+        const fields: readonly (readonly [string, TypeTerm])[] =
+          step === null
+            ? fieldsOf(has.type)
+            : ((on) => (on === undefined ? [] : [[step, on] as const]))(
+                this.#termAt(has.type, step),
+              );
+        for (const [name, field] of fields)
           if (field.kind === "ref")
             for (const d of definitions.cellDefs.get(field.place) ?? []) next.push([d, name]);
+      }
       program.work.charge("checks", sortCost(next.length));
-      next.sort(
+      return next.sort(
         ([x], [y]) =>
           (program.places[x.value!]?.site?.start ?? 0) -
           (program.places[y.value!]?.site?.start ?? 0),
       );
+    };
+    const pending: (readonly [PlaceId, FlowNode, readonly string[], readonly string[], boolean])[] =
+      [[value, node, [], [], false]];
+    for (let order = 0; pending.length > 0; order += 1) {
+      const [current, at, path, strip, deep] = pending.pop()!;
+      program.work.charge("indexSteps");
+      const binding = program.occurrenceOf.get(current);
+      const term = binding === undefined ? null : writtenOf(program.place(binding).kind);
+      const literal = term === null && program.hasOf.has(current);
+      // a literal read into stands by its cells on the path
+      if (literal && strip.length > 0) {
+        const next = cells(current, strip[0]!);
+        for (let index = next.length - 1; index >= 0; index -= 1)
+          pending.push([
+            next[index]![0].value!,
+            next[index]![0].node ?? at,
+            path,
+            strip.slice(1),
+            deep,
+          ]);
+        continue;
+      }
+      // a projection is its own contribution at the path, and below it its owner's contents at its step (F12)
+      if (
+        !literal &&
+        term === null &&
+        program.projOf.has(current) &&
+        this.#sourceOf(current) === null
+      ) {
+        const carried = this.#carriersOf(current, strip);
+        for (let index = carried.length - 1; index >= 0; index -= 1)
+          pending.push([carried[index]![0], at, path, carried[index]![1], true]);
+      }
+      const map = term !== null ? stops.written : literal ? stops.literals : stops.values;
+      const key = path.join(".");
+      // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2)
+      if (path.length > 0 && map === stops.values && this.#sourceOf(current) !== null) {
+        const identity = `${key}|${strip.join(".")}|${contract.identityOf(current).id}`;
+        if (sources.has(identity)) continue;
+        sources.add(identity);
+      }
+      const stop: Stop = { order, value: current, node: at, term, strip, deep };
+      const list = map.get(key);
+      if (list === undefined) map.set(key, [stop]);
+      else list.push(stop);
+      if (!literal) continue;
+      const next = cells(current, null);
       for (let index = next.length - 1; index >= 0; index -= 1) {
         const [d, step] = next[index]!;
-        pending.push([d.value!, d.node ?? at, [...path, step]]);
+        pending.push([d.value!, d.node ?? at, [...path, step], [], false]);
       }
     }
     this.#stops.set(value, stops);
@@ -1417,17 +1460,22 @@ export class Admission {
       for (const stop of stops.written.get(at.slice(0, length).join(".")) ?? []) {
         program.work.charge("checks");
         if (copy !== null && stop.order > copy.order) break;
-        const term = termAt(stop.term!, at.slice(length));
+        if (stop.deep && length === at.length) continue;
+        const term = termAt(stop.term!, [...stop.strip, ...at.slice(length)]);
         if (term !== null) copy = { order: stop.order, term, stop };
       }
     }
     // the values in evaluation order, those standing above the path's end with its rest, the literals at its end
     const lists: { readonly list: readonly Stop[]; readonly length: number }[] = [];
+    // (a value a projection selects stands for its parts below the path, never at it)
+    const own = (list: readonly Stop[] | undefined): readonly Stop[] | undefined =>
+      list?.some((stop) => stop.deep) === true ? list.filter((stop) => !stop.deep) : list;
     for (let length = 0; length <= at.length; length += 1) {
-      const list = stops.values.get(at.slice(0, length).join("."));
+      const key = at.slice(0, length).join(".");
+      const list = length === at.length ? own(stops.values.get(key)) : stops.values.get(key);
       if (list !== undefined) lists.push({ list, length });
     }
-    const literals = stops.literals.get(at.join("."));
+    const literals = own(stops.literals.get(at.join(".")));
     if (literals !== undefined) lists.push({ list: literals, length: at.length });
     const positions = lists.map(() => 0);
     for (;;) {
@@ -1446,7 +1494,12 @@ export class Admission {
       program.work.charge("checks", lists.length);
       positions[best]! += 1;
       const items = withoutEmpty(
-        this.#run(values.valueItems(next.value, next.node, at.slice(lists[best]!.length))),
+        this.#run(
+          values.valueItems(next.value, next.node, [
+            ...next.strip,
+            ...at.slice(lists[best]!.length),
+          ]),
+        ),
       );
       if (!items.some((item) => item.tag === "unknown") && deciding(items).length > 0)
         return { term: null, site: siteOf(next) };
