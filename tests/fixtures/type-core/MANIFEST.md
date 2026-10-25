@@ -7,14 +7,17 @@ commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; not
 ## Refresh (M4 step S6)
 
 Opus, 2026-10-25, builder for M4 step S6 (lead Fable). `cells.jsonl` is regenerated from the expectation set at
-`60751a0f17a0f8cf…` (1,888 gate records, 9 deferred; TABLE r4.48) by the same tooling, unchanged: `convert.py`
+`6f102107b71f3dde…` (1,913 gate records, 9 deferred; TABLE r4.49) by the same tooling, unchanged: `convert.py`
 (`eef78c11…`) with `collection-rewrites.json` (`981e40ee…`), the host rewrite and the four collection rewrites below.
 197 records are rewritten (193 prefixed files and the four collection records); `cells-deferred.jsonl` is unchanged.
-Against the set's previous revision `01eccb2f1a7da537…` (1,874 records; `716ac7091de2b95e…` before it differs in five
-reason texts only) it adds the 14 records `cp9-cells/s4/s6/returns/…` and `cp9-cells/s4/s6/defaults/…`; the other
-1,874 compact records are byte-identical.
+Against the set's previous revision `60751a0f17a0f8cf…` (1,888 records) it adds the 25 records
+`cp9-cells/s4/s6/owner/…` (`ingress/`, `bound/` and `default/`: the owner's review of 2026-10-25); the other 1,888
+compact records are byte-identical. The 25 were compared with the core in both orders before the refresh: 25 of 25 the
+same.
 
-The exit condition, rerun on the laptop worker with the reference model round 19d (`points14.mjs` `2edb329e…`) on a
+`60751a0f…` against its previous revision `01eccb2f1a7da537…` (1,874 records; `716ac7091de2b95e…` before it differs in
+five reason texts only) added the 14 records `cp9-cells/s4/s6/returns/…` and `cp9-cells/s4/s6/defaults/…`. The exit
+condition, rerun for it on the laptop worker with the reference model round 19d (`points14.mjs` `2edb329e…`) on a
 compiler build of `main` `6187eb145`, in both demand orders:
 - zero skipped records;
 - preservation equality (`verify.py`'s invariance check, every record's model output moved through the remapping
@@ -40,7 +43,7 @@ rerun on it: zero skips and zero differences in both orders.
 
 | file | SHA-256 | content |
 |---|---|---|
-| `cells.jsonl` | `722fddd6222ff1bfd4574a7b96dab8bb2dad228af4c8a39d19a2eb68344685d9` | the 1,888 gate records, 1,007,701 bytes (S6's refresh; S0's snapshot `cea67bb6…`, 1,782 records) |
+| `cells.jsonl` | `b9ddd0fde7800c0aa8e2a2d586fd105c49e3a64a4a98946b2b58a6b6576c7766` | the 1,913 gate records, 1,018,009 bytes (S6's refresh; S0's snapshot `cea67bb6…`, 1,782 records) |
 | `cells-deferred.jsonl` | `f6db26a8f33612c5f57d2506cc322b0e925318a7e943e6cd18426fabd52d8e4e` | the 9 deferred-syntax records, never in the gate |
 | `convert.py` | `eef78c1122233e97806cf3423a13bbbe65347131624faae19cdce1ef0eec7ba8` | the converter: deterministic (two runs byte-identical), one record per line, fixed key order |
 | `collection-rewrites.json` | `981e40ee4a1490609eb4e78f9a3095d514edc256acfe580dc77e628ab03970c2` | the four collection rewrites, all `confirmed: true` |
