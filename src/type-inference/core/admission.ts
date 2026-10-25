@@ -1,6 +1,6 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { termAt, typeTags, writtenOf } from "./contract.js";
+import { choiceLabels, defaultOf, REFERENCE, termAt, typeTags, writtenOf } from "./contract.js";
 import {
   keyOf,
   keyPath,
@@ -13,8 +13,13 @@ import {
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, writerKey, type IngressNode, type Item, type ItemTag } from "./items.js";
-import { conversionCategory, dictList, methodCategory } from "./method-categories.js";
-import { propertyStep } from "./program.js";
+import {
+  conversionCategory,
+  dictList,
+  interactionCategory,
+  methodCategory,
+} from "./method-categories.js";
+import { propertyStep, stepName } from "./program.js";
 import { elementStep, type Obligation, type RequiredKind } from "./result.js";
 import type { Work } from "./solver.js";
 
@@ -340,7 +345,7 @@ export class Admission {
     // structure gives with its store, read or not, so the named value's uncertain contents meet C1 there (the owner's
     // F1, round 10 B1)
     for (const d of reaching)
-      if ((stores.get(d.key) ?? 0) === 1 && program.hasOf.has(d.value!)) {
+      if ((stores.get(d.key) ?? 0) === 1) {
         const structure = this.#valueStructure(d.value!);
         if (structure.sources.length === 0) continue;
         const base = [...d.path, ...(d.kind === "add" && d.how !== "elements" ? ["element"] : [])];
@@ -788,33 +793,13 @@ export class Admission {
   // ------------------------------------------------------------------------------------------- literals
 
   /**
-   * A value's source key: the key a copy reads, a call's callee's result key (F20), the element of either an operation
-   * takes out (`get`, a removal), a dict's `values` read as its elements (r4.46 (2)); `null` for any other value and
-   * for a dict's `keys`, which hold text.
+   * A value's source key: the key a copy reads, a call's callee's result key (F20), a dict's `values` read as its
+   * elements (r4.46 (2)); `null` for any other value and for a dict's `keys`, which hold text.
    */
   #sourceOf(value: PlaceId): Key | null {
     const { contract, program } = this.pass;
-    // through the operations that take an element out of their receiver, to the key a copy or a call reads
-    let elements = 0;
-    let current = value;
-    let key = contract.copiedKey(current) ?? contract.resultKey(current);
-    while (key === null) {
-      const c = program.opOf.get(current);
-      const receiver =
-        c?.kind === "get"
-          ? c.receiver
-          : c?.kind === "operation" &&
-              c.contract.family === "method" &&
-              c.receiver !== null &&
-              methodCategory(c.contract.name)?.gives?.kind === "removed"
-            ? c.receiver
-            : null;
-      if (receiver === null) return null;
-      program.work.charge("indexSteps");
-      elements += 1;
-      current = receiver;
-      key = contract.copiedKey(current) ?? contract.resultKey(current);
-    }
+    const key = contract.copiedKey(value) ?? contract.resultKey(value);
+    if (key === null) return null;
     const path: string[] = [];
     for (const [index, step] of keyPath(key).entries()) {
       const list = dictList(step);
@@ -830,22 +815,85 @@ export class Admission {
       }
       path.push(step);
     }
-    for (; elements > 0; elements -= 1) path.push("element");
     return keyOf(keyPlace(key), path);
   }
 
   /**
-   * The operands a value an operation gives carries whole: a copy of a collection's elements (F10: `take`, `takeLast`,
-   * `toList`, `toSet`), a list's `+`, both sides of `otherwise`.
+   * The values a value carries, each with the path into it the value is (the walk of `answers.ts` `#propertyNames`):
+   * a projection its owner at its step (a loop variable a list's or a set's element, a dict's `values` its elements, its
+   * `keys` none, F12, F27, r4.46 (2)), `otherwise` both sides, `get` its receiver's element and its default (F17b), a
+   * load's and a parse's default (C10), a copy of a collection's elements its receiver (F10: `take`, `takeLast`,
+   * `toList`, `toSet`), a removal its receiver's element (F7), a list's `+` its operands, `askChoice` its unlabelled
+   * options' values (V30 §19); `strip` is the path below the value still to read.
    */
-  #operandsOf(value: PlaceId): readonly PlaceId[] {
-    const c = this.pass.program.opOf.get(value);
-    if (c?.kind === "fallback") return [c.left, c.right];
-    if (c?.kind !== "operation") return [];
+  #carriersOf(
+    value: PlaceId,
+    strip: readonly string[],
+  ): readonly (readonly [PlaceId, readonly string[]])[] {
+    const { program, contract } = this.pass;
+    const kinds = (of: PlaceId): ReadonlySet<ItemTag> =>
+      new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag));
+    // (a copy of the elements and a `+` give their operands' elements, nothing else of them)
+    const elements = strip.length === 0 || strip[0] === "element";
+    const projection = program.projOf.get(value);
+    if (projection !== undefined) {
+      const { owner, step } = projection;
+      if (step === "iteration") {
+        const of = kinds(owner);
+        return of.has("list") || of.has("set") ? [[owner, ["element", ...strip]]] : [];
+      }
+      const list = dictList(step);
+      if (list === undefined) return [[owner, [stepName(step), ...strip]]];
+      const of = kinds(owner);
+      if ([...of].some((tag) => REFERENCE.has(tag))) return [];
+      const out: (readonly [PlaceId, readonly string[]])[] = [];
+      if (of.has("object")) out.push([owner, [step, ...strip]]);
+      if (of.has("dict") && list === "values" && elements) out.push([owner, strip]);
+      return out;
+    }
+    const c = program.opOf.get(value);
+    if (c === undefined) return [];
+    if (c.kind === "fallback")
+      return [
+        [c.left, strip],
+        [c.right, strip],
+      ];
+    if (c.kind === "get")
+      return [
+        [c.receiver, ["element", ...strip]],
+        [c.fallback, strip],
+      ];
+    if (c.kind === "load") return c.fallback === null ? [] : [[c.fallback, strip]];
+    if (c.kind !== "operation") return [];
     const { family, name } = c.contract;
-    if (family === "method" && c.receiver !== null && methodCategory(name)?.gives?.kind === "copy")
-      return [c.receiver];
-    return family === "operator" && name === "+" ? c.arguments : [];
+    if (family === "conversion" && conversionCategory(name)?.kind === "parses") {
+      const fallback = defaultOf(c);
+      return fallback === undefined ? [] : [[fallback, strip]];
+    }
+    if (family === "method" && c.receiver !== null) {
+      const gives = methodCategory(name)?.gives;
+      if (gives?.kind === "copy" && elements) return [[c.receiver, strip]];
+      if (
+        gives?.kind === "removed" &&
+        (gives.fromList === "element" || kinds(c.receiver).has("dict"))
+      )
+        return [[c.receiver, ["element", ...strip]]];
+      return [];
+    }
+    if (family === "operator" && name === "+" && elements)
+      return c.arguments.map((argument) => [argument, strip] as const);
+    if (family === "interaction" && interactionCategory(name)?.kind === "options") {
+      const labels = choiceLabels(c);
+      return c.arguments.flatMap((argument, index) =>
+        labels[index] === undefined
+          ? [
+              [argument, ["value", ...strip]] as const,
+              [argument, ["element", "value", ...strip]] as const,
+            ]
+          : [],
+      );
+    }
+    return [];
   }
 
   /** A stored value's own structure: its literals' fields and elements at every depth, and their sources (F2). */
@@ -853,7 +901,7 @@ export class Admission {
     const id = `v${value}`;
     let structure = this.#structures.get(id);
     if (structure === undefined) {
-      structure = this.#collect([{ value, below: [], strip: [] }]);
+      structure = this.#collect([{ value, at: [], strip: [] }]);
       this.#structures.set(id, structure);
     }
     return structure;
@@ -871,16 +919,22 @@ export class Admission {
     const { definitions, lists, program } = this.pass;
     const place = keyPlace(key);
     const path = keyPath(key);
-    const roots: { value: PlaceId; below: readonly string[]; strip: readonly string[] }[] = [];
+    const roots: { value: PlaceId; at: readonly string[]; strip: readonly string[] }[] = [];
     const levels: (readonly string[])[] = [];
+    // a store's value standing at `below` (an add's below its element), read at `strip`: below the key, at its path or
+    // above it (the rest of the path read into it), or beside it (none)
     const root = (d: Definition, below: readonly string[], strip: readonly string[]): void => {
       program.work.charge("indexSteps");
-      if ((d.kind === "whole" || d.kind === "add") && d.value !== undefined && lists.live(d))
-        roots.push({
-          value: d.value,
-          below: d.kind === "add" && d.how !== "elements" ? [...below, "element"] : below,
-          strip,
-        });
+      if (!((d.kind === "whole" || d.kind === "add") && d.value !== undefined && lists.live(d)))
+        return;
+      const at = d.kind === "add" && d.how !== "elements" ? [...below, "element"] : below;
+      for (let index = 0; index < at.length && index < strip.length; index += 1)
+        if (at[index] !== strip[index]) return;
+      roots.push(
+        at.length > strip.length
+          ? { value: d.value, at: at.slice(strip.length), strip: [] }
+          : { value: d.value, at: [], strip: strip.slice(at.length) },
+      );
     };
     for (let length = 0; length <= path.length; length += 1)
       for (const d of definitions.byKey.get(keyOf(place, path.slice(0, length))) ?? [])
@@ -897,12 +951,13 @@ export class Admission {
   }
 
   /**
-   * The structure of values standing at paths below a value or key, cut to `strip` (a key's path below a prefix's
-   * store): their literals' fields and elements, walked as their literals nest (below a key its elements only), and the
-   * source key of each value no literal holds, with the levels of the keys below with stores.
+   * The structure of values standing at paths below a value or key: each root's value standing at `at`, read below
+   * `strip` (a key's path below a prefix's store, a carrier's step into its value): their literals' fields and elements,
+   * walked as their literals nest (below a key its elements only), through the values they carry, and the source key of
+   * each value no literal holds, with the levels of the keys below with stores.
    */
   #collect(
-    roots: readonly { value: PlaceId; below: readonly string[]; strip: readonly string[] }[],
+    roots: readonly { value: PlaceId; at: readonly string[]; strip: readonly string[] }[],
     levels: readonly (readonly string[])[] = [],
     elements = false,
   ): Structure {
@@ -914,64 +969,41 @@ export class Admission {
     };
     for (const at of levels)
       for (let length = 1; length <= at.length; length += 1) path(at.slice(0, length));
-    for (const { value, below, strip } of roots) {
-      // where a path stands against the key's own: below it, at it or above it (the rest of the key's path), or beside it
-      const against = (
-        at: readonly string[],
-      ): { readonly below: readonly string[] } | { readonly above: readonly string[] } | null => {
-        for (let index = 0; index < at.length && index < strip.length; index += 1)
-          if (at[index] !== strip[index]) return null;
-        return at.length > strip.length
-          ? { below: at.slice(strip.length) }
-          : { above: strip.slice(at.length) };
-      };
-      const pending: [PlaceId, readonly string[]][] = [[value, below]];
-      while (pending.length > 0) {
-        const [current, at] = pending.pop()!;
-        program.work.charge("indexSteps");
-        if (!program.hasOf.has(current)) {
-          // a value an operation carries stands where its operands do
-          const operands = this.#operandsOf(current);
-          for (let index = operands.length - 1; index >= 0; index -= 1)
-            pending.push([operands[index]!, at]);
-          if (operands.length > 0) continue;
-          // a source below the key stands there; one at the key or above it is read at the rest of the key's path
-          const source = this.#sourceOf(current);
-          const stands = source === null ? null : against(at);
-          if (source === null || stands === null) continue;
-          // (a source read at the rest of a path no key or read of the program reaches is a recursion: cut)
-          if (
-            "above" in stands &&
-            keyPath(source).length + stands.above.length > this.#longestKey()
-          )
+    const pending: (readonly [PlaceId, readonly string[], readonly string[]])[] = [];
+    for (let index = roots.length - 1; index >= 0; index -= 1)
+      pending.push([roots[index]!.value, roots[index]!.at, roots[index]!.strip]);
+    while (pending.length > 0) {
+      const [current, at, strip] = pending.pop()!;
+      program.work.charge("indexSteps");
+      if (!program.hasOf.has(current)) {
+        // a source stands at `at`, read at the rest of the path (a source read at a path no key or read of the program
+        // reaches is a recursion: cut); any other value through the values it carries
+        const source = this.#sourceOf(current);
+        if (source !== null) {
+          if (strip.length > 0 && keyPath(source).length + strip.length > this.#longestKey())
             continue;
-          const entry =
-            "below" in stands
-              ? { below: stands.below, key: source }
-              : { below: [], key: keyOf(keyPlace(source), [...keyPath(source), ...stands.above]) };
-          sources.set(`${entry.below.join(".")}|${entry.key}`, entry);
+          const key = keyOf(keyPlace(source), [...keyPath(source), ...strip]);
+          sources.set(`${at.join(".")}|${key}`, { below: at, key });
           continue;
         }
-        for (const has of program.hasOf.get(current)!) {
-          // above the key's path only the field on it (its literal's fields indexed once), below it every field
-          const on =
-            at.length < strip.length ? this.#termAt(has.type, strip[at.length]!) : undefined;
-          const fields: readonly (readonly [string, TypeTerm])[] =
-            at.length >= strip.length
-              ? fieldsOf(has.type)
-              : on === undefined
-                ? []
-                : [[strip[at.length]!, on]];
-          for (const [name, term] of fields) {
-            program.work.charge("indexSteps");
-            const step = [...at, name];
-            const stands = against(step);
-            if (stands === null || ("below" in stands && elements && name !== "element")) continue;
-            if ("below" in stands) path(stands.below);
-            if (term.kind === "ref")
-              for (const d of definitions.cellDefs.get(term.place) ?? [])
-                pending.push([d.value!, step]);
-          }
+        const carried = this.#carriersOf(current, strip);
+        for (let index = carried.length - 1; index >= 0; index -= 1)
+          pending.push([carried[index]![0], at, carried[index]![1]]);
+        continue;
+      }
+      for (const has of program.hasOf.get(current)!) {
+        // while reading into it only the field on the path (its literal's fields indexed once), then every field
+        const on = strip.length > 0 ? this.#termAt(has.type, strip[0]!) : undefined;
+        const fields: readonly (readonly [string, TypeTerm])[] =
+          strip.length === 0 ? fieldsOf(has.type) : on === undefined ? [] : [[strip[0]!, on]];
+        for (const [name, term] of fields) {
+          program.work.charge("indexSteps");
+          if (strip.length === 0 && elements && name !== "element") continue;
+          const step = strip.length === 0 ? [...at, name] : at;
+          if (strip.length === 0) path(step);
+          if (term.kind === "ref")
+            for (const d of definitions.cellDefs.get(term.place) ?? [])
+              pending.push([d.value!, step, strip.slice(1)]);
         }
       }
     }
