@@ -2,7 +2,6 @@ import type {
   Block,
   Expression,
   TimerParts,
-  SayParts,
   MediaParts,
   FunctionDeclaration,
   GlobalStatement,
@@ -36,7 +35,6 @@ import type {
   LoopControlInstruction,
   LoopStartInstruction,
   PrepareParameterDefaultInstruction,
-  SayInstruction,
   CallArgumentPlan,
   TemplatePartPlan,
   TemporaryExpressionPlan,
@@ -71,9 +69,9 @@ import {
   lowerExportTextTask,
   consumeInteractionResult,
   prepareInteractionSpeaker,
-  lowerInteractionPayloadTask,
 } from "./interactions.js";
 import { lowerInteractionTask, lowerAskQuestionTask, lowerAskImageTask } from "./asks.js";
+import { lowerSayTask } from "./say.js";
 import {
   isPlayerProfile,
   unwrapParentheses,
@@ -354,7 +352,7 @@ export class InstructionCompiler {
         });
         return;
       case "sayStatement":
-        yield* compileChild(this.#lowerSayTask(statement, false));
+        yield* compileChild(lowerSayTask(this, statement, false));
         return;
       case "showButtonStatement":
         yield* compileChild(lowerShowButtonTask(this, statement, false));
@@ -490,7 +488,7 @@ export class InstructionCompiler {
         }
         // A compound assignment reads the current value before any instruction-emitting operand runs.
         const current =
-          statement.operator === "=" || !this.#emitsInstructions(statement.value)
+          statement.operator === "=" || !this.emitsInstructions(statement.value)
             ? null
             : this.materializeExpression(
                 { plan: target.plan, temporaryIds: [] },
@@ -815,155 +813,6 @@ export class InstructionCompiler {
         target: exit,
       };
     }
-  }
-
-  /**
-   * Lowers a blocking timer to a foreground `wait` delay and an async timer to `startTimer`. The instruction evaluates
-   * duration, display, then label; operands written in another order are materialized first in source order.
-   */
-  /**
-   * A `say`: plain when no operand emits instructions, otherwise with its speaker, context, and, before a pacing that
-   * emits instructions, its text prepared. Used as a value, it gets a temporary for the handle of its message, which
-   * the instruction sets once the message is shown.
-   */
-  *#lowerSayTask(say: SayParts, value: boolean): CompileTask<LoweredExpression | null> {
-    const textCanSuspend = say.presentation !== null || this.#emitsInstructions(say.value);
-    const pacingCanSuspend =
-      say.pacing !== null && say.pacing !== "instant" && this.#emitsInstructions(say.pacing);
-    const pacingOf = (lowered: LoweredExpression | null): SayInstruction["pacing"] =>
-      say.pacing === null ? "smart" : lowered === null ? "instant" : lowered.plan;
-    let destinationTemporary: number | undefined;
-    const result = (): LoweredExpression | null =>
-      destinationTemporary === undefined
-        ? null
-        : {
-            plan: {
-              kind: "temporary",
-              temporaryId: destinationTemporary,
-              span: copySpan(say.span),
-            },
-            temporaryIds: [destinationTemporary],
-          };
-    if (!textCanSuspend && !pacingCanSuspend) {
-      const lowered = yield* compileChild(this.lowerExpressionTask(say.value));
-      const loweredPacing =
-        say.pacing === null || say.pacing === "instant"
-          ? null
-          : yield* compileChild(this.lowerExpressionTask(say.pacing));
-      if (value) destinationTemporary = this.allocateTemporary();
-      this.instructions.push({
-        kind: "say",
-        presentation: null,
-        speaker: say.speaker?.name ?? null,
-        value: lowered.plan,
-        skipPolicy: say.skipPolicy,
-        pacing: pacingOf(loweredPacing),
-        ...(destinationTemporary === undefined ? {} : { destinationTemporary }),
-        span: copySpan(say.span),
-      });
-      this.emitTemporaryCleanup(
-        [...lowered.temporaryIds, ...(loweredPacing?.temporaryIds ?? [])],
-        say.span,
-      );
-      return result();
-    }
-    const speakerTemporary = this.allocateTemporary();
-    this.instructions.push({
-      kind: "prepareSaySpeaker",
-      speaker: say.speaker?.name ?? null,
-      destinationTemporary: speakerTemporary,
-      span: copySpan(say.span),
-    });
-    const contextualSpeakerTemporary = this.allocateTemporary();
-    this.instructions.push({
-      kind: "prepareSayContextualSpeaker",
-      speakerTemporary,
-      destinationTemporary: contextualSpeakerTemporary,
-      span: copySpan(say.span),
-    });
-    const loweredPresentation =
-      say.presentation === null
-        ? null
-        : this.materializeExpression(
-            yield* compileChild(
-              lowerInteractionPayloadTask(this, say.presentation, contextualSpeakerTemporary),
-            ),
-            say.presentation.span,
-          );
-    const lowered = yield* compileChild(
-      lowerInteractionPayloadTask(this, say.value, contextualSpeakerTemporary),
-    );
-    if (!pacingCanSuspend) {
-      const loweredPacing =
-        say.pacing === null || say.pacing === "instant"
-          ? null
-          : yield* compileChild(
-              lowerInteractionPayloadTask(this, say.pacing, contextualSpeakerTemporary),
-            );
-      if (value) destinationTemporary = this.allocateTemporary();
-      this.instructions.push({
-        kind: "say",
-        presentation: loweredPresentation?.plan ?? null,
-        speaker: say.speaker?.name ?? null,
-        value: lowered.plan,
-        speakerTemporary,
-        contextualSpeakerTemporary,
-        skipPolicy: say.skipPolicy,
-        pacing: pacingOf(loweredPacing),
-        ...(destinationTemporary === undefined ? {} : { destinationTemporary }),
-        span: copySpan(say.span),
-      });
-      this.emitTemporaryCleanup(
-        [
-          speakerTemporary,
-          contextualSpeakerTemporary,
-          ...(loweredPresentation?.temporaryIds ?? []),
-          ...lowered.temporaryIds,
-          ...(loweredPacing?.temporaryIds ?? []),
-        ],
-        say.span,
-      );
-      return result();
-    }
-    const textTemporary = this.allocateTemporary();
-    this.instructions.push({
-      kind: "prepareSayText",
-      value: lowered.plan,
-      destinationTemporary: textTemporary,
-      span: copySpan(say.value.span),
-    });
-    this.emitTemporaryCleanup(lowered.temporaryIds, say.value.span);
-    const loweredPacing = this.materializeExpression(
-      yield* compileChild(
-        lowerInteractionPayloadTask(this, say.pacing!, contextualSpeakerTemporary),
-      ),
-      say.pacing!.span,
-    );
-    if (value) destinationTemporary = this.allocateTemporary();
-    this.instructions.push({
-      kind: "say",
-      presentation: loweredPresentation?.plan ?? null,
-      speaker: say.speaker?.name ?? null,
-      value: lowered.plan,
-      speakerTemporary,
-      contextualSpeakerTemporary,
-      textTemporary,
-      skipPolicy: say.skipPolicy,
-      pacing: loweredPacing.plan,
-      ...(destinationTemporary === undefined ? {} : { destinationTemporary }),
-      span: copySpan(say.span),
-    });
-    this.emitTemporaryCleanup(
-      [
-        speakerTemporary,
-        contextualSpeakerTemporary,
-        textTemporary,
-        ...(loweredPresentation?.temporaryIds ?? []),
-        ...loweredPacing.temporaryIds,
-      ],
-      say.span,
-    );
-    return result();
   }
 
   *#lowerTimerTask(timer: TimerParts, value: boolean): CompileTask<LoweredExpression | null> {
@@ -1309,7 +1158,7 @@ export class InstructionCompiler {
 
   public *lowerExpressionTask(expression: Expression): CompileTask<LoweredExpression> {
     expression = unwrapParentheses(expression);
-    if (this.contextualSpeakerTemporary === null && !this.#emitsInstructions(expression))
+    if (this.contextualSpeakerTemporary === null && !this.emitsInstructions(expression))
       return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
     if (expression.kind === "interactionExpression") {
       return yield* compileChild(lowerInteractionTask(this, expression));
@@ -1325,7 +1174,7 @@ export class InstructionCompiler {
       return lowered;
     }
     if (expression.kind === "sayExpression") {
-      const lowered = yield* compileChild(this.#lowerSayTask(expression, true));
+      const lowered = yield* compileChild(lowerSayTask(this, expression, true));
       if (lowered === null) throw new TypeError("A say value lowered without a handle.");
       return lowered;
     }
@@ -1405,14 +1254,14 @@ export class InstructionCompiler {
     if (
       expression.kind === "binaryExpression" &&
       (expression.operator === "and" || expression.operator === "or") &&
-      this.#emitsInstructions(expression)
+      this.emitsInstructions(expression)
     ) {
       return yield* compileChild(this.#lowerLogicalExpressionTask(expression));
     }
     if (
       expression.kind === "binaryExpression" &&
       expression.operator === "otherwise" &&
-      this.#emitsInstructions(expression.right)
+      this.emitsInstructions(expression.right)
     ) {
       return yield* compileChild(this.#lowerFallbackTask(expression));
     }
@@ -1512,7 +1361,7 @@ export class InstructionCompiler {
       }
       case "indexExpression": {
         let object = yield* compileChild(this.lowerExpressionTask(expression.object));
-        if (this.#emitsInstructions(expression.index)) {
+        if (this.emitsInstructions(expression.index)) {
           object = this.#prepareReferenceExpression(object, expression.object.span);
         }
         const index = yield* compileChild(this.lowerExpressionTask(expression.index));
@@ -1529,7 +1378,7 @@ export class InstructionCompiler {
       case "callExpression": {
         const lazy = lazyDefaultArgument(expression);
         // A `default:` that runs as instructions runs after the call, and only when the call needs it.
-        if (lazy === null || !this.#emitsInstructions(lazy.argument.value))
+        if (lazy === null || !this.emitsInstructions(lazy.argument.value))
           return yield* compileChild(this.#lowerCallTask(expression, null));
         const call = yield* compileChild(this.#lowerCallTask(expression, lazy.argument));
         const span = copySpan(expression.span);
@@ -1598,8 +1447,8 @@ export class InstructionCompiler {
         const rightExpression = expression.right;
         if (
           this.contextualSpeakerTemporary === null &&
-          !this.#emitsInstructions(leftExpression) &&
-          !this.#emitsInstructions(rightExpression)
+          !this.emitsInstructions(leftExpression) &&
+          !this.emitsInstructions(rightExpression)
         ) {
           return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
         }
@@ -1929,7 +1778,7 @@ export class InstructionCompiler {
     expressions: readonly Expression[],
     materializeInstructionEmitting = false,
   ): CompileTask<LoweredExpression[]> {
-    const emitsInstructions = expressions.map((expression) => this.#emitsInstructions(expression));
+    const emitsInstructions = expressions.map((expression) => this.emitsInstructions(expression));
     const laterEmitsInstructions = new Array<boolean>(expressions.length);
     let suffixEmitsInstructions = false;
     for (let index = expressions.length - 1; index >= 0; index -= 1) {
@@ -2056,7 +1905,7 @@ export class InstructionCompiler {
     const method = unwrapParentheses(expression.callee);
     if (method.kind === "propertyAccessExpression") {
       let receiver = yield* compileChild(this.lowerExpressionTask(method.object));
-      if (written.some((argument) => this.#emitsInstructions(argument.value))) {
+      if (written.some((argument) => this.emitsInstructions(argument.value))) {
         receiver = this.#prepareReferenceExpression(receiver, method.object.span);
         this.instructions.push({
           kind: "validateCallReceiver",
@@ -2163,7 +2012,7 @@ export class InstructionCompiler {
     const key = yield* compileChild(this.lowerExpressionTask(expression.key));
     const defaultValue = expression.defaultValue;
     const type = this.typeChecks.get(expression)?.type ?? null;
-    if (defaultValue === null || !this.#emitsInstructions(defaultValue)) {
+    if (defaultValue === null || !this.emitsInstructions(defaultValue)) {
       const lowered =
         defaultValue === null ? null : yield* compileChild(this.lowerExpressionTask(defaultValue));
       return {
@@ -2350,7 +2199,7 @@ export class InstructionCompiler {
    * button, popup, timer, media, or camera command, a photo or image ask, a file store or lock call, or a call of a user
    * function. Its lowering keeps the operands before it in temporaries and evaluates them in order.
    */
-  #emitsInstructions(expression: Expression): boolean {
+  public emitsInstructions(expression: Expression): boolean {
     const cached = this.#instructionEmissionByExpression.get(expression);
     if (cached !== undefined) return cached;
 
