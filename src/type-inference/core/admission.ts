@@ -135,6 +135,8 @@ interface Structure {
 export interface Candidate {
   readonly d: Definition;
   readonly at: readonly string[];
+  /** The later stores that bring the same value whole (`#copyKey`): checked only where `d` owes something (§8). */
+  readonly members?: readonly Definition[];
 }
 
 /** What decides a place (§5): the kinds, by a written type, a written copy's (A4) or the first definite store's. */
@@ -196,6 +198,9 @@ export class Admission {
   readonly #whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
   readonly #stops = new Map<PlaceId, Stops>();
+  /** A representative store's later equivalent ones (`#grouped`), and the bindings defined by one whole store. */
+  readonly #members = new Map<Definition, readonly Definition[]>();
+  #definedOnce: Set<PlaceId> | null = null;
   /** The expected types of typed ingresses by identity, for `#conflictClass`. */
   readonly #termIds = new Map<TypeTerm, string>();
   /** The own structure of each stored value (`v`) and source key (`k`), and each source key's element depth, F2. */
@@ -276,7 +281,11 @@ export class Admission {
    * decision too (F23), so it leaves the result's contract (an argument stays: the parameter is its callee's); in the
    * next pass it is decided again there.
    */
+  /** The rejections made in this pass, counted (C1 asks whether a candidate left one). */
+  public rejections = 0;
+
   public reject(d: Definition, root: PlaceId, path: readonly string[]): void {
+    this.rejections += 1;
     if (d.how === "argument") return;
     let keys = this.newlyRejected.get(d.uid);
     if (keys === undefined) this.newlyRejected.set(d.uid, (keys = new Set()));
@@ -576,7 +585,11 @@ export class Admission {
       const stored = contract.prefixStores(prefix);
       const take = (d: Definition): void => {
         const at = d.kind === "add" && d.how !== "elements" ? rest.slice(1) : rest;
-        candidates.set(`${d.uid}|${at.join(".")}`, { d, at });
+        const members = this.#members.get(d);
+        candidates.set(
+          `${d.uid}|${at.join(".")}`,
+          members === undefined ? { d, at } : { d, at, members },
+        );
       };
       const takeAll = (stores: ReadonlySet<Definition | null>): void => {
         const { wholes, adds } = this.#takeable(stores, byWritten);
@@ -877,9 +890,59 @@ export class Admission {
       );
       program.work.charge("checks", sortCost(list.length));
       list.sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b));
+      if (!add) list = this.#grouped(list);
       this.#whole.set(memoKey, list);
     }
     return list;
+  }
+
+  /**
+   * §8: the stores of one value whole (`#copyKey`), once per pass: their earliest as the representative, the later ones
+   * its members (`#members`); a scan or a check reads the representative, and a member only where it owes something.
+   */
+  #grouped(list: readonly Definition[]): Definition[] {
+    const out: Definition[] = [];
+    const first = new Map<string, Definition>();
+    for (const d of list) {
+      this.pass.program.work.charge("indexSteps");
+      const key = this.#copyKey(d);
+      const representative = key === null ? undefined : first.get(key);
+      if (representative === undefined) {
+        if (key !== null) first.set(key, d);
+        out.push(d);
+        continue;
+      }
+      const members = this.#members.get(representative);
+      this.#members.set(representative, members === undefined ? [d] : [...members, d]);
+    }
+    return out;
+  }
+
+  /**
+   * The value a whole store brings, where every store of it brings the same (§8): a plain read of a binding whose only
+   * definition is one whole store, so that each read sees that store's value; `null` for any other store.
+   */
+  #copyKey(d: Definition): string | null {
+    const { program, definitions } = this.pass;
+    if (d.kind !== "whole" || d.value === undefined) return null;
+    const binding = program.occurrenceOf.get(d.value);
+    if (binding === undefined || program.isHost(binding)) return null;
+    if (this.#definedOnce === null) {
+      const counts = new Map<PlaceId, number>();
+      const whole = new Set<PlaceId>();
+      for (const store of [...definitions.storeDefs, ...definitions.transferDefs]) {
+        program.work.charge("indexSteps");
+        const place = keyPlace(store.key);
+        counts.set(place, (counts.get(place) ?? 0) + 1);
+        if (store.kind === "whole" && keyPath(store.key).length === 0) whole.add(place);
+      }
+      this.#definedOnce = new Set(
+        [...counts]
+          .filter(([place, count]) => count === 1 && whole.has(place))
+          .map(([place]) => place),
+      );
+    }
+    return this.#definedOnce.has(binding) ? `c${binding}` : null;
   }
 
   /**
@@ -912,7 +975,8 @@ export class Admission {
       )
         if (d.kind === "whole") wholes.push(d);
         else if (d.kind === "add") adds.push(d);
-    return (known[index] = { wholes, adds });
+    wholes.sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b));
+    return (known[index] = { wholes: this.#grouped(wholes), adds });
   }
 
   /** Whether a value is a read of a host value: external data, with no kind and no `null` at any path. */

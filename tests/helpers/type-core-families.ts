@@ -1725,6 +1725,22 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
+    name: "A2-published-wide-copies",
+    measures:
+      "§8, A2, C9 r4.12: k whole copies of one record of k fields published beside named host data, every field read (Codex r17 B2)",
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          "let box = root",
+          rows(k, () => "box = root"),
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
     name: "A8-added-presets",
     measures:
       "F2, A8: k literals of one k-field record's copies added to one list, every field read (round 10 B4)",

@@ -28,7 +28,7 @@ import {
   termAt,
   typeTags,
 } from "./contract.js";
-import { keyOf, keyPath, keyPlace, type Key } from "./definitions.js";
+import { keyOf, keyPath, keyPlace, type Definition, type Key } from "./definitions.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { firstWriter, makeItem, REASON, type Item, type ItemTag, type Writer } from "./items.js";
@@ -439,33 +439,37 @@ export class Consumers {
       // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
       // an opaque value C5's obligation at its access (A7)
       if (decision.published) {
-        for (const { d, at } of decision.candidates) {
-          this.#reading = d.node;
-          const site = admission.namedExternalSite(d, at);
-          if (site === null) continue;
-          const named = admission
-            .valueAt(d, at)
-            .filter((item) => isExternal(item) && !admission.ownIngress(item, d));
-          const against = admission.admitted(root, path);
-          for (const { item } of offendingKinds(named))
-            this.#storeWarning(site, label, item, against);
-          // C9: the named data's own ingress keeps its boundary, as at a decided store
-          for (const item of named)
-            admission.boundaryFor(
-              item,
-              this.#obligation(
-                "copy-type",
-                site,
-                label,
-                against.map(requiredKind),
-                `validate ${label} against ${against.join("|")}`,
-              ),
-            );
-        }
+        for (const candidate of decision.candidates)
+          for (const d of [candidate.d, ...(candidate.members ?? [])]) {
+            const { at } = candidate;
+            this.#reading = d.node;
+            const site = admission.namedExternalSite(d, at);
+            // (an equivalent copy holds what its representative holds: none of them owes it)
+            if (site === null) break;
+            const named = admission
+              .valueAt(d, at)
+              .filter((item) => isExternal(item) && !admission.ownIngress(item, d));
+            const against = admission.admitted(root, path);
+            for (const { item } of offendingKinds(named))
+              this.#storeWarning(site, label, item, against);
+            // C9: the named data's own ingress keeps its boundary, as at a decided store
+            for (const item of named)
+              admission.boundaryFor(
+                item,
+                this.#obligation(
+                  "copy-type",
+                  site,
+                  label,
+                  against.map(requiredKind),
+                  `validate ${label} against ${against.join("|")}`,
+                ),
+              );
+          }
         continue;
       }
-      for (const { d, at } of decision.candidates) {
-        if (d === decider && at.length === 0) continue;
+      // C1 per candidate; an equivalent copy (`Candidate.members`) only where its representative leaves an obligation
+      const visit = (d: Definition, at: readonly string[]): void => {
+        if (d === decider && at.length === 0) return;
         this.#reading = d.node;
         // §3.3: a candidate the admitted type accepts whatever its value
         if (at.length === 0) {
@@ -477,7 +481,7 @@ export class Consumers {
             )
           ) {
             this.#skip(d.value);
-            continue;
+            return;
           }
         }
         const items = admission.valueAt(d, at);
@@ -490,7 +494,7 @@ export class Consumers {
         // A6: a store of a rejection cycle is a possibility
         if (bad.length > 0 && d !== decider && admission.cycling.has(d.uid)) {
           this.#storeWarning(d.site, label, { ...bad[0]!, cert: "pos" }, tags);
-          continue;
+          return;
         }
         // A8: a collection literal stored into a written element type admits each element by the scalar rule: a
         // definite element none of whose kinds fits is A6's error at that element, the store rejected
@@ -512,7 +516,7 @@ export class Consumers {
         if (wrong !== null) {
           this.#error("written-target", program.place(wrong.value!).site ?? d.site);
           admission.reject(d, root, path);
-          continue;
+          return;
         }
         // A6: a definite contribution that does not fit, where no kind of the value fits (r4.46: a fitting kind beside it
         // makes it a warning), is rejected, its error at the innermost offending expression (r4.35)
@@ -524,7 +528,7 @@ export class Consumers {
             ),
           );
           admission.reject(d, root, path);
-          continue;
+          return;
         }
         // C1, ADR 1.7: a value none of whose kinds fits errs, against a written type at any path or a type decided
         // earlier in the source for a store into the place itself; never against a later decider (A7), never under a
@@ -549,7 +553,7 @@ export class Consumers {
             admission.siteAt(d, at, (elements) => elements.length > 0 && !elements.some(fitsAny)),
           );
           admission.reject(d, root, path);
-          continue;
+          return;
         }
         // A7: a copy made before the decider is checked against it with context `later`
         const later = (item: Item): Item => (before ? { ...item, context: "later" } : item);
@@ -637,6 +641,18 @@ export class Consumers {
                 label,
                 tags.map(requiredKind),
               );
+      };
+      for (const { d, at, members } of decision.candidates) {
+        const before = this.diagnostics.length + admission.rejections;
+        visit(d, at);
+        if (members === undefined) continue;
+        if (this.diagnostics.length + admission.rejections === before) {
+          // (equivalent values are quiet alike, §3.3)
+          if (d.value !== undefined && this.quiet.has(d.value))
+            this.#skip(...members.map((m) => m.value));
+          continue;
+        }
+        for (const member of members) visit(member, at);
       }
     }
   }
