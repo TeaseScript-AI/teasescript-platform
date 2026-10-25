@@ -1252,6 +1252,288 @@ test("a selection consumes only its own emptiness mark below get, a loop's visit
 });
 
 /**
+ * TABLE r4.47 (#1026's follow-up): the set's records `cp9-cells/s4/followup/…` (set `b837110d8dd10bb1`) in both orders,
+ * as their outcome, diagnostics and checks with their sites: temporal fields and calendar parts by their declared
+ * results (1), a selection's descendant emptiness (2), held choice options after a store below `value` or `text` (4).
+ * Two records are S6's and left out: `temporal/year-string-fallback` differs only by C10's error at the fallback and
+ * `temporal/year-present-wrong-store` only by A6's error at the store, both admission's. Beside them, clock reads give
+ * their declared kind with no boundary, as an ask does (r4.47 (5)).
+ */
+test("the set's follow-up records and clock reads give their records in both orders", () => {
+  const programs: readonly (readonly [string, string, readonly string[]])[] = [
+    [
+      "temporal/weekday-repeat",
+      'let d = toDate("2026-10-04")\nrepeat d.weekday {}\nexit\n',
+      ["compile-error", "integer-use compile-error @36"],
+    ],
+    [
+      "temporal/weekday-written-string",
+      'let d = toDate("2026-10-04")\nlet name: string = d.weekday\nexit\n',
+      ["valid"],
+    ],
+    [
+      "temporal/year-written-integer",
+      'let d = toDate("2026-10-04")\nlet n: integer = d.year\nexit\n',
+      ["valid"],
+    ],
+    [
+      "temporal/year-written-string",
+      'let x: string = (askDate "When?").year\nexit\n',
+      ["compile-error", "written-target compile-error @16"],
+    ],
+    [
+      "temporal/year-fallback-written-union",
+      'let x: integer | string = (askDate "When?").year otherwise "ok"\nexit\n',
+      ["valid"],
+    ],
+    [
+      "temporal/year-partial-presence-store",
+      'let x = {p: (askDate "When?").year}\nif askBoolean "pick" { x = {q: 0} }\nx.p = 1\nexit\n',
+      [
+        "member-read warning-runtime-check @72",
+        "null-check x [non-null] @72",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "temporal/year-present-store",
+      'let x = {p: (askDate "When?").year}\nx.p = 1\nexit\n',
+      ["valid"],
+    ],
+    [
+      "temporal/property-absent-in-every-source",
+      "let x = {q: 0}\nx.p = 1\nexit\n",
+      ["compile-error", "member-read compile-error @8"],
+    ],
+    [
+      "temporal/calendar-parts-written-results",
+      "let c = 2 calendar days\nlet monthCount: integer = c.months\nlet dayCount: integer = c.days\nlet offset: duration = c.exactOffset\nexit\n",
+      ["valid"],
+    ],
+    [
+      "temporal/calendar-exact-offset-repeat",
+      "let c = 2 calendar days\nrepeat c.exactOffset {}\nexit\n",
+      ["compile-error", "integer-use compile-error @31"],
+    ],
+    [
+      "temporal/exact-duration-has-no-calendar-parts",
+      "let d = 2 days\nsay d.days\nexit\n",
+      ["compile-error", "member-read compile-error @19"],
+    ],
+    [
+      "temporal/datetime-date-and-time-fields",
+      'let dt = toDateTime("2026-10-04T18:00")\nlet y: integer = dt.year\nlet h: integer = dt.hour\nexit\n',
+      ["valid"],
+    ],
+    [
+      "temporal/time-date-field-inapplicable",
+      'let t = toTime("18:00")\nsay t.year\nexit\n',
+      ["compile-error", "member-read compile-error @28"],
+    ],
+    [
+      "temporal/absolute-local-field-inapplicable",
+      'let a = toAbsoluteDateTime("2026-10-04T12:30:00Z")\nsay a.year\nexit\n',
+      ["compile-error", "member-read compile-error @55"],
+    ],
+    [
+      "temporal/absolute-converted-local-field",
+      'let a = toAbsoluteDateTime("2026-10-04T12:30:00Z")\nlet n: integer = a.toDateTime().year\nexit\n',
+      ["valid"],
+    ],
+    [
+      "emptiness/values-first",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.first.values.first {}\nexit\n",
+      [
+        "empty-check d.values [list] @46",
+        "empty-check d.values.first.values [list] @46",
+        "member-read warning-runtime-check @46",
+        "member-read warning-runtime-check @46",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/keys-first",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.first.keys.first {}\nexit\n",
+      [
+        "empty-check d.values [list] @46",
+        "empty-check d.values.first.keys [list] @46",
+        "integer-check d.values.first.keys.first [integer] @46",
+        "integer-use warning-runtime-check @46",
+        "member-read warning-runtime-check @46",
+        "member-read warning-runtime-check @46",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/get-outer",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.get(0, default: dict{v: 1}).values.first {}\nexit\n",
+      [
+        "empty-check d.values.get(0, default: dict{v: 1}).values [list] @46",
+        "member-read warning-runtime-check @46",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/get-inner",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.first.values.get(0, default: 0) {}\nexit\n",
+      [
+        "empty-check d.values [list] @46",
+        "member-read warning-runtime-check @46",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/iterate-values-direct",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nfor n in d.values.first.values { repeat n {} }\nexit\n",
+      [
+        "empty-check d.values [list] @48",
+        "member-read warning-runtime-check @48",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/iterate-inner-then-select",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nfor inner in d.values { repeat inner.values.first {} }\nexit\n",
+      [
+        "empty-check inner.values [list] @70",
+        "member-read warning-runtime-check @70",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/removeFirst-outer",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.removeFirst().values.first {}\nexit\n",
+      [
+        "empty-check d.values [list] @46",
+        "empty-check d.values.removeFirst().values [list] @46",
+        "member-read warning-runtime-check @46",
+        "member-read warning-runtime-check @46",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/removeAt-outer",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.removeAt(0).values.first {}\nexit\n",
+      [
+        "empty-check d.values.removeAt(0).values [list] @46",
+        "member-read warning-runtime-check @46",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/bound-inner",
+      "let d = dict{a: dict{v: 1}, b: dict{v: 2}}\nlet inner = d.values.first\nlet count: integer = inner.values.first\nrepeat count {}\nexit\n",
+      [
+        "empty-check d.values [list] @55",
+        "empty-check inner.values [list] @91",
+        "member-read warning-runtime-check @55",
+        "member-read warning-runtime-check @91",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/cleared-bound-inner",
+      "let d = dict{a: dict{v: 1}, b: dict{v: 2}}\nlet inner = d.values.first\ninner.clear()\nlet count: integer = inner.values.first\nrepeat count {}\nexit\n",
+      [
+        "empty-check d.values [list] @55",
+        "empty-check inner.values [list] @105",
+        "member-read warning-runtime-check @105",
+        "member-read warning-runtime-check @55",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/list-literal-open-descendant",
+      "let xs = [[], [1]]\nrepeat xs.first.first {}\nexit\n",
+      [
+        "empty-check xs.element [list] @26",
+        "member-read warning-runtime-check @26",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/list-literal-held-control",
+      "let xs = [[2], [1]]\nrepeat xs.first.first {}\nexit\n",
+      ["valid"],
+    ],
+    [
+      "emptiness/named-values",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nlet projected = d.values\nrepeat projected.first.values.first {}\nexit\n",
+      [
+        "empty-check projected [list] @71",
+        "empty-check projected.first.values [list] @71",
+        "member-read warning-runtime-check @71",
+        "member-read warning-runtime-check @71",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/values-contract-route",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\ngoto inspect\nlabel inspect\nrepeat d.values.first.values.first {}\nexit\n",
+      [
+        "empty-check d.values [list] @73",
+        "empty-check d.values.first.values [list] @73",
+        "member-read warning-runtime-check @73",
+        "member-read warning-runtime-check @73",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/key-contract-count",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nlet key = d.values.first.keys.first\ngoto inspect\nlabel inspect\nrepeat key {}\nexit\n",
+      [
+        "compile-error",
+        "empty-check d.values [list] @49",
+        "empty-check d.values.first.keys [list] @49",
+        "integer-use compile-error @109",
+        "member-read warning-runtime-check @49",
+        "member-read warning-runtime-check @49",
+      ],
+    ],
+    [
+      "choice/value-base",
+      'let o = {text: "A", value: 1}\nrepeat askChoice o {}\nexit\n',
+      ["valid"],
+    ],
+    [
+      "choice/value-store",
+      'let o = {text: "A", value: 1}\no.value = 2\nrepeat askChoice o {}\nexit\n',
+      ["valid"],
+    ],
+    ["choice/text-base", "let o = {text: 0}\nrepeat askChoice o {}\nexit\n", ["valid"]],
+    [
+      "choice/text-store",
+      "let o = {text: 0}\no.text = 3\nrepeat askChoice o {}\nexit\n",
+      ["valid"],
+    ],
+    [
+      "choice/display-store",
+      'let o = {text: "A", value: 1}\no.text = "B"\nrepeat askChoice o {}\nexit\n',
+      ["valid"],
+    ],
+    [
+      "clock read: getDate() counted",
+      "let d = getDate()\nrepeat d.weekday {}\nexit\n",
+      ["compile-error", "integer-use compile-error @25"],
+    ],
+    ["clock read: getDate() into a date", "let t: date = getDate()\nexit\n", ["valid"]],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, expected] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const got = summary(reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run());
+      if (JSON.stringify(got) !== JSON.stringify(expected))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join("; ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});
+
+/**
  * §3.4, X3 (the lead's ruling on #1026's follow-up): a choice's button value, selected by key past the element step over
  * its options, carries the word `member` as its literal analogue does, written or held, and with options of both keys;
  * a whole option object, no element step, is the control. Kinds, warnings and checks are the analogue's; both orders.
