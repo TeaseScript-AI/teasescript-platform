@@ -274,6 +274,23 @@ test("admission's decided types and C9's boundary checks compile and run on the 
         ["bad", "TSR058@9:25"],
       ],
     ],
+    // A4: a copy of a written integer stays an integer where a number is possible (review r3: its plan took
+    // `number`), at its store's check and at a later store's boundary check
+    [
+      'let typed: integer = 1\nlet copy = typed\ncopy = [2, 2.5][1]\nsay "after store"\nexit\n',
+      ["warning TSV041@47"],
+      ["40:58"],
+      [[null, "TSR058@47:58"]],
+    ],
+    [
+      'let typed: integer = 1\nlet copy = typed\ncopy = [2, 2.5][0]\ncopy = hostValue\nsay "after store"\nexit\n',
+      ["warning TSV041@47", "warning TSV041@66"],
+      ["40:58", "59:75"],
+      [
+        [2, null],
+        [2.5, "TSR058@66:75"],
+      ],
+    ],
     // C9: external data stored whole into a written collection, checked there with its elements
     [
       "let pool: integer[] = hostValue\nexit\n",

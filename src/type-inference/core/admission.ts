@@ -513,9 +513,10 @@ export class Admission {
   }
 
   /**
-   * C9 r4.12 (A1–A7): a destination's admitted type: the written type (its null included), else the decider's kinds (a
-   * place admission never decided: its contract's kinds, one family), an integer decider widened by an admitted number,
-   * with `null` where a null contribution is admitted; never the raw union of contributions.
+   * C9 r4.12 (A1–A7): a destination's admitted type: the written type (its null included), else the decided kinds (an
+   * integer decider already widened by an admitted number, a copy of a written integer never: A4), else, where
+   * admission decided nothing, the contract's kinds, one family, an integer widened by an admitted number; with `null`
+   * where a null contribution is admitted; never the raw union of contributions.
    */
   public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {
     const { program, contract } = this.pass;
@@ -523,11 +524,11 @@ export class Admission {
     const term = written === null ? null : termAt(written, path);
     if (term !== null) return [...new Set(typeTags(term).filter((tag) => tag !== "unknown"))];
     const kinds = withoutEmpty(this.#run(contract.contractOf(keyOf(place, path))));
+    const decided = this.decided.get(keyOf(place, path));
     let tags = [
-      ...(this.decided.get(keyOf(place, path)) ??
-        new Set(kinds.filter((item) => concrete(item)).map((item) => item.tag))),
+      ...(decided ?? new Set(kinds.filter((item) => concrete(item)).map((item) => item.tag))),
     ];
-    if (tags.includes("integer") && kinds.some(admitsNumber))
+    if (decided === undefined && tags.includes("integer") && kinds.some(admitsNumber))
       tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
     return tags.length > 0 && kinds.some((item) => item.tag === "null") ? [...tags, "null"] : tags;
   }
