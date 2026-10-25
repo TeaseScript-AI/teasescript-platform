@@ -446,6 +446,22 @@ export class Consumers {
       const fitting = (item: Item): boolean =>
         item.tag === "unknown" ||
         (concrete(item) && tags.some((tag) => fits(item.tag, tag, written)));
+      // C9 r4.12, r4.50 (1): a place published with its contract's kinds owes the check of external data another store
+      // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
+      // an opaque value C5's obligation at its access (A7)
+      if (decision.published) {
+        for (const { d, at } of decision.candidates) {
+          this.#reading = d.node;
+          const site = this.#namedExternal(d, at);
+          if (site === null) continue;
+          const named = admission
+            .valueAt(d, at)
+            .filter((item) => isExternal(item) && !admission.ownIngress(item, d));
+          for (const { item } of offendingKinds(named))
+            this.#storeWarning(site, label, item, admission.admitted(root, path));
+        }
+        continue;
+      }
       for (const { d, at } of decision.candidates) {
         if (d === decider && at.length === 0) continue;
         this.#reading = d.node;
@@ -633,6 +649,58 @@ export class Consumers {
    * whatever remains. A variable read stops it: the store, as for a copy of a variable (r4.43's bound options). The first
    * in source order.
    */
+  /**
+   * Where a store's value at `at` carries external data another store brought, as a whole value (r4.50 (1)): the first
+   * read of it, in source order, through the literals, projections and value-carrying operations (`otherwise`, `get`)
+   * of the value; `null` where none does. External data a store brings inline is its own ingress (C9's boundary), and a
+   * member of a value whose kinds are unknown owes C5's obligation at its access (A7): neither is followed.
+   */
+  #namedExternal(d: Definition, at: readonly string[]): SourceSite | null {
+    const { program, definitions, values, contract } = this.pass;
+    if (d.value === undefined) return null;
+    const pending: (readonly [PlaceId, readonly string[]])[] = [[d.value, at]];
+    while (pending.length > 0) {
+      const [value, steps] = pending.pop()!;
+      program.work.charge("checks");
+      if (definitions.ingress.has(value)) continue;
+      const next: (readonly [PlaceId, readonly string[]])[] = [];
+      if (program.occurrenceOf.has(value)) {
+        const site = program.place(value).site;
+        const known = withoutEmpty(this.#run(contract.contractOfValue(value))).some(
+          (item) => item.tag !== "unknown",
+        );
+        // (a source whose own contract holds a kind meets C1 at its own stores, its external data checked there)
+        const source = withoutEmpty(
+          this.#run(contract.contractOf(keyOf(program.occurrenceOf.get(value)!, steps))),
+        );
+        if (
+          site !== null &&
+          (steps.length === 0 || known) &&
+          !source.some((item) => concrete(item)) &&
+          this.#run(values.valueItems(value, program.exprAt(site) ?? d.node, steps)).some(
+            isExternal,
+          )
+        )
+          return site;
+      } else if (program.hasOf.has(value) || program.cellOwner.has(value)) {
+        const [step, ...rest] = steps;
+        if (step !== undefined)
+          for (const child of this.admission.literalChildren(value, step))
+            next.push([child.value!, rest]);
+      } else if (program.projOf.has(value)) {
+        const { owner, step } = program.projOf.get(value)!;
+        if (step !== "iteration") next.push([owner, [stepName(step), ...steps]]);
+      } else {
+        const c = program.opOf.get(value);
+        if (c?.kind === "fallback") next.push([c.left, steps], [c.right, steps]);
+        else if (c?.kind === "get")
+          next.push([c.receiver, ["element", ...steps]], [c.fallback, steps]);
+      }
+      for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
+    }
+    return null;
+  }
+
   #ingressSite(d: Definition, at: readonly string[]): SourceSite {
     const { program, definitions } = this.pass;
     if (d.kind !== "whole" || d.value === undefined) return d.site;

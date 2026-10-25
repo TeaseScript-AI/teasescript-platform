@@ -162,6 +162,12 @@ export interface Decision {
   readonly decider: Definition | null;
   /** The candidates in source order (A5). */
   readonly candidates: readonly Candidate[];
+  /**
+   * Decided by no contribution, the contract's kinds it is published with (C9 r4.12) beside external data: only the
+   * external data another store brought owes its check at each candidate (r4.50 (1)); data a store brings inline has
+   * its boundary, an opaque value C5's obligation at its access (A7).
+   */
+  readonly published: boolean;
 }
 
 /** What admission asks of the consumers it runs beside: their solver runs, with each read's accounting. */
@@ -498,6 +504,7 @@ export class Admission {
     let byWritten = writtenTags !== null;
     let decider: Definition | null = null;
     let deciderSite: SourceSite | null = null;
+    let published = false;
     // an inferred root whose every store's contract is plain scalar kinds of one family accepts every store
     if (tags === null && path.length === 0 && !this.#a4Keys.has(keyOf(root, []))) {
       let plain = true;
@@ -532,6 +539,17 @@ export class Admission {
     if (tags === null) {
       const found = this.#scan(direct, prefixes);
       if (found !== null) ({ tags, nullable, byWritten, decider, site: deciderSite } = found);
+      else {
+        // C9 r4.12, r4.50 (1): where no contribution decides, but the contract holds kinds beside external data, those
+        // kinds are the type the place is published with, so external data a store brings into it owes its check
+        // there, named as well as inline (`published`)
+        const kinds = withoutEmpty(this.#run(contract.contractOf(key)));
+        if (kinds.some((item) => concrete(item)) && kinds.some(isExternal)) {
+          tags = [...new Set(kinds.filter((item) => concrete(item)).map((item) => item.tag))];
+          deciderSite = this.#concreteSite(direct, prefixes);
+          published = true;
+        }
+      }
     }
     if (tags === null) return null;
     // the decided family (ADR 1.2): an integer decider with a number admitted at the path decides numbers (r4.28); a
@@ -611,6 +629,7 @@ export class Admission {
       nullable,
       decider,
       candidates: ordered,
+      published,
     };
   }
 
@@ -748,6 +767,43 @@ export class Admission {
         };
     }
     return null;
+  }
+
+  /**
+   * The site of the earliest contribution of definite kinds at a path no contribution decides (`decide`'s fallback):
+   * per store in source order, the first value standing at the path whose own items there are definite kinds (a
+   * literal's element, an operand), else the store's own site; `null` without a store.
+   */
+  #concreteSite(
+    direct: readonly Candidate[],
+    prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[],
+  ): SourceSite | null {
+    const { program, values } = this.pass;
+    const tried = [
+      ...direct.map(({ d, at }) => ({ d, at })),
+      ...prefixes.flatMap(({ key, rest }) =>
+        this.#wholeOf(key, false).map((d) => ({ d, at: rest })),
+      ),
+    ].sort((a, b) => this.sourceOrder(a.d) - this.sourceOrder(b.d));
+    program.work.charge("checks", tried.length + sortCost(tried.length));
+    const first = tried[0];
+    for (const { d, at } of tried) {
+      if (d.value === undefined) continue;
+      const stops = this.#stopsOf(d.value, d.node);
+      const here = [
+        ...(stops.written.get(at.join(".")) ?? []),
+        ...(stops.values.get(at.join(".")) ?? []),
+        ...(stops.literals.get(at.join(".")) ?? []),
+      ].sort((x, y) => x.order - y.order);
+      program.work.charge("checks", here.length + sortCost(here.length));
+      for (const stop of here)
+        if (
+          deciding(withoutEmpty(this.#run(values.valueItems(stop.value, stop.node, stop.strip))))
+            .length > 0
+        )
+          return program.places[stop.value]?.site ?? d.site;
+    }
+    return first === undefined ? null : first.d.site;
   }
 
   /**
@@ -1937,6 +1993,11 @@ export class Admission {
    * The site of a store's check of data that a literal or a choice carried into it (C9 r4.29): the earliest ingress
    * expression where the item came in by this store, else `site`.
    */
+  /** Whether an item's external data came in at the store `d` itself (C9: its boundary there checks it). */
+  public ownIngress(item: Item, d: Definition): boolean {
+    return item.ingress !== undefined && this.#tokens(item.ingress).has(this.#token(d));
+  }
+
   public cellSited(site: SourceSite, item: Item, d: Definition): SourceSite {
     if (item.ingress === undefined) return site;
     const own = this.#token(d);

@@ -696,6 +696,115 @@ test("a written scalar a singleton literal gives stays strict on the candidate r
   assert.equal(candidate(source).plan, null);
 });
 
+/** The admitted type of the place a statement starting with `start` declares: its kinds and its decider's offset. */
+function admittedOf(source: string, start: string): string {
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null, source);
+  const answers = analyseCore(request);
+  for (const node of answers.graph.nodes) {
+    if (node.kind !== "statement" || node.span === null) continue;
+    if (!source.slice(node.span.start.offset, node.span.end.offset).startsWith(start)) continue;
+    const place = answers.at(node)?.place;
+    assert.ok(place, `${source}: ${start}'s place`);
+    const admitted = answers.place(place.id).admitted;
+    return admitted.by === "decided"
+      ? `decided ${admitted.kinds.join("|")}@${admitted.decider?.start ?? "-"}`
+      : admitted.by;
+  }
+  throw new Error(`${source}: no statement ${start}`);
+}
+
+test("a place published with a kind checks the external data stored into it, named or inline, at any endpoint (A7, C9 r4.12, r4.50 (1), R4-F1)", () => {
+  // the external reviewer's endpoint matrix: per kind (a known element, a fitting and a bad host value), projection
+  // (an index, a nested index, parentheses, an index held in a variable), host data inline or named, and without or
+  // with a later store: the place is decided by the known element (or the later store), named data warns where it is
+  // read with its check, inline data has its boundary, the declaration's store is checked, and the bad value stops
+  // there before AFTER while the fitting one reaches it
+  const kinds = [
+    ["1", 2, "bad"],
+    ['"a"', "b", 1],
+    ["true", false, "bad"],
+  ] as const;
+  const forms = [
+    (data: string): string => `[K, ${data}][1]`,
+    (data: string): string => `[[K, ${data}]][0][1]`,
+    (data: string): string => `([K, ${data}])[1]`,
+    (data: string): string => `[K, ${data}][i]`,
+  ];
+  let shapes = 0;
+  for (const [known, good, bad] of kinds)
+    for (const [index, form] of forms.entries())
+      for (const named of [false, true])
+        for (const later of [false, true]) {
+          const lines = [
+            ...(named ? ["let raw = hostValue"] : []),
+            ...(index === 3 ? ["let i = 1"] : []),
+            `let out = ${form(named ? "raw" : "hostValue").replace("K", known)}`,
+            ...(later ? [`out = ${known}`] : []),
+            'say "AFTER"',
+            "exit",
+          ];
+          const source = `${lines.join("\n")}\n`;
+          const declaration = source.indexOf("let out");
+          const decider = later ? source.lastIndexOf(known) : source.indexOf(known, declaration);
+          const kind = known === "1" ? "integer" : known === "true" ? "boolean" : "string";
+          assert.equal(admittedOf(source, "let out"), `decided ${kind}@${decider}`, source);
+          // (named data warns where it is read; with a later decider, C1 warns at the stored value, inline data at
+          // its host value)
+          const value = declaration + "let out = ".length;
+          const data = named ? source.indexOf("raw", declaration) : source.indexOf("hostValue");
+          const warned = named ? (later ? value : data) : later ? data : null;
+          const compiled = inBothOrders(() => {
+            const result = candidate(source);
+            return {
+              diagnostics: sited(result),
+              declarationChecked:
+                result.plan !== null &&
+                checkedStores(result.plan).some((span) => span.startsWith(`${declaration}:`)),
+            };
+          });
+          assert.deepEqual(
+            compiled,
+            {
+              diagnostics: warned === null ? [] : [`warning TSV041@${warned}`],
+              declarationChecked: true,
+            },
+            source,
+          );
+          const plan = candidate(source).plan;
+          assert.ok(plan !== null, source);
+          assert.deepEqual(
+            runWith(plan, good).says,
+            ["AFTER"],
+            `${source} with ${JSON.stringify(good)}`,
+          );
+          const stopped = runWith(plan, bad);
+          assert.deepEqual(
+            { says: stopped.says, code: stopped.failure?.split("@")[0] ?? null },
+            { says: [], code: "TSR058" },
+            `${source} with ${JSON.stringify(bad)}`,
+          );
+          shapes += 1;
+        }
+  assert.equal(shapes, 48);
+  // the controls: host data alone admits no kind (nothing to check it against), known elements need no check
+  for (const [source, admitted] of [
+    ['let raw = hostValue\nlet out = [raw][0]\nsay "AFTER"\nexit\n', "undecided"],
+    ['let out = [1, 2][1]\nsay "AFTER"\nexit\n', "decided integer@10"],
+  ] as const) {
+    assert.equal(admittedOf(source, "let out"), admitted, source);
+    assert.deepEqual(
+      inBothOrders(() => sited(candidate(source))),
+      [],
+      source,
+    );
+    const plan = candidate(source).plan;
+    assert.ok(plan !== null, source);
+    assert.deepEqual(checkedStores(plan), [], source);
+    assert.deepEqual(runWith(plan, "bad").says, ["AFTER"], source);
+  }
+});
+
 /** Runs a plan to its end, observing each reading pause's deadline: the events and the final snapshot. */
 function finish(
   plan: InstructionPlan,

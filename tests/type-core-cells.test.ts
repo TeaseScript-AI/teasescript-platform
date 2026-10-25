@@ -3492,3 +3492,44 @@ test("an operation the receiver's or the key's decision leaves opaque or externa
   }
   assert.deepEqual(differing, []);
 });
+
+test("named external data a carrier stores into a place published with a kind owes its check there (C9 r4.12, r4.50 (1), R4-F1)", () => {
+  // per carrier outside the candidate's slice (its plan and its run wait for the slice): the warning where the named
+  // data is read, with a `copy-type` check against the published kind; a source decided at its own stores (a list whose
+  // element `1` decides) keeps its check there only; a member of host data owes C5's obligation at its access (A7)
+  const programs: readonly (readonly [string, string, string | null])[] = [
+    ["otherwise", "let raw = hostValue\nlet out = raw otherwise 1\nexit", "raw otherwise"],
+    ["get's default", "let raw = hostValue\nlet out = [raw].get(0, default: 1)\nexit", "raw]"],
+    ["get's receiver", "let raw = hostValue\nlet out = [1, raw].get(1, default: 1)\nexit", "raw]"],
+    ["first", "let raw = hostValue\nlet out = [1, raw].first\nexit", "raw]"],
+    [
+      "a written element beside",
+      "let typed: integer = 1\nlet raw = hostValue\nlet out = [typed, raw][1]\nexit",
+      "raw]",
+    ],
+    ["a decided source", "let raw = hostValue\nlet xs = [1, raw]\nlet out = xs[1]\nexit", null],
+    [
+      "a member of host data",
+      'let parcel = hostValue\nlet out = parcel.get("count", default: 0)\nexit',
+      null,
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, read] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const at = read === null ? -1 : source.indexOf(read, source.indexOf("let out"));
+    const want = read === null ? [] : [`copy-type out @${at}`];
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const got = record.checks
+        .filter((check) => check.kind === "copy-type" && check.target === "out" && !check.boundary)
+        .map((check) => `${check.kind} ${check.target} @${check.site.offset}`);
+      if (JSON.stringify(got) !== JSON.stringify(want))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join(" ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});
