@@ -156,8 +156,6 @@ export class Admission {
   readonly #levels = new Map<string, Level>();
   readonly #pending = new Map<number, Definition>();
   readonly #typed: Definition[] = [];
-  /** A typed ingress's expected kinds (F18), by its store's token. */
-  readonly #typedKinds = new Map<string, readonly ItemTag[]>();
   readonly #readSeen = new Set<PlaceId>();
   readonly #hostSeen = new Set<string>();
   readonly #walked = new Set<IngressNode>();
@@ -1275,10 +1273,8 @@ export class Admission {
         !definitions.readIngress.has(writerKey(token)) &&
         operation !== undefined &&
         this.#f18Kinds(operation) !== null
-      ) {
+      )
         typed.add(writerKey(token));
-        this.#typedKinds.set(writerKey(token), this.#f18Kinds(operation)!.tags);
-      }
     }
     for (const d of [
       ...definitions.storeDefs,
@@ -1300,12 +1296,17 @@ export class Admission {
 
   /**
    * The kinds an ingress store's boundary check is against: the destination's admitted type; for an argument beside an
-   * unannotated parameter's default, which that default's decision never constrains (F21, ADR 0021 1.5), the typed
-   * ingress's own expected kinds (F18) or none (`unknown`: the runtime's validation of external data).
+   * unannotated parameter's default, which that default's decision never constrains (F21, ADR 0021 1.5), the
+   * argument's own kinds at the boundary's path (a record carrying the ingress its record, a typed ingress its expected
+   * kinds, F18, with their `null`), none for external data alone (`unknown`: the runtime's validation of it).
    */
   #againstOf(d: Definition, path: readonly string[]): ItemTag[] {
     if (!this.#besideDefault(d)) return this.admitted(d.place, path);
-    return [...(this.#typedKinds.get(this.#token(d)) ?? [])];
+    const items = this.valueAt(d, path);
+    const tags: ItemTag[] = [
+      ...new Set(items.filter((item) => concrete(item)).map((item) => item.tag)),
+    ];
+    return tags.length > 0 && items.some((item) => item.tag === "null") ? [...tags, "null"] : tags;
   }
 
   /** The boundary checks of the ingress stores, published once every place is decided. */
