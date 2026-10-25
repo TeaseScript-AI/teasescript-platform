@@ -147,7 +147,7 @@ export interface PlaceAnswer {
     readonly elements: readonly Item[];
     readonly emptiness: "held" | "open";
   };
-  /** The boundary checks of the ingress stores into the place (C9): here those of a written place (A1). */
+  /** The boundary checks of the ingress stores into the place (C9), against its admitted type. */
   readonly ingresses: readonly Obligation[];
   /**
    * The definitions the exact path uses (X2–X7): the live list in region order, F5a's loop-exit adds among them; the

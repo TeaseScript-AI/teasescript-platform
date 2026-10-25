@@ -25,7 +25,7 @@ import type { Work } from "./solver.js";
  * contribution in source order (A2), where a settled family needs no scan (A3); the candidates a decided type is checked
  * against are the direct stores and the whole stores of a prefix whose source holds an offending kind (A5). A definite
  * contribution that does not fit is an error at the store, which is rejected: its rejection takes effect in the next
- * pass, and the passes repeat until the rejected set is stable (A6, `admit`). The consumers check each candidate
+ * pass, and the passes repeat until the rejected set is stable (A6, `analyseCore`). The consumers check each candidate
  * against the decided type (C1); here: the decision, the rejections, a literal's elements of one type (A8, ADR 1.3) and
  * where each boundary check of external data stands (C9: one per ingress store at its ingress expression, against the
  * destination's own admitted type; host data no store brought is checked at the consumer that reads it).
