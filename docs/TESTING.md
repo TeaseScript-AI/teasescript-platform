@@ -607,7 +607,7 @@ It covers the technical playground and, on the built `/player/` route with trust
 end without console errors: a typed answer, buttons, presses on a message, not on a control, that skip pacing, Space
 that skips pacing or presses a `showButton`, Stage images, audible sounds, and smart follow with Return to latest; it
 also starts over plain HTTP on a local-network name.
-It opens fixture packages by URL in the Player, playground, and editor, including one that does not compile; checks
+It opens fixture packages by URL in the Player and the playground, including one that does not compile; checks
 script storage, a session kept across a reload with an image the script asked for, saved data exported and imported into
 a fresh profile, a session exported from one fresh profile and continued in another, the debug export after a script error, the rewind history's IndexedDB store, readable text once photo
 colours and the vignette have settled, a photo shown again from the Player's cache with its colour, the reading position
@@ -618,11 +618,6 @@ Switch camera buttons clicked on a phone-sized screen. Firefox captures camera f
 tried before the `/usr/bin` Chromium paths and then the newest Playwright-managed Chromium; an unusable value falls back
 to them. An unavailable Chromium executable is an explicit skip; an available browser must pass the configured smoke
 checks.
-
-The Monaco editor has a separate route outside `npm run check`: `npm run test:editor-browser` builds the editor and runs
-`tools/editor-browser-smoke.mjs`. Chromium may resolve only the local preview, so a build that needs remote code to
-start fails, and the editor must become ready with an accessible name. Chromium selection and the explicit skip without
-a browser match the Player smoke.
 
 Production browser E2E coverage becomes required after the cross-origin host shell and player exist. It should then
 include:

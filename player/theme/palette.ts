@@ -105,9 +105,9 @@ export function generatePlayerTheme(intent: PlayerThemeIntent, photo?: PhotoSurf
   const error = status(25, 72);
   // The debug room's bug while Debug runs: one red, the same in both modes, between the error reds (owner, #512).
   const debugMark = tonalColor(25, 72, 53);
-  // Code syntax colours (`syntax-*`), for every view of a script's code: the random draw picker now, the editor once it
-  // moves off Monaco's own colours. Strings and numbers take the warning and info hues one step further from the
-  // background than the status marks, as code text is small and sits on a tinted line; the others are the text colours.
+  // Code syntax colours (`syntax-*`), for every view of a script's code: the random draw picker now, the future editor
+  // later. Strings and numbers take the warning and info hues one step further from the background than the status
+  // marks, as code text is small and sits on a tinted line; the others are the text colours.
   const syntax = (hue: number, chroma: number) =>
     tonalColor(hue, chroma, dark ? (high ? 88 : 80) : high ? 28 : 40);
   const base = {
