@@ -3030,3 +3030,48 @@ test("a literal's elements are compared at each store with their own certainty, 
   }
   assert.deepEqual(differing, []);
 });
+
+test("a literal's own elements decide through the operations that carry it, under their certainty (round 12 B2)", () => {
+  const after = '\nsay "AFTER"\nexit';
+  // per program its outcome and its copy checks: C1's at the named host value against the literal's whole numbers,
+  // beside the boundary of the store that brought it in; a removal's possible element decides nothing (F7)
+  const checked = ["a [unknown] B @8", "xs.element [integer] @27"];
+  const programs: readonly (readonly [string, string, string, readonly string[]])[] = [
+    [
+      "get with its default",
+      "let xs = [].get(0, default: [1, a])",
+      "warning-runtime-check",
+      checked,
+    ],
+    ["takeLast", "let xs = [1, a].takeLast(1)", "warning-runtime-check", checked],
+    ["toSet", "let xs = [1, a].toSet()", "warning-runtime-check", checked],
+    ["+", "let xs = [1, a] + []", "warning-runtime-check", checked],
+    ["removeFirst", "let xs = [[1, a]].removeFirst()", "valid", []],
+  ];
+  const differing: string[] = [];
+  for (const [name, store, outcome, expected] of programs) {
+    const source = `let a = hostValue\n${store}${after}`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const copies = record.checks
+        .filter((check) => check.kind === "copy-type")
+        .map(
+          (check) =>
+            `${check.target} [${check.against.join(", ")}]${check.boundary ? " B" : ""} @${check.site.offset}`,
+        )
+        .sort();
+      if (
+        record.outcome !== outcome ||
+        JSON.stringify(copies) !== JSON.stringify([...expected].sort())
+      )
+        differing.push(
+          `${name}${reversed ? " reversed" : ""}: ${record.outcome}; ${copies.join("; ")}`,
+        );
+    }
+  }
+  assert.deepEqual(differing, []);
+});

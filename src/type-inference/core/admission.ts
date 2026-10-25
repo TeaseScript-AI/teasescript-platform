@@ -86,6 +86,19 @@ interface Stop {
    * projection's own value, the union of what it may select, contributes (A2: an unknown beside a kind decides nothing).
    */
   readonly deep: boolean;
+  /**
+   * The operation it was reached through, the outermost (`get` with its default, a copy of the elements, a list's `+`,
+   * ...): its contribution decides only where that operation's own value holds its kinds definitely (F7, F10, F17b).
+   */
+  readonly via: Via | null;
+}
+
+/** An operation a decider was reached through: its value, node, position and the path into it (`Stop.via`). */
+interface Via {
+  readonly value: PlaceId;
+  readonly node: FlowNode;
+  readonly path: readonly string[];
+  readonly strip: readonly string[];
 }
 
 /** A stored value's contributions by path (`#stopsOf`): written copies, other whole values, and literals. */
@@ -1350,10 +1363,16 @@ export class Admission {
           (program.places[y.value!]?.site?.start ?? 0),
       );
     };
-    const pending: (readonly [PlaceId, FlowNode, readonly string[], readonly string[], boolean])[] =
-      [[value, node, [], [], false]];
+    const pending: (readonly [
+      PlaceId,
+      FlowNode,
+      readonly string[],
+      readonly string[],
+      boolean,
+      Via | null,
+    ])[] = [[value, node, [], [], false, null]];
     for (let order = 0; pending.length > 0; order += 1) {
-      const [current, at, path, strip, deep] = pending.pop()!;
+      const [current, at, path, strip, deep, via] = pending.pop()!;
       program.work.charge("indexSteps");
       const binding = program.occurrenceOf.get(current);
       const term = binding === undefined ? null : writtenOf(program.place(binding).kind);
@@ -1368,19 +1387,18 @@ export class Admission {
             path,
             strip.slice(1),
             deep,
+            via,
           ]);
         continue;
       }
-      // a projection is its own contribution at the path, and below it its owner's contents at its step (F12)
-      if (
-        !literal &&
-        term === null &&
-        program.projOf.has(current) &&
-        this.#sourceOf(current) === null
-      ) {
+      // a projection or another carrier is its own contribution at the path, and below it what it carries (F12), an
+      // operation's under the certainty of its own value
+      if (!literal && term === null && this.#sourceOf(current) === null) {
         const carried = this.#carriersOf(current, strip);
+        const through =
+          via ?? (program.projOf.has(current) ? null : { value: current, node: at, path, strip });
         for (let index = carried.length - 1; index >= 0; index -= 1)
-          pending.push([carried[index]![0], at, path, carried[index]![1], true]);
+          pending.push([carried[index]![0], at, path, carried[index]![1], true, through]);
       }
       const map = term !== null ? stops.written : literal ? stops.literals : stops.values;
       const key = path.join(".");
@@ -1390,7 +1408,7 @@ export class Admission {
         if (sources.has(identity)) continue;
         sources.add(identity);
       }
-      const stop: Stop = { order, value: current, node: at, term, strip, deep };
+      const stop: Stop = { order, value: current, node: at, term, strip, deep, via };
       const list = map.get(key);
       if (list === undefined) map.set(key, [stop]);
       else list.push(stop);
@@ -1398,7 +1416,7 @@ export class Admission {
       const next = cells(current, null);
       for (let index = next.length - 1; index >= 0; index -= 1) {
         const [d, step] = next[index]!;
-        pending.push([d.value!, d.node ?? at, [...path, step], [], false]);
+        pending.push([d.value!, d.node ?? at, [...path, step], [], false, via]);
       }
     }
     this.#stops.set(value, stops);
@@ -1463,17 +1481,30 @@ export class Admission {
         return copy === null ? null : { term: copy.term, site: siteOf(copy.stop) };
       program.work.charge("checks", lists.length);
       positions[best]! += 1;
+      const rest = at.slice(lists[best]!.length);
       const items = withoutEmpty(
-        this.#run(
-          values.valueItems(next.value, next.node, [
-            ...next.strip,
-            ...at.slice(lists[best]!.length),
-          ]),
-        ),
+        this.#run(values.valueItems(next.value, next.node, [...next.strip, ...rest])),
       );
-      if (!items.some((item) => item.tag === "unknown") && deciding(items).length > 0)
+      const definite = items.some((item) => item.tag === "unknown") ? [] : deciding(items);
+      if (definite.length > 0 && this.#through(next.via, at, definite))
         return { term: null, site: siteOf(next) };
     }
+  }
+
+  /** Whether a decider reached through an operation decides at `at`: the operation's own value holds its kinds definitely. */
+  #through(via: Via | null, at: readonly string[], definite: readonly Item[]): boolean {
+    if (via === null) return true;
+    const carried = withoutEmpty(
+      this.#run(
+        this.pass.values.valueItems(via.value, via.node, [
+          ...via.strip,
+          ...at.slice(via.path.length),
+        ]),
+      ),
+    );
+    return definite.every((item) =>
+      carried.some((own) => own.tag === item.tag && own.cert === "def"),
+    );
   }
 
   /**
