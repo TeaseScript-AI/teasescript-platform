@@ -209,8 +209,8 @@ Package libraries may not:
 Library functions use ordinary call syntax:
 
 ```tease
-say(text: "Hello")
-askNumber(minimum: 1, maximum: 10)
+say("Hello")
+let count = askNumber("How many?", hint: "1 to 10")
 ```
 
 Their exported signatures and metadata can provide:

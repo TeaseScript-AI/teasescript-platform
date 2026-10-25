@@ -68,7 +68,7 @@ export function parseDeleteStatement(parser: Parser): DeleteStatement | null {
 /**
  * `load(<key>[, default: <value>])`, or the compact `load <key>[, default: <value>]`, whose operands are full
  * expressions, so `(load "k") == null` needs parentheses. Like the prefill of an ask, the compact `, default:` binds to
- * the nearest `load` before it. The default is evaluated only when the key is absent.
+ * the nearest `load` before it. The default is evaluated only when the key holds no value that fits the load's type.
  */
 export function* parseLoadExpression(parser: Parser): ParseTask<LoadExpression | null> {
   const command = parser.advance();

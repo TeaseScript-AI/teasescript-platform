@@ -247,7 +247,7 @@ let day = askDate hint: "Pick a day"
   checkpoint show the open field again without saying the question again. Running the ask again, as in a loop, asks
   again.
 - `askImage(...)` follows the same rule (Owner decision, 2026-10-05): its message, positional or `message:`, is the
-  question, which the Player also keeps on the camera viewfinder, and `hint:` is the composer's help text.
+  question, and `hint:` is the composer's help text.
 - The question may be shown as `say` shows a message (owner decision on #832, 2026-10-11): `bubble(options)` or
   `prose(options)` after `as speaker` and before the question, as in `askText prose "Your name?"`, with the options of
   `say`, evaluated once before the question. Without one, the speaker's mode applies, a bubble by default. A mode needs
