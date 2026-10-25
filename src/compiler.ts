@@ -35,11 +35,11 @@ import {
   type FileCall,
 } from "./reachability.js";
 import {
-  stopsTypeCheck,
   validateProjectSemantics,
   type FileSemanticResult,
   type SemanticValidationOptions,
 } from "./semantic.js";
+import { stopsTypeCheck } from "./semantic/diagnostics.js";
 import { speakerFlowDiagnostics, type SpeakerFlowInput } from "./speaker-flow.js";
 import type {
   RuntimeCheckSite,

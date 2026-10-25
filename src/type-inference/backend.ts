@@ -22,7 +22,7 @@ import type {
   TypeCheckPlan,
   TypePlan,
 } from "../plan/model.js";
-import type { VariableSite } from "../semantic.js";
+import type { VariableSite } from "../semantic/scope.js";
 import type { SpeakerFlowInput } from "../speaker-flow.js";
 import type { KnownValue } from "../static-evaluation.js";
 import type { WayFacts } from "../way-facts.js";

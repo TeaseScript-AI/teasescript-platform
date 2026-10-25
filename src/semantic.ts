@@ -1,41 +1,41 @@
-import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
-import { isAskImageCall, isLockCall, isTakePhotoCall } from "./capture-call.js";
-import { IMAGE_REQUEST_OPTIONS } from "./image-input.js";
 import {
-  EXPORT_TEXT_OPTIONS,
-  OPEN_URL_OPTIONS,
-  SHOW_POPUP_OPTIONS,
-} from "./parser/buttons-and-popups.js";
+  argumentCountMessage,
+  missingDefaultMessage,
+  unknownNamedArgumentMessage,
+} from "./argument-rules.js";
 import type {
   AssignmentTarget,
   Block,
+  Expression,
+  FileTarget,
+  FunctionDeclaration,
   Identifier,
+  LetStatement,
+  MediaParts,
+  Program,
+  RegexLiteral,
   SayParts,
   ShowButtonParts,
   ShowPermanentButtonParts,
-  TimerParts,
-  Expression,
-  MediaParts,
-  FunctionDeclaration,
-  GlobalStatement,
-  Program,
-  SpeakerDeclaration,
   Statement,
-  FileTarget,
-  ForStatement,
-  FunctionParameter,
-  LabelTarget,
-  LetStatement,
-  OpenUrlStatement,
-  ExportTextStatement,
-  RegexLiteral,
-  ShowPopupParts,
   TagQueryExpression,
-  TagQueryStep,
+  TimerParts,
 } from "./ast.js";
-import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
-import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
-import { canonicalRegexFlags, compileRegex, regexFlagProblem } from "./regex.js";
+import { isAskImageCall, isLockCall, isTakePhotoCall } from "./capture-call.js";
+import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
+import type { Diagnostic } from "./diagnostics.js";
+import { changesEntries } from "./dict-operations.js";
+import {
+  askOperands,
+  askParts,
+  expressionChildren,
+  mediaHandlerBlocks,
+  mediaOperands,
+  sayOperands,
+  showButtonOptions,
+  tagQueryOperands,
+  timerOperands,
+} from "./expression-children.js";
 import {
   COMMANDS,
   CORE_RUNTIME_BUILTINS,
@@ -49,52 +49,40 @@ import {
   TEASESCRIPT_GRAMMAR_KEYWORDS,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./language-facts.js";
-import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
-import {
-  askOperands,
-  askParts,
-  expressionChildren,
-  mediaHandlerBlocks,
-  mediaOperands,
-  sayOperands,
-  showButtonOptions,
-  tagQueryOperands,
-  timerOperands,
-} from "./expression-children.js";
-import { validateSwitchCases } from "./switch-cases.js";
-import { noteSharing, rootName, type Sharing } from "./operation-checks.js";
-import { changesEntries } from "./dict-operations.js";
 import { changesElements, reordersList } from "./list-methods.js";
-import {
-  declarationsOnlyMessage,
-  globMatches,
-  isPathGlob,
-  packageGlobProblem,
-  packagePathProblem,
-} from "./project-paths.js";
-import type { StatementFlow } from "./reachability.js";
-import { MAIN_FILE_PATH } from "./project-paths.js";
-import {
-  PLAYER_DECLARATION,
-  runsOnItsOwn,
-  sessionDeclarations,
-  setsDefaultSpeaker,
-} from "./project-globals.js";
-import { PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
-import { mayMatchTags, tagQueryKey } from "./tag-query.js";
-import { staticNumber } from "./static-evaluation.js";
-import type { Tag } from "./tags.js";
 import { duplicateEntryMessage } from "./object-properties.js";
-import { startValueMessage, startValueOwner } from "./start-value-rules.js";
+import { noteSharing, rootName, type Sharing } from "./operation-checks.js";
+import { isPathGlob, MAIN_FILE_PATH } from "./project-paths.js";
+import type { StatementFlow } from "./reachability.js";
+import { canonicalRegexFlags, compileRegex, regexFlagProblem } from "./regex.js";
 import {
-  argumentCountMessage,
-  argumentsTaken,
-  leadingArgumentMessage,
-  leadingArgumentTwiceMessage,
-  missingArgumentMessage,
-  missingDefaultMessage,
-  unknownNamedArgumentMessage,
-} from "./argument-rules.js";
+  validateAskImageArguments,
+  validateDistinctNamedArguments,
+  validateExportTextArguments,
+  validateFunctionCall,
+  validateOpenUrlArguments,
+  validateShowPopupArguments,
+} from "./semantic/call-arguments.js";
+import { semanticCode, type NamePassCode } from "./semantic/diagnostics.js";
+import { literalText, unwrapParentheses } from "./semantic/expressions.js";
+import { checkInitialization, type FlowContext } from "./semantic/initialization.js";
+import { ProjectNames } from "./semantic/project-names.js";
+import {
+  SemanticScope,
+  type Binding,
+  type BindingKind,
+  type VariableSite,
+} from "./semantic/scope.js";
+import { validateStartValue } from "./semantic/start-values.js";
+import {
+  taggedCandidates,
+  validateScriptReference,
+  validateTransferTarget,
+} from "./semantic/transfers.js";
+import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
+import { PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
+import { validateSwitchCases } from "./switch-cases.js";
+import type { Tag } from "./tags.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -103,91 +91,6 @@ export interface SemanticValidationOptions {
 
 export interface SemanticValidationResult {
   readonly diagnostics: readonly Diagnostic[];
-}
-
-/** `global` is a name the host configures; a `global` declared in a script is a project `variable`. */
-type BindingKind = "variable" | "speaker" | "global" | "function";
-
-interface Binding {
-  readonly kind: BindingKind;
-  /** The declaration of a function. */
-  readonly declaration?: FunctionDeclaration;
-  /** Where the project declares a global, a speaker, or a global function, which every file sees. */
-  readonly project?: ProjectDeclaration;
-  /** The declaration of a function, loop, or block variable. */
-  site?: VariableSite;
-}
-
-/**
- * The declaration of a function, loop, or block variable: its `let`, its `for` (the key of a pair loop), the value name
- * of a pair loop, or its parameter.
- */
-export type VariableSite = LetStatement | ForStatement | Identifier | FunctionParameter;
-
-interface ProjectDeclaration {
-  readonly file: number;
-  readonly span: SourceSpan;
-  readonly description: "global" | "speaker" | "global function";
-  /** The position of a global or speaker in the order a session initializes them; a global function has none. */
-  readonly order: number | null;
-}
-
-const semanticCode = {
-  duplicateDeclaration: "TSV001",
-  unknownVariable: "TSV002",
-  unknownAssignment: "TSV003",
-  invalidAssignment: "TSV004",
-  unknownSpeaker: "TSV005",
-  duplicateProperty: "TSV007",
-  invalidLoopControl: "TSV008",
-  chainedRange: "TSV009",
-  duplicateFunction: "TSV013",
-  duplicateParameter: "TSV014",
-  requiredAfterDefault: "TSV015",
-  nestedFunction: "TSV016",
-  returnOutsideFunction: "TSV017",
-  unknownFunction: "TSV018",
-  nonCallable: "TSV019",
-  argumentCount: "TSV020",
-  unknownNamedArgument: "TSV022",
-  duplicateNamedArgument: "TSV023",
-  missingNamedArgument: "TSV024",
-  laterParameterDefault: "TSV025",
-  functionAssignment: "TSV026",
-  functionValue: "TSV028",
-  unsupportedBlockingContext: "TSV032",
-  invalidTimer: "TSV033",
-  invalidLabel: "TSV051",
-  skippedInitialization: "TSV054",
-  invalidStartValue: "TSV055",
-  fileName: "TSV056",
-  invalidFileTarget: "TSV057",
-  noSpeaker: "TSV063",
-  invalidRegex: "TSV064",
-  invalidMediaForm: "TSV069",
-} as const satisfies Record<string, NamePassCode>;
-
-type NamePassCode = OwnedDiagnosticCode<"name pass", "error">;
-
-/** Where code runs, for the initialization check: a top-level statement, a function, or a handler and its origin. */
-type FlowContext =
-  | { readonly kind: "root"; readonly statement: number }
-  | { readonly kind: "function"; readonly name: string }
-  /** A block runs where its timer or media started: in `origin`, when `created` runs. */
-  | { readonly kind: "handler"; readonly origin: FlowContext; readonly created: Statement };
-
-/**
- * The name-pass errors that leave the type check its basis: every name resolves, and every construct it walks is whole.
- * They are a start value's placement (TSV055) and a `load` without `default:`, so the type check still reports the
- * problems of the values in them, such as a load's key that is a comparison.
- */
-const LEAVES_TYPES_CHECKABLE = new WeakSet<Diagnostic>();
-
-/** Whether a name-pass error leaves the type check without a basis (see `LEAVES_TYPES_CHECKABLE`). */
-export function stopsTypeCheck(diagnostic: Diagnostic): boolean {
-  return (
-    diagnostic.severity === DiagnosticSeverity.Error && !LEAVES_TYPES_CHECKABLE.has(diagnostic)
-  );
 }
 
 /** Validates one source as the `main.tease` of a single-file project. */
@@ -206,7 +109,7 @@ export interface FileSemanticResult {
   readonly diagnostics: readonly Diagnostic[];
   /** The files each glob target may pick, in project order. */
   readonly picks: ReadonlyMap<FileTarget, readonly string[]>;
-  /** The files each `goto tagged` or `call tagged` may pick, by the tags of their headers (see `#taggedCandidates`). */
+  /** The files each `goto tagged` or `call tagged` may pick, by the tags of their headers (see `taggedCandidates`). */
   readonly taggedPicks: ReadonlyMap<Statement, readonly string[]>;
   /** How each `call` of a file names it, for the check of the running file that follows the plan. */
   readonly fileCalls: ReadonlyMap<Statement, FileCallTarget>;
@@ -254,28 +157,6 @@ export interface ProjectProgram {
 }
 
 /**
- * Why a `goto` or `call` cannot name a label of a file, or a `script(...)` reference one (V30 §29): a file starts at its
- * top. `keyword` is `null` for a reference, `path` the file a literal path names or `null` for a glob, and `label` is
- * `null` when computed.
- */
-function fileLabelMessage(
-  keyword: "goto" | "call" | null,
-  label: string | null,
-  path: string | null,
-): string {
-  const named = label === null ? "a label" : `label '${label}'`;
-  const after = label === null ? "the label" : `'${label}'`;
-  const transfer = keyword === "goto" ? "'goto'" : "call";
-  if (keyword === null)
-    return `A file is always entered at its top, so 'script(...)' takes no 'label:'. Put the part after ${after} in a file of its own and name that file in 'script(...)'.`;
-  if (path === null)
-    return `A ${transfer} starts the file it picks at its top, so it cannot go to ${named}. Put the part after ${after} in a file of its own and ${transfer} that file.`;
-  return keyword === "call"
-    ? `A call starts '${path}' at its top, so it cannot go to ${named}. Put the part after ${after} in a file of its own and call that file, or in a global function.`
-    : `A 'goto' to '${path}' starts it at its top, so it cannot go to ${named}. Write 'goto "${path}"', or put the part after ${after} in a file of its own and 'goto' that file.`;
-}
-
-/**
  * Validates the names of a project's files together. Globals, global functions, and speakers belong to the whole
  * project (ADR 0022 §3, §6); every other name belongs to its file. `validate` selects the files whose statements are
  * validated; the others only contribute their project names, for example while they have syntax errors. `onFile` hears
@@ -311,285 +192,6 @@ export function validateProjectSemantics(
         validators[index]?.checkInitialization(files[index]!.program, flow) ?? [],
     }),
   );
-}
-
-/** The project scope: host globals, then the globals, speakers, and global functions of every file. */
-class ProjectNames {
-  readonly scope = new SemanticScope();
-
-  /** The top-level labels of each file, by path, which transfers may name. */
-  readonly labels = new Map<string, ReadonlySet<string>>();
-
-  /** The files that run nothing on their own: they hold declarations only. */
-  readonly declarationsOnly = new Set<string>();
-
-  /** The tags of each file that runs something, by path, when they are known. */
-  readonly tags = new Map<string, ReadonlyMap<string, number | null>>();
-
-  /** The files that tagged picks with the same facts may choose (see `#taggedCandidates`), by those facts. */
-  readonly taggedPicks = new Map<string, readonly string[]>();
-
-  /**
-   * The files that the script references the project makes may name: those of its `script(...)` calls and
-   * `findScripts(...)` lists; `null` once one may name any file, as a `script(...)` of a path computed otherwise than in
-   * a text with `${...}`.
-   */
-  referencedScripts: Set<string> | null = new Set();
-
-  /** The lists of files already in `referencedScripts`, each added once. */
-  readonly #referred = new WeakSet<readonly string[]>();
-
-  /** The files each `script(...)` text with `${...}` may name, by the texts around its `${...}`. */
-  readonly #patterns = new Map<string, readonly string[]>();
-
-  /** Adds files that a script reference may name, or any file with `null` (see `referencedScripts`). */
-  public refer(paths: readonly string[] | null): void {
-    if (this.referencedScripts === null || this.#referred.has(paths ?? [])) return;
-    if (paths === null) {
-      this.referencedScripts = null;
-      return;
-    }
-    this.#referred.add(paths);
-    for (const path of paths) this.referencedScripts.add(path);
-  }
-
-  /**
-   * The files that a text with `${...}` may name: those whose path starts with its first text, ends with its last, and
-   * holds the ones between in order, whatever the values give between them. Each pattern is matched once.
-   */
-  public filesLike(texts: readonly string[]): readonly string[] {
-    const key = JSON.stringify(texts);
-    const known = this.#patterns.get(key);
-    if (known !== undefined) return known;
-    if (texts.length === 1) {
-      const files = this.labels.has(texts[0]!) ? [texts[0]!] : [];
-      this.#patterns.set(key, files);
-      return files;
-    }
-    const first = texts[0]!;
-    const last = texts.at(-1)!;
-    const files = [...this.labels.keys()].filter((path) => {
-      if (
-        path.length < first.length + last.length ||
-        !path.startsWith(first) ||
-        !path.endsWith(last)
-      )
-        return false;
-      let at = first.length;
-      const end = path.length - last.length;
-      for (let index = 1; index < texts.length - 1; index += 1) {
-        const text = texts[index]!;
-        const found = path.indexOf(text, at);
-        if (found < 0 || found + text.length > end) return false;
-        at = found + text.length;
-      }
-      return true;
-    });
-    this.#patterns.set(key, files);
-    return files;
-  }
-
-  readonly diagnostics: Diagnostic[][];
-
-  /** Each global and speaker declaration with its position in the session-start order. */
-  readonly #orders = new Map<GlobalStatement | SpeakerDeclaration, number>();
-
-  #setsDefaultSpeaker: boolean | undefined;
-
-  public constructor(
-    readonly files: readonly ProjectProgram[],
-    options: SemanticValidationOptions,
-  ) {
-    this.diagnostics = files.map(() => []);
-    for (const { path, program } of files) {
-      this.labels.set(
-        path,
-        new Set(
-          program.statements.flatMap((statement) =>
-            statement.kind === "labelStatement" ? [statement.name.name] : [],
-          ),
-        ),
-      );
-      if (!program.statements.some(runsOnItsOwn)) this.declarationsOnly.add(path);
-    }
-    for (const { path, tags } of files)
-      if (tags !== undefined && tags !== null)
-        this.tags.set(path, new Map(tags.map((tag) => [tag.name, tag.value])));
-    for (const name of options.globals ?? []) this.scope.declare(name, { kind: "global" });
-    const protectedNames = new Set([...TEASESCRIPT_PROTECTED_NAMES, ...(options.builtins ?? [])]);
-    const declare = (
-      name: Identifier,
-      binding: Binding & { readonly project: ProjectDeclaration },
-    ): void => {
-      // A protected name is reported where the file's own statements are validated.
-      if (protectedNames.has(name.name)) return;
-      const existing = this.scope.resolve(name.name);
-      if (existing === undefined) {
-        this.scope.declare(name.name, binding);
-        return;
-      }
-      if (existing.project === undefined) {
-        this.report(
-          binding.project.file,
-          semanticCode.duplicateDeclaration,
-          `'${name.name}' is already a global that the host gives every script. Choose another name.`,
-          name.span,
-        );
-        return;
-      }
-      this.reportClash(name.name, binding.project, existing.project);
-    };
-    for (const [order, { file, declaration }] of sessionDeclarations(
-      files.map((file) => file.program),
-    ).entries()) {
-      this.#orders.set(declaration, order);
-      const speaker = declaration.kind === "speakerDeclaration";
-      const binding = {
-        kind: speaker ? "speaker" : "variable",
-        project: {
-          file,
-          span: declaration.name.span,
-          description: speaker ? "speaker" : "global",
-          order,
-        },
-      } as const;
-      // The built-in speaker has a protected name, which no script declaration may take.
-      if (declaration === PLAYER_DECLARATION) this.scope.declare(PLAYER, binding);
-      else declare(declaration.name, binding);
-    }
-    for (const [file, { program }] of files.entries())
-      for (const statement of program.statements)
-        if (statement.kind === "functionDeclaration" && statement.global)
-          declare(statement.name, {
-            kind: "function",
-            declaration: statement,
-            project: {
-              file,
-              span: statement.name.span,
-              description: "global function",
-              order: null,
-            },
-          });
-  }
-
-  /** Whether a file sets the default speaker anywhere, which a message without `as` needs for its `speaker`. */
-  public get setsDefaultSpeaker(): boolean {
-    this.#setsDefaultSpeaker ??= setsDefaultSpeaker(this.files.map((file) => file.program));
-    return this.#setsDefaultSpeaker;
-  }
-
-  /** The position of a global or speaker in the session-start order. */
-  public order(declaration: GlobalStatement | SpeakerDeclaration): number {
-    return this.#orders.get(declaration)!;
-  }
-
-  /** Whether `declaration` is the one its name stands for, rather than a clashing second one. */
-  public owns(declaration: GlobalStatement | SpeakerDeclaration | FunctionDeclaration): boolean {
-    const binding = this.scope.resolve(declaration.name.name);
-    return binding?.project !== undefined && binding.project.span === declaration.name.span;
-  }
-
-  /** Where a declaration is, as seen from `file`: `line 3` or `line 3 of helpers.tease`. */
-  public where(declaration: { readonly file: number; readonly span: SourceSpan }, file: number) {
-    const line = `line ${declaration.span.start.line + 1}`;
-    return declaration.file === file ? line : `${line} of ${this.files[declaration.file]!.path}`;
-  }
-
-  /** Reports two declarations of one project name, at both places. */
-  public reportClash(
-    name: string,
-    second: { readonly file: number; readonly span: SourceSpan; readonly description: string },
-    first: ProjectDeclaration,
-  ): void {
-    const rule =
-      "Globals, global functions, and speakers need a name of their own in the whole project. Rename one of them.";
-    this.report(
-      second.file,
-      semanticCode.duplicateDeclaration,
-      `'${name}' is already the name of the ${first.description} on ${this.where(first, second.file)}. ${rule}`,
-      second.span,
-    );
-    this.report(
-      first.file,
-      semanticCode.duplicateDeclaration,
-      `The ${first.description} '${name}' has the same name as the ${second.description} on ${this.where(second, first.file)}. ${rule}`,
-      first.span,
-    );
-  }
-
-  /** `checkable` marks an error that leaves the type check its basis (see `LEAVES_TYPES_CHECKABLE`). */
-  public report(
-    file: number,
-    code: NamePassCode,
-    message: string,
-    span: SourceSpan,
-    checkable = false,
-  ): void {
-    const diagnostic = createDiagnostic(DiagnosticSeverity.Error, code, message, span);
-    if (checkable) LEAVES_TYPES_CHECKABLE.add(diagnostic);
-    this.diagnostics[file]!.push(diagnostic);
-  }
-}
-
-class SemanticScope {
-  readonly bindings = new Map<string, Binding>();
-
-  /**
-   * For the scope of the locals a timer, media, or button block shares with the code that created it: the names the
-   * block uses from it, in the order of first use.
-   */
-  readonly captured: Set<string> | null;
-
-  public constructor(
-    readonly parent: SemanticScope | null = null,
-    captures = false,
-  ) {
-    this.captured = captures ? new Set() : null;
-  }
-
-  public resolve(name: string): Binding | undefined {
-    let scope: SemanticScope | null = this;
-    while (scope !== null) {
-      const binding = scope.bindings.get(name);
-      if (binding !== undefined) {
-        if (binding.kind === "variable") scope.captured?.add(name);
-        return binding;
-      }
-      scope = scope.parent;
-    }
-    return undefined;
-  }
-
-  /** The declaration of the variable `name` when it is one that a block shares with the code that created it. */
-  public sharedSite(name: string): VariableSite | undefined {
-    for (let scope: SemanticScope | null = this; scope !== null; scope = scope.parent) {
-      const binding = scope.bindings.get(name);
-      if (binding !== undefined) return scope.captured === null ? undefined : binding.site;
-    }
-    return undefined;
-  }
-
-  /** The binding of `name`, without counting it as a use of a variable that a block shares. */
-  public lookup(name: string): Binding | undefined {
-    for (let scope: SemanticScope | null = this; scope !== null; scope = scope.parent) {
-      const binding = scope.bindings.get(name);
-      if (binding !== undefined) return binding;
-    }
-    return undefined;
-  }
-
-  /** Whether `name` is a variable that a block shares with the code that created it. */
-  public isShared(name: string): boolean {
-    for (let scope: SemanticScope | null = this; scope !== null; scope = scope.parent)
-      if (scope.bindings.has(name)) return scope.captured !== null;
-    return false;
-  }
-
-  public declare(name: string, binding: Binding): boolean {
-    if (this.resolve(name) !== undefined) return false;
-    this.bindings.set(name, binding);
-    return true;
-  }
 }
 
 /**
@@ -630,7 +232,8 @@ interface PendingHandler {
   readonly created: Statement;
 }
 
-class SemanticValidator {
+/** The public members serve `validateProjectSemantics` and `semantic/`, and are internal to the compiler. */
+export class SemanticValidator {
   readonly #builtins: ReadonlySet<string>;
 
   readonly #protectedNames: ReadonlySet<string>;
@@ -647,6 +250,10 @@ class SemanticValidator {
    */
   #globalFunction: FunctionDeclaration | null = null;
 
+  public get globalFunction(): FunctionDeclaration | null {
+    return this.#globalFunction;
+  }
+
   readonly #invalidConfiguredNames: readonly string[];
 
   #functionDepth = 0;
@@ -660,7 +267,7 @@ class SemanticValidator {
   #context: FlowContext = { kind: "root", statement: 0 };
 
   /** Reads and writes of top-level variables, with where they run. */
-  readonly #rootAccesses: {
+  readonly rootAccesses: {
     readonly name: string;
     readonly span: SourceSpan;
     readonly context: FlowContext;
@@ -680,13 +287,20 @@ class SemanticValidator {
     readonly statement: Extract<Statement, { kind: "gotoStatement" | "callFileStatement" }>;
   } | null = null;
 
-  readonly #gotos: {
+  public get directTarget(): {
+    readonly call: Expression;
+    readonly statement: Extract<Statement, { kind: "gotoStatement" | "callFileStatement" }>;
+  } | null {
+    return this.#directTarget;
+  }
+
+  readonly gotos: {
     readonly label: string;
     readonly context: FlowContext;
     readonly statement: Statement;
   }[] = [];
 
-  readonly #calls: {
+  readonly calls: {
     readonly name: string;
     readonly context: FlowContext;
     readonly statement: Statement;
@@ -694,8 +308,8 @@ class SemanticValidator {
 
   public constructor(
     options: SemanticValidationOptions,
-    private readonly project: ProjectNames,
-    private readonly file: number,
+    readonly project: ProjectNames,
+    readonly file: number,
   ) {
     this.#root = new SemanticScope(project.scope);
     this.#invalidConfiguredNames = Object.freeze(
@@ -717,7 +331,7 @@ class SemanticValidator {
   public validate(program: Program): void {
     // The configuration belongs to the project, so its problems are reported once, in main.tease.
     for (const name of this.file === 0 ? new Set(this.#invalidConfiguredNames) : []) {
-      this.#report(
+      this.report(
         semanticCode.duplicateDeclaration,
         `Configured name '${name}' conflicts with a protected TeaseScript name.`,
         program.span,
@@ -732,7 +346,7 @@ class SemanticValidator {
         continue;
       }
       if (this.#functions.has(statement.name.name)) {
-        this.#report(
+        this.report(
           semanticCode.duplicateFunction,
           `Duplicate function declaration '${statement.name.name}'.`,
           statement.name.span,
@@ -749,15 +363,15 @@ class SemanticValidator {
       if (statement.kind !== "labelStatement") continue;
       const name = statement.name.name;
       if (this.#protectedNames.has(name)) {
-        this.#report(PROTECTED_NAME_CODE, protectedNameMessage(name, "label"), statement.name.span);
-      } else if (this.#labels.has(name)) {
-        this.#report(
+        this.report(PROTECTED_NAME_CODE, protectedNameMessage(name, "label"), statement.name.span);
+      } else if (this.labels.has(name)) {
+        this.report(
           semanticCode.invalidLabel,
           `This file already has a label '${name}'. Give each label in a file its own name.`,
           statement.name.span,
         );
       } else {
-        this.#labels.add(name);
+        this.labels.add(name);
       }
     }
     program.statements.forEach((statement, index) => {
@@ -904,23 +518,23 @@ class SemanticValidator {
   #handlerDepth = 0;
 
   /** The labels of the file, which stand only in its outer scope. */
-  readonly #labels = new Set<string>();
+  readonly labels = new Set<string>();
 
   #handlerOwner: "timer" | "media" | "button" = "timer";
 
   #validateTimer(timer: TimerParts, scope: SemanticScope, valuePosition: boolean): void {
-    for (const operand of timerOperands(timer)) this.#validateExpression(operand, scope, null);
+    for (const operand of timerOperands(timer)) this.validateExpression(operand, scope, null);
     if (!timer.async) {
       const invalid = timer.handler ?? (timer.repeat || timer.persist ? timer : null);
       if (invalid !== null) {
-        this.#report(
+        this.report(
           semanticCode.invalidTimer,
           "Only an async timer may have an expiry block, repeat, or persist.",
           invalid.span,
         );
       }
       if (valuePosition) {
-        this.#report(
+        this.report(
           semanticCode.invalidTimer,
           "A blocking timer returns no handle. Use 'timer async ...' to keep one.",
           timer.span,
@@ -951,7 +565,7 @@ class SemanticValidator {
       yield* compileChild(this.#validateExpressionTask(operand, scope, null));
     }
     if (!media.async && valuePosition) {
-      this.#report(
+      this.report(
         semanticCode.invalidMediaForm,
         `Blocking media returns no handle. Use '${command} async ...' to keep one.`,
         media.span,
@@ -963,7 +577,7 @@ class SemanticValidator {
         if (cue.kind === "finish") {
           finishes += 1;
           if (finishes > 1) {
-            this.#report(
+            this.report(
               semanticCode.invalidMediaForm,
               "A media block may declare 'finish' only once.",
               cue.keywordSpan,
@@ -1015,7 +629,7 @@ class SemanticValidator {
             this.#validateMediaTask(initializer, scope, true, statement.name.name),
           );
         } else {
-          this.#validateExpression(statement.initializer, scope, null);
+          this.validateExpression(statement.initializer, scope, null);
         }
         if (this.#declare(statement.name.name, "variable", statement.name.span, scope)) {
           scope.bindings.get(statement.name.name)!.site = statement;
@@ -1025,7 +639,7 @@ class SemanticValidator {
       case "speakerDeclaration": {
         // Speakers belong to the project, which declared them already.
         if (statement.name.name === PLAYER)
-          this.#report(
+          this.report(
             PROTECTED_NAME_CODE,
             protectedNameMessage(PLAYER, "speaker"),
             statement.name.span,
@@ -1039,14 +653,15 @@ class SemanticValidator {
         const names = new Set<string>();
         for (const property of statement.properties) {
           if (names.has(property.name.name)) {
-            this.#report(
+            this.report(
               semanticCode.duplicateProperty,
               duplicateEntryMessage("speaker", property.name.name),
               property.name.span,
             );
           }
           names.add(property.name.name);
-          this.#validateStartValue(
+          validateStartValue(
+            this,
             property.value,
             scope,
             statement,
@@ -1061,7 +676,7 @@ class SemanticValidator {
         // The assignment runs exactly when the declaration does, so what it uses keeps the declaration as its statement.
         if (statement.assignment !== null)
           yield* compileChild(this.#validateStatementKind(statement.assignment, scope, loopDepth));
-        this.#validateStartValue(statement.initial, scope, statement, null);
+        validateStartValue(this, statement.initial, scope, statement, null);
         return;
       case "speakerSetterStatement":
         this.#validateSpeakerReference(statement.speaker.name, statement.speaker.span, scope);
@@ -1073,7 +688,7 @@ class SemanticValidator {
         yield* compileChild(this.#validateShowButtonTask(statement, scope));
         return;
       case "waitStatement":
-        this.#validateExpression(statement.duration, scope, null);
+        this.validateExpression(statement.duration, scope, null);
         return;
       case "timerStatement":
         this.#validateTimer(statement, scope, false);
@@ -1085,7 +700,7 @@ class SemanticValidator {
         yield* compileChild(this.#validateMediaTask(statement, scope, false, null));
         return;
       case "showImageStatement":
-        this.#validateExpression(statement.image, scope, null);
+        this.validateExpression(statement.image, scope, null);
         return;
       case "hideImageStatement":
       case "showCameraStatement":
@@ -1093,36 +708,36 @@ class SemanticValidator {
       case "stopAudioStatement":
         return;
       case "showPopupStatement":
-        this.#validateShowPopupArguments(statement);
+        validateShowPopupArguments(this, statement);
         for (const argument of statement.arguments)
-          this.#validateExpression(argument.value, scope, null);
+          this.validateExpression(argument.value, scope, null);
         return;
       case "openUrlStatement":
-        this.#validateOpenUrlArguments(statement);
+        validateOpenUrlArguments(this, statement);
         for (const argument of statement.arguments)
-          this.#validateExpression(argument.value, scope, null);
+          this.validateExpression(argument.value, scope, null);
         return;
       case "exportTextStatement":
-        this.#validateExportTextArguments(statement);
+        validateExportTextArguments(this, statement);
         for (const argument of statement.arguments)
-          this.#validateExpression(argument.value, scope, null);
+          this.validateExpression(argument.value, scope, null);
         return;
       case "saveStatement":
-        this.#validateExpression(statement.value, scope, null);
-        this.#validateExpression(statement.key, scope, null);
+        this.validateExpression(statement.value, scope, null);
+        this.validateExpression(statement.key, scope, null);
         return;
       case "deleteStatement":
-        this.#validateExpression(statement.key, scope, null);
+        this.validateExpression(statement.key, scope, null);
         return;
       case "assignmentStatement":
         this.#validateAssignmentTarget(statement.target, scope);
-        this.#validateExpression(statement.value, scope, null);
+        this.validateExpression(statement.value, scope, null);
         return;
       case "expressionStatement":
-        this.#validateExpression(statement.expression, scope, null);
+        this.validateExpression(statement.expression, scope, null);
         return;
       case "ifStatement":
-        this.#validateExpression(statement.condition, scope, null);
+        this.validateExpression(statement.condition, scope, null);
         yield* compileChild(this.#validateBlock(statement.thenBlock, scope, loopDepth));
         if (statement.elseBlock !== null) {
           if (statement.elseBlock.kind === "ifStatement") {
@@ -1133,11 +748,11 @@ class SemanticValidator {
         }
         return;
       case "switchStatement":
-        this.#validateExpression(statement.subject, scope, null);
+        this.validateExpression(statement.subject, scope, null);
         validateSwitchCases(
           statement,
           (name) => scope.resolve(name)?.kind === "speaker",
-          (code, message, span) => this.#report(code, message, span),
+          (code, message, span) => this.report(code, message, span),
         );
         for (const switchCase of statement.cases) {
           yield* compileChild(this.#validateBlock(switchCase.body, scope, loopDepth));
@@ -1147,11 +762,11 @@ class SemanticValidator {
         }
         return;
       case "repeatStatement":
-        this.#validateExpression(statement.count, scope, null);
+        this.validateExpression(statement.count, scope, null);
         yield* compileChild(this.#validateBlock(statement.body, scope, loopDepth + 1));
         return;
       case "forStatement": {
-        this.#validateExpression(statement.iterable, scope, null);
+        this.validateExpression(statement.iterable, scope, null);
         const loopScope = new SemanticScope(scope);
         if (this.#declare(statement.variable.name, "variable", statement.variable.span, loopScope))
           loopScope.bindings.get(statement.variable.name)!.site = statement;
@@ -1171,13 +786,13 @@ class SemanticValidator {
         return;
       }
       case "whileStatement":
-        this.#validateExpression(statement.condition, scope, null);
+        this.validateExpression(statement.condition, scope, null);
         yield* compileChild(this.#validateBlock(statement.body, scope, loopDepth + 1));
         return;
       case "breakStatement":
       case "continueStatement":
         if (loopDepth === 0) {
-          this.#report(
+          this.report(
             semanticCode.invalidLoopControl,
             `'${statement.kind === "breakStatement" ? "break" : "continue"}' may only appear inside a loop.`,
             statement.span,
@@ -1185,7 +800,7 @@ class SemanticValidator {
         }
         return;
       case "functionDeclaration":
-        this.#report(
+        this.report(
           semanticCode.nestedFunction,
           "Nested function declarations are not supported in this milestone.",
           statement.span,
@@ -1193,13 +808,13 @@ class SemanticValidator {
         return;
       case "returnStatement":
         if (this.#functionDepth === 0) {
-          this.#report(
+          this.report(
             semanticCode.returnOutsideFunction,
             "'return' may only appear inside a function.",
             statement.span,
           );
         } else if (this.#handlerDepth > 0 && statement.value !== null) {
-          this.#report(
+          this.report(
             semanticCode.invalidTimer,
             this.#handlerOwner === "timer"
               ? "A timer expiry block may use 'return' only without a value."
@@ -1210,7 +825,7 @@ class SemanticValidator {
           );
         }
         if (statement.value !== null) {
-          this.#validateExpression(statement.value, scope, null);
+          this.validateExpression(statement.value, scope, null);
         }
         return;
       case "exitStatement":
@@ -1218,7 +833,7 @@ class SemanticValidator {
         return;
       case "labelStatement":
         if (scope !== this.#root || this.#functionDepth > 0) {
-          this.#report(
+          this.report(
             semanticCode.invalidLabel,
             `A label stands only in the outer level of a file, not inside a block, loop, function, or handler. Move 'label ${statement.name.name}' out of the block. A goto may still jump to it from anywhere in the file.`,
             statement.span,
@@ -1231,10 +846,10 @@ class SemanticValidator {
         if (target.kind === "scriptTarget") {
           const expression = unwrapParentheses(target.expression);
           this.#directTarget = { call: expression, statement };
-          this.#validateExpression(target.expression, scope, null);
+          this.validateExpression(target.expression, scope, null);
           this.#directTarget = null;
           if (expression.kind === "tagQueryExpression" && expression.catalog === "scripts") {
-            const candidates = this.#taggedCandidates(expression);
+            const candidates = taggedCandidates(this, expression);
             this.taggedPicks.set(statement, candidates);
             if (statement.kind === "callFileStatement")
               this.fileCalls.set(statement, {
@@ -1252,7 +867,7 @@ class SemanticValidator {
             });
           return;
         }
-        if (!this.#validateTransferTarget(target, statement.kind)) return;
+        if (!validateTransferTarget(this, target, statement.kind)) return;
         if (target.kind === "fileTarget") {
           if (statement.kind === "callFileStatement")
             this.fileCalls.set(statement, {
@@ -1263,7 +878,7 @@ class SemanticValidator {
             });
         } else {
           // A goto to a label of the same file keeps the file's variables.
-          this.#gotos.push({
+          this.gotos.push({
             label: target.label.name,
             context: this.#context,
             statement: this.#statement!,
@@ -1272,207 +887,6 @@ class SemanticValidator {
         return;
       }
     }
-  }
-
-  /**
-   * Reports a missing file or label, and a target that a `goto` or `call` cannot have: a label after a file, a label
-   * for a `call`, which starts another file at its top, or a label in a global function, which may run in any file
-   * (V30 §11, §29). A label alone names one of this file.
-   */
-  #validateTransferTarget(
-    target: LabelTarget | FileTarget,
-    transfer: "gotoStatement" | "callFileStatement",
-  ): boolean {
-    const path = this.project.files[this.file]!.path;
-    if (target.kind === "labelTarget") {
-      const label = target.label.name;
-      const problem =
-        transfer === "callFileStatement"
-          ? `A call only starts a file, at its top, so 'call ${label}' cannot go to a label or function of this file. Write 'goto ${label}' to continue at a label, or '${label}()' to run a function.`
-          : this.#globalFunction !== null
-            ? `A global function can run in any file, so it cannot go to label '${label}' of '${path}'. Put the part after the label in a file of its own and 'goto' that file, or in a global function that does the work and returns.`
-            : this.#labels.has(label)
-              ? null
-              : `This file has no label '${label}'. Add 'label ${label}' in the outer level of the file.`;
-      if (problem === null) return true;
-      this.#report(
-        transfer === "callFileStatement"
-          ? semanticCode.invalidFileTarget
-          : semanticCode.invalidLabel,
-        problem,
-        target.label.span,
-      );
-      return false;
-    }
-    if (target.label !== null) {
-      this.#report(
-        semanticCode.invalidFileTarget,
-        fileLabelMessage(
-          transfer === "callFileStatement" ? "call" : "goto",
-          target.label.name,
-          isPathGlob(target.path) ? null : target.path,
-        ),
-        target.label.span,
-      );
-      return false;
-    }
-    if (isPathGlob(target.path)) return this.#validateGlobTarget(target);
-    const problem = packagePathProblem(target.path);
-    if (problem !== null) {
-      this.#report(
-        semanticCode.invalidFileTarget,
-        `'${target.path}' is not a package file path: ${problem}.`,
-        target.pathSpan,
-      );
-      return false;
-    }
-    if (!this.project.labels.has(target.path)) {
-      this.#report(
-        semanticCode.invalidFileTarget,
-        `The project has no file '${target.path}'. Paths start at the package root, such as "rooms/hall.tease".`,
-        target.pathSpan,
-      );
-      return false;
-    }
-    if (transfer !== "callFileStatement" && this.project.declarationsOnly.has(target.path)) {
-      this.#report(
-        semanticCode.invalidFileTarget,
-        declarationsOnlyMessage(target.path),
-        target.pathSpan,
-      );
-      return false;
-    }
-    return true;
-  }
-
-  /** A `script(...)` call whose path is literal text is checked like a file target; it takes no label (V30 §29). */
-  #validateScriptReference(call: Extract<Expression, { kind: "callExpression" }>): void {
-    const label = call.arguments.find(
-      (argument) => argument.kind === "namedArgument" && argument.name.name === "label",
-    )?.value;
-    const direct = this.#directTarget?.call === call ? this.#directTarget.statement : null;
-    const transfer = direct?.kind ?? null;
-    if (label !== undefined) {
-      this.#report(
-        semanticCode.invalidFileTarget,
-        fileLabelMessage(null, literalText(label) ?? null, null),
-        label.span,
-      );
-      return;
-    }
-    const positional = call.arguments.filter((argument) => argument.kind === "positionalArgument");
-    // The type check reports another number of paths.
-    if (positional.length !== 1) return;
-    const pathArgument = positional[0]!.value;
-    const path = literalText(pathArgument) ?? null;
-    if (path === null) {
-      // A text with `${...}` names the files its texts allow; any other path, any file.
-      const written = unwrapParentheses(pathArgument);
-      this.project.refer(
-        written.kind === "stringLiteral"
-          ? this.project.filesLike(
-              written.parts.reduce<string[]>(
-                (texts, part) => {
-                  if (part.kind === "stringText") texts[texts.length - 1] += part.value;
-                  else texts.push("");
-                  return texts;
-                },
-                [""],
-              ),
-            )
-          : null,
-      );
-      return;
-    }
-    this.project.refer([path]);
-    const pathProblem = packagePathProblem(path);
-    const problem = isPathGlob(path)
-      ? `A glob cannot be inside script(...). To pick a random file, write ${transfer === "callFileStatement" ? "call" : "goto"} ${JSON.stringify(path)} directly.`
-      : pathProblem !== null
-        ? `'${path}' is not a package file path: ${pathProblem}.`
-        : !this.project.labels.has(path)
-          ? `The project has no file '${path}'. Paths start at the package root, such as "rooms/hall.tease".`
-          : transfer === "gotoStatement" && this.project.declarationsOnly.has(path)
-            ? declarationsOnlyMessage(path)
-            : null;
-    if (problem !== null) {
-      this.#report(semanticCode.invalidFileTarget, problem, pathArgument.span);
-      return;
-    }
-    if (direct?.kind === "callFileStatement")
-      this.fileCalls.set(direct, {
-        form: "path",
-        paths: [path],
-        query: null,
-        span: pathArgument.span,
-      });
-  }
-
-  /**
-   * A glob picks among the files it matches that run something; it is an error only when none remains (ADR 0022
-   * §2.2).
-   */
-  #validateGlobTarget(target: FileTarget): boolean {
-    const problem = packageGlobProblem(target.path);
-    if (problem !== null) {
-      this.#report(
-        semanticCode.invalidFileTarget,
-        `'${target.path}' is not a pattern of package file paths: ${problem}.`,
-        target.pathSpan,
-      );
-      return false;
-    }
-    const matches = globMatches(target.path, this.project.labels.keys());
-    const runnable = matches.filter((path) => !this.project.declarationsOnly.has(path));
-    if (runnable.length > 0) {
-      this.picks.set(target, runnable);
-      return true;
-    }
-    this.#report(
-      semanticCode.invalidFileTarget,
-      matches.length === 0
-        ? `No file of the project matches '${target.path}'. Paths start at the package root, such as "rooms/*.tease".`
-        : `Every file matching '${target.path}' holds declarations only and runs nothing, so there is nothing to pick.`,
-      target.pathSpan,
-    );
-    return false;
-  }
-
-  /**
-   * The files a tagged pick may choose by the tags of their headers: those that run something, within its `from:`,
-   * whose tags its tag tests, literal tag lists, and comparisons do not rule out. A comparison is false for a file
-   * without a number for its tag, as when the script runs, and decided by a bound of constant numbers; another bound
-   * or a computed list counts as possibly true here, and the check of the running file decides it by its known value
-   * where it can. None when the tags are not known, or the `from:` is not a path or glob, which the type check
-   * reports. Picks with the same facts share one list, found once.
-   */
-  #taggedCandidates(query: TagQueryExpression): readonly string[] {
-    const from = query.from?.pattern ?? null;
-    const bound = (step: Extract<TagQueryStep, { kind: "tagCompare" }>) => {
-      const value = staticNumber(step.bound);
-      return value !== undefined && Number.isFinite(value) ? value : undefined;
-    };
-    const key = JSON.stringify([from, tagQueryKey(query.steps, bound)]);
-    const known = this.project.taggedPicks.get(key);
-    if (known !== undefined) return known;
-    const files = this.project.files.filter((file) => this.project.tags.has(file.path));
-    const within =
-      from === null
-        ? new Set(files.map((file) => file.path))
-        : (isPathGlob(from) ? packageGlobProblem(from) : packagePathProblem(from)) !== null
-          ? new Set<string>()
-          : new Set(
-              globMatches(
-                from,
-                files.map((file) => file.path),
-              ),
-            );
-    const mayMatch = mayMatchTags(query.steps, bound);
-    const picks = files.flatMap((file) =>
-      within.has(file.path) && mayMatch(this.project.tags.get(file.path)!) ? [file.path] : [],
-    );
-    this.project.taggedPicks.set(key, picks);
-    return picks;
   }
 
   /** The files that each `goto tagged` or `call tagged` may pick, by its tag tests and literal tag lists. */
@@ -1497,7 +911,7 @@ class SemanticValidator {
     for (const parameter of declaration.parameters) {
       const duplicate = names.has(parameter.name.name);
       if (duplicate) {
-        this.#report(
+        this.report(
           semanticCode.duplicateParameter,
           `Duplicate function parameter '${parameter.name.name}'.`,
           parameter.name.span,
@@ -1505,7 +919,7 @@ class SemanticValidator {
       }
       names.add(parameter.name.name);
       if (parameter.defaultValue === null && sawDefault) {
-        this.#report(
+        this.report(
           semanticCode.requiredAfterDefault,
           "Required parameters must precede parameters with defaults.",
           parameter.span,
@@ -1537,7 +951,7 @@ class SemanticValidator {
       if (parameter.defaultValue !== null) {
         const blockingInteraction = findFirstInteraction(parameter.defaultValue);
         if (blockingInteraction !== null) {
-          this.#report(
+          this.report(
             semanticCode.unsupportedBlockingContext,
             blockingInteraction.kind === "playMediaExpression"
               ? "Media playback is not supported in function parameter defaults."
@@ -1556,7 +970,7 @@ class SemanticValidator {
           );
         }
         this.#reportLaterParameterReferences(parameter.defaultValue, laterNameCounts);
-        this.#validateExpression(parameter.defaultValue, defaultScope, null);
+        this.validateExpression(parameter.defaultValue, defaultScope, null);
       }
       defaultScope.declare(name, { kind: "variable", site: parameter });
     }
@@ -1585,7 +999,7 @@ class SemanticValidator {
     );
     if (target.kind === "identifier") {
       if (target.name === "debugMode") {
-        this.#report(
+        this.report(
           semanticCode.invalidAssignment,
           "Cannot assign to 'debugMode', which is read-only.",
           target.span,
@@ -1600,19 +1014,19 @@ class SemanticValidator {
       this.#recordRootAccess(target.name, binding, target.span);
       if (binding === undefined) {
         if (!this.#reportFileName(target.name, target.span))
-          this.#report(
+          this.report(
             semanticCode.unknownAssignment,
             `Cannot assign to unknown variable '${target.name}'.`,
             target.span,
           );
       } else if (binding.kind === "function") {
-        this.#report(
+        this.report(
           semanticCode.functionAssignment,
           `Cannot assign to function '${target.name}'.`,
           target.span,
         );
       } else if (binding.kind !== "variable") {
-        this.#report(
+        this.report(
           semanticCode.invalidAssignment,
           `Cannot replace ${binding.kind} '${target.name}'.`,
           target.span,
@@ -1625,9 +1039,9 @@ class SemanticValidator {
       this.#reportPlayerProfileChange(target, true);
       return;
     }
-    this.#validateExpression(target.object, scope, null);
+    this.validateExpression(target.object, scope, null);
     if (target.kind === "indexExpression") {
-      this.#validateExpression(target.index, scope, null);
+      this.validateExpression(target.index, scope, null);
     }
   }
 
@@ -1649,14 +1063,14 @@ class SemanticValidator {
     const label = name === null ? "playerProfile" : `playerProfile.${name}`;
     const instead =
       name !== null ? `'player.${name}'` : assigned ? "the player's fields" : "its field";
-    this.#report(
+    this.report(
       semanticCode.invalidAssignment,
       `Cannot ${assigned ? "assign to" : "change"} '${label}': the player profile changes only through 'askProfileChange(...)', which the player approves. Copy it into the player with 'player.copyFrom(playerProfile)' and ${assigned ? "assign" : "change"} ${instead} instead.`,
       place.span,
     );
   }
 
-  #validateExpression(
+  validateExpression(
     expression: Expression,
     scope: SemanticScope,
     contextualSpeaker: string | null,
@@ -1712,7 +1126,7 @@ class SemanticValidator {
           if (contextualSpeaker !== "speaker") this.speakers.set(expression, contextualSpeaker);
           // Without `as`, a message has the default speaker, which a script that never sets one cannot have.
           else if (!this.project.setsDefaultSpeaker)
-            this.#report(
+            this.report(
               semanticCode.noSpeaker,
               "This message has no speaker, so 'speaker' has no value: it names none with 'as', and the script never sets a default speaker. Give it one with 'as name', or set a default speaker with 'speaker name'.",
               expression.span,
@@ -1722,7 +1136,7 @@ class SemanticValidator {
         // Protected, so never a binding: the engine reads it from the session.
         if (expression.name === "debugMode") return;
         if (expression.name === "playerProfile") {
-          this.#report(
+          this.report(
             semanticCode.functionValue,
             "'playerProfile' is not a value of its own. Read one of its fields, as in 'playerProfile.firstName', or copy it into the player with 'player.copyFrom(playerProfile)'.",
             expression.span,
@@ -1740,21 +1154,21 @@ class SemanticValidator {
             expression.name === "openUrl" ||
             expression.name === "exportText"
           ) {
-            this.#report(
+            this.report(
               semanticCode.functionValue,
               `Builtin '${expression.name}' is not a first-class runtime value.`,
               expression.span,
             );
           } else if (!this.#reportFileName(expression.name, expression.span)) {
             const renamed = RENAMED_VALUES.get(expression.name);
-            this.#report(
+            this.report(
               semanticCode.unknownVariable,
               `Unknown variable '${expression.name}'.${renamed === undefined ? "" : ` Use '${renamed}'.`}`,
               expression.span,
             );
           }
         } else if (binding.kind === "function") {
-          this.#report(
+          this.report(
             semanticCode.functionValue,
             `Function '${expression.name}' is not a first-class runtime value.`,
             expression.span,
@@ -1789,7 +1203,7 @@ class SemanticValidator {
         yield* compileChild(this.#validateShowButtonTask(expression, scope));
         return;
       case "showPopupExpression":
-        this.#validateShowPopupArguments(expression);
+        validateShowPopupArguments(this, expression);
         for (const argument of expression.arguments)
           yield* compileChild(this.#validateExpressionTask(argument.value, scope, null));
         return;
@@ -1808,7 +1222,7 @@ class SemanticValidator {
         yield* compileChild(this.#validateExpressionTask(expression.key, scope, contextualSpeaker));
         if (expression.defaultValue === null) {
           const key = literalText(expression.key);
-          this.#report(
+          this.report(
             semanticCode.argumentCount,
             missingDefaultMessage(
               `load(${key === undefined ? "key" : JSON.stringify(key)}, default: value)`,
@@ -1837,7 +1251,7 @@ class SemanticValidator {
           expression.callee.kind === "identifier" &&
           scope.resolve(expression.callee.name)?.declaration !== undefined;
         // Only an author function's parameters are known here; for every other callee a repeated name is still an error.
-        if (!authorFunction) this.#validateDistinctNamedArguments(expression);
+        if (!authorFunction) validateDistinctNamedArguments(this, expression);
         // Grouping a method does not detach it from its receiver: `(text.trim)()` calls `text.trim()`.
         const method = unwrapParentheses(expression.callee);
         // A list or dict of the player profile changes in place as one of anything else does, also when a list is
@@ -1868,7 +1282,7 @@ class SemanticValidator {
               (argument) => argument.kind === "positionalArgument",
             ).length;
             if (positional > 0)
-              this.#report(
+              this.report(
                 semanticCode.argumentCount,
                 argumentCountMessage(
                   "takePhoto",
@@ -1880,13 +1294,13 @@ class SemanticValidator {
               );
             for (const argument of expression.arguments)
               if (argument.kind === "namedArgument" && argument.name.name !== "tags")
-                this.#report(
+                this.report(
                   semanticCode.unknownNamedArgument,
                   unknownNamedArgumentMessage("takePhoto", argument.name.name, ["tags"]),
                   argument.name.span,
                 );
           } else if (isAskImageCall(expression)) {
-            this.#validateAskImageArguments(expression);
+            validateAskImageArguments(this, expression);
             // `askImage` has no `as`, so the default speaker asks: `speaker` in its mode and in every argument is that
             // speaker, as in a basic ask.
             if (expression.presentation !== undefined)
@@ -1895,7 +1309,7 @@ class SemanticValidator {
               );
           } else if (name === "openUrl" || name === "exportText") {
             // A statement of its own is an `openUrlStatement` or an `exportTextStatement`.
-            this.#report(
+            this.report(
               semanticCode.functionValue,
               `${name}(...) gives no value, so it can only be a statement of its own.`,
               expression.callee.span,
@@ -1903,13 +1317,13 @@ class SemanticValidator {
           } else if (binding?.declaration !== undefined) {
             // The initialization check follows the calls of this file's functions.
             if (this.#functions.get(name) === binding.declaration)
-              this.#calls.push({ name, context: this.#context, statement: this.#statement! });
-            this.#validateFunctionCall(expression, binding.declaration);
+              this.calls.push({ name, context: this.#context, statement: this.#statement! });
+            validateFunctionCall(this, expression, binding.declaration);
           } else if (this.#builtins.has(name)) {
             // The type check checks the arguments of the core built-ins it knows.
-            if (name === "script") this.#validateScriptReference(expression);
+            if (name === "script") validateScriptReference(this, expression);
           } else if (binding !== undefined) {
-            this.#report(
+            this.report(
               semanticCode.nonCallable,
               `'${name}' is a ${binding.kind}, not a callable function.`,
               expression.callee.span,
@@ -1918,7 +1332,7 @@ class SemanticValidator {
             // A permanent button removes itself, as a timer stops itself (#836).
             const [button] = expression.arguments;
             const unwrapped = button === undefined ? undefined : unwrapParentheses(button.value);
-            this.#report(
+            this.report(
               semanticCode.unknownFunction,
               `removePermanentButton(...) is replaced by the button's own remove(), like stop() on a timer. ${
                 unwrapped?.kind === "identifier" && expression.arguments.length === 1
@@ -1928,13 +1342,13 @@ class SemanticValidator {
               expression.callee.span,
             );
           } else if (RENAMED_BUILTINS.has(name)) {
-            this.#report(
+            this.report(
               semanticCode.unknownFunction,
               `Unknown function '${name}'. Use '${RENAMED_BUILTINS.get(name)}'.`,
               expression.callee.span,
             );
           } else if (unboundValue(name, contextualSpeaker) !== null) {
-            this.#report(
+            this.report(
               semanticCode.nonCallable,
               `'${name}' is ${unboundValue(name, contextualSpeaker)}, not a callable function.`,
               expression.callee.span,
@@ -1949,7 +1363,7 @@ class SemanticValidator {
                 : this.#askQuestions.has(expression) && (name === "bubble" || name === "prose")
                   ? ` To show the question as ${name}, write the question after '${name}' without parentheses around it, as in '${name} "Name?"', or give '${name}' its own parentheses first, as in '${name}() ("Name?")'.`
                   : "";
-            this.#report(
+            this.report(
               semanticCode.unknownFunction,
               `Unknown function '${name}'.${hint}`,
               expression.callee.span,
@@ -1962,7 +1376,7 @@ class SemanticValidator {
           // No value has a method by an earlier name, so its call names the fix whatever the value is.
           const renamed = RENAMED_METHODS.get(method.property.name);
           if (renamed !== undefined)
-            this.#report(
+            this.report(
               semanticCode.unknownFunction,
               `Unknown method '${method.property.name}'. Use '${renamed}()'.`,
               method.property.span,
@@ -1979,14 +1393,14 @@ class SemanticValidator {
               unboundValue(method.name, contextualSpeaker) ??
               (binding !== undefined && binding.kind !== "function" ? `a ${binding.kind}` : null);
             if (kind !== null)
-              this.#report(
+              this.report(
                 semanticCode.nonCallable,
                 `'${method.name}' is ${kind}, not a callable function.`,
                 method.span,
               );
           } else {
             // Functions are not values, so no other expression, such as `items[0]` or `pick(1)`, gives one to call.
-            this.#report(
+            this.report(
               semanticCode.nonCallable,
               "Only a function or a method can be called. Call a function by its name instead.",
               method.span,
@@ -2024,7 +1438,7 @@ class SemanticValidator {
           expression.start.kind === "rangeExpression" ||
           expression.end.kind === "rangeExpression"
         ) {
-          this.#report(semanticCode.chainedRange, "Ranges may not be chained.", expression.span);
+          this.report(semanticCode.chainedRange, "Ranges may not be chained.", expression.span);
         }
         return;
       case "typeTestExpression":
@@ -2041,7 +1455,7 @@ class SemanticValidator {
         }
         // `findScripts(...)` makes references to the files it may list.
         if (expression.catalog === "scripts" && expression.select === "list")
-          this.project.refer(this.#taggedCandidates(expression));
+          this.project.refer(taggedCandidates(this, expression));
         return;
     }
     expression satisfies never;
@@ -2058,11 +1472,11 @@ class SemanticValidator {
         end.line,
         end.column - literal.flags.length,
       );
-      this.#report(semanticCode.invalidRegex, flagProblem, createSourceSpan(start, end));
+      this.report(semanticCode.invalidRegex, flagProblem, createSourceSpan(start, end));
       return;
     }
     const compiled = compileRegex(literal.source, canonicalRegexFlags(literal.flags));
-    if (!compiled.ok) this.#report(semanticCode.invalidRegex, compiled.problem, literal.span);
+    if (!compiled.ok) this.report(semanticCode.invalidRegex, compiled.problem, literal.span);
   }
 
   /** A `say`, as a statement or a value: its operands under the speaker it chooses, and its presentation and pacing. */
@@ -2128,7 +1542,7 @@ class SemanticValidator {
       const names = new Set<string>();
       for (const property of root.properties) {
         if (names.has(property.name.name))
-          this.#report(
+          this.report(
             semanticCode.duplicateProperty,
             duplicateEntryMessage("object", property.name.name),
             property.name.span,
@@ -2142,277 +1556,13 @@ class SemanticValidator {
       yield* compileChild(this.#validateExpressionTask(element, scope, contextualSpeaker));
   }
 
-  /**
-   * Positional arguments fill parameters from left to right; named arguments that follow them fill parameters by name.
-   * Each parameter receives at most one value, and every parameter without a default needs one.
-   */
-  #validateFunctionCall(
-    expression: Extract<Expression, { kind: "callExpression" }>,
-    declaration: FunctionDeclaration,
-  ): void {
-    const positional = expression.arguments.filter(
-      (argument) => argument.kind === "positionalArgument",
-    );
-    const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
-    const functionName = declaration.name.name;
-    const parameterNames = declaration.parameters.map((parameter) => parameter.name.name);
-    const required = declaration.parameters.filter(
-      (parameter) => parameter.defaultValue === null,
-    ).length;
-    if (positional.length > parameterNames.length) {
-      this.#report(
-        semanticCode.argumentCount,
-        argumentCountMessage(
-          functionName,
-          argumentsTaken(parameterNames, required),
-          positional.length,
-        ),
-        expression.span,
-      );
-      return;
-    }
-    if (named.length === 0) {
-      if (positional.length < required)
-        this.#report(
-          semanticCode.argumentCount,
-          argumentCountMessage(
-            functionName,
-            argumentsTaken(parameterNames, required),
-            positional.length,
-          ),
-          expression.span,
-        );
-      return;
-    }
-    const indexes = new Map(parameterNames.map((name, index) => [name, index]));
-    const supplied = new Set(parameterNames.slice(0, positional.length));
-    for (const argument of named) {
-      const name = argument.name.name;
-      const index = indexes.get(name);
-      if (index === undefined) {
-        this.#report(
-          semanticCode.unknownNamedArgument,
-          unknownNamedArgumentMessage(functionName, name, parameterNames, false),
-          argument.name.span,
-        );
-      } else if (index < positional.length) {
-        this.#report(
-          semanticCode.duplicateNamedArgument,
-          `Parameter '${name}' already receives positional argument ${index + 1}. Remove one of the two.`,
-          argument.name.span,
-        );
-      } else if (supplied.has(name)) {
-        this.#report(
-          semanticCode.duplicateNamedArgument,
-          `Argument '${name}' is given twice. Remove one of them.`,
-          argument.name.span,
-        );
-      }
-      supplied.add(name);
-    }
-    for (const parameter of declaration.parameters) {
-      if (parameter.defaultValue === null && !supplied.has(parameter.name.name)) {
-        this.#report(
-          semanticCode.missingNamedArgument,
-          missingArgumentMessage(
-            functionName,
-            `a value for '${parameter.name.name}'`,
-            `Add it by position or as '${parameter.name.name}: ...'.`,
-          ),
-          expression.span,
-        );
-      }
-    }
-  }
-
-  /** Reports a parameter name given twice in a call whose parameters only the callee knows. */
-  /**
-   * `askImage(...)` takes its message first, positionally or as `message:`, and the named options of V30 §20. The
-   * invalid-input options are not supported yet.
-   */
-  #validateAskImageArguments(expression: Extract<Expression, { kind: "callExpression" }>): void {
-    let message = false;
-    for (const [index, argument] of expression.arguments.entries()) {
-      if (argument.kind === "positionalArgument") {
-        if (index > 0 || message)
-          this.#report(
-            semanticCode.argumentCount,
-            leadingArgumentMessage(
-              "askImage",
-              "its message",
-              'askImage("Add an image", allowCamera: false)',
-            ),
-            argument.span,
-          );
-        message = true;
-        continue;
-      }
-      const name = argument.name.name;
-      if (name === "message") {
-        if (message)
-          this.#report(
-            semanticCode.argumentCount,
-            leadingArgumentTwiceMessage("askImage", "message"),
-            argument.name.span,
-          );
-        message = true;
-      } else if (name === "invalidMessage" || name === "invalidLlmInstruction") {
-        this.#report(
-          semanticCode.unknownNamedArgument,
-          `askImage(${name}:) is not supported yet.`,
-          argument.name.span,
-        );
-      } else if (!IMAGE_REQUEST_OPTIONS.has(name)) {
-        this.#report(
-          semanticCode.unknownNamedArgument,
-          unknownNamedArgumentMessage("askImage", name, ["message", ...IMAGE_REQUEST_OPTIONS]),
-          argument.name.span,
-        );
-      }
-    }
-  }
-
-  /**
-   * `showPopup` takes its message first, without a name or as `message:`, and an optional `buttonText:` (V30 §31). A
-   * repeated name is reported with the other arguments.
-   */
-  #validateShowPopupArguments(parts: ShowPopupParts): void {
-    this.#validateDistinctNamedArguments(parts);
-    let message = false;
-    for (const [index, argument] of parts.arguments.entries()) {
-      if (argument.kind === "positionalArgument") {
-        if (index > 0 || message)
-          this.#report(
-            semanticCode.argumentCount,
-            leadingArgumentMessage(
-              "showPopup",
-              "its message",
-              'showPopup("Task completed", buttonText: "Continue")',
-            ),
-            argument.span,
-          );
-        message = true;
-        continue;
-      }
-      const name = argument.name.name;
-      if (name === "message") {
-        if (message)
-          this.#report(
-            semanticCode.argumentCount,
-            leadingArgumentTwiceMessage("showPopup", "message"),
-            argument.name.span,
-          );
-        message = true;
-      } else if (!SHOW_POPUP_OPTIONS.includes(name)) {
-        this.#report(
-          semanticCode.unknownNamedArgument,
-          unknownNamedArgumentMessage("showPopup", name, ["message", ...SHOW_POPUP_OPTIONS]),
-          argument.name.span,
-        );
-      }
-    }
-    if (!message)
-      this.#report(
-        semanticCode.missingNamedArgument,
-        missingArgumentMessage(
-          "showPopup",
-          "a message",
-          `Give it first, as in 'showPopup "Task completed"'.`,
-        ),
-        parts.span,
-      );
-  }
-
-  /**
-   * `openUrl` takes one web address without a name, first, and the optional `buttonText:` and `alwaysButton:` (V30
-   * §33). A repeated name is reported with the other arguments.
-   */
-  #validateOpenUrlArguments(statement: OpenUrlStatement): void {
-    this.#validateDistinctNamedArguments(statement);
-    const addresses = statement.arguments.filter(
-      (argument) => argument.kind === "positionalArgument",
-    );
-    const addressed =
-      addresses.length === 1 && statement.arguments[0]?.kind === "positionalArgument";
-    if (!addressed)
-      this.#report(
-        semanticCode.argumentCount,
-        leadingArgumentMessage(
-          "openUrl",
-          "one web address",
-          'openUrl("https://example.com", buttonText: "Open the page")',
-        ),
-        statement.span,
-      );
-    for (const argument of statement.arguments)
-      if (
-        argument.kind === "namedArgument" &&
-        !OPEN_URL_OPTIONS.includes(argument.name.name) &&
-        // A named address without a positional one is the error above.
-        (addressed || argument.name.name !== "url")
-      )
-        this.#report(
-          semanticCode.unknownNamedArgument,
-          unknownNamedArgumentMessage("openUrl", argument.name.name, OPEN_URL_OPTIONS),
-          argument.name.span,
-        );
-  }
-
-  /**
-   * `exportText` takes one text without a name, first, and the optional `title:` and `fileName:` (V30 §31). A repeated
-   * name is reported with the other arguments.
-   */
-  #validateExportTextArguments(statement: ExportTextStatement): void {
-    this.#validateDistinctNamedArguments(statement);
-    const texts = statement.arguments.filter((argument) => argument.kind === "positionalArgument");
-    const given = texts.length === 1 && statement.arguments[0]?.kind === "positionalArgument";
-    if (!given)
-      this.#report(
-        semanticCode.argumentCount,
-        leadingArgumentMessage(
-          "exportText",
-          "one text",
-          'exportText(report, title: "Your report")',
-        ),
-        statement.span,
-      );
-    for (const argument of statement.arguments)
-      if (
-        argument.kind === "namedArgument" &&
-        !EXPORT_TEXT_OPTIONS.includes(argument.name.name) &&
-        // A named text without a positional one is the error above.
-        (given || argument.name.name !== "text")
-      )
-        this.#report(
-          semanticCode.unknownNamedArgument,
-          unknownNamedArgumentMessage("exportText", argument.name.name, EXPORT_TEXT_OPTIONS),
-          argument.name.span,
-        );
-  }
-
-  #validateDistinctNamedArguments(
-    expression: Pick<Extract<Expression, { kind: "callExpression" }>, "arguments">,
-  ): void {
-    const names = new Set<string>();
-    for (const argument of expression.arguments) {
-      if (argument.kind !== "namedArgument") continue;
-      if (names.has(argument.name.name))
-        this.#report(
-          semanticCode.duplicateNamedArgument,
-          `Argument '${argument.name.name}' is given twice. Remove one of them.`,
-          argument.name.span,
-        );
-      names.add(argument.name.name);
-    }
-  }
-
   #reportLaterParameterReferences(
     expression: Expression,
     laterNameCounts: ReadonlyMap<string, number>,
   ): void {
     visitExpression(expression, (identifier) => {
       if (!laterNameCounts.has(identifier.name)) return;
-      this.#report(
+      this.report(
         semanticCode.laterParameterDefault,
         `Default expression may not reference later parameter '${identifier.name}'.`,
         identifier.span,
@@ -2428,7 +1578,7 @@ class SemanticValidator {
     declaration?: FunctionDeclaration,
   ): boolean {
     if (this.#protectedNames.has(name)) {
-      this.#report(PROTECTED_NAME_CODE, protectedNameMessage(name, "other"), span);
+      this.report(PROTECTED_NAME_CODE, protectedNameMessage(name, "other"), span);
       return false;
     }
     if (scope.declare(name, declaration === undefined ? { kind } : { kind, declaration }))
@@ -2451,7 +1601,7 @@ class SemanticValidator {
       );
       return false;
     }
-    this.#report(
+    this.report(
       semanticCode.duplicateDeclaration,
       scope.isShared(name)
         ? `'${name}' already names a variable of the code that created this ${HANDLER_NAMES[this.#handlerOwner]}, which the block shares. Rename the block's variable.`
@@ -2467,136 +1617,13 @@ class SemanticValidator {
       binding?.kind === "variable" &&
       this.#root.bindings.get(name) === binding
     ) {
-      this.#rootAccesses.push({ name, span, context: this.#context, statement: this.#statement });
+      this.rootAccesses.push({ name, span, context: this.#context, statement: this.#statement });
     }
   }
 
-  /**
-   * A goto can reach a label without running the top-level `let`s between the place it starts and the label. A use of
-   * a variable of the file is an error when a goto can make it miss its `let`: it has a value on every way there
-   * without gotos, but not on every way with them. A goto has run what came before the statement it stands in, or
-   * before the call of its function or the start of its handler. Which statements run and continue is the flow of the
-   * type check, so this check and the ending check agree. A file starts at its top, so only a goto within it reaches a
-   * label (V30 §26). Other early uses, such as a function called before the `let`, are checked when they run.
-   */
+  /** Checks the uses of top-level variables after labels that a goto may reach before their `let` ran. */
   checkInitialization(program: Program, flow: StatementFlow): readonly Diagnostic[] {
-    const diagnostics: Diagnostic[] = [];
-    if (this.#gotos.length === 0 || this.#rootAccesses.length === 0) return diagnostics;
-    // Only the variables that are used need following.
-    const used = new Set(this.#rootAccesses.map((access) => access.name));
-    const withGotos = this.#initializedVariables(program, flow, used, true);
-    const withoutGotos = this.#initializedVariables(program, flow, used, false);
-    const reported = new Set<string>();
-    for (const access of this.#rootAccesses) {
-      if (flow.unreachable.has(access.statement)) continue;
-      const known = withGotos(access.context);
-      const knownWithoutGotos = withoutGotos(access.context);
-      if (
-        known === null ||
-        known.has(access.name) ||
-        (knownWithoutGotos !== null && !knownWithoutGotos.has(access.name))
-      )
-        continue;
-      const key = `${access.span.start.offset}:${access.name}`;
-      if (reported.has(key)) continue;
-      reported.add(key);
-      diagnostics.push(
-        createDiagnostic(
-          DiagnosticSeverity.Error,
-          semanticCode.skippedInitialization,
-          `A goto can reach this line without running 'let ${access.name}' first, so ${access.name} may have no value here. Move the label that the goto jumps to before 'let ${access.name}', or set ${access.name} on every way here.`,
-          access.span,
-        ),
-      );
-    }
-    return diagnostics;
-  }
-
-  /**
-   * The top-level variables that have a value wherever code of a context runs, following gotos or not. `null` stands
-   * for "every variable": no way there is known, so nothing is missing.
-   */
-  #initializedVariables(
-    program: Program,
-    flow: StatementFlow,
-    used: ReadonlySet<string>,
-    followGotos: boolean,
-  ): (context: FlowContext) => ReadonlySet<string> | null {
-    type Known = ReadonlySet<string> | null;
-    const statements = program.statements;
-    const meet = (left: Known, right: Known): Known =>
-      left === null
-        ? right
-        : right === null
-          ? left
-          : new Set([...left].filter((name) => right.has(name)));
-    // Function declarations run nothing; the file starts at its first other statement.
-    const order = statements.flatMap((statement, index) =>
-      statement.kind === "functionDeclaration" ? [] : [index],
-    );
-    const before: Known[] = statements.map((_, index) => (index === order[0] ? new Set() : null));
-    const after = (index: number): Known => {
-      const known = before[index]!;
-      const statement = statements[index]!;
-      return known !== null &&
-        statement.kind === "letStatement" &&
-        used.has(statement.name.name) &&
-        !known.has(statement.name.name)
-        ? new Set([...known, statement.name.name])
-        : known;
-    };
-    const functionStart = new Map<string, Known>();
-    // A handler starts with what ran where it was created; handlers nest without limit, so this is a loop.
-    const atContext = (start: FlowContext): Known => {
-      let context = start;
-      while (context.kind === "handler") {
-        if (flow.unreachable.has(context.created)) return null;
-        context = context.origin;
-      }
-      return context.kind === "root"
-        ? before[context.statement]!
-        : (functionStart.get(context.name) ?? null);
-    };
-    const calls = this.#calls.filter((call) => !flow.unreachable.has(call.statement));
-    const gotos = this.#gotos.filter((goto) => !flow.unreachable.has(goto.statement));
-    for (let changed = true; changed;) {
-      changed = false;
-      // A function starts with what every call of it has run; one never called adds nothing.
-      for (let functionsChanged = true; functionsChanged;) {
-        functionsChanged = false;
-        const starts = new Map<string, Known>();
-        for (const call of calls) {
-          starts.set(
-            call.name,
-            starts.has(call.name)
-              ? meet(starts.get(call.name)!, atContext(call.context))
-              : atContext(call.context),
-          );
-        }
-        for (const [name, known] of starts) {
-          if (!sameKnown(functionStart.get(name) ?? null, known)) {
-            functionStart.set(name, known);
-            functionsChanged = true;
-          }
-        }
-      }
-      for (let position = 1; position < order.length; position += 1) {
-        const index = order[position]!;
-        const previous = order[position - 1]!;
-        let known: Known = flow.continuing.has(statements[previous]!) ? after(previous) : null;
-        const statement = statements[index]!;
-        if (followGotos && statement.kind === "labelStatement") {
-          for (const goto of gotos) {
-            if (goto.label === statement.name.name) known = meet(known, atContext(goto.context));
-          }
-        }
-        if (!sameKnown(before[index]!, known)) {
-          before[index] = known;
-          changed = true;
-        }
-      }
-    }
-    return atContext;
+    return checkInitialization(this, program, flow);
   }
 
   /**
@@ -2607,7 +1634,7 @@ class SemanticValidator {
     const fn = this.#globalFunction;
     const binding = fn === null ? undefined : this.#root.resolve(name);
     if (fn === null || binding === undefined) return false;
-    this.#report(
+    this.report(
       semanticCode.fileName,
       binding.kind === "function"
         ? `Global function '${fn.name.name}' can be called from any file, so it can call only global functions and built-ins, not '${name}' of this file. Make '${name}' a global function.`
@@ -2617,123 +1644,15 @@ class SemanticValidator {
     return true;
   }
 
-  /**
-   * Validates a start value: a global's value at session start, or a speaker property. It runs before the story, so
-   * it may use literals, the globals and speakers set up before it, host globals, operators, and `load` (ADR 0022 §6).
-   * `contextualSpeaker` is a speaker's own name, which its properties may use.
-   */
-  #validateStartValue(
-    value: Expression,
-    scope: SemanticScope,
-    owner: GlobalStatement | SpeakerDeclaration,
-    contextualSpeaker: string | null,
-  ): void {
-    this.#validateExpression(value, scope, contextualSpeaker);
-    const speaker = owner.kind === "speakerDeclaration";
-    const subject = startValueOwner(owner);
-    const order = this.project.order(owner);
-    const work = [value];
-    while (work.length > 0) {
-      const expression = work.pop()!;
-      switch (expression.kind) {
-        case "interactionExpression":
-        case "sayExpression":
-        case "showButtonExpression":
-        case "showPopupExpression":
-        case "timerExpression":
-        case "playMediaExpression":
-        case "showCameraExpression":
-        case "showPermanentButtonExpression":
-          this.#report(
-            semanticCode.invalidStartValue,
-            startValueMessage(subject, { kind: "effect" }),
-            expression.span,
-            true,
-          );
-          continue;
-        case "callExpression":
-        case "tagQueryExpression":
-          // A script reference is made without effects, like a literal; its arguments follow the same rules.
-          if (
-            expression.kind === "callExpression" &&
-            expression.callee.kind === "identifier" &&
-            expression.callee.name === "script"
-          ) {
-            for (const argument of expression.arguments) work.push(argument.value);
-            continue;
-          }
-          this.#report(
-            semanticCode.invalidStartValue,
-            startValueMessage(subject, { kind: "call" }),
-            expression.span,
-            true,
-          );
-          continue;
-        case "identifier": {
-          if (expression.name === "speaker" && contextualSpeaker !== null) continue;
-          const binding = scope.resolve(expression.name);
-          if (binding === undefined || binding.kind === "global" || binding.kind === "function")
-            continue;
-          const used = binding.project;
-          if (used === undefined) {
-            const value =
-              owner.kind === "globalStatement" ? unwrapParentheses(owner.initial) : null;
-            this.#report(
-              semanticCode.invalidStartValue,
-              startValueMessage(subject, {
-                kind: "local",
-                name: expression.name,
-                assigned: value?.kind === "identifier" ? value.name : "...",
-                defaulted: owner.kind === "globalStatement" && owner.assignment !== null,
-              }),
-              expression.span,
-              true,
-            );
-          } else if (
-            used.order !== null &&
-            (used.order > order || (used.order === order && !speaker))
-          ) {
-            this.#report(
-              semanticCode.invalidStartValue,
-              startValueMessage(
-                subject,
-                used.order === order
-                  ? { kind: "itself" }
-                  : { kind: "later", name: expression.name },
-              ),
-              expression.span,
-              true,
-            );
-          }
-          continue;
-        }
-        default:
-          for (const child of expressionChildren(expression)) work.push(child);
-      }
-    }
-  }
-
   #validateSpeakerReference(name: string, span: SourceSpan, scope: SemanticScope): boolean {
     if (scope.resolve(name)?.kind === "speaker") return true;
-    this.#report(semanticCode.unknownSpeaker, `Unknown speaker '${name}'.`, span);
+    this.report(semanticCode.unknownSpeaker, `Unknown speaker '${name}'.`, span);
     return false;
   }
 
-  #report(code: NamePassCode, message: string, span: SourceSpan, checkable = false): void {
+  report(code: NamePassCode, message: string, span: SourceSpan, checkable = false): void {
     this.project.report(this.file, code, message, span, checkable);
   }
-}
-
-/** The text of a string literal without interpolation, looking through parentheses. */
-function literalText(expression: Expression): string | undefined {
-  const literal = unwrapParentheses(expression);
-  if (literal.kind !== "stringLiteral") return undefined;
-  let text = "";
-  for (const part of literal.parts) {
-    if (part.kind !== "stringText") return undefined;
-    text += part.value;
-  }
-  return text;
 }
 
 /**
@@ -2791,11 +1710,6 @@ function isPlayerProfile(expression: Expression): boolean {
   return node.kind === "identifier" && node.name === "playerProfile";
 }
 
-function unwrapParentheses(expression: Expression): Expression {
-  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
-  return expression;
-}
-
 /** What `speaker` is where a speaker is current, or what `debugMode` is: names that are values without a binding. */
 function unboundValue(name: string, contextualSpeaker: string | null): string | null {
   if (name === "speaker" && contextualSpeaker !== null) return "the current speaker";
@@ -2824,9 +1738,4 @@ function visitExpression(
             : expressionChildren(current);
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
   }
-}
-
-function sameKnown(left: ReadonlySet<string> | null, right: ReadonlySet<string> | null): boolean {
-  if (left === null || right === null) return left === right;
-  return left.size === right.size && [...left].every((name) => right.has(name));
 }
