@@ -593,6 +593,21 @@ class CoreAnswers implements Answers {
       new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag));
     while (pending.length > 0) {
       const task = pending.pop()!;
+      // r4.46 (2): an element of a dict's `values` is one of its values, wherever the path came from
+      const steps = "key" in task ? keyPath(task.key) : task.path;
+      const listed = steps.findIndex(
+        (step, index) => dictList(step) === "values" && steps[index + 1] === "element",
+      );
+      if (listed >= 0) {
+        const normal = [...steps.slice(0, listed), ...steps.slice(listed + 1)];
+        pending.push(
+          "key" in task
+            ? { key: keyOf(keyPlace(task.key), normal) }
+            : "literal" in task
+              ? { literal: task.literal, path: normal }
+              : { value: task.value, path: normal },
+        );
+      }
       const id =
         "key" in task
           ? `k${task.key}`

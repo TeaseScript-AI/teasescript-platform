@@ -804,7 +804,9 @@ export class Contract {
     )
       return yield* this.#valueAt(value, rest);
     const receiver = yield* this.#through(value, rest.slice(0, at), from);
-    if (receiver.some((item) => REFERENCE.has(item.tag)))
+    // F19a, r4.44: a receiver that may be a reference has the runtime's members, decided once for a whole value
+    const decided = at === 0 ? yield* this.valueReceiver(value) : receiver;
+    if (heldReference(decided) || decided.some((item) => REFERENCE.has(item.tag)))
       return yield* this.#through(value, rest, at + 1);
     return yield* this.#dictLists(rest, at, receiver, (path, start) =>
       this.#through(value, path, start),

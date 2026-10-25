@@ -82,6 +82,9 @@ test("the properties of a projected value and of a call's result are known", () 
     // a whole choice object, written and bound (review r5)
     ['say askChoice {text: "A", value: {value: 2}}', 'askChoice {text: "A", value: {value: 2}}'],
     ['let option = {text: "A", value: {value: 2}}\nsay askChoice option', "askChoice option"],
+    // a dict's values, read and copied (TABLE r4.46 (2); #1027 review r3)
+    ["let d = dict {k: {value: 2}}\nsay d.values.first", "d.values.first"],
+    ["let d = dict {k: {value: 2}}\nlet p = d.values\nsay p.first", "p.first"],
   ] as const) {
     const held = analysed(source);
     const properties = held.answers.properties(held.node(text));

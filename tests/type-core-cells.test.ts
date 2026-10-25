@@ -862,6 +862,24 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `integer-check o.keys.element [integer] @${at("o.keys.first")}`,
       ],
     ],
+    // the same through an operation and a literal: the receiver's completed contract decides (review r3)
+    [
+      "a dict's keys through an operation whose receiver may be a reference",
+      'let o = dict{k: "bad"}\nrepeat (o otherwise null).keys.first {}\no = player\nexit',
+      (at) => [
+        "warning-runtime-check",
+        `member-read warning-runtime-check @${at("o otherwise")}`,
+        `member-read warning-runtime-check @${at("o otherwise")}`,
+        `member-read warning-runtime-check @${at("(o otherwise")}`,
+        `member-read warning-runtime-check @${at("(o otherwise")}`,
+        `integer-use warning-runtime-check @${at("(o otherwise")}`,
+        `null-check o otherwise null [non-null] @${at("o otherwise")}`,
+        `null-check o otherwise null [non-null] @${at("o otherwise")}`,
+        `empty-check o otherwise null.keys [list] @${at("(o otherwise")}`,
+        `null-check o otherwise null.keys [non-null] @${at("(o otherwise")}`,
+        `integer-check o otherwise null.keys.element [integer] @${at("(o otherwise")}`,
+      ],
+    ],
     // a path through eight objects' own `values` is read once per step, as any property's (review r2: it exhausted the
     // allowance)
     [

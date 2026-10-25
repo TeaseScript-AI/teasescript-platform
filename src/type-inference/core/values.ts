@@ -188,9 +188,15 @@ export class Values {
       return yield* this.#valueAt(value, node, rest);
     const before = rest.slice(0, at);
     const after = rest.slice(at + 1);
-    const receiver = withoutEmpty(yield* this.#through(value, node, before, from));
-    if (receiver.some((item) => REFERENCE.has(item.tag)))
+    // F19a, r4.44: a receiver that may be a reference, by its completed contract, has the runtime's members
+    const contract = this.pass.contract;
+    const decided =
+      before.length === 0
+        ? yield* contract.valueReceiver(value)
+        : yield* contract.contractOfValueAt(value, before);
+    if (heldReference(decided) || decided.some((item) => REFERENCE.has(item.tag)))
       return yield* this.#through(value, node, rest, at + 1);
+    const receiver = withoutEmpty(yield* this.#through(value, node, before, from));
     const out: Item[] = [];
     let own = false;
     for (const item of receiver) {
