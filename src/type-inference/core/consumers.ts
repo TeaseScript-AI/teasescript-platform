@@ -6,7 +6,7 @@ import * as handles from "../adapters/handles.js";
 import type { OperandView, OperationInputs } from "../adapters/relation.js";
 import * as text from "../adapters/text.js";
 import type { MemberRules } from "../adapters/views.js";
-import type { Constraint, PlaceId, SourceSite, TypeTerm } from "../graph.js";
+import type { Constraint, PlaceId, SourceSite } from "../graph.js";
 import {
   Admission,
   concrete,
@@ -40,7 +40,7 @@ import {
 } from "./method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
-import { propertyName, propertyStep, siteKey, stepName, type ValueConstraint } from "./program.js";
+import { propertyName, siteKey, stepName, type ValueConstraint } from "./program.js";
 import {
   elementStep,
   explainingItem,
@@ -506,13 +506,14 @@ export class Consumers {
           admission.reject(d, root, path);
           continue;
         }
-        // C1, ADR 1.7: a value none of whose kinds fits errs, against a written type at any path or a decider earlier in
-        // the source at the root; never against a later decider (A7), never under a guard (§3.2), and not where the
-        // collection may be empty (no element: the empty list fits)
+        // C1, ADR 1.7: a value none of whose kinds fits errs, against a written type at any path or a type decided
+        // earlier in the source for a store into the place itself; never against a later decider (A7), never under a
+        // guard (§3.2), and not where the collection may be empty (no element: the empty list fits); a definite one is
+        // rejected (A6)
         if (
           !before &&
           items.length > 0 &&
-          (written || (at.length === 0 && path.length === 0)) &&
+          (written || at.length === 0) &&
           !(
             at.length > 0 &&
             d.kind !== "const" &&
@@ -527,6 +528,7 @@ export class Consumers {
             "written-target",
             admission.siteAt(d, at, (elements) => elements.length > 0 && !elements.some(fitsAny)),
           );
+          if (items.every((item) => item.cert === "def")) admission.reject(d, root, path);
           continue;
         }
         // A7: a copy made before the decider is checked against it with context `later`
@@ -598,14 +600,15 @@ export class Consumers {
           (external && !admission.admitted(root, path).includes("null"))
         )
           for (const item of nulls)
-            if (item.cert === "def" && !external)
+            if (item.cert === "def" && !external) {
               this.#error(
                 "written-target",
                 admission.siteAt(d, at, (elements) =>
                   elements.some((element) => element.tag === "null" && element.cert === "def"),
                 ),
               );
-            else
+              admission.reject(d, root, path);
+            } else
               this.#nullWarning(
                 "written-target",
                 d.site,
@@ -795,30 +798,53 @@ export class Consumers {
     const site = program.places[value]?.site;
     if (site === null || site === undefined || !("result" in c)) return;
     const direct = directAt(rest);
-    const fallback = withoutEmpty(this.#run(values.valueItems(value, node, rest)));
     const into = contract.landsIn(c.result, rest);
     const family = (tag: ItemTag): ItemTag => (tag === "integer" ? "number" : tag);
     const directFamilies = new Set(direct.filter(concrete).map((item) => family(item.tag)));
-    // a null element only against a written element type without null
-    const off = fallback.filter((item) =>
-      item.tag === "null"
-        ? rest.length > 0 && into !== null && !typeTags(into).includes("null")
-        : concrete(item) && !directFamilies.has(family(item.tag)),
-    );
     if (directFamilies.size === 0) return;
+    // the written union the value lands in directly, where it holds the direct family: a fallback of its kinds fits too
+    const union = into === null ? null : new Set(typeTags(into).map(family));
+    const unionHolds = union !== null && [...directFamilies].every((found) => union.has(found));
+    const fitsKind = (tag: ItemTag): boolean =>
+      tag === "null"
+        ? !(rest.length > 0 && into !== null && !typeTags(into).includes("null"))
+        : directFamilies.has(family(tag)) || (unionHolds && union.has(family(tag)));
+    // the target: the fallback's own key path at the rest of the path, a dict's value its `entry` (§10.5)
+    const label = rest.reduce(
+      (text, step, index) =>
+        step !== "element"
+          ? `${text}.${step}`
+          : `${text}.${elementStep(
+              withoutEmpty(this.#run(contract.contractOfValueAt(value, rest.slice(0, index)))).map(
+                (item) => item.tag,
+              ),
+            )}`,
+      this.#keyLabel(value),
+    );
     // the family the fallback is checked against: the direct value's (whole numbers with numbers), a load's or
-    // `fromJson`'s written type itself (its `null` C10's exception, never listed)
-    const against: ItemTag[] = written
-      ? [...new Set(direct.filter(concrete).map((item) => item.tag))]
-      : [...directFamilies].flatMap((found): ItemTag[] =>
-          found === "number" ? ["integer", "number"] : [found],
-        );
+    // `fromJson`'s written type itself (its `null` C10's exception, never listed), and the receiving union's kinds
+    const against: ItemTag[] = [
+      ...new Set([
+        ...(written
+          ? direct.filter(concrete).map((item) => item.tag)
+          : [...directFamilies].flatMap((found): ItemTag[] =>
+              found === "number" ? ["integer", "number"] : [found],
+            )),
+        ...(unionHolds ? typeTags(into!).filter((tag) => tag !== "null" && tag !== "unknown") : []),
+      ]),
+    ];
+    // §3.3: a fallback whose contract every kind of fits asks nothing more at this path
+    const quiet = this.#quietKinds(value, rest);
+    const fallback =
+      quiet !== null && quiet.every(fitsKind)
+        ? []
+        : withoutEmpty(this.#run(values.valueItems(value, node, rest)));
+    const off = fallback.filter((item) => item.tag !== "unknown" && !fitsKind(item.tag));
     const what = c.kind === "fallback" ? "the fallback" : "the default";
-    const label = this.#keyLabel(value);
     // an unknown the fallback may hold is possible: `copy-type` on the fallback against that family, unless a written
     // destination admits `unknown`; its host data meets its boundary
     const unknowns = fallback.filter((item) => isOpaque(item) || isExternal(item));
-    if (unknowns.length > 0 && !(into !== null && typeTags(into).includes("unknown"))) {
+    if (unknowns.length > 0 && !(union !== null && union.has("unknown"))) {
       for (const { item } of offendingKinds(unknowns))
         this.#storeWarning(site, label, item, against);
       this.admission.boundariesAt(
@@ -834,27 +860,23 @@ export class Consumers {
     }
     if (off.length === 0) {
       // nested literals by their elements
+      const kinds = quiet ?? fallback.map((item) => item.tag);
       if (rest.length < 256)
         for (const kind of ["list", "set", "dict"] as const)
-          if (directFamilies.has(kind) && fallback.some((item) => item.tag === kind))
+          if (directFamilies.has(kind) && kinds.includes(kind))
             this.#fallbackFits(c, node, directAt, value, [...rest, "element"]);
       return;
     }
-    const union = into === null ? null : new Set(typeTags(into).map(family));
-    if (
-      union !== null &&
-      (union.has("unknown") ||
-        [...directFamilies, ...off.map((item) => family(item.tag))].every((found) =>
-          union.has(found),
-        ))
-    )
-      return;
+    if (union !== null && union.has("unknown")) return;
+    // both definite and incompatible: an error at the fallback; possible: one warning and check per offending kind
     if (
       direct.filter(concrete).every((item) => item.cert === "def") &&
       off.every((item) => item.cert === "def")
     )
       this.#error("written-target", site);
-    else this.#storeWarning(site, label, off[0]!, [...directFamilies]);
+    else
+      for (const { item } of offendingKinds(off))
+        this.#storeWarning(site, label, item, [...directFamilies]);
   }
 
   #operation(c: Extract<ValueConstraint, { kind: "operation" }>, node: FlowNode): void {
@@ -1533,7 +1555,7 @@ export class Consumers {
         // the copy's value at the rest of the path, through its literal's fields
         let value: PlaceId | undefined = copy ? reaching.def.value : undefined;
         for (const part of copy ? reaching.rest : []) {
-          const children = value === undefined ? [] : this.#literalStores(value, part);
+          const children = value === undefined ? [] : this.admission.storesAt(value, part);
           value = children.length === 1 ? children[0]!.value : undefined;
           if (value === undefined) break;
         }
@@ -1544,16 +1566,6 @@ export class Consumers {
     }
     for (const memoKey of visited) this.#defaults.set(memoKey, found);
     return found;
-  }
-
-  /** A literal value's stores at one step: a property's one store, a collection's every element. */
-  #literalStores(value: PlaceId, step: string): readonly Definition[] {
-    const { program, definitions } = this.pass;
-    for (const has of program.hasOf.get(value) ?? []) {
-      const at = termPlace(has.type, step);
-      if (at !== null) return definitions.cellDefs.get(at) ?? [];
-    }
-    return [];
   }
 
   #defaultNull(owner: PlaceId, node: FlowNode, site: SourceSite): void {
@@ -1812,15 +1824,4 @@ export class Consumers {
       );
     }
   }
-}
-
-/** The cell or property place of a literal type at one step, or `null`. */
-function termPlace(term: TypeTerm, step: string): PlaceId | null {
-  const at =
-    term.kind === "object"
-      ? (term.properties ?? []).find((property) => propertyStep(property.name) === step)?.type
-      : step === "element" && (term.kind === "list" || term.kind === "set" || term.kind === "dict")
-        ? term.element
-        : undefined;
-  return at?.kind === "ref" ? at.place : null;
 }

@@ -111,6 +111,11 @@ export class Admission {
     readonly { readonly path: readonly string[]; readonly term: TypeTerm }[]
   >();
   readonly #whole = new Map<string, Definition[]>();
+  readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
+  readonly #copiesByPath = new Map<
+    PlaceId,
+    Map<string, { readonly order: number; readonly term: TypeTerm }[]>
+  >();
   readonly #pending = new Map<number, Definition>();
   readonly #typed: Definition[] = [];
   readonly #readSeen = new Set<PlaceId>();
@@ -156,9 +161,12 @@ export class Admission {
     keys.add(keyOf(root, path));
   }
 
-  /** ADR 1.6: a start value comes first; a single-site parameter's is its argument (F21). */
+  /**
+   * ADR 0021 1.6: source order, in which a declaration's start value comes before every other store into its place; a
+   * single-site parameter's is its argument (F21).
+   */
   public sourceOrder(d: Definition): number {
-    return d.how === "argument" && this.pass.lists.singleSite(d.fn)
+    return d.how === "initializer" || (d.how === "argument" && this.pass.lists.singleSite(d.fn))
       ? -1
       : d.site.file * 1e9 + d.site.start;
   }
@@ -576,19 +584,32 @@ export class Admission {
     return out;
   }
 
+  /** A literal's term at one step: an object's property by its step, a collection's element; built once per literal. */
+  #termAt(term: TypeTerm, step: string): TypeTerm | undefined {
+    const { work } = this.pass.program;
+    work.charge("checks");
+    if (term.kind === "list" || term.kind === "set" || term.kind === "dict")
+      return step === "element" ? term.element : undefined;
+    if (term.kind !== "object") return undefined;
+    let fields = this.#fields.get(term);
+    if (fields === undefined) {
+      fields = new Map();
+      for (const property of term.properties ?? []) {
+        work.charge("indexSteps");
+        const at = propertyStep(property.name);
+        if (!fields.has(at)) fields.set(at, property.type);
+      }
+      this.#fields.set(term, fields);
+    }
+    return fields.get(step);
+  }
+
   /** A literal value's stores at one step, in evaluation order: a property's one store, a collection's every element. */
   public literalChildren(value: PlaceId, step: string): Definition[] {
     const { program, definitions } = this.pass;
     const out: Definition[] = [];
     for (const has of program.hasOf.get(value) ?? []) {
-      const term =
-        has.type.kind === "object"
-          ? (has.type.properties ?? []).find((property) => propertyStep(property.name) === step)
-              ?.type
-          : step === "element" &&
-              (has.type.kind === "list" || has.type.kind === "set" || has.type.kind === "dict")
-            ? has.type.element
-            : undefined;
+      const term = this.#termAt(has.type, step);
       if (term?.kind === "ref") out.push(...(definitions.cellDefs.get(term.place) ?? []));
     }
     program.work.charge("checks", sortCost(out.length));
@@ -642,11 +663,11 @@ export class Admission {
   }
 
   /** A literal value's stores at one step: a property's one store, a collection's every element. */
-  #storesAt(value: PlaceId, step: string): readonly Definition[] {
+  public storesAt(value: PlaceId, step: string): readonly Definition[] {
     const { program, definitions } = this.pass;
     for (const has of program.hasOf.get(value) ?? []) {
-      const at = termPlace(has.type, step);
-      if (at !== null) return definitions.cellDefs.get(at) ?? [];
+      const at = this.#termAt(has.type, step);
+      if (at?.kind === "ref") return definitions.cellDefs.get(at.place) ?? [];
     }
     return [];
   }
@@ -685,14 +706,34 @@ export class Admission {
     return out;
   }
 
-  /** The written type at a path of the first copy of a written binding on the way, at the rest of the path (A4). */
+  /**
+   * The written type at a path of the first copy of a written binding on the way, at the rest of the path (A4): the
+   * copies indexed by their paths once per value, a query asking the path's prefixes, the first in the walk's order.
+   */
   #writtenCopyAt(value: PlaceId, at: readonly string[]): TypeTerm | null {
-    for (const { path, term } of this.#writtenCopies(value))
-      if (path.length <= at.length && path.every((step, index) => at[index] === step)) {
-        const found = termAt(term, at.slice(path.length));
-        if (found !== null) return found;
+    const { work } = this.pass.program;
+    let byPath = this.#copiesByPath.get(value);
+    if (byPath === undefined) {
+      byPath = new Map();
+      for (const [order, { path, term }] of this.#writtenCopies(value).entries()) {
+        work.charge("indexSteps");
+        const key = path.join(".");
+        const list = byPath.get(key);
+        if (list === undefined) byPath.set(key, [{ order, term }]);
+        else list.push({ order, term });
       }
-    return null;
+      this.#copiesByPath.set(value, byPath);
+    }
+    if (byPath.size === 0) return null;
+    let found: { readonly order: number; readonly term: TypeTerm } | null = null;
+    for (let length = 0; length <= at.length; length += 1)
+      for (const copy of byPath.get(at.slice(0, length).join(".")) ?? []) {
+        work.charge("checks");
+        const term = termAt(copy.term, at.slice(length));
+        if (term !== null && (found === null || copy.order < found.order))
+          found = { order: copy.order, term };
+      }
+    return found?.term ?? null;
   }
 
   /**
@@ -705,43 +746,63 @@ export class Admission {
     for (let index = 0; index < at.length; index += 1) {
       const whole = values.find((current) => !program.hasOf.has(current));
       if (whole !== undefined) return whole;
-      values = values.flatMap((current) =>
-        this.#storesAt(current, at[index]!).map((d) => d.value!),
-      );
+      values = values.flatMap((current) => this.storesAt(current, at[index]!).map((d) => d.value!));
       program.work.charge("checks", values.length);
     }
     return null;
   }
 
   /**
-   * ADR 1.3, A8: a list's, set's or dict's literal elements (values) have one type, the earliest element's, unless the
-   * literal lands directly in a written place, whose type then checks them (A1). An error at the element of another.
+   * ADR 0021 1.3, A8: a list's, set's or dict's literal elements (values), and the properties its objects share, have
+   * one type: the earliest element's, or a copy of a written binding's written type (A4), unless the literal lands
+   * directly in a written place, whose type then checks them (A1). A definite element of another type is an error at
+   * the innermost offending expression (r4.35) and is rejected: later uses see the earliest element's type (A6).
    */
   public literalElements(
     order: <T>(list: readonly T[]) => T[],
     error: (site: SourceSite) => void,
   ): void {
     const { program, definitions, contract } = this.pass;
+    const family = (tag: ItemTag): ItemTag => (NUMERIC.has(tag) ? "number" : tag);
     for (const [cell, list] of order([...definitions.cellDefs])) {
       const owner = program.cellOwner.get(cell);
       if (owner?.kind !== "cell" || list.length < 2 || contract.landsIn(owner.owner, []) !== null)
         continue;
-      const first = new Map<string, ItemTag>();
+      const first = new Map<
+        string,
+        { readonly tags: readonly ItemTag[]; readonly written: boolean }
+      >();
       for (const d of list) {
         if (d.value === undefined) continue;
         for (const path of [[], ...this.literalPaths(d.value)]) {
-          const kinds = [
-            ...new Set(
-              deciding(this.valueAt(d, path)).map((item) =>
-                NUMERIC.has(item.tag) ? "number" : item.tag,
-              ),
-            ),
-          ];
-          if (kinds.length !== 1) continue;
           const at = path.join(".");
-          const earlier = first.get(at);
-          if (earlier === undefined) first.set(at, kinds[0]!);
-          else if (kinds[0] !== earlier) error(d.site);
+          const decided = first.get(at);
+          const kinds = [
+            ...new Set(deciding(this.valueAt(d, path)).map((item) => family(item.tag))),
+          ];
+          if (decided === undefined) {
+            // A4: a copy of a written binding gives its written type, whatever it holds now
+            const copied = this.#writtenCopyAt(d.value, path);
+            if (copied !== null)
+              first.set(at, {
+                tags: typeTags(copied).filter((tag) => tag !== "null" && tag !== "unknown"),
+                written: true,
+              });
+            else if (kinds.length === 1) first.set(at, { tags: kinds, written: false });
+            continue;
+          }
+          const misfit = (tag: ItemTag): boolean =>
+            !decided.tags.some((ref) => fits(tag, ref, decided.written));
+          if (kinds.length !== 1 || !misfit(kinds[0]!)) continue;
+          const inner =
+            path.length > 0
+              ? this.offendingAt(d, path, (items) => {
+                  const own = [...new Set(deciding(items).map((item) => family(item.tag)))];
+                  return own.length === 1 && misfit(own[0]!);
+                })
+              : null;
+          error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site));
+          this.reject(d, cell, path);
         }
       }
     }
@@ -1017,15 +1078,4 @@ function fieldsOf(term: TypeTerm): readonly (readonly [string, TypeTerm])[] {
   if (term.kind === "list" || term.kind === "set" || term.kind === "dict")
     return [["element", term.element]];
   return [];
-}
-
-/** The cell or property place of a literal type at one step, or `null`. */
-function termPlace(term: TypeTerm, step: string): PlaceId | null {
-  const at =
-    term.kind === "object"
-      ? (term.properties ?? []).find((property) => propertyStep(property.name) === step)?.type
-      : step === "element" && (term.kind === "list" || term.kind === "set" || term.kind === "dict")
-        ? term.element
-        : undefined;
-  return at?.kind === "ref" ? at.place : null;
 }

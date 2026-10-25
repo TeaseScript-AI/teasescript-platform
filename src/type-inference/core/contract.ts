@@ -2542,7 +2542,9 @@ export class Contract {
       pending.push({ kind: "value", g: null, value: literal, path: "" });
     else
       for (const d of [...(definitions.cellDefs.get(literal) ?? [])].reverse())
-        pending.push({ kind: "value", g: d, value: d.value!, path: "" });
+        // a literal's element that admission rejected is ignored (A6, ADR 0021 1.3)
+        if (this.pass.lists.live(d))
+          pending.push({ kind: "value", g: d, value: d.value!, path: "" });
     while (pending.length > 0) {
       const task = pending.pop()!;
       program.work.charge("invSteps");
@@ -2608,7 +2610,7 @@ export class Contract {
       const { site, term, path } = task;
       if (term.kind === "ref") {
         for (const d of [...(definitions.cellDefs.get(term.place) ?? [])].reverse())
-          pending.push({ kind: "value", g: d, value: d.value!, path });
+          if (this.pass.lists.live(d)) pending.push({ kind: "value", g: d, value: d.value!, path });
         continue;
       }
       let kinds = index.terms.get(path);
