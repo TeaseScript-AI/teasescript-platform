@@ -1603,6 +1603,22 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
+    name: "A5-shared-presets",
+    measures:
+      "A2, A5: a k-field record replaced k times by copies of one record, then by external data, every field read",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "0")}}`,
+          "let state = seed",
+          rows(k, () => "if flagHost { state = seed }"),
+          "state = hostValue",
+          rows(k, (i) => `let shown${i}: integer = state.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
     name: "A4-wide-copies",
     measures:
       "A4, §8 width: one record of k fields, each a copy of one written binding, every field read",
@@ -1687,8 +1703,9 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "A6-chain",
     measures: "A6: a chain of k rejections, every copy taken after its source's misfit",
-    // 121,683 / 452,803 / 1,744,803 units at k = 32 … 128, k + 2 passes
-    measured: 3.91,
+    // 496,487 / 1,914,055 units at k = 64, 128, k + 2 passes, each charging its index of the previous pass's
+    // rejections (3.9103; 3.908 before that index was charged)
+    measured: 3.92,
     program: (k) =>
       main(
         lines(

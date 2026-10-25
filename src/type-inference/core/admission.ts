@@ -105,6 +105,8 @@ export class Admission {
   /** The boundary checks no store into a place owes: host data read where it is consumed, an ingress read (C9, F18). */
   readonly readChecks: Obligation[] = [];
   readonly #rejectedKeys = new Set<Key>();
+  /** The previous pass's rejected stores by the place and path each was rejected at (A6). */
+  readonly #retaken = new Map<Key, Definition[]>();
   readonly #a4Keys = new Set<Key>();
   readonly #copies = new Map<
     PlaceId,
@@ -115,6 +117,10 @@ export class Admission {
   readonly #copiesByPath = new Map<
     PlaceId,
     Map<string, { readonly order: number; readonly term: TypeTerm }[]>
+  >();
+  readonly #takeables = new WeakMap<
+    ReadonlySet<Definition | null>,
+    { readonly wholes: readonly Definition[]; readonly adds: readonly Definition[] }[]
   >();
   readonly #pending = new Map<number, Definition>();
   readonly #typed: Definition[] = [];
@@ -137,9 +143,20 @@ export class Admission {
     readonly rejected: ReadonlyMap<number, ReadonlySet<Key>>,
     readonly cycling: ReadonlySet<number>,
   ) {
-    const { definitions } = pass;
-    for (const list of definitions.byKey.values())
-      for (const d of list) if (rejected.has(d.uid)) this.#rejectedKeys.add(d.key);
+    const { definitions, program } = pass;
+    for (const list of definitions.byKey.values()) {
+      program.work.charge("indexSteps", list.length);
+      for (const d of list) {
+        const keys = rejected.get(d.uid);
+        if (keys === undefined) continue;
+        this.#rejectedKeys.add(d.key);
+        for (const key of keys) {
+          const retaken = this.#retaken.get(key);
+          if (retaken === undefined) this.#retaken.set(key, [d]);
+          else retaken.push(d);
+        }
+      }
+    }
     for (const d of definitions.storeDefs)
       if (d.kind === "whole" && d.value !== undefined)
         for (const { path } of this.#writtenCopies(d.value))
@@ -320,6 +337,7 @@ export class Admission {
       let plain = true;
       const all: ItemTag[] = [];
       for (const { d, at } of direct) {
+        work.charge("checks");
         // a multi-site argument decides nothing (F21); a single-site one is the parameter's start value
         if (d.how === "argument" && !lists.singleSite(d.fn)) continue;
         const kinds = at.length === 0 ? this.#quietKinds(d.value) : null;
@@ -355,43 +373,46 @@ export class Admission {
     if (tags === null) {
       // A2: the earliest definite contribution in source order decides, a lazy merge of the direct stores and the
       // prefixes' whole stores and adds; A4: a copy of a written binding is decided by its type
-      const lists_: Candidate[][] = [
-        direct
-          .filter(
-            (candidate) =>
-              ((candidate.d.how !== "argument" || lists.singleSite(candidate.d.fn)) &&
-                candidate.d.kind !== "add") ||
-              candidate.at.length === 0,
-          )
-          .map((candidate) => ({ d: candidate.d, at: candidate.at }))
-          .sort((a, b) => this.sourceOrder(a.d) - this.sourceOrder(b.d)),
-        ...prefixes.map(({ key: prefix, rest }) =>
-          this.#wholeOf(prefix, false).map((d) => ({ d, at: rest })),
-        ),
-        ...prefixes
-          .filter(({ rest }) => rest[0] === "element")
-          .map(({ key: prefix, rest }) =>
-            this.#wholeOf(prefix, true).map((d) => ({
-              d,
-              at: d.how !== "elements" ? rest.slice(1) : rest,
-            })),
-          ),
-      ];
-      const positions = lists_.map(() => 0);
+      // (each list is in source order and read only as far as the scan goes: a prefix's stores are listed once per pass)
+      const own = direct.filter(
+        (candidate) =>
+          ((candidate.d.how !== "argument" || lists.singleSite(candidate.d.fn)) &&
+            candidate.d.kind !== "add") ||
+          candidate.at.length === 0,
+      );
+      own.sort((a, b) => this.sourceOrder(a.d) - this.sourceOrder(b.d));
+      work.charge("checks", direct.length + sortCost(own.length));
+      const scans: {
+        readonly ds: readonly Definition[];
+        readonly at: (index: number) => readonly string[];
+      }[] = [{ ds: own.map((candidate) => candidate.d), at: (index) => own[index]!.at }];
+      for (const { key: prefix, rest } of prefixes)
+        scans.push({ ds: this.#wholeOf(prefix, false), at: () => rest });
+      for (const { key: prefix, rest } of prefixes)
+        if (rest[0] === "element") {
+          const adds = this.#wholeOf(prefix, true);
+          scans.push({
+            ds: adds,
+            at: (index) => (adds[index]!.how !== "elements" ? rest.slice(1) : rest),
+          });
+        }
+      const positions = scans.map(() => 0);
       let sawNull = false;
       for (;;) {
         let best = -1;
-        for (let index = 0; index < lists_.length; index += 1)
+        for (let index = 0; index < scans.length; index += 1)
           if (
-            positions[index]! < lists_[index]!.length &&
+            positions[index]! < scans[index]!.ds.length &&
             (best < 0 ||
-              this.sourceOrder(lists_[index]![positions[index]!]!.d) <
-                this.sourceOrder(lists_[best]![positions[best]!]!.d))
+              this.sourceOrder(scans[index]!.ds[positions[index]!]!) <
+                this.sourceOrder(scans[best]!.ds[positions[best]!]!))
           )
             best = index;
         if (best < 0) break;
-        const { d, at } = lists_[best]![positions[best]!++]!;
-        work.charge("checks");
+        const position = positions[best]!++;
+        const d = scans[best]!.ds[position]!;
+        const at = scans[best]!.at(position);
+        work.charge("checks", scans.length);
         const copied = d.value === undefined ? null : this.#writtenCopyAt(d.value, at);
         if (copied !== null) {
           const copiedTags = typeTags(copied);
@@ -433,6 +454,7 @@ export class Admission {
       );
     // A5: the direct stores, and the prefixes' whole stores whose source's contract at the path holds an offending kind
     const candidates = new Map<string, Candidate>();
+    work.charge("checks", direct.length);
     for (const candidate of direct)
       if (candidate.d.how !== "argument" || transfer || lists.singleSite(candidate.d.fn))
         candidates.set(`${candidate.d.uid}|${candidate.at.join(".")}`, candidate);
@@ -442,35 +464,36 @@ export class Admission {
           candidates.set(`${d.uid}|${path.join(".")}`, { d, at: path });
     for (const { key: prefix, rest } of prefixes) {
       const stored = contract.prefixStores(prefix);
-      // (a read of a host value below its store owes nothing at a decided type: A7's whole-store exception leaves it the
-      // boundary check its own path's candidate owes, C9, and it holds no kind and no `null`; a written type checks it)
-      const take = (list: Iterable<Definition | null>, again: boolean): void => {
-        for (const d of list)
-          if (
-            d !== null &&
-            (byWritten || !this.#hostRead(d.value)) &&
-            (again || lists.live(d)) &&
-            (d.kind === "whole" || (d.kind === "add" && rest[0] === "element")) &&
-            (again ||
-              (d.how !== "parameter default" &&
-                d.how !== "return" &&
-                (d.how !== "argument" || lists.singleSite(d.fn))))
-          ) {
-            const at = d.kind === "add" && d.how !== "elements" ? rest.slice(1) : rest;
-            candidates.set(`${d.uid}|${at.join(".")}`, { d, at });
-          }
+      const take = (d: Definition): void => {
+        const at = d.kind === "add" && d.how !== "elements" ? rest.slice(1) : rest;
+        candidates.set(`${d.uid}|${at.join(".")}`, { d, at });
       };
-      for (const entry of stored.list)
-        if (offends(this.#run(contract.entryAt(entry, rest)))) take(entry.ds, false);
-      for (const sub of contract.relevantSubs(stored, rest))
-        if (offends(this.#run(contract.subAt(sub.key, rest)))) take(sub.defs, false);
+      const takeAll = (stores: ReadonlySet<Definition | null>): void => {
+        const { wholes, adds } = this.#takeable(stores, byWritten);
+        work.charge("checks", wholes.length);
+        for (const d of wholes) take(d);
+        if (rest[0] !== "element") return;
+        work.charge("checks", adds.length);
+        for (const d of adds) take(d);
+      };
+      for (const entry of stored.list) {
+        work.charge("checks");
+        if (offends(this.#run(contract.entryAt(entry, rest)))) takeAll(entry.ds);
+      }
+      for (const sub of contract.relevantSubs(stored, rest)) {
+        work.charge("checks");
+        if (offends(this.#run(contract.subAt(sub.key, rest)))) takeAll(sub.defs);
+      }
       // A6: a rejected store is decided again in every pass, where it was rejected
-      take(
-        (definitions.byKey.get(prefix) ?? []).filter(
-          (d) => this.rejected.get(d.uid)?.has(key) === true,
-        ),
-        true,
-      );
+      const retaken = this.#retaken.get(key) ?? [];
+      work.charge("checks", retaken.length);
+      for (const d of retaken)
+        if (
+          d.key === prefix &&
+          (byWritten || !this.#hostRead(d.value)) &&
+          (d.kind === "whole" || (d.kind === "add" && rest[0] === "element"))
+        )
+          take(d);
     }
     const ordered = [...candidates.values()].sort(
       (a, b) => this.sourceOrder(a.d) - this.sourceOrder(b.d),
@@ -528,7 +551,9 @@ export class Admission {
     let list = this.#whole.get(memoKey);
     if (list === undefined) {
       const { definitions, lists, program } = this.pass;
-      list = (definitions.byKey.get(key) ?? []).filter(
+      const stores = definitions.byKey.get(key) ?? [];
+      program.work.charge("indexSteps", stores.length);
+      list = stores.filter(
         (d) =>
           lists.live(d) &&
           !this.#hostRead(d.value) &&
@@ -544,6 +569,39 @@ export class Admission {
       this.#whole.set(memoKey, list);
     }
     return list;
+  }
+
+  /**
+   * A5: the stores that brought a prefix's source, as candidates: live, no parameter default, no return, no multi-site
+   * argument (F21), and a read of a host value only against a written type (a read of one below its store owes nothing
+   * at a decided type: A7's whole-store exception leaves it the boundary check its own path's candidate owes, C9, and it
+   * holds no kind and no `null`); the whole stores and the adds, once per set of stores.
+   */
+  #takeable(
+    stores: ReadonlySet<Definition | null>,
+    byWritten: boolean,
+  ): { readonly wholes: readonly Definition[]; readonly adds: readonly Definition[] } {
+    let known = this.#takeables.get(stores);
+    if (known === undefined) this.#takeables.set(stores, (known = []));
+    const index = byWritten ? 1 : 0;
+    const found = known[index];
+    if (found !== undefined) return found;
+    const { lists, program } = this.pass;
+    program.work.charge("indexSteps", stores.size);
+    const wholes: Definition[] = [];
+    const adds: Definition[] = [];
+    for (const d of stores)
+      if (
+        d !== null &&
+        (byWritten || !this.#hostRead(d.value)) &&
+        lists.live(d) &&
+        d.how !== "parameter default" &&
+        d.how !== "return" &&
+        (d.how !== "argument" || lists.singleSite(d.fn))
+      )
+        if (d.kind === "whole") wholes.push(d);
+        else if (d.kind === "add") adds.push(d);
+    return (known[index] = { wholes, adds });
   }
 
   /** Whether a value is a read of a host value: external data, with no kind and no `null` at any path. */
