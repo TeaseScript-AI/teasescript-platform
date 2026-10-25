@@ -19,7 +19,7 @@ import { staticVisibleText } from "../../static-evaluation.js";
 import { compileChild, type CompileTask } from "../continuation.js";
 import { showButtonOptions } from "../../expression-children.js";
 import type { InstructionCompiler, LoweredExpression } from "./compiler.js";
-import { copySpan } from "./expression-plans.js";
+import { planSpan } from "./expression-plans.js";
 
 // Buttons, popups, web addresses, exports, and what every interaction shares: its speaker, operands, and result.
 
@@ -42,7 +42,7 @@ export function* lowerShowButtonTask(
       speaker: parts.speaker?.name ?? null,
       expectedResult,
       ui: { kind: "button", buttonLabel: staticLabel, accessibleName },
-      span: copySpan(parts.span),
+      span: planSpan(parts.span),
     } as const;
     if (valueWanted) return emitResultInteraction(compiler, instruction, parts.span);
     compiler.instructions.push({ kind: "interaction", ...instruction, destinationTemporary: null });
@@ -99,7 +99,7 @@ export function* lowerShowButtonTask(
       destinationTemporary: null,
       expectedResult: "none",
       preparedUi,
-      span: copySpan(parts.span),
+      span: planSpan(parts.span),
     });
   }
   compiler.emitTemporaryCleanup(preparedTemporaryIds, parts.span);
@@ -134,7 +134,7 @@ export function* lowerShowPopupTask(
       speaker: null,
       expectedResult,
       ui: { kind: "popup", message: staticMessage, buttonText: staticButtonText, accessibleName },
-      span: copySpan(parts.span),
+      span: planSpan(parts.span),
     } as const;
     if (valueWanted) return emitResultInteraction(compiler, instruction, parts.span);
     compiler.instructions.push({ kind: "interaction", ...instruction, destinationTemporary: null });
@@ -177,7 +177,7 @@ export function* lowerShowPopupTask(
       destinationTemporary: null,
       expectedResult: "none",
       preparedUi,
-      span: copySpan(parts.span),
+      span: planSpan(parts.span),
     });
   }
   compiler.emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], parts.span);
@@ -230,7 +230,7 @@ export function* lowerOpenUrlTask(
         alwaysButton: staticAlways,
         accessibleName,
       },
-      span: copySpan(statement.span),
+      span: planSpan(statement.span),
     });
     return;
   }
@@ -262,7 +262,7 @@ export function* lowerOpenUrlTask(
       ...(alwaysButtonTemporary === undefined ? {} : { alwaysButtonTemporary }),
       accessibleName,
     },
-    span: copySpan(statement.span),
+    span: planSpan(statement.span),
   });
   compiler.emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], statement.span);
 }
@@ -311,7 +311,7 @@ export function* lowerExportTextTask(
       ...(fileNameTemporary === undefined ? {} : { fileNameTemporary }),
       accessibleName: { kind: "localizedDefault", key: "continue" },
     },
-    span: copySpan(statement.span),
+    span: planSpan(statement.span),
   });
   compiler.emitTemporaryCleanup([speakerTemporary, ...temporaries.values()], statement.span);
 }
@@ -353,7 +353,7 @@ export function emitPreparedResultInteraction(
     destinationTemporary: transientTemporary,
     expectedResult,
     preparedUi,
-    span: copySpan(span),
+    span: planSpan(span),
   });
   return consumeInteractionResult(compiler, transientTemporary, span);
 }
@@ -367,17 +367,17 @@ export function consumeInteractionResult(
   compiler.instructions.push({
     kind: "storeTemporary",
     temporaryId: ordinaryTemporary,
-    value: { kind: "temporary", temporaryId: transientTemporary, span: copySpan(span) },
+    value: { kind: "temporary", temporaryId: transientTemporary, span: planSpan(span) },
     expectBoolean: false,
-    span: copySpan(span),
+    span: planSpan(span),
   });
   compiler.instructions.push({
     kind: "clearTemporary",
     temporaryId: transientTemporary,
-    span: copySpan(span),
+    span: planSpan(span),
   });
   return {
-    plan: { kind: "temporary", temporaryId: ordinaryTemporary, span: copySpan(span) },
+    plan: { kind: "temporary", temporaryId: ordinaryTemporary, span: planSpan(span) },
     temporaryIds: [ordinaryTemporary],
   };
 }
@@ -392,7 +392,7 @@ export function prepareInteractionSpeaker(
     kind: "prepareInteractionSpeaker",
     speaker,
     destinationTemporary,
-    span: copySpan(span),
+    span: planSpan(span),
   });
   return destinationTemporary;
 }
@@ -436,7 +436,7 @@ export function materializeDedicatedInteractionValue(
     temporaryId,
     value: lowered.plan,
     expectBoolean: false,
-    span: copySpan(span),
+    span: planSpan(span),
   });
   compiler.emitTemporaryCleanup(lowered.temporaryIds, span);
   return { temporaryId };

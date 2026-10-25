@@ -116,7 +116,8 @@ export function unitOf(expression: UnitExpression): UnitPlan {
     : { calendar: false, unit: expression.unit };
 }
 
-export function copySpan(span: SourceSpan): PlanSourceLocation {
+/** The plan location of a source span, as the plan keeps every span. */
+export function planSpan(span: SourceSpan): PlanSourceLocation {
   return sourceSpanToPlanLocation(span);
 }
 
@@ -129,19 +130,19 @@ function assembleExpression(
     case "booleanLiteral":
     case "nullLiteral":
     case "numberLiteral":
-      return { kind: "literal", value: expression.value, span: copySpan(expression.span) };
+      return { kind: "literal", value: expression.value, span: planSpan(expression.span) };
     case "regexLiteral":
       return {
         kind: "regex",
         source: expression.source,
         flags: canonicalRegexFlags(expression.flags),
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     case "durationLiteral": {
       const value = durationLiteralValue(expression);
       // The type checker rejects a calendar amount that is not whole before lowering.
       if (typeof value === "string") throw new Error(`Invalid duration literal: ${value}.`);
-      return { ...value, span: copySpan(expression.span) };
+      return { ...value, span: planSpan(expression.span) };
     }
     case "stringLiteral":
       return expression.parts.some((part) => part.kind === "stringInterpolation")
@@ -151,29 +152,29 @@ function assembleExpression(
               part.kind === "stringText"
                 ? part.value.length === 0
                   ? []
-                  : [{ kind: "text", value: part.value, span: copySpan(part.span) }]
+                  : [{ kind: "text", value: part.value, span: planSpan(part.span) }]
                 : [
                     {
                       kind: "expression",
                       expression: child(part.expression),
-                      span: copySpan(part.span),
+                      span: planSpan(part.span),
                     },
                   ],
             ),
-            span: copySpan(expression.span),
+            span: planSpan(expression.span),
           }
         : {
             kind: "literal",
             value: expression.parts
               .map((part) => (part.kind === "stringText" ? part.value : ""))
               .join(""),
-            span: copySpan(expression.span),
+            span: planSpan(expression.span),
           };
     case "identifier":
       // `debugMode` is protected, so no binding can have its name.
       if (expression.name === "debugMode")
-        return { kind: "debugMode", span: copySpan(expression.span) };
-      return { kind: "identifier", name: expression.name, span: copySpan(expression.span) };
+        return { kind: "debugMode", span: planSpan(expression.span) };
+      return { kind: "identifier", name: expression.name, span: planSpan(expression.span) };
     case "parenthesizedExpression":
       return child(expression.expression);
     case "listLiteral":
@@ -181,7 +182,7 @@ function assembleExpression(
       return {
         kind: expression.kind === "setLiteral" ? "set" : "list",
         elements: expression.elements.map(child),
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     case "objectLiteral":
       return {
@@ -189,9 +190,9 @@ function assembleExpression(
         properties: expression.properties.map((property) => ({
           name: property.name.name,
           value: child(property.value),
-          span: copySpan(property.span),
+          span: planSpan(property.span),
         })),
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     case "dictLiteral":
       return {
@@ -199,29 +200,29 @@ function assembleExpression(
         entries: expression.entries.map((entry) => ({
           key: child(entry.key),
           value: child(entry.value),
-          span: copySpan(entry.span),
+          span: planSpan(entry.span),
         })),
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     case "propertyAccessExpression":
       if (isPlayerProfile(expression.object))
         return {
           kind: "playerProfileField",
           name: expression.property.name,
-          span: copySpan(expression.span),
+          span: planSpan(expression.span),
         };
       return {
         kind: "property",
         object: child(expression.object),
         name: expression.property.name,
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     case "indexExpression":
       return {
         kind: "index",
         object: child(expression.object),
         index: child(expression.index),
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     case "callExpression":
       if (isTakePhotoCall(expression))
@@ -237,16 +238,16 @@ function assembleExpression(
         callee: child(expression.callee),
         arguments: expression.arguments.map((argument) =>
           argument.kind === "positionalArgument"
-            ? { kind: "positional", value: child(argument.value), span: copySpan(argument.span) }
+            ? { kind: "positional", value: child(argument.value), span: planSpan(argument.span) }
             : {
                 kind: "named",
                 name: argument.name.name,
                 value: child(argument.value),
-                span: copySpan(argument.span),
+                span: planSpan(argument.span),
               },
         ),
         ...withTypeCheck(typeChecks.get(expression)),
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     case "unaryExpression": {
       const normalized = normalizeUnaryExpression(expression);
@@ -256,7 +257,7 @@ function assembleExpression(
           kind: "unary",
           operator: normalized.operators[index]!,
           operand: plan,
-          span: copySpan(expression.span),
+          span: planSpan(expression.span),
         };
       }
       return plan;
@@ -266,14 +267,14 @@ function assembleExpression(
         kind: "unit",
         operand: child(expression.operand),
         ...unitOf(expression),
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     case "angleExpression":
       return {
         kind: "angleUnit",
         operand: child(expression.operand),
         unit: expression.unit,
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     case "binaryExpression":
       return {
@@ -281,7 +282,7 @@ function assembleExpression(
         operator: expression.operator,
         left: child(expression.left),
         right: child(expression.right),
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     case "rangeExpression":
       return {
@@ -289,7 +290,7 @@ function assembleExpression(
         start: child(expression.start),
         end: child(expression.end),
         inclusive: expression.inclusive,
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     case "loadExpression":
       return {
@@ -297,7 +298,7 @@ function assembleExpression(
         key: child(expression.key),
         default: expression.defaultValue === null ? null : child(expression.defaultValue),
         type: typeChecks.get(expression)?.type ?? null,
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     case "tagQueryExpression":
       return tagQueryPlan(expression, tagQueryOperands(expression).map(child));
@@ -336,7 +337,7 @@ export function tagQueryPlan(
             ? { kind: "tagList", option: step.option }
             : { kind: step.kind },
     ),
-    span: copySpan(expression.span),
+    span: planSpan(expression.span),
   };
 }
 
@@ -350,12 +351,12 @@ export function typeTestPlan(
 ): ExpressionPlan {
   const type = typePlan(typeFromAnnotation(expression.type));
   return type === null
-    ? { kind: "literal", value: !expression.negated, span: copySpan(expression.span) }
+    ? { kind: "literal", value: !expression.negated, span: planSpan(expression.span) }
     : {
         kind: "typeTest",
         value,
         type,
         negated: expression.negated,
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
 }

@@ -72,7 +72,7 @@ import {
   compileExpression,
   withTypeCheck,
   unitOf,
-  copySpan,
+  planSpan,
   tagQueryPlan,
   typeTestPlan,
 } from "./expression-plans.js";
@@ -186,7 +186,7 @@ export class InstructionCompiler {
         kind: "transfer",
         mode,
         destination: { value: lowered.plan },
-        span: copySpan(span),
+        span: planSpan(span),
       });
       // A call returns here with the temporaries of its target; a goto leaves them behind.
       if (mode === "call") this.emitTemporaryCleanup(lowered.temporaryIds, span);
@@ -202,7 +202,7 @@ export class InstructionCompiler {
       kind: "transfer",
       mode,
       destination: { file: -1, target: -1 },
-      span: copySpan(span),
+      span: planSpan(span),
     });
   }
 
@@ -264,7 +264,7 @@ export class InstructionCompiler {
         value: compileExpression(declaration.initial, this.typeChecks),
         ...withTypeCheck(this.typeChecks.get(declaration)),
         file,
-        span: copySpan(declaration.span),
+        span: planSpan(declaration.span),
       });
       return;
     }
@@ -274,10 +274,10 @@ export class InstructionCompiler {
       properties: declaration.properties.map((property) => ({
         name: property.name.name,
         value: compileExpression(property.value, this.typeChecks),
-        span: copySpan(property.span),
+        span: planSpan(property.span),
       })),
       file,
-      span: copySpan(declaration.span),
+      span: planSpan(declaration.span),
     });
   }
 
@@ -344,7 +344,7 @@ export class InstructionCompiler {
         this.instructions.push({
           kind: "setDefaultSpeaker",
           name: statement.speaker.name,
-          span: copySpan(statement.span),
+          span: planSpan(statement.span),
         });
         return;
       case "sayStatement":
@@ -362,7 +362,7 @@ export class InstructionCompiler {
           unit: statement.unit,
           display: "hidden",
           label: null,
-          span: copySpan(statement.span),
+          span: planSpan(statement.span),
         });
         this.emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
@@ -377,26 +377,26 @@ export class InstructionCompiler {
         yield* compileChild(lowerMediaTask(this, statement, false));
         return;
       case "stopAudioStatement":
-        this.instructions.push({ kind: "stopAudio", span: copySpan(statement.span) });
+        this.instructions.push({ kind: "stopAudio", span: planSpan(statement.span) });
         return;
       case "showImageStatement": {
         const lowered = this.lowerExpression(statement.image);
         this.instructions.push({
           kind: "showImage",
           image: lowered.plan,
-          span: copySpan(statement.span),
+          span: planSpan(statement.span),
         });
         this.emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
       }
       case "hideImageStatement":
-        this.instructions.push({ kind: "showImage", image: null, span: copySpan(statement.span) });
+        this.instructions.push({ kind: "showImage", image: null, span: planSpan(statement.span) });
         return;
       case "showCameraStatement":
         this.#lowerShowCamera(statement.placement, false, statement.span);
         return;
       case "hideCameraStatement":
-        this.instructions.push({ kind: "hideCamera", span: copySpan(statement.span) });
+        this.instructions.push({ kind: "hideCamera", span: planSpan(statement.span) });
         return;
       case "showPopupStatement":
         yield* compileChild(lowerShowPopupTask(this, statement, false));
@@ -415,7 +415,7 @@ export class InstructionCompiler {
           kind: "storageWrite",
           value: value!.plan,
           key: key!.plan,
-          span: copySpan(statement.span),
+          span: planSpan(statement.span),
         });
         this.emitTemporaryCleanup([...value!.temporaryIds, ...key!.temporaryIds], statement.span);
         return;
@@ -426,16 +426,16 @@ export class InstructionCompiler {
           kind: "storageWrite",
           value: null,
           key: key.plan,
-          span: copySpan(statement.span),
+          span: planSpan(statement.span),
         });
         this.emitTemporaryCleanup(key.temporaryIds, statement.span);
         return;
       }
       case "exitStatement":
-        this.instructions.push({ kind: "exit", span: copySpan(statement.span) });
+        this.instructions.push({ kind: "exit", span: planSpan(statement.span) });
         return;
       case "endStatement":
-        this.instructions.push({ kind: "end", span: copySpan(statement.span) });
+        this.instructions.push({ kind: "end", span: planSpan(statement.span) });
         return;
       case "labelStatement":
         this.labels.push({ name: statement.name.name, instruction: this.instructions.length });
@@ -446,7 +446,7 @@ export class InstructionCompiler {
             instruction: this.instructions.length,
             label: statement.target.label.name,
           });
-          this.instructions.push({ kind: "goto", target: -1, span: copySpan(statement.span) });
+          this.instructions.push({ kind: "goto", target: -1, span: planSpan(statement.span) });
           return;
         }
         this.#emitTransfer("goto", statement.target, statement.span);
@@ -468,7 +468,7 @@ export class InstructionCompiler {
           name: statement.name.name,
           value: lowered.plan,
           ...withTypeCheck(this.typeChecks.get(statement)),
-          span: copySpan(statement.span),
+          span: planSpan(statement.span),
         });
         this.emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
@@ -479,7 +479,7 @@ export class InstructionCompiler {
           this.instructions.push({
             kind: "validateAssignmentTarget",
             target: target.plan,
-            span: copySpan(statement.target.span),
+            span: planSpan(statement.target.span),
           });
         }
         // A compound assignment reads the current value before any instruction-emitting operand runs.
@@ -499,14 +499,14 @@ export class InstructionCompiler {
                 operator: statement.operator === "+=" ? "+" : "-",
                 left: current?.plan ?? target.plan,
                 right: value.plan,
-                span: copySpan(statement.span),
+                span: planSpan(statement.span),
               };
         this.instructions.push({
           kind: "assign",
           target: target.plan,
           value: assigned,
           ...withTypeCheck(this.typeChecks.get(statement)),
-          span: copySpan(statement.span),
+          span: planSpan(statement.span),
         });
         this.emitTemporaryCleanup(
           [...target.temporaryIds, ...(current?.temporaryIds ?? []), ...value.temporaryIds],
@@ -516,14 +516,14 @@ export class InstructionCompiler {
       }
       case "expressionStatement": {
         if (copiesPlayerProfile(statement.expression)) {
-          this.instructions.push({ kind: "copyPlayerProfile", span: copySpan(statement.span) });
+          this.instructions.push({ kind: "copyPlayerProfile", span: planSpan(statement.span) });
           return;
         }
         const lowered = this.lowerExpression(statement.expression);
         this.instructions.push({
           kind: "evaluate",
           expression: lowered.plan,
-          span: copySpan(statement.span),
+          span: planSpan(statement.span),
         });
         this.emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
@@ -586,14 +586,14 @@ export class InstructionCompiler {
           action: statement.kind === "breakStatement" ? "break" : "continue",
           loopId: loop.loopId,
           target: statement.kind === "breakStatement" ? -1 : loop.continueTarget,
-          span: copySpan(statement.span),
+          span: planSpan(statement.span),
         });
         if (statement.kind === "breakStatement") loop.breaks.push(index);
         return;
       }
       case "returnStatement": {
         if (statement.value === null) {
-          this.instructions.push({ kind: "returnVoid", span: copySpan(statement.span) });
+          this.instructions.push({ kind: "returnVoid", span: planSpan(statement.span) });
           return;
         }
         const lowered = this.lowerExpression(statement.value);
@@ -601,7 +601,7 @@ export class InstructionCompiler {
           kind: "returnValue",
           value: lowered.plan,
           ...withTypeCheck(this.typeChecks.get(statement)),
-          span: copySpan(statement.span),
+          span: planSpan(statement.span),
         });
         return;
       }
@@ -622,12 +622,12 @@ export class InstructionCompiler {
       kind: "showCamera",
       placement,
       destinationTemporary,
-      span: copySpan(span),
+      span: planSpan(span),
     });
     return destinationTemporary === null
       ? null
       : {
-          plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(span) },
+          plan: { kind: "temporary", temporaryId: destinationTemporary, span: planSpan(span) },
           temporaryIds: [destinationTemporary],
         };
   }
@@ -650,17 +650,17 @@ export class InstructionCompiler {
     this.instructions.push({
       kind: "beginFunctionDefaults",
       functionId: id,
-      span: copySpan(handler.span),
+      span: planSpan(handler.span),
     });
     this.instructions.push({
       kind: "enterFunctionBody",
       functionId: id,
-      span: copySpan(handler.span),
+      span: planSpan(handler.span),
     });
     const bodyEntryInstruction = this.instructions.length;
     this.compileStatements(handler.statements);
     const implicitReturnInstruction = this.instructions.length;
-    this.instructions.push({ kind: "returnVoid", span: copySpan(handler.span) });
+    this.instructions.push({ kind: "returnVoid", span: planSpan(handler.span) });
     this.#global = false;
     this.functions.push({
       id,
@@ -673,13 +673,13 @@ export class InstructionCompiler {
           : registered.owner === "media"
             ? "media cue"
             : "permanent button",
-      declarationSpan: copySpan(handler.span),
+      declarationSpan: planSpan(handler.span),
       parameters: [],
       entryInstruction,
       bodyEntryInstruction,
       implicitReturnInstruction,
       endInstruction: this.instructions.length,
-      bodySpan: copySpan(handler.span),
+      bodySpan: planSpan(handler.span),
     });
   }
 
@@ -695,13 +695,13 @@ export class InstructionCompiler {
         kind: "bindSuppliedParameter",
         functionId: registered.id,
         parameterIndex,
-        span: copySpan(parameter.span),
+        span: planSpan(parameter.span),
       });
     });
     this.instructions.push({
       kind: "beginFunctionDefaults",
       functionId: registered.id,
-      span: copySpan(declaration.span),
+      span: planSpan(declaration.span),
     });
     declaration.parameters.forEach((parameter, parameterIndex) => {
       const prepareIndex = this.instructions.length;
@@ -710,7 +710,7 @@ export class InstructionCompiler {
         functionId: registered.id,
         parameterIndex,
         target: -1,
-        span: copySpan(parameter.span),
+        span: planSpan(parameter.span),
       };
       this.instructions.push(prepareInstruction);
       if (parameter.defaultValue !== null) {
@@ -721,7 +721,7 @@ export class InstructionCompiler {
           parameterIndex,
           value: lowered.plan,
           ...withTypeCheck(this.typeChecks.get(parameter)),
-          span: copySpan(parameter.span),
+          span: planSpan(parameter.span),
         });
         this.emitTemporaryCleanup(lowered.temporaryIds, parameter.span);
       }
@@ -730,12 +730,12 @@ export class InstructionCompiler {
     this.instructions.push({
       kind: "enterFunctionBody",
       functionId: registered.id,
-      span: copySpan(declaration.body.span),
+      span: planSpan(declaration.body.span),
     });
     const bodyEntryInstruction = this.instructions.length;
     this.compileStatements(declaration.body.statements);
     const implicitReturnInstruction = this.instructions.length;
-    this.instructions.push({ kind: "returnVoid", span: copySpan(declaration.body.span) });
+    this.instructions.push({ kind: "returnVoid", span: planSpan(declaration.body.span) });
     const endInstruction = this.instructions.length;
     this.functions.push({
       id: registered.id,
@@ -743,19 +743,19 @@ export class InstructionCompiler {
       global: declaration.global,
       selfHandle: null,
       name: declaration.name.name,
-      declarationSpan: copySpan(declaration.span),
+      declarationSpan: planSpan(declaration.span),
       parameters: declaration.parameters.map((parameter, index) => ({
         name: parameter.name.name,
         index,
         hasDefault: parameter.defaultValue !== null,
-        declarationSpan: copySpan(parameter.span),
-        defaultSpan: parameter.defaultValue === null ? null : copySpan(parameter.defaultValue.span),
+        declarationSpan: planSpan(parameter.span),
+        defaultSpan: parameter.defaultValue === null ? null : planSpan(parameter.defaultValue.span),
       })),
       entryInstruction,
       bodyEntryInstruction,
       implicitReturnInstruction,
       endInstruction,
-      bodySpan: copySpan(declaration.body.span),
+      bodySpan: planSpan(declaration.body.span),
     });
   }
 
@@ -823,7 +823,7 @@ export class InstructionCompiler {
         capture: "photo",
         tags: tags?.plan ?? null,
         destinationTemporary: transientTemporary,
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       });
       const result = consumeInteractionResult(this, transientTemporary, expression.span);
       if (tags !== null) this.emitTemporaryCleanup(tags.temporaryIds, expression.span);
@@ -895,14 +895,14 @@ export class InstructionCompiler {
           if (part.kind === "stringText") {
             return part.value.length === 0
               ? []
-              : [{ kind: "text", value: part.value, span: copySpan(part.span) }];
+              : [{ kind: "text", value: part.value, span: planSpan(part.span) }];
           }
           const lowered = loweredInterpolations[interpolationIndex++]!;
           for (const temporaryId of lowered.temporaryIds) ids.push(temporaryId);
-          return [{ kind: "expression", expression: lowered.plan, span: copySpan(part.span) }];
+          return [{ kind: "expression", expression: lowered.plan, span: planSpan(part.span) }];
         });
         return {
-          plan: { kind: "template", parts, span: copySpan(expression.span) },
+          plan: { kind: "template", parts, span: planSpan(expression.span) },
           temporaryIds: ids,
         };
       }
@@ -912,7 +912,7 @@ export class InstructionCompiler {
             plan: {
               kind: "temporary",
               temporaryId: this.contextualSpeakerTemporary,
-              span: copySpan(expression.span),
+              span: planSpan(expression.span),
             },
             temporaryIds: [],
           };
@@ -938,9 +938,9 @@ export class InstructionCompiler {
             entries: expression.entries.map((entry, index) => ({
               key: parts[2 * index]!.plan,
               value: parts[2 * index + 1]!.plan,
-              span: copySpan(entry.span),
+              span: planSpan(entry.span),
             })),
-            span: copySpan(expression.span),
+            span: planSpan(expression.span),
           },
           temporaryIds: parts.flatMap((part) => part.temporaryIds),
         };
@@ -951,7 +951,7 @@ export class InstructionCompiler {
             plan: {
               kind: "playerProfileField",
               name: expression.property.name,
-              span: copySpan(expression.span),
+              span: planSpan(expression.span),
             },
             temporaryIds: [],
           };
@@ -961,7 +961,7 @@ export class InstructionCompiler {
             kind: "property",
             object: object.plan,
             name: expression.property.name,
-            span: copySpan(expression.span),
+            span: planSpan(expression.span),
           },
           temporaryIds: object.temporaryIds,
         };
@@ -977,7 +977,7 @@ export class InstructionCompiler {
             kind: "index",
             object: object.plan,
             index: index.plan,
-            span: copySpan(expression.span),
+            span: planSpan(expression.span),
           },
           temporaryIds: [...object.temporaryIds, ...index.temporaryIds],
         };
@@ -988,7 +988,7 @@ export class InstructionCompiler {
         if (lazy === null || !this.emitsInstructions(lazy.argument.value))
           return yield* compileChild(lowerCallTask(this, expression, null));
         const call = yield* compileChild(lowerCallTask(this, expression, lazy.argument));
-        const span = copySpan(expression.span);
+        const span = planSpan(expression.span);
         const lowered = yield* compileChild(
           lowerLazyDefaultTask(
             this,
@@ -1021,7 +1021,7 @@ export class InstructionCompiler {
             kind: "unary",
             operator: normalized.operators[index]!,
             operand: plan,
-            span: copySpan(expression.span),
+            span: planSpan(expression.span),
           };
         }
         return { plan, temporaryIds: operand.temporaryIds };
@@ -1033,7 +1033,7 @@ export class InstructionCompiler {
             kind: "unit",
             operand: operand.plan,
             ...unitOf(expression),
-            span: copySpan(expression.span),
+            span: planSpan(expression.span),
           },
           temporaryIds: operand.temporaryIds,
         };
@@ -1045,7 +1045,7 @@ export class InstructionCompiler {
             kind: "angleUnit",
             operand: operand.plan,
             unit: expression.unit,
-            span: copySpan(expression.span),
+            span: planSpan(expression.span),
           },
           temporaryIds: operand.temporaryIds,
         };
@@ -1069,7 +1069,7 @@ export class InstructionCompiler {
             operator: expression.operator,
             left: left!.plan,
             right: right!.plan,
-            span: copySpan(expression.span),
+            span: planSpan(expression.span),
           },
           temporaryIds: [...left!.temporaryIds, ...right!.temporaryIds],
         };
@@ -1084,7 +1084,7 @@ export class InstructionCompiler {
             start: start!.plan,
             end: end!.plan,
             inclusive: expression.inclusive,
-            span: copySpan(expression.span),
+            span: planSpan(expression.span),
           },
           temporaryIds: [...start!.temporaryIds, ...end!.temporaryIds],
         };
@@ -1102,7 +1102,7 @@ export class InstructionCompiler {
   } {
     if (expression.kind === "identifier") {
       return {
-        plan: { kind: "identifier", name: expression.name, span: copySpan(expression.span) },
+        plan: { kind: "identifier", name: expression.name, span: planSpan(expression.span) },
         temporaryIds: [],
       };
     }
@@ -1113,7 +1113,7 @@ export class InstructionCompiler {
           kind: "property",
           object: object.plan,
           name: expression.property.name,
-          span: copySpan(expression.span),
+          span: planSpan(expression.span),
         },
         temporaryIds: object.temporaryIds,
       };
@@ -1129,7 +1129,7 @@ export class InstructionCompiler {
           kind: "index",
           object: object.plan,
           index: index.plan,
-          span: copySpan(expression.span),
+          span: planSpan(expression.span),
         },
         temporaryIds: [...object.temporaryIds, ...index.temporaryIds],
       };
@@ -1149,10 +1149,10 @@ export class InstructionCompiler {
       temporaryId,
       value: lowered.plan,
       expectBoolean: false,
-      span: copySpan(span),
+      span: planSpan(span),
     });
     return {
-      plan: { kind: "temporary", temporaryId, span: copySpan(span) },
+      plan: { kind: "temporary", temporaryId, span: planSpan(span) },
       temporaryIds: [...lowered.temporaryIds, temporaryId],
     };
   }
@@ -1167,10 +1167,10 @@ export class InstructionCompiler {
       kind: "prepareReference",
       expression: lowered.plan,
       destinationTemporary: temporaryId,
-      span: copySpan(span),
+      span: planSpan(span),
     });
     return {
-      plan: { kind: "preparedReference", temporaryId, span: copySpan(span) },
+      plan: { kind: "preparedReference", temporaryId, span: planSpan(span) },
       temporaryIds: [...lowered.temporaryIds, temporaryId],
     };
   }
@@ -1219,14 +1219,14 @@ export class InstructionCompiler {
               properties: root.properties.map((property, index) => ({
                 name: property.name.name,
                 value: elements[index]!.plan,
-                span: copySpan(property.span),
+                span: planSpan(property.span),
               })),
-              span: copySpan(root.span),
+              span: planSpan(root.span),
             }
           : {
               kind: root.kind === "listLiteral" ? "list" : "set",
               elements: elements.map((item) => item.plan),
-              span: copySpan(root.span),
+              span: planSpan(root.span),
             },
       temporaryIds: elements.flatMap((item) => item.temporaryIds),
     };
@@ -1304,7 +1304,7 @@ export class InstructionCompiler {
 
   public emitTemporaryCleanup(ids: readonly number[], span: SourceSpan): void {
     for (const temporaryId of new Set(ids)) {
-      this.instructions.push({ kind: "clearTemporary", temporaryId, span: copySpan(span) });
+      this.instructions.push({ kind: "clearTemporary", temporaryId, span: planSpan(span) });
     }
   }
 }

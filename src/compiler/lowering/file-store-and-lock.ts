@@ -8,7 +8,7 @@ import type { InstructionCompiler, LoweredExpression } from "./compiler.js";
 import { prepareInteractionSpeaker } from "./interactions.js";
 import { lowerAskQuestionTask } from "./asks.js";
 import { lowerLazyDefaultTask } from "./calls.js";
-import { copySpan } from "./expression-plans.js";
+import { planSpan } from "./expression-plans.js";
 
 // File store and lock calls: their operands wait in temporaries, so every run of the instruction reads the same values.
 
@@ -46,10 +46,10 @@ export function* lowerFileStoreTask(
         temporaryId,
         value: plan,
         expectBoolean: false,
-        span: copySpan(argument.value.span),
+        span: planSpan(argument.value.span),
       });
       temporaryIds.push(temporaryId);
-      plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
+      plan = { kind: "temporary", temporaryId, span: planSpan(argument.value.span) };
     }
     const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
     if (name !== "value" && name !== "files")
@@ -66,7 +66,7 @@ export function* lowerFileStoreTask(
       defaultTemporary,
       files: operands.files,
       destinationTemporary,
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     });
     compiler.emitTemporaryCleanup(temporaryIds, expression.span);
   };
@@ -85,7 +85,7 @@ export function* lowerFileStoreTask(
   const destinationTemporary = compiler.allocateTemporary();
   store(destinationTemporary, null);
   return {
-    plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(expression.span) },
+    plan: { kind: "temporary", temporaryId: destinationTemporary, span: planSpan(expression.span) },
     temporaryIds: [destinationTemporary],
   };
 }
@@ -145,7 +145,7 @@ export function* lowerLockTask(
             : {
                 kind: "temporary",
                 temporaryId: hint.temporaryId,
-                span: copySpan(field.hint!.span),
+                span: planSpan(field.hint!.span),
               },
       };
     }
@@ -163,10 +163,10 @@ export function* lowerLockTask(
           temporaryId,
           value: plan,
           expectBoolean: false,
-          span: copySpan(argument.value.span),
+          span: planSpan(argument.value.span),
         });
         temporaryIds.push(temporaryId);
-        plan = { kind: "temporary", temporaryId, span: copySpan(argument.value.span) };
+        plan = { kind: "temporary", temporaryId, span: planSpan(argument.value.span) };
       }
       const name = argument.kind === "positionalArgument" ? "value" : argument.name.name;
       if (
@@ -194,7 +194,7 @@ export function* lowerLockTask(
       timeLock: operands.timeLock,
       defaultTemporary,
       destinationTemporary,
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     });
     compiler.emitTemporaryCleanup(temporaryIds, expression.span);
   };
@@ -213,7 +213,7 @@ export function* lowerLockTask(
   const destinationTemporary = compiler.allocateTemporary();
   lock(destinationTemporary, null);
   return {
-    plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(expression.span) },
+    plan: { kind: "temporary", temporaryId: destinationTemporary, span: planSpan(expression.span) },
     temporaryIds: [destinationTemporary],
   };
 }
