@@ -2998,3 +2998,35 @@ test("a value any carrier gives brings its elements' types, decided and checked 
   }
   assert.deepEqual(differing, []);
 });
+
+test("a literal's elements are compared at each store with their own certainty, guarded or not, in both orders (round 12 B1)", () => {
+  const carriers: readonly (readonly [string, (value: string) => string])[] = [
+    ["direct", (value) => value],
+    ["take", (value) => `${value}.take(1)`],
+    ["get with its default", (value) => `[].get(0, default: ${value})`],
+    ["otherwise", (value) => `${value} otherwise ${value}`],
+    ["projection", (value) => `[${value}][0]`],
+    ["+", (value) => `${value} + []`],
+  ];
+  const differing: string[] = [];
+  for (const [name, carry] of carriers) {
+    const store = `xs = [${carry("a")}, ${carry('["bad"]')}]`;
+    for (const [order, source] of [
+      ["guarded first", `let a = [1]\nlet xs = []\nif a is list { ${store} }\n${store}\nexit`],
+      ["unguarded first", `let a = [1]\nlet xs = []\n${store}\nif a is list { ${store} }\nexit`],
+    ] as const) {
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null, `${name}, ${order}: its source parses and resolves`);
+      const forward = compactAnalysis(request);
+      const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+        withConsumerOrder(
+          (list) => [...list].reverse(),
+          () => compactAnalysis(request),
+        ),
+      );
+      for (const difference of recordDifferences(forward, reversed))
+        differing.push(`${name}, ${order}, reversed: ${difference}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});

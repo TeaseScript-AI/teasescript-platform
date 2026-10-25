@@ -1115,103 +1115,6 @@ export class Admission {
     return this.#depths.get(key)!;
   }
 
-  /**
-   * A cell element's value as the cell holds it, for sharing a literal's verdicts (F2): a literal holding no source by
-   * its structure (the contract's signature), a copy by the definition its read reaches there (its exact path), through
-   * the copies that definition stores, a value a projection or an operation gives by its step or its name and the
-   * values it takes, held alike; `null` for any other (a call's result, a literal holding a source), whose value may
-   * differ from cell to cell.
-   */
-  #held(d: Definition): string | null {
-    const { contract, definitions, exact, program } = this.pass;
-    if (d.value === undefined) return "";
-    const node = d.node;
-    const held = new Map<PlaceId, string | null>();
-    // the values a projection or an operation takes, and how it combines them
-    const inputs = (
-      value: PlaceId,
-    ): { readonly name: string; readonly of: readonly (PlaceId | null)[] } | null => {
-      // a literal holding a source by its shape and its cells
-      if (program.hasOf.has(value)) {
-        if (this.#valueStructure(value).sources.length === 0) return null;
-        const shape: string[] = [];
-        const of: PlaceId[] = [];
-        for (const has of program.hasOf.get(value)!) {
-          shape.push(has.type.kind);
-          for (const [name, term] of fieldsOf(has.type)) {
-            const cells = term.kind === "ref" ? (definitions.cellDefs.get(term.place) ?? []) : [];
-            shape.push(`${name}:${cells.length}`);
-            for (const cell of cells) of.push(cell.value!);
-          }
-        }
-        return { name: `[${shape.join(" ")}]`, of };
-      }
-      const projection = program.projOf.get(value);
-      if (projection !== undefined) return { name: `.${projection.step}`, of: [projection.owner] };
-      const c = program.opOf.get(value);
-      if (c === undefined) return null;
-      if (c.kind === "fallback") return { name: "otherwise", of: [c.left, c.right] };
-      if (c.kind === "get") return { name: "get", of: [c.receiver, c.key, c.fallback] };
-      if (c.kind === "load") return { name: `load ${c.key ?? ""}`, of: [c.fallback] };
-      if (c.kind !== "operation") return null;
-      return {
-        name: `${c.contract.family}.${c.contract.name}`,
-        of: [c.receiver, ...c.arguments, ...c.named.map((argument) => argument.value)],
-      };
-    };
-    const leaf = (value: PlaceId): string | null => {
-      if (program.hasOf.has(value)) return contract.identityOf(value).id;
-      let key = contract.copiedKey(value);
-      if (key === null) return null;
-      let at = node;
-      const seen = new Set<string>();
-      while (!seen.has(`${key}|${at.id}`)) {
-        program.work.charge("indexSteps");
-        seen.add(`${key}|${at.id}`);
-        const answer = exact.exactPath(key, at);
-        if (!("def" in answer)) return null;
-        const { def, rest } = answer;
-        const copied =
-          def.kind === "whole" && def.value !== undefined ? contract.copiedKey(def.value) : null;
-        if (copied === null) return `${def.uid}@${rest.join(".")}`;
-        key = keyOf(keyPlace(copied), [...keyPath(copied), ...rest]);
-        at = def.node;
-      }
-      return null;
-    };
-    // post order on an explicit stack: a value's inputs held before it
-    const stack: { readonly value: PlaceId; ready: boolean }[] = [{ value: d.value, ready: false }];
-    while (stack.length > 0) {
-      const top = stack.at(-1)!;
-      if (held.has(top.value)) {
-        stack.pop();
-        continue;
-      }
-      program.work.charge("indexSteps");
-      const taken = contract.copiedKey(top.value) !== null ? null : inputs(top.value);
-      if (taken === null) {
-        held.set(top.value, leaf(top.value));
-        stack.pop();
-        continue;
-      }
-      if (!top.ready) {
-        top.ready = true;
-        for (const input of taken.of)
-          if (input !== null && !held.has(input)) stack.push({ value: input, ready: false });
-        continue;
-      }
-      const parts = taken.of.map((input) => (input === null ? "" : held.get(input)));
-      held.set(
-        top.value,
-        parts.some((part) => part === null || part === undefined)
-          ? null
-          : `${taken.name}(${parts.join(",")})`,
-      );
-      stack.pop();
-    }
-    return held.get(d.value) ?? null;
-  }
-
   /** The paths below a literal's element its known structure gives (F2), and `also`, each once. */
   #pathsBelow(value: PlaceId, also: readonly (readonly string[])[]): (readonly string[])[] {
     const work = this.pass.program.work;
@@ -1612,25 +1515,50 @@ export class Admission {
   ): void {
     const { program, definitions, contract } = this.pass;
     const family = (tag: ItemTag): ItemTag => (NUMERIC.has(tag) ? "number" : tag);
-    type Decided = Map<string, { readonly tags: readonly ItemTag[]; readonly written: boolean }>;
-    // per landing and its elements' values as their cells hold them, a cell's deciders and offending elements and paths
-    // (F2): a cell of the same values landing there decides and offends as it does, each at its own elements' sites
-    const cells = new Map<
-      string,
-      { readonly first: Decided; readonly verdicts: (readonly [number, readonly string[]])[] }
-    >();
-    // a named element: one whose structure holds a source (a copy, a call)
+    // a named element: one whose structure holds a source (a copy, a call, what a carrier takes of either)
     const named = (d: Definition): boolean =>
       d.value !== undefined && this.#valueStructure(d.value).sources.length > 0;
+    // per landing and the distinct source identities of a literal's elements (the contract's, flow-insensitive), the
+    // paths below them where their contracts hold more than one kind: only there can one element offend another (F2)
+    const conflicts = new Map<string, readonly (readonly string[])[]>();
     for (const [cell, list] of order([...definitions.cellDefs])) {
       const owner = program.cellOwner.get(cell);
       if (owner?.kind !== "cell" || list.length < 2 || contract.landsIn(owner.owner, []) !== null)
         continue;
-      const landing = list.some(named) ? this.#landing(owner.owner) : null;
-      const held = landing === null ? [] : list.map((d) => this.#held(d));
-      const memo = landing === null || held.includes(null) ? null : `${landing}|${held.join(",")}`;
-      const cached = memo === null ? undefined : cells.get(memo);
-      const first: Decided = cached?.first ?? new Map();
+      let shared: readonly (readonly string[])[] | null = null;
+      if (list.some(named)) {
+        const ids = list.map((d) => (d.value === undefined ? "" : contract.identityOf(d.value).id));
+        const distinct = [...new Set(ids)].sort();
+        // (elements of one source identity hold one value: none offends another)
+        if (distinct.length === 1) continue;
+        const landing = this.#landing(owner.owner);
+        const key = `${landing ?? ""}|${distinct.join(",")}`;
+        let paths = conflicts.get(key);
+        if (paths === undefined) {
+          const representatives = distinct.map((id) => list[ids.indexOf(id)]!);
+          const kept: (readonly string[])[] = [];
+          for (const path of this.#pathsBelow(representatives[0]!.value!, [
+            ...this.#sharedPaths(landing, representatives),
+            ...representatives.slice(1).flatMap((d) => this.#pathsBelow(d.value!, [])),
+          ])) {
+            const kinds = new Set<ItemTag>();
+            for (const d of representatives) {
+              program.work.charge("checks");
+              for (const item of withoutEmpty(
+                this.#run(contract.contractOfValueAt(d.value!, path)),
+              ))
+                if (concrete(item)) kinds.add(item.tag);
+            }
+            if (kinds.size > 1) kept.push(path);
+          }
+          conflicts.set(key, (paths = kept));
+        }
+        shared = paths;
+      }
+      const first = new Map<
+        string,
+        { readonly tags: readonly ItemTag[]; readonly written: boolean }
+      >();
       // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
       // number fits a written integer, a fraction does not), an earliest element's by their family
       const offends = (at: string, tags: readonly ItemTag[]): boolean => {
@@ -1655,25 +1583,16 @@ export class Admission {
         error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site));
         this.reject(d, cell, path);
       };
-      if (cached !== undefined) {
-        for (const [index, path] of cached.verdicts) offended(list[index]!, path);
-        continue;
-      }
-      const verdicts: (readonly [number, readonly string[]])[] = [];
-      if (memo !== null) cells.set(memo, { first, verdicts });
-      // a named element's paths: its source's elements, and a record's fields where the literal's own records or a read
-      // decide them, never copy-only (A2, TABLE q12); per source identity (the contract's: k copies or k wrappers of one
-      // record are one), the paths below its first element where it offends, where each later one offends too (F2)
-      const shared = list.some(named) ? this.#sharedPaths(landing, list) : [];
+      // a named literal's elements are compared at those paths, a literal's own elements at their structure's; per source
+      // identity in the literal, the paths its first element offends at, where each later one offends too
       const offending = new Map<string, (readonly string[])[]>();
-      for (const [index, d] of list.entries()) {
+      for (const d of list) {
         if (d.value === undefined) continue;
         const identity = named(d) ? contract.identityOf(d.value).id : null;
         const known = identity === null ? undefined : offending.get(identity);
         const found: (readonly string[])[] = [];
         if (identity !== null && known === undefined) offending.set(identity, found);
-        const below =
-          known !== undefined ? [] : this.#pathsBelow(d.value, identity !== null ? shared : []);
+        const below = known !== undefined ? [] : (shared ?? this.#pathsBelow(d.value, []));
         for (const path of [[], ...below]) {
           const at = path.join(".");
           const own = [...new Set(deciding(this.valueAt(d, path)).map((item) => item.tag))];
@@ -1692,13 +1611,9 @@ export class Admission {
           }
           if (!offends(at, own)) continue;
           offended(d, path);
-          verdicts.push([index, path]);
           if (path.length > 0) found.push(path);
         }
-        for (const path of known ?? []) {
-          offended(d, path);
-          verdicts.push([index, path]);
-        }
+        for (const path of known ?? []) offended(d, path);
       }
     }
   }

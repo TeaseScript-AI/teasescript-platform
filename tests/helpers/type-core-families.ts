@@ -1770,6 +1770,37 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
+    name: "A8-added-call-presets",
+    measures:
+      "F2, A8: k literals of one function's k-field result, added to one list, every field read (round 12 B3)",
+    program: (k) =>
+      main(
+        lines(
+          `function seed {\n  return {${fields(k, () => "1")}}\n}`,
+          "let xs = []",
+          rows(k, () => "xs.add([seed(), seed()])"),
+          rows(k, (i) => `let shown${i}: integer = xs[0][0].f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-added-chained-presets",
+    measures:
+      "F2, A8: k literals of the end of a chain of k copies of one record, added to one list (round 12 B3)",
+    program: (k) =>
+      main(
+        lines(
+          "let a0 = {n: 1}",
+          rows(k, (i) => `let a${i + 1} = a${i}`),
+          "let xs = []",
+          rows(k, () => `xs.add([a${k}, a${k}])`),
+          "let shown: integer = xs[0][0].n",
+          "exit",
+        ),
+      ),
+  },
+  {
     name: "A8-added-taken-presets",
     measures:
       "F2, A8: k literals of `take`s of a list of one k-field record, added to one list, every field read (round 11 B4)",
