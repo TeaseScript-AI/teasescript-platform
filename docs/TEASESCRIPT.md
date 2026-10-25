@@ -3,6 +3,8 @@
 ## Syntax authority
 
 The complete accepted syntax baseline is `specifications/accepted-syntaxes-v30.md`. Do not duplicate or reinterpret it here.
+[`TEASESCRIPT-REFERENCE.md`](TEASESCRIPT-REFERENCE.md) summarizes each accepted construct with its status and an
+example, and links to its V30 section; start there to learn the language.
 
 Accepted post-V30 additions:
 
