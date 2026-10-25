@@ -30,11 +30,12 @@ import { CARRIER_KINDS, type CarrierKind } from "../src/type-inference/core/carr
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { nodeOf, SliceIndex } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
-import { readFixture } from "./helpers/type-core-fixture.js";
+import { heldBack, readFixture } from "./helpers/type-core-fixture.js";
 
 // The coarse core on the test-only candidate route (the port plan's S5): source, candidate compile, plan, runtime.
 
@@ -166,8 +167,8 @@ function fitsKind(value: SerializableRuntimeValue, kind: string): boolean {
 
 /**
  * The owner's rule (TABLE r4.59): a record whose checks the candidate route lowers proves them in the plan and in a run,
- * not only in the answers. Every record of the positive list (the cells test's: all but the adapters' and stage 3b's
- * records) is tried on the candidate route in both orders. A record the route accepts compiles as it expects: its
+ * not only in the answers. Every record of the positive list (the cells test's: all but those `heldBack` names) is
+ * tried on the candidate route in both orders. A record the route accepts compiles as it expects: its
  * C1 and C2 diagnostics at its sites, a plan exactly where it is not a compile error, and in the plan exactly the checks
  * a store's `typeCheck` discharges (S3 §4: C1's and C9's `copy-type` checks against a kind, at the store that holds
  * their site, of the kinds their target's path requires; C2's checks, and a boundary against `unknown`, are the
@@ -192,7 +193,7 @@ test("every positive-list record the candidate route reaches lowers and runs exa
   let refusedRuns = 0;
   let fittingRuns = 0;
   for (const record of readFixture()) {
-    if (record.owner === "adapter" || record.cells.some((cell) => /^N\d/.test(cell))) continue;
+    if (heldBack(record) !== null) continue;
     positive += 1;
     let result: ReturnType<typeof compileProjectWithBackend>;
     try {
@@ -856,22 +857,19 @@ test("a written scalar a singleton literal gives stays strict on the candidate r
   assert.equal(candidate(source).plan, null);
 });
 
-/** The admitted type of the place a statement starting with `start` declares, at `path`: its kinds and its decider's offset. */
-function admittedOf(source: string, start: string, path: readonly string[] = []): string {
+/** The admitted type of the binding `name` at `path`: its kinds and its decider's offset. */
+function admittedOf(source: string, name: string, path: readonly string[] = []): string {
   const request = coreRequest([{ path: "main.tease", source }]);
   assert.ok(request !== null, source);
-  const answers = analyseCore(request);
-  for (const node of answers.graph.nodes) {
-    if (node.kind !== "statement" || node.span === null) continue;
-    if (!source.slice(node.span.start.offset, node.span.end.offset).startsWith(start)) continue;
-    const place = answers.at(node)?.place;
-    assert.ok(place, `${source}: ${start}'s place`);
-    const admitted = answers.place(place.id, path).admitted;
-    return admitted.by === "decided"
-      ? `decided ${admitted.kinds.join("|")}@${admitted.decider?.start ?? "-"}`
-      : admitted.by;
-  }
-  throw new Error(`${source}: no statement ${start}`);
+  // (the core numbers its places alike in every analysis of a request)
+  const place = new CoreProgram(request).places.find(
+    ({ kind }) => kind.kind === "binding" && kind.name === name,
+  );
+  assert.ok(place !== undefined, `${source}: ${name}'s place`);
+  const admitted = analyseCore(request).place(place.id, path).admitted;
+  return admitted.by === "decided"
+    ? `decided ${admitted.kinds.join("|")}@${admitted.decider?.start ?? "-"}`
+    : admitted.by;
 }
 
 test("a place published with a kind checks the external data stored into it, named or inline, at any endpoint (A7, C9 r4.12, r4.50 (1), R4-F1)", () => {
@@ -908,7 +906,7 @@ test("a place published with a kind checks the external data stored into it, nam
           const declaration = source.indexOf("let out");
           const decider = later ? source.lastIndexOf(known) : source.indexOf(known, declaration);
           const kind = known === "1" ? "integer" : known === "true" ? "boolean" : "string";
-          assert.equal(admittedOf(source, "let out"), `decided ${kind}@${decider}`, source);
+          assert.equal(admittedOf(source, "out"), `decided ${kind}@${decider}`, source);
           // (named data warns where it is read; with a later decider, C1 warns at the stored value, inline data at
           // its host value)
           const value = declaration + "let out = ".length;
@@ -951,7 +949,7 @@ test("a place published with a kind checks the external data stored into it, nam
     ['let raw = hostValue\nlet out = [raw][0]\nsay "AFTER"\nexit\n', "undecided"],
     ['let out = [1, 2][1]\nsay "AFTER"\nexit\n', "decided integer@10"],
   ] as const) {
-    assert.equal(admittedOf(source, "let out"), admitted, source);
+    assert.equal(admittedOf(source, "out"), admitted, source);
     assert.deepEqual(
       inBothOrders(() => sited(candidate(source))),
       [],
@@ -969,58 +967,129 @@ test("a place published with a kind checks the external data stored into it, nam
 });
 
 /**
- * Per carrier kind, a declaration that gives host data through the carrier beside a known integer: at a scalar endpoint
- * (the place's value) and at a collection one (its element), the data a value or (`list`) a list whose elements the
- * carrier gives. A carrier that reads a member of its operand reads a literal here; a member of the data owes C5's
- * obligation at its access (A7).
+ * Per carrier kind, the ways a declaration gives host data through the carrier beside a known integer, each at a scalar
+ * endpoint (the place's value) and at a collection one (its element): the data inside a literal operand, the whole
+ * operand, the operation's own read, or the receiver whose member the runtime reads (F15, r4.60: the destination's own
+ * check beside C5's obligation on the receiver). `lists` counts the lists around the host value at each endpoint;
+ * `read` names the read that brings the data into the declaration where it is not the data's (a loop variable).
  */
-const CARRIER_SHAPES: Readonly<
-  Record<
-    CarrierKind,
+interface CarrierShape {
+  readonly data: string;
+  readonly scalar: string;
+  readonly collection: string | { readonly none: string };
+  /** Whether the data stands in the operation's own read (C10: a default the operation's value is checked with). */
+  readonly own?: true;
+  readonly lists?: readonly [scalar: number, collection: number];
+  readonly read?: string;
+}
+
+const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
+  projection: [
+    { data: "in a literal", scalar: "let out = [1, D][1]", collection: "let out = [[1, D]][0]" },
     {
-      readonly scalar: string;
-      readonly collection: string | { readonly none: string };
-      /** Whether the data stands in the operation's own read (C10: a default the operation's value is checked with). */
-      readonly own?: true;
-      readonly list?: true;
-    }
-  >
-> = {
-  projection: { scalar: "let out = [1, D][1]", collection: "let out = [[1, D]][0]" },
-  iteration: {
-    scalar: "for item in [1, D] {\n  let out = item\n  LATER\n}",
-    collection: "for item in [[1, D]] {\n  let out = item\n  LATER\n}",
-  },
-  otherwise: { scalar: "let out = D otherwise 1", collection: "let out = [1, D] otherwise [2]" },
-  get: {
-    scalar: "let out = [1, D].get(1, default: 1)",
-    collection: "let out = [[1, D]].get(0, default: [])",
-  },
-  "load default": {
-    scalar: 'let out = load("k", default: [1, D][1])',
-    collection: 'let out = load("k", default: [1, D])',
-    own: true,
-  },
-  "parse default": {
-    scalar: 'let out = fromJson("1", default: [1, D][1])',
-    collection: 'let out = fromJson("[]", default: [1, D])',
-    own: true,
-  },
-  copy: { scalar: "let out = [1, D].take(2)[1]", collection: "let out = [1, D].take(2)" },
-  removal: {
-    scalar: "let out = [1, D].removeFirst()",
-    collection: "let out = [[1, D]].removeFirst()",
-  },
-  concatenation: { scalar: "let out = ([1] + D)[1]", collection: "let out = [1] + D", list: true },
-  choice: {
-    scalar: "let out = askChoice 1, D",
-    collection: { none: "a button's value is never a list or a set (V30 §19, TSV029)" },
-  },
+      data: "a member",
+      scalar: "let out = [1, D[0]][1]",
+      collection: "let out = [[1], D[0]][1]",
+      lists: [1, 2],
+    },
+  ],
+  iteration: [
+    {
+      data: "in a literal",
+      scalar: "for item in [1, D] {\n  let out = item\n  LATER\n}",
+      collection: "for item in [[1, D]] {\n  let out = item\n  LATER\n}",
+    },
+    {
+      data: "a member",
+      scalar: "for item in D {\n  let out = [1, item][1]\n  LATER\n}",
+      collection: "for item in D {\n  let out = [[1], item][1]\n  LATER\n}",
+      lists: [1, 2],
+      read: "item",
+    },
+  ],
+  otherwise: [
+    {
+      data: "the operand",
+      scalar: "let out = D otherwise 1",
+      collection: "let out = D otherwise [1]",
+      lists: [0, 1],
+    },
+  ],
+  get: [
+    {
+      data: "in a literal",
+      scalar: "let out = [1, D].get(1, default: 1)",
+      collection: "let out = [[1, D]].get(0, default: [])",
+    },
+    {
+      data: "a member",
+      scalar: "let out = D.get(0, default: 1)",
+      collection: "let out = D.get(0, default: [1])",
+      lists: [1, 2],
+    },
+  ],
+  "load default": [
+    {
+      data: "its own read",
+      scalar: 'let out = load("k", default: [1, D][1])',
+      collection: 'let out = load("k", default: [1, D])',
+      own: true,
+    },
+  ],
+  "parse default": [
+    {
+      data: "its own read",
+      scalar: 'let out = fromJson("1", default: [1, D][1])',
+      collection: 'let out = fromJson("[]", default: [1, D])',
+      own: true,
+    },
+  ],
+  copy: [
+    {
+      data: "in a literal",
+      scalar: "let out = [1, D].take(2)[1]",
+      collection: "let out = [1, D].take(2)",
+    },
+    {
+      data: "a member",
+      scalar: "let out = [1, D.take(1)[0]][1]",
+      collection: "let out = [[1], D.take(1)][1]",
+      lists: [1, 1],
+    },
+  ],
+  removal: [
+    {
+      data: "in a literal",
+      scalar: "let out = [1, D].removeFirst()",
+      collection: "let out = [[1, D]].removeFirst()",
+    },
+    {
+      data: "a member",
+      scalar: "let out = [1, D.removeFirst()][1]",
+      collection: "let out = [[1], D.removeFirst()][1]",
+      lists: [1, 2],
+    },
+  ],
+  concatenation: [
+    {
+      data: "the operand",
+      scalar: "let out = ([1] + D)[1]",
+      collection: "let out = [1] + D",
+      lists: [1, 1],
+    },
+  ],
+  choice: [
+    {
+      data: "an option",
+      scalar: "let out = askChoice 1, D",
+      collection: { none: "a button's value is never a list or a set (V30 §19, TSV029)" },
+    },
+  ],
 };
 
 /**
- * Invariant O over the carrier table (`carriers.ts`): each kind of `CARRIER_KINDS` has its shapes, each named or inline,
- * without and with a later store, in both orders. The place is admitted an integer where the data stands (published or
+ * Invariant O over the carrier table (`carriers.ts`), without exception (r4.60): each kind of `CARRIER_KINDS` has its
+ * shapes, each named or inline, without and with a later store, in both orders. The place is admitted an integer where the data stands (published or
  * decided), and the data owes an obligation that checks it against that type, at its read or at the value that holds
  * it: named data A7's `copy-type` warning and check (r4.50 (1)), inline data C9's boundary or C1's check (r4.12), data
  * in the operation's own read the operation's boundary (C10, r4.57). Where the candidate route reaches a shape (TABLE
@@ -1034,112 +1103,126 @@ test("every carrier kind leaves an obligation for the external data it gives a p
   const none: string[] = [];
   let shapes = 0;
   let routed = 0;
-  for (const kind of CARRIER_KINDS) {
-    const { scalar, collection, own = false, list = false } = CARRIER_SHAPES[kind];
-    for (const [endpoint, template] of [
-      ["scalar", scalar],
-      ["collection", collection],
-    ] as const) {
-      if (typeof template !== "string") {
-        none.push(`${kind} at a collection: ${template.none}`);
-        continue;
-      }
-      const shape: string = template;
-      for (const named of [false, true])
-        for (const later of [false, true]) {
-          const store = endpoint === "scalar" ? "out = 1" : "out = [1]";
-          const filled = shape.replace("D", named ? "raw" : "hostValue");
-          const body: string = filled.includes("LATER")
-            ? filled.replace(later ? "LATER" : /\n *LATER/, later ? store : "")
-            : `${filled}${later ? `\n${store}` : ""}`;
-          const source: string = `${named ? "let raw = hostValue\n" : ""}${body}\nsay "AFTER"\nexit\n`;
-          const name = `${kind} at a ${endpoint}, ${named ? "named" : "inline"}${later ? ", a later store" : ""}`;
-          // the data's read, and the statement that holds it: its place and its value
-          const data = named
-            ? source.indexOf("raw", source.indexOf("\n"))
-            : source.indexOf("hostValue");
-          const holder = source.lastIndexOf("\n", data) + 1;
-          const end = source.indexOf("\n", holder);
-          const [opening, place] = /^(?:let|for) (\w+) (?:=|in) /.exec(source.slice(holder))!;
-          const value = holder + opening.length;
-          const targets =
-            endpoint === "scalar"
-              ? [`${place} integer`]
-              : [`${place}.element integer`, `${place} list`];
-          const answered = inBothOrders(() => {
-            const request = coreRequest([{ path: "main.tease", source }]);
-            assert.ok(request !== null, name);
-            const { diagnostics, checks } = compactAnalysis(request);
-            return {
-              admitted: admittedOf(
-                source,
-                "let out",
-                endpoint === "scalar" ? [] : ["element"],
-              ).split("@")[0],
-              warned: diagnostics
-                .flatMap((d) => (d.kind === "written-target" ? [d.site.offset] : []))
-                .sort((a, b) => a - b),
-              obligations: checks.flatMap((check) =>
-                check.kind === "copy-type" &&
-                (check.site.offset === data || check.site.offset === value) &&
-                targets.includes(`${check.target} ${check.against.join("|")}`)
-                  ? [{ boundary: check.boundary, at: check.site.offset }]
-                  : [],
-              ),
-            };
-          });
-          assert.equal(answered.admitted, "decided integer", name);
-          assert.ok(answered.obligations.length > 0, `${name}: an obligation checks the data`);
-          if (own)
-            assert.ok(
-              answered.obligations.some(({ boundary, at }) => boundary && at === value),
-              `${name}: the operation's boundary`,
-            );
-          else if (named)
-            assert.ok(
-              answered.obligations.some(
-                ({ boundary, at }) => !boundary && answered.warned.includes(at),
-              ),
-              `${name}: A7's warning and check`,
-            );
-          shapes += 1;
-          let compiled: { readonly checks: readonly string[] | null } | null = null;
-          try {
-            compiled = inBothOrders(() => {
-              const result = candidate(source);
-              return { checks: result.plan === null ? null : checksOf(result.plan) };
-            });
-          } catch (error) {
-            if (!(error instanceof CandidateOutsideSlice)) throw error;
-            outside.set(kind, error.what.replace(/^this /, ""));
-            continue;
-          }
-          assert.deepEqual(
-            compiled.checks,
-            [`${holder}:${end} ${endpoint === "scalar" ? "integer" : "list<integer>"}`],
-            name,
-          );
-          const plan = candidate(source).plan!;
-          const host = (scalar: SerializableRuntimeValue): SerializableRuntimeValue =>
-            list ? { kind: "list", items: [scalar] } : scalar;
-          assert.deepEqual(
-            runWith(plan, host(2)),
-            { status: "halted", says: ["AFTER"], failure: null },
-            `${name} with 2`,
-          );
-          for (const bad of ["bad", 2.5])
-            assert.deepEqual(
-              runWith(plan, host(bad)),
-              { status: "failed", says: [], failure: `TSR058@${value}:${end}` },
-              `${name} with ${JSON.stringify(bad)}`,
-            );
-          routed += 1;
+  for (const kind of CARRIER_KINDS)
+    for (const {
+      data: placed,
+      scalar,
+      collection,
+      own = false,
+      lists = [0, 0],
+      read,
+    } of CARRIER_SHAPES[kind])
+      for (const [endpoint, template, wrap] of [
+        ["scalar", scalar, lists[0]],
+        ["collection", collection, lists[1]],
+      ] as const) {
+        if (typeof template !== "string") {
+          none.push(`${kind} at a collection: ${template.none}`);
+          continue;
         }
-    }
-  }
+        const shape: string = template;
+        for (const named of [false, true])
+          for (const later of [false, true]) {
+            const store = endpoint === "scalar" ? "out = 1" : "out = [1]";
+            const filled = shape.replace("D", named ? "raw" : "hostValue");
+            const body: string = filled.includes("LATER")
+              ? filled.replace(later ? "LATER" : /\n *LATER/, later ? store : "")
+              : `${filled}${later ? `\n${store}` : ""}`;
+            const source: string = `${named ? "let raw = hostValue\n" : ""}${body}\nsay "AFTER"\nexit\n`;
+            const name =
+              `${kind}, the data ${placed}, at a ${endpoint}, ${named ? "named" : "inline"}` +
+              (later ? ", a later store" : "");
+            // the data's read, and the statement that holds it: its place and its value
+            const data =
+              read !== undefined
+                ? source.indexOf(read, source.indexOf("let out"))
+                : named
+                  ? source.indexOf("raw", source.indexOf("\n"))
+                  : source.indexOf("hostValue");
+            const holder = source.lastIndexOf("\n", data) + 1;
+            const end = source.indexOf("\n", holder);
+            const [opening, place] = /^ *(?:let|for) (\w+) (?:=|in) /.exec(source.slice(holder))!;
+            const value = holder + opening.length;
+            const targets =
+              endpoint === "scalar"
+                ? [`${place} integer`]
+                : [`${place}.element integer`, `${place} list`];
+            const answered = inBothOrders(() => {
+              const request = coreRequest([{ path: "main.tease", source }]);
+              assert.ok(request !== null, name);
+              const { diagnostics, checks } = compactAnalysis(request);
+              return {
+                admitted: admittedOf(source, "out", endpoint === "scalar" ? [] : ["element"]).split(
+                  "@",
+                )[0],
+                warned: diagnostics
+                  .flatMap((d) => (d.kind === "written-target" ? [d.site.offset] : []))
+                  .sort((a, b) => a - b),
+                obligations: checks
+                  .flatMap((check) =>
+                    check.kind === "copy-type" &&
+                    (check.site.offset === data || check.site.offset === value) &&
+                    targets.includes(`${check.target} ${check.against.join("|")}`)
+                      ? [{ boundary: check.boundary, at: check.site.offset }]
+                      : [],
+                  )
+                  .sort((a, b) => a.at - b.at || Number(a.boundary) - Number(b.boundary)),
+              };
+            });
+            assert.equal(answered.admitted, "decided integer", name);
+            assert.ok(answered.obligations.length > 0, `${name}: an obligation checks the data`);
+            if (own)
+              assert.ok(
+                answered.obligations.some(({ boundary, at }) => boundary && at === value),
+                `${name}: the operation's boundary`,
+              );
+            else if (named)
+              assert.ok(
+                answered.obligations.some(
+                  ({ boundary, at }) => !boundary && answered.warned.includes(at),
+                ),
+                `${name}: A7's warning and check`,
+              );
+            shapes += 1;
+            let compiled: { readonly checks: readonly string[] | null } | null = null;
+            try {
+              compiled = inBothOrders(() => {
+                const result = candidate(source);
+                return { checks: result.plan === null ? null : checksOf(result.plan) };
+              });
+            } catch (error) {
+              if (!(error instanceof CandidateOutsideSlice)) throw error;
+              outside.set(`${kind} (${placed})`, error.what.replace(/^this /, ""));
+              continue;
+            }
+            assert.deepEqual(
+              compiled.checks,
+              [`${holder}:${end} ${endpoint === "scalar" ? "integer" : "list<integer>"}`],
+              name,
+            );
+            const plan = candidate(source).plan!;
+            const host = (
+              scalar: SerializableRuntimeValue,
+              depth = wrap,
+            ): SerializableRuntimeValue =>
+              depth === 0 ? scalar : { kind: "list", items: [host(scalar, depth - 1)] };
+            assert.deepEqual(
+              runWith(plan, host(2)),
+              { status: "halted", says: ["AFTER"], failure: null },
+              `${name} with 2`,
+            );
+            for (const bad of ["bad", 2.5])
+              assert.deepEqual(
+                runWith(plan, host(bad)),
+                { status: "failed", says: [], failure: `TSR058@${value}:${end}` },
+                `${name} with ${JSON.stringify(bad)}`,
+              );
+            routed += 1;
+          }
+      }
   t.diagnostic(
     `${shapes} shapes, ${routed} on the candidate route; outside the slice until S7–S9b (the answers only): ` +
-      [...outside].map(([kind, what]) => `${kind} (${what})`).join(", ") +
+      [...outside].map(([shape, what]) => `${shape}: ${what}`).join(", ") +
       `; no shape: ${none.join("; ")}`,
   );
 });

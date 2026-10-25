@@ -117,21 +117,6 @@ export function operandsOf(program: CoreProgram, value: PlaceId): readonly Opera
   return [];
 }
 
-/**
- * Whether the runtime reads a member of the operand to give the carrier's value (F15, C5: a projection's owner, an
- * iteration's list or set, `get`'s receiver, a copying or removing method's receiver), not the operand as a whole value
- * (`otherwise`, a default, a list's `+`, a choice's option).
- */
-export function memberAccess(operand: Operand): boolean {
-  return (
-    operand.kind === "projection" ||
-    operand.kind === "iteration" ||
-    operand.kind === "copy" ||
-    operand.kind === "removal" ||
-    (operand.kind === "get" && !operand.own)
-  );
-}
-
 /** The value side's decisions a walk asks before it carries (F19a's RECEIVER decision, the contract's kinds). */
 export interface Dispatch {
   kinds(of: PlaceId): ReadonlySet<ItemTag>;
@@ -160,21 +145,20 @@ export function keepsOwn(program: CoreProgram, value: PlaceId, dispatch: Dispatc
 
 /**
  * The values a value carries, each with the path into it its own value is read at (`strip`: the path below it still to
- * read) and its table row, after the value side's decisions: nothing where the operation keeps its own value (F19a,
- * F19), and each operand only where its decision allows it.
+ * read), after the value side's decisions: nothing where the operation keeps its own value (F19a, F19), and each
+ * operand only where its decision allows it.
  */
 export function carried(
   program: CoreProgram,
   value: PlaceId,
   strip: readonly string[],
   dispatch: Dispatch,
-): readonly (readonly [PlaceId, readonly string[], Operand])[] {
+): readonly (readonly [PlaceId, readonly string[]])[] {
   if (keepsOwn(program, value, dispatch)) return [];
   const elements = strip.length === 0 || strip[0] === "element";
-  const out: (readonly [PlaceId, readonly string[], Operand])[] = [];
+  const out: (readonly [PlaceId, readonly string[]])[] = [];
   let kinds: ReadonlySet<ItemTag> | null = null;
-  for (const row of operandsOf(program, value)) {
-    const { operand, below, when } = row;
+  for (const { operand, below, when } of operandsOf(program, value)) {
     if (when === "elements" && !elements) continue;
     if (when === "list or set" || when === "object" || when === "dict") {
       kinds ??= dispatch.kinds(operand);
@@ -186,7 +170,7 @@ export function carried(
       // (a dict's `values` are its elements: read at an element path only)
       if (when === "dict" && below.length === 0 && !elements) continue;
     }
-    out.push([operand, [...below, ...strip], row]);
+    out.push([operand, [...below, ...strip]]);
   }
   return out;
 }

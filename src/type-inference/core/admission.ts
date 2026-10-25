@@ -1,13 +1,6 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import {
-  carried,
-  keepsOwn,
-  memberAccess,
-  operandsOf,
-  type Dispatch,
-  type Operand,
-} from "./carriers.js";
+import { carried, keepsOwn, operandsOf, type Dispatch } from "./carriers.js";
 import { defaultOf, heldReference, termAt, typeTags, writtenOf } from "./contract.js";
 import {
   keyOf,
@@ -96,8 +89,6 @@ interface Stop {
   readonly deep: boolean;
   /** Whether each literal it was read out of has it alone at the step (`[typed][0]`, never `[typed, 2][0]`). */
   readonly single: boolean;
-  /** Whether the carrier it was reached through reads a member of it (`memberAccess`: C5's access, F15). */
-  readonly access: boolean;
   /**
    * The operations it was reached through, the outermost first (`get` with its default, a copy of the elements, a
    * list's `+`, ...): its contribution decides only where each of them holds its kinds definitely (F7, F10, F17b).
@@ -1043,7 +1034,7 @@ export class Admission {
   #carriersOf(
     value: PlaceId,
     strip: readonly string[],
-  ): readonly (readonly [PlaceId, readonly string[], Operand])[] {
+  ): readonly (readonly [PlaceId, readonly string[]])[] {
     return carried(this.pass.program, value, strip, this.#dispatch);
   }
 
@@ -1549,10 +1540,9 @@ export class Admission {
       readonly Via[],
       boolean,
       boolean,
-      boolean,
-    ])[] = [[value, node, [], [], false, [], false, true, false]];
+    ])[] = [[value, node, [], [], false, [], false, true]];
     for (let order = 0; pending.length > 0; order += 1) {
-      const [current, at, path, strip, deep, via, after, single, access] = pending.pop()!;
+      const [current, at, path, strip, deep, via, after, single] = pending.pop()!;
       program.work.charge("indexSteps");
       const written = this.#writtenSource(current, strip);
       const term = written?.term ?? null;
@@ -1570,7 +1560,6 @@ export class Admission {
             via,
             false,
             single && next.length === 1,
-            false,
           ]);
         continue;
       }
@@ -1580,23 +1569,13 @@ export class Admission {
       if (!after && !literal && term === null && this.#sourceOf(current) === null) {
         const carried = this.#carriersOf(current, strip);
         if (carried.length > 0) {
-          pending.push([current, at, path, strip, deep, via, true, single, access]);
+          pending.push([current, at, path, strip, deep, via, true, single]);
           for (let index = carried.length - 1; index >= 0; index -= 1) {
-            const [operand, rest, row] = carried[index]!;
+            const [operand, rest] = carried[index]!;
             const through = program.projOf.has(current)
               ? via
               : [...via, { value: current, node: at, path, strip, operand }];
-            pending.push([
-              operand,
-              at,
-              path,
-              rest,
-              true,
-              through,
-              false,
-              single,
-              memberAccess(row),
-            ]);
+            pending.push([operand, at, path, rest, true, through, false, single]);
           }
           continue;
         }
@@ -1619,7 +1598,6 @@ export class Admission {
         deep,
         single,
         via,
-        access,
       };
       const list = map.get(key);
       if (list === undefined) map.set(key, [stop]);
@@ -1628,17 +1606,7 @@ export class Admission {
       const next = cells(current, null);
       for (let index = next.length - 1; index >= 0; index -= 1) {
         const [d, step] = next[index]!;
-        pending.push([
-          d.value!,
-          d.node ?? at,
-          [...path, step],
-          [],
-          false,
-          via,
-          false,
-          single,
-          false,
-        ]);
+        pending.push([d.value!, d.node ?? at, [...path, step], [], false, via, false, single]);
       }
     }
     this.#stops.set(value, stops);
@@ -1840,28 +1808,20 @@ export class Admission {
   }
 
   /**
-   * Where a store's value at `at` carries external data another store brought, as a whole value (r4.50 (1)): the first
-   * read among its contributions of a source no store validates (its own contract holds no kind), whose items there are
-   * external; `null` where none does. Inline data is the store's own ingress (C9's boundary), and a member the runtime
-   * reads of a value whose kinds are unknown owes C5's obligation at its access (A7): neither counts. A carrier that
-   * reads its operand whole (a list's `+`, a choice's option) reads no member, whatever the path below it.
+   * Where a store's value at `at` carries external data another store brought (r4.50 (1)): the first read among its
+   * contributions of a source key (`#sourceOf`: a binding, a member of one, a call's result) no store validates (its
+   * contract there holds no kind), whose items there are external, a member the runtime reads included (F15, r4.60: C5's
+   * obligation on the receiver waives nothing at the destination); `null` where none does. Inline data is the store's
+   * own ingress (C9's boundary): it does not count.
    */
   public namedExternalSite(d: Definition, at: readonly string[]): SourceSite | null {
     const { program, contract, values } = this.pass;
     for (const { stop, rest } of this.#contributions(d, at)) {
-      const binding = program.occurrenceOf.get(stop.value);
-      if (binding === undefined) continue;
+      const source = this.#sourceOf(stop.value);
+      if (source === null) continue;
       const path = [...stop.strip, ...rest];
-      if (
-        stop.access &&
-        path.length > 0 &&
-        !withoutEmpty(this.#run(contract.contractOfValue(stop.value))).some(
-          (item) => item.tag !== "unknown",
-        )
-      )
-        continue;
-      if (withoutEmpty(this.#run(contract.contractOf(keyOf(binding, path)))).some(concrete))
-        continue;
+      const key = keyOf(keyPlace(source), [...keyPath(source), ...path]);
+      if (withoutEmpty(this.#run(contract.contractOf(key))).some(concrete)) continue;
       if (this.#run(values.valueItems(stop.value, stop.node, path)).some(isExternal))
         return program.places[stop.value]?.site ?? d.site;
     }

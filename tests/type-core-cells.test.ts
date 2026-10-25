@@ -5,24 +5,15 @@ import { analyseCore } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
-import { readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
+import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
 import { recordDifferences, type CompactRecord } from "./helpers/type-core-records.js";
 
 /**
  * The coarse core against its independent expectation set (checkpoint 9, TABLE §10.2, §10.5; the port plan's §3.1):
  * per record the outcome, the diagnostics as (kind, class, site, asserted context) and the checks as (kind, target,
- * required kinds, boundary, site) multisets. Every record is asserted except the classes held back below, each named by
- * its cell with its reason.
+ * required kinds, boundary, site) multisets. Every record is asserted except those `heldBack` names, each by its cell or
+ * its name, with its reason.
  */
-function heldBack(record: FixtureRecord): string | null {
-  // the adapters' cell (C13 and the storage rules' adapter rows): the kept checks the consumer calls run with S9b
-  if (record.owner === "adapter") return "the adapters' records (S9b)";
-  // stage 3b (§13: N1–N10): narrowing definitions, N3's required checks for a possible null and for written unions, and
-  // with them S0(c)'s class of expectations that rest on the null and written-union deviation, enter with S10
-  if (record.cells.some((cell) => /^N\d/.test(cell))) return "stage 3b's cells (S10)";
-  return null;
-}
-
 const records = readFixture();
 const asserted = records.filter((record) => heldBack(record) === null);
 
@@ -3514,7 +3505,8 @@ test("an operation the receiver's or the key's decision leaves opaque or externa
 test("named external data a carrier stores into a place published with a kind owes its check there (C9 r4.12, r4.50 (1), R4-F1)", () => {
   // per carrier outside the candidate's slice (its plan and its run wait for the slice): the warning where the named
   // data is read, with a `copy-type` check against the published kind; a source decided at its own stores (a list whose
-  // element `1` decides) keeps its check there only; a member of host data owes C5's obligation at its access (A7)
+  // element `1` decides) keeps its check there only; a member of host data owes C5's obligation on the receiver and,
+  // beside it, the destination's own check, where the member is read (F15, r4.60)
   const programs: readonly (readonly [string, string, string | null])[] = [
     ["otherwise", "let raw = hostValue\nlet out = raw otherwise 1\nexit", "raw otherwise"],
     ["get's default", "let raw = hostValue\nlet out = [raw].get(0, default: 1)\nexit", "raw]"],
@@ -3529,7 +3521,7 @@ test("named external data a carrier stores into a place published with a kind ow
     [
       "a member of host data",
       'let parcel = hostValue\nlet out = parcel.get("count", default: 0)\nexit',
-      null,
+      "parcel.get",
     ],
   ];
   const differing: string[] = [];
