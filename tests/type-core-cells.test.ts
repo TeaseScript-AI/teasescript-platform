@@ -3209,10 +3209,21 @@ test("a written operand its operation does not give decides nothing, whether its
       "a default's default",
       (index, store) => fill(`[].get(0, default: [typed].get(${index}, default: []))`, store),
     ],
-    // (`otherwise` gives its fallback where its own operand may be null: `[null][0]`, never beside `[[]][0]`)
+    // (`otherwise` gives its fallback where its own operand may be null: `[null][0]`, never beside `[[]][0]`; and its own
+    // operand where that may be a value: a written list, never a null one)
     [
       "an `otherwise` fallback",
       (index, store) => fill(`${index === 0 ? "[null][0]" : "[[]][0]"} otherwise typed`, store),
+    ],
+    [
+      "an `otherwise` operand",
+      (index, store) =>
+        `let typed: integer[]? = ${index === 0 ? "[1]" : "null"}\nlet xs = typed otherwise []\n${store}\nexit`,
+    ],
+    [
+      "an `otherwise` operand's projection",
+      (index, store) =>
+        `let typed: integer[]? = ${index === 0 ? "[1]" : "null"}\nlet xs = [typed][0] otherwise []\n${store}\nexit`,
     ],
   ];
   const programs: (readonly [string, string, boolean])[] = [];

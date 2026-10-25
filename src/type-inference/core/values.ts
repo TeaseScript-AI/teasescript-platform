@@ -443,7 +443,11 @@ export class Values {
     let out: Item[] = [];
     if (c.kind === "fallback") {
       const left = yield* this.valueItems(c.left, at, rest);
-      const kept = left.filter((item) => rest.length > 0 || item.tag !== "null");
+      // (a left operand that is only null gives nothing, at its path or below it: the fallback is the value)
+      const value = rest.length === 0 ? left : yield* this.valueItems(c.left, at, []);
+      const kept = value.some((item) => item.tag !== "null")
+        ? left.filter((item) => rest.length > 0 || item.tag !== "null")
+        : [];
       // F17a: K = (K(a) \ {null}) ∪ K(b), the fallback's kinds kept even where the graph never evaluates it; the
       // fallback runs where a is null, so its own known items without a word take that null's (§3.4)
       const rightSite = program.places[c.right]?.site ?? c.site;

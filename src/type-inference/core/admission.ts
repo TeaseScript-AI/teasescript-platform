@@ -1608,8 +1608,10 @@ export class Admission {
         this.#run(values.valueItems(next.value, next.node, [...next.strip, ...rest])),
       );
       const definite = items.some((item) => item.tag === "unknown") ? [] : deciding(items);
+      // (an operand its operation does not give decides nothing, F17a, F17b)
       if (
         definite.length > 0 &&
+        this.#chosen(next.via) &&
         this.#through(
           next.via,
           at,
@@ -1644,23 +1646,28 @@ export class Admission {
    * Whether a written copy reached through operations is selected: its own read runs, and each operation gives the
    * operand the walk took to it, by the operation's rule, never by what the copy's items say of their writers (a written
    * parameter's have none): a `get` its receiver's element unless the graph's literal proof leaves only its default, and
-   * its default only where that is reached (F17b); `otherwise` its fallback only where its own operand may be null
-   * (F17a); the other carriers give every operand that runs.
+   * its default only where that is reached (F17b); `otherwise` its own operand only where that may be a value, and its
+   * fallback only where the operand may be null (F17a); the other carriers give every operand that runs.
    */
   #selects(stop: Stop): boolean {
+    return this.#live(stop.value) && this.#chosen(stop.via);
+  }
+
+  /** Whether each operation of a chain gives the operand the walk took (`#selects`'s rule). */
+  #chosen(via: readonly Via[]): boolean {
     const { program, values } = this.pass;
-    if (!this.#live(stop.value)) return false;
-    return stop.via.every((level) => {
+    return via.every((level) => {
       const c = program.opOf.get(level.value);
       const at = c === undefined ? level.node : (program.exprAt(c.site) ?? level.node);
-      // (`otherwise` gives its fallback only where its own operand may be null, an unknown included: F17a)
-      if (c?.kind === "fallback")
-        return (
-          level.operand !== c.right ||
-          withoutEmpty(this.#run(values.valueItems(c.left, at, []))).some(
-            (item) => item.tag === "null" || item.tag === "unknown",
-          )
-        );
+      // (`otherwise` gives its own operand only where that may be a value, and its fallback only where the operand may
+      // be null, an unknown either: F17a)
+      if (c?.kind === "fallback") {
+        const left = withoutEmpty(this.#run(values.valueItems(c.left, at, [])));
+        return level.operand === c.left
+          ? left.some((item) => item.tag !== "null")
+          : level.operand !== c.right ||
+              left.some((item) => item.tag === "null" || item.tag === "unknown");
+      }
       if (c?.kind !== "get") return true;
       const { reached, only } = getProof(program, c, at);
       return level.operand === c.receiver ? !only : level.operand !== c.fallback || reached;
