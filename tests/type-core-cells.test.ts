@@ -2261,3 +2261,66 @@ test("an element read the contract answers is X3's member, before a later condit
   }
   assert.deepEqual(differing, []);
 });
+
+/**
+ * C9, F18 beside F21 and ADR 0021 1.5 (review r7 of the repairs): external data an argument brings into an unannotated
+ * parameter with a default is checked against the argument's own ingress, never the default's decision: a parsed text
+ * against its expected text, host data against `unknown`, positionally, by name and at two calls; a written parameter's
+ * boundary is its type. Both orders.
+ */
+test("an argument beside a default meets its own boundary, never the default's", () => {
+  const parsed = 'fromJson("\\"hello\\"", default: "hello", files: false)';
+  const show = (parameter: string, statement: string): string =>
+    `function show(${parameter}) {\n  ${statement}\n}\n`;
+  const programs: readonly (readonly [string, string, string, readonly string[]])[] = [
+    [
+      "a parsed text",
+      `${show("value = [3]", "say value")}show(${parsed})\nexit`,
+      "valid",
+      ["string"],
+    ],
+    [
+      "a parsed text at two calls",
+      `${show("value = [3]", "say value")}show(${parsed})\nshow(${parsed})\nexit`,
+      "valid",
+      ["string", "string"],
+    ],
+    [
+      "host data",
+      `${show("value = [3]", "say value.length")}show(hostValue)\nexit`,
+      "warning-runtime-check",
+      ["unknown"],
+    ],
+    [
+      "host data by name",
+      `${show("value = [3]", "say value.length")}show(value: hostValue)\nexit`,
+      "warning-runtime-check",
+      ["unknown"],
+    ],
+    [
+      "a parsed text into a written list",
+      `${show("value: integer[] = [3]", "say value")}show(${parsed})\nexit`,
+      "compile-error",
+      ["list"],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, outcome, against] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const boundaries = record.checks
+        .filter((check) => check.boundary)
+        .map((check) => `${check.target} [${check.against.join(", ")}]`);
+      const expected = against.map((kinds) => `show.value [${kinds}]`);
+      if (record.outcome !== outcome || JSON.stringify(boundaries) !== JSON.stringify(expected))
+        differing.push(
+          `${name}${reversed ? " reversed" : ""}: ${record.outcome}; ${boundaries.join("; ")}`,
+        );
+    }
+  }
+  assert.deepEqual(differing, []);
+});

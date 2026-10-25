@@ -156,6 +156,8 @@ export class Admission {
   readonly #levels = new Map<string, Level>();
   readonly #pending = new Map<number, Definition>();
   readonly #typed: Definition[] = [];
+  /** A typed ingress's expected kinds (F18), by its store's token. */
+  readonly #typedKinds = new Map<string, readonly ItemTag[]>();
   readonly #readSeen = new Set<PlaceId>();
   readonly #hostSeen = new Set<string>();
   readonly #walked = new Set<IngressNode>();
@@ -1273,8 +1275,10 @@ export class Admission {
         !definitions.readIngress.has(writerKey(token)) &&
         operation !== undefined &&
         this.#f18Kinds(operation) !== null
-      )
+      ) {
         typed.add(writerKey(token));
+        this.#typedKinds.set(writerKey(token), this.#f18Kinds(operation)!.tags);
+      }
     }
     for (const d of [
       ...definitions.storeDefs,
@@ -1294,14 +1298,24 @@ export class Admission {
         this.#typed.push(d);
   }
 
+  /**
+   * The kinds an ingress store's boundary check is against: the destination's admitted type; for an argument beside an
+   * unannotated parameter's default, which that default's decision never constrains (F21, ADR 0021 1.5), the typed
+   * ingress's own expected kinds (F18) or none (`unknown`: the runtime's validation of external data).
+   */
+  #againstOf(d: Definition, path: readonly string[]): ItemTag[] {
+    if (!this.#besideDefault(d)) return this.admitted(d.place, path);
+    return [...(this.#typedKinds.get(this.#token(d)) ?? [])];
+  }
+
   /** The boundary checks of the ingress stores, published once every place is decided. */
   public publish(): void {
     for (const d of this.#typed)
-      if (this.admitted(d.place, this.#destPath(d)).length > 0) this.boundaryAt(d);
+      if (this.#againstOf(d, this.#destPath(d)).length > 0) this.boundaryAt(d);
     const { definitions } = this.pass;
     for (const d of [...this.#pending.values()].sort((a, b) => a.uid - b.uid)) {
       const path = this.#admissionPath(d);
-      const tags = this.admitted(d.place, path);
+      const tags = this.#againstOf(d, path);
       const label = this.pathLabel(d.place, path);
       const against: RequiredKind[] = tags.length > 0 ? tags.map(requiredKind) : ["unknown"];
       const site = definitions.cellSiteOf.get(this.#token(d)) ?? d.site;
