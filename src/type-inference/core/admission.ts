@@ -677,7 +677,8 @@ export class Admission {
     const out: Definition[] = [];
     for (const has of program.hasOf.get(value) ?? []) {
       const term = this.#termAt(has.type, step);
-      if (term?.kind === "ref") for (const d of definitions.cellDefs.get(term.place) ?? []) out.push(d);
+      if (term?.kind === "ref")
+        for (const d of definitions.cellDefs.get(term.place) ?? []) out.push(d);
     }
     program.work.charge("checks", sortCost(out.length));
     return out.sort(
