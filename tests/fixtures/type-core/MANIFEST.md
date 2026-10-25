@@ -22,6 +22,14 @@ compiler build of `main` `6187eb145`, in both demand orders:
 - boundary checks and ingress stores one to one in 1,860 records, 4 more consumed in place, 3 more with a store owing
   none, and 7 different, the same follow-up records (clock reads, r4.47 (5)).
 
+`presence-controls.jsonl` (`1ab9bd60bcb2b049…`, 40 records in the same compact shape) holds the presence-versus-resolution
+controls of the port plan's §3.1 (TABLE r4.46): for every optional-field decision, the field present but computed
+through a method's result or a solver component, a fit and a misfit. They stand beside the set, not in it: a Codex
+research sub-agent of S6 derived each expectation from the TABLE (r4.47) and V30 without running an implementation,
+then ran the reference model (round 19d) on them, 43 of 43 in both orders with the set's three `s4/choice-value/…`
+controls, three derivations corrected by their cells (the research fixture folder's `s6-presence/`: `BRIEF.md`, `REPORT.md`
+`df054cd1…`, `controls.jsonl` `1499c123…`).
+
 The sections below are S0's record of the method; the file table names the refreshed fixture.
 
 ## S0

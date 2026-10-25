@@ -17,7 +17,7 @@ export interface FixtureRecord {
   readonly expected: CompactRecord;
 }
 
-const FIXTURE = new URL("../../../tests/fixtures/type-core/cells.jsonl", import.meta.url);
+const FIXTURES = new URL("../../../tests/fixtures/type-core/", import.meta.url);
 
 function fields(value: unknown, where: string): Readonly<Record<string, unknown>> {
   assert.ok(
@@ -36,9 +36,9 @@ function texts(value: unknown, where: string): string[] {
   });
 }
 
-/** The fixture's records, each line checked, so a malformed line fails where it is. */
-export function readFixture(): FixtureRecord[] {
-  return readFileSync(FIXTURE, "utf8")
+/** A fixture's records (the set's, or another file of the folder), each line checked, so a malformed line fails where it is. */
+export function readFixture(file = "cells.jsonl"): FixtureRecord[] {
+  return readFileSync(new URL(file, FIXTURES), "utf8")
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line, index) => {

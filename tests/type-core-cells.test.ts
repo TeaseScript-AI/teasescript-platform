@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { analyseCore } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
@@ -87,6 +88,56 @@ test("the comparison fails a record whose second check is replaced by a copy of 
   const actual = analysed(record);
   assert.deepEqual(recordDifferences(record.expected, actual), []);
   assert.notDeepEqual(recordDifferences(altered, actual), []);
+});
+
+/**
+ * The presence-versus-resolution controls of the port plan's §3.1 (TABLE r4.46): for every optional-field decision (a
+ * choice object's `value` and its `text`, `get`'s default, `load`'s and `fromJson`'s default and expected type) the field
+ * present but computed through a method's result or a solver component, a fit and a misfit, in both orders, so a decision
+ * made from the resolved items instead of the key's presence fails. Derived from the TABLE and V30 beside the set
+ * (`fixtures/type-core/MANIFEST.md`); the set's `s4/choice-value/…` records are the choice value's first ones.
+ */
+test("every optional-field decision follows the field's presence, computed through a result or a component", () => {
+  const controls = readFixture("presence-controls.jsonl");
+  assert.equal(controls.length, 40);
+  const failures = controls.flatMap((record) =>
+    [false, true].flatMap((reversed) => {
+      const request = coreRequest(record.files);
+      assert.ok(request !== null, record.name);
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const actual = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const differences = recordDifferences(record.expected, actual);
+      return differences.length === 0
+        ? []
+        : [`${record.name}${reversed ? " reversed" : ""}: ${differences.join("; ")}`];
+    }),
+  );
+  assert.deepEqual(failures, []);
+});
+
+test("a warning names the earliest admitted store of its offending kind, after a rejection too (F28)", () => {
+  // the set's writer evidence (`provenance.writers`), which the compact fixture leaves out, by the writer's site
+  for (const [name, site, writer] of [
+    ["cp9-cells/provenance/earliest-number", 108, 49],
+    ["cp9-cells/provenance/prefix-admitted", 192, 64],
+    // the store of 1.5 into the whole record is rejected (A6): the first admitted number is `state.n = 2.5`
+    ["cp9-cells/provenance/prefix-rejected", 196, 133],
+  ] as const) {
+    const record = records.find((candidate) => candidate.name === name);
+    assert.ok(record !== undefined, name);
+    const request = coreRequest(record.files);
+    assert.ok(request !== null, name);
+    const warning = analyseCore(request).diagnostics.find(
+      (diagnostic) => diagnostic.site.start === site,
+    );
+    assert.ok(warning?.class === "warning-runtime-check", name);
+    assert.deepEqual(
+      warning.provenance.writers.map((found) => found.start),
+      [writer],
+      name,
+    );
+  }
 });
 
 /**
