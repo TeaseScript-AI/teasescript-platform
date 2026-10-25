@@ -2123,3 +2123,72 @@ test("a copy of a written type keeps it through every carrier", () => {
   }
   assert.deepEqual(differing, []);
 });
+
+/**
+ * F21, ADR 0021 1.5 (review: Astra's B1): each call types an unannotated parameter from its argument, and its default
+ * is the start value the function is checked against once, so a supplied argument and the default never constrain each
+ * other: the argument decides nothing and is no candidate, a store of another kind in the body errs against the default
+ * whether calls supply the argument or omit it, and a written parameter checks its argument. Per kind of value (a
+ * scalar, a list, a record, a dict): supplied (positionally, by name, at two calls), a body store of the argument's
+ * kind with the argument supplied or omitted, and written; both orders.
+ */
+test("a supplied argument and a parameter's default never constrain each other", () => {
+  const kinds: readonly (readonly [string, string, string, string | null])[] = [
+    ["a scalar", "3", '"hello"', "integer"],
+    ["a list", "[3]", '["hello"]', "integer[]"],
+    ["a record", "{n: 3}", '{n: "hello"}', null],
+    ["a dict", "dict{a: 3}", 'dict{a: "hello"}', null],
+  ];
+  const programs: (readonly [string, string, boolean])[] = [];
+  const body = (statement: string): string => `{\n  ${statement}\n}`;
+  for (const [kind, given, other, written] of kinds) {
+    const show = (parameter: string, statement: string): string =>
+      `function show(${parameter}) ${body(statement)}\n`;
+    const plain = `value = ${given}`;
+    programs.push(
+      [`${kind}, supplied`, `${show(plain, 'say "shown"')}show(${other})\nexit`, false],
+      [
+        `${kind}, supplied by name`,
+        `${show(plain, 'say "shown"')}show(value: ${other})\nexit`,
+        false,
+      ],
+      [
+        `${kind}, supplied at two calls`,
+        `${show(plain, 'say "shown"')}show(${other})\nshow(${other})\nexit`,
+        false,
+      ],
+      [
+        `${kind}, supplied, another kind stored in the body`,
+        `${show(plain, `value = ${other}`)}show(${other})\nexit`,
+        true,
+      ],
+      [
+        `${kind}, omitted, another kind stored in the body`,
+        `${show(plain, `value = ${other}`)}show()\nexit`,
+        true,
+      ],
+    );
+    if (written !== null)
+      programs.push([
+        `${kind}, written`,
+        `${show(`value: ${written} = ${given}`, 'say "shown"')}show(${other})\nexit`,
+        true,
+      ]);
+  }
+  const differing: string[] = [];
+  for (const [name, source, errs] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const expected = errs
+      ? ["compile-error", `written-target compile-error @${source.indexOf('"hello"')}`]
+      : ["valid"];
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const got = summary(reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run());
+      if (JSON.stringify(got) !== JSON.stringify(expected.sort()))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join("; ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});

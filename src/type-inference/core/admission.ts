@@ -114,6 +114,8 @@ export class Admission {
   /** The previous pass's rejected stores by the place and path each was rejected at (A6). */
   readonly #retaken = new Map<Key, Definition[]>();
   readonly #a4Keys = new Set<Key>();
+  /** The parameters with a default (ADR 0021 1.5). */
+  readonly #defaulted = new Set<PlaceId>();
   readonly #a4Copies: {
     readonly place: PlaceId;
     readonly path: readonly string[];
@@ -172,13 +174,16 @@ export class Admission {
         }
       }
     }
+    for (const d of definitions.transferDefs)
+      if (d.how === "parameter default") this.#defaulted.add(d.place);
     // A4: the copies of written bindings the stores, adds, returns, parameter defaults and single-site arguments bring
     // (a multi-site argument decides nothing, F21), where they land
     for (const d of [...definitions.storeDefs, ...definitions.transferDefs])
       if (
         (d.kind === "whole" || d.kind === "add") &&
         d.value !== undefined &&
-        (d.how !== "argument" || pass.lists.singleSite(d.fn))
+        (d.how !== "argument" || pass.lists.singleSite(d.fn)) &&
+        !this.#besideDefault(d)
       )
         for (const { path, term } of this.#writtenCopies(d.value)) {
           const at = [
@@ -214,6 +219,20 @@ export class Admission {
     return d.how === "initializer" || (d.how === "argument" && this.pass.lists.singleSite(d.fn))
       ? -1
       : d.site.file * 1e9 + d.site.start;
+  }
+
+  /**
+   * F21, ADR 0021 1.5: an argument for an unannotated parameter with a default. Each call types such a parameter from
+   * its argument, and the default is the parameter's start value, checked once at the function against the body: the
+   * argument decides nothing and is no candidate, so the two never constrain each other. Without a default a single-site
+   * argument is the start value (F21); a written parameter checks every argument (A9, C7).
+   */
+  #besideDefault(d: Definition): boolean {
+    return (
+      d.how === "argument" &&
+      this.#defaulted.has(d.place) &&
+      writtenOf(this.pass.program.place(d.place).kind) === null
+    );
   }
 
   /** A store's value at the path below its destination, by §3 at its node. */
@@ -259,7 +278,8 @@ export class Admission {
     const reaching = [...definitions.storeDefs, ...definitions.transferDefs].filter(
       (d) =>
         (d.kind === "whole" || d.kind === "add") &&
-        (d.how !== "argument" || lists.singleSite(d.fn)),
+        (d.how !== "argument" || lists.singleSite(d.fn)) &&
+        !this.#besideDefault(d),
     );
     const stores = new Map<Key, number>();
     for (const d of reaching)
@@ -346,7 +366,9 @@ export class Admission {
     )
       return null;
     const key = keyOf(root, path);
-    const direct = definitions.candidates.get(key) ?? [];
+    const direct = (definitions.candidates.get(key) ?? []).filter(
+      (candidate) => !this.#besideDefault(candidate.d),
+    );
     const prefixes: { readonly key: Key; readonly rest: readonly string[] }[] = [];
     for (let length = 0; length < path.length; length += 1) {
       work.charge("checks");
@@ -626,7 +648,9 @@ export class Admission {
           !this.#hostRead(d.value) &&
           (add
             ? d.kind === "add"
-            : d.kind === "whole" && (d.how !== "argument" || lists.singleSite(d.fn))),
+            : d.kind === "whole" &&
+              (d.how !== "argument" || lists.singleSite(d.fn)) &&
+              !this.#besideDefault(d)),
       );
       program.work.charge("checks", sortCost(list.length));
       list.sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b));
@@ -660,7 +684,8 @@ export class Admission {
         d !== null &&
         (byWritten || !this.#hostRead(d.value)) &&
         lists.live(d) &&
-        (d.how !== "argument" || lists.singleSite(d.fn))
+        (d.how !== "argument" || lists.singleSite(d.fn)) &&
+        !this.#besideDefault(d)
       )
         if (d.kind === "whole") wholes.push(d);
         else if (d.kind === "add") adds.push(d);
