@@ -89,6 +89,16 @@ interface Level {
   readonly whole: PlaceId | null;
 }
 
+/**
+ * The known structure of a stored value or a source key (F2): the paths below it its literals and the stores below the
+ * key give, and the source keys copied or called below it, each where it stands; below a source key, its elements only
+ * (`#depthOf`).
+ */
+interface Structure {
+  readonly paths: readonly (readonly string[])[];
+  readonly sources: readonly { readonly below: readonly string[]; readonly key: Key }[];
+}
+
 /** A candidate of a decided type: a store and the path below its destination it reaches the place at. */
 export interface Candidate {
   readonly d: Definition;
@@ -148,6 +158,11 @@ export class Admission {
   readonly #whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
   readonly #stops = new Map<PlaceId, Stops>();
+  /** The own structure of each stored value (`v`) and source key (`k`), and each source key's element depth, F2. */
+  readonly #structures = new Map<string, Structure>();
+  readonly #depths = new Map<Key, number>();
+  #keyBound: number | null = null;
+  #byRoot: Map<PlaceId, (readonly string[])[]> | null = null;
   readonly #takeables = new WeakMap<
     ReadonlySet<Definition | null>,
     { readonly wholes: readonly Definition[]; readonly adds: readonly Definition[] }[]
@@ -304,17 +319,23 @@ export class Admission {
         work.charge("indexSteps");
         stores.set(key, (stores.get(key) ?? 0) + 1);
       }
-    // a literal's structure where another store or add reaches the place or below it
+    // a stored value's structure where another store or add reaches the place or below it: its literals', and below a
+    // copy or a call its source's elements (F2), the deepest once per path it lands at (its prefixes follow below)
+    const deepest = new Map<Key, number>();
     for (const d of reaching)
-      if ((stores.get(d.key) ?? 0) > 1)
-        for (const path of this.literalPaths(d.value!))
-          tracked.add(
-            keyOf(d.place, [
-              ...d.path,
-              ...(d.kind === "add" && d.how !== "elements" ? ["element"] : []),
-              ...path,
-            ]),
-          );
+      if ((stores.get(d.key) ?? 0) > 1) {
+        const base = [...d.path, ...(d.kind === "add" && d.how !== "elements" ? ["element"] : [])];
+        const structure = this.#valueStructure(d.value!);
+        for (const path of structure.paths) tracked.add(keyOf(d.place, [...base, ...path]));
+        for (const { below, key } of structure.sources) {
+          work.charge("indexSteps");
+          const landing = keyOf(d.place, [...base, ...below]);
+          const depth = this.#depthOf(key);
+          if (depth <= (deepest.get(landing) ?? 0)) continue;
+          deepest.set(landing, depth);
+          tracked.add(keyOf(d.place, [...base, ...below, ...Array<string>(depth).fill("element")]));
+        }
+      }
     // C9: where each ingress store's external data stands below its destination, decided with the store whether a
     // consumer reads the place or not (the owner's F1)
     for (const [token, d] of definitions.storeByToken) {
@@ -759,24 +780,292 @@ export class Admission {
     return contract.copiedKey(value) ?? contract.resultKey(value);
   }
 
-  /** The paths a literal's structure contributes: its objects' fields and its collections' elements, at every depth. */
-  public literalPaths(value: PlaceId): string[][] {
-    const { program, definitions } = this.pass;
-    const out: string[][] = [];
-    const pending: [PlaceId, string[]][] = [[value, []]];
-    while (pending.length > 0) {
-      const [current, path] = pending.pop()!;
-      for (const has of program.hasOf.get(current) ?? [])
-        for (const [name, term] of fieldsOf(has.type)) {
-          program.work.charge("indexSteps");
-          const below = [...path, name];
-          out.push(below);
-          if (term.kind === "ref")
-            for (const d of definitions.cellDefs.get(term.place) ?? [])
-              pending.push([d.value!, below]);
-        }
+  /** A stored value's own structure: its literals' fields and elements at every depth, and their sources (F2). */
+  #valueStructure(value: PlaceId): Structure {
+    const id = `v${value}`;
+    let structure = this.#structures.get(id);
+    if (structure === undefined) {
+      structure = this.#collect([{ value, below: [], strip: [] }]);
+      this.#structures.set(id, structure);
     }
-    return out;
+    return structure;
+  }
+
+  /**
+   * A source key's own structure (F2): the elements, at every depth, of the values stored at it or at a prefix of it (an
+   * add's below its element), cut to the key's path, and of the keys below it with stores. A copied record's fields are
+   * none of it: they are admitted at their first read (A2, TABLE q12).
+   */
+  #keyStructure(key: Key): Structure {
+    const id = `k${key}`;
+    const known = this.#structures.get(id);
+    if (known !== undefined) return known;
+    const { definitions, lists, program } = this.pass;
+    const place = keyPlace(key);
+    const path = keyPath(key);
+    const roots: { value: PlaceId; below: readonly string[]; strip: readonly string[] }[] = [];
+    const levels: (readonly string[])[] = [];
+    const root = (d: Definition, below: readonly string[], strip: readonly string[]): void => {
+      program.work.charge("indexSteps");
+      if ((d.kind === "whole" || d.kind === "add") && d.value !== undefined && lists.live(d))
+        roots.push({
+          value: d.value,
+          below: d.kind === "add" && d.how !== "elements" ? [...below, "element"] : below,
+          strip,
+        });
+    };
+    for (let length = 0; length <= path.length; length += 1)
+      for (const d of definitions.byKey.get(keyOf(place, path.slice(0, length))) ?? [])
+        root(d, [], path.slice(length));
+    for (const below of definitions.keysBelow(key)) {
+      const at = keyPath(below).slice(path.length);
+      if (at.some((step) => step !== "element")) continue;
+      levels.push(at);
+      for (const d of definitions.byKey.get(below) ?? []) root(d, at, []);
+    }
+    const structure = this.#collect(roots, levels, true);
+    this.#structures.set(id, structure);
+    return structure;
+  }
+
+  /**
+   * The structure of values standing at paths below a value or key, cut to `strip` (a key's path below a prefix's
+   * store): their literals' fields and elements, walked as their literals nest (below a key its elements only), and the
+   * source key of each value no literal holds, with the levels of the keys below with stores.
+   */
+  #collect(
+    roots: readonly { value: PlaceId; below: readonly string[]; strip: readonly string[] }[],
+    levels: readonly (readonly string[])[] = [],
+    elements = false,
+  ): Structure {
+    const { program, definitions } = this.pass;
+    const paths = new Map<string, readonly string[]>();
+    const sources = new Map<string, { readonly below: readonly string[]; readonly key: Key }>();
+    const path = (at: readonly string[]): void => {
+      if (at.length > 0 && !paths.has(at.join("."))) paths.set(at.join("."), at);
+    };
+    for (const at of levels)
+      for (let length = 1; length <= at.length; length += 1) path(at.slice(0, length));
+    for (const { value, below, strip } of roots) {
+      // where a path stands against the key's own: below it, at it or above it (the rest of the key's path), or beside it
+      const against = (
+        at: readonly string[],
+      ): { readonly below: readonly string[] } | { readonly above: readonly string[] } | null => {
+        for (let index = 0; index < at.length && index < strip.length; index += 1)
+          if (at[index] !== strip[index]) return null;
+        return at.length > strip.length
+          ? { below: at.slice(strip.length) }
+          : { above: strip.slice(at.length) };
+      };
+      const pending: [PlaceId, readonly string[]][] = [[value, below]];
+      while (pending.length > 0) {
+        const [current, at] = pending.pop()!;
+        program.work.charge("indexSteps");
+        if (!program.hasOf.has(current)) {
+          // a source below the key stands there; one at the key or above it is read at the rest of the key's path
+          const source = this.#sourceOf(current);
+          const stands = source === null ? null : against(at);
+          if (source === null || stands === null) continue;
+          // (a source read at the rest of a path no key or read of the program reaches is a recursion: cut)
+          if (
+            "above" in stands &&
+            keyPath(source).length + stands.above.length > this.#longestKey()
+          )
+            continue;
+          const entry =
+            "below" in stands
+              ? { below: stands.below, key: source }
+              : { below: [], key: keyOf(keyPlace(source), [...keyPath(source), ...stands.above]) };
+          sources.set(`${entry.below.join(".")}|${entry.key}`, entry);
+          continue;
+        }
+        for (const has of program.hasOf.get(current)!)
+          for (const [name, term] of fieldsOf(has.type)) {
+            program.work.charge("indexSteps");
+            const step = [...at, name];
+            const stands = against(step);
+            if (stands === null || ("below" in stands && elements && name !== "element")) continue;
+            if ("below" in stands) path(stands.below);
+            if (term.kind === "ref")
+              for (const d of definitions.cellDefs.get(term.place) ?? [])
+                pending.push([d.value!, step]);
+          }
+      }
+    }
+    return { paths: [...paths.values()], sources: [...sources.values()] };
+  }
+
+  /** The longest path of a key with stores or of a read's or a call's projections in the program. */
+  #longestKey(): number {
+    if (this.#keyBound !== null) return this.#keyBound;
+    const { program, definitions } = this.pass;
+    let longest = 0;
+    for (const [key] of definitions.byKey) {
+      program.work.charge("indexSteps");
+      longest = Math.max(longest, keyPath(key).length);
+    }
+    const chains = new Map<PlaceId, number>();
+    for (const [value] of program.projOf) {
+      const way: PlaceId[] = [];
+      let current = value;
+      while (program.projOf.has(current) && !chains.has(current)) {
+        program.work.charge("indexSteps");
+        way.push(current);
+        current = program.projOf.get(current)!.owner;
+      }
+      let length = chains.get(current) ?? 0;
+      for (let index = way.length - 1; index >= 0; index -= 1)
+        chains.set(way[index]!, (length += 1));
+      longest = Math.max(longest, length);
+    }
+    return (this.#keyBound = longest);
+  }
+
+  /**
+   * The element depth of a source key's known structure, its sources' followed (F2): once per key, a cycle of copies
+   * (Tarjan's components) one turn of it for each of its keys, so the copies of one source share it and every order
+   * gives one answer.
+   */
+  #depthOf(key: Key): number {
+    const known = this.#depths.get(key);
+    if (known !== undefined) return known;
+    const { program, contract } = this.pass;
+    const work = program.work;
+    // (a key whose contract holds no collection has no elements to follow)
+    const flat = (at: Key): boolean => {
+      const none = !withoutEmpty(this.#run(contract.contractOf(at))).some(
+        (item) => item.tag === "list" || item.tag === "set" || item.tag === "dict",
+      );
+      if (none) this.#depths.set(at, 0);
+      return none;
+    };
+    if (flat(key)) return 0;
+    const order = new Map<Key, number>();
+    const low = new Map<Key, number>();
+    const stack: Key[] = [];
+    const open = new Set<Key>();
+    const frames: { readonly key: Key; next: number }[] = [];
+    const enter = (at: Key): void => {
+      order.set(at, order.size);
+      low.set(at, order.get(at)!);
+      stack.push(at);
+      open.add(at);
+      frames.push({ key: at, next: 0 });
+    };
+    enter(key);
+    while (frames.length > 0) {
+      const frame = frames.at(-1)!;
+      const { sources } = this.#keyStructure(frame.key);
+      if (frame.next < sources.length) {
+        const target = sources[frame.next++]!.key;
+        work.charge("indexSteps");
+        if (this.#depths.has(target)) continue;
+        if (!order.has(target) && !flat(target)) enter(target);
+        else if (open.has(target))
+          low.set(frame.key, Math.min(low.get(frame.key)!, order.get(target)!));
+        continue;
+      }
+      frames.pop();
+      const parent = frames.at(-1);
+      if (parent !== undefined)
+        low.set(parent.key, Math.min(low.get(parent.key)!, low.get(frame.key)!));
+      if (low.get(frame.key) !== order.get(frame.key)) continue;
+      const members = new Set<Key>();
+      for (let member = stack.pop()!; ; member = stack.pop()!) {
+        open.delete(member);
+        members.add(member);
+        if (member === frame.key) break;
+      }
+      // the deepest own element and source's below the component; a source inside it once around
+      let depth = 0;
+      let turn = 0;
+      for (const member of members) {
+        const own = this.#keyStructure(member);
+        for (const path of own.paths) depth = Math.max(depth, path.length);
+        for (const source of own.sources) {
+          work.charge("indexSteps");
+          if (members.has(source.key)) turn = Math.max(turn, source.below.length);
+          else depth = Math.max(depth, source.below.length + this.#depths.get(source.key)!);
+        }
+      }
+      for (const member of members) this.#depths.set(member, depth + turn);
+    }
+    return this.#depths.get(key)!;
+  }
+
+  /** The paths below a literal's element its known structure gives (F2), and `also`, each once. */
+  #pathsBelow(value: PlaceId, also: readonly (readonly string[])[]): (readonly string[])[] {
+    const work = this.pass.program.work;
+    const out = new Map<string, readonly string[]>();
+    const put = (path: readonly string[]): void => {
+      work.charge("indexSteps");
+      if (!out.has(path.join("."))) out.set(path.join("."), path);
+    };
+    const structure = this.#valueStructure(value);
+    for (const path of structure.paths) put(path);
+    for (const { below, key } of structure.sources) {
+      let path = below;
+      for (let depth = this.#depthOf(key); depth > 0; depth -= 1)
+        put((path = [...path, "element"]));
+    }
+    for (const path of also) put(path);
+    return [...out.values()];
+  }
+
+  /**
+   * The paths below a collection literal's elements that its own literals give or admission decides where the literal
+   * lands (a read's path, A2): there a named element's fields are compared too (TABLE q12: a field is copy-only until
+   * a literal or a read reaches it).
+   */
+  #sharedPaths(literal: PlaceId, list: readonly Definition[]): (readonly string[])[] {
+    const { program, definitions } = this.pass;
+    const out = new Map<string, readonly string[]>();
+    const put = (path: readonly string[]): void => {
+      program.work.charge("indexSteps");
+      if (path.length > 0 && !out.has(path.join("."))) out.set(path.join("."), path);
+    };
+    for (const d of list)
+      if (d.value !== undefined) for (const path of this.#valueStructure(d.value).paths) put(path);
+    // where the literal lands: the store holding it, through the literals around it
+    const steps: string[] = [];
+    for (let value = literal; ;) {
+      program.work.charge("indexSteps");
+      const d = (definitions.byValue.get(value) ?? []).find(
+        (store) => store.kind === "whole" || store.kind === "add",
+      );
+      if (d === undefined) break;
+      if (program.cellOwner.has(d.place)) {
+        const kind = program.place(d.place).kind;
+        steps.push(kind.kind === "property" ? propertyStep(kind.name) : "element");
+        value = program.cellOwner.get(d.place)!.owner;
+        continue;
+      }
+      // (an `addAll`'s literal's elements are the destination's own elements)
+      const at = [
+        ...(d.kind === "add" && d.how === "elements" ? d.path : this.#destPath(d)),
+        ...steps.reverse(),
+        "element",
+      ];
+      for (const path of this.#decidedBelow(d.place))
+        if (path.length > at.length && at.every((step, index) => path[index] === step))
+          put(path.slice(at.length));
+      break;
+    }
+    return [...out.values()];
+  }
+
+  /** The paths admission decides at a place (`groups`), by place, once. */
+  #decidedBelow(place: PlaceId): readonly (readonly string[])[] {
+    if (this.#byRoot === null) {
+      this.#byRoot = new Map();
+      for (const { root, path } of this.groups()) {
+        this.pass.program.work.charge("indexSteps");
+        const paths = this.#byRoot.get(root);
+        if (paths === undefined) this.#byRoot.set(root, [path]);
+        else paths.push(path);
+      }
+    }
+    return this.#byRoot.get(place) ?? [];
   }
 
   /** A literal's term at one step: an object's property by its step, a collection's element; built once per literal. */
@@ -1041,9 +1330,10 @@ export class Admission {
 
   /**
    * ADR 0021 1.3, A8: a list's, set's or dict's literal elements (values), and the properties its objects share, have
-   * one type: the earliest element's, or a copy of a written binding's written type (A4), unless the literal lands
-   * directly in a written place, whose type then checks them (A1). A definite element of another type is an error at
-   * the innermost offending expression (r4.35) and is rejected: later uses see the earliest element's type (A6).
+   * one type at every path their known structure gives, a copy's or a call's its source's (F2): the earliest element's,
+   * or a copy of a written binding's written type (A4), unless the literal lands directly in a written place, whose
+   * type then checks them (A1). A definite element of another type is an error at the innermost offending expression
+   * (r4.35) and is rejected: later uses see the earliest element's type (A6).
    */
   public literalElements(
     order: <T>(list: readonly T[]) => T[],
@@ -1059,17 +1349,53 @@ export class Admission {
         string,
         { readonly tags: readonly ItemTag[]; readonly written: boolean }
       >();
+      // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
+      // number fits a written integer, a fraction does not), an earliest element's by their family
+      const offends = (at: string, tags: readonly ItemTag[]): boolean => {
+        const decided = first.get(at)!;
+        const families = [...new Set(tags.map(family))];
+        return (
+          families.length === 1 &&
+          (decided.written ? tags : families).every(
+            (tag) => !decided.tags.some((ref) => fits(tag, ref, decided.written)),
+          )
+        );
+      };
+      // the error at the innermost offending expression (r4.35), the element rejected (A6)
+      const offended = (d: Definition, path: readonly string[]): void => {
+        const at = path.join(".");
+        const inner =
+          path.length > 0
+            ? this.offendingAt(d, path, (items) =>
+                offends(at, [...new Set(deciding(items).map((item) => item.tag))]),
+              )
+            : null;
+        error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site));
+        this.reject(d, cell, path);
+      };
+      // a named element's paths: its source's elements, and a record's fields where the literal's own records or a read
+      // decide them, never copy-only (A2, TABLE q12); per source identity (the contract's: k copies or k wrappers of one
+      // record are one), the paths below its first element where it offends, where each later one offends too (F2)
+      const named = (d: Definition): boolean =>
+        d.value !== undefined && this.#valueStructure(d.value).sources.length > 0;
+      const shared = list.some(named) ? this.#sharedPaths(owner.owner, list) : [];
+      const offending = new Map<string, (readonly string[])[]>();
       for (const d of list) {
         if (d.value === undefined) continue;
-        for (const path of [[], ...this.literalPaths(d.value)]) {
+        const identity = named(d) ? contract.identityOf(d.value).id : null;
+        const known = identity === null ? undefined : offending.get(identity);
+        const found: (readonly string[])[] = [];
+        if (identity !== null && known === undefined) offending.set(identity, found);
+        const below =
+          known !== undefined ? [] : this.#pathsBelow(d.value, identity !== null ? shared : []);
+        for (const path of [[], ...below]) {
           const at = path.join(".");
-          const decided = first.get(at);
           const own = [...new Set(deciding(this.valueAt(d, path)).map((item) => item.tag))];
-          const kinds = [...new Set(own.map(family))];
-          if (decided === undefined) {
+          if (!first.has(at)) {
             // A4: a copy of a written binding gives its written type, whatever it holds now, where it is the earliest
             // decider on the path
             const copied = this.#earliestDecider(d.value, d.node, path)?.term ?? null;
+            const kinds = [...new Set(own.map(family))];
             if (copied !== null)
               first.set(at, {
                 tags: typeTags(copied).filter((tag) => tag !== "null" && tag !== "unknown"),
@@ -1078,27 +1404,11 @@ export class Admission {
             else if (kinds.length === 1) first.set(at, { tags: kinds, written: false });
             continue;
           }
-          // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
-          // number fits a written integer, a fraction does not), an earliest element's by their family
-          const offends = (tags: readonly ItemTag[]): boolean => {
-            const families = [...new Set(tags.map(family))];
-            return (
-              families.length === 1 &&
-              (decided.written ? tags : families).every(
-                (tag) => !decided.tags.some((ref) => fits(tag, ref, decided.written)),
-              )
-            );
-          };
-          if (!offends(own)) continue;
-          const inner =
-            path.length > 0
-              ? this.offendingAt(d, path, (items) =>
-                  offends([...new Set(deciding(items).map((item) => item.tag))]),
-                )
-              : null;
-          error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site));
-          this.reject(d, cell, path);
+          if (!offends(at, own)) continue;
+          offended(d, path);
+          if (path.length > 0) found.push(path);
         }
+        for (const path of known ?? []) offended(d, path);
       }
     }
   }

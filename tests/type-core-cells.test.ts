@@ -2489,3 +2489,111 @@ test("external data a literal carries is warned and checked at its store where a
   }
   assert.deepEqual(differing, []);
 });
+
+test("a named collection in a literal or an add brings its elements' types to the literal's, as a written one would (A8, the owner's F2)", () => {
+  const after = '\nsay "AFTER"\nexit';
+  const lists = 'let a = [1]\nlet b = ["bad"]\n';
+  // per program its outcome and its errors' sites: the named source of another type, where it is written
+  const programs: readonly (readonly [string, string, string, readonly number[]])[] = [
+    ["a list of lists", `${lists}let xs = [a, b]${after}`, "compile-error", [41]],
+    ["a list of lists, nested", `${lists}let xs = [[a], [b]]${after}`, "compile-error", [43]],
+    ["a set of lists", `${lists}let xs = set[a, b]${after}`, "compile-error", [44]],
+    ["a dict of lists", `${lists}let xs = dict{x: a, y: b}${after}`, "compile-error", [51]],
+    ["a record of lists", `${lists}let xs = [{n: a}, {n: b}]${after}`, "compile-error", [46]],
+    [
+      "a list of dicts",
+      `let a = dict{k: 1}\nlet b = dict{k: "bad"}\nlet xs = [a, b]${after}`,
+      "compile-error",
+      [55],
+    ],
+    [
+      "a list of sets",
+      `let a = set[1]\nlet b = set["bad"]\nlet xs = [a, b]${after}`,
+      "compile-error",
+      [47],
+    ],
+    ["an add", `${lists}let xs = [a]\nxs.add(b)${after}`, "compile-error", [48]],
+    ["a whole store", `${lists}let xs = a\nxs = b${after}`, "compile-error", [44]],
+    ["each copy of the source", `${lists}let xs = [a, b, b, a]${after}`, "compile-error", [41, 44]],
+    [
+      "results of calls",
+      `function f {\n  return [1]\n}\nfunction g {\n  return ["bad"]\n}\nlet xs = [f(), g()]${after}`,
+      "compile-error",
+      [75],
+    ],
+    [
+      "fields read",
+      `let r = {items: [1]}\nlet s = {items: ["bad"]}\nlet xs = [r.items, s.items]${after}`,
+      "compile-error",
+      [65],
+    ],
+    [
+      "lists grown by adds",
+      `let a = []\na.add(1)\nlet b = []\nb.add("bad")\nlet xs = [a, b]${after}`,
+      "compile-error",
+      [57],
+    ],
+    // the literal forms the named ones match
+    ["inline lists", `let xs = [[1], ["bad"]]${after}`, "compile-error", [16]],
+    ["an inline add", `let xs = [[1]]\nxs.add(["bad"])${after}`, "compile-error", [22]],
+    ["inline records", `let xs = [{n: 1}, {n: "bad"}]${after}`, "compile-error", [22]],
+    // a named record's field where a read or the literal's own record decides it (A2, TABLE q12)
+    [
+      "records, a field read",
+      `let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, b]\nrepeat xs[0].n {}${after}`,
+      "compile-error",
+      [47],
+    ],
+    [
+      "a record beside a literal one",
+      `let b = {n: "bad"}\nlet xs = [{n: 1}, b]${after}`,
+      "compile-error",
+      [37],
+    ],
+    // whole numbers with numbers; fields apart; a named record's fields admitted at their first read (A2); host data
+    [
+      "whole numbers and numbers",
+      `let a = [1]\nlet b = [2.5]\nlet xs = [a, b]${after}`,
+      "valid",
+      [],
+    ],
+    [
+      "records of other fields",
+      `let a = {n: 1}\nlet b = {m: "x"}\nlet xs = [a, b]${after}`,
+      "valid",
+      [],
+    ],
+    [
+      "records, no field read",
+      `let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, b]${after}`,
+      "valid",
+      [],
+    ],
+    [
+      "records holding lists, no field read",
+      `let a = {items: [1]}\nlet b = {items: ["bad"]}\nlet xs = [a, b]${after}`,
+      "valid",
+      [],
+    ],
+    ["host data", `let a = [1]\nlet b = hostValue\nlet xs = [a, b]${after}`, "valid", []],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, outcome, sites] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const errors = record.diagnostics
+        .filter((diagnostic) => diagnostic.class === "compile-error")
+        .map((diagnostic) => diagnostic.site.offset)
+        .sort((a, b) => a - b);
+      if (record.outcome !== outcome || JSON.stringify(errors) !== JSON.stringify(sites))
+        differing.push(
+          `${name}${reversed ? " reversed" : ""}: ${record.outcome} @${errors.join(", @")}`,
+        );
+    }
+  }
+  assert.deepEqual(differing, []);
+});

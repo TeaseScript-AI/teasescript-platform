@@ -322,6 +322,12 @@ test("admission's decided types and C9's boundary checks compile and run on the 
       [],
       [[null, null]],
     ],
+    // A8 (the owner's F2): a named list in a literal brings its elements' type, as a literal one does; whole numbers
+    // with numbers
+    ['let a = [1]\nlet b = ["bad"]\nlet xs = [a, b]\nexit\n', ["error TSV041@41"], null, []],
+    ['let a = [1]\nlet b = ["bad"]\nlet xs = [[a], [b]]\nexit\n', ["error TSV041@43"], null, []],
+    ['let a = [1]\nlet b = ["bad"]\nlet xs = a\nxs = b\nexit\n', ["error TSV041@44"], null, []],
+    ['let a = [1]\nlet b = [2.5]\nlet xs = [a, b]\nsay "after"\nexit\n', [], [], [[2, null]]],
     // C9: external data stored whole into a written collection, checked there with its elements
     [
       "let pool: integer[] = hostValue\nexit\n",
