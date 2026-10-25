@@ -24,7 +24,8 @@ The codes that more than one owner reports are listed in
 - **lexer** (`src/lexer.ts`): the characters of the source.
 - **parser** (`src/parser.ts` and `src/parser/`): the structure of the source, with the file header
   (`src/script-header.ts`) and the check that number and duration literals are finite.
-- **name pass** (`src/semantic.ts`): names, scopes, placement, and what the structure of a command allows.
+- **name pass** (`src/semantic.ts` and `src/semantic/`): names, scopes, placement, and what the structure of a command
+  allows.
 - **type checker** (`src/type-checker.ts`): types and values. The coarse core (`src/type-inference/core/`), which
   replaces it, is reached only through a test-only compile route so far.
 - **compiler** (`src/compiler.ts`): the project's file paths and images, waits written in days or weeks, the check of

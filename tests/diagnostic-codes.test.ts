@@ -24,7 +24,7 @@ const registry: Readonly<Record<string, DiagnosticCodeInfo>> = DIAGNOSTIC_CODES;
 const OWNER_SOURCES: Readonly<Record<DiagnosticOwner, readonly string[]>> = {
   lexer: ["lexer.ts"],
   parser: ["parser.ts", "parser/", "script-header.ts", "ast-validation.ts"],
-  "name pass": ["semantic.ts", "switch-cases.ts"],
+  "name pass": ["semantic.ts", "semantic/", "switch-cases.ts"],
   "type checker": [
     "type-checker.ts",
     "authored-presentation.ts",

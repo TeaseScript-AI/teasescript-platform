@@ -74,7 +74,7 @@ import {
   isFormFieldKind,
   unknownFormTypeMessage,
 } from "./form-fields.js";
-import type { VariableSite } from "./semantic.js";
+import type { VariableSite } from "./semantic/scope.js";
 import { isAskImageCall, isFileStoreCall, isLockCall, isTakePhotoCall } from "./capture-call.js";
 import { lazyDefaultArgument } from "./lazy-defaults.js";
 import { canonicalWebUrl, OPEN_URL_FIX, OPEN_URL_RULE } from "./web-url.js";
