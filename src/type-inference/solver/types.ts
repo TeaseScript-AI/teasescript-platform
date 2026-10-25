@@ -1,19 +1,17 @@
 import {
-  assignedType,
-  excludeType,
   isAssignable,
   isScalarKind,
   members as memberTypes,
-  narrowTo,
   nonNullType,
   NULL_TYPE,
   optional as optionalType,
-  PropertyTable,
   union,
   UNKNOWN_TYPE,
   type ScalarValue,
   type StaticType,
 } from "../../static-types.js";
+import { PropertyTable } from "../../static-types/property-tables.js";
+import { assignedType, excludeType, narrowTo } from "../../static-types/narrowing.js";
 import { VALUE_KINDS, type PlainKind, type ValueKind } from "../../value-kinds.js";
 import type { TypeTerm } from "../graph.js";
 

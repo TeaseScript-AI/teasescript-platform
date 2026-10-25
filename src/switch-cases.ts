@@ -4,7 +4,6 @@ import type { Expression, SwitchStatement } from "./ast.js";
 import { durationLiteralValue, durationParts, isCalendar, negateDuration } from "./duration.js";
 import type { SourceSpan } from "./source.js";
 import {
-  describeValue,
   isKnown,
   isNumeric,
   members,
@@ -12,6 +11,7 @@ import {
   valueKindOfType,
   type StaticType,
 } from "./static-types.js";
+import { describeValue } from "./static-types/type-names.js";
 import { mayEqualKinds, VALUE_KINDS, type ValueKind } from "./value-kinds.js";
 
 const switchCaseCode = {

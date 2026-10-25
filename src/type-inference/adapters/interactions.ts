@@ -12,13 +12,10 @@ import {
   isNullable,
   isScalar,
   isScalarKind,
-  joinTypes,
   members,
   nonNullType,
   NUMBER_TYPE,
   optional,
-  plainType,
-  PropertyTable,
   resolved,
   STRING_TYPE,
   TIME_TYPE,
@@ -29,6 +26,9 @@ import {
   type ScalarValue,
   type StaticType,
 } from "../../static-types.js";
+import { PropertyTable } from "../../static-types/property-tables.js";
+import { plainType } from "../../static-types/places.js";
+import { joinTypes } from "../../static-types/join.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS } from "../../value-kinds.js";
 import type {
   ChoiceElementEvidence,

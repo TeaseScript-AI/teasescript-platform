@@ -6,7 +6,6 @@ import {
   INTEGER_TYPE,
   isKnown,
   isScalar,
-  joinTypes,
   NULL_TYPE,
   optional,
   resolved,
@@ -15,6 +14,7 @@ import {
   UNKNOWN_TYPE,
   type StaticType,
 } from "../../static-types.js";
+import { joinTypes } from "../../static-types/join.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { OperandView, OperationInputs, OperationResult } from "./relation.js";
 import {

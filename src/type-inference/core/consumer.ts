@@ -18,14 +18,8 @@ import {
 import type { TypeCheckPlan } from "../../plan/model.js";
 import type { SourceSpan } from "../../source.js";
 import { KnownValues } from "../../static-evaluation.js";
-import {
-  members,
-  openType,
-  typeFromAnnotation,
-  union,
-  UNKNOWN_TYPE,
-  type StaticType,
-} from "../../static-types.js";
+import { members, openType, union, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
+import { typeFromAnnotation } from "../../static-types/annotations.js";
 import { typeKey } from "../../storage-types.js";
 import { typePlan } from "../../type-plans.js";
 import { VALUE_KINDS } from "../../value-kinds.js";

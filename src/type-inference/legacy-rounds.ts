@@ -21,18 +21,18 @@ import {
   CALENDAR_DURATION_TYPE,
   DURATION_TYPE,
   INTEGER_TYPE,
-  joinTypes,
   nonNullType,
   NULL_TYPE,
   NUMBER_TYPE,
   openType,
-  PropertyTable,
   resolved,
   STRING_TYPE,
-  typeFromAnnotation,
   UNKNOWN_TYPE,
   type StaticType,
 } from "../static-types.js";
+import { PropertyTable } from "../static-types/property-tables.js";
+import { joinTypes } from "../static-types/join.js";
+import { typeFromAnnotation } from "../static-types/annotations.js";
 import {
   sameReadStorageKeyTypes,
   sameStorageKeyTypes,

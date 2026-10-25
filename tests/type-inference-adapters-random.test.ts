@@ -5,11 +5,11 @@ import {
   INTEGER_TYPE,
   NUMBER_TYPE,
   optional,
-  PropertyTable,
   STRING_TYPE,
   union,
   type StaticType,
 } from "../src/static-types.js";
+import { PropertyTable } from "../src/static-types/property-tables.js";
 import { operationRelations } from "../src/type-inference/adapters/index.js";
 import {
   assertCase,

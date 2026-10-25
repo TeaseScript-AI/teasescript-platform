@@ -1,14 +1,8 @@
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import type { SourceSpan } from "./source.js";
-import {
-  isAssignable,
-  openType,
-  PropertyTable,
-  resolved,
-  settle,
-  union,
-  type StaticType,
-} from "./static-types.js";
+import { isAssignable, openType, resolved, union, type StaticType } from "./static-types.js";
+import { PropertyTable } from "./static-types/property-tables.js";
+import { settle } from "./static-types/places.js";
 
 /**
  * The type a storage key written as a string literal keeps for the whole project (ADR 0021 §6): its declared type, or

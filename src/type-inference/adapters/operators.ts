@@ -1,6 +1,5 @@
 import {
   ANGLE_TYPE,
-  arithmeticType,
   BOOLEAN_TYPE,
   CALENDAR_DURATION_TYPE,
   DURATION_TYPE,
@@ -14,6 +13,7 @@ import {
   withValues,
   type StaticType,
 } from "../../static-types.js";
+import { arithmeticType } from "../../static-types/arithmetic.js";
 import { typeKey } from "../../storage-types.js";
 import { VALUE_KIND_NAMES } from "../../value-kinds.js";
 import type { ContractFamily } from "../graph.js";

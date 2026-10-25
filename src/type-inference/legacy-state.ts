@@ -4,10 +4,10 @@ import {
   isCollection,
   members,
   resolved,
-  type Declaration,
   type OpenType,
   type StaticType,
 } from "../static-types.js";
+import type { Declaration } from "../static-types/origins.js";
 
 // The state that the legacy type inference carries from one check of the project to the next, and the helpers that
 // decide what it carries (see `legacy-rounds.ts`). A check decides the types of places from the first value stored in

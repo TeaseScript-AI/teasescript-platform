@@ -24,8 +24,6 @@ import { RANDOM_CONTRACTS } from "./random-functions.js";
 import { isList } from "./runtime/values/value-predicates.js";
 import { staticChoiceValue, staticVisibleText, type KnownValue } from "./static-evaluation.js";
 import {
-  copyType,
-  describeValue,
   DURATION_TYPE,
   INTEGER_TYPE,
   isAssignable,
@@ -34,7 +32,6 @@ import {
   members,
   nonNullType,
   NUMBER_TYPE,
-  PropertyTable,
   resolved,
   STRING_TYPE,
   union,
@@ -42,6 +39,9 @@ import {
   type StaticType,
   valueKindOfType,
 } from "./static-types.js";
+import { PropertyTable } from "./static-types/property-tables.js";
+import { copyType } from "./static-types/places.js";
+import { describeValue } from "./static-types/type-names.js";
 
 /** The problems with a call of a list function, the properties it reads by name, and its result type. */
 export interface ListFunctionCheck {

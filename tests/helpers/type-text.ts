@@ -1,12 +1,12 @@
 import {
   isScalarKind,
-  PropertyTable,
   union,
   UNKNOWN_TYPE,
   withValues,
   type ScalarValue,
   type StaticType,
 } from "../../src/static-types.js";
+import { PropertyTable } from "../../src/static-types/property-tables.js";
 import { typeKey } from "../../src/storage-types.js";
 import { VALUE_KIND_NAMES, type ValueKind } from "../../src/value-kinds.js";
 import { structureOf } from "./adapter-parity.js";
