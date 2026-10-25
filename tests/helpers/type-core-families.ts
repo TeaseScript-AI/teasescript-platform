@@ -1603,6 +1603,21 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
+    name: "A7-copied-wholes",
+    measures:
+      "A7: a list of k copies of one record replaced by external data, each of its k fields stored and read",
+    program: (k) =>
+      main(
+        lines(
+          `let source = {${fields(k, () => "1")}}`,
+          "source = hostValue",
+          `let xs = [${Array.from({ length: k }, () => "source").join(", ")}]`,
+          rows(k, (i) => `xs[0].f${i} = 1\nlet shown${i}: integer = xs[0].f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
     name: "A5-shared-presets",
     measures:
       "A2, A5: a k-field record replaced k times by copies of one record, then by external data, every field read",

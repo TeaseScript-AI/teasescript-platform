@@ -67,6 +67,12 @@ function family(tags: readonly ItemTag[]): boolean {
 /** A number the place admits: one an internal contribution gives, never one possible solely through external data. */
 const admitsNumber = (item: Item): boolean => item.tag === "number" && item.extOnly !== true;
 
+/** The values at one depth of a stored value's path, and the first of them no literal of it holds (`wholeBelow`). */
+interface Level {
+  readonly values: readonly PlaceId[];
+  readonly whole: PlaceId | null;
+}
+
 /** A candidate of a decided type: a store and the path below its destination it reaches the place at. */
 export interface Candidate {
   readonly d: Definition;
@@ -122,6 +128,8 @@ export class Admission {
     ReadonlySet<Definition | null>,
     { readonly wholes: readonly Definition[]; readonly adds: readonly Definition[] }[]
   >();
+  /** `wholeBelow`'s values per stored value and path prefix. */
+  readonly #levels = new Map<string, Level>();
   readonly #pending = new Map<number, Definition>();
   readonly #typed: Definition[] = [];
   readonly #readSeen = new Set<PlaceId>();
@@ -800,14 +808,24 @@ export class Admission {
    */
   public wholeBelow(value: PlaceId, at: readonly string[]): PlaceId | null {
     const { program } = this.pass;
-    let values: readonly PlaceId[] = [value];
-    for (let index = 0; index < at.length; index += 1) {
-      const whole = values.find((current) => !program.hasOf.has(current));
-      if (whole !== undefined) return whole;
-      values = values.flatMap((current) => this.storesAt(current, at[index]!).map((d) => d.value!));
-      program.work.charge("checks", values.length);
+    // the values at each depth of the path, and the first whole one there, once per value and path prefix: the paths
+    // of a stored value share their prefixes (each field of a list's elements its element step)
+    let level: Level = { values: [value], whole: program.hasOf.has(value) ? null : value };
+    let key = `${value}`;
+    for (let index = 0; index + 1 < at.length && level.whole === null; index += 1) {
+      key = `${key}.${at[index]!}`;
+      let next = this.#levels.get(key);
+      if (next === undefined) {
+        const values: PlaceId[] = [];
+        for (const current of level.values)
+          for (const d of this.storesAt(current, at[index]!)) values.push(d.value!);
+        program.work.charge("checks", values.length + 1);
+        next = { values, whole: values.find((current) => !program.hasOf.has(current)) ?? null };
+        this.#levels.set(key, next);
+      }
+      level = next;
     }
-    return null;
+    return at.length > 0 ? level.whole : null;
   }
 
   /**
