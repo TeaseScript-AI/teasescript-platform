@@ -146,6 +146,8 @@ export const OPAQUE_MEMBER: Item = OWN_SELECTION;
 
 /** F19a (r4.44): what a receiver's kinds hold beside them where its component decided it a reference (`RECEIVER`). */
 const HELD_REFERENCE: Item = Object.freeze(makeItem("unknown", null, { reasons: REASON.opaque }));
+/** `severalElements`'s answer as its demand's items: one item for several, none for fewer. */
+const SEVERAL: readonly Item[] = Object.freeze([HELD_REFERENCE]);
 
 /**
  * F19a (r4.44): a receiver's kinds (the input) and the choice, on its completed kinds, whether it holds a reference
@@ -488,8 +490,6 @@ export class Contract {
     selectionVisits: 0,
   };
   readonly #prefix = new Map<Key, PrefixStores>();
-  /** `severalElements` per key's first element step. */
-  readonly #several = new Map<Key, boolean>();
   readonly #subPaths = new Map<Key, ReadonlySet<string>>();
   readonly #aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly #projectedLayers = new Map<string, SubLayer | null>();
@@ -610,12 +610,23 @@ export class Contract {
     const path = keyPath(key);
     const step = path.indexOf("element");
     if (step < 0) return false;
-    const memoKey = keyOf(place, path.slice(0, step + 1));
-    const known = this.#several.get(memoKey);
-    if (known !== undefined) return known;
-    // (a copy cycle back to this step adds nothing)
-    this.#several.set(memoKey, false);
-    const collection = path.slice(0, step);
+    const at = keyOf(place, path.slice(0, step + 1));
+    const site = this.pass.program.places[place]?.site ?? null;
+    // a demand per element step, so a chain of collections read from collections (a function's result returning
+    // another's) is followed on the solver's explicit stack, and a copy cycle is solved as its component
+    const several = yield {
+      key: `s|${at}`,
+      kind: "contract",
+      file: site?.file ?? -1,
+      offset: site?.start ?? -1,
+      make: () => this.#severalWork(at),
+    };
+    return several.length > 0;
+  }
+
+  *#severalWork(at: Key): Work<readonly Item[]> {
+    const place = keyPlace(at);
+    const collection = keyPath(at).slice(0, -1);
     let count = 0;
     for (let length = collection.length; length >= 0 && count < 2; length -= 1) {
       this.pass.program.work.charge("invSteps");
@@ -631,8 +642,7 @@ export class Contract {
         if (withoutEmpty(yield* this.subAt(sub.key, below)).length > 0) count += 1;
       }
     }
-    this.#several.set(memoKey, count >= 2);
-    return count >= 2;
+    return count >= 2 ? SEVERAL : [];
   }
 
   /** The elements one source entry gives at `below` (which ends with an element step), counted to two. */

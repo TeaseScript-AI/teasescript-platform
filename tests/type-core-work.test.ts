@@ -132,6 +132,30 @@ test("a literal of 150,000 elements beside a host value is admitted within the n
 });
 
 /**
+ * Native resilience (TABLE §8, round 10 B5): an element read of a result that a chain of 2,048 functions returns, each
+ * the next one's or a list, asks whether several elements meet there through every function's result: on the solver's
+ * stack, never one native frame per function.
+ */
+test("an element read through a chain of 2,048 returned results is answered within the native stack", () => {
+  const functions = Array.from(
+    { length: 2_048 },
+    (_, index) =>
+      `function get${index} {\n  if flagHost { return [1] }\n  return get${(index + 1) % 2_048}()\n}`,
+  );
+  const source = `let flagHost = askBoolean "flag"\n${functions.join("\n")}\nlet xs = [get0(), get0()]\nrepeat xs[0][0] {}\nexit`;
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const forward = analyseCore(request).outcome;
+  const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+    withConsumerOrder(
+      (list) => [...list].reverse(),
+      () => analyseCore(request).outcome,
+    ),
+  );
+  assert.deepEqual([forward, reversed], ["valid", "valid"]);
+});
+
+/**
  * W34's two known products, gated known limits by the owner's decision (TABLE r4.45, PLAN §6b): a regression check on
  * the 64 → 128 growth step only, each held to its measured doubling in either order (3.37 and 2.53); not a bound at
  * larger sizes (128 → 256 grows 3.62 and 2.82), and no linearity is asserted for them.
