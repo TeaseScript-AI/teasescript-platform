@@ -78,7 +78,10 @@ export interface CorePass {
 }
 
 /** One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6). */
-function createPass(program: CoreProgram, rejected: ReadonlySet<number> = new Set()): CorePass {
+function createPass(
+  program: CoreProgram,
+  rejected: ReadonlyMap<number, unknown> = new Map(),
+): CorePass {
   const definitions = new DefinitionIndex(program);
   const parts: {
     program: CoreProgram;
@@ -226,9 +229,9 @@ export function analyseCore(request: CoreAnalysisRequest): Answers {
     program.index();
     // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
     // whose changing stores stay possibilities
-    let rejected: ReadonlySet<number> = new Set();
+    let rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map();
     let cycling: ReadonlySet<number> = new Set();
-    const sets: ReadonlySet<number>[] = [rejected];
+    const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
     for (let last = false; ;) {
       const pass = createPass(program, rejected);
       const consumers = new Consumers(pass, rejected, cycling);
@@ -240,19 +243,20 @@ export function analyseCore(request: CoreAnalysisRequest): Answers {
       program.work.charge("rejectPasses");
       const repeated = sets.findIndex((set) => sameSet(set, now));
       if (repeated >= 0) {
+        // the stores every set of the cycle rejects stay rejected, the others are its possibilities
         const cycle = sets.slice(repeated);
-        const every = new Set<number>();
+        const every = new Map<number, ReadonlySet<Key>>();
         const some = new Set<number>();
         for (const set of cycle)
-          for (const uid of set)
-            if (cycle.every((other) => other.has(uid))) every.add(uid);
+          for (const [uid, keys] of set)
+            if (cycle.every((other) => other.has(uid))) every.set(uid, keys);
             else some.add(uid);
         rejected = every;
         cycling = some;
         last = true;
         continue;
       }
-      rejected = new Set(now);
+      rejected = now;
       sets.push(rejected);
     }
   } catch (error) {
@@ -349,8 +353,9 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   }
 }
 
-function sameSet(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
-  return a.size === b.size && [...a].every((uid) => b.has(uid));
+/** Whether two passes reject the same stores. */
+function sameSet(a: ReadonlyMap<number, unknown>, b: ReadonlyMap<number, unknown>): boolean {
+  return a.size === b.size && [...a.keys()].every((uid) => b.has(uid));
 }
 
 function definitionByUid(pass: CorePass, uid: number): Definition {

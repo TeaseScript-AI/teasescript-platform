@@ -196,7 +196,7 @@ export class Consumers {
 
   public constructor(
     readonly pass: CorePass,
-    rejected: ReadonlySet<number> = new Set(),
+    rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map(),
     cycling: ReadonlySet<number> = new Set(),
   ) {
     this.#order = consumerOrder ?? ((list) => [...list]);
@@ -491,7 +491,7 @@ export class Consumers {
             : null;
         if (wrong !== null) {
           this.#error("written-target", program.place(wrong.value!).site ?? d.site);
-          admission.reject(d);
+          admission.reject(d, root, path);
           continue;
         }
         // A6: a definite contribution that does not fit, where no kind of the value fits (r4.46: a fitting kind beside it
@@ -503,7 +503,7 @@ export class Consumers {
               deciding(elements).some((item) => !tags.some((tag) => fits(item.tag, tag, written))),
             ),
           );
-          admission.reject(d);
+          admission.reject(d, root, path);
           continue;
         }
         // C1, ADR 1.7: a value none of whose kinds fits errs, against a written type at any path or a decider earlier in

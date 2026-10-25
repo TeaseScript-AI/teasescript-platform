@@ -98,8 +98,8 @@ export interface AdmissionHost {
 export class Admission {
   /** The decider's kinds per key (§5). */
   readonly decided = new Map<Key, readonly ItemTag[]>();
-  /** The stores rejected in this pass, by their definitions' order (A6). */
-  readonly newlyRejected = new Set<number>();
+  /** The stores rejected in this pass, by their definitions' order, with the places and paths they are rejected at (A6). */
+  readonly newlyRejected = new Map<number, Set<Key>>();
   /** The boundary checks of the ingress stores, by the key each enters (C9), published after the consumers ran. */
   readonly boundaries = new Map<Key, Obligation[]>();
   /** The boundary checks no store into a place owes: host data read where it is consumed, an ingress read (C9, F18). */
@@ -125,8 +125,11 @@ export class Admission {
   public constructor(
     readonly pass: CorePass,
     readonly host: AdmissionHost,
-    /** The stores rejected by the previous passes, and those a rejection cycle changes (A6). */
-    readonly rejected: ReadonlySet<number>,
+    /**
+     * The stores rejected by the previous pass, each with the places and paths it was rejected at, and those a rejection
+     * cycle changes (A6).
+     */
+    readonly rejected: ReadonlyMap<number, ReadonlySet<Key>>,
     readonly cycling: ReadonlySet<number>,
   ) {
     const { definitions } = pass;
@@ -142,9 +145,15 @@ export class Admission {
     return this.host.run(work);
   }
 
-  /** A6: a definite contribution that does not fit is rejected (a return or an argument stays: its callee decides). */
-  public reject(d: Definition): void {
-    if (d.how !== "return" && d.how !== "argument") this.newlyRejected.add(d.uid);
+  /**
+   * A6: a definite contribution that does not fit at a place's path is rejected (a return or an argument stays: its
+   * callee decides); in the next pass it is decided again there.
+   */
+  public reject(d: Definition, root: PlaceId, path: readonly string[]): void {
+    if (d.how === "return" || d.how === "argument") return;
+    let keys = this.newlyRejected.get(d.uid);
+    if (keys === undefined) this.newlyRejected.set(d.uid, (keys = new Set()));
+    keys.add(keyOf(root, path));
   }
 
   /** ADR 1.6: a start value comes first; a single-site parameter's is its argument (F21). */
@@ -425,10 +434,13 @@ export class Admission {
           candidates.set(`${d.uid}|${path.join(".")}`, { d, at: path });
     for (const { key: prefix, rest } of prefixes) {
       const stored = contract.prefixStores(prefix);
+      // (a read of a host value below its store owes nothing at a decided type: A7's whole-store exception leaves it the
+      // boundary check its own path's candidate owes, C9, and it holds no kind and no `null`; a written type checks it)
       const take = (list: Iterable<Definition | null>, again: boolean): void => {
         for (const d of list)
           if (
             d !== null &&
+            (byWritten || !this.#hostRead(d.value)) &&
             (again || lists.live(d)) &&
             (d.kind === "whole" || (d.kind === "add" && rest[0] === "element")) &&
             (again ||
@@ -444,9 +456,11 @@ export class Admission {
         if (offends(this.#run(contract.entryAt(entry, rest)))) take(entry.ds, false);
       for (const sub of contract.relevantSubs(stored, rest))
         if (offends(this.#run(contract.subAt(sub.key, rest)))) take(sub.defs, false);
-      // A6: a rejected store is decided again in every pass
+      // A6: a rejected store is decided again in every pass, where it was rejected
       take(
-        (definitions.byKey.get(prefix) ?? []).filter((d) => this.rejected.has(d.uid)),
+        (definitions.byKey.get(prefix) ?? []).filter(
+          (d) => this.rejected.get(d.uid)?.has(key) === true,
+        ),
         true,
       );
     }
@@ -497,7 +511,10 @@ export class Admission {
     return true;
   }
 
-  /** A prefix's whole stores in source order (A2's lazy scan), or its adds; a single-site parameter starts as its argument. */
+  /**
+   * A prefix's whole stores in source order (A2's lazy scan), or its adds; a single-site parameter starts as its argument.
+   * A read of a host value decides no path below it (external data, no kind and no `null`), so the scan passes none.
+   */
   #wholeOf(key: Key, add: boolean): Definition[] {
     const memoKey = `${key}|${add}`;
     let list = this.#whole.get(memoKey);
@@ -506,6 +523,7 @@ export class Admission {
       list = (definitions.byKey.get(key) ?? []).filter(
         (d) =>
           lists.live(d) &&
+          !this.#hostRead(d.value) &&
           (add
             ? d.kind === "add"
             : d.kind === "whole" &&
@@ -518,6 +536,13 @@ export class Admission {
       this.#whole.set(memoKey, list);
     }
     return list;
+  }
+
+  /** Whether a value is a read of a host value: external data, with no kind and no `null` at any path. */
+  #hostRead(value: PlaceId | undefined): boolean {
+    const { program } = this.pass;
+    const binding = value === undefined ? undefined : program.occurrenceOf.get(value);
+    return binding !== undefined && program.isHost(binding);
   }
 
   /** §3.3: a value's contract kinds, `null` with an unknown. */
