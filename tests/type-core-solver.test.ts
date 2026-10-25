@@ -364,7 +364,8 @@ const NARRATOR = 'speaker narrator { value: "Hello" }\n';
  * outside the cycle beside a record, a nested record or an external leaf round it (B2, B2-r2), and the record-only
  * control, with their diagnostics (a class `warning-runtime-check` unless written). A return that may not fit the result
  * its function's first return decides owes C1's check (A2, F23), at the result and at each path of the first return's
- * literal (A8); the record-only control's, which none of its kinds fits, is an error (ADR 0021 1.5).
+ * literal (A8); the record-only control's, which none of its kinds fits, is an error (ADR 0021 1.5) and is rejected, so
+ * the result's use sees the first return's record (A6, F23).
  */
 const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[] = [
   [
@@ -467,12 +468,8 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
   [
     "the record-only control",
     "function g(flag: boolean) {\n  if flag { return {custom: 2} }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return {custom: 1} }\n  return g(true).custom\n}\nrepeat f(false) {}\nexit",
-    [
-      "integer-use f(false)",
-      "member-read g(true)",
-      "written-target compile-error g(true).custom",
-      "written-target f(true)",
-    ],
+    // (the rejected return leaves the result, so the count reads a record, A6)
+    ["integer-use compile-error f(false)", "written-target compile-error g(true).custom"],
   ],
 ];
 

@@ -214,11 +214,12 @@ export class Admission {
   }
 
   /**
-   * A6: a definite contribution that does not fit at a place's path is rejected (a return or an argument stays: its
-   * callee decides); in the next pass it is decided again there.
+   * A6: a definite contribution that does not fit at a place's path is rejected, a return against its own result's
+   * decision too (F23), so it leaves the result's contract (an argument stays: the parameter is its callee's); in the
+   * next pass it is decided again there.
    */
   public reject(d: Definition, root: PlaceId, path: readonly string[]): void {
-    if (d.how === "return" || d.how === "argument") return;
+    if (d.how === "argument") return;
     let keys = this.newlyRejected.get(d.uid);
     if (keys === undefined) this.newlyRejected.set(d.uid, (keys = new Set()));
     keys.add(keyOf(root, path));

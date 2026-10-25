@@ -2034,6 +2034,18 @@ test("admission decides from the start value, keeps written copies, rejects ever
       'function g(flag: boolean) {\n  if flag { return [1] }\n  return ["x"]\n}\nlet r = g(true)\nexit',
       (at) => ["compile-error", `written-target compile-error @${at('"x"')}`],
     ],
+    // a return of another kind is rejected, so the result's readers see the first return's kind (A6, F23; review:
+    // Astra's D1); a written result's alike
+    [
+      "a return of another element kind, its result read",
+      'function f(flag: boolean) {\n  if flag { return [3] }\n  return ["bad"]\n}\nlet n: integer = f(true).first\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+    ],
+    [
+      "a return of another kind, its result read",
+      'function f(flag: boolean) {\n  if flag { return 3 }\n  return "bad"\n}\nlet n: integer = f(true)\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+    ],
     // a literal's `null` element beside the copy makes the element optional (ADR 0021 1.3, A8), its type strict
     [
       "a list whose first element copies a written integer, a later one possibly null, then external data",
