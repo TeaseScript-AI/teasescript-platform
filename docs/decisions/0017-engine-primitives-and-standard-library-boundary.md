@@ -210,7 +210,7 @@ Library functions use ordinary call syntax:
 
 ```tease
 say("Hello")
-askNumber("How many?", hint: "1 to 10")
+let count = askNumber("How many?", hint: "1 to 10")
 ```
 
 Their exported signatures and metadata can provide:

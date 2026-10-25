@@ -3570,7 +3570,10 @@ The developer instruction controls tone and wording. It does not need to repeat 
 
 ### General input rules
 
-- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askPassword(...)`, `askBoolean(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`, except a file input the player skips ([Skipping a file input](#skipping-a-file-input)). A [form](#forms), `askForm(...)` or
+- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`,
+  `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askPassword(...)`, `askBoolean(...)`, `askFile(...)`,
+  `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`, except
+  a file input the player skips ([Skipping a file input](#skipping-a-file-input)). A [form](#forms), `askForm(...)` or
   `askBooleans(...)`, returns `null` only when it is cancelled: by the player when written with `cancel:`, or, for
   `askForm(...)`, by its timeout with `onTimeout: "cancel"`.
 - Input functions complete only after valid input has been supplied, or a skip or cancellation the request allows.
