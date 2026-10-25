@@ -1,8 +1,13 @@
 import type { ForStatement } from "../../ast.js";
 import type { PlaceId, SourceSite } from "../graph.js";
 import type { Callable, FlowLoop, FlowNode } from "./flow-graph.js";
-import { makeItem, type ContextWord, type Item, type Writer } from "./items.js";
-import { conversionCategory, methodCategory } from "./method-categories.js";
+import { makeItem, writerKey, type ContextWord, type Item, type Writer } from "./items.js";
+import {
+  conversionCategory,
+  dictList,
+  interactionCategory,
+  methodCategory,
+} from "./method-categories.js";
 import { siteKey, type CoreProgram } from "./program.js";
 
 /*
@@ -162,6 +167,12 @@ export class DefinitionIndex {
   /** C9: the values external data enters by, and the store that brought each in (its ingress store). */
   readonly ingress = new Set<PlaceId>();
   readonly ingressStore = new Map<PlaceId, Writer>();
+  /** Per ingress store's token (`writerKey`): its store, the path below its destination, its earliest carried site. */
+  readonly storeByToken = new Map<string, Definition>();
+  readonly ingressSuffix = new Map<string, readonly string[]>();
+  readonly cellSiteOf = new Map<string, SourceSite>();
+  /** A fallback's or a default's own ingress read, by its token (C10: checked at the read). */
+  readonly readIngress = new Map<string, PlaceId>();
   /** The keys below each key that have definitions (X6's own events, X7's keys below). */
   readonly #keysBelow = new Map<Key, Key[]>();
   readonly #foreignAt = new Set<Key>();
@@ -469,11 +480,13 @@ export class DefinitionIndex {
   }
 
   /**
-   * C9: the values external data enters by (a load, `fromJson`, a read of a host global; an `askChoice` only through an
-   * option that is one, r4.43) and each one's
-   * ingress store: the whole store of the value, or of the value that carries it there (the outermost literal holding
-   * it, a property or element read of it, the fallback whose direct value it is). A fallback or default carries
-   * nothing to its operation's store (C10): data there names its own read.
+   * C9: the values external data enters by (a load, `fromJson`, a read of a host global) and each one's ingress store:
+   * the whole store of the value, or of the value that carries it there (the outermost literal holding it, a property
+   * or element read of it, the fallback whose direct value it is, an `askChoice` whose option it is or whose option's
+   * selected value it is, r4.42, r4.46 (1)). A fallback or default carries nothing to its operation's store (C10): data
+   * there names its own read. Per store, the path below its destination its ingresses share (A8: a collection literal's
+   * element; an object literal's record level, a read of the carrier taking its outermost step), and the earliest
+   * ingress expression a literal or a choice carries (C9 r4.29: the boundary's site).
    */
   #ingress(): void {
     const program = this.program;
@@ -489,6 +502,7 @@ export class DefinitionIndex {
       if (program.isHost(binding)) this.ingress.add(occurrence);
     const ownOperand = new Set<PlaceId>();
     const readOfValue = new Map<PlaceId, PlaceId>();
+    const choiceOfOption = new Map<PlaceId, PlaceId>();
     for (const constraint of program.constraints) {
       for (const operand of [
         constraint.kind === "fallback" ? constraint.right : undefined,
@@ -498,10 +512,25 @@ export class DefinitionIndex {
           : undefined,
       ])
         if (typeof operand === "number") ownOperand.add(operand);
-      if (constraint.kind === "project" && constraint.step !== "iteration")
+      if (
+        constraint.kind === "project" &&
+        constraint.step !== "iteration" &&
+        !(typeof constraint.step === "object" && constraint.step.property === "length")
+      )
         readOfValue.set(constraint.owner, constraint.into);
       else if (constraint.kind === "get" && typeof constraint.receiver === "number")
         readOfValue.set(constraint.receiver, constraint.result);
+      else if (
+        constraint.kind === "operation" &&
+        constraint.contract.family === "interaction" &&
+        interactionCategory(constraint.contract.name)?.kind === "options"
+      ) {
+        // an unlabelled option gives its buttons' values (V30 §19); a label gives its own kind
+        const options = constraint.evidence?.kind === "choice" ? constraint.evidence.options : [];
+        constraint.arguments.forEach((argument, index) => {
+          if (options[index]?.label === null) choiceOfOption.set(argument, constraint.result);
+        });
+      }
     }
     const storeOfValue = new Map<PlaceId, Definition>();
     for (const d of [...this.storeDefs, ...this.transferDefs])
@@ -514,13 +543,27 @@ export class DefinitionIndex {
     const cellOfValue = new Map<PlaceId, PlaceId>();
     for (const [cell, definitions] of this.cellDefs)
       for (const d of definitions) if (d.value !== undefined) cellOfValue.set(d.value, cell);
+    // an object literal's property names, for a choice object's selected value
+    const propertiesOf = new Map<PlaceId, Set<string>>();
+    for (const place of program.places)
+      if (place.kind.kind === "property") {
+        let names = propertiesOf.get(place.kind.owner);
+        if (names === undefined) propertiesOf.set(place.kind.owner, (names = new Set()));
+        names.add(place.kind.name);
+      }
     const carrierOf = (value: PlaceId): PlaceId | undefined => {
       const cell = cellOfValue.get(value);
       if (cell !== undefined) return program.cellOwner.get(cell)!.owner;
-      return readOfValue.get(value) ?? this.fallbackOf.get(value);
+      return readOfValue.get(value) ?? this.fallbackOf.get(value) ?? choiceOfOption.get(value);
     };
     for (const value of this.ingress) {
       let current = value;
+      // the path below the store the literals add, the steps from `current` down to the value with the object literal
+      // holding each property step, and whether a literal or a choice carried the value
+      let suffix: string[] = [];
+      let way: string[] = [];
+      let objects: (PlaceId | null)[] = [];
+      let carried = false;
       for (
         let depth = 0;
         depth < 256 &&
@@ -530,17 +573,72 @@ export class DefinitionIndex {
         depth += 1
       ) {
         program.work.charge("indexSteps");
+        const cell = cellOfValue.get(current);
+        if (cell !== undefined) {
+          const owner = program.place(cell).kind;
+          const step = owner.kind === "property" ? owner.name : "element";
+          suffix = owner.kind === "property" ? [] : ["element", ...suffix];
+          way = [step, ...way];
+          objects = [owner.kind === "property" ? owner.owner : null, ...objects];
+          carried = true;
+        } else if (readOfValue.has(current)) {
+          // r4.46 (2): a dict literal's `values` holds its values at the element step, its `keys` none of them
+          const listed = (program.hasOf.get(current) ?? []).some((has) => has.type.kind === "dict")
+            ? dictList(program.projOf.get(readOfValue.get(current)!)?.step ?? "")
+            : undefined;
+          if (listed === "keys") break;
+          if (listed !== "values") {
+            suffix = suffix.slice(1);
+            way = way.slice(1);
+            objects = objects.slice(1);
+          }
+        } else if (choiceOfOption.has(current)) {
+          // an option's own value, an element of its list, or a choice object's `value` (its `text` without one)
+          const at = way[0] === "element" ? 1 : 0;
+          const step = way[at];
+          if (
+            step !== undefined &&
+            step !== "value" &&
+            !(step === "text" && !propertiesOf.get(objects[at]!)?.has("value"))
+          )
+            break;
+          suffix = [];
+          way = [];
+          objects = [];
+          carried = true;
+        }
         current = carrierOf(current)!;
       }
       // a host read there, or a load or `fromJson` call: its own read, so the consumers it reaches stay linked to it
       if (ownOperand.has(current)) {
         const site = program.places[value]?.site;
-        if (site !== null && site !== undefined)
-          this.ingressStore.set(value, program.writer("read", site));
+        if (site !== null && site !== undefined) {
+          const token = program.writer("read", site);
+          this.ingressStore.set(value, token);
+          this.readIngress.set(writerKey(token), value);
+        }
         continue;
       }
       const store = storeOfValue.get(current);
-      if (store !== undefined) this.ingressStore.set(value, program.writer(store.how, store.site));
+      if (store === undefined) continue;
+      const token = program.writer(store.how, store.site);
+      const key = writerKey(token);
+      this.ingressStore.set(value, token);
+      this.storeByToken.set(key, store);
+      const site = program.places[value]?.site;
+      const earliest = this.cellSiteOf.get(key);
+      if (carried && site && (earliest === undefined || site.start < earliest.start))
+        this.cellSiteOf.set(key, site);
+      const was = this.ingressSuffix.get(key);
+      let common = 0;
+      while (
+        was !== undefined &&
+        common < was.length &&
+        common < suffix.length &&
+        was[common] === suffix[common]
+      )
+        common += 1;
+      this.ingressSuffix.set(key, was === undefined ? suffix : was.slice(0, common));
     }
   }
 

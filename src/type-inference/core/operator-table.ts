@@ -186,6 +186,13 @@ export function operationItems(
       cert: "pos" as const,
       ...(combination.some((item) => item.guarded === true) ? { guarded: true as const } : {}),
     };
+    // A2, A3 r4.36: a result kind of a combination holding external data (an external unknown, or an operand item that is
+    // itself possible solely through external data)
+    const external = combination.some(
+      (item) =>
+        item.extOnly === true || (item.tag === "unknown" && (item.reasons & REASON.external) !== 0),
+    );
+    const known = external ? { ...shared, extOnly: true as const } : shared;
     const explained = combination.reduce((first, item) => firstWriter(first, item.writer), writer);
     const unknowns = combination.filter((item) => item.tag === "unknown");
     if (
@@ -222,8 +229,8 @@ export function operationItems(
         continue;
       results.push(
         fan === undefined
-          ? makeItem(row.result, explained, shared)
-          : makeItem(row.result, fanWriter, { ...shared, fan }),
+          ? makeItem(row.result, explained, known)
+          : makeItem(row.result, fanWriter, { ...known, fan }),
       );
       if (unknowns.length > 0) {
         unsure = true;

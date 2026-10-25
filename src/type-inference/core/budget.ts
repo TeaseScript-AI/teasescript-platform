@@ -72,9 +72,10 @@ export type WorkCounter =
   | "mergeItems"
   | "sigItems"
   | "operatorSteps"
-  // the checks of consumers and admission, evaluated and skipped by the quiet path
+  // the checks of consumers and admission, evaluated and skipped by the quiet path; admission's passes after the first (A6)
   | "checks"
   | "checksSkipped"
+  | "rejectPasses"
   // the writers the result names
   | "evidence";
 

@@ -82,6 +82,11 @@ export interface Item {
   readonly guarded?: true;
   /** The unknown operand, by `fanIdentity`, whose operator rows this item is one of (§4 r4.14). */
   readonly fan?: string;
+  /**
+   * An operation's result kind that every combination giving it holds external data in: possible solely through
+   * external data, so no internal contribution admits it (A2, A3 r4.36, r4.37).
+   */
+  readonly extOnly?: true;
 }
 
 /** The fields of an item that `makeItem` lets a caller set. */
@@ -224,8 +229,9 @@ function mergePair(first: Item, other: Item, ingress: IngressGraph): Item {
       ? (firstContext(first.word, other.word) ?? undefined)
       : undefined;
   const loose = first.loose === true || (node !== undefined && (isLoose(first) || isLoose(other)));
-  // Still the rows of one unknown only when both are.
+  // Still the rows of one unknown only when both are; still possible solely through external data only when both are.
   const fan = first.fan !== undefined && first.fan === other.fan ? first.fan : undefined;
+  const extOnly = first.extOnly === true && other.extOnly === true;
   return {
     tag: first.tag,
     cert: !guarded && (first.cert === "def" || other.cert === "def") ? "def" : "pos",
@@ -237,6 +243,7 @@ function mergePair(first: Item, other: Item, ingress: IngressGraph): Item {
     ...(loose ? { loose: true } : {}),
     ...(guarded ? { guarded: true } : {}),
     ...(fan === undefined ? {} : { fan }),
+    ...(extOnly ? { extOnly: true } : {}),
   };
 }
 
@@ -305,7 +312,7 @@ export function itemsSignature(items: readonly Item[], scope: ItemScope): string
         item.writer === null ? "" : writerKey(item.writer),
         item.context ?? "",
         item.word ?? "",
-        `${item.guarded === true ? "g" : ""}${item.loose === true ? "l" : ""}`,
+        `${item.guarded === true ? "g" : ""}${item.loose === true ? "l" : ""}${item.extOnly === true ? "e" : ""}`,
         item.fan ?? "",
       ].join("|"),
     )
