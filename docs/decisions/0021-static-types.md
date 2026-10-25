@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Decision source:** Owner decisions in issues #504 and #536 (dicts) (2026-10-04); §6: Owner decision, 2026-10-07; the
-rules for the new type checker (O4): Owner decisions of 2026-10-19 to 2026-10-23
+rules for the new type checker (O4): Owner decisions of 2026-10-19 to 2026-10-25
 
 The current compiler and runtime still apply the rules this file held before the O4 decisions until the compiler
 switches to the new type checker, as V30's transition note says.
@@ -33,8 +33,11 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    collection settle nothing. Rule 2 widens an `integer` to a `number` where no type is written. Storing a value of
    another type is a compile error at that store that names the line that decided the type and suggests a written
    union. The compiler ignores the rejected value, so later uses are checked against the decided type and one mistake
-   gives one error. The decided type holds wherever the place is used, also before the value that decided it, and a
-   read inside an expression sees the value at that point of evaluation, as the runtime does.
+   gives one error. A property that reaches a place only through copies of whole objects is checked at the first direct
+   read or store of that property in that place, not at the copy, and the error there names the copy or store that
+   brought a value of another type. With `let xs = [a, b]`, where `a.n` holds a number and `b.n` text, the error is at
+   the first read or store of `xs[i].n`. The decided type holds wherever the place is used, also before the value that
+   decided it, and a read inside an expression sees the value at that point of evaluation, as the runtime does.
 2. `let x = null` without a type takes the type `T?` of the earliest non-null value stored into it. A different non-null
    type is an error that names both places. This is the ordinary rule applied to the first real value, not a general
    union inference. Storing `null` later also makes a place optional: after `let count = 1`, `count = null` makes
@@ -109,12 +112,13 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
     time, each with its own review and performance check, so that a warning becomes an error where the code is
     certainly wrong, or disappears where it is certainly fine. The required-check rules stay: a use that needs a check
     and has none on some route is an error (rules 1.9 and 5.6).
-    The temporary work budget follows this rule: a place over it, and the checks that need what it would have found, are
-    checked when the script runs, with a warning there; every other use, also of the same variable or function, stays
-    checked at compile time, and a known violation stays an error. A limit of the compiler is thus never reported as
-    the author's mistake. The compiler never hangs: only a shape that is very unrealistic for a real script, now or in
-    the future, stops with a compile error at the compiler's limit, which leaves generous room above realistic
-    scripts.
+    The compiler's work budget follows this rule: a place over it, and the checks that need what the compiler would
+    have found, are checked when the script runs, with a warning there; every other use, also of the same variable or
+    function, stays checked at compile time, and a known violation stays an error. A limit of the compiler is thus
+    never reported as the author's mistake. The compiler never hangs and never rejects a script because it is too large
+    or too deeply nested for the analysis: when a script exceeds the compiler's total budget, the compiler stops
+    proving; what it has found stays, every check it has not decided is made when the script runs, and one compiler
+    warning says so.
 
 ### 2. Conversions
 
@@ -278,14 +282,16 @@ union would be an inferred union (rule 3.4).
 - An error or a warning for a JSON object default's `null` property: its only fix, such as `nick: ""`, turns "not set"
   into empty text, because a property's type cannot be written; if that pinches, the remedy is syntax for a type at a
   `null`.
-- A compile error for a place over the work budget in a realistic script, or for a written check the compiler cannot
-  keep: it rejects valid code for a limit of the compiler.
+- A compile error for a place over the work budget or a script over the total budget, or for a written check the
+  compiler cannot keep: it rejects valid code for a limit of the compiler.
 - A compile error for code that may go wrong, as mypy gives: clear at first sight, but a false error confuses beginners
   most, and an error should always mean that the code is certainly wrong.
 - Exact answers everywhere through an ever more precise analysis: its plan reviews kept finding new blockers of the
   same kinds, so precision comes one rule at a time instead.
 - A compile error for a store that reads its own place through a function: it needs another representation, with
   symbolic obligations, and a further design round.
+- An error or a warning at the copy itself for a property that reaches a place only through copies of whole objects
+  (rule 1.1): it makes the compiler's work grow with the number of copies times the number of properties.
 - Accepting, at an integer-only use, a value that may not be whole where the compiler proves that it reaches the use
   (rule 1.2), with a check when the script runs as in Lua, or with a warning: `items[score / 2]` would fail only when
   `score` is odd.
