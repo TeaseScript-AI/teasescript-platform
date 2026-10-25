@@ -223,6 +223,36 @@ lifecycle, and a representative ordinary multi-`say` integration path. This
 pattern is a test-isolation technique, not a source compatibility promise or
 permission to hide behavior that the test actually owns.
 
+## Runtime-check evidence rule
+
+A test that claims a type constraint is actually enforced must not only check
+that the type derivation is right. It must prove that every necessary runtime
+check actually lands in the executable plan and runs before any side effect.
+This applies to every compiler step that owes a runtime check, not only to the
+new type checker.
+
+Such a test asserts three layers:
+
+1. **The decision.** The compiler's answer for the place: its diagnostics and
+   the checks it reports owing, each at its site.
+2. **The plan.** The executable plan contains each owed check at the intended
+   site, with the intended target and type. A check the compiler reports but
+   does not lower is a failing test.
+3. **The execution.** The plan runs through the public route with a conforming
+   value and with a violating value. The conforming run reaches the next
+   observable effect; the violating run stops at the check before that effect,
+   with the intended TSR code at the intended site.
+
+Not every test case walks all three layers itself: a focused test of the
+solver's internals or of its performance needs no runtime execution, and a
+lowering test may stop at the plan. The three layers are required where the
+test's claim is that a constraint is enforced; a test that stops at the first
+layer does not count as coverage of that claim. A regression test for a defect
+in enforcement asserts all three layers. Asserting the presence of one owed
+check is a focused lowering assertion about the subject under test, not the
+broad instruction-plan snapshot that the conformance-corpus section
+discourages.
+
 ## Systematic coverage for bounded behavior spaces
 
 When supported behavior can be described through a finite or otherwise
