@@ -1482,3 +1482,183 @@ export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
       ),
   },
 ];
+
+/**
+ * Admission (TABLE §5, §10.3's admission combinations; the port plan's §3.3, M4 S6): the decided type over an empty, a
+ * populated and a later mutated snapshot, several destinations of one source with different decided types, a rejected
+ * destination beside its intact source, external ingresses merged with an opaque source, A5's candidates under k whole
+ * presets of a record, A2's scan past external stores, and the boundary checks of a literal's external cells; each at
+ * size k, linear.
+ */
+export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
+  {
+    name: "A2-empty-snapshot",
+    measures: "A2, F9: k copies of empty lists, each decided by its own later add",
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let a${i} = []\nlet b${i} = a${i}\nb${i}.add(${i})\na${i}.add("t${i}")`),
+          rows(k, (i) => `let s${i}: integer = b${i}.first`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-populated-snapshot",
+    measures: "A2, A6: k copies of populated lists, each given an element of another kind",
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let a${i} = [${i}]\nlet b${i} = a${i}\nb${i}.add("x${i}")`),
+          rows(k, (i) => `repeat a${i}.first {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-later-mutation",
+    measures: "A2, F9: k copies taken before their sources change kind",
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let a${i} = [${i}]\nlet b${i} = a${i}\na${i}.add(1.5)\nb${i}.add(2)`),
+          rows(k, (i) => `repeat b${i}.first {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-destinations",
+    measures:
+      "A2, A5: k destinations of one record's fields, decided by different kinds, then stored",
+    program: (k) =>
+      main(
+        lines(
+          `let source = {n: 1, s: "a", f: 1.5}`,
+          rows(k, (i) => `let d${i} = source.${["n", "s", "f"][i % 3]}`),
+          rows(k, (i) => `d${i} = ${["2", '"b"', "2.5"][i % 3]}`),
+          rows(k, (i) => `if flagHost { d${i} = ${['"x"', "3", "true"][i % 3]} }`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A6-rejected-destination",
+    measures: "A6, F9: k destinations rejected at a field, their sources intact",
+    program: (k) =>
+      main(
+        lines(
+          rows(
+            k,
+            (i) => `let source${i} = {n: ${i}}\nlet copy${i} = source${i}\ncopy${i}.n = "bad"`,
+          ),
+          rows(k, (i) => `repeat source${i}.n {}\nrepeat copy${i}.n {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A5-presets",
+    measures:
+      "A5: k presets each giving one field of a k-field record another kind, all stored whole, every field read",
+    program: (k) =>
+      main(
+        lines(
+          `let state = {${fields(k, () => "0")}}`,
+          rows(k, (i) => `let preset${i} = {${fields(k, (j) => (i === j ? '"t"' : "0"))}}`),
+          rows(k, (i) => `if flagHost { state = preset${i} }`),
+          rows(k, (i) => `let shown${i}: integer = state.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A5-presets-copied",
+    measures: "A5: the same with each preset a copy of one seed changed at its own field",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "0")}}`,
+          "let state = seed",
+          rows(k, (i) => `let preset${i} = seed\npreset${i}.f${i} = "t"`),
+          rows(k, (i) => `if flagHost { state = preset${i} }`),
+          rows(k, (i) => `let shown${i}: integer = state.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-external-scan",
+    measures:
+      "A2: a k-field record replaced k times by external data before a literal decides it, every field read",
+    program: (k) =>
+      main(
+        lines(
+          "let state = hostValue",
+          rows(k, () => "if flagHost { state = hostValue }"),
+          `state = {${fields(k, () => "0")}}`,
+          rows(k, (i) => `let shown${i}: integer = state.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "C9-merged-ingresses",
+    measures:
+      "C9: k places each merging two external ingresses with an opaque source, every boundary check kept",
+    program: (k) =>
+      main(
+        lines(
+          "speaker vera { custom: 1 }",
+          rows(
+            k,
+            (i) =>
+              `let v${i} = hostValue\nif flagHost { v${i} = fromJson("${i}", default: null, files: false) }\nif flagHost { v${i} = vera.custom }\nlet w${i}: integer = v${i}`,
+          ),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "C9-literal-cells",
+    measures:
+      "C9 r4.29, r4.35: k records each holding k external cells, one boundary each at its first cell",
+    program: (k) =>
+      main(
+        lines(
+          rows(
+            k,
+            (i) =>
+              `let r${i} = {${fields(4, () => "hostValue")}}\nlet n${i}: integer = r${i}.f${i % 4}`,
+          ),
+          `let wide = [${Array.from({ length: k }, () => "hostValue").join(", ")}]`,
+          "let first: integer = wide.first",
+          "exit",
+        ),
+      ),
+  },
+];
+
+/**
+ * A6's chain of k dependent rejections (Sol's twelve-step witness at size k): each copy reads its source after the
+ * source's misfit, so each rejection shows only in the pass after the one before it, k passes in all: the TABLE's
+ * accepted product of passes and stores (§8), each pass charged; its doubling at k = 64 → 128 as measured.
+ */
+export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
+  {
+    name: "A6-chain",
+    measures: "A6: a chain of k rejections, every copy taken after its source's misfit",
+    // 121,683 / 452,803 / 1,744,803 units at k = 32 … 128, k + 2 passes
+    measured: 3.91,
+    program: (k) =>
+      main(
+        lines(
+          "let v0 = 0",
+          'v0 = "x"',
+          rows(k, (i) => `let v${i + 1} = v${i}\nv${i + 1} = "x"`),
+          `let final: integer = v${k}`,
+          "exit",
+        ),
+      ),
+  },
+];

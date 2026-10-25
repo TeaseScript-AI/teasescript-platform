@@ -6,6 +6,8 @@ import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import {
+  ADMISSION_FAMILIES,
+  ADMISSION_KNOWN_PRODUCTS,
   W34_KNOWN_PRODUCTS,
   W34_VARIANTS,
   W44_VARIANTS,
@@ -66,9 +68,10 @@ test("every sampled family's work grows with its program, not with a product of 
  */
 const COUNTER_DOUBLING = 2.35;
 
-test("every W34, W44 and W45 variant's work and each of its counters grow with the program in either order", () => {
+/** The families of `families` whose total or a counter of at least 200 units grows faster than linearly, either order. */
+function steepCounters(families: readonly WorkFamily[]): string[] {
   const steep: string[] = [];
-  for (const family of [...W34_VARIANTS, ...W44_VARIANTS, ...W45_VARIANTS])
+  for (const family of families)
     for (const reversed of [false, true]) {
       const small = analysed(family, 64, reversed).budget;
       const large = analysed(family, 128, reversed).budget;
@@ -87,6 +90,30 @@ test("every W34, W44 and W45 variant's work and each of its counters grow with t
           steep.push(
             `${name} ${counter}: ${doubling(small.counts.get(counter) ?? 0, after).toFixed(3)}`,
           );
+    }
+  return steep;
+}
+
+test("every W34, W44 and W45 variant's work and each of its counters grow with the program in either order", () => {
+  assert.deepEqual(steepCounters([...W34_VARIANTS, ...W44_VARIANTS, ...W45_VARIANTS]), []);
+});
+
+/**
+ * Admission (TABLE §5, §10.3; the port plan's §3.3): its decisions, rejections, candidates and boundary checks, gated as
+ * W34 is; A6's chain of dependent rejections, which takes a pass per link (§8's accepted product of passes and stores,
+ * each pass charged), held to its measured doubling instead.
+ */
+test("every admission family's work and each of its counters grow with the program in either order", () => {
+  assert.deepEqual(steepCounters(ADMISSION_FAMILIES), []);
+  const steep: string[] = [];
+  for (const family of ADMISSION_KNOWN_PRODUCTS)
+    for (const reversed of [false, true]) {
+      const small = analysed(family, 64, reversed).budget;
+      const large = analysed(family, 128, reversed).budget;
+      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+      const doubling = (2 * (large.total / small.total)) / scale;
+      if (doubling > family.measured)
+        steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
     }
   assert.deepEqual(steep, []);
 });
