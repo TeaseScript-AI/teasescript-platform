@@ -15,6 +15,7 @@ import { marked } from "./guards.js";
 import {
   alternatives,
   EMPTY,
+  firstContext,
   mergeItems,
   REASON,
   weaken,
@@ -1115,11 +1116,21 @@ export class ExactPath {
       ),
       writer,
     );
+    // §3.4: the element read gathers the elements before and the added ones, several elements: `member`
+    const several = withoutEmpty(before).length > 0 && withoutEmpty(own).length > 0;
+    const worded = (items: readonly Item[]): readonly Item[] =>
+      several
+        ? items.map((item) =>
+            item.tag === "unknown" || item.tag === "empty"
+              ? item
+              : { ...item, context: firstContext(item.context, "member") },
+          )
+        : items;
     // F5: an `add` makes the collection hold an element; an `addAll` leaves its M unchanged, whatever its source
-    if (rest.length > 1) return alternatives([...before, ...own], scope);
+    if (rest.length > 1) return alternatives(worded([...before, ...own]), scope);
     const empty = d.how === "elements" && before.some((item) => item.tag === "empty");
     return alternatives(
-      [...withoutEmpty(before), ...withoutEmpty(own), ...(empty ? [EMPTY] : [])],
+      worded([...withoutEmpty(before), ...withoutEmpty(own), ...(empty ? [EMPTY] : [])]),
       scope,
     );
   }
