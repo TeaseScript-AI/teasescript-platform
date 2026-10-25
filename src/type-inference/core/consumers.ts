@@ -426,9 +426,10 @@ export class Consumers {
   /**
    * C1, C7 against a written type (A1, A9): every store into a place with a written type at the path, every argument
    * of a written parameter and every return of a written result is checked against that type, the store's value at its
-   * node by §3. A definite contribution that does not fit is an error at the store (the innermost offending expression
-   * inside literals, r4.35); a value none of whose kinds fits is an error even when every item is possible (ADR 1.7),
-   * never under a guard; otherwise one `copy-type` per offending kind and a `null-check` for a possible null.
+   * node by §3. A definite element of a collection literal none of whose kinds fits is an error at that element (A8); a
+   * value none of whose kinds fits is an error even when every item is possible (ADR 1.7), at the innermost offending
+   * expression inside literals (r4.35), never under a guard; otherwise one `copy-type` per offending kind, whatever its
+   * certainty, and a `null-check` for a possible null.
    */
   #writtenStores(): void {
     const { program, definitions, lists, contract } = this.pass;
@@ -588,10 +589,6 @@ export class Consumers {
           for (const { site, lands } of this.#ingressSites(d, at))
             if (lands)
               this.#boundary(keyOf(root, path), site, label, nullable ? [...tags, "null"] : tags);
-        const bad = items.filter(
-          (item) =>
-            item.cert === "def" && concrete(item) && !tags.some((tag) => fits(item.tag, tag, true)),
-        );
         const nulls = items.filter((item) => item.tag === "null");
         // A8: a collection literal stored into a written element type admits each element by the scalar rule: a
         // definite element none of whose kinds fits is an error at that element
@@ -608,21 +605,6 @@ export class Consumers {
             : null;
         if (wrong !== null) {
           this.#error("written-target", program.place(wrong.value!).site ?? d.site);
-          continue;
-        }
-        // a definite contribution that does not fit (at the innermost offending expression, r4.35)
-        if (bad.length > 0) {
-          this.#error(
-            "written-target",
-            this.#siteAt(d, at, (elements) =>
-              elements.some(
-                (item) =>
-                  item.cert === "def" &&
-                  concrete(item) &&
-                  !tags.some((tag) => fits(item.tag, tag, true)),
-              ),
-            ),
-          );
           continue;
         }
         const fitsAny = (item: Item): boolean =>
@@ -648,12 +630,12 @@ export class Consumers {
           );
           continue;
         }
+        // some kind fits: every concrete kind that does not, definite or possible, owes its check (TABLE §4, r4.46: two
+        // definite answers, one fitting, warn)
         const offending = items
           .filter(
             (item) =>
-              (item.cert === "pos" &&
-                concrete(item) &&
-                !tags.some((tag) => fits(item.tag, tag, true))) ||
+              (concrete(item) && !tags.some((tag) => fits(item.tag, tag, true))) ||
               (item.tag === "unknown" &&
                 (at.length === 0 ? isOpaque(item) || isExternal(item) : contributes(item))),
           )

@@ -26,6 +26,8 @@ import type { SerializableRuntimeValue } from "../src/runtime/values/serializabl
 import type { TypeAnalysisRequest, TypeCheckResult } from "../src/type-inference/backend.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
+import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
@@ -54,6 +56,16 @@ function sited(result: Pick<CompilationResult, "diagnostics">): string[] {
   return result.diagnostics.map(
     (diagnostic) => `${diagnostic.severity} ${diagnostic.code}@${diagnostic.span.start.offset}`,
   );
+}
+
+/** `run` in the source order and with the consumers' and the solver's orders reversed: the two results, equal. */
+function inBothOrders<T>(run: () => T): T {
+  const forward = run();
+  const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+    withConsumerOrder((list) => [...list].reverse(), run),
+  );
+  assert.deepEqual(reversed, forward);
+  return forward;
 }
 
 /** A run of `plan` to its end without reading pauses, with `hostValue`: its status, messages and failure. */
@@ -209,6 +221,92 @@ test("C1's copy check and C9's boundary check run where external data enters a w
       boundaries,
       shape,
     );
+  }
+});
+
+test("C1 warns where some kind of the stored value fits and errs only where none does, in both orders (r4.46)", () => {
+  // a list literal's element at an index: the items `integer` and `number`, both definite, one fitting; with a host value
+  // the external item beside a `number`, and C9's boundary check at the host value
+  for (const [source, warnings, boundary, passing, failing] of [
+    [
+      'let result: integer = [2, 2.5][0]\nsay "selected"\nexit\n',
+      ["warning TSV041@22"],
+      null,
+      null,
+      null,
+    ],
+    [
+      'let result: integer = [2.5, 2][1]\nsay "selected"\nexit\n',
+      ["warning TSV041@22"],
+      null,
+      null,
+      null,
+    ],
+    [
+      'let result: integer = [hostValue, 2.5][0]\nsay "selected"\nexit\n',
+      ["warning TSV041@22", "warning TSV041@23"],
+      'result ["integer"] @23',
+      3,
+      1.5,
+    ],
+    [
+      'let result: integer = [2.5, hostValue][1]\nsay "selected"\nexit\n',
+      ["warning TSV041@22", "warning TSV041@28"],
+      'result ["integer"] @28',
+      3,
+      "x",
+    ],
+  ] as const) {
+    const compiled = inBothOrders(() => {
+      const result = candidate(source);
+      return { sited: sited(result), plan: result.plan };
+    });
+    assert.deepEqual(compiled.sited, warnings, source);
+    assert.ok(compiled.plan !== null, source);
+    // the destination's check on the store, which the selected value passes or fails at runtime
+    assert.deepEqual(checkedStores(compiled.plan), [`0:${source.indexOf("\n")}`], source);
+    const end = source.indexOf("\n");
+    if (passing === null)
+      assert.deepEqual(runWith(compiled.plan, null), {
+        status: "halted",
+        says: ["selected"],
+        failure: null,
+      });
+    else {
+      assert.deepEqual(runWith(compiled.plan, passing).says, ["selected"], source);
+      assert.deepEqual(
+        runWith(compiled.plan, failing),
+        { status: "failed", says: [], failure: `TSR058@22:${end}` },
+        source,
+      );
+    }
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    assert.deepEqual(
+      inBothOrders(() =>
+        compactAnalysis(request)
+          .checks.filter((check) => check.boundary)
+          .map((check) => `${check.target} ${JSON.stringify(check.against)} @${check.site.offset}`),
+      ),
+      boundary === null ? [] : [boundary],
+      source,
+    );
+  }
+  // the selected value that does not fit stops at the store
+  const fractional = candidate('let result: integer = [2, 2.5][1]\nsay "selected"\nexit\n');
+  assert.ok(fractional.plan !== null);
+  assert.equal(runWith(fractional.plan, null).failure, "TSR058@22:33");
+  // no kind fits: still the error, also for a literal's element written as `integer[]` (A8)
+  for (const [source, error] of [
+    ["let result: integer = [2.5, 3.5][0]\nexit\n", "error TSV041@22"],
+    ["let result: integer = 2.5\nexit\n", "error TSV041@22"],
+    ["let xs: integer[] = [2, 2.5]\nexit\n", "error TSV041@24"],
+  ] as const) {
+    const compiled = inBothOrders(() => {
+      const result = candidate(source);
+      return { sited: sited(result), plan: result.plan === null };
+    });
+    assert.deepEqual(compiled, { sited: [error], plan: true }, source);
   }
 });
 
