@@ -123,10 +123,11 @@ The behavior-neutral Option A refactor is implemented for the code present on
 the starting `main`. `src/plan/model.ts` contains only the serializable plan
 contract; `capture.ts` owns stable external-data capture, while `validation.ts` remains the plan-validation entry and
 owns the envelope checks, with the startup-prefix, file-table, instruction, interaction, expression, and type shape
-checks in `validation/`. The internal `instruction-stream-analyses.ts` module owns
-cross-instruction loop and prepared-reference invariants, function ranges and prologues, execution-region indexing,
-prepared-say dataflow, interaction-result handoffs, and control-flow targets. The small private capture and validation
-support files, `capture-support.ts` and `validation-support.ts`, hold only helpers shared across those owners.
+checks in `validation/`. The internal `instruction-stream-analyses.ts` module owns cross-instruction loop and
+prepared-reference invariants and control-flow targets, with function ranges and prologues, execution-region indexing,
+prepared-say dataflow, interaction-result handoffs, and label positions in `instruction-stream-analyses/`. The small
+private capture and validation support files, `capture-support.ts` and `validation-support.ts`, hold only helpers
+shared across those owners.
 `src/compiler/compile-program.ts` owns compilation orchestration, while `src/compiler/lowering/compiler.ts` owns the
 stateful lowering pass: its statement and expression dispatch, temporaries, and function compilation. The families it
 hands constructs to, such as asks and other interactions, say, background actions, calls, and branches and loops, are
