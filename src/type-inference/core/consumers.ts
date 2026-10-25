@@ -754,7 +754,6 @@ export class Consumers {
                     .map((tag) => makeItem(tag));
             },
             fallback,
-            [],
             true,
           );
         if (c.kind === "load") continue;
@@ -791,17 +790,42 @@ export class Consumers {
     node: FlowNode,
     directAt: (rest: readonly string[]) => readonly Item[],
     value: PlaceId,
-    rest: readonly string[] = [],
     written = false,
   ): void {
+    // nested list, set and dict literals by their elements, one depth after another; the target: the fallback's own
+    // key path at the depth, a dict's value its `entry` (§10.5)
+    const { contract, program } = this.pass;
+    let label = this.#keyLabel(value);
+    for (
+      let rest: readonly string[] = [];
+      this.#fallbackFitsAt(c, node, directAt, value, rest, written && rest.length === 0, label);
+      rest = [...rest, "element"]
+    ) {
+      program.work.charge("checks");
+      label = `${label}.${elementStep(
+        withoutEmpty(this.#run(contract.contractOfValueAt(value, rest))).map((item) => item.tag),
+      )}`;
+    }
+  }
+
+  /** C10 at one path of the fallback: whether its elements are checked too. */
+  #fallbackFitsAt(
+    c: ValueConstraint,
+    node: FlowNode,
+    directAt: (rest: readonly string[]) => readonly Item[],
+    value: PlaceId,
+    rest: readonly string[],
+    written: boolean,
+    label: string,
+  ): boolean {
     const { program, values, contract } = this.pass;
     const site = program.places[value]?.site;
-    if (site === null || site === undefined || !("result" in c)) return;
+    if (site === null || site === undefined || !("result" in c)) return false;
     const direct = directAt(rest);
     const into = contract.landsIn(c.result, rest);
     const family = (tag: ItemTag): ItemTag => (tag === "integer" ? "number" : tag);
     const directFamilies = new Set(direct.filter(concrete).map((item) => family(item.tag)));
-    if (directFamilies.size === 0) return;
+    if (directFamilies.size === 0) return false;
     // the written union the value lands in directly, where it holds the direct family: a fallback of its kinds fits too
     const union = into === null ? null : new Set(typeTags(into).map(family));
     const unionHolds = union !== null && [...directFamilies].every((found) => union.has(found));
@@ -809,18 +833,6 @@ export class Consumers {
       tag === "null"
         ? !(rest.length > 0 && into !== null && !typeTags(into).includes("null"))
         : directFamilies.has(family(tag)) || (unionHolds && union.has(family(tag)));
-    // the target: the fallback's own key path at the rest of the path, a dict's value its `entry` (§10.5)
-    const label = rest.reduce(
-      (text, step, index) =>
-        step !== "element"
-          ? `${text}.${step}`
-          : `${text}.${elementStep(
-              withoutEmpty(this.#run(contract.contractOfValueAt(value, rest.slice(0, index)))).map(
-                (item) => item.tag,
-              ),
-            )}`,
-      this.#keyLabel(value),
-    );
     // the family the fallback is checked against: the direct value's (whole numbers with numbers), a load's or
     // `fromJson`'s written type itself (its `null` C10's exception, never listed), and the receiving union's kinds
     const against: ItemTag[] = [
@@ -861,22 +873,19 @@ export class Consumers {
     if (off.length === 0) {
       // nested literals by their elements
       const kinds = quiet ?? fallback.map((item) => item.tag);
-      if (rest.length < 256)
-        for (const kind of ["list", "set", "dict"] as const)
-          if (directFamilies.has(kind) && kinds.includes(kind))
-            this.#fallbackFits(c, node, directAt, value, [...rest, "element"]);
-      return;
+      return (["list", "set", "dict"] as const).some(
+        (kind) => directFamilies.has(kind) && kinds.includes(kind),
+      );
     }
-    if (union !== null && union.has("unknown")) return;
+    if (union !== null && union.has("unknown")) return false;
     // both definite and incompatible: an error at the fallback; possible: one warning and check per offending kind
     if (
       direct.filter(concrete).every((item) => item.cert === "def") &&
       off.every((item) => item.cert === "def")
     )
       this.#error("written-target", site);
-    else
-      for (const { item } of offendingKinds(off))
-        this.#storeWarning(site, label, item, [...directFamilies]);
+    else for (const { item } of offendingKinds(off)) this.#storeWarning(site, label, item, against);
+    return false;
   }
 
   #operation(c: Extract<ValueConstraint, { kind: "operation" }>, node: FlowNode): void {

@@ -559,27 +559,25 @@ export class DefinitionIndex {
     for (const value of this.ingress) {
       let current = value;
       // the path below the store the literals add, the steps from `current` down to the value with the object literal
-      // holding each property step, and whether a literal or a choice carried the value
-      let suffix: string[] = [];
-      let way: string[] = [];
-      let objects: (PlaceId | null)[] = [];
+      // holding each property step, and whether a literal or a choice carried the value; the paths are kept last step
+      // first, so each carrier is one step at any depth
+      const suffix: string[] = [];
+      const way: string[] = [];
+      const objects: (PlaceId | null)[] = [];
       let carried = false;
-      for (
-        let depth = 0;
-        depth < 256 &&
+      while (
         !storeOfValue.has(current) &&
         !ownOperand.has(current) &&
-        carrierOf(current) !== undefined;
-        depth += 1
+        carrierOf(current) !== undefined
       ) {
         program.work.charge("indexSteps");
         const cell = cellOfValue.get(current);
         if (cell !== undefined) {
           const owner = program.place(cell).kind;
-          const step = owner.kind === "property" ? owner.name : "element";
-          suffix = owner.kind === "property" ? [] : ["element", ...suffix];
-          way = [step, ...way];
-          objects = [owner.kind === "property" ? owner.owner : null, ...objects];
+          if (owner.kind === "property") suffix.length = 0;
+          else suffix.push("element");
+          way.push(owner.kind === "property" ? owner.name : "element");
+          objects.push(owner.kind === "property" ? owner.owner : null);
           carried = true;
         } else if (readOfValue.has(current)) {
           // r4.46 (2): a dict literal's `values` holds its values at the element step, its `keys` none of them
@@ -588,27 +586,28 @@ export class DefinitionIndex {
             : undefined;
           if (listed === "keys") break;
           if (listed !== "values") {
-            suffix = suffix.slice(1);
-            way = way.slice(1);
-            objects = objects.slice(1);
+            suffix.pop();
+            way.pop();
+            objects.pop();
           }
         } else if (choiceOfOption.has(current)) {
           // an option's own value, an element of its list, or a choice object's `value` (its `text` without one)
-          const at = way[0] === "element" ? 1 : 0;
-          const step = way[at];
+          const at = way.at(-1) === "element" ? 2 : 1;
+          const step = way.at(-at);
           if (
             step !== undefined &&
             step !== "value" &&
-            !(step === "text" && !propertiesOf.get(objects[at]!)?.has("value"))
+            !(step === "text" && !propertiesOf.get(objects.at(-at)!)?.has("value"))
           )
             break;
-          suffix = [];
-          way = [];
-          objects = [];
+          suffix.length = 0;
+          way.length = 0;
+          objects.length = 0;
           carried = true;
         }
         current = carrierOf(current)!;
       }
+      suffix.reverse();
       // a host read there, or a load or `fromJson` call: its own read, so the consumers it reaches stay linked to it
       if (ownOperand.has(current)) {
         const site = program.places[value]?.site;

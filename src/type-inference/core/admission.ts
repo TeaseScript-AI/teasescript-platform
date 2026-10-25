@@ -634,7 +634,7 @@ export class Admission {
           program.work.charge("indexSteps");
           const below = [...path, name];
           out.push(below);
-          if (term.kind === "ref" && below.length < 256)
+          if (term.kind === "ref")
             for (const d of definitions.cellDefs.get(term.place) ?? [])
               pending.push([d.value!, below]);
         }
@@ -751,7 +751,6 @@ export class Admission {
         if (term !== null) out.push({ path, term });
         continue;
       }
-      if (path.length >= 256) continue;
       const next: [PlaceId, readonly string[]][] = [];
       for (const has of program.hasOf.get(current) ?? [])
         for (const [name, term] of fieldsOf(has.type))
