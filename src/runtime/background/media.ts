@@ -658,10 +658,7 @@ function positionAtProgressMs(
   };
 }
 
-/**
- * Starts a new segment at scene time `atMs` from the position playback reached by then. The caller has committed the
- * events due by then.
- */
+/** Starts a new segment at scene time `atMs` from the position playback reached by then. */
 function startSegment(media: RuntimeMediaSnapshot, atMs: number): void {
   const progress = progressBefore(media, atMs);
   if (progress > media.committedProgressMs) {
