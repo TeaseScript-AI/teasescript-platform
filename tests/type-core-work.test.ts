@@ -159,6 +159,30 @@ test("an element read through a chain of 2,048 returned results is answered with
  * A value's identity names its inputs by their own identities (TABLE §8, round 12 B4): a chain of 32 `otherwise`s, each
  * of the one before twice, is a source of 32 lines, never an identity of 2^32 characters.
  */
+/**
+ * A search the ledger does not see (round 13 B2, round 14 H1): over a literal of k records of distinct fields, the
+ * analysis's `indexOf` searches inspect entries in proportion to k, never k² (each identity's first element is found in
+ * one pass). The count wraps the built-in for this analysis only.
+ */
+test("a literal of 4,096 distinct records is searched in linear time", () => {
+  const k = 4_096;
+  const source = `${Array.from({ length: k }, (_, i) => `let a${i} = {f${i}: 1}`).join("\n")}\nlet xs = [${Array.from({ length: k }, (_, i) => `a${i}`).join(", ")}]\nexit`;
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const original = Array.prototype.indexOf;
+  let inspected = 0;
+  Array.prototype.indexOf = function (this: unknown[], ...args: Parameters<typeof original>) {
+    if (this.length >= k) inspected += this.length;
+    return original.apply(this, args);
+  };
+  try {
+    assert.equal(analyseCore(request).outcome, "valid");
+  } finally {
+    Array.prototype.indexOf = original;
+  }
+  assert.ok(inspected <= 64 * k, `${inspected} entries inspected`);
+});
+
 test("a chain of records over shared inputs is identified in linear space (round 13 B3)", () => {
   const levels = Array.from(
     { length: 32 },
