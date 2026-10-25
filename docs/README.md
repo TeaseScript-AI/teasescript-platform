@@ -16,6 +16,7 @@
 - `PRODUCT.md`
 - `ARCHITECTURE.md`
 - `TEASESCRIPT.md`
+- `TEASESCRIPT-REFERENCE.md`: non-authoritative summary of every accepted construct, with status and V30 links.
 - `RUNTIME.md`
 - `DIAGNOSTICS.md`: the codes of compiler diagnostics, and where runtime and checkpoint codes are listed.
 - `ENCRYPTION.md`: the locks of `encryptText`, `encryptFile`, `decryptText`, and `decryptFile`: scheme, format, drand
