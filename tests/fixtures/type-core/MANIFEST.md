@@ -7,13 +7,14 @@ commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; not
 ## Refresh (M4 step S6)
 
 Opus, 2026-10-25, builder for M4 step S6 (lead Fable). `cells.jsonl` is regenerated from the expectation set at
-`6f102107b71f3dde…` (1,913 gate records, 9 deferred; TABLE r4.49) by the same tooling, unchanged: `convert.py`
+`1de3570831c7bc4b…` (1,913 gate records, 9 deferred; TABLE r4.50) by the same tooling, unchanged: `convert.py`
 (`eef78c11…`) with `collection-rewrites.json` (`981e40ee…`), the host rewrite and the four collection rewrites below.
 197 records are rewritten (193 prefixed files and the four collection records); `cells-deferred.jsonl` is unchanged.
 Against the set's previous revision `60751a0f17a0f8cf…` (1,888 records) it adds the 25 records
 `cp9-cells/s4/s6/owner/…` (`ingress/`, `bound/` and `default/`: the owner's review of 2026-10-25); the other 1,888
 compact records are byte-identical. The 25 were compared with the core in both orders before the refresh: 25 of 25 the
-same.
+same. The set's revision `6f102107b71f3dde…` before it differs only in the 25 records' reason citations and pins (TABLE
+r4.50 states the owner's three readings); both convert to the same bytes.
 
 `60751a0f…` against its previous revision `01eccb2f1a7da537…` (1,874 records; `716ac7091de2b95e…` before it differs in
 five reason texts only) added the 14 records `cp9-cells/s4/s6/returns/…` and `cp9-cells/s4/s6/defaults/…`. The exit
