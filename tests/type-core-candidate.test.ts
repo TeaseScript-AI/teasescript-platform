@@ -24,8 +24,10 @@ import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-con
 import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import type { TypeAnalysisRequest, TypeCheckResult } from "../src/type-inference/backend.js";
+import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
+import { nodeOf, SliceIndex } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
@@ -584,6 +586,41 @@ test("C2's integer check warns with TSV011 at a count and TSV043 at a list index
   );
   assert.deepEqual(sited(parenthesized), ["error TSV043@46"]);
   assert.match(parenthesized.diagnostics[0]!.message, /^A list index must be a whole number/);
+});
+
+test("parentheses answer for their content: a parenthesised count and index read as bare ones (S3 3.4)", () => {
+  // the flow graph's node of a parenthesised expression is its content's, the value the parentheses hold
+  const source = "let n = 2\nrepeat ((n)) {}\nlet xs = [1, 2]\nlet y = xs[(n)]\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const answers = analyseCore(request);
+  const index = new SliceIndex(request.files.map((file) => file.program));
+  for (const expression of index.expressions)
+    if (expression.kind === "parenthesizedExpression")
+      assert.deepEqual(
+        answers.at(nodeOf(answers, index, expression))?.items.map((item) => item.tag),
+        ["integer"],
+        source.slice(expression.span.start.offset, expression.span.end.offset),
+      );
+  // on the candidate route: the content's site, the kinds the core names, and the check at the content
+  const count = inBothOrders(() => candidate("repeat ((2.5)) {}\nexit\n").diagnostics);
+  assert.deepEqual(sited({ diagnostics: count }), ["error TSV011@9"]);
+  assert.match(count[0]!.message, /but '2\.5' is a number\.$/);
+  const listed = inBothOrders(
+    () => candidate("let xs = [1, 2]\nlet y = xs[(0.5)]\nexit\n").diagnostics,
+  );
+  assert.deepEqual(sited({ diagnostics: listed }), ["error TSV043@28"]);
+  assert.match(listed[0]!.message, /but '0\.5' is a number\.$/);
+  const host = candidate("repeat ((hostValue)) {}\nexit\n");
+  assert.deepEqual(sited(host), ["warning TSV011@9"]);
+  assert.ok(host.plan !== null);
+  assert.equal(runWith(host.plan, 2).status, "halted");
+  assert.equal(runWith(host.plan, 1.5).failure, "TSR043@9:18");
+  const hostIndex = candidate("let xs = [1, 2]\nlet y = xs[(hostValue)]\nexit\n");
+  assert.deepEqual(sited(hostIndex), ["warning TSV043@28"]);
+  assert.ok(hostIndex.plan !== null);
+  assert.equal(runWith(hostIndex.plan, 1).status, "halted");
+  assert.equal(runWith(hostIndex.plan, 0.5).failure, "TSR024@28:37");
 });
 
 /** Runs a plan to its end, observing each reading pause's deadline: the events and the final snapshot. */

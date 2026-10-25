@@ -190,7 +190,8 @@ export class SliceIndex {
 
 /**
  * The flow graph's node of a statement or an expression of the slice: an `if`'s is its condition's and a `repeat`'s its
- * count's, which run first; parentheses have their content's.
+ * count's, which run first; parentheses have their content's, whose value they are (S3 §3.4: a consumer's site is the
+ * expression inside them).
  */
 export function nodeOf(
   answers: Answers,
@@ -198,18 +199,17 @@ export function nodeOf(
   node: Statement | Expression,
 ): FlowNode {
   let current: Statement | Expression = node;
-  for (;;) {
+  for (;;)
     if (current.kind === "ifStatement") current = current.condition;
     else if (current.kind === "repeatStatement") current = current.count;
-    const site = index.site(current);
-    const found = current.kind.endsWith("Statement")
-      ? answers.graph.statementAt(site)
-      : answers.graph.expressionAt(site);
-    if (found !== undefined) return found;
-    if (current.kind !== "parenthesizedExpression")
-      throw new Error(`The flow graph has no node for this ${current.kind}.`);
-    current = current.expression;
-  }
+    else if (current.kind === "parenthesizedExpression") current = current.expression;
+    else break;
+  const site = index.site(current);
+  const found = current.kind.endsWith("Statement")
+    ? answers.graph.statementAt(site)
+    : answers.graph.expressionAt(site);
+  if (found === undefined) throw new Error(`The flow graph has no node for this ${current.kind}.`);
+  return found;
 }
 
 /** The `let` that declares each variable of the slice, by its place. */
