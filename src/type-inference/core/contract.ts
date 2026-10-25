@@ -19,6 +19,7 @@ import {
   declaredResult,
   dictList,
   interactionCategory,
+  listStep,
   measuresLength,
   memberResult,
   methodCategory,
@@ -505,11 +506,15 @@ export class Contract {
    * A key's contract along a path through a dict's `values` or `keys` from the step `from` on, its receiver decided as
    * a reference's or not once (F19a, r4.44): a reference's member is the runtime's.
    */
-  *#keyThrough(key: Key, from: number): Work<readonly Item[]> {
+  #keyThrough(key: Key, from: number): Work<readonly Item[]> {
+    const at = listStep(keyPath(key), from);
+    return at < 0 ? this.#keyContract(key) : this.#keyListsAt(key, at);
+  }
+
+  /** `#keyThrough` at the step `at`, the first of the key's path from its `from` on that is a dict's list. */
+  *#keyListsAt(key: Key, at: number): Work<readonly Item[]> {
     const place = keyPlace(key);
     const path = keyPath(key);
-    const at = path.findIndex((step, index) => index >= from && dictList(step) !== undefined);
-    if (at < 0) return yield* this.#keyContract(key);
     const receiver = yield* this.receiverKinds(keyOf(place, path.slice(0, at)));
     if (heldReference(receiver)) return yield* this.#keyContract(key);
     return yield* this.#dictLists(path, at, receiver, (along, start) =>
@@ -781,8 +786,8 @@ export class Contract {
   }
 
   /** The kinds at a path of a value: a literal's field, a copied record's field. */
-  public *contractOfValueAt(value: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
-    return yield* this.#through(value, rest, 0);
+  public contractOfValueAt(value: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
+    return this.#through(value, rest, 0);
   }
 
   /**
@@ -792,9 +797,9 @@ export class Contract {
    * `null`); an object's own property of the name is read as any property (F11), and a receiver that may be a reference
    * has the runtime's members (F19a).
    */
-  *#through(value: PlaceId, rest: readonly string[], from: number): Work<readonly Item[]> {
+  #through(value: PlaceId, rest: readonly string[], from: number): Work<readonly Item[]> {
     const { program } = this.pass;
-    const at = rest.findIndex((step, index) => index >= from && dictList(step) !== undefined);
+    const at = listStep(rest, from);
     if (
       at < 0 ||
       program.occurrenceOf.has(value) ||
@@ -802,7 +807,17 @@ export class Contract {
       program.speakerPlaces.has(value) ||
       program.callOutOf.has(value)
     )
-      return yield* this.#valueAt(value, rest);
+      return this.#valueAt(value, rest);
+    return this.#listsAt(value, rest, at, from);
+  }
+
+  /** `#through` at the step `at`, the first of `rest` from `from` on that is a dict's `values` or `keys`. */
+  *#listsAt(
+    value: PlaceId,
+    rest: readonly string[],
+    at: number,
+    from: number,
+  ): Work<readonly Item[]> {
     const receiver = yield* this.#through(value, rest.slice(0, at), from);
     // F19a, r4.44: a receiver that may be a reference has the runtime's members, decided once for a whole value
     const decided = at === 0 ? yield* this.valueReceiver(value) : receiver;

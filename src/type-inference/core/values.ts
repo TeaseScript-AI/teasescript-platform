@@ -27,6 +27,7 @@ import {
   declaredResult,
   dictList,
   interactionCategory,
+  listStep,
   measuresLength,
   memberResult,
   methodCategory,
@@ -154,12 +155,12 @@ export class Values {
   }
 
   /** The value of a place at a node, read at the path `rest` below it. */
-  public *valueItems(
+  public valueItems(
     value: PlaceId,
     node: FlowNode | null,
     rest: readonly string[],
   ): Work<readonly Item[]> {
-    return yield* this.#through(value, node, rest, 0);
+    return this.#through(value, node, rest, 0);
   }
 
   /**
@@ -169,23 +170,34 @@ export class Values {
    * The lists are as certain as the dict and may hold none (no count proof, no `null`); an object's own property of the
    * name is read as any property (F11), and a receiver that may be a reference has the runtime's members (F19a).
    */
-  *#through(
+  #through(
     value: PlaceId,
     node: FlowNode | null,
     rest: readonly string[],
     from: number,
   ): Work<readonly Item[]> {
     const { program } = this.pass;
-    const at = rest.findIndex((step, index) => index >= from && dictList(step) !== undefined);
-    const call = program.callOutOf.has(value) && program.opOf.get(value)?.kind === "call";
+    const at = listStep(rest, from);
     if (
       at < 0 ||
       program.occurrenceOf.has(value) ||
       program.projOf.has(value) ||
       program.speakerPlaces.has(value) ||
-      call
+      (program.callOutOf.has(value) && program.opOf.get(value)?.kind === "call")
     )
-      return yield* this.#valueAt(value, node, rest);
+      return this.#valueAt(value, node, rest);
+    return this.#dictLists(value, node, rest, at, from);
+  }
+
+  /** `#through` at the step `at`, the first of `rest` from `from` on that is a dict's `values` or `keys`. */
+  *#dictLists(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+    at: number,
+    from: number,
+  ): Work<readonly Item[]> {
+    const { program } = this.pass;
     const before = rest.slice(0, at);
     const after = rest.slice(at + 1);
     // F19a, r4.44: a receiver that may be a reference, by its completed contract, has the runtime's members

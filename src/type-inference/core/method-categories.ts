@@ -109,6 +109,13 @@ export function dictList(property: string): "values" | "keys" | undefined {
   return gives === "values" || gives === "keys" ? gives : undefined;
 }
 
+/** The first step of a path from `from` on that is a dict's `values` or `keys`, or -1. */
+export function listStep(path: readonly string[], from: number): number {
+  for (let index = from; index < path.length; index += 1)
+    if (dictList(path[index]!) !== undefined) return index;
+  return -1;
+}
+
 /** The members of the built-in values that give a declared result whatever their receiver: F14's `length`. */
 const MEMBERS: Readonly<Record<string, readonly ValueKind[]>> = { length: ["integer"] };
 
