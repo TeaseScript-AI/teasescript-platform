@@ -1450,7 +1450,16 @@ export class Admission {
         if (copy !== null && stop.order > copy.order) break;
         if (stop.deep && length === at.length) continue;
         const term = termAt(stop.term!, [...stop.strip, ...at.slice(length)]);
-        if (term !== null) copy = { order: stop.order, term, stop };
+        // (a written copy an operation carries decides only where the operation's value holds its type definitely)
+        if (
+          term !== null &&
+          this.#through(
+            stop.via,
+            at,
+            typeTags(term).filter((tag) => tag !== "null" && tag !== "unknown"),
+          )
+        )
+          copy = { order: stop.order, term, stop };
       }
     }
     // the values in evaluation order, those standing above the path's end with its rest, the literals at its end

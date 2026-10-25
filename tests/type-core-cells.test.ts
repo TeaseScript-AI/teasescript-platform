@@ -3075,3 +3075,36 @@ test("a literal's own elements decide through the operations that carry it, unde
   }
   assert.deepEqual(differing, []);
 });
+
+test("a written type an operation carries decides only where the operation's value holds it (A4, round 13 B1)", () => {
+  // the receiver's element is selected, the written default never: the later text decides, the host value is checked
+  // against it, nothing is an error
+  const programs: readonly (readonly [string, string])[] = [
+    [
+      "a written list as a dead default",
+      "let typed: integer[] = [1]\nlet xs = [[hostValue]].get(0, default: typed)",
+    ],
+    [
+      "a written whole number in a dead default",
+      "let typed: integer = 1\nlet xs = [[hostValue]].get(0, default: [typed])",
+    ],
+    [
+      "a written list as a dead fallback",
+      "let typed: integer[] = [1]\nlet xs = [hostValue] otherwise typed",
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, store] of programs) {
+    const source = `${store}\nxs.add("bad")\nexit`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      if (record.outcome !== "warning-runtime-check")
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${record.outcome}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});
