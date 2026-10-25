@@ -26,6 +26,7 @@ import type { SerializableRuntimeValue } from "../src/runtime/values/serializabl
 import type { TypeAnalysisRequest, TypeCheckResult } from "../src/type-inference/backend.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { CARRIER_KINDS, type CarrierKind } from "../src/type-inference/core/carriers.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { nodeOf, SliceIndex } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
@@ -855,8 +856,8 @@ test("a written scalar a singleton literal gives stays strict on the candidate r
   assert.equal(candidate(source).plan, null);
 });
 
-/** The admitted type of the place a statement starting with `start` declares: its kinds and its decider's offset. */
-function admittedOf(source: string, start: string): string {
+/** The admitted type of the place a statement starting with `start` declares, at `path`: its kinds and its decider's offset. */
+function admittedOf(source: string, start: string, path: readonly string[] = []): string {
   const request = coreRequest([{ path: "main.tease", source }]);
   assert.ok(request !== null, source);
   const answers = analyseCore(request);
@@ -865,7 +866,7 @@ function admittedOf(source: string, start: string): string {
     if (!source.slice(node.span.start.offset, node.span.end.offset).startsWith(start)) continue;
     const place = answers.at(node)?.place;
     assert.ok(place, `${source}: ${start}'s place`);
-    const admitted = answers.place(place.id).admitted;
+    const admitted = answers.place(place.id, path).admitted;
     return admitted.by === "decided"
       ? `decided ${admitted.kinds.join("|")}@${admitted.decider?.start ?? "-"}`
       : admitted.by;
@@ -965,6 +966,182 @@ test("a place published with a kind checks the external data stored into it, nam
       source,
     );
   }
+});
+
+/**
+ * Per carrier kind, a declaration that gives host data through the carrier beside a known integer: at a scalar endpoint
+ * (the place's value) and at a collection one (its element), the data a value or (`list`) a list whose elements the
+ * carrier gives. A carrier that reads a member of its operand reads a literal here; a member of the data owes C5's
+ * obligation at its access (A7).
+ */
+const CARRIER_SHAPES: Readonly<
+  Record<
+    CarrierKind,
+    {
+      readonly scalar: string;
+      readonly collection: string | { readonly none: string };
+      /** Whether the data stands in the operation's own read (C10: a default the operation's value is checked with). */
+      readonly own?: true;
+      readonly list?: true;
+    }
+  >
+> = {
+  projection: { scalar: "let out = [1, D][1]", collection: "let out = [[1, D]][0]" },
+  iteration: {
+    scalar: "for item in [1, D] {\n  let out = item\n  LATER\n}",
+    collection: "for item in [[1, D]] {\n  let out = item\n  LATER\n}",
+  },
+  otherwise: { scalar: "let out = D otherwise 1", collection: "let out = [1, D] otherwise [2]" },
+  get: {
+    scalar: "let out = [1, D].get(1, default: 1)",
+    collection: "let out = [[1, D]].get(0, default: [])",
+  },
+  "load default": {
+    scalar: 'let out = load("k", default: [1, D][1])',
+    collection: 'let out = load("k", default: [1, D])',
+    own: true,
+  },
+  "parse default": {
+    scalar: 'let out = fromJson("1", default: [1, D][1])',
+    collection: 'let out = fromJson("[]", default: [1, D])',
+    own: true,
+  },
+  copy: { scalar: "let out = [1, D].take(2)[1]", collection: "let out = [1, D].take(2)" },
+  removal: {
+    scalar: "let out = [1, D].removeFirst()",
+    collection: "let out = [[1, D]].removeFirst()",
+  },
+  concatenation: { scalar: "let out = ([1] + D)[1]", collection: "let out = [1] + D", list: true },
+  choice: {
+    scalar: "let out = askChoice 1, D",
+    collection: { none: "a button's value is never a list or a set (V30 §19, TSV029)" },
+  },
+};
+
+/**
+ * Invariant O over the carrier table (`carriers.ts`): each kind of `CARRIER_KINDS` has its shapes, each named or inline,
+ * without and with a later store, in both orders. The place is admitted an integer where the data stands (published or
+ * decided), and the data owes an obligation that checks it against that type, at its read or at the value that holds
+ * it: named data A7's `copy-type` warning and check (r4.50 (1)), inline data C9's boundary or C1's check (r4.12), data
+ * in the operation's own read the operation's boundary (C10, r4.57). Where the candidate route reaches a shape (TABLE
+ * r4.59), its plan checks the declaration against the whole type, a fitting value says AFTER and halts, and each bad one
+ * fails at the declaration's value with nothing said; a shape outside the slice is proved at the answers, the route's
+ * reason reported.
+ */
+test("every carrier kind leaves an obligation for the external data it gives a place admitted a kind (O, A7, C9 r4.12, C10, r4.59)", (t) => {
+  assert.deepEqual(Object.keys(CARRIER_SHAPES).sort(), [...CARRIER_KINDS].sort());
+  const outside = new Map<string, string>();
+  const none: string[] = [];
+  let shapes = 0;
+  let routed = 0;
+  for (const kind of CARRIER_KINDS) {
+    const { scalar, collection, own = false, list = false } = CARRIER_SHAPES[kind];
+    for (const [endpoint, template] of [
+      ["scalar", scalar],
+      ["collection", collection],
+    ] as const) {
+      if (typeof template !== "string") {
+        none.push(`${kind} at a collection: ${template.none}`);
+        continue;
+      }
+      const shape: string = template;
+      for (const named of [false, true])
+        for (const later of [false, true]) {
+          const store = endpoint === "scalar" ? "out = 1" : "out = [1]";
+          const filled = shape.replace("D", named ? "raw" : "hostValue");
+          const body: string = filled.includes("LATER")
+            ? filled.replace(later ? "LATER" : /\n *LATER/, later ? store : "")
+            : `${filled}${later ? `\n${store}` : ""}`;
+          const source: string = `${named ? "let raw = hostValue\n" : ""}${body}\nsay "AFTER"\nexit\n`;
+          const name = `${kind} at a ${endpoint}, ${named ? "named" : "inline"}${later ? ", a later store" : ""}`;
+          // the data's read, and the statement that holds it: its place and its value
+          const data = named
+            ? source.indexOf("raw", source.indexOf("\n"))
+            : source.indexOf("hostValue");
+          const holder = source.lastIndexOf("\n", data) + 1;
+          const end = source.indexOf("\n", holder);
+          const [opening, place] = /^(?:let|for) (\w+) (?:=|in) /.exec(source.slice(holder))!;
+          const value = holder + opening.length;
+          const targets =
+            endpoint === "scalar"
+              ? [`${place} integer`]
+              : [`${place}.element integer`, `${place} list`];
+          const answered = inBothOrders(() => {
+            const request = coreRequest([{ path: "main.tease", source }]);
+            assert.ok(request !== null, name);
+            const { diagnostics, checks } = compactAnalysis(request);
+            return {
+              admitted: admittedOf(
+                source,
+                "let out",
+                endpoint === "scalar" ? [] : ["element"],
+              ).split("@")[0],
+              warned: diagnostics
+                .flatMap((d) => (d.kind === "written-target" ? [d.site.offset] : []))
+                .sort((a, b) => a - b),
+              obligations: checks.flatMap((check) =>
+                check.kind === "copy-type" &&
+                (check.site.offset === data || check.site.offset === value) &&
+                targets.includes(`${check.target} ${check.against.join("|")}`)
+                  ? [{ boundary: check.boundary, at: check.site.offset }]
+                  : [],
+              ),
+            };
+          });
+          assert.equal(answered.admitted, "decided integer", name);
+          assert.ok(answered.obligations.length > 0, `${name}: an obligation checks the data`);
+          if (own)
+            assert.ok(
+              answered.obligations.some(({ boundary, at }) => boundary && at === value),
+              `${name}: the operation's boundary`,
+            );
+          else if (named)
+            assert.ok(
+              answered.obligations.some(
+                ({ boundary, at }) => !boundary && answered.warned.includes(at),
+              ),
+              `${name}: A7's warning and check`,
+            );
+          shapes += 1;
+          let compiled: { readonly checks: readonly string[] | null } | null = null;
+          try {
+            compiled = inBothOrders(() => {
+              const result = candidate(source);
+              return { checks: result.plan === null ? null : checksOf(result.plan) };
+            });
+          } catch (error) {
+            if (!(error instanceof CandidateOutsideSlice)) throw error;
+            outside.set(kind, error.what.replace(/^this /, ""));
+            continue;
+          }
+          assert.deepEqual(
+            compiled.checks,
+            [`${holder}:${end} ${endpoint === "scalar" ? "integer" : "list<integer>"}`],
+            name,
+          );
+          const plan = candidate(source).plan!;
+          const host = (scalar: SerializableRuntimeValue): SerializableRuntimeValue =>
+            list ? { kind: "list", items: [scalar] } : scalar;
+          assert.deepEqual(
+            runWith(plan, host(2)),
+            { status: "halted", says: ["AFTER"], failure: null },
+            `${name} with 2`,
+          );
+          for (const bad of ["bad", 2.5])
+            assert.deepEqual(
+              runWith(plan, host(bad)),
+              { status: "failed", says: [], failure: `TSR058@${value}:${end}` },
+              `${name} with ${JSON.stringify(bad)}`,
+            );
+          routed += 1;
+        }
+    }
+  }
+  t.diagnostic(
+    `${shapes} shapes, ${routed} on the candidate route; outside the slice until S7–S9b (the answers only): ` +
+      [...outside].map(([kind, what]) => `${kind} (${what})`).join(", ") +
+      `; no shape: ${none.join("; ")}`,
+  );
 });
 
 /**
