@@ -122,7 +122,8 @@ identity/migrations, and continuous-personality scheduling remain later work.
 The behavior-neutral Option A refactor is implemented for the code present on
 the starting `main`. `src/plan/model.ts` contains only the serializable plan
 contract; `capture.ts` owns stable external-data capture, while `validation.ts` remains the plan-validation entry and
-owns envelope, instruction, and expression shape checks. The internal `instruction-stream-analyses.ts` module owns
+owns the envelope checks, with the startup-prefix, file-table, instruction, interaction, expression, and type shape
+checks in `validation/`. The internal `instruction-stream-analyses.ts` module owns
 cross-instruction loop and prepared-reference invariants, function ranges and prologues, execution-region indexing,
 prepared-say dataflow, interaction-result handoffs, and control-flow targets. The small private capture and validation
 support files, `capture-support.ts` and `validation-support.ts`, hold only helpers shared across those owners.
