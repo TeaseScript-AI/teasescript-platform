@@ -366,7 +366,13 @@ class StoppedAnswers implements Answers {
       exhausted: limit,
       demands: [],
       finished: [],
-      facts: { prefixEntries: 0, literalEntries: 0, markNodes: 0, markVisits: 0 },
+      facts: {
+        prefixEntries: 0,
+        literalEntries: 0,
+        markNodes: 0,
+        markVisits: 0,
+        selectionVisits: 0,
+      },
     };
   }
 

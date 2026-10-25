@@ -392,6 +392,9 @@ interface ValueEntry {
   readonly value: PlaceId;
 }
 
+/** A choice object's property its button value reads (V30 §19), or none. */
+type Selected = { readonly name: string; readonly type: TypeTerm } | null;
+
 /** One index of a literal's structure, through its nested literals at every step (§8 r4.9). */
 export interface LiteralIndex {
   /** Per path, the kinds its own terms give there, with the first literal's token. */
@@ -407,6 +410,8 @@ export interface LiteralIndex {
         readonly names: Set<string>;
         readonly token: Writer;
         readonly term: Extract<TypeTerm, { readonly kind: "object" }>;
+        /** V30 §19: the property its button value reads, its `value`, else its `text`, or `null`. */
+        readonly selected: Selected;
       }[];
       readonly count: Map<string, number>;
     }
@@ -451,6 +456,11 @@ export interface ContractFacts {
   literalEntries: number;
   markNodes: number;
   markVisits: number;
+  /**
+   * The record properties and records a choice's selection inspects (V30 §19): each property once where the literal
+   * index decides it, each record once per read.
+   */
+  selectionVisits: number;
 }
 
 export class Contract {
@@ -459,6 +469,7 @@ export class Contract {
     literalEntries: 0,
     markNodes: 0,
     markVisits: 0,
+    selectionVisits: 0,
   };
   readonly #prefix = new Map<Key, PrefixStores>();
   readonly #subPaths = new Map<Key, ReadonlySet<string>>();
@@ -2548,10 +2559,17 @@ export class Contract {
         let objects = index.objects.get(path);
         if (objects === undefined)
           index.objects.set(path, (objects = { list: [], count: new Map() }));
-        const names = new Set(
-          (term.properties ?? []).map((property) => propertyStep(property.name)),
-        );
-        objects.list.push({ names, token: site, term });
+        // its property names, and the property its button value reads, decided once per record (V30 §19)
+        const names = new Set<string>();
+        let value: Selected = null;
+        let text: Selected = null;
+        for (const property of term.properties ?? []) {
+          this.facts.selectionVisits += 1;
+          names.add(propertyStep(property.name));
+          if (property.name === "value") value ??= property;
+          else if (property.name === "text") text ??= property;
+        }
+        objects.list.push({ names, token: site, term, selected: value ?? text });
         for (const name of names) objects.count.set(name, (objects.count.get(name) ?? 0) + 1);
         for (const property of [...(term.properties ?? [])].reverse())
           pending.push({
@@ -2781,12 +2799,9 @@ export class Contract {
       out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
     for (const object of index.objects.get(path)?.list ?? []) {
       this.pass.program.work.charge("invSteps");
-      const properties = object.term.properties;
-      const selected =
-        properties?.find((property) => property.name === "value") ??
-        properties?.find((property) => property.name === "text") ??
-        null;
-      if (properties === null) {
+      this.facts.selectionVisits += 1;
+      const { selected } = object;
+      if (object.term.properties === null) {
         if (byValue) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
       } else if ((selected?.name === "value") !== byValue) continue;
       else if (selected === null)
