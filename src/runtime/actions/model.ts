@@ -11,11 +11,12 @@ import type {
 import type { RuntimeTimerSnapshot } from "../background/timers.js";
 import type { RuntimeMediaSnapshot } from "../background/media.js";
 import type { RuntimePermanentButtonSnapshot } from "../background/permanent-buttons.js";
-import type {
-  SerializableRuntimeDict,
-  SerializableRuntimeList,
-  SerializableRuntimeObject,
-  SerializableRuntimeValue,
+import {
+  cloneCapturedSerializableValue,
+  type SerializableRuntimeDict,
+  type SerializableRuntimeList,
+  type SerializableRuntimeObject,
+  type SerializableRuntimeValue,
 } from "../values/serializable-values.js";
 import type { TemporalAnswer } from "../../interaction-answers.js";
 
@@ -96,6 +97,15 @@ export type InteractionResultValue =
   | SerializableRuntimeObject
   | SerializableRuntimeDict
   | SerializableRuntimeList;
+
+/** A copy of an interaction result: a choice value, or a form's object, dict, or list of answers. */
+export function cloneInteractionResult(value: InteractionResultValue): InteractionResultValue {
+  if (typeof value !== "object" || value === null) return value;
+  if (value.kind === "object" || value.kind === "dict" || value.kind === "list")
+    // EVIDENCE: invariant: a copy of a form's answers keeps its object, dict, or list kind.
+    return cloneCapturedSerializableValue(value) as InteractionResultValue;
+  return { ...value };
+}
 
 /** The scene time at which a button with a timeout times out, or `null`. */
 export function interactionDeadlineMs(action: RuntimeInteractionActionSnapshot): number | null {

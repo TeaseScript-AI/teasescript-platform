@@ -54,11 +54,12 @@ import {
 import { frozenTemporalCaptures } from "../host-data/temporal-captures.js";
 import { cloneCaptures } from "../scopes/captures.js";
 import { cloneRandomControl } from "../random/random-control.js";
-import { cloneInteractionResult, cloneInteractionChoiceValue } from "../../choice-values.js";
-import type {
-  RuntimeForegroundActionSnapshot,
-  RuntimePendingActionSnapshot,
-  RuntimeActionSettlementSnapshot,
+import { cloneInteractionChoiceValue } from "../../choice-values.js";
+import {
+  cloneInteractionResult,
+  type RuntimeForegroundActionSnapshot,
+  type RuntimePendingActionSnapshot,
+  type RuntimeActionSettlementSnapshot,
 } from "../actions/model.js";
 import { cloneTimer } from "../background/timers.js";
 import { cloneMedia } from "../background/media.js";
