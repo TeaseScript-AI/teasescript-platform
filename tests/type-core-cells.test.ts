@@ -3412,3 +3412,83 @@ test("a written copy a carrier surely gives decides at the path's end too, an un
   }
   assert.deepEqual(differing, []);
 });
+
+test("an operation the receiver's or the key's decision leaves opaque or external carries no written type (F19a, F19, A4, Astra r3 B1)", () => {
+  // per shape a projection, a `get` or a method of a receiver that may be a reference (the runtime's member, F19a), or
+  // a `load` of a computed key (external data, F19): their typed operands give the value no written domain, so the
+  // fraction or the text after them warns with its checks and never errs; the ordinary controls (a literal key, a
+  // receiver that is no reference) keep their written copy's error
+  const programs: readonly (readonly [string, string, boolean])[] = [
+    [
+      "a computed key's load",
+      'let typed: integer[] = [1]\nlet key = "k"\nlet xs = load(key, default: typed)\nxs = [2.5]',
+      false,
+    ],
+    [
+      "a literal key's load",
+      'let typed: integer[] = [1]\nlet xs = load("k", default: typed)\nxs = [2.5]',
+      true,
+    ],
+    ["an index", "let typed: integer[][] | speaker = [[1]]\nlet xs = typed[0]\nxs = [2.5]", false],
+    [
+      "a first",
+      "let typed: integer[][] | speaker = [[1]]\nlet xs = typed.first\nxs = [2.5]",
+      false,
+    ],
+    [
+      "a dict's values",
+      "let typed: (integer[] dict) | speaker = dict{a: [1]}\nlet xs = typed.values[0]\nxs = [2.5]",
+      false,
+    ],
+    [
+      "a removal",
+      "let typed: integer[][] | speaker = [[1]]\nlet xs = typed.removeAt(0)\nxs = [2.5]",
+      false,
+    ],
+    ["a copy", "let typed: integer[] | speaker = [1]\nlet xs = typed.toList()\nxs = [2.5]", false],
+    [
+      "a get's receiver",
+      "let typed: integer[][] | speaker = [[1]]\nlet xs = typed.get(0, default: [])\nxs = [2.5]",
+      false,
+    ],
+    [
+      "a get's default",
+      "let typed: integer[] = [1]\nlet holder: integer[][] | speaker = [[1]]\nlet xs = holder.get(0, default: typed)\nxs = [2.5]",
+      false,
+    ],
+    ["a take", 'let typed: integer[] | speaker = [1]\nlet xs = typed.take(1)\nxs.add("ok")', false],
+    [
+      "a speaker's get",
+      "speaker vera { length: 2 }\nlet typed: integer[] = [1]\nlet xs = vera.get(0, default: typed)\nxs = [2.5]",
+      false,
+    ],
+    [
+      "a speaker's get, inferred",
+      'speaker vera { length: 2 }\nlet xs = vera.get(0, default: [1])\nxs = ["ok"]',
+      false,
+    ],
+    [
+      "a list's get",
+      "let typed: integer[][] = [[1]]\nlet xs = typed.get(0, default: [])\nxs = [2.5]",
+      true,
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, body, error] of programs) {
+    const source = `${body}\nexit`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const want = error ? [`compile-error@${source.lastIndexOf("2.5")}`] : [];
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const got = record.diagnostics
+        .filter((d) => d.class === "compile-error")
+        .map((d) => `${d.class}@${d.site.offset}`);
+      if (JSON.stringify(got) !== JSON.stringify(want))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join(" ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});

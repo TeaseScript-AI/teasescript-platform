@@ -1,6 +1,14 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { choiceLabels, defaultOf, REFERENCE, termAt, typeTags, writtenOf } from "./contract.js";
+import {
+  choiceLabels,
+  defaultOf,
+  heldReference,
+  REFERENCE,
+  termAt,
+  typeTags,
+  writtenOf,
+} from "./contract.js";
 import {
   keyOf,
   keyPath,
@@ -920,6 +928,8 @@ export class Admission {
     const { program, contract } = this.pass;
     const kinds = (of: PlaceId): ReadonlySet<ItemTag> =>
       new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag));
+    // (an operation the receiver's or the key's decision leaves its own value carries nothing: F19a, F19)
+    if (this.#keepsOwn(value)) return [];
     // (a copy of the elements and a `+` give their operands' elements, nothing else of them)
     const elements = strip.length === 0 || strip[0] === "element";
     const projection = program.projOf.get(value);
@@ -981,6 +991,30 @@ export class Admission {
       );
     }
     return [];
+  }
+
+  /**
+   * F19a, F19: whether the receiver's or the key's decision leaves a value's operation its own value, before any operand
+   * is selected or a written type carried: a projection, a `get` or a method of a receiver that may be a reference (the
+   * runtime's member, opaque), a `load` of a computed key (external data, whatever its default), the decisions the value
+   * side and the contract take first (`valueReceiver`'s RECEIVER decision).
+   */
+  #keepsOwn(value: PlaceId): boolean {
+    const { program, contract } = this.pass;
+    const reference = (receiver: PlaceId): boolean =>
+      heldReference(this.#run(contract.valueReceiver(receiver)));
+    const projection = program.projOf.get(value);
+    if (projection !== undefined)
+      return projection.step !== "iteration" && reference(projection.owner);
+    const c = program.opOf.get(value);
+    if (c?.kind === "get") return reference(c.receiver);
+    if (c?.kind === "load") return c.key === null;
+    return (
+      c?.kind === "operation" &&
+      c.contract.family === "method" &&
+      c.receiver !== null &&
+      reference(c.receiver)
+    );
   }
 
   /** A stored value's own structure: its literals' fields and elements at every depth, and their sources (F2). */
@@ -1426,6 +1460,9 @@ export class Admission {
     const key = program.projOf.has(value) ? contract.copiedKey(value) : null;
     const term = key === null ? null : writtenOf(program.place(keyPlace(key)).kind);
     if (key === null || term === null) return null;
+    // (a projection of a receiver that may be a reference is the runtime's member, no copy: F19a)
+    for (let at = value; program.projOf.has(at); at = program.projOf.get(at)!.owner)
+      if (this.#keepsOwn(at)) return null;
     const steps = keyPath(key);
     const path = [...steps, ...strip];
     return steps.some((step) => dictList(step) !== undefined) || termAt(term, path) === null
