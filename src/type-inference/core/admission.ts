@@ -67,6 +67,22 @@ function family(tags: readonly ItemTag[]): boolean {
 /** A number the place admits: one an internal contribution gives, never one possible solely through external data. */
 const admitsNumber = (item: Item): boolean => item.tag === "number" && item.extOnly !== true;
 
+/** A contribution of a stored value at one path (`#stopsOf`): its order of evaluation, value and node, its written type. */
+interface Stop {
+  readonly order: number;
+  readonly value: PlaceId;
+  readonly node: FlowNode;
+  /** A copy of a written binding's written type, else `null`. */
+  readonly term: TypeTerm | null;
+}
+
+/** A stored value's contributions by path (`#stopsOf`): written copies, other whole values, and literals. */
+interface Stops {
+  readonly written: Map<string, Stop[]>;
+  readonly values: Map<string, Stop[]>;
+  readonly literals: Map<string, Stop[]>;
+}
+
 /** The values at one depth of a stored value's path, and the first of them no literal of it holds (`wholeBelow`). */
 interface Level {
   readonly values: readonly PlaceId[];
@@ -129,10 +145,7 @@ export class Admission {
   >();
   readonly #whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
-  readonly #copiesByPath = new Map<
-    PlaceId,
-    Map<string, { readonly order: number; readonly term: TypeTerm }[]>
-  >();
+  readonly #stops = new Map<PlaceId, Stops>();
   readonly #takeables = new WeakMap<
     ReadonlySet<Definition | null>,
     { readonly wholes: readonly Definition[]; readonly adds: readonly Definition[] }[]
@@ -487,7 +500,11 @@ export class Admission {
         const d = scans[best]!.ds[position]!;
         const at = scans[best]!.at(position);
         work.charge("checks", scans.length);
-        const copied = d.value === undefined ? null : this.#writtenCopyAt(d.value, at);
+        const first =
+          d.value === undefined
+            ? null
+            : this.#earliestDecider(d.value, d.node, at, evaluate(d, at));
+        const copied = first?.term ?? null;
         if (copied !== null) {
           // (its type stays strict, but a literal's `null` elements beside the copy make the place optional, ADR 0021
           // 1.3, A8)
@@ -853,33 +870,109 @@ export class Admission {
   }
 
   /**
-   * The written type at a path of the first copy of a written binding on the way, at the rest of the path (A4): the
-   * copies indexed by their paths once per value, a query asking the path's prefixes, the first in the walk's order.
+   * A stored value's contributions by the path they stand at, in evaluation order: the copies of written bindings
+   * (A4), the other values no literal of it holds (a read, a call, external data), and its literals, whose fields and
+   * elements stand below them; once per value.
    */
-  #writtenCopyAt(value: PlaceId, at: readonly string[]): TypeTerm | null {
-    const { work } = this.pass.program;
-    let byPath = this.#copiesByPath.get(value);
-    if (byPath === undefined) {
-      byPath = new Map();
-      for (const [order, { path, term }] of this.#writtenCopies(value).entries()) {
-        work.charge("indexSteps");
-        const key = path.join(".");
-        const list = byPath.get(key);
-        if (list === undefined) byPath.set(key, [{ order, term }]);
-        else list.push({ order, term });
+  #stopsOf(value: PlaceId, node: FlowNode): Stops {
+    const known = this.#stops.get(value);
+    if (known !== undefined) return known;
+    const { program, definitions } = this.pass;
+    const stops: Stops = { written: new Map(), values: new Map(), literals: new Map() };
+    const pending: [PlaceId, FlowNode, readonly string[]][] = [[value, node, []]];
+    for (let order = 0; pending.length > 0; order += 1) {
+      const [current, at, path] = pending.pop()!;
+      program.work.charge("indexSteps");
+      const binding = program.occurrenceOf.get(current);
+      const term = binding === undefined ? null : writtenOf(program.place(binding).kind);
+      const literal = term === null && program.hasOf.has(current);
+      const map = term !== null ? stops.written : literal ? stops.literals : stops.values;
+      const key = path.join(".");
+      const stop: Stop = { order, value: current, node: at, term };
+      const list = map.get(key);
+      if (list === undefined) map.set(key, [stop]);
+      else list.push(stop);
+      if (!literal) continue;
+      const next: (readonly [Definition, string])[] = [];
+      for (const has of program.hasOf.get(current) ?? [])
+        for (const [name, field] of fieldsOf(has.type))
+          if (field.kind === "ref")
+            for (const d of definitions.cellDefs.get(field.place) ?? []) next.push([d, name]);
+      program.work.charge("checks", sortCost(next.length));
+      next.sort(
+        ([x], [y]) =>
+          (program.places[x.value!]?.site?.start ?? 0) -
+          (program.places[y.value!]?.site?.start ?? 0),
+      );
+      for (let index = next.length - 1; index >= 0; index -= 1) {
+        const [d, step] = next[index]!;
+        pending.push([d.value!, d.node ?? at, [...path, step]]);
       }
-      this.#copiesByPath.set(value, byPath);
     }
-    if (byPath.size === 0) return null;
-    let found: { readonly order: number; readonly term: TypeTerm } | null = null;
-    for (let length = 0; length <= at.length; length += 1)
-      for (const copy of byPath.get(at.slice(0, length).join(".")) ?? []) {
-        work.charge("checks");
-        const term = termAt(copy.term, at.slice(length));
-        if (term !== null && (found === null || copy.order < found.order))
-          found = { order: copy.order, term };
+    this.#stops.set(value, stops);
+    return stops;
+  }
+
+  /**
+   * A2, A4, A8 (ADR 0021 1.1–1.3): the earliest contribution in evaluation order that decides a stored value's path: a
+   * copy of a written binding (its written type at the rest of the path), or a value whose items there are of definite
+   * kinds; a `null` or an unknown decides nothing, and a later copy never comes before an earlier definite element. The
+   * place's decision and the literal's own elements (`literalElements`) both take it, so they cannot pick opposite
+   * deciders. `union` is the stored value's items at the path: where it holds an unknown, no value decides it (A8), so
+   * only a copy is looked for. `null` where nothing on the path decides.
+   */
+  #earliestDecider(
+    value: PlaceId,
+    node: FlowNode,
+    at: readonly string[],
+    union: readonly Item[],
+  ): { readonly term: TypeTerm | null; readonly site: SourceSite | null } | null {
+    const { program, values } = this.pass;
+    const stops = this.#stopsOf(value, node);
+    const siteOf = (stop: Stop): SourceSite | null => program.places[stop.value]?.site ?? null;
+    // the earliest copy whose written type reaches the rest of the path
+    let copy: { readonly order: number; readonly term: TypeTerm; readonly stop: Stop } | null =
+      null;
+    for (let length = 0; length <= at.length; length += 1) {
+      program.work.charge("checks");
+      for (const stop of stops.written.get(at.slice(0, length).join(".")) ?? []) {
+        program.work.charge("checks");
+        if (copy !== null && stop.order > copy.order) break;
+        const term = termAt(stop.term!, at.slice(length));
+        if (term !== null) copy = { order: stop.order, term, stop };
       }
-    return found?.term ?? null;
+    }
+    if (union.some((item) => item.tag === "unknown"))
+      return copy === null ? null : { term: copy.term, site: siteOf(copy.stop) };
+    // the values in evaluation order, those standing above the path's end with its rest, the literals at its end
+    const lists: { readonly list: readonly Stop[]; readonly length: number }[] = [];
+    for (let length = 0; length <= at.length; length += 1) {
+      const list = stops.values.get(at.slice(0, length).join("."));
+      if (list !== undefined) lists.push({ list, length });
+    }
+    const literals = stops.literals.get(at.join("."));
+    if (literals !== undefined) lists.push({ list: literals, length: at.length });
+    const positions = lists.map(() => 0);
+    for (;;) {
+      let best = -1;
+      for (let index = 0; index < lists.length; index += 1)
+        if (
+          positions[index]! < lists[index]!.list.length &&
+          (best < 0 ||
+            lists[index]!.list[positions[index]!]!.order <
+              lists[best]!.list[positions[best]!]!.order)
+        )
+          best = index;
+      const next = best < 0 ? null : lists[best]!.list[positions[best]!]!;
+      if (next === null || (copy !== null && copy.order < next.order))
+        return copy === null ? null : { term: copy.term, site: siteOf(copy.stop) };
+      program.work.charge("checks", lists.length);
+      positions[best]! += 1;
+      const items = withoutEmpty(
+        this.#run(values.valueItems(next.value, next.node, at.slice(lists[best]!.length))),
+      );
+      if (deciding(items).length > 0) return { term: null, site: siteOf(next) };
+    }
   }
 
   /**
@@ -936,8 +1029,10 @@ export class Admission {
           const own = [...new Set(deciding(this.valueAt(d, path)).map((item) => item.tag))];
           const kinds = [...new Set(own.map(family))];
           if (decided === undefined) {
-            // A4: a copy of a written binding gives its written type, whatever it holds now
-            const copied = this.#writtenCopyAt(d.value, path);
+            // A4: a copy of a written binding gives its written type, whatever it holds now, where it is the earliest
+            // decider on the path
+            const copied =
+              this.#earliestDecider(d.value, d.node, path, this.valueAt(d, path))?.term ?? null;
             if (copied !== null)
               first.set(at, {
                 tags: typeTags(copied).filter((tag) => tag !== "null" && tag !== "unknown"),

@@ -1997,6 +1997,36 @@ test("admission decides from the start value, keeps written copies, rejects ever
         `copy-type copy [integer] boundary @${at("hostValue")}`,
       ],
     ],
+    // the earliest deciding element decides a literal's path, a written copy only where it comes first; a `null` or an
+    // unknown before it decides nothing (review: Astra's B2)
+    [
+      "a fraction before a copy of a written integer",
+      "let whole: integer = 1\nlet xs = [2.5, whole]\nxs = [3.5]\nexit",
+      () => ["valid"],
+    ],
+    [
+      "a fraction before a copy of a written integer, in dict values and shared fields",
+      "let whole: integer = 1\nlet d = dict{a: 2.5, b: whole}\nd = dict{c: 3.5}\nlet rows = [{n: 2.5}, {n: whole}]\nrows = [{n: 3.5}]\nexit",
+      () => ["valid"],
+    ],
+    [
+      "a whole number before a copy of a written text",
+      'let s: string = "a"\nlet xs = [1, s]\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at("s]")}`],
+    ],
+    [
+      "a copy of a written integer first, a null and external data before it",
+      "let whole: integer = 1\nlet xs = [whole, 2.5]\nlet ys = [null, hostValue, whole]\nys = [3.5]\nexit",
+      (at) => [
+        "compile-error",
+        `written-target compile-error @${at("2.5")}`,
+        `written-target compile-error @${at("3.5")}`,
+        // (the null element keeps the element optional, ADR 0021 1.3; the external one owes its check and boundary)
+        `written-target warning-runtime-check @${at("hostValue")}`,
+        `copy-type ys.element [integer, null] @${at("hostValue")}`,
+        `copy-type ys.element [integer, null] boundary @${at("hostValue")}`,
+      ],
+    ],
     // a return's literal decides the result's paths as a store's does: a later return of another element kind errs
     // (ADR 0021 1.5, A8; review r5)
     [

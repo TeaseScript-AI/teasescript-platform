@@ -308,6 +308,20 @@ test("admission's decided types and C9's boundary checks compile and run on the 
         [list(2.5), "TSR058@74:83"],
       ],
     ],
+    // A2, A4, A8: the earliest element decides a literal's elements, a later copy of a written integer fitting a number
+    // (review: Astra's B2, a false error), nested too
+    [
+      'let whole: integer = 1\nlet xs = [2.5, whole]\nxs = [3.5]\nsay "after"\nexit\n',
+      [],
+      [],
+      [[null, null]],
+    ],
+    [
+      'let whole: integer = 1\nlet xs = [[2.5, whole]]\nxs = [[3.5]]\nsay "after"\nexit\n',
+      [],
+      [],
+      [[null, null]],
+    ],
     // C9: external data stored whole into a written collection, checked there with its elements
     [
       "let pool: integer[] = hostValue\nexit\n",
