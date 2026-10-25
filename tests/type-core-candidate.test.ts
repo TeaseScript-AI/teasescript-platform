@@ -226,11 +226,13 @@ test("C1's copy check and C9's boundary check run where external data enters a w
 
 test("C1 warns where some kind of the stored value fits and errs only where none does, in both orders (r4.46)", () => {
   // a list literal's element at an index: the items `integer` and `number`, both definite, one fitting; with a host value
-  // the external item beside a `number`, and C9's boundary check at the host value
-  for (const [source, warnings, boundary, passing, failing] of [
+  // the external item beside a `number`, and C9's boundary check at the host value. The context words (§3.4): the
+  // element read that gathers several elements gives `member`, the host value its reason's `unknown`
+  for (const [source, warnings, contexts, boundary, passing, failing] of [
     [
       'let result: integer = [2, 2.5][0]\nsay "selected"\nexit\n',
       ["warning TSV041@22"],
+      ["written-target@22 member"],
       null,
       null,
       null,
@@ -238,6 +240,7 @@ test("C1 warns where some kind of the stored value fits and errs only where none
     [
       'let result: integer = [2.5, 2][1]\nsay "selected"\nexit\n',
       ["warning TSV041@22"],
+      ["written-target@22 member"],
       null,
       null,
       null,
@@ -245,6 +248,7 @@ test("C1 warns where some kind of the stored value fits and errs only where none
     [
       'let result: integer = [hostValue, 2.5][0]\nsay "selected"\nexit\n',
       ["warning TSV041@22", "warning TSV041@23"],
+      ["written-target@22 member", "written-target@23 unknown"],
       'result ["integer"] @23',
       3,
       1.5,
@@ -252,6 +256,7 @@ test("C1 warns where some kind of the stored value fits and errs only where none
     [
       'let result: integer = [2.5, hostValue][1]\nsay "selected"\nexit\n',
       ["warning TSV041@22", "warning TSV041@28"],
+      ["written-target@22 member", "written-target@28 unknown"],
       'result ["integer"] @28',
       3,
       "x",
@@ -282,12 +287,18 @@ test("C1 warns where some kind of the stored value fits and errs only where none
     }
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null);
+    const record = inBothOrders(() => compactAnalysis(request));
     assert.deepEqual(
-      inBothOrders(() =>
-        compactAnalysis(request)
-          .checks.filter((check) => check.boundary)
-          .map((check) => `${check.target} ${JSON.stringify(check.against)} @${check.site.offset}`),
-      ),
+      record.diagnostics
+        .map((diagnostic) => `${diagnostic.kind}@${diagnostic.site.offset} ${diagnostic.context}`)
+        .sort(),
+      contexts,
+      source,
+    );
+    assert.deepEqual(
+      record.checks
+        .filter((check) => check.boundary)
+        .map((check) => `${check.target} ${JSON.stringify(check.against)} @${check.site.offset}`),
       boundary === null ? [] : [boundary],
       source,
     );
