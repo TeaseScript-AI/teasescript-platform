@@ -13,19 +13,22 @@ import {
   TEMPORAL_METHODS,
 } from "../src/temporal-builtins.js";
 import { TEXT_METHODS } from "../src/text-operations.js";
-import { analyseCore } from "../src/type-inference/core/answers.js";
+import { analyseCore, coreResult } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { REASON } from "../src/type-inference/core/items.js";
+import { coreRecord } from "../src/type-inference/core/result.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 
 /*
  * TABLE r4.47 (1), member completeness (#1026's follow-up): every built-in member the language's tables give a
  * receiver kind answers through the core, by its declared result or as the runtime's opaque `unknown` whose consumers
- * keep their checks, never with no items (a member with none made `repeat d.weekday {}` silently valid). Per pair, the
- * read's published items on the value side (a bound receiver) and through the contract (a function's result of two
- * returns), in both orders. The members whose results the core reads from the tables (the temporal fields, calendar
- * parts and methods, a range's `toList`) give exactly their declared kind.
+ * keep their checks, never with no items (a member with none made `repeat d.weekday {}` silently valid). Per pair,
+ * on the value side (a bound receiver) and through the contract (a function's result of two returns), in both orders:
+ * the read's published items, and a consumer its declared result's kind requires (a count for a whole number, a written
+ * place of its kind otherwise, a collection's element through `first`), which never errs. The members whose results the
+ * core reads from the tables (the temporal fields, calendar parts and methods, a range's `toList` and its elements)
+ * give exactly their declared kind.
  */
 
 /** A receiver of each kind, as a script writes one. */
@@ -63,11 +66,42 @@ const ARGUMENTS: Readonly<Record<string, string>> = {
 const LISTS: readonly ListMethod[] = Object.values(LIST_METHODS);
 const DICTS: readonly DictMethod[] = Object.values(DICT_METHODS);
 
+/** A member's declared result: its kind, `null` beside it where it may be, and a collection's element. */
+interface Result {
+  readonly kind: string;
+  readonly nullable?: true;
+  readonly element?: Result;
+}
+
 interface Member {
   readonly receiver: string;
   readonly read: string;
-  /** The declared kind the core reads from the tables, where it does. */
-  readonly declared?: string;
+  readonly result: Result;
+  /** The members whose results the core reads from the tables: their exact kind, and their element's. */
+  readonly exact?: true;
+}
+
+/** A table's result as a kind, on a receiver of `receiver` whose elements are text (the seeds'). */
+function resultOf(declared: string, receiver: string): Result {
+  const text: Result = { kind: "string" };
+  switch (declared) {
+    case "element":
+    case "value":
+      return text;
+    case "same":
+      return { kind: receiver, element: text };
+    case "list":
+    case "set":
+      return { kind: declared, element: text };
+    case "string[]":
+      return { kind: "list", element: text };
+    case "string?[]?":
+      return { kind: "list", nullable: true, element: { kind: "string", nullable: true } };
+    default:
+      return declared.endsWith("?")
+        ? { kind: declared.slice(0, -1), nullable: true }
+        : { kind: declared };
+  }
 }
 
 function members(): Member[] {
@@ -89,51 +123,109 @@ function members(): Member[] {
       ...(named === undefined ? [] : ['default: "s"']),
     ].join(", ")})`;
   for (const receiver of ["list", "set"]) {
-    for (const name of Object.keys(LIST_PROPERTIES)) out.push({ receiver, read: name });
+    for (const [name, property] of Object.entries(LIST_PROPERTIES))
+      out.push({
+        receiver,
+        read: name,
+        result: resultOf(property.gives === "length" ? "integer" : "element", receiver),
+      });
     for (const method of LISTS)
       if (method.receivers.some((kind) => kind === receiver))
-        out.push({ receiver, read: call(method.name, method.parameters, method.named) });
+        out.push({
+          receiver,
+          read: call(method.name, method.parameters, method.named),
+          result: resultOf(method.result, receiver),
+        });
   }
-  for (const name of Object.keys(DICT_PROPERTIES)) out.push({ receiver: "dict", read: name });
+  for (const [name, property] of Object.entries(DICT_PROPERTIES))
+    out.push({
+      receiver: "dict",
+      read: name,
+      result: resultOf(property.gives === "length" ? "integer" : "list", "dict"),
+    });
   for (const method of DICTS)
-    out.push({ receiver: "dict", read: call(method.name, method.parameters, method.named) });
-  out.push({ receiver: "string", read: "length" });
+    out.push({
+      receiver: "dict",
+      read: call(method.name, method.parameters, method.named),
+      result: resultOf(method.result, "dict"),
+    });
+  out.push({ receiver: "string", read: "length", result: { kind: "integer" } });
   for (const [name, method] of Object.entries(TEXT_METHODS))
-    out.push({ receiver: "string", read: call(name, method.parameters) });
-  out.push({ receiver: "range", read: "toList()", declared: "list" });
+    out.push({
+      receiver: "string",
+      read: call(name, method.parameters),
+      result: resultOf(method.result, "string"),
+    });
+  out.push({
+    receiver: "range",
+    read: "toList()",
+    result: { kind: "list", element: { kind: "integer" } },
+    exact: true,
+  });
   for (const receiver of TEMPORAL_KINDS) {
     for (const [name, field] of Object.entries(TEMPORAL_FIELDS))
       if (hasTemporalField(receiver, name))
-        out.push({ receiver, read: name, declared: field.result });
+        out.push({ receiver, read: name, result: { kind: field.result }, exact: true });
     for (const [name, method] of Object.entries(TEMPORAL_METHODS))
       if (hasTemporalMethod(receiver, name))
-        out.push({ receiver, read: `${name}()`, declared: method.result });
+        out.push({ receiver, read: `${name}()`, result: { kind: method.result }, exact: true });
   }
   for (const [name, part] of Object.entries(CALENDAR_DURATION_PARTS))
-    out.push({ receiver: "calendarDuration", read: name, declared: part.result });
+    out.push({
+      receiver: "calendarDuration",
+      read: name,
+      result: { kind: part.result },
+      exact: true,
+    });
   for (const [receiver, handle] of Object.entries(HANDLE_MEMBERS)) {
-    for (const name of Object.keys(handle.properties)) out.push({ receiver, read: name });
-    for (const name of Object.keys(handle.methods)) out.push({ receiver, read: `${name}()` });
+    for (const [name, property] of Object.entries(handle.properties))
+      out.push({
+        receiver,
+        read: name,
+        result: { kind: property.type, ...(property.nullable === true ? { nullable: true } : {}) },
+      });
+    for (const [name, method] of Object.entries(handle.methods))
+      out.push({ receiver, read: `${name}()`, result: { kind: method.result } });
   }
   return out;
 }
 
-test("every member a receiver kind has answers by its declared result or the runtime's, never with nothing", () => {
+/**
+ * The consumer a result's kind requires (C2, C1): a count for a whole number, a written place of its kind otherwise;
+ * a collection's element through `first` into its own consumer. With the reads whose items the test inspects.
+ */
+function consumed(read: string, result: Result): { statement: string; element?: string } {
+  if (result.element !== undefined) {
+    const element = result.nullable === true ? `(${read} otherwise []).first` : `${read}.first`;
+    return { statement: consumed(element, result.element).statement, element };
+  }
+  return {
+    statement:
+      result.kind === "integer" && result.nullable !== true
+        ? `repeat ${read} {}`
+        : `let x: ${result.kind}${result.nullable === true ? " | null" : ""} = ${read}`,
+  };
+}
+
+test("every member a receiver kind has answers its declared result to a consumer of its kind, never nothing", () => {
   const failing: string[] = [];
   for (const member of members()) {
     const seed = SEEDS[member.receiver]!;
     const read = `r.${member.read}`;
-    const routes: readonly (readonly [string, string, string])[] = [
-      ["bound", `let r = ${seed}\nsay ${read}\nexit`, read],
+    const routes: readonly (readonly [string, (use: string) => string, string])[] = [
+      ["bound", (use) => `let r = ${seed}\n${use}\nexit`, read],
       [
         "result",
-        `function make {\nlet r = ${seed}\nif askBoolean "pick" { return ${read} }\nreturn ${read}\n}\nlet v = make()\nsay v\nexit`,
+        (use) =>
+          `function make {\nlet r = ${seed}\nif askBoolean "pick" { return ${read} }\nreturn ${read}\n}\nlet v = make()\n${use}\nexit`,
         "v",
       ],
     ];
-    for (const [route, source, text] of routes)
+    for (const [route, program, text] of routes)
       for (const reversed of [false, true]) {
         const name = `${member.receiver}.${member.read} ${route}${reversed ? " reversed" : ""}`;
+        const use = consumed(text, member.result);
+        const source = program(use.statement);
         const request = coreRequest([{ path: "main.tease", source }]);
         if (request === null) {
           failing.push(`${name}: does not parse or resolve`);
@@ -143,27 +235,45 @@ test("every member a receiver kind has answers by its declared result or the run
         const answers = withSolverSeam({ reverseWorklist: reversed }, () =>
           reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run(),
         );
-        const node = answers.graph.nodes.find(
-          (candidate) =>
-            candidate.kind === "expression" &&
-            candidate.span !== null &&
-            source.slice(candidate.span.start.offset, candidate.span.end.offset) === text,
-        );
-        const items = (node === undefined ? null : answers.at(node))?.items.filter(
-          (item) => item.tag !== "empty",
-        );
+        const itemsAt = (at: string) => {
+          const node = answers.graph.nodes.find(
+            (candidate) =>
+              candidate.kind === "expression" &&
+              candidate.span !== null &&
+              source.slice(candidate.span.start.offset, candidate.span.end.offset) === at,
+          );
+          return (node === undefined ? null : answers.at(node))?.items.filter(
+            (item) => item.tag !== "empty",
+          );
+        };
+        const items = itemsAt(text);
+        const kinds = (found: readonly { readonly tag: string }[]) =>
+          found.map((item) => item.tag).join("|");
         if (items === undefined || items.length === 0) failing.push(`${name}: no items`);
         else if (
           items.some((item) => item.tag === "unknown" && (item.reasons & REASON.external) !== 0)
         )
           failing.push(`${name}: external data`);
-        else if (
-          member.declared !== undefined &&
-          (items.some((item) => item.tag !== member.declared) || items.length === 0)
-        )
-          failing.push(
-            `${name}: ${items.map((item) => item.tag).join("|")}, not ${member.declared}`,
-          );
+        else if (member.exact === true && items.some((item) => item.tag !== member.result.kind))
+          failing.push(`${name}: ${kinds(items)}, not ${member.result.kind}`);
+        // a consumer of the declared kind is never an error: a wrong kind is (Astra's B1 on #1028)
+        const outcome = coreRecord(coreResult(answers), ["main.tease"]).outcome;
+        if (outcome === "compile-error") failing.push(`${name}: ${use.statement} errs`);
+        if (
+          member.exact === true &&
+          use.element !== undefined &&
+          member.result.element !== undefined
+        ) {
+          const elements = itemsAt(use.element);
+          if (
+            elements === undefined ||
+            elements.length === 0 ||
+            elements.some((item) => item.tag !== member.result.element!.kind)
+          )
+            failing.push(
+              `${name}: its element ${kinds(elements ?? [])}, not ${member.result.element.kind}`,
+            );
+        }
       }
   }
   assert.deepEqual(failing, []);
