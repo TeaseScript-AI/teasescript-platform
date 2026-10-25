@@ -20,7 +20,7 @@ import {
   type Definition,
   type Key,
 } from "./definitions.js";
-import { withoutEmpty, withWriter } from "./exact-path.js";
+import { belowSelected, withoutEmpty, withWriter } from "./exact-path.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
 import {
@@ -1000,7 +1000,9 @@ export class Contract {
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.contractOfValue(owner))) {
       if (item.tag === "list" || item.tag === "set")
-        out.push(...withoutEmpty(yield* this.contractOfValueAt(owner, ["element", ...rest])));
+        out.push(
+          ...belowSelected(yield* this.contractOfValueAt(owner, ["element", ...rest]), rest),
+        );
       else if ((item.tag === "dict" || item.tag === "range") && rest.length === 0)
         out.push(
           carried(makeItem(item.tag === "dict" ? "string" : "integer", item.writer), [item]),
@@ -1048,7 +1050,7 @@ export class Contract {
     if (c.kind === "get")
       return mergeItems(
         [
-          ...withoutEmpty(yield* this.contractOfValueAt(c.receiver, ["element", ...rest])),
+          ...belowSelected(yield* this.contractOfValueAt(c.receiver, ["element", ...rest]), rest),
           ...(yield* this.contractOfValueAt(c.fallback, rest)),
         ],
         scope,
@@ -1116,7 +1118,7 @@ export class Contract {
           if (rest.length === 0) out.push(carried(makeItem("null"), [item]));
         } else if (COLLECTIONS.has(item.tag))
           out.push(
-            ...withoutEmpty(yield* this.contractOfValueAt(c.receiver, ["element", ...rest])),
+            ...belowSelected(yield* this.contractOfValueAt(c.receiver, ["element", ...rest]), rest),
           );
       }
       return mergeItems(out, scope);

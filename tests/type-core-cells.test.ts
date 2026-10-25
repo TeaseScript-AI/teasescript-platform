@@ -1180,3 +1180,69 @@ test("a held choice object's button value is marked by a test of its selected ke
     }
   assert.deepEqual(differing, []);
 });
+
+/**
+ * #1027's B1 beyond a dict's lists (review round 5's R5-3, Astra's delta): a collection's `get`, a loop's visit and the
+ * removals that give an element consume only the selected element's emptiness mark; a demanded descendant's passes
+ * through, so its read keeps the check whose runtime failure (TSR018) it guards. Per collection (a list, a dict's
+ * values), form and depth 1–3, the selected element holds a list that many levels deep whose innermost may be empty,
+ * read that many `first`s down; both orders. A scalar element is the control.
+ */
+test("a selection consumes only its own emptiness mark below get, a loop's visit and a removal", () => {
+  const nest = (inner: string, depth: number): string =>
+    `${"[".repeat(depth - 1)}${inner}${"]".repeat(depth - 1)}`;
+  const collections: readonly (readonly [string, (depth: number) => string])[] = [
+    ["a list", (depth) => `let c = [${nest("[]", depth)}, ${nest("[1]", depth)}]`],
+    [
+      "a dict's values",
+      (depth) =>
+        `let d = dict{a: ${nest("[]", depth)}, b: ${nest("[1]", depth)}}\nlet c = d.values`,
+    ],
+  ];
+  // per form, the selection with its default (the selected element's shape) and the read below it
+  const forms: readonly (readonly [string, (fallback: string, read: string) => string])[] = [
+    ["get", (fallback, read) => `let picked = c.get(0, default: ${fallback})\nrepeat ${read} {}`],
+    ["a loop's visit", (_, read) => `for picked in c { repeat ${read} {} }`],
+    ["removeFirst", (_, read) => `let picked = c.removeFirst()\nrepeat ${read} {}`],
+    ["removeAt", (_, read) => `let picked = c.removeAt(0)\nrepeat ${read} {}`],
+  ];
+  const programs: [string, string, string[]][] = [];
+  for (const [collection, made] of collections)
+    for (const [form, select] of forms)
+      for (const depth of [1, 2, 3]) {
+        const read = `picked${".first".repeat(depth)}`;
+        const source = `${made(depth)}\n${select(nest("[1]", depth), read)}\nexit`;
+        const at = source.indexOf(`repeat ${read}`) + "repeat ".length;
+        const expected = [
+          "warning-runtime-check",
+          `member-read warning-runtime-check @${at}`,
+          `empty-check picked${".element".repeat(depth - 1)} [list] @${at}`,
+        ];
+        // a dict's values may hold none: its removal keeps its own check (C6)
+        if (collection === "a dict's values" && form === "removeFirst")
+          expected.push(
+            `member-read warning-runtime-check @${source.indexOf("c.removeFirst")}`,
+            `empty-check c [list] @${source.indexOf("c.removeFirst")}`,
+          );
+        programs.push([`${form} of ${collection} at depth ${depth}`, source, expected.sort()]);
+      }
+  for (const [form, select] of forms)
+    programs.push([
+      `${form} of a list's scalar`,
+      `let c = [1, 2]\n${select("1", "picked")}\nexit`,
+      ["valid"],
+    ]);
+  const differing: string[] = [];
+  for (const [name, source, expected] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const got = summary(reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run());
+      if (JSON.stringify(got) !== JSON.stringify(expected))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join("; ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});

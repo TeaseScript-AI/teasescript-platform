@@ -18,7 +18,7 @@ import {
   withOwnSelection,
 } from "./contract.js";
 import { keyOf, keyPath, keyPlace, type ForLoopFacts, type Key } from "./definitions.js";
-import { withoutEmpty } from "./exact-path.js";
+import { belowSelected, withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
 import {
@@ -322,7 +322,10 @@ export class Values {
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.valueItems(owner, node, []))) {
       if (item.tag === "list" || item.tag === "set") {
-        const elements = withoutEmpty(yield* this.valueItems(owner, node, ["element", ...rest]));
+        const elements = belowSelected(
+          yield* this.valueItems(owner, node, ["element", ...rest]),
+          rest,
+        );
         out.push(...(item.cert === "def" ? elements : weaken(elements)));
       } else if ((item.tag === "dict" || item.tag === "range") && rest.length === 0)
         out.push(
@@ -463,7 +466,10 @@ export class Values {
       // F19a before F17b: a receiver that may be a reference has the runtime's `get`, no default merged beside it
       out = [OPAQUE_MEMBER];
     } else if (c.kind === "get") {
-      const receiver = withoutEmpty(yield* this.valueItems(c.receiver, at, ["element", ...rest]));
+      const receiver = belowSelected(
+        yield* this.valueItems(c.receiver, at, ["element", ...rest]),
+        rest,
+      );
       const fallbackAt = program.exprAt(program.places[c.fallback]?.site ?? c.site);
       // P7, F17b: only the graph's literal proof (a `get` on a list literal with a literal index: the default is dead)
       // makes the element certain; else the element may be absent and its kinds are possible
@@ -598,7 +604,9 @@ export class Values {
             out.push(carried(makeItem("null", null, { cert: item.cert }), [item]));
         } else if (COLLECTIONS.has(item.tag))
           out.push(
-            ...weaken(withoutEmpty(yield* this.valueItems(c.receiver, at, ["element", ...rest]))),
+            ...weaken(
+              belowSelected(yield* this.valueItems(c.receiver, at, ["element", ...rest]), rest),
+            ),
           );
       }
       return out;
