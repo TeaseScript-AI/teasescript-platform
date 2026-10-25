@@ -360,8 +360,9 @@ export class Consumers {
     const projection =
       program.projOf.get(value) ??
       (this.#getOf.has(value) ? { owner: this.#getOf.get(value)!, step: "index" } : undefined);
-    // a read through a dict's `values` or `keys`, a new list each read and no place, is named by its own text (r4.47)
-    if (projection !== undefined && this.#derived(value)) {
+    // §10.5: an anonymous target, a read below a value no place holds (a literal's, an operation's) or through a dict's
+    // `values` or `keys` (a new list each read, r4.46 (2)), is named by its own text
+    if (projection !== undefined && (this.#derived(value) || this.#anonymous(value))) {
       const site = program.places[value]?.site ?? null;
       if (site !== null) return program.textAt(site);
     }
@@ -397,6 +398,21 @@ export class Consumers {
         this.#run(contract.contractOfValue(projection.owner)).some((item) => item.tag === "dict")
       )
         return true;
+      at = projection.owner;
+    }
+    return false;
+  }
+
+  /** Whether a projection chain starts at a value no place holds: no variable's read, no call's result. */
+  #anonymous(value: PlaceId): boolean {
+    const { program } = this.pass;
+    let at: PlaceId = value;
+    for (let depth = 0; depth < 256; depth += 1) {
+      const projection =
+        program.projOf.get(at) ??
+        (this.#getOf.has(at) ? { owner: this.#getOf.get(at)!, step: "index" } : undefined);
+      if (projection === undefined)
+        return !program.occurrenceOf.has(at) && !this.#resultOfCall.has(at);
       at = projection.owner;
     }
     return false;
