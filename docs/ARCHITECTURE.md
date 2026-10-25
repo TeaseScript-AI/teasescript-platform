@@ -127,7 +127,9 @@ cross-instruction loop and prepared-reference invariants, function ranges and pr
 prepared-say dataflow, interaction-result handoffs, and control-flow targets. The small private capture and validation
 support files, `capture-support.ts` and `validation-support.ts`, hold only helpers shared across those owners.
 `src/compiler/compile-program.ts` owns compilation orchestration, while `src/compiler/lowering/compiler.ts` owns the
-cohesive stateful lowering pass.
+stateful lowering pass: its statement and expression dispatch, temporaries, and function compilation. The families it
+hands constructs to, such as asks and other interactions, say, background actions, calls, and branches and loops, are
+modules beside it in `src/compiler/lowering/`.
 `src/static-evaluation.ts` owns what the compiler knows of values: the constants the source writes, which semantic
 validation, lowering, and the checks of written values read, and `KnownValues`, the values every run gives an
 expression, which the type checker's value checks read; it computes them with the runtime's own operations.
