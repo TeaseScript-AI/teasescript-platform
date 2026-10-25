@@ -103,8 +103,9 @@ export function declaredResult(
 
 /**
  * V30 §6, F10, F27: the element a value holds by its kind alone, which a loop visits and a copy of its elements
- * (`toList`) holds: a range's whole numbers, as many as its bounds give and so maybe none (the core does not read the
- * bounds). A list's or a set's elements are its own, read below it.
+ * (`toList`) holds: a range's whole numbers, as many as its bounds give and so maybe none, as the range-to-list
+ * transfer does not use the bounds (P7 proves only a direct loop's entry). A list's or a set's elements are its own,
+ * read below it.
  */
 const KIND_ELEMENTS: Readonly<Record<string, ValueKind>> = { range: "integer" };
 
