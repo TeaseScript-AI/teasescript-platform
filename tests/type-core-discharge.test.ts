@@ -36,6 +36,10 @@ const ROWS = [
   ["C6: an element selection", "the runtime's check at the selection"],
   ["C10: a get's, a conversion's or a load's default", "the final instruction's typeCheck"],
   ["C10: an otherwise's fallback", "S7: fallbackCheck on the final instruction"],
+  [
+    "C10: the lazy default of fileFromBase64, decryptText or decryptFile",
+    "S7: fallbackCheck on the instruction that selects it",
+  ],
 ] as const;
 
 type Row = (typeof ROWS)[number][0];
@@ -103,7 +107,7 @@ function rowOf(check: Obligation, program: unknown): Row | null {
           return lazy?.operation === "fileFromBase64" ||
             lazy?.operation === "decryptText" ||
             lazy?.operation === "decryptFile"
-            ? null
+            ? "C10: the lazy default of fileFromBase64, decryptText or decryptFile"
             : "C10: a get's, a conversion's or a load's default";
       }
       if (
@@ -158,10 +162,17 @@ function rowOf(check: Obligation, program: unknown): Row | null {
   }
 }
 
+/** Programs beside the set for the rows its records do not reach: the set's lazy file and lock defaults are all `null`. */
+const BESIDE = ['let file = fileFromBase64("!", default: hostValue)\nexit'];
+
 test("every check the core emits has a row of the discharge map, its runtime check existing or S7's (S3 §4)", () => {
   const witnessed = new Map<Row, number>();
   const unplaced: string[] = [];
-  for (const record of readFixture()) {
+  const records = [
+    ...readFixture(),
+    ...BESIDE.map((source) => ({ name: source, files: [{ path: "main.tease", source }] })),
+  ];
+  for (const record of records) {
     const request = coreRequest(record.files);
     assert.ok(request !== null, record.name);
     const answers = analyseCore(request);
@@ -183,5 +194,6 @@ test("every check the core emits has a row of the discharge map, its runtime che
     "C5c: a property's presence at a store",
     "C2: the index of a list's get",
     "C10: an otherwise's fallback",
+    "C10: the lazy default of fileFromBase64, decryptText or decryptFile",
   ]);
 });

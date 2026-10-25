@@ -1,4 +1,5 @@
 import type { Expression } from "../../ast.js";
+import { lazyDefaultOperation } from "../../lazy-defaults.js";
 import type { ValueKind } from "../../value-kinds.js";
 import * as clockTemporal from "../adapters/clock-temporal.js";
 import * as collections from "../adapters/collections.js";
@@ -33,6 +34,7 @@ import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { firstWriter, makeItem, REASON, type Item, type ItemTag, type Writer } from "./items.js";
 import {
+  builtinResult,
   conversionCategory,
   dictList,
   interactionCategory,
@@ -767,6 +769,22 @@ export class Consumers {
             c,
             node,
             (rest) => (rest.length === 0 ? [makeItem(category.result)] : []),
+            fallback,
+          );
+      }
+      if (
+        c.kind === "operation" &&
+        c.contract.family === "builtin" &&
+        lazyDefaultOperation(c.contract.name, false) !== null
+      ) {
+        // C10: the default `fileFromBase64`, `decryptText` and `decryptFile` select (ADR 0021 7.2) against their result
+        const fallback = defaultOf(c);
+        const result = builtinResult(c.contract.name);
+        if (fallback !== undefined)
+          this.#fallbackFits(
+            c,
+            node,
+            (rest) => (rest.length === 0 ? [makeItem(result)] : []),
             fallback,
           );
       }
