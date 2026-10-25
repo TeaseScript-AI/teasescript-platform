@@ -5741,16 +5741,16 @@ The request is atomic and the server validates the complete schema and all activ
 A script may publish typed data shared by all executions of that same script:
 
 ```text
-publishGlobal(
+publishToPlayers(
     key: "monopoly",
     value: { score: player.monopolyScore }
 )
 ```
 
-Read matching entries with `getGlobal(...)`:
+Read matching entries with `loadFromPlayers(...)`:
 
 ```text
-let previous = getGlobal(
+let previous = loadFromPlayers(
     key: "monopoly",
     order: "newest",
     limit: 1,
@@ -5769,11 +5769,11 @@ publishedAt
 
 `participantId` is an opaque server-generated identifier scoped to the script and is not the account ID or username. `displayName` comes from the player's global account preference and may be empty. Receiving scripts may display `participantId` when no display name is available.
 
-A script may read saved data from another script for the same player through an immutable script ID:
+A script may read saved data from another script for the same player through an immutable tease id:
 
 ```text
-let previousChapter = loadFromScript(
-    script: "immutable-script-id",
+let previousChapter = loadFromTease(
+    tease: "immutable-tease-id",
     key: "chapterState",
     default: {}
 )
@@ -5782,18 +5782,26 @@ let previousChapter = loadFromScript(
 This access is read-only. Script metadata is available separately:
 
 ```text
-let metadata = getScriptMetadata("immutable-script-id")
+let metadata = getTeaseMetadata("immutable-tease-id")
 
-metadata.firstRunAt
-metadata.lastRunAt
-metadata.runCount
+metadata.firstSessionAt
+metadata.lastSessionAt
+metadata.sessionCount
+metadata.sessions
 ```
+
+`sessions` is a list with one object per session started with Start, oldest first. Continuing a session is not a new
+session. Each object has three fields: `startedAt` is the absolute moment of Start; `finishedAt` is the absolute moment
+of `exit`, or `null` when the session has not ended with `exit`; and `playedTime` is the scene time the Tease actually
+ran in that session, without the time the Playroom was closed, as timers measure it ([§27](#27-timers)). For an
+unfinished session, `playedTime` counts up to its latest saved checkpoint. `firstSessionAt` and `lastSessionAt` are the
+`startedAt` of the first and the last session, and `sessionCount` equals `sessions.length`.
 
 Access boundaries:
 
 - current player and current script: ordinary `load`;
-- current player and another script: `loadFromScript`;
-- other players and the same script: `getGlobal`;
+- current player and another script: `loadFromTease`;
+- other players and the same script: `loadFromPlayers`;
 - another player and another script: not allowed.
 
 ### Runtime, script, and account persistence
@@ -5896,7 +5904,7 @@ Current state and history are stored separately:
 - append-only history records completed or point-in-time facts;
 - aggregate statistics, including record values, are derived from normal history and are not freely overwritten by scripts.
 
-History is queried with `getPlayerHistory(...)`, which returns a filtered list of event objects. A query first filters, then orders, then applies `limit`. Thus `limit: 5` returns at most the five matching events selected by the requested order. Queries may filter by immutable script ID.
+History is queried with `getPlayerHistory(...)`, which returns a filtered list of event objects. A query first filters, then orders, then applies `limit`. Thus `limit: 5` returns at most the five matching events selected by the requested order. Queries may filter by immutable tease id.
 
 ```text
 let recent = getPlayerHistory(
@@ -6188,10 +6196,10 @@ drawText
 removeDrawing
 playerProfile
 askProfileChange
-publishGlobal
-getGlobal
-loadFromScript
-getScriptMetadata
+publishToPlayers
+loadFromPlayers
+loadFromTease
+getTeaseMetadata
 getPlayerHistory
 ```
 
@@ -6512,8 +6520,8 @@ Resolved in this revision:
 - `playerProfile` is the typed player profile reference, which a script changes only through `askProfileChange(...)`;
 - profile-change operations include `save`, `add`, `remove`, `removeAll`, `increase`, and `decrease`, while saving `[]` empties a list;
 - toys have server-generated IDs, may share visible names, can be disabled without script-driven deletion, and have common photos plus initial detailed schemas for butt plugs, dildos, chastity devices, and ball gags;
-- script-global data uses `publishGlobal` and `getGlobal`;
-- cross-script same-player saved data uses read-only `loadFromScript` plus `getScriptMetadata`;
+- script-global data uses `publishToPlayers` and `loadFromPlayers`;
+- cross-script same-player saved data uses read-only `loadFromTease` plus `getTeaseMetadata`;
 - account history uses `getPlayerHistory`; orgasm outcomes are `"orgasm"`, `"ruined"`, or `"denied"`;
 - session checkpoints include sequence-controlled changed state, execution position, deterministic RNG state, and active recoverable runtime state;
 - user identifiers are ASCII, case-sensitive, and follow `[A-Za-z_][A-Za-z0-9_]*`;

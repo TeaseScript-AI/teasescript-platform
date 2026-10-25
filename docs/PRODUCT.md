@@ -20,9 +20,36 @@ production hosting are later milestones.
 
 In product and language documentation:
 
-- **creator** or **script author** means the human writing an interactive story or package;
-- **player** means the human participating in the tease or scene;
-- **player application** or **player UI** means the browser software that renders and controls the session;
-- **engine** or **runtime** means the deterministic execution system inside the player application.
+- **creator** means the person writing a Tease. The script header field remains `author:`.
+- **player** means the person playing a Tease.
+- **Playroom** means the software that plays Teases: the player plays in the Playroom.
+- **engine** or **runtime** means the deterministic execution system inside the Playroom.
+- **Writer's Den**, or **the Den** after its first mention, means the editor where creators write Teases.
+- **Tease** means the published unit a creator ships: its scripts, media and libraries. Each Tease has an immutable
+  **tease id**.
+- **script** means one `.tease` file. The **main script**, `main.tease`, is where a Tease starts.
+- **session** means one play-through, from Start to `exit`, including pauses and Continue.
+- **speaker** means a speaking identity in a script, including the built-in `player`.
+- **personality** is not built or designed yet; see [Ideas for later](#ideas-for-later-persistent-personalities).
+- **tease catalog** means the website listing of published Teases. Use **image catalog** for the image collection.
+- **player profile**, or **profile** when clear, means the player's personal details, settings, limits and kink
+  ratings. Playroom settings are application preferences.
+- **saved data** means values a script stores with `save` for later sessions. A **checkpoint** is the technical engine
+  representation used to resume a session.
 
-Use the qualified software terms instead of calling both the human and the application only “player” when the distinction matters.
+The cross-player data API names are `publishToPlayers` and `loadFromPlayers`. A Tease reads another Tease's saved data
+for the same player with `loadFromTease`, and that Tease's run history with `getTeaseMetadata`.
+
+## Ideas for later: persistent personalities
+
+Not built and not designed. This is an owner idea of 2026-10-25, to be worked out later; it is not accepted design.
+
+- A **personality** is a speaker with planned events: a persistent character, such as a mistress or a master, who
+  continues across Teases instead of living inside one.
+- A player links a personality to their account, and Teases by different creators copy it, as the player speaker is
+  taken from the player profile. The Teases a player plays then feel like one character's continuing story.
+- A personality could give assignments, such as Teases to play, as a kind of to-do list.
+- A player profile is itself a kind of persistent personality: a group of settings kept with the account.
+- A personality could carry its own system prompt for LLM dialogue, describing how it behaves.
+- Image tags can select the photos for the active personality in every Tease. Personalities can then be swapped while
+  the story stays consistent, provided their images carry matching tags.
