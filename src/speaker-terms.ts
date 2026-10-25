@@ -100,7 +100,10 @@ export function displayNameParts(
  * The properties that a speaker whose own properties `own` gives reads its property `name` from: `name` itself, or the
  * ones {@link speakerPropertyValue} falls back to.
  */
-export function speakerPropertySources(own: (name: string) => unknown, name: string): string[] {
+export function speakerPropertySources<T>(
+  own: (name: string) => T | undefined,
+  name: string,
+): string[] {
   const has = (field: string) => own(field) !== undefined;
   if (has(name)) return [name];
   if (name === "title" && has("shortTitle")) return ["shortTitle"];
