@@ -3249,3 +3249,56 @@ test("a written operand its operation does not give decides nothing, whether its
   }
   assert.deepEqual(differing, []);
 });
+
+test("a projection of a written binding keeps its written type at the projected path, through the carriers that select it (A4, F12, Astra r2 B2)", () => {
+  // per expression over a written `integer[][]` (a fraction then the error) and `(integer | string)[][]` (text then
+  // fits): a direct projection, a carrier's selected receiver or default, a copy of the elements, a removal; a nested
+  // `.first` on a copy of the elements may still warn that it is empty (C6), never err
+  const expressions = [
+    "typed[0]",
+    "typed.first",
+    "[typed][0][0]",
+    "[typed].get(0, default: [])[0]",
+    "[typed].get(0, default: []).first",
+    "[].get(0, default: typed)[0]",
+    "[typed].take(1)[0][0]",
+    "[typed].take(1).first.first",
+    "[typed].removeAt(0)[0]",
+    "(typed otherwise [])[0]",
+  ];
+  const programs: (readonly [string, string, boolean])[] = [];
+  for (const expression of expressions) {
+    programs.push([
+      `${expression}, integer`,
+      `let typed: integer[][] = [[1]]\nlet xs = ${expression}\nxs = [2.5]\nexit`,
+      true,
+    ]);
+    programs.push([
+      `${expression}, union`,
+      `let typed: (integer | string)[][] = [[1]]\nlet xs = ${expression}\nxs = ["later"]\nexit`,
+      false,
+    ]);
+  }
+  programs.push([
+    "an element of a written list",
+    "let typed: integer[] = [1]\nlet n = typed[0]\nn = 2.5\nexit",
+    true,
+  ]);
+  const differing: string[] = [];
+  for (const [name, source, error] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const want = error ? [`compile-error@${source.lastIndexOf("2.5")}`] : [];
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const got = record.diagnostics
+        .filter((d) => d.class === "compile-error")
+        .map((d) => `${d.class}@${d.site.offset}`);
+      if (JSON.stringify(got) !== JSON.stringify(want))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join(" ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});

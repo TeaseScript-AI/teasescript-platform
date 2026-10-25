@@ -677,6 +677,16 @@ test("a projected written integer list stays strict on the candidate route (A4, 
   assert.equal(candidate(source).plan, null);
 });
 
+test("a projection of a written nested list stays strict on the candidate route (A4, F12, Astra r2 B2)", () => {
+  const source =
+    'let source: integer[][] = [[4]]\nlet result = source[0]\nresult = [3.5]\nsay "AFTER"\nexit\n';
+  assert.deepEqual(
+    inBothOrders(() => sited(candidate(source))),
+    [`error TSV041@${source.indexOf("3.5")}`],
+  );
+  assert.equal(candidate(source).plan, null);
+});
+
 /** Runs a plan to its end, observing each reading pause's deadline: the events and the final snapshot. */
 function finish(
   plan: InstructionPlan,

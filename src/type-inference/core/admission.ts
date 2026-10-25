@@ -1349,6 +1349,31 @@ export class Admission {
   }
 
   /**
+   * A4, F12: the written binding a value copies, directly or through its projections (`typed[0]`, `typed.first`), with
+   * the path into the written type it stands at: the projections' steps, then `strip`; `null` for any other value, and
+   * for a projection the written type has no path for (a dict's lists, a length).
+   */
+  #writtenSource(
+    value: PlaceId,
+    strip: readonly string[],
+  ): { readonly term: TypeTerm; readonly strip: readonly string[] } | null {
+    const { program, contract } = this.pass;
+    const binding = program.occurrenceOf.get(value);
+    if (binding !== undefined) {
+      const term = writtenOf(program.place(binding).kind);
+      return term === null ? null : { term, strip };
+    }
+    const key = program.projOf.has(value) ? contract.copiedKey(value) : null;
+    const term = key === null ? null : writtenOf(program.place(keyPlace(key)).kind);
+    if (key === null || term === null) return null;
+    const steps = keyPath(key);
+    const path = [...steps, ...strip];
+    return steps.some((step) => dictList(step) !== undefined) || termAt(term, path) === null
+      ? null
+      : { term, strip: path };
+  }
+
+  /**
    * A stored value's contributions by the path they stand at, in evaluation order: the copies of written bindings
    * (A4), the other values no literal of it holds (a read, a call, external data), and its literals, whose fields and
    * elements stand below them; once per value.
@@ -1392,8 +1417,8 @@ export class Admission {
     for (let order = 0; pending.length > 0; order += 1) {
       const [current, at, path, strip, deep, via, after] = pending.pop()!;
       program.work.charge("indexSteps");
-      const binding = program.occurrenceOf.get(current);
-      const term = binding === undefined ? null : writtenOf(program.place(binding).kind);
+      const written = this.#writtenSource(current, strip);
+      const term = written?.term ?? null;
       const literal = term === null && program.hasOf.has(current);
       // a literal read into stands by its cells on the path
       if (literal && strip.length > 0) {
@@ -1435,7 +1460,16 @@ export class Admission {
         if (sources.has(identity)) continue;
         sources.add(identity);
       }
-      const stop: Stop = { order, value: current, node: at, path, term, strip, deep, via };
+      const stop: Stop = {
+        order,
+        value: current,
+        node: at,
+        path,
+        term,
+        strip: written?.strip ?? strip,
+        deep,
+        via,
+      };
       const list = map.get(key);
       if (list === undefined) map.set(key, [stop]);
       else list.push(stop);
