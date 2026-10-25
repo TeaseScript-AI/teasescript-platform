@@ -21,17 +21,16 @@ import { isTextOnlyMethod, TEXT_METHODS } from "../src/text-operations.js";
 import { LIST_FUNCTION_CONTRACTS } from "../src/list-function-rules.js";
 import { LIST_METHODS, type ListMethod } from "../src/list-methods.js";
 import { MESSAGE_PRESENTATION_OPTIONS } from "../src/message-presentation.js";
+import { askOptionNames, requiredAskOptionNames } from "../src/parser/asks.js";
 import {
-  askOptionNames,
   EXPORT_TEXT_OPTIONS,
-  MEDIA_ARGUMENTS,
   OPEN_URL_OPTIONS,
   PERMANENT_BUTTON_OPTIONS,
-  requiredAskOptionNames,
   SHOW_BUTTON_OPTIONS,
   SHOW_POPUP_OPTIONS,
-  TIMER_ARGUMENTS,
-} from "../src/parser.js";
+} from "../src/parser/buttons-and-popups.js";
+import { MEDIA_ARGUMENTS } from "../src/parser/media.js";
+import { TIMER_ARGUMENTS } from "../src/parser/timers.js";
 import {
   classifyTokens,
   compileSource,
