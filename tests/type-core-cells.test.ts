@@ -20,42 +20,8 @@ function heldBack(record: FixtureRecord): string | null {
   // stage 3b (§13: N1–N10): narrowing definitions, N3's required checks for a possible null and for written unions, and
   // with them S0(c)'s class of expectations that rest on the null and written-union deviation, enter with S10
   if (record.cells.some((cell) => /^N\d/.test(cell))) return "stage 3b's cells (S10)";
-  return HELD_BY_NAME.get(record.name) ?? null;
+  return null;
 }
-
-/**
- * Records of the #1026 follow-up (TABLE r4.47, PR #1028: every member's declared result, the clock reads' declared
- * kinds, the emptiness markers of a dict's `values` and `keys`, the widened place's read and a literal projection's
- * target), held back by name until it merges, when this list empties; two of them test admission's cells too
- * (`year-present-wrong-store`, A6; `year-string-fallback`, C10) and need its temporal member transfers first.
- */
-const HELD_BY_NAME: ReadonlyMap<string, string> = new Map(
-  [
-    "clock/date-written",
-    "clock/time-written",
-    "clock/time-written-integer",
-    "clock/weekday-repeat",
-    "clock/weekday-written-string",
-    "clock/year-written-integer",
-    "emptiness/cleared-bound-inner",
-    "emptiness/get-outer",
-    "emptiness/iterate-inner-then-select",
-    "emptiness/key-contract-count",
-    "emptiness/keys-first",
-    "emptiness/named-values",
-    "emptiness/values-contract-route",
-    "emptiness/values-first",
-    "fit/literal-mixed-repeat",
-    "fit/widened-place-written",
-    "temporal/absolute-converted-local-field",
-    "temporal/calendar-exact-offset-repeat",
-    "temporal/weekday-repeat",
-    "temporal/year-partial-presence-store",
-    "temporal/year-present-wrong-store",
-    "temporal/year-string-fallback",
-    "temporal/year-written-string",
-  ].map((name) => [`cp9-cells/s4/followup/${name}`, "the #1026 follow-up's (PR #1028)"]),
-);
 
 const records = readFixture();
 const asserted = records.filter((record) => heldBack(record) === null);
@@ -840,20 +806,21 @@ test("a choice object's value is selected by its key, and a dict's values and ke
       'let o = {text: "A", value: 1}\no.value = 2.5\nlet n: integer = askChoice o\nexit',
       (at) => ["compile-error", `written-target compile-error @${at("askChoice")}`],
     ],
-    // and a record's `text` stored after it is made; a key without a store below it stays per record (Astra on #1027)
+    // and a record's `text` stored after it is made (a number widens the place); a key without a store below it stays
+    // per record (Astra on #1027), the options' texts of one kind (ADR 0021 1.4)
     [
       "a held record whose text is stored",
-      'let o = {text: 1}\no.text = "x"\nlet n: integer = askChoice o\nexit',
+      "let o = {text: 1}\no.text = 2.5\nlet n: integer = askChoice o\nexit",
       (at) => ["compile-error", `written-target compile-error @${at("askChoice")}`],
     ],
     [
       "held records beside a value stored elsewhere",
-      'let other = {value: 0}\nother.value = 1\nlet opts = [{text: "unused", value: 1}, {text: 2}]\nrepeat askChoice opts {}\nexit',
+      "let other = {value: 0}\nother.value = 1\nlet opts = [{text: 0, value: 1}, {text: 2}]\nrepeat askChoice opts {}\nexit",
       () => ["valid"],
     ],
     [
       "held records none of whose buttons fits, beside a value stored elsewhere",
-      'let other = {value: 0}\nother.value = 1\nlet opts = [{text: 1, value: "x"}, {text: "y"}]\nrepeat askChoice opts {}\nexit',
+      'let other = {value: 0}\nother.value = 1\nlet opts = [{text: "w", value: "x"}, {text: "y"}]\nrepeat askChoice opts {}\nexit',
       (at) => ["compile-error", `integer-use compile-error @${at("askChoice")}`],
     ],
     // a choice object held in a variable, whose value may be a missing member: possibly its text, never certainly
@@ -1273,8 +1240,8 @@ test("a selection consumes only its own emptiness mark below get, a loop's visit
  * as their outcome, diagnostics and checks with their sites: temporal fields and calendar parts by their declared
  * results (1), a selection's descendant emptiness (2), held choice options after a store below `value` or `text` (4),
  * clock reads by their declared kind with no boundary (5), and what fits a written place (6, §3.4, §10.5). Two records
- * are S6's and left out: `temporal/year-string-fallback` differs only by C10's error at the fallback and
- * `temporal/year-present-wrong-store` only by A6's error at the store, both admission's.
+ * are S6's and left out here: `temporal/year-string-fallback` differs only by C10's error at the fallback and
+ * `temporal/year-present-wrong-store` only by A6's error at the store, both admission's; the set's test asserts them.
  */
 test("the set's follow-up records give their records in both orders", () => {
   // per record its source, its outcome, diagnostics and checks, and the words it asserts (an unasserted word is null)
@@ -1680,9 +1647,10 @@ test("a choice over a list of options takes its literal analogue's word", () => 
         differing.push(
           `${name}${reversed ? " reversed" : ""}: ${record(choice, reversed).join("; ")}`,
         );
-    // options of both keys have no single analogue: the same word, by the same element step
+    // options of both keys have no single analogue: the same word, by the same element step (their texts of one
+    // family, ADR 0021 1.4)
     const mixed = record(
-      'let result: integer = askChoice [{text: "A", value: 2}, {text: 2.5}]\nexit',
+      "let result: integer = askChoice [{text: 1, value: 2}, {text: 2.5}]\nexit",
       reversed,
     );
     if (!mixed.includes("written-target warning-runtime-check member @22"))
@@ -1809,7 +1777,13 @@ test("a chain of methods without a category stays opaque", () => {
     [
       "a receiver of a known kind or an opaque answer",
       'let s = "a"\nlet t = s\nif askBoolean "f" { t = s.trimStart() }\nlet n: integer = t.trimEnd()\nexit',
-      ["copy-type n [integer] @79", "null-check t [non-null] @79", "warning-runtime-check"],
+      // (the opaque answer stored into `t`, decided a text by its start value, owes its check there: A5, C1)
+      [
+        "copy-type n [integer] @79",
+        "copy-type t [string] @46",
+        "null-check t [non-null] @79",
+        "warning-runtime-check",
+      ],
       ["written-target warning-runtime-check unmodelled @79"],
     ],
   ];
