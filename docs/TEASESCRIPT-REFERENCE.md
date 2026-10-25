@@ -1,9 +1,9 @@
 # TeaseScript syntax reference
 
-TeaseScript is the language of interactive teases. A project is a set of `.tease` files that the Player (the app)
-runs for the player (the person), starting at the top of `main.tease`. Statements run one at a time: `say` shows a
-chat message and waits for its reading time, an ask waits for the answer, `wait` pauses. Timers, media and buttons can
-run a block of code that briefly interrupts the script.
+TeaseScript is the language of interactive Teases. A Tease is a set of scripts (`.tease` files) that the Playroom
+runs for the player, starting at the top of its main script, `main.tease`. Statements run one at a time: `say` shows
+a chat message and waits for its reading time, an ask waits for the answer, `wait` pauses. Timers, media and buttons
+can run a block of code that briefly interrupts the script.
 
 This page summarizes all accepted syntax, one construct per entry, with an example and a link to the full rule. New
 to TeaseScript? Read [A first script](#a-first-script), then the topics you need.
@@ -28,7 +28,7 @@ accepted construct, updates the affected entries here in the same pull request.
 **Terms.** A *handle* controls something that keeps running: a message, an async timer or media, a permanent button.
 A *declared* type is written with `: T`; a *literal* is a value written in the source. *Narrowing*: inside
 `if x is integer` or `if x != null`, the compiler treats `x` as that type. *Scene time*, the clock of `wait` and timers,
-runs while the Player is open, also minimized, and skips the time it is closed. A timer, media or button block
+runs while the Playroom is open, also minimized, and skips the time it is closed. A timer, media or button block
 interrupts at a *safe point*:
 between steps, or while the script waits for a message, an ask, `wait`, a timer or media.
 
@@ -54,7 +54,7 @@ between steps, or while the script waits for a message, an ask, `wait`, a timer 
 
 ## A first script
 
-A project starts at `main.tease` and must reach `exit`. Try it in the
+A Tease starts at its main script, `main.tease`, and must reach `exit`. Try it in the
 [playground](../README.md#standalone-development-playground).
 
 ```tease
@@ -160,7 +160,7 @@ speed = speed * 1.5
 ### Scope
 
 A variable lives in its block and the blocks inside it. Top-level names belong to their file; globals, global
-functions and speakers to the whole project. A file's function sees that file's names, not its caller's variables.
+functions and speakers to the whole Tease. A file's function sees that file's names, not its caller's variables.
 
 - **Fails:** names out of scope; redeclaring a visible name.
 - **Status:** Implemented · [§14](specifications/accepted-syntaxes-v30.md#14-scope)
@@ -366,8 +366,8 @@ function record(count: integer) { global attempts = count, default: 0 }
 **Syntax:** `goto "folder/file.tease"` · `call "folder/file.tease"` · `"folder/*.tease"` · `script(path)` ·
 `goto (expression)`
 
-- **Takes:** a path from the project root; all files compile together. `*` matches within one folder. `script(path)`
-  is a value that can be stored and compared.
+- **Takes:** a path from the root of the Tease; all files compile together. `*` matches within one folder.
+  `script(path)` is a value that can be stored and compared.
 - **Gives:** `goto` continues at the top of the file; `call` returns after its `end`; a glob picks one file at random.
 - **Fails:** a missing target; `goto` to a file of declarations only; a label after the path; `call` of the running
   file.
@@ -464,8 +464,8 @@ say "No pause.", instant
 **Syntax:** `speaker name { field: value }` · `speaker name` · `say as name text` · `speaker.field`
 
 - **Takes:** one field per line (see [Speaker fields](#speaker-fields)); start values as for globals.
-- **Gives:** a project-wide speaker. `speaker name` alone sets the default speaker in every file until changed; with
-  no speaker, the narrator speaks. Inside a message's text, `speaker` is that message's speaker.
+- **Gives:** a speaker for the whole Tease. `speaker name` alone sets the default speaker in every file until changed;
+  with no speaker, the narrator speaks. Inside a message's text, `speaker` is that message's speaker.
 - **Fails:** reading `speaker` in a message without one.
 - **Status:** Implemented · [§37](specifications/accepted-syntaxes-v30.md#speaker-declaration-and-say-as)
 
@@ -502,7 +502,7 @@ mistress.punishmentPoints += 1
 speaker fields `presentation`, `bubble`, `prose`
 
 - **Takes:** `position` and `align` (`"left"`, `"center"`, `"right"`) for prose only; `null` inherits.
-- **Gives:** each option comes from the message, else the speaker's field, else the Player's default.
+- **Gives:** each option comes from the message, else the speaker's field, else the Playroom's default.
 - **Status:** Implemented ·
   [presentation](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides)
 
@@ -1250,7 +1250,7 @@ startAt: D, endAt: D, volume: v) { }`, the same for `playVideo`
 - **Gives:** waits for the end; with `async`, gives a [media handle](#media-handles-stopaudio) once the file has
   loaded, while playback continues. A file that fails to load warns and the script goes on.
 - **Fails:** invalid ranges or volume (0–1); endless repeat without `async`.
-- **Status:** Partly built: video does not play in the Player yet ·
+- **Status:** Partly built: video does not play in the Playroom yet ·
   [audio and video](specifications/accepted-syntaxes-v30.md#audio-and-video)
 
 ```tease
@@ -1297,7 +1297,7 @@ let music = playAudio async "music.mp3" {
 **Syntax:** `showCamera` · `showCamera stage` · `view.placement = "window"` · `hideCamera` · `takePhoto()` ·
 `takePhoto(tags: list)`
 
-- **Gives:** a live camera view; `takePhoto` captures without asking, from the camera the Player opened at the start,
+- **Gives:** a live camera view; `takePhoto` captures without asking, from the camera the Playroom opened at the start,
   and gives a stored image reference, or `null` without a camera.
 - **Status:** Implemented · [camera view](specifications/accepted-syntaxes-v30.md#camera-view),
   [takePhoto](specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references)
@@ -1325,7 +1325,7 @@ hideCamera
 
 - **Takes:** a text key; plain data: text, numbers, booleans, collections, objects, ranges, durations, angles, dates,
   scripts, regexes, file references.
-- **Gives:** a copy kept for this player and tease; `save null` or `delete` removes it.
+- **Gives:** a copy kept for this player and Tease; `save null` or `delete` removes it.
 - **Fails:** speakers and handles. A failed write keeps the old data and warns.
 - **Status:** Implemented · [§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys)
 
@@ -1399,7 +1399,7 @@ say decryptText(locked, password: "corner", default: "")
 let file = fileFromBase64("SGVsbG8=", default: null)
 ```
 
-### Data across players and teases (not built)
+### Data across players and Teases (not built)
 
 `publishToPlayers` · `loadFromPlayers` · `loadFromTease` · `getTeaseMetadata` (with `sessions`) · `askProfileChange` ·
 `getPlayerHistory` · `playerProfile.settings`, `.toys`, `.hardcore`
