@@ -515,6 +515,7 @@ export function resolveDescriptor(
   return value;
 }
 
+/** `TSR003` for a property assignment on a value, which `plan` gives, that has no properties to assign. */
 function noAssignableProperties(
   evaluator: Evaluator,
   plan: ExpressionPlan,

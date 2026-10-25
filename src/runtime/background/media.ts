@@ -640,10 +640,6 @@ function progressBefore(media: RuntimeMediaSnapshot, atMs: number): number {
 }
 
 /**
- * Starts a new segment at scene time `atMs` from the position playback reached by then. The caller has committed the
- * events due by then.
- */
-/**
  * Where playback stands at segment progress `progressMs`, at most the next uncommitted arrival: exactly on that arrival
  * once reached, otherwise the committed position advanced by the progress since.
  */
@@ -662,6 +658,7 @@ function positionAtProgressMs(
   };
 }
 
+/** Starts a new segment at scene time `atMs` from the position playback reached by then. */
 function startSegment(media: RuntimeMediaSnapshot, atMs: number): void {
   const progress = progressBefore(media, atMs);
   if (progress > media.committedProgressMs) {

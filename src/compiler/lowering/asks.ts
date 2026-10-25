@@ -21,7 +21,7 @@ import {
   lowerInteractionPayloadsTask,
   materializeDedicatedInteractionValue,
 } from "./interactions.js";
-import { unwrapParentheses, copySpan } from "./expression-plans.js";
+import { unwrapParentheses, planSpan } from "./expression-plans.js";
 
 // Asks: a question with its answer field, buttons, or form, whose UI is embedded when every part of it is known.
 
@@ -60,11 +60,11 @@ export function* lowerInteractionTask(
         value: {
           kind: "literal",
           value: staticQuestion,
-          span: copySpan(expression.question!.span),
+          span: planSpan(expression.question!.span),
         },
         skipPolicy: null,
         pacing: "instant",
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       });
     }
     return emitResultInteraction(
@@ -75,7 +75,7 @@ export function* lowerInteractionTask(
         speaker: expression.speaker?.name ?? null,
         expectedResult,
         ui,
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       },
       expression.span,
     );
@@ -146,10 +146,10 @@ export function* lowerInteractionTask(
       value: {
         kind: "list",
         elements: loweredValues.slice(0, values.length).map((item) => item.plan),
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       },
       expectBoolean: false,
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     });
     preparedTemporaryIds.push(optionsTemporary);
     let prefillTemporary: number | undefined;
@@ -160,7 +160,7 @@ export function* lowerInteractionTask(
         temporaryId: prefillTemporary,
         value: loweredValues[values.length]!.plan,
         expectBoolean: false,
-        span: copySpan(expression.prefill.span),
+        span: planSpan(expression.prefill.span),
       });
       preparedTemporaryIds.push(prefillTemporary);
     }
@@ -228,7 +228,7 @@ export function* lowerAskQuestionTask(
       value: lowered.plan,
       destinationTemporary: textTemporary,
       field: true,
-      span: copySpan(expression.question.span),
+      span: planSpan(expression.question.span),
     });
     compiler.emitTemporaryCleanup(lowered.temporaryIds, expression.question.span);
     question = {
@@ -240,7 +240,7 @@ export function* lowerAskQuestionTask(
       textTemporary,
       skipPolicy: null,
       pacing: "instant",
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     };
     questionTemporaryIds = [
       sayTemporaries.speakerTemporary,
@@ -311,7 +311,7 @@ function* lowerAskBooleanTask(
   compiler: InstructionCompiler,
   expression: InteractionExpression,
 ): CompileTask<LoweredExpression> {
-  const span = copySpan(expression.span);
+  const span = planSpan(expression.span);
   const { speakerTemporary, requestTemporary } = yield* compileChild(
     prepareAskRequestTask(compiler, expression),
   );
@@ -425,12 +425,12 @@ function* prepareAskRequestTask(
             ? "defaults"
             : argument.name,
         value: values[index]!.plan,
-        span: copySpan(argument.value.span),
+        span: planSpan(argument.value.span),
       })),
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     },
     expectBoolean: false,
-    span: copySpan(expression.span),
+    span: planSpan(expression.span),
   });
   compiler.emitTemporaryCleanup(
     values.flatMap((value) => value.temporaryIds),
@@ -439,9 +439,9 @@ function* prepareAskRequestTask(
   if (sayTemporaries !== null) {
     const question: ExpressionPlan = {
       kind: "property",
-      object: { kind: "temporary", temporaryId: requestTemporary, span: copySpan(expression.span) },
+      object: { kind: "temporary", temporaryId: requestTemporary, span: planSpan(expression.span) },
       name: "message",
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     };
     const textTemporary = compiler.allocateTemporary();
     compiler.instructions.push({
@@ -449,7 +449,7 @@ function* prepareAskRequestTask(
       value: question,
       destinationTemporary: textTemporary,
       field: true,
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     });
     compiler.instructions.push({
       kind: "say",
@@ -460,7 +460,7 @@ function* prepareAskRequestTask(
       textTemporary,
       skipPolicy: null,
       pacing: "instant",
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     });
     compiler.emitTemporaryCleanup(
       [
@@ -513,12 +513,12 @@ export function* lowerAskImageTask(
       properties: expression.arguments.map((argument, index) => ({
         name: argument.kind === "namedArgument" ? argument.name.name : "message",
         value: values[index]!.plan,
-        span: copySpan(argument.span),
+        span: planSpan(argument.span),
       })),
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     },
     expectBoolean: false,
-    span: copySpan(expression.span),
+    span: planSpan(expression.span),
   });
   compiler.emitTemporaryCleanup(
     values.flatMap((value) => value.temporaryIds),
@@ -527,9 +527,9 @@ export function* lowerAskImageTask(
   if (sayTemporaries !== null) {
     const question: ExpressionPlan = {
       kind: "property",
-      object: { kind: "temporary", temporaryId: requestTemporary, span: copySpan(expression.span) },
+      object: { kind: "temporary", temporaryId: requestTemporary, span: planSpan(expression.span) },
       name: "message",
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     };
     const textTemporary = compiler.allocateTemporary();
     compiler.instructions.push({
@@ -537,7 +537,7 @@ export function* lowerAskImageTask(
       value: question,
       destinationTemporary: textTemporary,
       field: true,
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     });
     compiler.instructions.push({
       kind: "say",
@@ -548,7 +548,7 @@ export function* lowerAskImageTask(
       textTemporary,
       skipPolicy: null,
       pacing: "instant",
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     });
     compiler.emitTemporaryCleanup(
       [
@@ -590,14 +590,14 @@ function prepareQuestionSpeaker(
     kind: "prepareSaySpeaker",
     speaker,
     destinationTemporary: speakerTemporary,
-    span: copySpan(span),
+    span: planSpan(span),
   });
   const contextualSpeakerTemporary = compiler.allocateTemporary();
   compiler.instructions.push({
     kind: "prepareSayContextualSpeaker",
     speakerTemporary,
     destinationTemporary: contextualSpeakerTemporary,
-    span: copySpan(span),
+    span: planSpan(span),
   });
   return { speakerTemporary, contextualSpeakerTemporary };
 }

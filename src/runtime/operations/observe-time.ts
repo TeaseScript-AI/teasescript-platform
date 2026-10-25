@@ -54,11 +54,6 @@ export interface MediaProgressReport {
   readonly progressMs: number;
 }
 
-/**
- * Observes scene time and, optionally, the playback progress of running media at that time. A running media without a
- * report in an observation has made no known progress since its last sample. Reports for unknown, settled, or
- * unloaded media, another segment, an earlier or equal time, or decreasing progress are ignored.
- */
 /** The options of an operation whose catch-up may draw a repeating timer's next round. */
 export interface CatchUpOptions {
   readonly debugTrace?: RuntimeDebugContext;
@@ -66,6 +61,11 @@ export interface CatchUpOptions {
   readonly randomControl?: RandomControlOptions;
 }
 
+/**
+ * Observes scene time and, optionally, the playback progress of running media at that time. A running media without a
+ * report in an observation has made no known progress since its last sample. Reports for unknown, settled, or
+ * unloaded media, another segment, an earlier or equal time, or decreasing progress are ignored.
+ */
 export function observeTime(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,

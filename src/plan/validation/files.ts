@@ -24,10 +24,6 @@ const FILE_FIELDS = [
 
 const LABEL_FIELDS = ["name", "instruction"];
 
-/**
- * Checks the file table: `main.tease` first, the other package paths in order, and blocks that cover the instruction
- * stream one after another. Returns the boundaries for the stream analyses, or `null` when they are unusable.
- */
 /** Label names are unique in their file and stand in source order inside its root region. */
 function validatePlanLabels(
   value: unknown,
@@ -81,6 +77,10 @@ function validatePlanLabels(
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 
+/**
+ * Checks the file table: `main.tease` first, the other package paths in order, and blocks that cover the instruction
+ * stream one after another. Returns the boundaries for the stream analyses, or `null` when they are unusable.
+ */
 export function validatePlanFiles(
   value: unknown,
   instructions: readonly unknown[],

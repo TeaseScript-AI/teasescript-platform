@@ -3,14 +3,10 @@ import type { SayInstruction } from "../../plan/model.js";
 import { compileChild, type CompileTask } from "../continuation.js";
 import type { InstructionCompiler, LoweredExpression } from "./compiler.js";
 import { lowerInteractionPayloadTask } from "./interactions.js";
-import { copySpan } from "./expression-plans.js";
+import { planSpan } from "./expression-plans.js";
 
 // Say: a message, with its speaker, presentation, text, and pacing prepared first when an operand runs instructions.
 
-/**
- * Lowers a blocking timer to a foreground `wait` delay and an async timer to `startTimer`. The instruction evaluates
- * duration, display, then label; operands written in another order are materialized first in source order.
- */
 /**
  * A `say`: plain when no operand emits instructions, otherwise with its speaker, context, and, before a pacing that
  * emits instructions, its text prepared. Used as a value, it gets a temporary for the handle of its message, which
@@ -31,7 +27,7 @@ export function* lowerSayTask(
     destinationTemporary === undefined
       ? null
       : {
-          plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(say.span) },
+          plan: { kind: "temporary", temporaryId: destinationTemporary, span: planSpan(say.span) },
           temporaryIds: [destinationTemporary],
         };
   if (!textCanSuspend && !pacingCanSuspend) {
@@ -49,7 +45,7 @@ export function* lowerSayTask(
       skipPolicy: say.skipPolicy,
       pacing: pacingOf(loweredPacing),
       ...(destinationTemporary === undefined ? {} : { destinationTemporary }),
-      span: copySpan(say.span),
+      span: planSpan(say.span),
     });
     compiler.emitTemporaryCleanup(
       [...lowered.temporaryIds, ...(loweredPacing?.temporaryIds ?? [])],
@@ -62,14 +58,14 @@ export function* lowerSayTask(
     kind: "prepareSaySpeaker",
     speaker: say.speaker?.name ?? null,
     destinationTemporary: speakerTemporary,
-    span: copySpan(say.span),
+    span: planSpan(say.span),
   });
   const contextualSpeakerTemporary = compiler.allocateTemporary();
   compiler.instructions.push({
     kind: "prepareSayContextualSpeaker",
     speakerTemporary,
     destinationTemporary: contextualSpeakerTemporary,
-    span: copySpan(say.span),
+    span: planSpan(say.span),
   });
   const loweredPresentation =
     say.presentation === null
@@ -101,7 +97,7 @@ export function* lowerSayTask(
       skipPolicy: say.skipPolicy,
       pacing: pacingOf(loweredPacing),
       ...(destinationTemporary === undefined ? {} : { destinationTemporary }),
-      span: copySpan(say.span),
+      span: planSpan(say.span),
     });
     compiler.emitTemporaryCleanup(
       [
@@ -120,7 +116,7 @@ export function* lowerSayTask(
     kind: "prepareSayText",
     value: lowered.plan,
     destinationTemporary: textTemporary,
-    span: copySpan(say.value.span),
+    span: planSpan(say.value.span),
   });
   compiler.emitTemporaryCleanup(lowered.temporaryIds, say.value.span);
   const loweredPacing = compiler.materializeExpression(
@@ -141,7 +137,7 @@ export function* lowerSayTask(
     skipPolicy: say.skipPolicy,
     pacing: loweredPacing.plan,
     ...(destinationTemporary === undefined ? {} : { destinationTemporary }),
-    span: copySpan(say.span),
+    span: planSpan(say.span),
   });
   compiler.emitTemporaryCleanup(
     [

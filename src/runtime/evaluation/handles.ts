@@ -465,7 +465,6 @@ function mediaWarning(evaluator: Evaluator, warning: MediaWarning | null, span: 
   if (warning !== null) evaluator.warn(warning.code, warning.message, span);
 }
 
-/** `TSR003` for a property assignment on a value, which `plan` gives, that has no properties to assign. */
 /** The property `name` of a handle of `kind` that a read finds (see `HANDLE_MEMBERS`), or `TSR017`. */
 export function readHandleProperty<Kind extends HandleKind>(
   kind: Kind,

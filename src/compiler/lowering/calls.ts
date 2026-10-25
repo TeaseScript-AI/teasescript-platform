@@ -8,7 +8,7 @@ import type {
 import { boundParameterName } from "../../function-arguments.js";
 import { compileChild, type CompileTask } from "../continuation.js";
 import type { InstructionCompiler, LoweredExpression, ControlOrigin } from "./compiler.js";
-import { unwrapParentheses, withTypeCheck, copySpan } from "./expression-plans.js";
+import { unwrapParentheses, withTypeCheck, planSpan } from "./expression-plans.js";
 
 // Calls, the script's own functions included, and `load`, with a `default:` that runs only when it is used.
 
@@ -41,7 +41,7 @@ export function* lowerUserFunctionCallTask(
     planned.push({
       parameterName,
       value: lowered.plan,
-      span: copySpan(argument.span),
+      span: planSpan(argument.span),
       ...withTypeCheck(compiler.typeChecks.get(argument)),
     });
   });
@@ -54,17 +54,17 @@ export function* lowerUserFunctionCallTask(
     arguments: planned,
     destinationTemporary,
     returnInstruction: callIndex + 1,
-    span: copySpan(expression.span),
+    span: planSpan(expression.span),
   });
   if (temporaryIds.length > 0) {
     compiler.instructions.push({
       kind: "clearTemporaries",
       temporaryIds: [...new Set(temporaryIds)],
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     });
   }
   return {
-    plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(expression.span) },
+    plan: { kind: "temporary", temporaryId: destinationTemporary, span: planSpan(expression.span) },
     temporaryIds: [destinationTemporary],
   };
 }
@@ -90,7 +90,7 @@ export function* lowerCallTask(
         kind: "validateCallReceiver",
         receiver: receiver.plan,
         method: method.property.name,
-        span: copySpan(method.span),
+        span: planSpan(method.span),
       });
     }
     callee = {
@@ -98,7 +98,7 @@ export function* lowerCallTask(
         kind: "property",
         object: receiver.plan,
         name: method.property.name,
-        span: copySpan(method.span),
+        span: planSpan(method.span),
       },
       temporaryIds: receiver.temporaryIds,
     };
@@ -118,17 +118,17 @@ export function* lowerCallTask(
       callee: callee.plan,
       arguments: argumentsList.map(({ argument, lowered }) =>
         argument.kind === "positionalArgument"
-          ? { kind: "positional", value: lowered.plan, span: copySpan(argument.span) }
+          ? { kind: "positional", value: lowered.plan, span: planSpan(argument.span) }
           : {
               kind: "named",
               name: argument.name.name,
               value: lowered.plan,
-              span: copySpan(argument.span),
+              span: planSpan(argument.span),
             },
       ),
       // The check of a `get` default goes with the default.
       ...(omitted === null ? withTypeCheck(compiler.typeChecks.get(expression)) : {}),
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     },
     temporaryIds: [
       ...callee.temporaryIds,
@@ -153,7 +153,7 @@ export function* lowerLazyDefaultTask(
   const resultTemporary = compiler.allocateTemporary();
   const defaultTemporary = compiler.allocateTemporary();
   probe(resultTemporary, defaultTemporary);
-  const span = copySpan(origin.span);
+  const span = planSpan(origin.span);
   const conditional = compiler.instructions.length;
   const conditionalInstruction: JumpIfFalseInstruction = {
     kind: "jumpIfFalse",
@@ -170,7 +170,7 @@ export function* lowerLazyDefaultTask(
     value: lowered.plan,
     expectBoolean: false,
     ...accept,
-    span: copySpan(defaultValue.span),
+    span: planSpan(defaultValue.span),
   });
   compiler.instructions[conditional] = {
     ...conditionalInstruction,
@@ -204,7 +204,7 @@ export function* lowerLoadTask(
         key: key.plan,
         default: lowered?.plan ?? null,
         type,
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       },
       temporaryIds: [...key.temporaryIds, ...(lowered?.temporaryIds ?? [])],
     };
@@ -223,11 +223,11 @@ export function* lowerLoadTask(
             key: key.plan,
             default: null,
             type,
-            span: copySpan(expression.span),
+            span: planSpan(expression.span),
           },
           expectBoolean: false,
           defaultTemporary,
-          span: copySpan(expression.span),
+          span: planSpan(expression.span),
         });
       },
       defaultValue,

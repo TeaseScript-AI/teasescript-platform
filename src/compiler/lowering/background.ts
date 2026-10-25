@@ -10,10 +10,14 @@ import type { ExpressionPlan, DelayDisplay, MediaCuePlan } from "../../plan/mode
 import { compileChild, type CompileTask } from "../continuation.js";
 import { mediaHandlerBlocks, mediaOperands, timerOperands } from "../../expression-children.js";
 import type { InstructionCompiler, LoweredExpression } from "./compiler.js";
-import { copySpan } from "./expression-plans.js";
+import { planSpan } from "./expression-plans.js";
 
 // Background actions: timers, media, and permanent buttons, and the variables their blocks share.
 
+/**
+ * Lowers a blocking timer to a foreground `wait` delay and an async timer to `startTimer`. The instruction evaluates
+ * duration, display, then label; operands written in another order are materialized first in source order.
+ */
 export function* lowerTimerTask(
   compiler: InstructionCompiler,
   timer: TimerParts,
@@ -48,7 +52,7 @@ export function* lowerTimerTask(
       unit: timer.unit,
       display,
       label: timer.label === null ? null : plan(timer.label),
-      span: copySpan(timer.span),
+      span: planSpan(timer.span),
     });
     compiler.emitTemporaryCleanup(temporaryIds, timer.span);
     return null;
@@ -66,13 +70,13 @@ export function* lowerTimerTask(
       timer.handler === null ? null : compiler.registerHandler(timer.handler, "timer", null),
     captures: capturesOf(compiler, timer.handler === null ? [] : [timer.handler]),
     destinationTemporary,
-    span: copySpan(timer.span),
+    span: planSpan(timer.span),
   });
   compiler.emitTemporaryCleanup(temporaryIds, timer.span);
   return destinationTemporary === null
     ? null
     : {
-        plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(timer.span) },
+        plan: { kind: "temporary", temporaryId: destinationTemporary, span: planSpan(timer.span) },
         temporaryIds: [destinationTemporary],
       };
 }
@@ -96,13 +100,13 @@ export function* lowerPermanentButtonTask(
     handlerFunctionId: compiler.registerHandler(button.handler, "button", null),
     captures: capturesOf(compiler, [button.handler]),
     destinationTemporary,
-    span: copySpan(span),
+    span: planSpan(span),
   });
   compiler.emitTemporaryCleanup(text.temporaryIds, span);
   return destinationTemporary === null
     ? null
     : {
-        plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(span) },
+        plan: { kind: "temporary", temporaryId: destinationTemporary, span: planSpan(span) },
         temporaryIds: [destinationTemporary],
       };
 }
@@ -151,7 +155,7 @@ export function* lowerMediaTask(
   if (media.handlers?.kind === "compact") {
     cuePlans.push({
       kind: "beforeEnd",
-      offset: { kind: "duration", milliseconds: 0, span: copySpan(media.handlers.body.span) },
+      offset: { kind: "duration", milliseconds: 0, span: planSpan(media.handlers.body.span) },
       functionId: register(media.handlers.body),
     });
   }
@@ -181,13 +185,13 @@ export function* lowerMediaTask(
     finishFunctionId,
     captures: capturesOf(compiler, mediaHandlerBlocks(media)),
     destinationTemporary,
-    span: copySpan(media.span),
+    span: planSpan(media.span),
   });
   compiler.emitTemporaryCleanup(temporaryIds, media.span);
   return destinationTemporary === null
     ? null
     : {
-        plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(media.span) },
+        plan: { kind: "temporary", temporaryId: destinationTemporary, span: planSpan(media.span) },
         temporaryIds: [destinationTemporary],
       };
 }

@@ -10,7 +10,7 @@ import type {
 } from "../../plan/model.js";
 import { compileChild, type CompileTask } from "../continuation.js";
 import type { InstructionCompiler, LoopStatement, LoweredExpression } from "./compiler.js";
-import { unwrapParentheses, copySpan, typeTestPlan } from "./expression-plans.js";
+import { unwrapParentheses, planSpan, typeTestPlan } from "./expression-plans.js";
 
 // Branches and loops: `if`, `switch`, loops, and a right side of `and`, `or`, or `otherwise` that runs instructions.
 
@@ -24,7 +24,7 @@ export function* compileIf(
     kind: "jumpIfFalse",
     condition: lowered.plan,
     target: -1,
-    span: copySpan(statement.condition.span),
+    span: planSpan(statement.condition.span),
   };
   compiler.instructions.push(conditionalInstruction);
   compiler.originate(conditional, { kind: "if", statement });
@@ -41,7 +41,7 @@ export function* compileIf(
   const jumpInstruction: JumpInstruction = {
     kind: "jump",
     target: -1,
-    span: copySpan(statement.span),
+    span: planSpan(statement.span),
   };
   compiler.instructions.push(jumpInstruction);
   const falseCleanup = compiler.instructions.length;
@@ -70,7 +70,7 @@ export function* compileSwitch(
     temporaryId: subjectTemporary,
     value: subject.plan,
     expectBoolean: false,
-    span: copySpan(statement.subject.span),
+    span: planSpan(statement.subject.span),
   });
   compiler.emitTemporaryCleanup(subject.temporaryIds, statement.subject.span);
   const jumpsToEnd: { readonly index: number; readonly instruction: JumpInstruction }[] = [];
@@ -83,13 +83,13 @@ export function* compileSwitch(
       kind: "jumpIfFalse",
       condition: caseCondition(compiler, switchCase, subjectTemporary, valuesSpan),
       target: -1,
-      span: copySpan(valuesSpan),
+      span: planSpan(valuesSpan),
     };
     compiler.instructions.push(conditionalInstruction);
     compiler.originate(conditional, { kind: "case", statement, index });
     compiler.emitTemporaryCleanup([subjectTemporary], valuesSpan);
     yield* compileChild(compileBlock(compiler, switchCase.body));
-    const jump: JumpInstruction = { kind: "jump", target: -1, span: copySpan(switchCase.span) };
+    const jump: JumpInstruction = { kind: "jump", target: -1, span: planSpan(switchCase.span) };
     jumpsToEnd.push({ index: compiler.instructions.length, instruction: jump });
     compiler.instructions.push(jump);
     compiler.instructions[conditional] = {
@@ -118,14 +118,14 @@ function caseCondition(
     return typeTestPlan(switchCase.typeTest, {
       kind: "temporary",
       temporaryId: subjectTemporary,
-      span: copySpan(valuesSpan),
+      span: planSpan(valuesSpan),
     });
   const tests = switchCase.values.map((expression): ExpressionPlan => {
     const value = unwrapParentheses(expression);
     const subject = (): ExpressionPlan => ({
       kind: "temporary",
       temporaryId: subjectTemporary,
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     });
     if (value.kind !== "rangeExpression") {
       return {
@@ -133,7 +133,7 @@ function caseCondition(
         operator: "==",
         left: subject(),
         right: compiler.lowerExpression(value).plan,
-        span: copySpan(expression.span),
+        span: planSpan(expression.span),
       };
     }
     return {
@@ -141,7 +141,7 @@ function caseCondition(
       operator: "in",
       left: subject(),
       right: compiler.lowerExpression(value).plan,
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     };
   });
   return tests.reduce((left, right): ExpressionPlan => ({
@@ -149,14 +149,14 @@ function caseCondition(
     operator: "or",
     left,
     right,
-    span: copySpan(valuesSpan),
+    span: planSpan(valuesSpan),
   }));
 }
 
 function* compileBlock(compiler: InstructionCompiler, block: Block): CompileTask<void> {
-  compiler.instructions.push({ kind: "enterScope", span: copySpan(block.span) });
+  compiler.instructions.push({ kind: "enterScope", span: planSpan(block.span) });
   yield* compileChild(compiler.compileStatementsTask(block.statements));
-  compiler.instructions.push({ kind: "leaveScope", span: copySpan(block.span) });
+  compiler.instructions.push({ kind: "leaveScope", span: planSpan(block.span) });
 }
 
 export function* compileLoop(
@@ -186,7 +186,7 @@ export function* compileLoop(
           expression: lowered.plan,
           continueTarget: loopContinueTarget,
           target: -1,
-          span: copySpan(span),
+          span: planSpan(span),
         }
       : {
           kind: "loopStart",
@@ -195,7 +195,7 @@ export function* compileLoop(
           expression: lowered.plan,
           continueTarget: loopContinueTarget,
           target: -1,
-          span: copySpan(span),
+          span: planSpan(span),
         };
   compiler.instructions.push(instruction);
   compiler.originate(start, { kind: "loop", statement });
@@ -209,7 +209,7 @@ export function* compileLoop(
     action: "continue",
     loopId,
     target: context.continueTarget,
-    span: copySpan(body.span),
+    span: planSpan(body.span),
   });
   compiler.loops.pop();
   const falseCleanup = compiler.instructions.length;
@@ -240,12 +240,12 @@ export function* lowerFallbackTask(
     temporaryId: resultTemporary,
     value: left.plan,
     expectBoolean: false,
-    span: copySpan(expression.left.span),
+    span: planSpan(expression.left.span),
   });
   const result: TemporaryExpressionPlan = {
     kind: "temporary",
     temporaryId: resultTemporary,
-    span: copySpan(expression.span),
+    span: planSpan(expression.span),
   };
   const conditional = compiler.instructions.length;
   const conditionalInstruction: JumpIfFalseInstruction = {
@@ -254,11 +254,11 @@ export function* lowerFallbackTask(
       kind: "binary",
       operator: "==",
       left: result,
-      right: { kind: "literal", value: null, span: copySpan(expression.span) },
-      span: copySpan(expression.span),
+      right: { kind: "literal", value: null, span: planSpan(expression.span) },
+      span: planSpan(expression.span),
     },
     target: -1,
-    span: copySpan(expression.span),
+    span: planSpan(expression.span),
   };
   compiler.instructions.push(conditionalInstruction);
   compiler.originate(conditional, { kind: "operand", expression });
@@ -268,7 +268,7 @@ export function* lowerFallbackTask(
     temporaryId: resultTemporary,
     value: right.plan,
     expectBoolean: false,
-    span: copySpan(expression.right.span),
+    span: planSpan(expression.right.span),
   });
   compiler.instructions[conditional] = {
     ...conditionalInstruction,
@@ -291,12 +291,12 @@ export function* lowerLogicalExpressionTask(
     temporaryId: resultTemporary,
     value: left.plan,
     expectBoolean: true,
-    span: copySpan(expression.left.span),
+    span: planSpan(expression.left.span),
   });
   const condition: TemporaryExpressionPlan = {
     kind: "temporary",
     temporaryId: resultTemporary,
-    span: copySpan(expression.left.span),
+    span: planSpan(expression.left.span),
   };
   if (expression.operator === "and") {
     const conditional = compiler.instructions.length;
@@ -304,7 +304,7 @@ export function* lowerLogicalExpressionTask(
       kind: "jumpIfFalse",
       condition,
       target: -1,
-      span: copySpan(expression.span),
+      span: planSpan(expression.span),
     };
     compiler.instructions.push(conditionalInstruction);
     compiler.originate(conditional, { kind: "operand", expression });
@@ -314,14 +314,14 @@ export function* lowerLogicalExpressionTask(
       temporaryId: resultTemporary,
       value: right.plan,
       expectBoolean: true,
-      span: copySpan(expression.right.span),
+      span: planSpan(expression.right.span),
     });
     compiler.instructions[conditional] = {
       ...conditionalInstruction,
       target: compiler.instructions.length,
     };
     return {
-      plan: { ...condition, span: copySpan(expression.span) },
+      plan: { ...condition, span: planSpan(expression.span) },
       temporaryIds: [...left.temporaryIds, ...right.temporaryIds, resultTemporary],
     };
   }
@@ -330,7 +330,7 @@ export function* lowerLogicalExpressionTask(
     kind: "jumpIfFalse",
     condition,
     target: -1,
-    span: copySpan(expression.span),
+    span: planSpan(expression.span),
   };
   compiler.instructions.push(conditionalInstruction);
   compiler.originate(conditional, { kind: "operand", expression });
@@ -338,7 +338,7 @@ export function* lowerLogicalExpressionTask(
   const skipRightInstruction: JumpInstruction = {
     kind: "jump",
     target: -1,
-    span: copySpan(expression.span),
+    span: planSpan(expression.span),
   };
   compiler.instructions.push(skipRightInstruction);
   compiler.instructions[conditional] = {
@@ -351,14 +351,14 @@ export function* lowerLogicalExpressionTask(
     temporaryId: resultTemporary,
     value: right.plan,
     expectBoolean: true,
-    span: copySpan(expression.right.span),
+    span: planSpan(expression.right.span),
   });
   compiler.instructions[skipRight] = {
     ...skipRightInstruction,
     target: compiler.instructions.length,
   };
   return {
-    plan: { ...condition, span: copySpan(expression.span) },
+    plan: { ...condition, span: planSpan(expression.span) },
     temporaryIds: [...left.temporaryIds, ...right.temporaryIds, resultTemporary],
   };
 }
