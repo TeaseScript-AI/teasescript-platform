@@ -74,21 +74,17 @@ import type { Diagnostic } from "./diagnostics.js";
 import type { ProjectImageFile } from "./image-catalog.js";
 import { lex } from "./lexer.js";
 import { MESSAGE_PRESENTATION_OPTIONS } from "./message-presentation.js";
+import { parse, type ParseResult, type StatementRange } from "./parser.js";
+import { askOptionNames, requiredAskOptionNames } from "./parser/asks.js";
 import {
-  askOptionNames,
   EXPORT_TEXT_OPTIONS,
-  MEDIA_ARGUMENTS,
   OPEN_URL_OPTIONS,
-  parse,
   PERMANENT_BUTTON_OPTIONS,
-  requiredAskOptionNames,
   SHOW_BUTTON_OPTIONS,
   SHOW_POPUP_OPTIONS,
-  TIMER_ARGUMENTS,
-  TIMER_DISPLAYS,
-  type ParseResult,
-  type StatementRange,
-} from "./parser.js";
+} from "./parser/buttons-and-popups.js";
+import { MEDIA_ARGUMENTS } from "./parser/media.js";
+import { TIMER_ARGUMENTS, TIMER_DISPLAYS } from "./parser/timers.js";
 import { compareProjectPaths } from "./project-paths.js";
 import {
   COMMANDS,

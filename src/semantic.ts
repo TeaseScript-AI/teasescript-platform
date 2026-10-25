@@ -1,7 +1,11 @@
 import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import { isAskImageCall, isLockCall, isTakePhotoCall } from "./capture-call.js";
 import { IMAGE_REQUEST_OPTIONS } from "./image-input.js";
-import { EXPORT_TEXT_OPTIONS, OPEN_URL_OPTIONS, SHOW_POPUP_OPTIONS } from "./parser.js";
+import {
+  EXPORT_TEXT_OPTIONS,
+  OPEN_URL_OPTIONS,
+  SHOW_POPUP_OPTIONS,
+} from "./parser/buttons-and-popups.js";
 import type {
   AssignmentTarget,
   Block,
