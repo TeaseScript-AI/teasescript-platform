@@ -1,7 +1,7 @@
 import { NULL_TYPE, UNKNOWN_TYPE, isScalarKind, type StaticType } from "../../static-types.js";
 import { VALUE_KINDS, type PlainKind, type ValueKind } from "../../value-kinds.js";
 import type { OperandView } from "../adapters/relation.js";
-import type { DynamicWhy, PlaceId, SourceSite } from "../graph.js";
+import type { DynamicWhy, PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { BudgetExhausted, checkNesting, type BudgetLimit, type WorkCounter } from "./budget.js";
 import { Consumers } from "./consumers.js";
 import {
@@ -58,9 +58,10 @@ import { Values } from "./values.js";
  * compile and publishes, after its last pass, the frozen surface the consumer, the extracted checks, storage and the
  * backend read: per source occurrence its items, route, place and obligations; per place its admitted type, contract,
  * ingresses and definitions; the projections and properties of a value; the bridge to the adapters' operand views;
- * and the whole program's diagnostics, checks, graph, budget counters and deferred bindings. Here admission is one
- * pass: decided types, the boundary checks of external data (C9) other than those of a store into a written place, and
- * narrowing (§13) join in their steps, and the fields they own say so.
+ * and the whole program's diagnostics, checks, graph, budget counters and deferred bindings. The analysis runs in
+ * admission's passes (A6): each pass is a fresh analysis with the stores the previous pass rejected left out, until the
+ * rejected set is stable; a set that repeats is a cycle, whose changing stores stay possibilities. Narrowing (§13) joins
+ * in its step, and the field it owns says so.
  */
 
 /** The parts of one pass of the analysis: each reads the others through it. */
@@ -76,8 +77,8 @@ export interface CorePass {
   readonly solver: Solver;
 }
 
-function createPass(program: CoreProgram): CorePass {
-  program.index();
+/** One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6). */
+function createPass(program: CoreProgram, rejected: ReadonlySet<number> = new Set()): CorePass {
   const definitions = new DefinitionIndex(program);
   const parts: {
     program: CoreProgram;
@@ -89,8 +90,8 @@ function createPass(program: CoreProgram): CorePass {
   } = {
     program,
     definitions,
-    // admission's rejections take effect in a later pass (A6); one pass rejects nothing
-    lists: new DefinitionLists(definitions, () => true),
+    // admission's rejections take effect in the next pass (A6)
+    lists: new DefinitionLists(definitions, (d) => !rejected.has(d.uid)),
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
     solver: new Solver(program.scope),
@@ -127,9 +128,13 @@ export interface OccurrenceAnswer {
   readonly narrowing: null;
 }
 
-/** A place's admitted type (A1–A9): its written type here; decided types are admission's (S6). */
+/**
+ * A place's admitted type (A1–A9): its written type; else the kinds admission decided it by, `null` among them where a
+ * `null` contribution is admitted (C9 r4.12); `undecided` where nothing decides (an unknown, or no store).
+ */
 export type AdmittedType =
-  { readonly by: "written"; readonly kinds: readonly ItemTag[] } | { readonly by: "undecided" };
+  | { readonly by: "written" | "decided"; readonly kinds: readonly ItemTag[] }
+  | { readonly by: "undecided" };
 
 export interface PlaceAnswer {
   readonly admitted: AdmittedType;
@@ -218,9 +223,38 @@ export function analyseCore(request: CoreAnalysisRequest): Answers {
   try {
     // the nesting limit stops the analysis before any of it (TABLE §8; S3 §5's third stop)
     checkNesting(program.nesting);
-    const pass = createPass(program);
-    analysed = { pass, consumers: new Consumers(pass) };
-    analysed.consumers.check();
+    program.index();
+    // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
+    // whose changing stores stay possibilities
+    let rejected: ReadonlySet<number> = new Set();
+    let cycling: ReadonlySet<number> = new Set();
+    const sets: ReadonlySet<number>[] = [rejected];
+    for (let last = false; ;) {
+      const pass = createPass(program, rejected);
+      const consumers = new Consumers(pass, rejected, cycling);
+      analysed = null;
+      consumers.check();
+      analysed = { pass, consumers };
+      const now = consumers.admission.newlyRejected;
+      if (last || sameSet(now, rejected)) break;
+      program.work.charge("rejectPasses");
+      const repeated = sets.findIndex((set) => sameSet(set, now));
+      if (repeated >= 0) {
+        const cycle = sets.slice(repeated);
+        const every = new Set<number>();
+        const some = new Set<number>();
+        for (const set of cycle)
+          for (const uid of set)
+            if (cycle.every((other) => other.has(uid))) every.add(uid);
+            else some.add(uid);
+        rejected = every;
+        cycling = some;
+        last = true;
+        continue;
+      }
+      rejected = new Set(now);
+      sets.push(rejected);
+    }
   } catch (error) {
     if (!(error instanceof BudgetExhausted)) throw error;
     exhausted = error.limit;
@@ -248,7 +282,9 @@ export function solveDemands(
   request: CoreAnalysisRequest,
   keys: readonly string[],
 ): (readonly Item[])[] {
-  const pass = createPass(new CoreProgram(request));
+  const program = new CoreProgram(request);
+  program.index();
+  const pass = createPass(program);
   return keys.map((key) => {
     pass.solver.run(demandWork(pass, key));
     // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store)
@@ -311,6 +347,10 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
     default:
       throw new Error(`No demand is written '${key}'.`);
   }
+}
+
+function sameSet(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
+  return a.size === b.size && [...a].every((uid) => b.has(uid));
 }
 
 function definitionByUid(pass: CorePass, uid: number): Definition {
@@ -451,7 +491,10 @@ class CoreAnswers implements Answers {
         if (list === undefined) this.#obligations.set(at, [diagnostic.obligation]);
         else list.push(diagnostic.obligation);
       }
-    if (exhausted === null) for (const list of consumers.boundaries.values()) checks.push(...list);
+    if (exhausted === null) {
+      for (const list of consumers.admission.boundaries.values()) checks.push(...list);
+      checks.push(...consumers.admission.readChecks);
+    }
     this.checks = checks;
     const deferredParameters: PlaceId[] = [];
     const deferredResults: PlaceId[] = [];
@@ -544,12 +587,15 @@ class CoreAnswers implements Answers {
     };
   }
 
-  /** The store a statement makes, by its node: its first live store definition there. */
+  /** The store a statement makes, by its node: its first live store definition there, else its first rejected one (A6). */
   #storeAt(node: FlowNode): Definition | null {
     if (this.#stores === null) {
       this.#stores = new Map();
-      for (const d of this.#pass.definitions.storeDefs)
-        if (!this.#stores.has(d.node) && this.#pass.lists.live(d)) this.#stores.set(d.node, d);
+      const { definitions, lists } = this.#pass;
+      for (const d of definitions.storeDefs)
+        if (!this.#stores.has(d.node) && lists.live(d)) this.#stores.set(d.node, d);
+      for (const d of definitions.storeDefs)
+        if (!this.#stores.has(d.node)) this.#stores.set(d.node, d);
     }
     return this.#stores.get(node) ?? null;
   }
@@ -564,13 +610,13 @@ class CoreAnswers implements Answers {
       ? this.#run(contract.contractOf(keyOf(id, [...path, "element"])))
       : [];
     return {
-      admitted: term === null ? { by: "undecided" } : { by: "written", kinds: typeTags(term) },
+      admitted: this.#admitted(id, path, term),
       contract: {
         kinds: withoutEmpty(kinds),
         elements: withoutEmpty(elements),
         emptiness: elements.some((item) => item.tag === "empty") ? "open" : "held",
       },
-      ingresses: this.#consumers.boundaries.get(keyOf(id, path)) ?? [],
+      ingresses: this.#consumers.admission.boundaries.get(keyOf(id, path)) ?? [],
       // the exact service's list, not the raw stores (Astra B8)
       definitions: {
         list: lists.definitionsOf(key).list,
@@ -579,6 +625,13 @@ class CoreAnswers implements Answers {
         events: lists.ownEvents(key),
       },
     };
+  }
+
+  #admitted(id: PlaceId, path: readonly string[], term: TypeTerm | null): AdmittedType {
+    if (term !== null) return { by: "written", kinds: typeTags(term) };
+    const admission = this.#consumers.admission;
+    if (!admission.decided.has(keyOf(id, path))) return { by: "undecided" };
+    return { by: "decided", kinds: admission.admitted(id, path) };
   }
 
   public project(
