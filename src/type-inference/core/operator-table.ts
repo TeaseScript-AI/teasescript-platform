@@ -19,7 +19,8 @@ import {
  * The runtime's operator table (checkpoint 9, F16 and C4): for each operator, the operand kinds the runtime accepts and
  * the kind of the result. The runtime is the authority: `tests/type-core-operator-table.test.ts` evaluates every
  * operator on every pair of value kinds and fails where a row exists that the runtime rejects or a row is missing that
- * it accepts. For the core this table replaces the legacy checker's `arithmeticType` (`src/static-types.ts`).
+ * it accepts. For the core this table replaces the legacy checker's `arithmeticType`
+ * (`src/static-types/arithmetic.ts`).
  */
 
 export type Operator = "+" | "-" | "*" | "/" | "%" | "neg" | "<" | "<=" | ">" | ">=";

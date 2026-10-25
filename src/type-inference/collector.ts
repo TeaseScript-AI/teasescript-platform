@@ -1637,7 +1637,7 @@ function interactionEvidence(
 
 /**
  * The term a written annotation names. A compile task, as the production conversion is (`annotationTask` in
- * `static-types.ts`): an annotation nests as deep as it is written.
+ * `static-types/annotations.ts`): an annotation nests as deep as it is written.
  */
 function typeTerm(annotation: TypeAnnotation): TypeTerm {
   return runCompileTask(typeTermTask(annotation));

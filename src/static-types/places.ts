@@ -32,7 +32,7 @@ export function nextDecision(): number {
 
 /**
  * Records what a stored value decides: undecided open slots in `target` take the value's type, and an object place
- * adds the value's new properties. Call it only after {@link isAssignable} accepted the value.
+ * adds the value's new properties. Call it only after `isAssignable` (`static-types.ts`) accepted the value.
  */
 export function settle(target: StaticType, source: StaticType, at: SourceSpan): void {
   flowInto(target, source);
@@ -259,7 +259,7 @@ export function observe(type: StaticType): void {
   }
 }
 
-/** A slot in a place's type, decided or not, with its path there (see {@link widenPath}). */
+/** A slot in a place's type, decided or not, with its path there (see `widenPath` in `widening.ts`). */
 export interface PlacedSlot {
   readonly slot: OpenType;
   readonly path: readonly string[];
