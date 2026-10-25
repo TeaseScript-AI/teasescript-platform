@@ -805,6 +805,16 @@ test("a choice object's value is selected by its key, and a dict's values and ke
       'function make(n) {\n  if n > 0 { return {text: "unused", value: n} }\n  return {text: 2}\n}\nrepeat askChoice make(1) {}\nexit',
       () => ["valid"],
     ],
+    // §3.2: under a test of the record's `value` the button value is marked, as the read of the `value` is
+    [
+      "a held record under a test of its value",
+      'let o = {text: "A", value: 1.5}\nif o.value is integer { let n: integer = askChoice o }\nexit',
+      (at) => [
+        "warning-runtime-check",
+        `written-target warning-runtime-check @${at("askChoice")}`,
+        `copy-type n [integer] @${at("askChoice")}`,
+      ],
+    ],
     // a record's `value` stored after it is made is read by its key
     [
       "a held record whose value is stored",
@@ -1061,4 +1071,93 @@ test("a choice's written list element reads below the list's element step, as it
       ["warning-runtime-check", `written-target member @${head.length}`],
     );
   }
+});
+
+/**
+ * §3.2 (review round 5 on #1027): a held choice object's button value keeps the mark of a test of the key it selects,
+ * through copies, a list's element, a parameter and a path below it, as the keyed read does; a test of the other key
+ * marks neither. Per program its record in both orders against the same program with the keyed read in its place, the
+ * checks' targets aside.
+ */
+test("a held choice object's button value is marked by a test of its selected key, as the keyed read is", () => {
+  const cases: readonly (readonly [string, string, string, string, string])[] = [
+    [
+      "a test of its value",
+      'let o = {text: "unused", value: 2.0}\nif o.value is integer { let r: integer = READ }\nexit',
+      "askChoice o",
+      "o.value",
+      "warning-runtime-check",
+    ],
+    [
+      "a test of its text, without a value",
+      "let o = {text: 2.0}\nif o.text is integer { let r: integer = READ }\nexit",
+      "askChoice o",
+      "o.text",
+      "warning-runtime-check",
+    ],
+    [
+      "a copy of a copy in the tested branch",
+      'let o = {text: "unused", value: 2.0}\nif o.value is integer {\nlet p = o\nlet q = p\nlet r: integer = READ\n}\nexit',
+      "askChoice q",
+      "q.value",
+      "warning-runtime-check",
+    ],
+    [
+      "a path below its value",
+      'let o = {text: "unused", value: {n: 2.0}}\nif o.value.n is integer { repeat READ {} }\nexit',
+      "(askChoice o).n",
+      "o.value.n",
+      "warning-runtime-check",
+    ],
+    [
+      "a list's element",
+      'let opts = [{text: "unused", value: 2.0}]\nif opts[0].value is integer { let r: integer = READ }\nexit',
+      "askChoice opts",
+      "opts[0].value",
+      "warning-runtime-check",
+    ],
+    [
+      "a parameter",
+      'function pick(o) {\nif o.value is integer { let r: integer = READ }\n}\npick({text: "unused", value: 2.0})\nexit',
+      "askChoice o",
+      "o.value",
+      "warning-runtime-check",
+    ],
+    [
+      "a test of the other key",
+      "let o = {text: 2.0, value: 2.5}\nif o.text is integer { let r: integer = READ }\nexit",
+      "askChoice o",
+      "o.value",
+      "compile-error",
+    ],
+  ];
+  // its outcome first, then its diagnostics with their contexts and its checks without their targets
+  const shape = (record: CompactRecord): string[] => [
+    record.outcome,
+    ...[
+      ...record.diagnostics.map(
+        (d) => `${d.kind} ${d.class} ${d.context ?? "-"} @${d.site.offset}`,
+      ),
+      ...record.checks.map(
+        (check) =>
+          `${check.kind} [${check.against.join(", ")}]${check.boundary ? " boundary" : ""} @${check.site.offset}`,
+      ),
+    ].sort(),
+  ];
+  const differing: string[] = [];
+  for (const [name, program, choice, keyed, outcome] of cases)
+    for (const reversed of [false, true]) {
+      const [got, expected] = [choice, keyed].map((read) => {
+        const request = coreRequest([
+          { path: "main.tease", source: program.replace("READ", read) },
+        ]);
+        assert.ok(request !== null, `${name}: its source parses and resolves`);
+        const run = (): CompactRecord =>
+          withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+        return shape(reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run());
+      });
+      if (JSON.stringify(got) !== JSON.stringify(expected) || got![0] !== outcome)
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got!.join("; ")}`);
+    }
+  assert.deepEqual(differing, []);
 });

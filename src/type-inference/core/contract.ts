@@ -9,7 +9,17 @@ import type {
 } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import type { ReadRoute } from "./values.js";
-import { keyOf, keyPath, keyPlace, sortCost, type Definition, type Key } from "./definitions.js";
+import {
+  keyOf,
+  keyPath,
+  keyPlace,
+  recordPath,
+  SELECTED_TEXT,
+  SELECTED_VALUE,
+  sortCost,
+  type Definition,
+  type Key,
+} from "./definitions.js";
 import { withoutEmpty, withWriter } from "./exact-path.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
@@ -2297,9 +2307,10 @@ export class Contract {
   /**
    * §3.2: a holder's mark at `path` (memoised per holder and the leading steps it can depend on): a literal's guarded
    * read at a prefix, the references standing at a prefix (each asked once, for the rest under its shift), its own
-   * reads. A walk on an explicit stack: a holder's ask waits on the references it asks.
+   * reads; a choice's selection step as the record key it reads. A walk on an explicit stack: a holder's ask waits on the
+   * references it asks.
    */
-  #marksAt(holder: Holder | null, path: readonly string[]): boolean {
+  #marksAt(holder: Holder | null, read: readonly string[]): boolean {
     if (holder === null) return false;
     this.#collectMarks();
     const work = this.pass.program.work;
@@ -2336,7 +2347,7 @@ export class Contract {
       });
       return undefined;
     };
-    let answer = ask(holder, path);
+    let answer = ask(holder, recordPath(read));
     while (stack.length > 0) {
       const frame = stack.at(-1)!;
       if (answer === true) frame.hit = true;
@@ -2703,11 +2714,13 @@ export class Contract {
           out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, below)));
       }
       // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
-      if (length < rest.length && rest[length] === SELECTED) {
+      const step = rest[length];
+      if (step === SELECTED_VALUE || step === SELECTED_TEXT) {
         out.push(
           ...(yield* this.#selectedAt(
             index,
             path,
+            step === SELECTED_VALUE,
             rest.slice(length + 1),
             node,
             exact,
@@ -2747,31 +2760,36 @@ export class Contract {
 
   /**
    * V30 §19, TABLE r4.46 (1): the button values of the options a literal holds at `path`, read at `after` below them,
-   * per record alternative: a record's `value` where it has the key, its `text` where it has none (the property's own
-   * cell, its sources kept); a value that is no record is its own button's value; a record whose keys are unknown, or a
-   * reference, has the runtime's.
+   * per record alternative: the `value` of a record that has the key (`byValue`), the `text` of one that has none (the
+   * property's own cell, its sources kept); a value that is no record is its own button's value, and a record whose keys
+   * are unknown, or a reference, has the runtime's (both with the `value`s).
    */
   *#selectedAt(
     index: LiteralIndex,
     path: string,
+    byValue: boolean,
     after: readonly string[],
     node: FlowNode | null,
     exact: boolean,
     below: boolean,
   ): Work<readonly Item[]> {
     const out: Item[] = [];
-    if (after.length === 0)
+    if (byValue && after.length === 0)
       for (const [tag, token] of index.terms.get(path) ?? [])
         if (tag !== "object") out.push(makeItem(tag, token));
-    if (index.references.has(path)) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
+    if (byValue && index.references.has(path))
+      out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
     for (const object of index.objects.get(path)?.list ?? []) {
       this.pass.program.work.charge("invSteps");
       const properties = object.term.properties;
       const selected =
         properties?.find((property) => property.name === "value") ??
-        properties?.find((property) => property.name === "text");
-      if (properties === null) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
-      else if (selected === undefined)
+        properties?.find((property) => property.name === "text") ??
+        null;
+      if (properties === null) {
+        if (byValue) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
+      } else if ((selected?.name === "value") !== byValue) continue;
+      else if (selected === null)
         out.push(
           exact
             ? makeItem("unknown", object.token, { reasons: REASON.missing, context: "missing" })
@@ -2835,21 +2853,14 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
 }
 
 /**
- * The path step of a choice object's button value (V30 §19, TABLE r4.46 (1)): per record alternative its `value` where
- * it has the key and its `text` where it has none, answered where the path meets the records (a literal's objects),
- * never a key with stores of its own.
- */
-export const SELECTED = "#select";
-
-/**
  * V30 §19, TABLE r4.46 (1): an `askChoice`'s answer at `rest`, read by `read`: per option its label's kind, or each of
  * its buttons' values. Whether a choice object gives its `value` or its `text` is decided by the key's presence in the
  * object, never by what the key's value resolves to (an empty answer is unresolved, the solver's bottom, never an absent
  * key): a written choice object (the whole option, or an element of a written list or set) by the keys it writes; one
  * the options hold without writing it (a variable's, a call's) per record alternative where its path meets the records
- * (`SELECTED`, the literal's objects). Where a store goes below a `value` or `text` property after a record is made
- * (`byRecord` false), the records are read by their keys: the `value`, and every record's `text` where some lacks the
- * key (F11's `missing`), neither certain.
+ * (`SELECTED_VALUE`, `SELECTED_TEXT`, the literal's objects). Where a store goes below a `value` or `text` property
+ * after a record is made (`byRecord` false), the records are read by their keys: the `value`, and every record's `text`
+ * where some lacks the key (F11's `missing`), neither certain.
  */
 export function* choiceItems(
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
@@ -2864,7 +2875,8 @@ export function* choiceItems(
   // changes such records, by its keys: its `value`, and every record's `text` where some lacks the key, neither certain
   const held = function* (option: PlaceId, at: readonly string[]): Work<void> {
     if (byRecord) {
-      out.push(...(yield* read(option, [...at, SELECTED, ...rest])));
+      for (const step of [SELECTED_VALUE, SELECTED_TEXT])
+        out.push(...(yield* read(option, [...at, step, ...rest])));
       return;
     }
     const value = withoutEmpty(yield* read(option, [...at, "value"]));

@@ -2,7 +2,15 @@ import type { Expression } from "../../ast.js";
 import { expressionChildren, unwrap } from "../../expression-children.js";
 import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
-import { keyOf, keyPlace, keyPath, prefixesOf, sortCost, type Key } from "./definitions.js";
+import {
+  keyOf,
+  keyPlace,
+  keyPath,
+  prefixesOf,
+  recordKey,
+  sortCost,
+  type Key,
+} from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import type { Item } from "./items.js";
 import { siteKey, stepName, type CoreProgram } from "./program.js";
@@ -269,12 +277,13 @@ export class GuardIndex {
   /**
    * Whether a read of `key` at `node` is guarded (§3.2, per path): a test of the key or of a prefix guards a branch of
    * the node's own callable that dominates the node, or an operand region holds the node: a binary search per key asked,
-   * the key and each prefix (r4.12).
+   * the key and each prefix (r4.12); a choice's selection step as the record key it reads.
    */
   public narrowed(key: Key, node: FlowNode): boolean {
     const program = this.program;
     if (!program.reached(node)) return false;
-    for (const tested of [key, ...prefixesOf(key)]) {
+    const asked = recordKey(key);
+    for (const tested of [asked, ...prefixesOf(asked)]) {
       program.work.charge("eventSteps");
       const branches = this.#branches.get(tested)?.get(program.callableAt(node));
       if (
