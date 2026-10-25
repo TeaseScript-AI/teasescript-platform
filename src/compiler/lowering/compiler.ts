@@ -1,7 +1,6 @@
 import type {
   Block,
   Expression,
-  TimerParts,
   MediaParts,
   FunctionDeclaration,
   GlobalStatement,
@@ -11,7 +10,6 @@ import type {
   SetLiteral,
   Statement,
   InteractionExpression,
-  ShowPermanentButtonParts,
   SpeakerDeclaration,
   IfStatement,
   SwitchCase,
@@ -25,11 +23,9 @@ import type {
   AssignmentTargetPlan,
   CompiledFunctionDefinition,
   ExpressionPlan,
-  DelayDisplay,
   Instruction,
   JumpIfFalseInstruction,
   StoreTemporaryInstruction,
-  MediaCuePlan,
   JumpInstruction,
   LockInstruction,
   LoopControlInstruction,
@@ -57,10 +53,7 @@ import type { RuntimeCheckSite } from "../../type-inference/backend.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
 import {
   expressionChildren as instructionEmissionChildren,
-  mediaHandlerBlocks,
-  mediaOperands,
   tagQueryOperands,
-  timerOperands,
 } from "../../expression-children.js";
 import {
   lowerShowButtonTask,
@@ -72,6 +65,7 @@ import {
 } from "./interactions.js";
 import { lowerInteractionTask, lowerAskQuestionTask, lowerAskImageTask } from "./asks.js";
 import { lowerSayTask } from "./say.js";
+import { lowerTimerTask, lowerPermanentButtonTask, lowerMediaTask } from "./background.js";
 import {
   isPlayerProfile,
   unwrapParentheses,
@@ -230,7 +224,7 @@ export class InstructionCompiler {
     /** The files each glob target may pick, from semantic validation. */
     private readonly picks: ReadonlyMap<FileTarget, readonly string[]> = new Map(),
     /** The variables each timer, media, or button block shares with the code that created it. */
-    private readonly captures: ReadonlyMap<Block, readonly string[]> = new Map(),
+    public readonly captures: ReadonlyMap<Block, readonly string[]> = new Map(),
     /** The result shape of each `askForm`, from the type check. */
     public readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape> = new Map(),
     /** Receives the trace of the lowering, when an analysis asks for it. */
@@ -318,7 +312,7 @@ export class InstructionCompiler {
   readonly #handlers: RegisteredHandler[] = [];
 
   /** The `let` name that a media initializer binds in its own blocks. */
-  readonly #selfHandleByInitializer = new Map<MediaParts, string>();
+  public readonly selfHandleByInitializer = new Map<MediaParts, string>();
 
   public compileStatements(statements: readonly Statement[]): void {
     runCompileTask(this.#compileStatements(statements));
@@ -372,13 +366,13 @@ export class InstructionCompiler {
         return;
       }
       case "timerStatement":
-        yield* compileChild(this.#lowerTimerTask(statement, false));
+        yield* compileChild(lowerTimerTask(this, statement, false));
         return;
       case "showPermanentButtonStatement":
-        yield* compileChild(this.#lowerPermanentButtonTask(statement, false));
+        yield* compileChild(lowerPermanentButtonTask(this, statement, false));
         return;
       case "playMediaStatement":
-        yield* compileChild(this.#lowerMediaTask(statement, false));
+        yield* compileChild(lowerMediaTask(this, statement, false));
         return;
       case "stopAudioStatement":
         this.instructions.push({ kind: "stopAudio", span: copySpan(statement.span) });
@@ -464,7 +458,7 @@ export class InstructionCompiler {
       case "letStatement": {
         const initializer = unwrapParentheses(statement.initializer);
         if (initializer.kind === "playMediaExpression") {
-          this.#selfHandleByInitializer.set(initializer, statement.name.name);
+          this.selfHandleByInitializer.set(initializer, statement.name.name);
         }
         const lowered = this.#lowerExpression(statement.initializer);
         this.instructions.push({
@@ -815,188 +809,6 @@ export class InstructionCompiler {
     }
   }
 
-  *#lowerTimerTask(timer: TimerParts, value: boolean): CompileTask<LoweredExpression | null> {
-    const dynamicDisplay = typeof timer.display === "object" ? timer.display : null;
-    // The instruction's evaluation order; `timerOperands` gives the source order.
-    const operands = [timer.duration, dynamicDisplay, timer.label].filter(
-      (operand): operand is Expression => operand !== null,
-    );
-    const sourceOrder = timerOperands(timer);
-    const reordered = sourceOrder.some((operand, index) => operand !== operands[index]);
-    const lowered = yield* compileChild(this.lowerOrderedExpressionsTask(sourceOrder));
-    const planOf = (operand: Expression): LoweredExpression => {
-      const item = lowered[sourceOrder.indexOf(operand)]!;
-      return reordered && item.plan.kind !== "temporary"
-        ? this.materializeExpression(item, operand.span)
-        : item;
-    };
-    // Materialization must follow source order, so resolve every operand before building the instruction.
-    const loweredBySource = sourceOrder.map(planOf);
-    const plan = (operand: Expression): ExpressionPlan =>
-      loweredBySource[sourceOrder.indexOf(operand)]!.plan;
-    const temporaryIds = loweredBySource.flatMap((item) => item.temporaryIds);
-    const staticDisplay: DelayDisplay =
-      typeof timer.display === "string" ? timer.display : "visible";
-    const display = dynamicDisplay === null ? staticDisplay : plan(dynamicDisplay);
-    if (!timer.async) {
-      this.instructions.push({
-        kind: "wait",
-        command: "timer",
-        duration: plan(timer.duration),
-        unit: timer.unit,
-        display,
-        label: timer.label === null ? null : plan(timer.label),
-        span: copySpan(timer.span),
-      });
-      this.emitTemporaryCleanup(temporaryIds, timer.span);
-      return null;
-    }
-    const destinationTemporary = value ? this.allocateTemporary() : null;
-    this.instructions.push({
-      kind: "startTimer",
-      duration: plan(timer.duration),
-      unit: timer.unit,
-      display,
-      label: timer.label === null ? null : plan(timer.label),
-      repeat: timer.repeat,
-      persist: timer.persist,
-      handlerFunctionId:
-        timer.handler === null ? null : this.#registerHandler(timer.handler, "timer", null),
-      captures: this.#capturesOf(timer.handler === null ? [] : [timer.handler]),
-      destinationTemporary,
-      span: copySpan(timer.span),
-    });
-    this.emitTemporaryCleanup(temporaryIds, timer.span);
-    return destinationTemporary === null
-      ? null
-      : {
-          plan: {
-            kind: "temporary",
-            temporaryId: destinationTemporary,
-            span: copySpan(timer.span),
-          },
-          temporaryIds: [destinationTemporary],
-        };
-  }
-
-  /**
-   * `showPermanentButton <text> { ... }` evaluates its text and shows the button; the block becomes a parameterless
-   * handler region that a click runs. Used as a value, it gives the button's identifier.
-   */
-  *#lowerPermanentButtonTask(
-    button: ShowPermanentButtonParts,
-    value: boolean,
-  ): CompileTask<LoweredExpression | null> {
-    const text = yield* compileChild(this.lowerExpressionTask(button.text));
-    const span = createSourceSpan(button.commandSpan.start, button.text.span.end);
-    const destinationTemporary = value ? this.allocateTemporary() : null;
-    this.instructions.push({
-      kind: "showPermanentButton",
-      text: text.plan,
-      persist: button.persist,
-      handlerFunctionId: this.#registerHandler(button.handler, "button", null),
-      captures: this.#capturesOf([button.handler]),
-      destinationTemporary,
-      span: copySpan(span),
-    });
-    this.emitTemporaryCleanup(text.temporaryIds, span);
-    return destinationTemporary === null
-      ? null
-      : {
-          plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(span) },
-          temporaryIds: [destinationTemporary],
-        };
-  }
-
-  /** Lowers a play command; its operands evaluate in source order. */
-  *#lowerMediaTask(media: MediaParts, value: boolean): CompileTask<LoweredExpression | null> {
-    const repeatOperand =
-      media.repeat === null || media.repeat.kind === "indefinite"
-        ? null
-        : media.repeat.kind === "times"
-          ? media.repeat.count
-          : media.repeat.value;
-    const cues = media.handlers?.kind === "cues" ? media.handlers.cues : [];
-    // The instruction's evaluation order; `mediaOperands` gives the source order.
-    const operands = [
-      media.file,
-      repeatOperand,
-      media.startAt,
-      media.endAt,
-      media.volume,
-      ...cues.map((cue) => cue.offset),
-    ].filter((operand): operand is Expression => operand !== null);
-    const sourceOrder = mediaOperands(media);
-    const reordered = sourceOrder.some((operand, index) => operand !== operands[index]);
-    const lowered = yield* compileChild(this.lowerOrderedExpressionsTask(sourceOrder));
-    const loweredByOperand = new Map<Expression, LoweredExpression>();
-    sourceOrder.forEach((operand, index) => {
-      const item = lowered[index]!;
-      loweredByOperand.set(
-        operand,
-        reordered && item.plan.kind !== "temporary"
-          ? this.materializeExpression(item, operand.span)
-          : item,
-      );
-    });
-    const plan = (operand: Expression): ExpressionPlan => loweredByOperand.get(operand)!.plan;
-    const temporaryIds = [...loweredByOperand.values()].flatMap((item) => item.temporaryIds);
-    const selfHandle = media.async ? (this.#selfHandleByInitializer.get(media) ?? null) : null;
-    const register = (block: Block): number => this.#registerHandler(block, "media", selfHandle);
-    const cuePlans: MediaCuePlan[] = [];
-    let finishFunctionId: number | null = null;
-    if (media.handlers?.kind === "compact") {
-      cuePlans.push({
-        kind: "beforeEnd",
-        offset: { kind: "duration", milliseconds: 0, span: copySpan(media.handlers.body.span) },
-        functionId: register(media.handlers.body),
-      });
-    }
-    for (const cue of cues) {
-      if (cue.kind === "finish") finishFunctionId = register(cue.body);
-      else
-        cuePlans.push({
-          kind: cue.kind,
-          offset: plan(cue.offset!),
-          functionId: register(cue.body),
-        });
-    }
-    const destinationTemporary = value ? this.allocateTemporary() : null;
-    this.instructions.push({
-      kind: "playMedia",
-      media: media.media,
-      async: media.async,
-      file: plan(media.file),
-      repeat:
-        media.repeat === null
-          ? { kind: "once" }
-          : media.repeat.kind === "indefinite"
-            ? { kind: "indefinite" }
-            : media.repeat.kind === "times"
-              ? { kind: "times", count: plan(media.repeat.count) }
-              : { kind: "value", value: plan(media.repeat.value) },
-      startAt: media.startAt === null ? null : plan(media.startAt),
-      endAt: media.endAt === null ? null : plan(media.endAt),
-      volume: media.volume === null ? null : plan(media.volume),
-      cues: cuePlans,
-      finishFunctionId,
-      captures: this.#capturesOf(mediaHandlerBlocks(media)),
-      destinationTemporary,
-      span: copySpan(media.span),
-    });
-    this.emitTemporaryCleanup(temporaryIds, media.span);
-    return destinationTemporary === null
-      ? null
-      : {
-          plan: {
-            kind: "temporary",
-            temporaryId: destinationTemporary,
-            span: copySpan(media.span),
-          },
-          temporaryIds: [destinationTemporary],
-        };
-  }
-
   /** `showCamera [stage]` shows the camera view. */
   #lowerShowCamera(
     placement: "window" | "stage",
@@ -1018,15 +830,8 @@ export class InstructionCompiler {
         };
   }
 
-  /** The variables that blocks of one resource share with the code that creates it, in the order of first use. */
-  #capturesOf(blocks: readonly Block[]): string[] {
-    const names = new Set<string>();
-    for (const block of blocks) for (const name of this.captures.get(block) ?? []) names.add(name);
-    return [...names];
-  }
-
   /** Reserves the next function ID; the region is compiled after all user functions. */
-  #registerHandler(
+  public registerHandler(
     block: Block,
     owner: "timer" | "media" | "button",
     selfHandle: string | null,
@@ -1179,12 +984,12 @@ export class InstructionCompiler {
       return lowered;
     }
     if (expression.kind === "timerExpression") {
-      const lowered = yield* compileChild(this.#lowerTimerTask(expression, true));
+      const lowered = yield* compileChild(lowerTimerTask(this, expression, true));
       if (lowered === null) throw new TypeError("A blocking timer reached value lowering.");
       return lowered;
     }
     if (expression.kind === "playMediaExpression") {
-      const lowered = yield* compileChild(this.#lowerMediaTask(expression, true));
+      const lowered = yield* compileChild(lowerMediaTask(this, expression, true));
       if (lowered === null) throw new TypeError("Blocking media reached value lowering.");
       return lowered;
     }
@@ -1194,7 +999,7 @@ export class InstructionCompiler {
       return lowered;
     }
     if (expression.kind === "showPermanentButtonExpression") {
-      const lowered = yield* compileChild(this.#lowerPermanentButtonTask(expression, true));
+      const lowered = yield* compileChild(lowerPermanentButtonTask(this, expression, true));
       if (lowered === null)
         throw new TypeError("A permanent button lowered without an identifier.");
       return lowered;
