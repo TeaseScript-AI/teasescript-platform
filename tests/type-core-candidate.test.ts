@@ -96,24 +96,29 @@ function runSited(plan: InstructionPlan, hostValue: SerializableRuntimeValue) {
 
 /**
  * The run oracle of an enforcement test (TABLE r4.59): per host value its expected failure, `CODE@start:end`, or `null`.
- * A run without one halts at the end; a run with one ends failed with exactly it, nothing said by a statement at or
- * after the failing check's start.
+ * A run without one says exactly `said` and halts at the end; a run with one ends failed with exactly it, nothing said
+ * by a statement at or after the failing check's start.
  */
 function assertRuns(
   plan: InstructionPlan,
   name: string,
+  said: readonly string[],
   runs: readonly (readonly [SerializableRuntimeValue, string | null])[],
 ): void {
   for (const [value, failure] of runs) {
     const ran = runSited(plan, value);
-    const start = failure === null ? Infinity : Number(/@(\d+):/.exec(failure)![1]);
+    const start = failure === null ? -1 : Number(/@(\d+):/.exec(failure)![1]);
     assert.deepEqual(
       {
         status: ran.status,
         failure: ran.failure,
-        saidAfter: ran.said.flatMap(({ text, at }) => (at >= start ? [text] : [])),
+        said: ran.said.flatMap(({ text, at }) => (at >= start ? [text] : [])),
       },
-      { status: failure === null ? "halted" : "failed", failure, saidAfter: [] },
+      {
+        status: failure === null ? "halted" : "failed",
+        failure,
+        said: failure === null ? said : [],
+      },
       `${name} with ${JSON.stringify(value)}`,
     );
   }
@@ -368,18 +373,23 @@ test("C1's copy check and C9's boundary check run where external data enters a w
     says: [],
     failure: "TSR058@22:39",
   });
-  assertRuns(compiled.plan, source, [[1.5, "TSR058@22:39"]]);
+  assertRuns(compiled.plan, source, ["picked", "turn", "turn"], [[1.5, "TSR058@22:39"]]);
 
   // the literal analogue of r4.29: the element's check against the written element type, `null` admitted
   const pool = candidate("let pool: integer?[] = [hostValue, null, 7]\nexit\n");
   assert.deepEqual(sited(pool), ["warning TSV041@24"]);
   assert.ok(pool.plan !== null);
   assert.deepEqual(checksOf(pool.plan), ["0:43 list<integer|null>"]);
-  assertRuns(pool.plan, "pool", [
-    [null, null],
-    [3, null],
-    ["x", "TSR058@23:43"],
-  ]);
+  assertRuns(
+    pool.plan,
+    "pool",
+    [],
+    [
+      [null, null],
+      [3, null],
+      ["x", "TSR058@23:43"],
+    ],
+  );
 
   // the root compile, on the production default, does not warn: the candidate is reached only by its entry
   assert.deepEqual(sited(compileSource(source, OPTIONS)), []);
@@ -543,7 +553,9 @@ test("admission's decided types and C9's boundary checks compile and run on the 
     const plan = candidate(source).plan;
     if (runs.length > 0) {
       assert.ok(plan !== null, source);
-      assertRuns(plan, source, runs);
+      // (its programs say each message once, in order)
+      const said = [...source.matchAll(/say "([^"]*)"/g)].map((match) => match[1]!);
+      assertRuns(plan, source, said, runs);
     }
   }
 });
@@ -707,7 +719,7 @@ test("C1 warns where some kind of the stored value fits and errs only where none
   const fractional = candidate('let result: integer = [2, 2.5][1]\nsay "selected"\nexit\n');
   assert.ok(fractional.plan !== null);
   assert.deepEqual(checksOf(fractional.plan), ["0:33 integer"]);
-  assertRuns(fractional.plan, "the fractional element", [[null, "TSR058@22:33"]]);
+  assertRuns(fractional.plan, "the fractional element", ["selected"], [[null, "TSR058@22:33"]]);
   // no kind fits: still the error, also for a literal's element written as `integer[]` (A8)
   for (const [source, error] of [
     ["let result: integer = [2.5, 3.5][0]\nexit\n", "error TSV041@22"],
@@ -755,7 +767,7 @@ test("C2's integer check warns with TSV011 at a count and TSV043 at a list index
     says: ["ready"],
     failure: "TSR043@49:54",
   });
-  assertRuns(count.plan, "the count", [["x", "TSR058@20:29"]]);
+  assertRuns(count.plan, "the count", ["ready", "turn", "turn"], [["x", "TSR058@20:29"]]);
 
   const index = candidate(
     "let rows = [10, 20]\nlet at: number = hostValue\nrepeat rows[at] {}\nexit\n",
@@ -763,12 +775,17 @@ test("C2's integer check warns with TSV011 at a count and TSV043 at a list index
   assert.deepEqual(sited(index), ["warning TSV041@37", "warning TSV043@59"]);
   assert.ok(index.plan !== null);
   assert.deepEqual(checksOf(index.plan), ["20:46 number"]);
-  assertRuns(index.plan, "the index", [
-    [1, null],
-    [0.5, "TSR024@59:61"],
-    [2, "TSR025@59:61"],
-    ["x", "TSR058@37:46"],
-  ]);
+  assertRuns(
+    index.plan,
+    "the index",
+    [],
+    [
+      [1, null],
+      [0.5, "TSR024@59:61"],
+      [2, "TSR025@59:61"],
+      ["x", "TSR058@37:46"],
+    ],
+  );
 
   // the proven cases stay errors under the same codes
   assert.deepEqual(sited(candidate("let n = 2.5\nrepeat n {}\nexit\n")), ["error TSV011@19"]);
@@ -811,17 +828,27 @@ test("parentheses answer for their content: a parenthesised count and index read
   const host = candidate("repeat ((hostValue)) {}\nexit\n");
   assert.deepEqual(sited(host), ["warning TSV011@9"]);
   assert.ok(host.plan !== null);
-  assertRuns(host.plan, "the parenthesised count", [
-    [2, null],
-    [1.5, "TSR043@9:18"],
-  ]);
+  assertRuns(
+    host.plan,
+    "the parenthesised count",
+    [],
+    [
+      [2, null],
+      [1.5, "TSR043@9:18"],
+    ],
+  );
   const hostIndex = candidate("let xs = [1, 2]\nlet y = xs[(hostValue)]\nexit\n");
   assert.deepEqual(sited(hostIndex), ["warning TSV043@28"]);
   assert.ok(hostIndex.plan !== null);
-  assertRuns(hostIndex.plan, "the parenthesised index", [
-    [1, null],
-    [0.5, "TSR024@28:37"],
-  ]);
+  assertRuns(
+    hostIndex.plan,
+    "the parenthesised index",
+    [],
+    [
+      [1, null],
+      [0.5, "TSR024@28:37"],
+    ],
+  );
 });
 
 test("a projection of a literal carries its elements' types and host data on the candidate route (round 11)", () => {
