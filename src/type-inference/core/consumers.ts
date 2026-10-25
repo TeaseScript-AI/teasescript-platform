@@ -798,10 +798,12 @@ export class Consumers {
 
   /**
    * C10: a fallback or a default is `null`, or has the direct value's family without its `null` (whole numbers with
-   * numbers; a conversion's result; a load's or `fromJson`'s expected type; nested list, set and dict literals by their
-   * elements), or the value lands directly in a written place whose union holds both; a direct value that is only `null`
-   * or unsettled imposes none. Both definite and incompatible: an error at the fallback; possible: a warning with its
-   * `copy-type`; an unknown the fallback may hold: a warning against that family, its host data meeting its boundary.
+   * numbers; a conversion's result; nested list, set and dict literals by their elements), or a load's or `fromJson`'s
+   * written expected type's kinds at every depth (ADR 1.2, 7: a whole number fits a written number, a fraction never a
+   * written integer, the owner's F3), or the value lands directly in a written place whose union holds both; a direct
+   * value that is only `null` or unsettled imposes none. Both definite and incompatible: an error at the fallback, below
+   * it at the innermost offending element (r4.35); possible: a warning with its `copy-type`; an unknown the fallback may
+   * hold: a warning against those kinds, its host data meeting its boundary.
    */
   #fallbackFits(
     c: ValueConstraint,
@@ -816,7 +818,7 @@ export class Consumers {
     let label = this.#keyLabel(value);
     for (
       let rest: readonly string[] = [];
-      this.#fallbackFitsAt(c, node, directAt, value, rest, written && rest.length === 0, label);
+      this.#fallbackFitsAt(c, node, directAt, value, rest, written, label);
       rest = [...rest, "element"]
     ) {
       program.work.charge("checks");
@@ -842,15 +844,22 @@ export class Consumers {
     const direct = directAt(rest);
     const into = contract.landsIn(c.result, rest);
     const family = (tag: ItemTag): ItemTag => (tag === "integer" ? "number" : tag);
-    const directFamilies = new Set(direct.filter(concrete).map((item) => family(item.tag)));
-    if (directFamilies.size === 0) return false;
-    // the written union the value lands in directly, where it holds the direct family: a fallback of its kinds fits too
-    const union = into === null ? null : new Set(typeTags(into).map(family));
-    const unionHolds = union !== null && [...directFamilies].every((found) => union.has(found));
+    const directTags = [...new Set(direct.filter(concrete).map((item) => item.tag))];
+    if (directTags.length === 0) return false;
+    const directFamilies = new Set(directTags.map(family));
+    // one domain for the quiet path, the error, the warning and the check: a written type's own kinds, else the family
+    const admits = (tag: ItemTag, refs: readonly ItemTag[]): boolean =>
+      refs.some((ref) =>
+        written ? tag !== "unknown" && fits(tag, ref, true) : family(tag) === family(ref),
+      );
+    // the written union the value lands in directly, where it holds the direct kinds: a fallback of its kinds fits too
+    const intoTags = into === null ? [] : typeTags(into);
+    const union = into === null ? null : new Set(intoTags.map(family));
+    const unionHolds = union !== null && directTags.every((tag) => admits(tag, intoTags));
     const fitsKind = (tag: ItemTag): boolean =>
       tag === "null"
-        ? !(rest.length > 0 && into !== null && !typeTags(into).includes("null"))
-        : directFamilies.has(family(tag)) || (unionHolds && union.has(family(tag)));
+        ? !(rest.length > 0 && into !== null && !intoTags.includes("null"))
+        : admits(tag, directTags) || (unionHolds && admits(tag, intoTags));
     // the family the fallback is checked against: the direct value's (whole numbers with numbers), a load's or
     // `fromJson`'s written type itself (its `null` C10's exception, never listed), and the receiving union's kinds
     const against: ItemTag[] = [
@@ -896,14 +905,56 @@ export class Consumers {
       );
     }
     if (union !== null && union.has("unknown")) return false;
-    // both definite and incompatible: an error at the fallback; possible: one warning and check per offending kind
-    if (
+    // below the fallback, a definite element of its literals none of whose kinds fits: an error at that element (A8,
+    // r4.35); else both definite and incompatible, no kind of the fallback fitting (r4.46): an error at the fallback;
+    // possible: one warning and check per offending kind
+    const element = this.#offendingElement(value, node, rest, fitsKind);
+    if (element !== null) this.#error("written-target", element);
+    else if (
       direct.filter(concrete).every((item) => item.cert === "def") &&
-      off.every((item) => item.cert === "def")
+      off.every((item) => item.cert === "def") &&
+      !fallback.some((item) => concrete(item) && fitsKind(item.tag))
     )
       this.#error("written-target", site);
     else for (const { item } of offendingKinds(off)) this.#storeWarning(site, label, item, against);
     return false;
+  }
+
+  /**
+   * A8, r4.35: the innermost element of a fallback's literals at `rest` whose kinds are definite and none fits, in source
+   * order; `null` at the fallback itself or where no literal holds one.
+   */
+  #offendingElement(
+    value: PlaceId,
+    node: FlowNode,
+    rest: readonly string[],
+    fitsKind: (tag: ItemTag) => boolean,
+  ): SourceSite | null {
+    const { program, values } = this.pass;
+    const pending: [PlaceId, FlowNode, number][] = rest.length === 0 ? [] : [[value, node, 0]];
+    while (pending.length > 0) {
+      const [current, at, index] = pending.pop()!;
+      const children = this.admission.literalChildren(current, rest[index]!);
+      for (let position = children.length - 1; position >= 0; position -= 1) {
+        program.work.charge("checks");
+        const child = children[position]!;
+        if (index + 1 < rest.length) pending.push([child.value!, child.node ?? at, index + 1]);
+      }
+      if (index + 1 < rest.length) continue;
+      for (const child of children) {
+        program.work.charge("checks");
+        const items = withoutEmpty(
+          this.#run(values.valueItems(child.value!, child.node ?? at, [])),
+        );
+        if (
+          items.length > 0 &&
+          items.every((item) => item.cert === "def" && concrete(item)) &&
+          !items.some((item) => fitsKind(item.tag))
+        )
+          return program.place(child.value!).site;
+      }
+    }
+    return null;
   }
 
   #operation(c: Extract<ValueConstraint, { kind: "operation" }>, node: FlowNode): void {

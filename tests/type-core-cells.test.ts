@@ -2597,3 +2597,111 @@ test("a named collection in a literal or an add brings its elements' types to th
   }
   assert.deepEqual(differing, []);
 });
+
+test("a written expected type holds a default to its own kinds at every depth, known or possible (C10, the owner's F3)", () => {
+  const integer = (call: string): string => `let n: integer = ${call}\nrepeat n {}\nexit`;
+  const integers = (call: string): string => `let xs: integer[] = ${call}\nrepeat xs[0] {}\nexit`;
+  // per program its outcome and its written-target diagnostics, as class and site
+  const programs: readonly (readonly [string, string, string, readonly string[]])[] = [
+    [
+      "a fraction for an integer",
+      integer('fromJson("bad", default: 1.5)'),
+      "compile-error",
+      ["compile-error @42"],
+    ],
+    ["a whole number for an integer", integer('fromJson("bad", default: 2)'), "valid", []],
+    [
+      "a fraction loaded for an integer",
+      integer('load("k", default: 1.5)'),
+      "compile-error",
+      ["compile-error @36"],
+    ],
+    ["a whole number loaded for an integer", integer('load("k", default: 2)'), "valid", []],
+    [
+      "a possible fraction for an integer",
+      integer('fromJson("bad", default: [1, 2.5][0])'),
+      "warning-runtime-check",
+      ["warning-runtime-check @42"],
+    ],
+    [
+      "host data for an integer",
+      integer('fromJson("bad", default: hostValue)'),
+      "warning-runtime-check",
+      ["warning-runtime-check @42"],
+    ],
+    ["a fraction for a number", 'let n: number = fromJson("bad", default: 1.5)\nexit', "valid", []],
+    [
+      "a whole number for a number",
+      'let n: number = fromJson("bad", default: 2)\nexit',
+      "valid",
+      [],
+    ],
+    [
+      "a fraction for an integer or a text",
+      'let n: integer | string = fromJson("1", default: 1.5)\nexit',
+      "compile-error",
+      ["compile-error @49"],
+    ],
+    [
+      "a text for an integer or a text",
+      'let n: integer | string = fromJson("1", default: "x")\nexit',
+      "valid",
+      [],
+    ],
+    // below the default, at the element (A8, r4.35)
+    [
+      "a fraction among integers",
+      integers('fromJson("bad", default: [1.5])'),
+      "compile-error",
+      ["compile-error @46"],
+    ],
+    ["integers", integers('fromJson("bad", default: [2])'), "valid", []],
+    [
+      "a fraction loaded among integers",
+      integers('load("k", default: [1, 2.5])'),
+      "compile-error",
+      ["compile-error @43"],
+    ],
+    [
+      "a nested fraction",
+      'let xs: integer[][] = fromJson("[]", default: [[1], [2.5]])\nexit',
+      "compile-error",
+      ["compile-error @53"],
+    ],
+    [
+      "a possible list of fractions",
+      integers('fromJson("[]", default: [[1], [2.5]][0])'),
+      "warning-runtime-check",
+      ["warning-runtime-check @44"],
+    ],
+    // an inferred default keeps the family: a fraction beside whole numbers
+    [
+      "a fraction beside inferred whole numbers",
+      "let xs = [1]\nlet y = xs.get(0, default: 1.5)\nexit",
+      "valid",
+      [],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, outcome, expected] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const found = record.diagnostics
+        .filter((diagnostic) => diagnostic.kind === "written-target")
+        .map((diagnostic) => `${diagnostic.class} @${diagnostic.site.offset}`)
+        .sort();
+      if (
+        record.outcome !== outcome ||
+        JSON.stringify(found) !== JSON.stringify([...expected].sort())
+      )
+        differing.push(
+          `${name}${reversed ? " reversed" : ""}: ${record.outcome}; ${found.join(", ")}`,
+        );
+    }
+  }
+  assert.deepEqual(differing, []);
+});
