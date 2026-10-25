@@ -1,6 +1,6 @@
 import type { Instruction, InstructionPlan } from "../../src/plan/model.js";
 import { PlanControlFlow } from "../../src/plan/control-flow.js";
-import { rootRegionNeeds } from "../../src/plan/instruction-stream-analyses.js";
+import { rootRegionNeeds } from "../../src/plan/instruction-stream-analyses/label-positions.js";
 import {
   instructionKilledTemporaries,
   requiredInstructionTemporaries,

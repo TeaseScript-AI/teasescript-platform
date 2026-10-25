@@ -5,11 +5,9 @@ import {
   INSTRUCTION_PLAN_VERSION,
   type InstructionPlan,
 } from "./model.js";
-import {
-  analyzeInstructionStream,
-  collectFunctionIds,
-  validateLabelPositions,
-} from "./instruction-stream-analyses.js";
+import { analyzeInstructionStream } from "./instruction-stream-analyses.js";
+import { collectFunctionIds } from "./instruction-stream-analyses/function-definitions.js";
+import { validateLabelPositions } from "./instruction-stream-analyses/label-positions.js";
 import {
   type PlanValidationError,
   hasExactKeys,

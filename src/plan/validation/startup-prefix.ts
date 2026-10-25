@@ -1,4 +1,4 @@
-import type { PlanFileBoundaries } from "../instruction-stream-analyses.js";
+import type { PlanFileBoundaries } from "../instruction-stream-analyses/execution-regions.js";
 import {
   type PlanValidationError,
   isRecord,
