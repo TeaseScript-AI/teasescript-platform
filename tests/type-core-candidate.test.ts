@@ -310,6 +310,21 @@ test("C1 warns where some kind of the stored value fits and errs only where none
   }
 });
 
+test("the candidate hears of each file it walks, as the production default does", () => {
+  const request = coreRequest([
+    { path: "main.tease", source: "let first = 1\nexit\n" },
+    { path: "other.tease", source: "let other = 2\nexit\n" },
+  ]);
+  assert.ok(request !== null);
+  const heard = (backend?: typeof CORE_BACKEND): number[] => {
+    const files: number[] = [];
+    analyzeTypes({ ...request, onFile: (file) => files.push(file) }, backend);
+    return files;
+  };
+  assert.deepEqual(heard(), [0, 1]);
+  assert.deepEqual(heard(CORE_BACKEND), [0, 1]);
+});
+
 test("C2's integer check warns with TSV011 at a count and TSV043 at a list index, and runs at the use", () => {
   const count = candidate(
     'let count: number = hostValue\nsay "ready"\nrepeat count {\n  say "turn"\n}\nexit\n',

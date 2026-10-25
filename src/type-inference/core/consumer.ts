@@ -74,11 +74,13 @@ export class SliceIndex {
   readonly #whole = new Set<Expression>();
   readonly #role = new Map<Expression, "count" | "index">();
 
-  public constructor(programs: readonly Program[]) {
+  /** `onFile` hears of each file as the walk enters it (S3 §6 keeps the request's progress callback). */
+  public constructor(programs: readonly Program[], onFile: (file: number) => void = () => {}) {
     type Entry =
       | { readonly statement: Statement }
       | { readonly expression: Expression; readonly store: Store | null; readonly whole: boolean };
     programs.forEach((program, file) => {
+      onFile(file);
       const pending: Entry[] = program.statements.map((statement) => ({ statement })).reverse();
       const statements = (list: readonly Statement[]): void => {
         for (let at = list.length - 1; at >= 0; at -= 1) pending.push({ statement: list[at]! });

@@ -58,7 +58,11 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
     const globals = new Set(request.options.globals ?? []);
     const before = outsideSyntax(core.files, globals);
     if (before !== null) throw outsideSlice(core, before);
-    const index = new SliceIndex(core.files.map((file) => file.program));
+    // the walk of each file once, in project order (S3 §6), where the progress callback hears of it
+    const index = new SliceIndex(
+      core.files.map((file) => file.program),
+      request.onFile,
+    );
     const answers = analyseCore(core);
     try {
       const after = outsideAnswers(answers, index, core.files, globals);
