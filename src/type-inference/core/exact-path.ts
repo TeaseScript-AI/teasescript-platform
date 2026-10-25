@@ -15,6 +15,7 @@ import { marked } from "./guards.js";
 import {
   alternatives,
   EMPTY,
+  firstContext,
   mergeItems,
   REASON,
   weaken,
@@ -22,6 +23,7 @@ import {
   type Item,
   type Writer,
 } from "./items.js";
+import { dictList } from "./method-categories.js";
 import type { WorkLedger } from "./budget.js";
 import type { Work } from "./solver.js";
 import type { ReadRoute } from "./values.js";
@@ -1093,9 +1095,11 @@ export class ExactPath {
       return mergeItems(withWriter(items, writer), scope);
     }
     const before = yield* values.keyItems(keyOf(d.place, [...d.path, ...rest]), d.node, true);
-    // F5–F7: the collection's kind is unchanged
-    if (rest.length === 0) return before;
-    const element = rest.length === 1 && rest[0] === "element";
+    // F5–F7: the collection's kind is unchanged, and a dict's `values` or `keys` still a list of what it holds, whose
+    // element is the dict's (r4.46 (2))
+    const listed = rest.length > 0 && dictList(rest[0]!) !== undefined ? 1 : 0;
+    if (rest.length === listed) return before;
+    const element = rest.length === listed + 1 && rest[listed] === "element";
     // F6: no element
     if (d.kind === "clear") return element ? [EMPTY] : [];
     // F7: every element possible, maybe none
@@ -1112,11 +1116,21 @@ export class ExactPath {
       ),
       writer,
     );
+    // §3.4: the element read gathers the elements before and the added ones, several elements: `member`
+    const several = withoutEmpty(before).length > 0 && withoutEmpty(own).length > 0;
+    const worded = (items: readonly Item[]): readonly Item[] =>
+      several
+        ? items.map((item) =>
+            item.tag === "unknown" || item.tag === "empty"
+              ? item
+              : { ...item, context: firstContext(item.context, "member") },
+          )
+        : items;
     // F5: an `add` makes the collection hold an element; an `addAll` leaves its M unchanged, whatever its source
-    if (rest.length > 1) return alternatives([...before, ...own], scope);
+    if (rest.length > 1) return alternatives(worded([...before, ...own]), scope);
     const empty = d.how === "elements" && before.some((item) => item.tag === "empty");
     return alternatives(
-      [...withoutEmpty(before), ...withoutEmpty(own), ...(empty ? [EMPTY] : [])],
+      worded([...withoutEmpty(before), ...withoutEmpty(own), ...(empty ? [EMPTY] : [])]),
       scope,
     );
   }
@@ -1125,6 +1139,14 @@ export class ExactPath {
 /** The items without the emptiness mark: the kinds a value has. */
 export function withoutEmpty(items: readonly Item[]): Item[] {
   return items.filter((item) => item.tag !== "empty");
+}
+
+/**
+ * The answer at `rest` below a collection's selected element (`get`, a loop's visit, a removal): a selection consumes
+ * only its own emptiness mark, the element's; a demanded descendant's mark passes through (#1027's B1, F12).
+ */
+export function belowSelected(items: readonly Item[], rest: readonly string[]): readonly Item[] {
+  return rest.length === 0 ? withoutEmpty(items) : items;
 }
 
 /**

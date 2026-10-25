@@ -18,22 +18,36 @@ import {
   withOwnSelection,
 } from "./contract.js";
 import { keyOf, keyPath, keyPlace, type ForLoopFacts, type Key } from "./definitions.js";
-import { withoutEmpty } from "./exact-path.js";
+import { belowSelected, withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
 import {
   builtinResult,
+  clockResult,
   conversionCategory,
   declaredResult,
+  declaredMethod,
+  declaredProperty,
   dictList,
   interactionCategory,
-  listStep,
+  kindElement,
+  memberStep,
   measuresLength,
   memberResult,
   methodCategory,
   selectsElement,
+  shownResult,
 } from "./method-categories.js";
-import { alternatives, EMPTY, makeItem, mergeItems, REASON, weaken, type Item } from "./items.js";
+import {
+  alternatives,
+  EMPTY,
+  makeItem,
+  mergeItems,
+  REASON,
+  weaken,
+  type Item,
+  type ItemTag,
+} from "./items.js";
 import { operationItems } from "./operator-table.js";
 import { stepName, type ValueConstraint } from "./program.js";
 import type { Work } from "./solver.js";
@@ -47,6 +61,9 @@ import type { Work } from "./solver.js";
  */
 
 const COLLECTIONS = new Set(["list", "set", "dict", "object"]);
+
+/** The receiver kinds a copy of their elements (F10) is not. */
+const COPIED: ReadonlySet<ItemTag> = new Set(["list", "set", "range"]);
 
 /** Which path answered a read (S3 §1's route): the exact path's definition, or the contract (§3 step 1 included). */
 export type ReadRoute = "exact" | "contract";
@@ -164,10 +181,11 @@ export class Values {
   }
 
   /**
-   * TABLE r4.46 (2): a value read along a path through a dict's `values` (a new list of its values) or `keys` (a new
-   * list of text), from the step `from` on, where the path ends: at a literal or an operation (a projection passes its
-   * step to its owner, and a variable or a call its key to the key's reads, which the contract answers the same way).
-   * The lists are as certain as the dict and may hold none (no count proof, no `null`); an object's own property of the
+   * A value read along a path through a member a built-in value answers by itself, from the step `from` on, where the
+   * path ends: at a literal or an operation (a projection passes its step to its owner, and a variable or a call its key
+   * to the key's reads, which the contract answers the same way). A dict's `values` is a new list of its values and its
+   * `keys` one of text (TABLE r4.46 (2)), as certain as the dict, either may hold none (no count proof, no `null`); a
+   * temporal field or a calendar duration's part gives its declared result (V30 §35); an object's own property of the
    * name is read as any property (F11), and a receiver that may be a reference has the runtime's members (F19a).
    */
   #through(
@@ -177,7 +195,7 @@ export class Values {
     from: number,
   ): Work<readonly Item[]> {
     const { program } = this.pass;
-    const at = listStep(rest, from);
+    const at = memberStep(rest, from);
     if (
       at < 0 ||
       program.occurrenceOf.has(value) ||
@@ -186,11 +204,11 @@ export class Values {
       (program.callOutOf.has(value) && program.opOf.get(value)?.kind === "call")
     )
       return this.#valueAt(value, node, rest);
-    return this.#dictLists(value, node, rest, at, from);
+    return this.#members(value, node, rest, at, from);
   }
 
-  /** `#through` at the step `at`, the first of `rest` from `from` on that is a dict's `values` or `keys`. */
-  *#dictLists(
+  /** `#through` at the step `at`, the first of `rest` from `from` on that a built-in value answers by itself. */
+  *#members(
     value: PlaceId,
     node: FlowNode | null,
     rest: readonly string[],
@@ -211,18 +229,21 @@ export class Values {
     const receiver = withoutEmpty(yield* this.#through(value, node, before, from));
     const out: Item[] = [];
     let own = false;
+    const step = rest[at]!;
     for (const item of receiver) {
-      if (item.tag === "dict") {
-        const of = (tag: "list" | "string"): Item =>
-          carried({ ...makeItem(tag, item.writer, { context: item.context }), cert: item.cert }, [
-            item,
-          ]);
+      const of = (tag: ItemTag): Item =>
+        carried({ ...makeItem(tag, item.writer, { context: item.context }), cert: item.cert }, [
+          item,
+        ]);
+      const declared = declaredProperty(item.tag, step);
+      if (item.tag === "dict" && dictList(step) !== undefined) {
         if (after.length === 0) out.push(of("list"));
         else if (after[0] === "element") {
+          // a key is text from the list's contract, possible: no literal holds a derived list's element (r4.47, P3)
           const below =
-            dictList(rest[at]!) === "keys"
+            dictList(step) === "keys"
               ? after.length === 1
-                ? [of("string")]
+                ? weaken([of("string")])
                 : []
               : yield* this.#through(value, node, [...before, ...after], at);
           // the list's own selection takes its own emptiness (open); a deeper selection's marker is that selection's
@@ -230,6 +251,9 @@ export class Values {
           out.push(...(item.cert === "def" ? elements : weaken(elements)));
           if (after.length === 1) out.push(EMPTY);
         }
+      } else if (declared !== undefined) {
+        // a temporal field or a calendar duration's part: its declared result, as certain as its receiver
+        if (after.length === 0) out.push(of(declared));
       } else if (item.tag === "object") own = true;
       else if (item.tag === "unknown") out.push(item);
     }
@@ -300,13 +324,16 @@ export class Values {
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.valueItems(owner, node, []))) {
       if (item.tag === "list" || item.tag === "set") {
-        const elements = withoutEmpty(yield* this.valueItems(owner, node, ["element", ...rest]));
+        const elements = belowSelected(
+          yield* this.valueItems(owner, node, ["element", ...rest]),
+          rest,
+        );
         out.push(...(item.cert === "def" ? elements : weaken(elements)));
-      } else if ((item.tag === "dict" || item.tag === "range") && rest.length === 0)
+      } else if ((item.tag === "dict" || kindElement(item.tag) !== undefined) && rest.length === 0)
         out.push(
           carried(
             {
-              ...makeItem(item.tag === "dict" ? "string" : "integer", item.writer, {
+              ...makeItem(item.tag === "dict" ? "string" : kindElement(item.tag)!, item.writer, {
                 context: item.context,
               }),
               cert: item.cert,
@@ -441,7 +468,10 @@ export class Values {
       // F19a before F17b: a receiver that may be a reference has the runtime's `get`, no default merged beside it
       out = [OPAQUE_MEMBER];
     } else if (c.kind === "get") {
-      const receiver = withoutEmpty(yield* this.valueItems(c.receiver, at, ["element", ...rest]));
+      const receiver = belowSelected(
+        yield* this.valueItems(c.receiver, at, ["element", ...rest]),
+        rest,
+      );
       const fallbackAt = program.exprAt(program.places[c.fallback]?.site ?? c.site);
       // P7, F17b: only the graph's literal proof (a `get` on a list literal with a literal index: the default is dead)
       // makes the element certain; else the element may be absent and its kinds are possible
@@ -576,22 +606,48 @@ export class Values {
             out.push(carried(makeItem("null", null, { cert: item.cert }), [item]));
         } else if (COLLECTIONS.has(item.tag))
           out.push(
-            ...weaken(withoutEmpty(yield* this.valueItems(c.receiver, at, ["element", ...rest]))),
+            ...weaken(
+              belowSelected(yield* this.valueItems(c.receiver, at, ["element", ...rest]), rest),
+            ),
           );
       }
       return out;
     }
-    // F10: a copy of the elements, which may hold none where it takes a count
+    // F10: a copy of the elements, which may hold none where it takes a count: a receiver's own elements, or those its
+    // kind declares (a range's whole numbers)
     if (method !== undefined && c.receiver !== null && method.gives.kind === "copy") {
       const copy = method.gives;
-      const held = yield* this.valueItems(
-        c.receiver,
-        at,
-        rest.length === 0 ? [] : ["element", ...rest.slice(1)],
-      );
+      const receiver = yield* this.valueItems(c.receiver, at, []);
+      // the receiver's own collection is not the copy's kind (a range's `toList` gives a list)
+      if (rest.length === 0)
+        return [
+          carried(makeItem(copy.into), receiver),
+          ...receiver.filter((item) => !COPIED.has(item.tag)),
+        ];
+      const kinds = withoutEmpty(receiver);
+      const declared = kinds.some((item) => kindElement(item.tag) !== undefined);
       return [
-        ...(rest.length === 0 ? [carried(makeItem(copy.into), held)] : []),
-        ...held.filter((item) => rest.length > 0 || (item.tag !== "list" && item.tag !== "set")),
+        // a kind's declared elements may be none (a range's bounds decide): the copy's element step keeps that mark
+        ...(declared && rest.length === 1 ? [EMPTY] : []),
+        ...(rest.length === 1
+          ? kinds.flatMap((item) => {
+              const element = kindElement(item.tag);
+              return element === undefined
+                ? []
+                : [
+                    carried(
+                      {
+                        ...makeItem(element, item.writer, { context: item.context }),
+                        cert: item.cert,
+                      },
+                      [item],
+                    ),
+                  ];
+            })
+          : []),
+        ...(kinds.some((item) => kindElement(item.tag) === undefined)
+          ? yield* this.valueItems(c.receiver, at, ["element", ...rest.slice(1)])
+          : []),
         ...(copy.mayHoldNone && rest.length === 1 ? [EMPTY] : []),
       ];
     }
@@ -636,6 +692,9 @@ export class Values {
     const interaction = family === "interaction" ? interactionCategory(name) : undefined;
     if (interaction?.kind === "asks")
       return rest.length === 0 ? [makeItem(interaction.result)] : [];
+    // r4.47 (5): a clock read gives its declared kind, as an ask does
+    const clock = family === "clock" ? clockResult(name) : undefined;
+    if (clock !== undefined) return rest.length === 0 ? [makeItem(clock)] : [];
     // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
     if (interaction?.kind === "options")
       return yield* choiceItems(
@@ -643,14 +702,39 @@ export class Values {
         rest,
         (value, path, element) =>
           element === true ? this.#belowElement(value, at, path) : this.valueItems(value, at, path),
-        !contract.choiceKeysStored(),
+        contract.choiceKeysStored(),
       );
     const member = family === "member" ? memberResult(name) : undefined;
     if (member !== undefined) return member.map((kind) => makeItem(kind));
     // F19a: a handle's members are the runtime's
     if (family === "timer" || family === "media")
       return rest.length === 0 ? [makeItem(family)] : [OPAQUE_MEMBER];
-    if (family === "range") return [makeItem("range")];
+    // F25: a button's, a popup's or a camera's fixed result; a handle's members are the runtime's (F19a)
+    const shown = shownResult(name);
+    if (shown !== undefined)
+      return rest.length === 0 ? [makeItem(shown)] : shown === "duration" ? [] : [OPAQUE_MEMBER];
+    // a range: its elements are its kind's (`kindElement`), nothing stands below it by path
+    if (family === "range") return rest.length === 0 ? [makeItem("range")] : [];
+    // a method without a category, per receiver alternative: its declared result per receiver kind (F25), else the
+    // runtime's opaque answer on a known kind (C2: its consumers keep their checks, r4.47 (1)); what the core cannot know
+    // keeps its own reasons. A receiver without items yet is a provisional bottom, no answer: the method's result stays
+    // the bottom, which the solver completes (S3 §1, r4.44), never an `unknown` with a reason of its own
+    if (family === "method" && c.receiver !== null) {
+      const receiver = withoutEmpty(yield* this.valueItems(c.receiver, at, []));
+      return receiver.flatMap((item) => {
+        if (item.tag === "unknown") return [item];
+        const declared = declaredMethod(item.tag, name);
+        if (declared === undefined) return [OPAQUE_MEMBER];
+        return rest.length > 0
+          ? []
+          : [
+              carried(
+                { ...makeItem(declared, item.writer, { context: item.context }), cert: item.cert },
+                [item],
+              ),
+            ];
+      });
+    }
     return [unknownItem(REASON.external)];
   }
 

@@ -10,6 +10,7 @@ import {
   itemsSignature,
   makeItem,
   mergeItems,
+  REASON,
   writerKey,
   type Item,
 } from "../src/type-inference/core/items.js";
@@ -198,6 +199,74 @@ test("a default in a cycle is chosen on its completed kinds, in either order and
     got,
     DEFAULT_CYCLES.map(([name, , outcome]) => `${name}: ${outcome}`),
   );
+  assert.deepEqual(differing, []);
+});
+
+/**
+ * r4.47 (1), r4.44, S3 §1 (Astra's R2-B1 on #1028): a method without a category answers per receiver alternative, and a
+ * receiver without items yet is a provisional bottom, no answer: the method's result stays the bottom, which the solver
+ * completes, so no `external` reason enters a component from it. A chain round its own component (a self-update, a
+ * record's field updated from itself, a loop, two functions) gives the same record in every order combination
+ * (consumers × worklist) and the same answers from every component entry, its unknowns opaque.
+ */
+const METHOD_CYCLES: readonly (readonly [string, string, string])[] = [
+  [
+    "a self-update",
+    'let s = "a"\nif askBoolean "f" { s = s.trimStart() }\nlet n: integer = s.trimEnd()\nexit',
+    "s.trimEnd()",
+  ],
+  [
+    "a record's field updated from itself",
+    'let r = {s: "a"}\nif askBoolean "f" { r.s = r.s.trimStart() }\nlet n: integer = r.s.trimEnd()\nexit',
+    "r.s.trimEnd()",
+  ],
+  [
+    "a loop",
+    'let s = "a"\nrepeat 3 { s = s.trimStart() }\nlet n: integer = s.trimEnd()\nexit',
+    "s.trimEnd()",
+  ],
+  [
+    "two functions",
+    'function f(x) {\nif x > 0 { return g(x - 1).trimStart() }\nreturn "a"\n}\nfunction g(x) { return f(x).trimEnd() }\nlet n: integer = f(3)\nexit',
+    "f(3)",
+  ],
+];
+
+test("a method chain round its own component answers alike from every entry, its unknowns opaque", () => {
+  const differing: string[] = [];
+  for (const [name, source, read] of METHOD_CYCLES) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: the source parses and resolves`);
+    let first: string | null = null;
+    for (const consumers of [false, true])
+      for (const reverseWorklist of [false, true]) {
+        const order = `${consumers ? "consumers reversed" : "consumers"}, ${reverseWorklist ? "worklist reversed" : "worklist"}`;
+        const run = <T>(f: () => T): T =>
+          withSolverSeam({ reverseWorklist }, () =>
+            consumers ? withConsumerOrder((list) => [...list].reverse(), f) : f(),
+          );
+        const record = canonical(run(() => compactAnalysis(request)));
+        first ??= record;
+        if (record !== first) differing.push(`${name}: ${order}`);
+        const answers = run(() => analyseCore(request));
+        const node = answers.graph.nodes.find(
+          (candidate) =>
+            candidate.kind === "expression" &&
+            candidate.span !== null &&
+            source.slice(candidate.span.start.offset, candidate.span.end.offset) === read,
+        );
+        const unknowns = (node === undefined ? [] : (answers.at(node)?.items ?? [])).filter(
+          (item) => item.tag === "unknown",
+        );
+        if (unknowns.length === 0 || unknowns.some((item) => item.reasons !== REASON.opaque))
+          differing.push(
+            `${name}: ${order}: reasons ${unknowns.map((item) => item.reasons).join(",")}`,
+          );
+      }
+    const found = componentDifferences(name, request);
+    if (found.components === 0) differing.push(`${name}: no component`);
+    differing.push(...found.differing);
+  }
   assert.deepEqual(differing, []);
 });
 

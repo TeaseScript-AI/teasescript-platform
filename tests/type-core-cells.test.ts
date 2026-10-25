@@ -824,6 +824,22 @@ test("a choice object's value is selected by its key, and a dict's values and ke
       'let o = {text: "A", value: 1}\no.value = "x"\nlet n: integer = askChoice o\nexit',
       (at) => ["compile-error", `written-target compile-error @${at("askChoice")}`],
     ],
+    // and a record's `text` stored after it is made; a key without a store below it stays per record (Astra on #1027)
+    [
+      "a held record whose text is stored",
+      'let o = {text: 1}\no.text = "x"\nlet n: integer = askChoice o\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at("askChoice")}`],
+    ],
+    [
+      "held records beside a value stored elsewhere",
+      'let other = {value: 0}\nother.value = 1\nlet opts = [{text: "unused", value: 1}, {text: 2}]\nrepeat askChoice opts {}\nexit',
+      () => ["valid"],
+    ],
+    [
+      "held records none of whose buttons fits, beside a value stored elsewhere",
+      'let other = {value: 0}\nother.value = 1\nlet opts = [{text: 1, value: "x"}, {text: "y"}]\nrepeat askChoice opts {}\nexit',
+      (at) => ["compile-error", `integer-use compile-error @${at("askChoice")}`],
+    ],
     // a choice object held in a variable, whose value may be a missing member: possibly its text, never certainly
     [
       "a held choice object whose value may be missing",
@@ -847,14 +863,17 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `empty-check dict{k: "bad"}.values [list] @${at("dict")}`,
       ],
     ],
+    // r4.47 (7), F12 with P3: an element read from an open derived list is possible, so a key is possible text, a
+    // warning with its check; §10.5, r4.46 (2): a target through a dict's list is its source text, no key of the dict
     [
       "a dict's keys",
       "let d = dict{k: 1}\nrepeat d.keys.first {}\nexit",
       (at) => [
-        "compile-error",
-        `integer-use compile-error @${at("d.keys")}`,
+        "warning-runtime-check",
+        `integer-use warning-runtime-check @${at("d.keys")}`,
         `member-read warning-runtime-check @${at("d.keys")}`,
         `empty-check d.keys [list] @${at("d.keys")}`,
+        `integer-check d.keys.first [integer] @${at("d.keys")}`,
       ],
     ],
     [
@@ -886,19 +905,20 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `member-read warning-runtime-check @${at("d.values")}`,
         `member-read warning-runtime-check @${at("d.values")}`,
         `empty-check d.values [list] @${at("d.values")}`,
-        `empty-check d.values.element.values [list] @${at("d.values")}`,
+        `empty-check d.values.first.values [list] @${at("d.values")}`,
       ],
     ],
     [
       "a dict's keys below its values",
       "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.first.keys.first {}\nexit",
       (at) => [
-        "compile-error",
-        `integer-use compile-error @${at("d.values")}`,
+        "warning-runtime-check",
+        `integer-use warning-runtime-check @${at("d.values")}`,
         `member-read warning-runtime-check @${at("d.values")}`,
         `member-read warning-runtime-check @${at("d.values")}`,
         `empty-check d.values [list] @${at("d.values")}`,
-        `empty-check d.values.element.keys [list] @${at("d.values")}`,
+        `empty-check d.values.first.keys [list] @${at("d.values")}`,
+        `integer-check d.values.first.keys.first [integer] @${at("d.values")}`,
       ],
     ],
     [
@@ -910,8 +930,8 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `member-read warning-runtime-check @${at("d.values")}`,
         `member-read warning-runtime-check @${at("d.values")}`,
         `empty-check d.values [list] @${at("d.values")}`,
-        `empty-check d.values.element.values [list] @${at("d.values")}`,
-        `empty-check d.values.element.values.element.values [list] @${at("d.values")}`,
+        `empty-check d.values.first.values [list] @${at("d.values")}`,
+        `empty-check d.values.first.values.first.values [list] @${at("d.values")}`,
       ],
     ],
     [
@@ -922,7 +942,7 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `member-read warning-runtime-check @${at("d.values")}`,
         `member-read warning-runtime-check @${at("d.values")}`,
         `empty-check d.values [list] @${at("d.values")}`,
-        `empty-check d.values.element.values [list] @${at("d.values")}`,
+        `empty-check d.values.first.values [list] @${at("d.values")}`,
       ],
     ],
     [
@@ -957,7 +977,7 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `integer-use warning-runtime-check @${at("d.values.first {}")}`,
         `empty-check d.values [list] @${at("d.values.first is")}`,
         `empty-check d.values [list] @${at("d.values.first {}")}`,
-        `integer-check d.values.element [integer] @${at("d.values.first {}")}`,
+        `integer-check d.values.first [integer] @${at("d.values.first {}")}`,
       ],
     ],
     // r4.43: C1's site at the external value among the options a dict's values give a choice
@@ -983,7 +1003,7 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `null-check o [non-null] @${at("o.keys.first")}`,
         `empty-check o.keys [list] @${at("o.keys.first")}`,
         `null-check o.keys [non-null] @${at("o.keys.first")}`,
-        `integer-check o.keys.element [integer] @${at("o.keys.first")}`,
+        `integer-check o.keys.first [integer] @${at("o.keys.first")}`,
       ],
     ],
     // the same through an operation and a literal: the receiver's completed contract decides (review r3)
@@ -999,9 +1019,9 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `integer-use warning-runtime-check @${at("(o otherwise")}`,
         `null-check o otherwise null [non-null] @${at("o otherwise")}`,
         `null-check o otherwise null [non-null] @${at("o otherwise")}`,
-        `empty-check o otherwise null.keys [list] @${at("(o otherwise")}`,
-        `null-check o otherwise null.keys [non-null] @${at("(o otherwise")}`,
-        `integer-check o otherwise null.keys.element [integer] @${at("(o otherwise")}`,
+        `empty-check (o otherwise null).keys [list] @${at("(o otherwise")}`,
+        `null-check (o otherwise null).keys [non-null] @${at("(o otherwise")}`,
+        `integer-check (o otherwise null).keys.first [integer] @${at("(o otherwise")}`,
       ],
     ],
     // a path through eight objects' own `values` is read once per step, as any property's (review r2: it exhausted the
@@ -1161,6 +1181,645 @@ test("a held choice object's button value is marked by a test of its selected ke
       });
       if (JSON.stringify(got) !== JSON.stringify(expected) || got![0] !== outcome)
         differing.push(`${name}${reversed ? " reversed" : ""}: ${got!.join("; ")}`);
+    }
+  assert.deepEqual(differing, []);
+});
+
+/**
+ * #1027's B1 beyond a dict's lists (review round 5's R5-3, Astra's delta): a collection's `get`, a loop's visit and the
+ * removals that give an element consume only the selected element's emptiness mark; a demanded descendant's passes
+ * through, so its read keeps the check whose runtime failure (TSR018) it guards. Per collection (a list, a dict's
+ * values), form and depth 1–3, the selected element holds a list that many levels deep whose innermost may be empty,
+ * read that many `first`s down; both orders. A scalar element is the control.
+ */
+test("a selection consumes only its own emptiness mark below get, a loop's visit and a removal", () => {
+  const nest = (inner: string, depth: number): string =>
+    `${"[".repeat(depth - 1)}${inner}${"]".repeat(depth - 1)}`;
+  const collections: readonly (readonly [string, (depth: number) => string])[] = [
+    ["a list", (depth) => `let c = [${nest("[]", depth)}, ${nest("[1]", depth)}]`],
+    [
+      "a dict's values",
+      (depth) =>
+        `let d = dict{a: ${nest("[]", depth)}, b: ${nest("[1]", depth)}}\nlet c = d.values`,
+    ],
+  ];
+  // per form, the selection with its default (the selected element's shape) and the read below it
+  const forms: readonly (readonly [string, (fallback: string, read: string) => string])[] = [
+    ["get", (fallback, read) => `let picked = c.get(0, default: ${fallback})\nrepeat ${read} {}`],
+    ["a loop's visit", (_, read) => `for picked in c { repeat ${read} {} }`],
+    ["removeFirst", (_, read) => `let picked = c.removeFirst()\nrepeat ${read} {}`],
+    ["removeAt", (_, read) => `let picked = c.removeAt(0)\nrepeat ${read} {}`],
+  ];
+  const programs: [string, string, string[]][] = [];
+  for (const [collection, made] of collections)
+    for (const [form, select] of forms)
+      for (const depth of [1, 2, 3]) {
+        const read = `picked${".first".repeat(depth)}`;
+        const source = `${made(depth)}\n${select(nest("[1]", depth), read)}\nexit`;
+        const at = source.indexOf(`repeat ${read}`) + "repeat ".length;
+        const expected = [
+          "warning-runtime-check",
+          `member-read warning-runtime-check @${at}`,
+          `empty-check picked${".element".repeat(depth - 1)} [list] @${at}`,
+        ];
+        // a dict's values may hold none: its removal keeps its own check (C6)
+        if (collection === "a dict's values" && form === "removeFirst")
+          expected.push(
+            `member-read warning-runtime-check @${source.indexOf("c.removeFirst")}`,
+            `empty-check c [list] @${source.indexOf("c.removeFirst")}`,
+          );
+        programs.push([`${form} of ${collection} at depth ${depth}`, source, expected.sort()]);
+      }
+  for (const [form, select] of forms)
+    programs.push([
+      `${form} of a list's scalar`,
+      `let c = [1, 2]\n${select("1", "picked")}\nexit`,
+      ["valid"],
+    ]);
+  const differing: string[] = [];
+  for (const [name, source, expected] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const got = summary(reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run());
+      if (JSON.stringify(got) !== JSON.stringify(expected))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join("; ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});
+
+/**
+ * TABLE r4.47 (#1026's follow-up): the set's records `cp9-cells/s4/followup/…` (set `716ac7091de2b95e`) in both orders,
+ * as their outcome, diagnostics and checks with their sites: temporal fields and calendar parts by their declared
+ * results (1), a selection's descendant emptiness (2), held choice options after a store below `value` or `text` (4),
+ * clock reads by their declared kind with no boundary (5), and what fits a written place (6, §3.4, §10.5). Two records
+ * are S6's and left out: `temporal/year-string-fallback` differs only by C10's error at the fallback and
+ * `temporal/year-present-wrong-store` only by A6's error at the store, both admission's.
+ */
+test("the set's follow-up records give their records in both orders", () => {
+  // per record its source, its outcome, diagnostics and checks, and the words it asserts (an unasserted word is null)
+  type Expected = readonly [string, string, readonly string[], (readonly string[])?];
+  const programs: readonly Expected[] = [
+    [
+      "temporal/weekday-repeat",
+      'let d = toDate("2026-10-04")\nrepeat d.weekday {}\nexit\n',
+      ["compile-error", "integer-use compile-error @36"],
+    ],
+    [
+      "temporal/weekday-written-string",
+      'let d = toDate("2026-10-04")\nlet name: string = d.weekday\nexit\n',
+      ["valid"],
+    ],
+    [
+      "temporal/year-written-integer",
+      'let d = toDate("2026-10-04")\nlet n: integer = d.year\nexit\n',
+      ["valid"],
+    ],
+    [
+      "temporal/year-written-string",
+      'let x: string = (askDate "When?").year\nexit\n',
+      ["compile-error", "written-target compile-error @16"],
+    ],
+    [
+      "temporal/year-fallback-written-union",
+      'let x: integer | string = (askDate "When?").year otherwise "ok"\nexit\n',
+      ["valid"],
+    ],
+    [
+      "temporal/year-partial-presence-store",
+      'let x = {p: (askDate "When?").year}\nif askBoolean "pick" { x = {q: 0} }\nx.p = 1\nexit\n',
+      [
+        "member-read warning-runtime-check @72",
+        "null-check x [non-null] @72",
+        "warning-runtime-check",
+      ],
+      ["member-read warning-runtime-check missing @72"],
+    ],
+    [
+      "temporal/year-present-store",
+      'let x = {p: (askDate "When?").year}\nx.p = 1\nexit\n',
+      ["valid"],
+    ],
+    [
+      "temporal/property-absent-in-every-source",
+      "let x = {q: 0}\nx.p = 1\nexit\n",
+      ["compile-error", "member-read compile-error @8"],
+    ],
+    [
+      "temporal/calendar-parts-written-results",
+      "let c = 2 calendar days\nlet monthCount: integer = c.months\nlet dayCount: integer = c.days\nlet offset: duration = c.exactOffset\nexit\n",
+      ["valid"],
+    ],
+    [
+      "temporal/calendar-exact-offset-repeat",
+      "let c = 2 calendar days\nrepeat c.exactOffset {}\nexit\n",
+      ["compile-error", "integer-use compile-error @31"],
+    ],
+    [
+      "temporal/exact-duration-has-no-calendar-parts",
+      "let d = 2 days\nsay d.days\nexit\n",
+      ["compile-error", "member-read compile-error @19"],
+    ],
+    [
+      "temporal/datetime-date-and-time-fields",
+      'let dt = toDateTime("2026-10-04T18:00")\nlet y: integer = dt.year\nlet h: integer = dt.hour\nexit\n',
+      ["valid"],
+    ],
+    [
+      "temporal/time-date-field-inapplicable",
+      'let t = toTime("18:00")\nsay t.year\nexit\n',
+      ["compile-error", "member-read compile-error @28"],
+    ],
+    [
+      "temporal/absolute-local-field-inapplicable",
+      'let a = toAbsoluteDateTime("2026-10-04T12:30:00Z")\nsay a.year\nexit\n',
+      ["compile-error", "member-read compile-error @55"],
+    ],
+    [
+      "temporal/absolute-converted-local-field",
+      'let a = toAbsoluteDateTime("2026-10-04T12:30:00Z")\nlet n: integer = a.toDateTime().year\nexit\n',
+      ["valid"],
+    ],
+    [
+      "emptiness/values-first",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.first.values.first {}\nexit\n",
+      [
+        "empty-check d.values [list] @46",
+        "empty-check d.values.first.values [list] @46",
+        "member-read warning-runtime-check @46",
+        "member-read warning-runtime-check @46",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/keys-first",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.first.keys.first {}\nexit\n",
+      [
+        "empty-check d.values [list] @46",
+        "empty-check d.values.first.keys [list] @46",
+        "integer-check d.values.first.keys.first [integer] @46",
+        "integer-use warning-runtime-check @46",
+        "member-read warning-runtime-check @46",
+        "member-read warning-runtime-check @46",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/get-outer",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.get(0, default: dict{v: 1}).values.first {}\nexit\n",
+      [
+        "empty-check d.values.get(0, default: dict{v: 1}).values [list] @46",
+        "member-read warning-runtime-check @46",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/get-inner",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.first.values.get(0, default: 0) {}\nexit\n",
+      [
+        "empty-check d.values [list] @46",
+        "member-read warning-runtime-check @46",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/iterate-values-direct",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nfor n in d.values.first.values { repeat n {} }\nexit\n",
+      [
+        "empty-check d.values [list] @48",
+        "member-read warning-runtime-check @48",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/iterate-inner-then-select",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nfor inner in d.values { repeat inner.values.first {} }\nexit\n",
+      [
+        "empty-check inner.values [list] @70",
+        "member-read warning-runtime-check @70",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/removeFirst-outer",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.removeFirst().values.first {}\nexit\n",
+      [
+        "empty-check d.values [list] @46",
+        "empty-check d.values.removeFirst().values [list] @46",
+        "member-read warning-runtime-check @46",
+        "member-read warning-runtime-check @46",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/removeAt-outer",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nrepeat d.values.removeAt(0).values.first {}\nexit\n",
+      [
+        "empty-check d.values.removeAt(0).values [list] @46",
+        "member-read warning-runtime-check @46",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/bound-inner",
+      "let d = dict{a: dict{v: 1}, b: dict{v: 2}}\nlet inner = d.values.first\nlet count: integer = inner.values.first\nrepeat count {}\nexit\n",
+      [
+        "empty-check d.values [list] @55",
+        "empty-check inner.values [list] @91",
+        "member-read warning-runtime-check @55",
+        "member-read warning-runtime-check @91",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/cleared-bound-inner",
+      "let d = dict{a: dict{v: 1}, b: dict{v: 2}}\nlet inner = d.values.first\ninner.clear()\nlet count: integer = inner.values.first\nrepeat count {}\nexit\n",
+      [
+        "empty-check d.values [list] @55",
+        "empty-check inner.values [list] @105",
+        "member-read warning-runtime-check @105",
+        "member-read warning-runtime-check @55",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/list-literal-open-descendant",
+      "let xs = [[], [1]]\nrepeat xs.first.first {}\nexit\n",
+      [
+        "empty-check xs.element [list] @26",
+        "member-read warning-runtime-check @26",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/list-literal-held-control",
+      "let xs = [[2], [1]]\nrepeat xs.first.first {}\nexit\n",
+      ["valid"],
+    ],
+    [
+      "emptiness/named-values",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nlet projected = d.values\nrepeat projected.first.values.first {}\nexit\n",
+      [
+        "empty-check projected [list] @71",
+        "empty-check projected.first.values [list] @71",
+        "member-read warning-runtime-check @71",
+        "member-read warning-runtime-check @71",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/values-contract-route",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\ngoto inspect\nlabel inspect\nrepeat d.values.first.values.first {}\nexit\n",
+      [
+        "empty-check d.values [list] @73",
+        "empty-check d.values.first.values [list] @73",
+        "member-read warning-runtime-check @73",
+        "member-read warning-runtime-check @73",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "emptiness/key-contract-count",
+      "let d = dict{a: dict{}, b: dict{v: 1}}\nlet key = d.values.first.keys.first\ngoto inspect\nlabel inspect\nrepeat key {}\nexit\n",
+      [
+        "compile-error",
+        "empty-check d.values [list] @49",
+        "empty-check d.values.first.keys [list] @49",
+        "integer-use compile-error @109",
+        "member-read warning-runtime-check @49",
+        "member-read warning-runtime-check @49",
+      ],
+    ],
+    [
+      "choice/value-base",
+      'let o = {text: "A", value: 1}\nrepeat askChoice o {}\nexit\n',
+      ["valid"],
+    ],
+    [
+      "choice/value-store",
+      'let o = {text: "A", value: 1}\no.value = 2\nrepeat askChoice o {}\nexit\n',
+      ["valid"],
+    ],
+    ["choice/text-base", "let o = {text: 0}\nrepeat askChoice o {}\nexit\n", ["valid"]],
+    [
+      "choice/text-store",
+      "let o = {text: 0}\no.text = 3\nrepeat askChoice o {}\nexit\n",
+      ["valid"],
+    ],
+    [
+      "choice/display-store",
+      'let o = {text: "A", value: 1}\no.text = "B"\nrepeat askChoice o {}\nexit\n',
+      ["valid"],
+    ],
+    [
+      "clock/weekday-repeat",
+      "let d = getDate()\nrepeat d.weekday {}\nexit\n",
+      ["compile-error", "integer-use compile-error @25"],
+    ],
+    [
+      "clock/weekday-written-string",
+      "let d = getDate()\nlet weekdayName: string = d.weekday\nexit\n",
+      ["valid"],
+    ],
+    ["clock/date-written", "let t: date = getDate()\nexit\n", ["valid"]],
+    ["clock/year-written-integer", "let n: integer = getDate().year\nexit\n", ["valid"]],
+    ["clock/time-written", "let t: time = getTime()\nexit\n", ["valid"]],
+    [
+      "clock/time-written-integer",
+      "let t: integer = getTime()\nexit\n",
+      ["compile-error", "written-target compile-error @17"],
+    ],
+    [
+      "fit/literal-mixed-written",
+      "let r: integer = [2, 2.5][0]\nexit\n",
+      [
+        "copy-type r [integer] @17",
+        "warning-runtime-check",
+        "written-target warning-runtime-check @17",
+      ],
+      ["written-target warning-runtime-check member @17"],
+    ],
+    [
+      "fit/literal-number-written",
+      "let r: integer = [2.5, 3.5][0]\nexit\n",
+      ["compile-error", "written-target compile-error @17"],
+    ],
+    [
+      "fit/external-mixed-written",
+      "let r: integer = [hostValue, 2.5][0]\nexit\n",
+      [
+        "copy-type r [integer] @17",
+        "copy-type r [integer] @18",
+        "copy-type r [integer] boundary @18",
+        "warning-runtime-check",
+        "written-target warning-runtime-check @17",
+        "written-target warning-runtime-check @18",
+      ],
+      [
+        "written-target warning-runtime-check member @17",
+        "written-target warning-runtime-check unknown @18",
+      ],
+    ],
+    [
+      "fit/widened-place-written",
+      "let xs = [1]\nxs.add(1.5)\nlet r: integer = xs.first\nexit\n",
+      [
+        "copy-type r [integer] @42",
+        "warning-runtime-check",
+        "written-target warning-runtime-check @42",
+      ],
+      ["written-target warning-runtime-check member @42"],
+    ],
+    [
+      "fit/scalar-overwrite-written",
+      "let n = 1\nn = 2.5\nlet r: integer = n\nexit\n",
+      ["compile-error", "written-target compile-error @35"],
+    ],
+    [
+      "fit/literal-mixed-repeat",
+      "repeat [2, 2.5][0] {}\nexit\n",
+      [
+        "integer-check [2, 2.5][0] [integer] @7",
+        "integer-use warning-runtime-check @7",
+        "warning-runtime-check",
+      ],
+      ["integer-use warning-runtime-check member @7"],
+    ],
+    [
+      "fit/literal-number-repeat",
+      "repeat [2.5, 3.5][0] {}\nexit\n",
+      ["compile-error", "integer-use compile-error @7"],
+    ],
+    ["fit/literal-integer-written", "let r: integer = [2, 3][0]\nexit\n", ["valid"]],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, expected, words = []] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const got = summary(record);
+      const worded = record.diagnostics.map(
+        (d) => `${d.kind} ${d.class} ${d.context} @${d.site.offset}`,
+      );
+      if (
+        JSON.stringify(got) !== JSON.stringify(expected) ||
+        words.some((word) => !worded.includes(word))
+      )
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${[...got, ...worded].join("; ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});
+
+/**
+ * §3.4, X3 (the lead's ruling on #1026's follow-up): a choice's button value, selected by key past the element step over
+ * its options, carries the word `member` as its literal analogue does, written or held, and with options of both keys;
+ * a whole option object, no element step, is the control. Kinds, warnings and checks are the analogue's; both orders.
+ */
+test("a choice over a list of options takes its literal analogue's word", () => {
+  const pairs: readonly (readonly [string, string, string])[] = [
+    [
+      "a written list",
+      'let result: integer = askChoice [{text: "A", value: 2}, {text: "B", value: 2.5}]\nexit',
+      'let result: integer = [{text: "A", value: 2}, {text: "B", value: 2.5}][0].value\nexit',
+    ],
+    [
+      "a held list",
+      'let opts = [{text: "A", value: 2}, {text: "B", value: 2.5}]\nlet result: integer = askChoice opts\nexit',
+      'let opts = [{text: "A", value: 2}, {text: "B", value: 2.5}]\nlet result: integer = opts[0].value\nexit',
+    ],
+    [
+      "a whole option object",
+      'let result: integer = askChoice {text: "A", value: 2.5}\nexit',
+      'let result: integer = {text: "A", value: 2.5}.value\nexit',
+    ],
+  ];
+  // its outcome, then its diagnostics with their words and its checks
+  const record = (source: string, reversed: boolean): string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const run = (): CompactRecord =>
+      withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+    const got = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+    return [
+      got.outcome,
+      ...got.diagnostics.map((d) => `${d.kind} ${d.class} ${d.context ?? "-"} @${d.site.offset}`),
+      ...got.checks.map(
+        (check) =>
+          `${check.kind} ${check.target} [${check.against.join(", ")}] @${check.site.offset}`,
+      ),
+    ];
+  };
+  const differing: string[] = [];
+  for (const reversed of [false, true]) {
+    for (const [name, choice, analogue] of pairs)
+      if (JSON.stringify(record(choice, reversed)) !== JSON.stringify(record(analogue, reversed)))
+        differing.push(
+          `${name}${reversed ? " reversed" : ""}: ${record(choice, reversed).join("; ")}`,
+        );
+    // options of both keys have no single analogue: the same word, by the same element step
+    const mixed = record(
+      'let result: integer = askChoice [{text: "A", value: 2}, {text: 2.5}]\nexit',
+      reversed,
+    );
+    if (!mixed.includes("written-target warning-runtime-check member @22"))
+      differing.push(`options of both keys${reversed ? " reversed" : ""}: ${mixed.join("; ")}`);
+  }
+  assert.deepEqual(differing, []);
+  assert.ok(
+    record(pairs[0]![1], false).includes("written-target warning-runtime-check member @22"),
+    "the written list's word is member",
+  );
+});
+
+/**
+ * V30 §6, F10, F27 (Astra's B1 on #1028): a range's list holds the range's whole numbers, as the category layer declares
+ * a range's elements, and maybe none, as its bounds decide (review round 3: `3..1` holds none, and its list's `first`
+ * fails at runtime with TSR018). Its element read is an integer into a count, a written integer and through `first`,
+ * bound, in a loop and through a function's result of two returns, each selection with its empty check; in both
+ * orders. A written text is the control.
+ */
+test("a range's list holds its whole numbers, maybe none", () => {
+  const programs: readonly (readonly [string, string, readonly string[]])[] = [
+    [
+      "counted",
+      "let xs = (1..3).toList()\nrepeat xs.first {}\nexit",
+      [
+        "empty-check xs [list] @32",
+        "member-read warning-runtime-check @32",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "into a written integer",
+      "let n: integer = (1..3).toList().first\nexit",
+      [
+        "empty-check (1..3).toList() [list] @17",
+        "member-read warning-runtime-check @17",
+        "warning-runtime-check",
+      ],
+    ],
+    ["visited by a loop", "for x in (1..3).toList() { repeat x {} }\nexit", ["valid"]],
+    [
+      "through a function's result",
+      'function make(f) {\nif f { return (1..3).toList() }\nreturn (2..4).toList()\n}\nrepeat make(askBoolean "f").first {}\nexit',
+      [
+        "empty-check make.result [list] @83",
+        "member-read warning-runtime-check @83",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "an empty range's first",
+      "let xs = (3..1).toList()\nrepeat xs.first {}\nexit",
+      [
+        "empty-check xs [list] @32",
+        "member-read warning-runtime-check @32",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "an empty range's removal",
+      "let xs = (3..1).toList()\nrepeat xs.removeFirst() {}\nexit",
+      [
+        "empty-check xs [list] @32",
+        "member-read warning-runtime-check @32",
+        "warning-runtime-check",
+      ],
+    ],
+    [
+      "into a written text",
+      "let s: string = (1..3).toList().first\nexit",
+      [
+        "compile-error",
+        "empty-check (1..3).toList() [list] @16",
+        "member-read warning-runtime-check @16",
+        "written-target compile-error @16",
+      ],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, expected] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const got = summary(reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run());
+      if (JSON.stringify(got) !== JSON.stringify(expected))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join("; ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});
+
+/**
+ * TABLE r4.47 (1), F15, §3.4 (Astra's D1 on #1028): a method without a category answers the runtime's opaque `unknown`
+ * on a receiver of a known kind, and on what the core cannot know keeps that value's own reasons, so a chain of such
+ * methods stays opaque (the word `unmodelled`), with no external data and no boundary; a modelled method in the chain
+ * gives its declared result. Both orders.
+ */
+test("a chain of methods without a category stays opaque", () => {
+  const cases: readonly (readonly [string, string, readonly string[], readonly string[]])[] = [
+    [
+      "two methods without a category",
+      'let n: integer = "  alpha  ".trimStart().trimEnd()\nexit',
+      [
+        "copy-type n [integer] @17",
+        'null-check "  alpha  ".trimStart() [non-null] @17',
+        "warning-runtime-check",
+      ],
+      ["written-target warning-runtime-check unmodelled @17"],
+    ],
+    [
+      "a modelled method, then one without a category",
+      'let n: integer = "  alpha  ".uppercase().trimStart()\nexit',
+      ["copy-type n [integer] @17", "warning-runtime-check"],
+      ["written-target warning-runtime-check unmodelled @17"],
+    ],
+    [
+      "one without a category, then a modelled method",
+      'let n: integer = "  alpha  ".trimStart().uppercase()\nexit',
+      ["compile-error", 'null-check "  alpha  ".trimStart() [non-null] @17'],
+      ["written-target compile-error null @17"],
+    ],
+    [
+      "a receiver of a known kind or an opaque answer",
+      'let s = "a"\nlet t = s\nif askBoolean "f" { t = s.trimStart() }\nlet n: integer = t.trimEnd()\nexit',
+      ["copy-type n [integer] @79", "null-check t [non-null] @79", "warning-runtime-check"],
+      ["written-target warning-runtime-check unmodelled @79"],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, expected, words] of cases)
+    for (const reversed of [false, true]) {
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null, `${name}: its source parses and resolves`);
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      // its outcome and checks, and the words of its value's diagnostics
+      const got = [
+        record.outcome,
+        ...record.checks.map(
+          (check) =>
+            `${check.kind} ${check.target} [${check.against.join(", ")}]${check.boundary ? " boundary" : ""} @${check.site.offset}`,
+        ),
+      ].sort();
+      const worded = record.diagnostics.map(
+        (d) => `${d.kind} ${d.class} ${d.context} @${d.site.offset}`,
+      );
+      if (
+        JSON.stringify(got) !== JSON.stringify(expected) ||
+        words.some((word) => !worded.includes(word))
+      )
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${[...got, ...worded].join("; ")}`);
     }
   assert.deepEqual(differing, []);
 });

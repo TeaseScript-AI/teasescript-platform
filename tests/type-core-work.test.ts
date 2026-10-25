@@ -9,6 +9,7 @@ import {
   W34_KNOWN_PRODUCTS,
   W34_VARIANTS,
   W44_VARIANTS,
+  W45_VARIANTS,
   WORK_FAMILIES,
   type WorkFamily,
 } from "./helpers/type-core-families.js";
@@ -56,8 +57,8 @@ test("every sampled family's work grows with its program, not with a product of 
 });
 
 /**
- * W34 (TABLE §13.3, r4.33–r4.38) and W44 (r4.46 (3)): every variant in the source order and with the consumers' and the
- * solver's orders reversed, its total and each counter of at least 200 units per doubling of the source. A counter is the raw count of
+ * W34 (TABLE §13.3, r4.33–r4.38), W44 and W45 (r4.46 (3)): every variant in the source order and with the consumers'
+ * and the solver's orders reversed, its total and each counter of at least 200 units per doubling of the source. A counter is the raw count of
  * one structure's steps, so a copy walked per field or a mark set made per copy shows in its own counter where the
  * total would hide it; a counter may carry its structure's log factor (a sort, a table of jumps: 2.33 at these sizes
  * where nothing else is charged to it), a product of two dimensions measures 3 and more. The full series to k = 1,024
@@ -65,9 +66,9 @@ test("every sampled family's work grows with its program, not with a product of 
  */
 const COUNTER_DOUBLING = 2.35;
 
-test("every W34 and W44 variant's work and each of its counters grow with the program in either order", () => {
+test("every W34, W44 and W45 variant's work and each of its counters grow with the program in either order", () => {
   const steep: string[] = [];
-  for (const family of [...W34_VARIANTS, ...W44_VARIANTS])
+  for (const family of [...W34_VARIANTS, ...W44_VARIANTS, ...W45_VARIANTS])
     for (const reversed of [false, true]) {
       const small = analysed(family, 64, reversed).budget;
       const large = analysed(family, 128, reversed).budget;

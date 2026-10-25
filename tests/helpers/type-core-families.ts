@@ -545,6 +545,34 @@ function w44(k: number, variant: "fields" | "dict" | "deep"): string {
   );
 }
 
+/**
+ * k destinations that each copy one source and then store another, both with k stored fields, each read at its own
+ * field (#1026 review r1's N3): the same two roots under a flag or unconditionally, k small first sources beside one
+ * wide second, or one wide first beside k small seconds.
+ */
+function w45(k: number, variant: "flag" | "plain" | "firsts" | "seconds"): string {
+  const wide = (name: string): string =>
+    lines(
+      `let ${name} = {${fields(k, () => "1")}}`,
+      rows(k, (i) => `${name}.f${i} = 2`),
+    );
+  const small = (name: string, i: number): string =>
+    lines(`let ${name}${i} = {f${i}: 1}`, `${name}${i}.f${i} = 2`);
+  const first = (i: number): string => (variant === "firsts" ? `a${i}` : "a");
+  const second = (i: number): string => (variant === "seconds" ? `b${i}` : "b");
+  return lines(
+    'let flag = askBoolean "pick"',
+    variant === "firsts" ? rows(k, (i) => small("a", i)) : wide("a"),
+    variant === "seconds" ? rows(k, (i) => small("b", i)) : wide("b"),
+    rows(
+      k,
+      (i) =>
+        `let d${i} = ${first(i)}\n${variant === "plain" ? `d${i} = ${second(i)}` : `if flag { d${i} = ${second(i)} }`}\nrepeat d${i}.f${i} {}`,
+    ),
+    "exit",
+  );
+}
+
 export const WORK_FAMILIES: readonly WorkFamily[] = [
   {
     name: "W1",
@@ -893,6 +921,15 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
     ],
   },
 ];
+
+/** W45 (r4.46 (3)): a destination's second copied source is referenced, never flattened into it per destination. */
+export const W45_VARIANTS: readonly WorkFamily[] = (
+  ["flag", "plain", "firsts", "seconds"] as const
+).map((variant) => ({
+  name: `W45-${variant}`,
+  measures: "r4.46 (3): a joined copy's sources referenced once per destination",
+  program: (k: number) => main(w45(k, variant)),
+}));
 
 /**
  * W44 (r4.46 (3)): the width axis of one root's keys under projected copies, gated in both orders as W34 is; and k
