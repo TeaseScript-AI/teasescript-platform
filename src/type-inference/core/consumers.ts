@@ -508,8 +508,8 @@ export class Consumers {
         }
         // C1, ADR 1.7: a value none of whose kinds fits errs, against a written type at any path or a type decided
         // earlier in the source for a store into the place itself; never against a later decider (A7), never under a
-        // guard (§3.2), and not where the collection may be empty (no element: the empty list fits); a definite one is
-        // rejected (A6)
+        // guard (§3.2), and not where the collection may be empty (no element: the empty list fits); the store is
+        // rejected (A6), whether its kinds are definite or possible: none of them fits
         if (
           !before &&
           items.length > 0 &&
@@ -528,7 +528,7 @@ export class Consumers {
             "written-target",
             admission.siteAt(d, at, (elements) => elements.length > 0 && !elements.some(fitsAny)),
           );
-          if (items.every((item) => item.cert === "def")) admission.reject(d, root, path);
+          admission.reject(d, root, path);
           continue;
         }
         // A7: a copy made before the decider is checked against it with context `later`
