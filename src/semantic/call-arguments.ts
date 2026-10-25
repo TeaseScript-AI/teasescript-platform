@@ -108,7 +108,6 @@ export function validateFunctionCall(
   }
 }
 
-/** Reports a parameter name given twice in a call whose parameters only the callee knows. */
 /**
  * `askImage(...)` takes its message first, positionally or as `message:`, and the named options of V30 §20. The
  * invalid-input options are not supported yet.
@@ -280,6 +279,7 @@ export function validateExportTextArguments(
       );
 }
 
+/** Reports a parameter name given twice in a call whose parameters only the callee knows. */
 export function validateDistinctNamedArguments(
   validator: SemanticValidator,
   expression: Pick<Extract<Expression, { kind: "callExpression" }>, "arguments">,

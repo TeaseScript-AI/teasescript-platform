@@ -507,7 +507,6 @@ function isCanonicalArrayIndexKey(key: string, length: number): boolean {
   return Number.isSafeInteger(index) && index >= 0 && index < length && String(index) === key;
 }
 
-/** Captured references are unique, non-empty, and fit an interaction string; each carries canonical tags. */
 /** A reference to a stored file, as a capture or file store gives it: non-empty text that fits an answer. */
 export function isStoredFileReference(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && interactionStringFits(value);

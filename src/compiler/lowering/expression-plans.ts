@@ -340,8 +340,10 @@ export function tagQueryPlan(
   };
 }
 
-/** A type test; a type the runtime cannot narrow down, which no written type is, makes the test constant. */
-/** `value is T` or `value is not T`, from a type test expression or a `case is T`. */
+/**
+ * `value is T` or `value is not T`, from a type test expression or a `case is T`. A type the runtime cannot narrow down,
+ * which no written type is, makes the test constant.
+ */
 export function typeTestPlan(
   expression: Pick<TypeTestExpression, "type" | "negated" | "span">,
   value: ExpressionPlan,

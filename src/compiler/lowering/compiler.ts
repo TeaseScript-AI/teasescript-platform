@@ -307,7 +307,10 @@ export class InstructionCompiler {
     }
   }
 
-  /** Timer expiry blocks and media cue blocks, compiled after the user functions in registration order. */
+  /**
+   * Timer expiry blocks, media cue blocks, and permanent-button blocks, compiled after the user functions in
+   * registration order.
+   */
   readonly #handlers: RegisteredHandler[] = [];
 
   /** The `let` name that a media initializer binds in its own blocks. */

@@ -178,7 +178,6 @@ function isSubset(inner: readonly ScalarValue[], outer: readonly ScalarValue[]):
   return inner.every((value) => kept.has(value));
 }
 
-/** Whether two scalar types belong together in a union: the same type, or both numbers. */
 /** Whether two scalar types are of one family (`familyOf`), as an integer and a number are. */
 export function sameFamily(left: StaticType, right: StaticType): boolean {
   return left.kind === "scalar" && right.kind === "scalar" && sameScalarFamily(left, right);
@@ -242,7 +241,6 @@ export function isNumeric(type: StaticType): boolean {
   return kind !== undefined && familyOf(kind) === "number";
 }
 
-/** Whether the compiler knows anything about values of this type. */
 /** Whether a value of this type may be one the compiler cannot know, which a known place checks at runtime. */
 export function mayBeUnknown(type: StaticType): boolean {
   return containsType(
@@ -408,7 +406,6 @@ export function isNullable(type: StaticType): boolean {
   return members(type).some((member) => member.kind === "null");
 }
 
-/** Whether every value of `inner` is also a value of `outer`, ignoring open slots. It keeps unions minimal. */
 /** Whether every value of `inner` is also a value of `outer`; an undecided slot is covered by nothing but unknown. */
 export function coversType(outer: StaticType, inner: StaticType): boolean {
   return canonical(outer) === canonical(inner) || includes(outer, inner);

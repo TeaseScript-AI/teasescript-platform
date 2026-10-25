@@ -1042,6 +1042,7 @@ function validStoredFiles(value: unknown): boolean {
   return true;
 }
 
+/** Captured references are unique, non-empty, and fit an interaction string; each carries canonical tags. */
 function validCapturedImages(value: unknown): boolean {
   if (!Array.isArray(value)) return false;
   const references = new Set<string>();

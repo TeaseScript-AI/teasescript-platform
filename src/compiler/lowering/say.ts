@@ -8,10 +8,6 @@ import { copySpan } from "./expression-plans.js";
 // Say: a message, with its speaker, presentation, text, and pacing prepared first when an operand runs instructions.
 
 /**
- * Lowers a blocking timer to a foreground `wait` delay and an async timer to `startTimer`. The instruction evaluates
- * duration, display, then label; operands written in another order are materialized first in source order.
- */
-/**
  * A `say`: plain when no operand emits instructions, otherwise with its speaker, context, and, before a pacing that
  * emits instructions, its text prepared. Used as a value, it gets a temporary for the handle of its message, which
  * the instruction sets once the message is shown.

@@ -14,6 +14,10 @@ import { copySpan } from "./expression-plans.js";
 
 // Background actions: timers, media, and permanent buttons, and the variables their blocks share.
 
+/**
+ * Lowers a blocking timer to a foreground `wait` delay and an async timer to `startTimer`. The instruction evaluates
+ * duration, display, then label; operands written in another order are materialized first in source order.
+ */
 export function* lowerTimerTask(
   compiler: InstructionCompiler,
   timer: TimerParts,
