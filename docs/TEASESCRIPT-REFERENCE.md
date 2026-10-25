@@ -1356,7 +1356,8 @@ let nickname: string? = load("nickname", default: null)
   `data:` URLs unless `files: false`.
 - **Fails:** calendar durations, ranges, scripts, regexes and handles in JSON.
 - **Status:** Implemented. Type rule ahead: JSON of the wrong shape takes the default and objects stay objects; today
-  it is returned as is, so the receiving type check can fail, and objects become dicts ·
+  it is returned as is, so the receiving type check can fail, and objects become dicts. A default of another type
+  needs a declared union ·
   [JSON](specifications/accepted-syntaxes-v30.md#json-and-base64)
 
 ```tease
