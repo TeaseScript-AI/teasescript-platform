@@ -159,6 +159,17 @@ test("an element read through a chain of 2,048 returned results is answered with
  * A value's identity names its inputs by their own identities (TABLE §8, round 12 B4): a chain of 32 `otherwise`s, each
  * of the one before twice, is a source of 32 lines, never an identity of 2^32 characters.
  */
+test("a chain of records over shared inputs is identified in linear space (round 13 B3)", () => {
+  const levels = Array.from(
+    { length: 32 },
+    (_, index) => `let a${index + 1} = {left: a${index}, right: a${index}}`,
+  );
+  const source = `let a0 = {n: 1}\n${levels.join("\n")}\nlet xs = [a32, a32]\nexit`;
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  assert.equal(analyseCore(request).outcome, "valid");
+});
+
 test("a chain of carriers over shared inputs is identified in linear space", () => {
   const levels = Array.from(
     { length: 32 },

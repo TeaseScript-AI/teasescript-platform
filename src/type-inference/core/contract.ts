@@ -499,8 +499,9 @@ export class Contract {
   readonly #holders = new Map<string, Holder>();
   readonly #literals = new Map<PlaceId, LiteralIndex>();
   readonly #signatures = new Map<PlaceId, string>();
-  /** A carrier value's identity by its shape (`#identityWork`), interned. */
+  /** A carrier value's identity by its shape (`#identityWork`), interned; a plain literal's (`#signatureWork`). */
   readonly #carrierIds = new Map<string, string>();
+  readonly #literalIds = new Map<string, string>();
   readonly #groups = new WeakMap<
     readonly unknown[],
     Map<Key, { readonly byCallable: Map<Callable | null, ReadGroup>; readonly list: ReadGroup[] }>
@@ -2825,7 +2826,13 @@ export class Contract {
         parts.push(`{${[...object.names].sort().join(",")}}`);
     }
     parts.push(`empty:${[...index.empty].sort().join(",")}`);
-    const signature = plain ? `l${parts.join(";")}` : `v${literal}`;
+    // (interned: a literal names its inputs by their own short identities, never by their expansions)
+    let signature = `v${literal}`;
+    if (plain) {
+      const shape = parts.join(";");
+      signature = this.#literalIds.get(shape) ?? `l${this.#literalIds.size}`;
+      this.#literalIds.set(shape, signature);
+    }
     this.#signatures.set(literal, signature);
   }
 
