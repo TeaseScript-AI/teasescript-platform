@@ -18,6 +18,7 @@ const rows = (k: number, row: (index: number) => string): string =>
 const lines = (...parts: readonly string[]): string => parts.join("\n");
 const fields = (k: number, value: (index: number) => string, name = "f"): string =>
   Array.from({ length: k }, (_, index) => `${name}${index}: ${value(index)}`).join(", ");
+const cells = (k: number, cell: string): string => Array.from({ length: k }, () => cell).join(", ");
 
 /** A file that reads the boolean host flag declares it from an interaction first. */
 function file(path: string, source: string): SourceFile {
@@ -2110,20 +2111,31 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       );
     },
   })),
-  // Codex r24 F1: k distinct ingresses at k fields, each its own provenance node, asked of the store's index
-  {
-    name: "A2-wide-ingress-fields",
-    measures: "§3.1: `let out = {f_i: hostValue}` at k, decided at k fields, each read (Codex r24 F1)",
+  // Codex r24 F1, F2 and their neighbours: k distinct ingresses at k fields, each its own provenance node, asked of the
+  // store's index; and k host reads a call that stores nothing separates, one snapshot (r4.68 (1)), with the calls'
+  // results one entry as k calls of one function are (r4.15), inline and beside named data
+  ...(
+    [
+      ["fields", (k: number) => `{${fields(k, () => "hostValue")}}`],
+      ["idle-index", (k: number) => `[${cells(k, "hostValue[idle()]")}][0]`],
+      ["idle-cells", (k: number) => `[${cells(k, "hostValue, idle()")}][0]`],
+      ["idle-cells-mixed", (k: number) => `[raw, [${cells(k, "hostValue, idle()")}][0]][1]`],
+    ] as const
+  ).map(([variant, value]): WorkFamily => ({
+    name: `A2-wide-ingress-${variant}`,
+    measures: `§3.1, r4.68 (1): \`let out = ${value(2)}\` at k, decided at k fields, each read (Codex r24 F1, F2)`,
     program: (k) =>
       main(
         lines(
-          `let out = {${fields(k, () => "hostValue")}}`,
+          "let raw = hostValue",
+          "function idle { return 0 }",
+          `let out = ${value(k)}`,
           `out = {${fields(k, () => "1")}}`,
           rows(k, (i) => `repeat out.f${i} {}`),
           "exit",
         ),
       ),
-  },
+  })),
 ];
 
 /**

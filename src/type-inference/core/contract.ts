@@ -1681,7 +1681,7 @@ export class Contract {
 
   /**
    * A read's snapshot (TABLE §8, r4.68 (1)): the key it copies, its guard bit and that key's exact-path signature at the
-   * read's own node (`aliasSignature`, where the value side reads it), so reads of one key in one literal are one key
+   * read's own node (`readSignature`, where the value side reads it), so reads of one key in one literal are one key
    * read only where they read the same: a guard, or a call storing to the key between them, keeps them apart. Once per
    * read; `null` for no read.
    */
@@ -1697,7 +1697,7 @@ export class Contract {
       projection = program.projOf.get(root);
     }
     const node = program.occNode.get(root) ?? null;
-    const snapshot = `${guards.guardedRead(value) ? "g" : ""}${copied}|${node === null ? "-" : lists.aliasSignature(copied, node)}`;
+    const snapshot = `${guards.guardedRead(value) ? "g" : ""}${copied}|${node === null ? "-" : lists.readSignature(copied, node)}`;
     this.#snapshots.set(value, snapshot);
     return snapshot;
   }

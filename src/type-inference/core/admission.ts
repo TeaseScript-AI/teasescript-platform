@@ -290,6 +290,8 @@ interface Stops {
 interface KeyStops {
   readonly selected: readonly Stop[];
   readonly sitings: () => readonly Siting[];
+  /** Of the sitings, the named data's (`ingress` null). */
+  readonly namedSitings: () => readonly Siting[];
   readonly named: () => readonly Stop[];
 }
 
@@ -2409,7 +2411,8 @@ export class Admission {
    * A list of a walk's stops as the decider reads it, once per list: each snapshot once (TABLE §8: one key read here,
    * r4.68 (1)), so of the reads of one key through one chain of operations at one strip that read the same only the
    * first is read, the later ones holding what it holds (k reads of one host global, decided at k paths: Codex r23 F1);
-   * `shallow` leaves out the values a projection selects.
+   * so too k calls of one function (r4.15, Codex r24 F2's neighbours); `shallow` leaves out the values a projection
+   * selects.
    */
   #snapshots(list: readonly Stop[] | undefined, shallow: boolean): readonly Stop[] | undefined {
     if (list === undefined) return undefined;
@@ -2417,13 +2420,26 @@ export class Admission {
     if (memo === undefined) this.#snapshotLists.set(list, (memo = []));
     const known = memo[shallow ? 1 : 0];
     if (known !== undefined) return known;
+    const out = this.#distinct(shallow ? list.filter((stop) => !stop.deep) : list);
+    this.pass.program.work.charge("checks", list.length);
+    memo[shallow ? 1 : 0] = out;
+    return out;
+  }
+
+  /**
+   * Stops with each snapshot once, in their order: of the reads of one key through one chain of operations at one strip
+   * that read the same (`Contract.readSnapshot`), and of k calls of one function (as in the literal index, r4.15), the
+   * first; any other stop as itself.
+   */
+  #distinct(list: readonly Stop[]): Stop[] {
     const { program, contract } = this.pass;
     const seen = new Map<readonly Via[], Set<string>>();
     const out: Stop[] = [];
     for (const stop of list) {
       program.work.charge("checks");
-      if (shallow && stop.deep) continue;
-      const read = contract.readSnapshot(stop.value);
+      const read =
+        contract.readSnapshot(stop.value) ??
+        (contract.resultKey(stop.value) === null ? null : `c${contract.identityOf(stop.value).id}`);
       if (read !== null) {
         const snapshot = `${stop.strip.join(".")}|${stop.deep}|${stop.single}|${read}`;
         let reads = seen.get(stop.via);
@@ -2433,10 +2449,8 @@ export class Admission {
       }
       out.push(stop);
     }
-    memo[shallow ? 1 : 0] = out;
     return out;
   }
-
 
   /**
    * Whether a decider reached through operations decides at `at`: each of them, outermost to innermost, holds its kinds
@@ -2536,10 +2550,13 @@ export class Admission {
       (this.#perNode(this.#someOwn, d, node!, () => this.#meet(own, this.#ownLeaves(d, false))) ||
         this.#meet(own, this.#namedBeside(d, at)));
     let first: SourceSite | null = null;
-    // (each prefix's sitings once per store, read in evaluation order only as far as the answer: Codex r23 F1)
+    // (each prefix's sitings once per store, read in evaluation order only as far as the answer: Codex r23 F1; for named
+    // data only its own sitings, the inline ones it skips never read, Codex r24 F2's neighbours)
     const lists: (readonly Siting[])[] = [];
-    for (let length = 0; length <= at.length; length += 1)
-      lists.push(this.#keyStops(d, at.slice(0, length).join(".")).sitings());
+    for (let length = 0; length <= at.length; length += 1) {
+      const stops = this.#keyStops(d, at.slice(0, length).join("."));
+      lists.push(named ? stops.namedSitings() : stops.sitings());
+    }
     const positions = lists.map(() => 0);
     for (;;) {
       let best = -1;
@@ -2606,6 +2623,7 @@ export class Admission {
       return value;
     };
     let sitings: readonly Siting[] | null = null;
+    let namedSitings: readonly Siting[] | null = null;
     let named: readonly Stop[] | null = null;
     const entry: KeyStops = {
       selected,
@@ -2626,6 +2644,8 @@ export class Admission {
         }
         return (sitings = out);
       },
+      namedSitings: () =>
+        (namedSitings ??= entry.sitings().filter((siting) => siting.ingress === null)),
       // named external data outside every ingress the store holds whole and every own read (`#namedBeside`)
       named: () => {
         if (named !== null) return named;
@@ -2646,7 +2666,8 @@ export class Admission {
           )
             out.push(stop);
         }
-        return (named = out);
+        // (equal snapshots bring equal named data at every path below: each read once, Codex r24 F2's neighbours)
+        return (named = this.#distinct(out));
       },
     };
     this.#keyed.set(memoKey, entry);

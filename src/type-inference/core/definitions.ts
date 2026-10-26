@@ -796,9 +796,10 @@ export class DefinitionLists {
    * reachability and whether the source's declaration dominates it (X1, X4, X5, X7, P3); and, in each list X6 reads
    * for any of those keys (the source's own events with its descendants', each prefix's, the call sites), where the
    * node's subtree begins and ends among its positions, which fixes the events of any span the node ends. The handlers'
-   * facts are the caller's.
+   * facts are the caller's. Without `calls` the call sites are left out: a read's snapshot of a key no other callable
+   * stores (`readSignature`).
    */
-  public aliasSignature(source: Key, node: FlowNode): string {
+  public aliasSignature(source: Key, node: FlowNode, calls = true): string {
     const program = this.#program;
     const work = program.work;
     work.charge("exactQueries");
@@ -812,7 +813,9 @@ export class DefinitionLists {
       work.charge("eventSteps", 2);
       return `${lowerBound(positions, begin)},${lowerBound(positions, end)}`;
     };
-    const lists = [this.#eventList(source), this.index.sitePositions];
+    const lists = calls
+      ? [this.#eventList(source), this.index.sitePositions]
+      : [this.#eventList(source)];
     for (const prefix of prefixesOf(source)) lists.push(this.definitionsOf(prefix).eventPositions);
     return [
       reaching === null ? "-" : `${reaching.def.uid}:${reaching.rest.join(".")}`,
@@ -825,6 +828,15 @@ export class DefinitionLists {
       declaration !== undefined && program.dom.dominates(declaration.node, node) ? "p" : "",
       lists.map(cut).join(";"),
     ].join("|");
+  }
+
+  /**
+   * A read's snapshot signature (TABLE r4.68 (1)): `aliasSignature`, the call sites in it only where another callable
+   * stores the source, a key below it or a prefix (`ownedAway`, X6's owner rule): elsewhere no call is an event of any
+   * key at or below the source, so reads a call separates read the same (Codex r24 F2).
+   */
+  public readSignature(source: Key, node: FlowNode): string {
+    return this.aliasSignature(source, node, this.index.ownedAway(source));
   }
 
   /** The nearest definition of the list dominating `node`; `before`: one at `node` itself does not count. */
