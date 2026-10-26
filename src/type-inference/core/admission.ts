@@ -2561,40 +2561,39 @@ export class Admission {
       return at;
     };
     // the own reads some walk reached through its own row (§3.2: never walked again as their own landing), and per
-    // row of a walk (its carrier and operand) whether it or a row outside it is an own row: each row once, so a stop
-    // costs only the rows no stop before it went through (each value has one syntactic parent, so a row's outer rows
-    // are the same in every stop through it)
-    const reached = new Set<PlaceId>();
-    const ownThrough = new Map<string, boolean>();
-    const ownOf = (via: readonly Via[]): boolean => {
-      let start = via.length;
-      while (start > 0 && !ownThrough.has(`${via[start - 1]!.value}:${via[start - 1]!.operand}`)) {
-        program.work.charge("indexSteps");
-        start -= 1;
-      }
-      let own =
-        start > 0 && ownThrough.get(`${via[start - 1]!.value}:${via[start - 1]!.operand}`) === true;
-      for (const level of via.slice(start)) {
-        if (OWN_ROLES.has(level.role)) {
-          own = true;
-          reached.add(level.operand);
-        }
-        ownThrough.set(`${level.value}:${level.operand}`, own);
-      }
-      return own;
-    };
+    // row of a walk (its carrier and operand) whether it or a row outside it is an own row, and the innermost typed
+    // default's call at or outside it: each row once, so a stop costs only the rows no stop before it went through
+    // (each value has one syntactic parent, so a row's outer rows are the same in every stop through it; Codex r21 B2)
     // r4.63 (3), r4.66 (2): host data in the default of a `load` or `fromJson` of an inferred place typed by that
     // default (its kinds definite) is the call's: the boundary at the call validates the loaded value, so the default
     // owes no own read; a default without definite kinds types nothing, its read an own read as any; the innermost
     // such call
-    const typedDefault = (via: readonly Via[]): PlaceId | null => {
-      for (let index = via.length - 1; index >= 0; index -= 1) {
-        const level = via[index]!;
-        if (!TYPED_ROLES.has(level.role)) continue;
+    const reached = new Set<PlaceId>();
+    const rows = new Map<string, { readonly own: boolean; readonly call: PlaceId | null }>();
+    const rowOf = (
+      via: readonly Via[],
+    ): { readonly own: boolean; readonly call: PlaceId | null } => {
+      const keyAt = (index: number): string => `${via[index]!.value}:${via[index]!.operand}`;
+      let start = via.length;
+      while (start > 0 && !rows.has(keyAt(start - 1))) {
         program.work.charge("indexSteps");
-        return this.typedByDefault(level.value) ? level.value : null;
+        start -= 1;
       }
-      return null;
+      let row = start > 0 ? rows.get(keyAt(start - 1))! : { own: false, call: null };
+      for (let index = start; index < via.length; index += 1) {
+        const level = via[index]!;
+        if (OWN_ROLES.has(level.role)) reached.add(level.operand);
+        row = {
+          own: row.own || OWN_ROLES.has(level.role),
+          call: TYPED_ROLES.has(level.role)
+            ? this.typedByDefault(level.value)
+              ? level.value
+              : null
+            : row.call,
+        };
+        rows.set(keyAt(index), row);
+      }
+      return row;
     };
     const walk = (
       value: PlaceId,
@@ -2606,10 +2605,11 @@ export class Admission {
         for (const list of map.values())
           for (const stop of list) {
             program.work.charge("indexSteps");
-            const own = ownOf(stop.via);
+            const row = rowOf(stop.via);
+            const own = row.own;
             const ingress = this.#lengthAt(stop.value, stop.strip) ? null : ingressOf(stop.value);
             if (ingress === null) continue;
-            const call = own ? typedDefault(stop.via) : null;
+            const call = own ? row.call : null;
             if (call !== null) entry(ingress).call = call;
             else found(stop, ingress, own);
           }
