@@ -212,6 +212,45 @@ export interface WrittenCase {
   readonly exact: boolean;
   /** Per host value, `null` where it fits, else where it stops (`TSR058@start:end`). */
   readonly runs: readonly (readonly [SerializableRuntimeValue, string | null])[];
+  /**
+   * The program's C9 boundaries, sorted, each `root level [kinds] start:end`: one per store that brings the host value,
+   * at the host read, against what its destination admits at the level it lands at; none where that level admits every
+   * kind; a named host value's at its own unwritten binding, which nothing decides (`[unknown]`).
+   */
+  readonly boundaries: readonly string[];
+}
+
+/** The level `valueOf`'s leaf stands at: its collections' nesting along the first members. */
+function leafDepth(form: Form): number {
+  switch (form.kind) {
+    case "name":
+      return 0;
+    case "optional":
+      return leafDepth(form.of);
+    case "union":
+      return leafDepth(form.members[0]!);
+    case "collection":
+      return 1 + leafDepth(form.of);
+  }
+}
+
+/** The C9 boundary a host read at `site` owes where it lands in `root` at `level` of `levels`, if any (`boundaries`). */
+function boundaryAt(
+  root: string,
+  levels: readonly (readonly string[])[],
+  level: number,
+  site: string,
+): string[] {
+  const kinds = levels[level]!;
+  return kinds.includes("unknown")
+    ? []
+    : [`${root} ${level} [${[...kinds].sort().join(",")}] ${site}`];
+}
+
+/** The site of `of` in `line` of `source`, as `start:end`. */
+function siteIn(source: string, line: string, of: string): string {
+  const start = source.indexOf(`${line}\n`) + line.indexOf(of);
+  return `${start}:${start + of.length}`;
 }
 
 /**
@@ -279,15 +318,35 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
       return [given, stop === undefined ? null : `TSR058@${stop.value}`];
     },
   );
+  const place = decision === "written" ? "typed" : "copy";
+  const boundaries = [
+    ...(literal === null
+      ? boundaryAt(
+          "typed",
+          levelsOf(form),
+          leafDepth(form),
+          siteIn(source, `let typed: ${type} = ${init}`, "hostValue"),
+        )
+      : []),
+    ...(host === "named"
+      ? [`h 0 [unknown] ${siteIn(source, "let h = hostValue", "hostValue")}`]
+      : boundaryAt(
+          place,
+          levelsOf(placed),
+          decision === "later copy" ? 0 : leafDepth(placed),
+          siteIn(source, hostLine, "hostValue"),
+        )),
+  ];
   return {
     name: `${type}, ${decision}, ${host}`,
     source,
-    place: decision === "written" ? "typed" : "copy",
+    place,
     form: formText(placed),
     levels: levelsOf(placed),
     checks: stores.map(({ store, of }) => `${store} ${checkedText(of)}`),
     exact: literal !== null,
     runs,
+    boundaries: boundaries.sort(),
   };
 }
 
@@ -332,6 +391,9 @@ const DECISIONS: readonly Decision[] = [
   "copy of a copy of a copy",
 ];
 
+/** The decision of a written list's element: a copy of it (a typed index projection). */
+const PROJECTIONS: readonly Decision[] = ["projection"];
+
 /**
  * The merged S6's B1 (the reviewer's written-domain matrix, rebuilt by axes): nine element domains (the four usual
  * scalars, each optional, and `null` alone) × list depths 0–3, the outermost list optional or not × the place written,
@@ -351,19 +413,25 @@ export const WRITTEN_DOMAIN_MATRIX: readonly WrittenCase[] = (() => {
         let form = domain;
         for (let level = 0; level < depth; level += 1) form = collection("list", form);
         if (outerOptional) form = optional(form);
-        for (const decision of [...DECISIONS, "projection"] as const) {
-          if (decision === "projection" && (outerOptional || depth === 0)) continue;
+        for (const decision of [...DECISIONS, ...PROJECTIONS]) {
+          if (PROJECTIONS.includes(decision) && (outerOptional || depth === 0)) continue;
           for (const host of HOSTS) out.push(writtenCase(form, decision, host));
         }
       }
   return out;
 })();
 
-/** One source of `UNRESTRICTED_COLLECTION_MATRIX`: an unrestricted collection's known contents, which every kind fits. */
-interface UnrestrictedCase {
+/**
+ * One source of `UNRESTRICTED_COLLECTION_MATRIX` or `OBJECT_PROPERTY_MATRIX`: contents an unrestricted part takes, which
+ * every kind fits, so nothing is owed.
+ */
+export interface UnrestrictedCase {
   readonly name: string;
   readonly source: string;
   readonly place: string;
+  /** The steps from the place down to its unrestricted part: elements, a property. */
+  readonly path: readonly string[];
+  /** The kinds the place admits at each prefix of `path`, from the place itself, `unknown` (every kind) last. */
   readonly levels: readonly (readonly string[])[];
 }
 
@@ -424,9 +492,79 @@ export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() =
             name: `${type} holding ${contentName}, ${arrival}`,
             source: `${[...lines, 'say "DONE"', "exit"].join("\n")}\n`,
             place,
+            path: Array<string>(levels.length - 1).fill("element"),
             levels,
           });
         }
+  return out;
+})();
+
+/**
+ * Sol's round 1 on #1049 (B2's invariant through optionals, unions and projections): an `object`'s properties admit
+ * every kind (V30 §13; r4.74 (2)) in each form that holds one, `object`, `object?`, `object | string`, and as a list's
+ * element at depths 1 and 2, optional or in a union too × the property's contents (an integer, text, a boolean, `null`,
+ * a list, the host value) × the place written, a copy of it at the end of a chain of one to three copies, or a copy of
+ * the property (a projection), each then taking them. Nothing is owed: no diagnostic, no check, no boundary. The candidate route does not take object literals: the decision layer only.
+ */
+export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
+  const out: UnrestrictedCase[] = [];
+  const object = name("object");
+  const forms = [
+    object,
+    optional(object),
+    union(object, name("string")),
+    collection("list", object),
+    collection("list", optional(object)),
+    collection("list", union(object, name("string"))),
+    optional(collection("list", object)),
+    collection("list", collection("list", object)),
+    collection("list", collection("list", optional(object))),
+  ];
+  for (const form of forms) {
+    const type = formText(form);
+    const index = "[0]".repeat(depthOf(form));
+    const property = [...Array<string>(depthOf(form)).fill("element"), "p"];
+    for (const [content, contentName] of [
+      ["1", "an integer"],
+      ['"text"', "text"],
+      ["true", "a boolean"],
+      ["null", "null"],
+      ["[1]", "a list"],
+      ["hostValue", "the host value"],
+    ] as const)
+      for (const arrival of [
+        "written",
+        "copy",
+        "copy of a copy",
+        "copy of a copy of a copy",
+        "projection",
+      ] as const) {
+        const projected = arrival === "projection";
+        const place = arrival === "written" ? "typed" : "copy";
+        const chain =
+          arrival === "copy"
+            ? ["let copy = typed"]
+            : arrival === "copy of a copy"
+              ? ["let middle = typed", "let copy = middle"]
+              : arrival === "copy of a copy of a copy"
+                ? ["let first = typed", "let second = first", "let copy = second"]
+                : arrival === "projection"
+                  ? [`let copy = typed${index}.p`]
+                  : [];
+        const lines = [
+          `let typed: ${type} = ${valueOf(form, "{p: 1}")}`,
+          ...chain,
+          projected ? `copy = ${content}` : `${place}${index}.p = ${content}`,
+        ];
+        out.push({
+          name: `${type} holding ${contentName}, ${arrival}`,
+          source: `${[...lines, 'say "DONE"', "exit"].join("\n")}\n`,
+          place,
+          path: projected ? [] : property,
+          levels: projected ? [["unknown"]] : [...levelsOf(form), ["unknown"]],
+        });
+      }
+  }
   return out;
 })();
 
@@ -435,8 +573,8 @@ export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() =
  * unrestricted `list`, `set`, `dict`, `object`, the program-control names) in each form §13 lists, `T`, `T?`, `T[]`,
  * `T set`, `T dict`, `T?[]`, `T[]?`, `T | U` and `(T | U)[]` (beside `string`, `integer` for a `string`), nested to depth
  * three (`T[][]`, `T?[][]`, `T[]?[]`, `T[] set`, `T[] dict`, `T[][][]`; `null?` is `null`), × the place written, an early
- * or a later copy, a copy at the end of a chain of two or three copies × the host value direct, named or held at an
- * index. A union holding a whole collection beside another type is §13's compile error and has no form here: the
+ * or a later copy, a copy at the end of a chain of two or three copies, and for a list form a copy of its element (a
+ * typed index projection) × the host value direct, named or held at an index. A union holding a whole collection beside another type is §13's compile error and has no form here: the
  * compiler does not report it yet, pre-existing, with the lead.
  */
 export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
@@ -466,7 +604,8 @@ export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
     ];
     for (const form of forms) {
       if (depthOf(form) > 3) continue;
-      for (const decision of DECISIONS)
+      const list = form.kind === "collection" && form.collection === "list";
+      for (const decision of [...DECISIONS, ...(list ? PROJECTIONS : [])])
         for (const host of HOSTS) out.push(writtenCase(form, decision, host));
     }
   }
@@ -507,12 +646,13 @@ export const INFERRED_COPY_MATRIX: readonly WrittenCase[] = (() => {
           const start = source.indexOf(`${hostLine}\n`);
           const end = start + hostLine.length;
           const kinds = [...leafKinds].sort();
+          const levels = [...Array.from({ length: depth }, () => ["list"]), kinds];
           out.push({
             name: `${widening} into the source ${copied} the copy, depth ${depth}, ${host}`,
             source,
             place: "copy",
             form: wrap(kinds.join("|"), 0),
-            levels: [...Array.from({ length: depth }, () => ["list"]), kinds],
+            levels,
             checks: [
               `${start}:${end} ${"list<".repeat(depth)}${kinds.join("|")}${">".repeat(depth)}`,
             ],
@@ -523,6 +663,10 @@ export const INFERRED_COPY_MATRIX: readonly WrittenCase[] = (() => {
                 ? null
                 : `TSR058@${end - value.length}:${end}`,
             ]),
+            boundaries:
+              host === "named"
+                ? [`h 0 [unknown] ${siteIn(source, "let h = hostValue", "hostValue")}`]
+                : boundaryAt("copy", levels, depth, siteIn(source, hostLine, "hostValue")),
           });
         }
   return out;

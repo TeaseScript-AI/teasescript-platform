@@ -64,20 +64,35 @@ export function fits(tag: ItemTag, ref: ItemTag, written: boolean): boolean {
   );
 }
 
+/** The part below an unrestricted written part: every kind fits it. */
+const OPEN: TypeTerm = { kind: "dynamic", why: "unwritten parts" };
+
 /**
  * The written type a path stands under (V30 §13: `list`, `set`, `dict` and `object` stand for any list, set, dict or
- * object): its term, or below an unrestricted part (an unwritten element, an `object`'s properties) that part, whose
- * every kind fits; `null` where the written type does not reach the path (the lead's ruling on the merged S6's B2).
+ * object): its term, or below an unrestricted part (an unwritten element, an `object`'s properties, an optional's or a
+ * union's member's too) a part whose every kind fits; `null` where the written type does not reach the path (the lead's
+ * ruling on the merged S6's B2). One step at a time, so a path costs its length.
  */
 function permittedAt(term: TypeTerm, path: readonly string[]): TypeTerm | null {
-  for (let length = 0; length < path.length; length += 1) {
-    const above = termAt(term, path.slice(0, length));
-    if (above === null) return null;
-    if (unrestricted(above)) return above;
-    if (above.kind === "object" && above.properties === null)
-      return { kind: "dynamic", why: "unwritten parts" };
+  let at: TypeTerm | null = term;
+  for (const step of path) {
+    if (at === null || unrestricted(at)) return at;
+    at = permittedStep(at, step);
   }
-  return termAt(term, path);
+  return at;
+}
+
+/** One step of `permittedAt`: a union is unrestricted below where any of its members is, else read as `termAt` reads it. */
+function permittedStep(term: TypeTerm, step: string): TypeTerm | null {
+  if (term.kind === "union")
+    return term.members.some((member) => {
+      const below = permittedStep(member, step);
+      return below !== null && unrestricted(below);
+    })
+      ? OPEN
+      : termAt(term, [step]);
+  if (unrestricted(term) || (term.kind === "object" && term.properties === null)) return OPEN;
+  return termAt(term, [step]);
 }
 
 /** Whether a written part restricts nothing (`typeTags`' `unknown`: an unwritten element, a type the core leaves open). */
@@ -944,7 +959,7 @@ export class Admission {
       return {
         guard: key !== null && guards.narrowed(key, alias.read),
         domain: JSON.stringify(
-          domain === null ? null : termAt(domain, rest.slice(alias.at.length)),
+          domain === null ? null : permittedAt(domain, rest.slice(alias.at.length)),
         ),
         items: this.valueAt(d, rest)
           .map((item) => itemText(item, writers))
@@ -1627,7 +1642,7 @@ export class Admission {
    */
   #writtenDomain(alias: Alias): TypeTerm | null {
     const written = this.#writtenSource(alias.value, []);
-    return written === null ? null : termAt(written.term, written.strip);
+    return written === null ? null : permittedAt(written.term, written.strip);
   }
 
   /**
@@ -2235,7 +2250,7 @@ export class Admission {
       const binding = program.occurrenceOf.get(current);
       if (binding !== undefined) {
         const written = this.#typeOf(binding);
-        const term = written === null ? null : termAt(written, strip);
+        const term = written === null ? null : permittedAt(written, strip);
         if (term !== null) out.push({ path, term });
         continue;
       }
@@ -2282,7 +2297,7 @@ export class Admission {
       if (this.#keepsOwn(at)) return null;
     const steps = keyPath(key);
     const path = [...steps, ...strip];
-    return steps.some((step) => dictList(step) !== undefined) || termAt(term, path) === null
+    return steps.some((step) => dictList(step) !== undefined) || permittedAt(term, path) === null
       ? null
       : { term, strip: path };
   }

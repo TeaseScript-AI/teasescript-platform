@@ -13,7 +13,9 @@ import { coreRequest } from "./helpers/type-core-analysis.js";
 import { runGlobals } from "./helpers/type-core-route.js";
 import {
   INFERRED_COPY_MATRIX,
+  OBJECT_PROPERTY_MATRIX,
   UNRESTRICTED_COLLECTION_MATRIX,
+  type UnrestrictedCase,
   V30_TYPE_MATRIX,
   WRITTEN_DOMAIN_MATRIX,
   type WrittenCase,
@@ -22,8 +24,9 @@ import {
 /*
  * The written-domain matrices (`type-core-written.ts`; the lead's rulings on the merged S6's B1 and B2: A4, F17b,
  * §4's fit rule, ADR 0021 1.3, V30 §13), each source in both orders and with the sharing on and off, in three layers:
- * the decision (the place's admitted kinds at each level and C9's `against` at each of its targets, none at a level
- * that admits every kind), the plan (each store that brings a host value checked against the whole written type) and
+ * the decision (the place's admitted kinds at each level, and the program's C9 boundaries, each at its host read with its
+ * target's level and `against`, none at a level that admits every kind), the plan (each store that brings a host value
+ * checked against the whole written type) and
  * the runs (each host value that fits says DONE, each other one stops at TSR058 at the first checked store's value,
  * nothing said). A source the candidate route does not take is checked in the decision layer alone.
  */
@@ -57,25 +60,37 @@ function checksOf(plan: InstructionPlan): string[] {
   );
 }
 
-/** The place's admitted kinds at each of its first `count` levels and C9's `against` at each of its targets. */
-function decision(answers: Answers, request: CoreAnalysisRequest, place: string, count: number) {
+/**
+ * The place's admitted kinds at each prefix of `path`, and the program's C9 boundaries, sorted, each as `root level
+ * [against] start:end` (`WrittenCase.boundaries`).
+ */
+function decision(
+  answers: Answers,
+  request: CoreAnalysisRequest,
+  place: string,
+  path: readonly string[],
+) {
   const id = new CoreProgram(request).places.find(
     ({ kind }) => kind.kind === "binding" && kind.name === place,
   )!.id;
   return {
-    levels: Array.from({ length: count }, (_, level) => {
-      const admitted = answers.place(id, Array<string>(level).fill("element")).admitted;
+    levels: Array.from({ length: path.length + 1 }, (_, length) => {
+      const admitted = answers.place(id, path.slice(0, length)).admitted;
       return admitted.by === "undecided" ? ["undecided"] : sorted(admitted.kinds);
     }),
-    against: answers.checks
-      .filter((check) => check.boundary && check.target.split(".")[0] === place)
-      .map((check) => ({
-        level: check.target.split(".").filter((step) => step === "element" || step === "entry")
-          .length,
-        kinds: sorted(check.against),
-      })),
+    boundaries: answers.checks
+      .filter((check) => check.boundary)
+      .map((check) => {
+        const steps = check.target.split(".");
+        const level = steps.filter((step) => step === "element" || step === "entry").length;
+        return `${steps[0]} ${level} [${sorted(check.against).join(",")}] ${check.site.start}:${check.site.end}`;
+      })
+      .sort(),
   };
 }
+
+/** A written case's element path down its levels. */
+const elementsOf = (c: WrittenCase): string[] => Array<string>(c.levels.length - 1).fill("element");
 
 /** Every layer of one source in one order: the decision, and the plan and its runs where the route takes it. */
 function observe(c: WrittenCase, request: CoreAnalysisRequest) {
@@ -88,7 +103,7 @@ function observe(c: WrittenCase, request: CoreAnalysisRequest) {
     plan = "outside";
   }
   return {
-    ...decision(answers, request, c.place, c.levels.length),
+    ...decision(answers, request, c.place, elementsOf(c)),
     checks: plan === "outside" ? "outside" : plan === null ? "no plan" : checksOf(plan),
     runs:
       plan === "outside" || plan === null
@@ -123,12 +138,8 @@ function failing(cases: readonly WrittenCase[]): {
       const name = `${c.name}${shared ? "" : " (no sharing)"}`;
       if (JSON.stringify(observed.levels) !== JSON.stringify(c.levels.map(sorted)))
         wrong.push(`${name}: admits ${JSON.stringify(observed.levels)}`);
-      for (const { level, kinds } of observed.against)
-        if (
-          JSON.stringify(kinds) !== JSON.stringify(sorted(c.levels[level] ?? ["unowed"])) ||
-          kinds.includes("unknown")
-        )
-          wrong.push(`${name}: C9 at level ${level} against ${JSON.stringify(kinds)}`);
+      if (JSON.stringify(observed.boundaries) !== JSON.stringify(c.boundaries))
+        wrong.push(`${name}: C9 boundaries ${JSON.stringify(observed.boundaries)}`);
       if (observed.checks === "outside") {
         if (shared) decisionOnly.add(c.form);
         continue;
@@ -162,10 +173,14 @@ test("a written type or a copy of it admits its written domain at every level, n
   assert.deepEqual(wrong, []);
 });
 
-test("an unrestricted written collection takes any known contents, owing nothing for its elements (merged S6 B2)", (t) => {
+/**
+ * The sources of `cases` where an unrestricted part's contents owe anything (a diagnostic, a check, a boundary) or the
+ * place's levels differ, and how many the route planned and ran (each saying DONE, nothing checked).
+ */
+function owing(cases: readonly UnrestrictedCase[]): { wrong: string[]; full: number } {
   const wrong: string[] = [];
   let full = 0;
-  for (const c of UNRESTRICTED_COLLECTION_MATRIX) {
+  for (const c of cases) {
     const request = coreRequest([{ path: "main.tease", source: c.source }]);
     assert.ok(request !== null, `${c.name}: its file parses and resolves`);
     for (const shared of [true, false]) {
@@ -179,7 +194,7 @@ test("an unrestricted written collection takes any known contents, owing nothing
           plan = "outside";
         }
         return {
-          ...decision(answers, request, c.place, c.levels.length),
+          levels: decision(answers, request, c.place, c.path).levels,
           outcome: answers.outcome,
           diagnostics: answers.diagnostics.length,
           checks: answers.checks.length,
@@ -190,7 +205,7 @@ test("an unrestricted written collection takes any known contents, owing nothing
                 ? "no plan"
                 : {
                     checks: checksOf(plan),
-                    says: runGlobals(plan, {}).said.map(({ text }) => text),
+                    says: runGlobals(plan, { hostValue: 1 }).said.map(({ text }) => text),
                   },
         };
       };
@@ -198,7 +213,6 @@ test("an unrestricted written collection takes any known contents, owing nothing
       if (shared && observed.plan !== "outside") full += 1;
       const expected = {
         levels: c.levels.map(sorted),
-        against: [],
         outcome: "valid",
         diagnostics: 0,
         checks: 0,
@@ -208,8 +222,21 @@ test("an unrestricted written collection takes any known contents, owing nothing
         wrong.push(`${c.name}${shared ? "" : " (no sharing)"}: ${JSON.stringify(observed)}`);
     }
   }
+  return { wrong, full };
+}
+
+test("an unrestricted written collection takes any known contents, owing nothing for its elements (merged S6 B2)", (t) => {
+  const { wrong, full } = owing(UNRESTRICTED_COLLECTION_MATRIX);
   t.diagnostic(
     `${UNRESTRICTED_COLLECTION_MATRIX.length} sources (${full} planned and run), both orders, sharing on and off`,
+  );
+  assert.deepEqual(wrong, []);
+});
+
+test("an object's properties take any contents in every form, copy and projection, owing nothing (merged S6 B2, Sol r1)", (t) => {
+  const { wrong, full } = owing(OBJECT_PROPERTY_MATRIX);
+  t.diagnostic(
+    `${OBJECT_PROPERTY_MATRIX.length} sources (${full} planned and run; object literals are outside the candidate slice), both orders, sharing on and off`,
   );
   assert.deepEqual(wrong, []);
 });
