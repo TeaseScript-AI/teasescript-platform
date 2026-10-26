@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
-import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
+import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 
@@ -86,9 +86,13 @@ test("a root stored whole 130,000 times answers at its property within the nativ
     ]);
     const answers = analyseCore(request);
     assert.equal(answers.outcome, "valid", `${stores} stores`);
-    const root = new CoreProgram(request).places.find(
-      ({ kind }) => kind.kind === "binding" && kind.name === "root",
-    )!;
+    // (the root's place through the analysis's own graph: a second program index of the 130,000 stores beside the
+    // answers doubled the heap past V8's 2 GB default, the test-cost audit's out-of-memory)
+    const declaration = answers.graph.nodes.find(
+      (node) => node.kind === "statement" && node.span?.start.offset === 0,
+    );
+    const root = declaration === undefined ? null : answers.at(declaration)?.place;
+    assert.ok(root, `${stores} stores: the root's place`);
     assert.equal(
       answers.place(root.id, ["n"]).definitions.events.stores.length,
       stores + 1,
