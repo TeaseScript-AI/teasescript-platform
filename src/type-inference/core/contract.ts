@@ -741,9 +741,9 @@ export class Contract {
     const path = keyPath(key);
     const found = program.place(place);
     const declaration = definitions.declOf.get(place);
-    // P3: one kind, not unknown, no guarded source, the root's declaration dominates the read. In dead code the
-    // contract's one known kind stays known, the declaration before the read in its file standing for the dominance:
-    // only the flow facts are dropped there (X1), so an intrinsic violation is the error it is in live code (AD-3)
+    // P3: one kind, not unknown, no guarded source, the root's declaration dominates the read. The dominance is a flow
+    // fact, which dead code drops (X1): there the contract's one known kind stays known, so an intrinsic violation is
+    // the error it is in live code (AD-3)
     let definite =
       kinds.length === 1 &&
       kinds[0]!.tag !== "unknown" &&
@@ -751,14 +751,10 @@ export class Contract {
       (found.kind.kind === "parameter" ||
         found.kind.kind === "result" ||
         (declaration !== undefined &&
-          (program.live(node)
-            ? lists.live(declaration) &&
+          (!program.live(node) ||
+            (lists.live(declaration) &&
               program.reached(declaration.node) &&
-              program.dom.dominates(declaration.node, node)
-            : declaration.node.file === node.file &&
-              declaration.node.span !== null &&
-              node.span !== null &&
-              declaration.node.span.start.offset < node.span.start.offset)));
+              program.dom.dominates(declaration.node, node)))));
     // every selection on the way holds an element
     for (let length = 1; length <= path.length && definite; length += 1)
       if (path[length - 1] === "element") {
