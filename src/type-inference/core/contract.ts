@@ -742,19 +742,21 @@ export class Contract {
     const found = program.place(place);
     const declaration = definitions.declOf.get(place);
     // P3: one kind, not unknown, no guarded source, the root's declaration dominates the read. The dominance is a flow
-    // fact, which dead code drops (X1): there the contract's one known kind stays known, so an intrinsic violation is
-    // the error it is in live code (AD-3)
+    // fact, which dead code drops (X1): there a declared place's one known kind stays known, so an intrinsic violation
+    // is the error it is in live code (AD-3). A parameter's and a result's kinds and marks come from their calls'
+    // bindings, which a dead call does not make (F21), so in dead code they stay possible
     let definite =
       kinds.length === 1 &&
       kinds[0]!.tag !== "unknown" &&
       kinds[0]!.guarded !== true &&
-      (found.kind.kind === "parameter" ||
-        found.kind.kind === "result" ||
-        (declaration !== undefined &&
-          (!program.live(node) ||
-            (lists.live(declaration) &&
-              program.reached(declaration.node) &&
-              program.dom.dominates(declaration.node, node)))));
+      (program.live(node)
+        ? found.kind.kind === "parameter" ||
+          found.kind.kind === "result" ||
+          (declaration !== undefined &&
+            lists.live(declaration) &&
+            program.reached(declaration.node) &&
+            program.dom.dominates(declaration.node, node))
+        : declaration !== undefined);
     // every selection on the way holds an element
     for (let length = 1; length <= path.length && definite; length += 1)
       if (path[length - 1] === "element") {
