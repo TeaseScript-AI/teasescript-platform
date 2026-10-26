@@ -501,6 +501,8 @@ export interface ContractFacts {
    * index decides it, each record once per read.
    */
   selectionVisits: number;
+  /** The paths admission decided, in every pass (S6-CARRIERS §4.4: the member visits' bound). */
+  decidedPaths: number;
 }
 
 export class Contract {
@@ -510,6 +512,7 @@ export class Contract {
     markNodes: 0,
     markVisits: 0,
     selectionVisits: 0,
+    decidedPaths: 0,
   };
   readonly #prefix = new Map<Key, PrefixStores>();
   readonly #subPaths = new Map<Key, ReadonlySet<string>>();

@@ -438,6 +438,7 @@ class StoppedAnswers implements Answers {
         markNodes: 0,
         markVisits: 0,
         selectionVisits: 0,
+        decidedPaths: 0,
       },
     };
   }

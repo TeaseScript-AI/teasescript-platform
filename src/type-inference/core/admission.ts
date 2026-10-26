@@ -756,6 +756,7 @@ export class Admission {
       (a, b) => this.sourceOrder(a.d) - this.sourceOrder(b.d),
     );
     work.charge("checks", ordered.length + sortCost(ordered.length));
+    contract.facts.decidedPaths += 1;
     return {
       root,
       path,

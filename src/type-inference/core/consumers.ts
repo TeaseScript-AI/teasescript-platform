@@ -440,9 +440,11 @@ export class Consumers {
       // an opaque value C5's obligation at its access (A7)
       if (decision.published) {
         for (const candidate of decision.candidates)
-          for (const d of [candidate.d, ...(candidate.members ?? [])]) {
+          for (const [index, d] of [candidate.d, ...(candidate.members ?? [])].entries()) {
             const { at } = candidate;
             this.#reading = d.node;
+            // (S6-CARRIERS §4.4: the representative's site is its class's proof, each member a visit)
+            program.work.charge(index === 0 ? "quietProofs" : "c1Visits");
             const site = admission.namedExternalSite(d, at);
             // (an equivalent copy holds what its representative holds: none of them owes it)
             if (site === null) break;
@@ -648,17 +650,38 @@ export class Consumers {
                 tags.map(requiredKind),
               );
       };
+      // S6-CARRIERS §4.4: a class's quiet proofs, one per side of the decider, each its side's first member but the
+      // decider's own store; a proof that emits nothing (no diagnostic, rejection or check) proves its side quiet, else
+      // each member of the side is visited
+      const emitted = (): number =>
+        this.diagnostics.length + admission.rejections + admission.readChecks.length;
+      const order = decider === null ? null : admission.sourceOrder(decider);
       for (const { d, at, members } of decision.candidates) {
-        const before = this.diagnostics.length + admission.rejections;
-        visit(d, at);
-        if (members === undefined) continue;
-        if (this.diagnostics.length + admission.rejections === before) {
-          // (equivalent values are quiet alike, §3.3)
-          if (d.value !== undefined && this.quiet.has(d.value))
-            this.#skip(...members.map((m) => m.value));
+        if (members === undefined) {
+          visit(d, at);
           continue;
         }
-        for (const member of members) visit(member, at);
+        const sides: Definition[][] = [[], []];
+        for (const member of [d, ...members])
+          sides[order !== null && admission.sourceOrder(member) < order ? 0 : 1]!.push(member);
+        for (const side of sides) {
+          const proof = side.find((member) => member !== decider || at.length > 0);
+          if (proof === undefined) continue;
+          program.work.charge("quietProofs");
+          const was = emitted();
+          visit(proof, at);
+          const rest = side.filter((member) => member !== proof);
+          if (emitted() === was) {
+            // (equivalent values are quiet alike, §3.3)
+            if (proof.value !== undefined && this.quiet.has(proof.value))
+              this.#skip(...rest.map((m) => m.value));
+            continue;
+          }
+          for (const member of rest) {
+            program.work.charge("c1Visits");
+            visit(member, at);
+          }
+        }
       }
     }
   }

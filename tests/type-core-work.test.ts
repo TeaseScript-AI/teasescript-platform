@@ -330,3 +330,27 @@ test("every alias member answers as its class does at every decided path, in bot
   assert.deepEqual(differences, []);
   assert.ok(compared > 1_000, `${compared} member answers compared`);
 });
+
+/**
+ * S6-CARRIERS §4.4: a class's members are visited only where its side's quiet proof is not quiet, and each such visit
+ * emits, so the visits are bounded by the output: per pass, at most the diagnostics, the checks and the decided paths.
+ */
+test("every family's member visits are bounded by its output and its decided paths (§4.4)", () => {
+  const over: string[] = [];
+  for (const family of [
+    ...WORK_FAMILIES,
+    ...W34_VARIANTS,
+    ...W44_VARIANTS,
+    ...W45_VARIANTS,
+    ...ADMISSION_FAMILIES,
+  ]) {
+    const answers = analysed(family, 32);
+    const counts = answers.budget.counts;
+    const visits = counts.get("c1Visits") ?? 0;
+    const bound =
+      (1 + (counts.get("rejectPasses") ?? 0)) *
+      (answers.diagnostics.length + answers.checks.length + answers.budget.facts.decidedPaths);
+    if (visits > bound) over.push(`${family.name}: ${visits} visits, ${bound} the bound`);
+  }
+  assert.deepEqual(over, []);
+});
