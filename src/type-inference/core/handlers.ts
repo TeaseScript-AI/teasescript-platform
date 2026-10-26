@@ -1,4 +1,10 @@
-import { prefixesOf, sortCost, type DefinitionIndex, type Key } from "./definitions.js";
+import {
+  keptPrefixes,
+  prefixesOf,
+  sortCost,
+  type DefinitionIndex,
+  type Key,
+} from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import type { CoreProgram } from "./program.js";
 
@@ -44,7 +50,7 @@ export class HandlerIndex {
         if (!d.node.dead && program.inBlockCode(d.node)) this.#handlerKeys.add(key);
       }
     for (const key of this.#handlerKeys)
-      for (const prefix of prefixesOf(key)) {
+      for (const prefix of keptPrefixes(work, key)) {
         work.charge("indexSteps");
         this.#handlerAbove.add(prefix);
       }

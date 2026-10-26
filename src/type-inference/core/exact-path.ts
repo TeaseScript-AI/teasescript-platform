@@ -1,8 +1,11 @@
 import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import {
+  keptPathText,
   keyOf,
+  keyOfText,
   keyPath,
+  keyPathText,
   keyPlace,
   prefixesOf,
   recordPath,
@@ -24,7 +27,15 @@ import {
   type Writer,
 } from "./items.js";
 import { dictList } from "./method-categories.js";
-import type { WorkLedger } from "./budget.js";
+import {
+  joinParts,
+  joinSteps,
+  keepText,
+  keptParts,
+  keptText,
+  pathText,
+  type WorkLedger,
+} from "./budget.js";
 import type { Work } from "./solver.js";
 import type { ReadRoute } from "./values.js";
 
@@ -277,12 +288,18 @@ export class ExactPath {
 
   public constructor(readonly pass: CorePass) {}
 
+  /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */
+  get #work(): WorkLedger {
+    return this.pass.program.work;
+  }
+
   /** The exact path of a read of `key` at `node`; `before`: a definition at `node` itself does not count. */
   public exactPath(key: Key, node: FlowNode, before = false): ExactAnswer {
-    const memoKey = `${key}|${node.id}|${before ? 1 : 0}`;
+    const memoKey = joinParts(key, node.id, before ? 1 : 0);
     let answer = this.#memo.get(memoKey);
     if (answer === undefined) {
       answer = this.#exactPath(key, node, before);
+      keepText(this.#work, memoKey.length);
       this.#memo.set(memoKey, answer);
     }
     return answer;
@@ -352,7 +369,7 @@ export class ExactPath {
     for (let length = 0; length < rest.length; length += 1) {
       program.work.charge("invSteps");
       const at = rest.slice(0, length);
-      if ((inElement || at.includes("element")) && (index.reads.get(at.join("."))?.length ?? 0) > 0)
+      if ((inElement || at.includes("element")) && (index.reads.get(pathText(at))?.length ?? 0) > 0)
         return true;
     }
     return false;
@@ -568,9 +585,9 @@ export class ExactPath {
     for (const source of sources)
       for (const key of definitions.keysBelow(keyOf(source, []))) {
         const path = keyPath(key);
-        add(at, atSpans, atSeveral, path.join("."), source);
+        add(at, atSpans, atSeveral, keptText(this.#work, path), source);
         for (let length = 1; length <= path.length; length += 1)
-          add(below, belowSpans, belowSeveral, path.slice(0, length).join("."), source);
+          add(below, belowSpans, belowSeveral, keptText(this.#work, path.slice(0, length)), source);
       }
     // per source and callable, its anchored copies by dominator position, with the runs of one anchor's copies (an
     // anchor's copies in one callable are consecutive in its order, so a run is one interval of the walk)
@@ -604,7 +621,7 @@ export class ExactPath {
     const markPlaces = new Map<string, Set<PlaceId>>();
     for (const { key } of guards.branchRegions()) {
       work.charge("exactQueries");
-      const path = keyPath(key).join(".");
+      const path = keptPathText(this.#work, key);
       const places = markPlaces.get(path);
       if (places === undefined) markPlaces.set(path, new Set([keyPlace(key)]));
       else places.add(keyPlace(key));
@@ -614,11 +631,11 @@ export class ExactPath {
     // a source with several anchors is asked at the read, by its own nested anchors, per tree
     const markSeveral = new Map<string, Map<number, Set<PlaceId>>>();
     const register = (key: Key, callable: number, low: number, high: number): void => {
-      if ((markPlaces.get(keyPath(key).join("."))?.size ?? 0) <= FEW_PLACES) return;
+      if ((markPlaces.get(keyPathText(key))?.size ?? 0) <= FEW_PLACES) return;
       const place = keyPlace(key);
       const own = anchorsOf.get(place) ?? [];
       if (own.length > FEW_ANCHORS) {
-        const path = keyPath(key).join(".");
+        const path = keptPathText(this.#work, key);
         let byTree = markSeveral.get(path);
         if (byTree === undefined) markSeveral.set(path, (byTree = new Map()));
         for (const tree of treesOfPlace(place, own)) {
@@ -629,7 +646,7 @@ export class ExactPath {
         }
         return;
       }
-      const id = `${place}|${callable}|${low}|${high}`;
+      const id = joinParts(place, callable, low, high);
       let found = runs.get(id);
       if (found === undefined) {
         const list: Span<number>[] = [];
@@ -650,7 +667,7 @@ export class ExactPath {
         runs.set(id, (found = list));
       }
       if (found.length === 0) return;
-      const path = keyPath(key).join(".");
+      const path = keptPathText(this.#work, key);
       const list = markSpans.get(path);
       if (list === undefined) markSpans.set(path, [...found]);
       else list.push(...found);
@@ -702,7 +719,7 @@ export class ExactPath {
     for (const { key, file, regions } of guards.operandRegions()) {
       const entry = byOffset.get(keyPlace(key))?.get(file);
       if (entry === undefined) continue;
-      const path = keyPath(key).join(".");
+      const path = keptPathText(this.#work, key);
       for (let at = 0; at < regions.length;) {
         const start = regions[at]!.start;
         let end = regions[at]!.end;
@@ -769,10 +786,12 @@ export class ExactPath {
   ): NestedSpans<T> | null {
     const list = spans.get(path);
     if (list === undefined) return null;
-    const key = `${name}|${path}`;
+    const key = joinParts(name, path);
     let nested = built.get(key);
-    if (nested === undefined)
+    if (nested === undefined) {
+      keepText(this.#work, key.length);
       built.set(key, (nested = new NestedSpans(list, this.pass.program.work)));
+    }
     return nested;
   }
 
@@ -783,24 +802,24 @@ export class ExactPath {
    */
   #stopAt(forest: CopyForest, link: CopyLink, rest: readonly string[]): CopyLink | null {
     const candidates = [
-      this.#spans(forest.anchorsBuilt, "below", rest.join("."), forest.belowSpans),
+      this.#spans(forest.anchorsBuilt, "below", pathText(rest), forest.belowSpans),
       ...rest
         .slice(0, -1)
         .map((_, index) =>
           this.#spans(
             forest.anchorsBuilt,
             "at",
-            rest.slice(0, index + 1).join("."),
+            pathText(rest.slice(0, index + 1)),
             forest.atSpans,
           ),
         ),
     ].map((spans) => spans?.innermost(link.enter) ?? null);
     // the sources with several anchors in the link's tree, each by its anchors nested once
     const several = [
-      forest.belowSeveral.get(rest.join(".")),
+      forest.belowSeveral.get(pathText(rest)),
       ...rest
         .slice(0, -1)
-        .map((_, index) => forest.atSeveral.get(rest.slice(0, index + 1).join("."))),
+        .map((_, index) => forest.atSeveral.get(pathText(rest.slice(0, index + 1)))),
     ].flatMap((byTree) => [byTree?.get(link.tree), byTree?.get(-1)]);
     for (const places of several)
       for (const place of places ?? [])
@@ -814,9 +833,9 @@ export class ExactPath {
     if (root.top.kind === "own") return root;
     if (root.top.kind === "fail") {
       // a root without an exact definition stops at a path its source has keys at, above or below
-      if (forest.below.get(rest.join("."))?.has(root.source) === true) return root;
+      if (forest.below.get(pathText(rest))?.has(root.source) === true) return root;
       for (let length = 1; length < rest.length; length += 1)
-        if (forest.at.get(rest.slice(0, length).join("."))?.has(root.source) === true) return root;
+        if (forest.at.get(pathText(rest.slice(0, length)))?.has(root.source) === true) return root;
     }
     return null;
   }
@@ -867,7 +886,7 @@ export class ExactPath {
     const rest = recordPath(read);
     const floor = stop === null ? -1 : stop.depth;
     for (let length = 0; length <= rest.length; length += 1) {
-      const path = rest.slice(0, length).join(".");
+      const path = pathText(rest.slice(0, length));
       const places = forest.markPlaces.get(path);
       if (places === undefined) continue;
       if (places.size > FEW_PLACES) {
@@ -904,7 +923,7 @@ export class ExactPath {
       const depth = this.#spans(
         forest.marksBuilt,
         "operand",
-        rest.slice(0, length).join("."),
+        pathText(rest.slice(0, length)),
         forest.operandSpans,
       )?.innermost(link.enter);
       if (depth !== undefined && depth !== null && depth > floor) return true;
@@ -924,7 +943,7 @@ export class ExactPath {
    */
   #guardedDepth(forest: CopyForest, copy: CopyLink, path: string): number {
     const { guards, program } = this.pass;
-    const key = keyOf(copy.source, path === "" ? [] : path.split("."));
+    const key = keyOfText(copy.source, path);
     const callables = guards.branchCallables(key);
     if (callables === undefined) return -1;
     const exits = this.#exitsWhenDue(forest, key, callables);
@@ -1049,13 +1068,13 @@ export class ExactPath {
 
   /** The route D's value at a path took (S3 §1): `contract` where it is a chain root's contract or a copy's below. */
   public defRoute(d: Definition, rest: readonly string[]): ReadRoute {
-    return this.#defRoutes.get(`${d.uid}|${rest.join(".")}`) ?? "exact";
+    return this.#defRoutes.get(joinParts(d.uid, rest)) ?? "exact";
   }
 
   /** D's value at the path `rest` below its key, at D's node (§3.1's answer): once per (D, path). */
   public *defVal(d: Definition, rest: readonly string[]): Work<readonly Item[]> {
     return yield {
-      key: `def|${d.uid}|${rest.join(".")}`,
+      key: joinParts("def", d.uid, rest),
       kind: "exact",
       file: d.site.file,
       offset: d.site.start,
@@ -1073,7 +1092,7 @@ export class ExactPath {
     const copy = d.kind === "whole" && rest.length > 0 && !rest.includes("element");
     const forest = copy ? this.#forest() : null;
     const link = forest?.links.get(d.uid);
-    const routeKey = `${d.uid}|${rest.join(".")}`;
+    const routeKey = keptParts(this.#work, d.uid, rest);
     if (forest !== null && link !== undefined) {
       const stop = this.#stopAt(forest, link, rest);
       const root = link.root!;
@@ -1108,7 +1127,7 @@ export class ExactPath {
       this.#defRoutes.set(routeKey, values.valueRoute(d.value!, d.node, rest));
       return mergeItems(withWriter(items, writer), scope);
     }
-    const before = yield* values.keyItems(keyOf(d.place, [...d.path, ...rest]), d.node, true);
+    const before = yield* values.keyItems(keyOf(d.place, joinSteps(d.path, rest)), d.node, true);
     // F5–F7: the collection's kind is unchanged, and a dict's `values` or `keys` still a list of what it holds, whose
     // element is the dict's (r4.46 (2))
     const listed = rest.length > 0 && dictList(rest[0]!) !== undefined ? 1 : 0;

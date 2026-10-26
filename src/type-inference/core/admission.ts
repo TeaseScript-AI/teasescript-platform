@@ -1,10 +1,28 @@
 import { unwrap } from "../../expression-children.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { pathTextLength, textUnits, type WorkLedger } from "./budget.js";
+import {
+  joinParts,
+  joinSteps,
+  keepText,
+  keptParts,
+  keptSplit,
+  keptSteps,
+  keptText,
+  pathText,
+  splitPath,
+  stepText,
+  type WorkLedger,
+} from "./budget.js";
 import { carried, keepsOwn, operandsOf, type CarrierRole, type Dispatch } from "./carriers.js";
 import { defaultOf, heldReference, termAt, typeTags, writtenOf } from "./contract.js";
 import {
+  keptKey,
+  keptKeyBelow,
+  keptPath,
+  keptPathText,
+  keptPrefixes,
+  keyBelow,
   keyOf,
   keyPath,
   keyPlace,
@@ -338,7 +356,7 @@ function addRest(d: Definition, rest: readonly string[]): readonly string[] {
 function aliasKeyAt(alias: Alias, rest: readonly string[]): Key | null {
   if (rest.length < alias.at.length || alias.at.some((step, index) => rest[index] !== step))
     return null;
-  return keyOf(keyPlace(alias.source), [...keyPath(alias.source), ...rest.slice(alias.at.length)]);
+  return keyBelow(alias.source, rest.slice(alias.at.length));
 }
 
 /**
@@ -663,24 +681,31 @@ export class Admission {
         d.value !== undefined &&
         (d.how !== "argument" || pass.lists.singleSite(d.fn)) &&
         !this.#besideDefault(d)
-      )
+      ) {
+        // (one landing path and key per copied path, its copies' shared one, charged before it is made)
+        const landed = new Map<readonly string[], readonly string[]>();
         for (const { path, binding, strip } of this.#copySources(d.value)) {
-          const at = [
-            ...d.path,
-            ...(d.kind === "add" && d.how !== "elements" ? ["element"] : []),
-            ...path,
-          ];
           const written = writtenOf(program.place(binding).kind);
           const term = written === null ? null : permittedAt(written, strip);
+          if (term === null && (written !== null || !this.#inheriting.has(binding))) continue;
+          let at = landed.get(path);
+          if (at === undefined) {
+            at = keptSteps(
+              this.#work,
+              d.path,
+              d.kind === "add" && d.how !== "elements" ? ["element"] : [],
+              path,
+            );
+            landed.set(path, at);
+            this.#a4Keys.add(keptKey(this.#work, d.place, at));
+          }
           if (term !== null) this.#a4Copies.push({ place: d.place, path: at, term });
-          else if (written === null && this.#inheriting.has(binding))
-            this.#a4Inherits.push({ place: d.place, path: at, from: binding, strip });
-          else continue;
-          this.#a4Keys.add(keyOf(d.place, at));
+          else this.#a4Inherits.push({ place: d.place, path: at, from: binding, strip });
         }
+      }
     for (const { path, term } of this.#a4Copies) {
       let depth = path.length;
-      for (let step = ["element"]; termAt(term, step) !== null; step = [...step, "element"])
+      for (let step = ["element"]; termAt(term, step) !== null; step = joinSteps(step, ["element"]))
         depth = path.length + step.length;
       this.#reach = Math.max(this.#reach, depth);
     }
@@ -757,6 +782,7 @@ export class Admission {
         try {
           const inputs = this.#inputs(keyPlace(next), keyPath(next));
           const found = inputs === null ? null : this.#scan(inputs.direct, inputs.prefixes, next);
+          keepText(this.#work, next.length);
           this.#inherited.set(
             next,
             found === null ? null : optionalOf(found.copied, found.nullable),
@@ -767,9 +793,10 @@ export class Admission {
           if (!(error instanceof Unresolved)) throw error;
           const from = waiting.get(error.key);
           if (from !== undefined) {
-            const cycle = `${next}|${error.key}`;
+            const cycle = joinParts(next, error.key);
             // (a scan that asks again across the cycle just closed inherits nothing: it never waits on itself twice)
             if (cycle === closed) {
+              keepText(this.#work, next.length);
               this.#inherited.set(next, null);
               pending.pop();
               waiting.delete(next);
@@ -825,6 +852,11 @@ export class Admission {
     if (x !== y) this.#cycles.set(x, y);
   }
 
+  /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */
+  get #work(): WorkLedger {
+    return this.pass.program.work;
+  }
+
   #run<T>(work: Work<T>): T {
     return this.host.run(work);
   }
@@ -842,7 +874,7 @@ export class Admission {
     if (d.how === "argument") return;
     let keys = this.newlyRejected.get(d.uid);
     if (keys === undefined) this.newlyRejected.set(d.uid, (keys = new Set()));
-    keys.add(keyOf(root, path));
+    keys.add(keptKey(this.#work, root, path));
   }
 
   /**
@@ -881,12 +913,12 @@ export class Admission {
     const { program, contract } = this.pass;
     let label = program.place(place).label;
     path.forEach((step, index) => {
-      if (step !== "element") label = `${label}.${step}`;
+      if (step !== "element") label = stepText(label, step);
       else {
         const kinds = withoutEmpty(
           this.#run(contract.contractOf(keyOf(place, path.slice(0, index)))),
         );
-        label = `${label}.${elementStep(kinds.map((item) => item.tag))}`;
+        label = stepText(label, elementStep(kinds.map((item) => item.tag)));
       }
     });
     return label;
@@ -904,9 +936,9 @@ export class Admission {
       if (c.kind === "project") {
         const target = program.targetRoot(c.into);
         if (!program.cellOwner.has(target.root) && !program.hasOf.has(target.root))
-          tracked.add(keyOf(target.root, target.path));
+          tracked.add(keptKey(this.#work, target.root, target.path));
       }
-    for (const [, binding] of program.occurrenceOf) tracked.add(keyOf(binding, []));
+    for (const [, binding] of program.occurrenceOf) tracked.add(keptKey(this.#work, binding, []));
     // the stores, adds, returns, parameter defaults and single-site arguments into each key (a multi-site argument
     // decides nothing, F21)
     const reaching = [...definitions.storeDefs, ...definitions.transferDefs].filter(
@@ -917,7 +949,7 @@ export class Admission {
     );
     const stores = new Map<Key, number>();
     for (const d of reaching)
-      for (const key of [d.key, ...prefixesOf(d.key)]) {
+      for (const key of [d.key, ...keptPrefixes(this.#work, d.key)]) {
         work.charge("indexSteps");
         stores.set(key, (stores.get(key) ?? 0) + 1);
       }
@@ -926,17 +958,22 @@ export class Admission {
     const deepest = new Map<Key, number>();
     for (const d of reaching)
       if ((stores.get(d.key) ?? 0) > 1) {
-        const base = [...d.path, ...(d.kind === "add" && d.how !== "elements" ? ["element"] : [])];
+        const base = joinSteps(d.path, d.kind === "add" && d.how !== "elements" ? ["element"] : []);
         const structure = this.#valueStructure(d.value!);
-        for (const path of structure.paths) tracked.add(this.#keyText(d.place, [...base, ...path]));
+        for (const path of structure.paths)
+          tracked.add(keptKey(this.#work, d.place, joinSteps(base, path)));
         for (const { below, key } of structure.sources) {
           work.charge("indexSteps");
-          const landing = this.#keyText(d.place, [...base, ...below]);
+          const landing = keptKey(this.#work, d.place, joinSteps(base, below));
           const depth = this.#depthOf(key);
           if (depth <= (deepest.get(landing) ?? 0)) continue;
           deepest.set(landing, depth);
           tracked.add(
-            this.#keyText(d.place, [...base, ...below, ...Array<string>(depth).fill("element")]),
+            keptKey(
+              this.#work,
+              d.place,
+              joinSteps(base, below, Array<string>(depth).fill("element")),
+            ),
           );
         }
       }
@@ -947,10 +984,10 @@ export class Admission {
       if ((stores.get(d.key) ?? 0) === 1) {
         const structure = this.#valueStructure(d.value!);
         if (structure.sources.length === 0) continue;
-        const base = [...d.path, ...(d.kind === "add" && d.how !== "elements" ? ["element"] : [])];
+        const base = joinSteps(d.path, d.kind === "add" && d.how !== "elements" ? ["element"] : []);
         for (const path of structure.paths) {
           work.charge("indexSteps");
-          tracked.add(this.#keyText(d.place, [...base, ...path]));
+          tracked.add(keptKey(this.#work, d.place, joinSteps(base, path)));
         }
       }
     // C9: where each ingress store's external data stands below its destination, decided with the store whether a
@@ -959,10 +996,11 @@ export class Admission {
       for (const stop of stops) {
         work.charge("indexSteps");
         const below = elementsBelow(d, stop.path);
-        if (below.length > 0) tracked.add(this.#keyText(d.place, [...this.#destPath(d), ...below]));
+        if (below.length > 0)
+          tracked.add(keptKey(this.#work, d.place, joinSteps(this.#destPath(d), below)));
       }
     for (const key of [...tracked])
-      for (const prefix of this.#prefixesOf(key)) {
+      for (const prefix of keptPrefixes(this.#work, key)) {
         work.charge("indexSteps");
         tracked.add(prefix);
       }
@@ -977,8 +1015,7 @@ export class Admission {
     for (const key of tracked) {
       let paths = roots.get(keyPlace(key));
       if (paths === undefined) roots.set(keyPlace(key), (paths = new Set()));
-      work.charge("indexSteps", textUnits(key.length));
-      paths.add(keyPath(key).join("."));
+      paths.add(keptPathText(this.#work, key));
     }
     // A1, A8: a written collection's elements at every depth; A4: a copied written type's paths, where the copy lands
     // and below, whether a read asks for them or not
@@ -986,8 +1023,12 @@ export class Admission {
       const written = writtenOf(place.kind);
       const paths = roots.get(place.id);
       if (written === null || paths === undefined) continue;
-      for (let path = ["element"]; termAt(written, path) !== null; path = [...path, "element"])
-        paths.add(path.join("."));
+      for (
+        let path = ["element"];
+        termAt(written, path) !== null;
+        path = joinSteps(path, ["element"])
+      )
+        paths.add(keptText(this.#work, path));
     }
     const copied = new Map<Key, Set<TypeTerm>>();
     // (per place and path, the rests below it of the paths copies of written types land at in the place: all of them,
@@ -996,35 +1037,39 @@ export class Admission {
     const land = (place: PlaceId, path: readonly string[], base: boolean): boolean => {
       let grew = false;
       for (const rests of base ? [below.all, below.base] : [below.all]) {
-        const own = `${place}|=${path.join(".")}`;
+        const own = keptParts(this.#work, place, "=", path);
         if (rests.has(own)) continue;
         rests.set(own, new Set());
         grew = true;
         for (let length = 0; length < path.length; length += 1) {
           work.charge("indexSteps");
-          const prefix = `${place}|${path.slice(0, length).join(".")}`;
+          const prefix = keptParts(this.#work, place, path.slice(0, length));
           let found = rests.get(prefix);
           if (found === undefined) rests.set(prefix, (found = new Set()));
-          found.add(path.slice(length).join("."));
+          found.add(keptText(this.#work, path.slice(length)));
         }
       }
       let paths = roots.get(place);
       if (paths === undefined) roots.set(place, (paths = new Set()));
-      paths.add(path.join("."));
+      paths.add(keptText(this.#work, path));
       return grew;
     };
     for (const { place, path, term } of this.#a4Copies) {
       // (once per landing path and written type: k copies of one binding into one literal are one)
-      const at = keyOf(place, path);
+      const at = keptKey(this.#work, place, path);
       let terms = copied.get(at);
       if (terms === undefined) copied.set(at, (terms = new Set()));
       work.charge("indexSteps");
       if (terms.has(term)) continue;
       terms.add(term);
       land(place, path, true);
-      for (let step = ["element"]; termAt(term, step) !== null; step = [...step, "element"]) {
+      for (
+        let step = ["element"];
+        termAt(term, step) !== null;
+        step = joinSteps(step, ["element"])
+      ) {
         work.charge("indexSteps");
-        land(place, [...path, ...step], true);
+        land(place, joinSteps(path, step), true);
       }
     }
     // A4 through copies: a copy of a place that may inherit a written type lands at its path, and below it at the paths
@@ -1051,10 +1096,10 @@ export class Admission {
         // length going round, so a cycle of whole copies brings each member every one, Sol's round 4 B1)
         const keeps = across || (path.length === 0 && strip.length === 0);
         let grew = land(place, path, keeps);
-        const rests = (across ? below.all : below.base).get(`${from}|${strip.join(".")}`);
+        const rests = (across ? below.all : below.base).get(joinParts(from, strip));
         for (const rest of [...(rests ?? [])]) {
           work.charge("indexSteps");
-          grew = land(place, [...path, ...rest.split(".")], keeps) || grew;
+          grew = land(place, joinSteps(path, splitPath(rest)), keeps) || grew;
         }
         if (grew && bySource.has(place) && !queued.has(place)) {
           queued.add(place);
@@ -1064,10 +1109,7 @@ export class Admission {
     }
     const groups: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
     for (const [root, paths] of roots)
-      for (const path of paths) {
-        work.charge("indexSteps", textUnits(path.length));
-        groups.push({ root, path: path === "" ? [] : path.split(".") });
-      }
+      for (const path of paths) groups.push({ root, path: keptSplit(this.#work, path) });
     this.#groups = groups;
     return groups;
   }
@@ -1085,7 +1127,7 @@ export class Admission {
     if (inputs === null) return null;
     const { direct, prefixes } = inputs;
     if (memberOracle !== null) this.#compareMembers(root, path, prefixes);
-    const key = keyOf(root, path);
+    const key = keptKey(this.#work, root, path);
     const written = writtenOf(place.kind);
     const term = written === null ? null : permittedAt(written, path);
     // A9, C7: every argument and return into a written parameter or result is a candidate
@@ -1201,27 +1243,27 @@ export class Admission {
     work.charge("checks", direct.length);
     for (const candidate of direct)
       if (candidate.d.how !== "argument" || transfer || lists.singleSite(candidate.d.fn))
-        candidates.set(`${candidate.d.uid}|${candidate.at.join(".")}`, candidate);
+        candidates.set(keptParts(this.#work, candidate.d.uid, candidate.at), candidate);
     if (transfer && path.length > 0)
       for (const d of [
         ...(definitions.byKey.get(keyOf(root, [])) ?? []),
         ...(definitions.deadArguments.get(keyOf(root, [])) ?? []),
       ])
         if (lists.live(d) && d.kind === "whole")
-          candidates.set(`${d.uid}|${path.join(".")}`, { d, at: path });
+          candidates.set(keptParts(this.#work, d.uid, path), { d, at: path });
     for (const { key: prefix, rest } of prefixes) {
       const stored = contract.prefixStores(prefix);
       const take = (d: Definition): void => {
         const at = d.kind === "add" && d.how !== "elements" ? rest.slice(1) : rest;
         const members = this.#members.get(d);
         candidates.set(
-          `${d.uid}|${at.join(".")}`,
+          keptParts(this.#work, d.uid, at),
           members === undefined || !this.#covers(d, at) ? { d, at } : { d, at, members },
         );
         // (beside or above a literal's alias cell its members are their own candidates: their own terms stand there)
         if (members !== undefined && !this.#covers(d, at))
           for (const member of members)
-            candidates.set(`${member.uid}|${at.join(".")}`, { d: member, at });
+            candidates.set(keptParts(this.#work, member.uid, at), { d: member, at });
       };
       const takeAll = (stores: ReadonlySet<Definition | null>): void => {
         const { wholes, adds } = this.#takeable(stores, byWritten);
@@ -1325,7 +1367,7 @@ export class Admission {
               own.domain === theirs.domain && JSON.stringify(expected) === JSON.stringify(actual)
                 ? null
                 : `${keyOf(root, path)}: the member at ${member.site.start} answers ${JSON.stringify(actual)} ` +
-                    `(written ${own.domain}) at ${rest.join(".")}, its class at ${representative.site.start} ` +
+                    `(written ${own.domain}) at ${pathText(rest)}, its class at ${representative.site.start} ` +
                     `${JSON.stringify(expected)} (written ${theirs.domain})`,
             );
           }
@@ -1393,9 +1435,12 @@ export class Admission {
     const work = program.work;
     const seen = new Map<string, Item[]>();
     const evaluate = (d: Definition, at: readonly string[]): Item[] => {
-      const memoKey = `${d.uid}|${at.join(".")}`;
+      const memoKey = joinParts(d.uid, at);
       let items = seen.get(memoKey);
-      if (items === undefined) seen.set(memoKey, (items = this.valueAt(d, at)));
+      if (items === undefined) {
+        keepText(this.#work, memoKey.length);
+        seen.set(memoKey, (items = this.valueAt(d, at)));
+      }
       return items;
     };
     // A2: the earliest definite contribution in source order decides, a lazy merge of the direct stores and the
@@ -1499,9 +1544,9 @@ export class Admission {
       if (d.value === undefined) continue;
       const stops = this.#stopsOf(d.value, d.node);
       const here = [
-        ...(stops.written.get(at.join(".")) ?? []),
-        ...(stops.values.get(at.join(".")) ?? []),
-        ...(stops.literals.get(at.join(".")) ?? []),
+        ...(stops.written.get(pathText(at)) ?? []),
+        ...(stops.values.get(pathText(at)) ?? []),
+        ...(stops.literals.get(pathText(at)) ?? []),
       ].sort((x, y) => compareKeys(x.key, y.key));
       program.work.charge("checks", here.length + sortCost(here.length));
       for (const stop of here)
@@ -1561,6 +1606,7 @@ export class Admission {
     if (!this.#deciderSites.has(key)) {
       const inputs = this.#inputs(place, path);
       const below = path.length > 0 && this.#run(this.pass.contract.refReceiver(key));
+      keepText(this.#work, key.length);
       this.#deciderSites.set(
         key,
         inputs === null || below
@@ -1587,7 +1633,7 @@ export class Admission {
    * (external data, no kind and no `null`), so the scan passes none.
    */
   #wholeOf(key: Key, add: boolean): Definition[] {
-    const memoKey = `${key}|${add}`;
+    const memoKey = joinParts(key, add);
     let list = this.#whole.get(memoKey);
     if (list === undefined) {
       const { definitions, lists, program } = this.pass;
@@ -1606,6 +1652,7 @@ export class Admission {
       program.work.charge("checks", sortCost(list.length));
       list.sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b));
       list = this.#grouped(list);
+      keepText(this.#work, memoKey.length);
       this.#whole.set(memoKey, list);
     }
     return list;
@@ -1693,7 +1740,7 @@ export class Admission {
       if (at === null) continue;
       const full = recordKey(at);
       let parent = "";
-      for (const key of [...prefixesOf(full).reverse(), full]) {
+      for (const key of [...keptPrefixes(this.#work, full).reverse(), full]) {
         this.pass.program.work.charge("eligibility");
         if (!tested(guards, key)) continue;
         if (!children.has(key)) children.set(key, new Set());
@@ -1842,7 +1889,7 @@ export class Admission {
       for (const { root, path } of this.groups())
         for (let length = 0; length < path.length; length += 1) {
           this.pass.program.work.charge("eligibility");
-          const key = keyOf(root, path.slice(0, length));
+          const key = keptKey(this.#work, root, path.slice(0, length));
           const list = demands.get(key);
           if (list === undefined) demands.set(key, [path.slice(length)]);
           else list.push(path.slice(length));
@@ -1937,10 +1984,10 @@ export class Admission {
           program.work.charge("aliasSteps");
           if (beside(path)) return null;
         }
-      const steps = at === "" ? [] : at.split(".");
+      const steps = splitPath(at);
       for (let length = 0; length < steps.length; length += 1) {
         program.work.charge("aliasSteps");
-        const objects = index.objects.get(steps.slice(0, length).join("."));
+        const objects = index.objects.get(pathText(steps.slice(0, length)));
         if (objects !== undefined && (objects.count.get(steps[length]!) ?? 0) < objects.list.length)
           return null;
       }
@@ -1949,7 +1996,7 @@ export class Admission {
       alias = {
         source: read.source,
         read: read.read,
-        at: cell.path === "" ? [] : cell.path.split("."),
+        at: keptSplit(this.#work, cell.path),
         value: cell.value,
       };
       written = read.written;
@@ -1987,14 +2034,14 @@ export class Admission {
     if (written === null) return "null";
     return written.from === null
       ? JSON.stringify(permittedAt(written.term!, written.strip))
-      : `inherits ${written.from} ${written.strip.join(".")}`;
+      : `inherits ${written.from} ${keptText(this.#work, written.strip)}`;
   }
 
   /** The written type an alias's read copies at `rest` below its path (`#writtenDomainKey`), `null` where none. */
   #writtenDomainAt(alias: Alias, rest: readonly string[]): TypeTerm | null {
     const written = this.#writtenSource(alias.value, []);
     if (written === null) return null;
-    const path = [...written.strip, ...rest];
+    const path = joinSteps(written.strip, rest);
     return written.from === null
       ? permittedAt(written.term!, path)
       : this.#inheritedAt(written.from, path);
@@ -2008,7 +2055,7 @@ export class Admission {
    */
   #chainEnd(source: Key, read: FlowNode): ChainEnd | null {
     if (chainsOff) return null;
-    const first = `${source}|${read.id}`;
+    const first = keptParts(this.#work, source, read.id);
     const known = this.#chains.get(first);
     if (known !== undefined) return known;
     const { program, exact, guards } = this.pass;
@@ -2023,15 +2070,15 @@ export class Admission {
       const next = this.#stablePath(value, answer.def.node);
       if (next === null || guards.guardedRead(value) || guards.guardedBelowRead(value).length > 0)
         break;
-      current = {
-        source: keyOf(keyPlace(next.source), [...keyPath(next.source), ...answer.rest]),
-        read: next.read,
-      };
+      current = { source: keptKeyBelow(this.#work, next.source, answer.rest), read: next.read };
       end = {
         ...current,
-        written: [next.written, ...answer.rest].filter((x) => x !== "").join("."),
+        written: keptText(
+          this.#work,
+          joinSteps([next.written], answer.rest).filter((x) => x !== ""),
+        ),
       };
-      const key = `${current.source}|${current.read.id}`;
+      const key = keptParts(this.#work, current.source, current.read.id);
       const known = this.#chains.get(key);
       if (known !== undefined) {
         end = known ?? end;
@@ -2092,9 +2139,9 @@ export class Admission {
     const binding = program.occurrenceOf.get(at);
     if (binding === undefined || program.isHost(binding)) return null;
     return {
-      source: keyOf(binding, steps.reverse()),
+      source: keptKey(this.#work, binding, steps.reverse()),
       read: program.occNode.get(at) ?? reading,
-      written: written.reverse().join("."),
+      written: keptText(this.#work, written.reverse()),
     };
   }
 
@@ -2231,7 +2278,10 @@ export class Admission {
       program.work.charge("indexSteps");
       if (!((d.kind === "whole" || d.kind === "add") && d.value !== undefined && lists.live(d)))
         return;
-      const at = d.kind === "add" && d.how !== "elements" ? [...below, "element"] : below;
+      const at =
+        d.kind === "add" && d.how !== "elements"
+          ? keptSteps(this.#work, below, ["element"])
+          : below;
       for (let index = 0; index < at.length && index < strip.length; index += 1)
         if (at[index] !== strip[index]) return;
       roots.push(
@@ -2244,7 +2294,7 @@ export class Admission {
       for (const d of definitions.byKey.get(keyOf(place, path.slice(0, length))) ?? [])
         root(d, [], path.slice(length));
     for (const below of definitions.keysBelow(key)) {
-      const at = keyPath(below).slice(path.length);
+      const at = keptPath(this.#work, below).slice(path.length);
       if (at.some((step) => step !== "element")) continue;
       levels.push(at);
       for (const d of definitions.byKey.get(below) ?? []) root(d, at, []);
@@ -2271,7 +2321,7 @@ export class Admission {
     // (each path's text charged by its size before it is made, TABLE r4.58)
     const path = (at: readonly string[]): void => {
       if (at.length === 0) return;
-      const text = this.#pathText(at);
+      const text = keptText(this.#work, at);
       if (!paths.has(text)) paths.set(text, at);
     };
     for (const at of levels)
@@ -2290,9 +2340,8 @@ export class Admission {
           // (read past the longest key, it is cut there, never dropped: whether a literal holds a source, and so which
           // obligations its paths owe, never depends on the keys elsewhere in the program, TABLE r4.67 (1))
           const room = Math.max(0, this.#longestKey() - keyPath(source).length);
-          const key = keyOf(keyPlace(source), [...keyPath(source), ...strip.slice(0, room)]);
-          program.work.charge("indexSteps", textUnits(key.length));
-          sources.set(`${this.#pathText(at)}|${key}`, { below: at, key });
+          const key = keptKeyBelow(this.#work, source, strip.slice(0, room));
+          sources.set(keptParts(this.#work, at, key), { below: at, key });
           continue;
         }
         const carried = this.#carriersOf(current, strip);
@@ -2308,12 +2357,8 @@ export class Admission {
         for (const [name, term] of fields) {
           program.work.charge("indexSteps");
           if (strip.length === 0 && elements && name !== "element") continue;
-          const step = strip.length === 0 ? [...at, name] : at;
-          // (a nested cell's path is one step longer than its literal's: charged by its length, TABLE r4.58)
-          if (strip.length === 0) {
-            program.work.charge("indexSteps", step.length);
-            path(step);
-          }
+          const step = strip.length === 0 ? keptSteps(this.#work, at, [name]) : at;
+          if (strip.length === 0) path(step);
           if (term.kind === "ref")
             for (const d of definitions.cellDefs.get(term.place) ?? [])
               pending.push([d.value!, step, strip.slice(1)]);
@@ -2321,37 +2366,6 @@ export class Admission {
       }
     }
     return { paths: [...paths.values()], sources: [...sources.values()] };
-  }
-
-  /**
-   * A path's text, which admission keeps as a key: charged by its size before it is made (TABLE r4.58), so a literal's
-   * long or deep paths reach the work allowance before the heap.
-   */
-  #pathText(path: readonly string[]): string {
-    this.pass.program.work.charge("indexSteps", textUnits(pathTextLength(path)));
-    return path.join(".");
-  }
-
-  /** A key admission keeps, charged by its text's size before it is made (`#pathText`). */
-  #keyText(place: PlaceId, path: readonly string[]): Key {
-    this.pass.program.work.charge(
-      "indexSteps",
-      textUnits(String(place).length + 1 + pathTextLength(path)),
-    );
-    return keyOf(place, path);
-  }
-
-  /** A key's prefixes (`prefixesOf`), their texts charged by their sizes before they are made (`#pathText`). */
-  #prefixesOf(key: Key): Key[] {
-    const path = keyPath(key);
-    let units = 0;
-    for (let length = path.length - 1, size = key.length; length >= 0; length -= 1) {
-      // (a prefix is its key without its last step and the dot before it)
-      size -= path[length]!.length + (length > 0 ? 1 : 0);
-      units += textUnits(size);
-    }
-    this.pass.program.work.charge("indexSteps", units);
-    return prefixesOf(key);
   }
 
   /** The longest path of a key with stores or of a read's or a call's projections in the program. */
@@ -2458,14 +2472,17 @@ export class Admission {
     const out = new Map<string, readonly string[]>();
     const put = (path: readonly string[]): void => {
       work.charge("indexSteps");
-      if (!out.has(path.join("."))) out.set(path.join("."), path);
+      {
+        const text = keptText(this.#work, path);
+        if (!out.has(text)) out.set(text, path);
+      }
     };
     const structure = this.#valueStructure(value);
     for (const path of structure.paths) put(path);
     for (const { below, key } of structure.sources) {
       let path = below;
       for (let depth = this.#depthOf(key); depth > 0; depth -= 1)
-        put((path = [...path, "element"]));
+        put((path = keptSteps(this.#work, path, ["element"])));
     }
     for (const path of also) put(path);
     return [...out.values()];
@@ -2481,7 +2498,10 @@ export class Admission {
     const out = new Map<string, readonly string[]>();
     const put = (path: readonly string[]): void => {
       program.work.charge("indexSteps");
-      if (path.length > 0 && !out.has(path.join("."))) out.set(path.join("."), path);
+      {
+        const text = path.length > 0 ? keptText(this.#work, path) : "";
+        if (path.length > 0 && !out.has(text)) out.set(text, path);
+      }
     };
     for (const d of list)
       if (d.value !== undefined) for (const path of this.#valueStructure(d.value).paths) put(path);
@@ -2509,11 +2529,14 @@ export class Admission {
         continue;
       }
       // (an `addAll`'s literal's elements are the destination's own elements)
-      return keyOf(d.place, [
-        ...(d.kind === "add" && d.how === "elements" ? d.path : this.#destPath(d)),
-        ...steps.reverse(),
-        "element",
-      ]);
+      return keyOf(
+        d.place,
+        joinSteps(
+          d.kind === "add" && d.how === "elements" ? d.path : this.#destPath(d),
+          steps.reverse(),
+          ["element"],
+        ),
+      );
     }
   }
 
@@ -2524,7 +2547,7 @@ export class Admission {
       for (const { root, path } of this.groups())
         for (let length = 0; length < path.length; length += 1) {
           this.pass.program.work.charge("indexSteps");
-          const prefix = keyOf(root, path.slice(0, length));
+          const prefix = keptKey(this.#work, root, path.slice(0, length));
           const paths = this.#below.get(prefix);
           if (paths === undefined) this.#below.set(prefix, [path.slice(length)]);
           else paths.push(path.slice(length));
@@ -2657,9 +2680,12 @@ export class Admission {
           const fields: readonly (readonly [string, TypeTerm])[] =
             strip.length === 0 ? fieldsOf(has.type) : on === undefined ? [] : [[strip[0]!, on]];
           for (const [name, term] of fields)
-            if (term.kind === "ref")
+            if (term.kind === "ref") {
+              // (one path per field, which its cells share, charged before it is made)
+              const child = strip.length === 0 ? keptSteps(this.#work, path, [name]) : path;
               for (const d of definitions.cellDefs.get(term.place) ?? [])
-                next.push([d.value!, strip.length === 0 ? [...path, name] : path, strip.slice(1)]);
+                next.push([d.value!, child, strip.slice(1)]);
+            }
         }
       else
         for (const [carried, rest] of this.#carriersOf(current, strip))
@@ -2701,7 +2727,7 @@ export class Admission {
     for (let at = value; program.projOf.has(at); at = program.projOf.get(at)!.owner)
       if (this.#keepsOwn(at)) return null;
     const steps = keyPath(key);
-    const path = [...steps, ...strip];
+    const path = keptSteps(this.#work, steps, strip);
     if (steps.some((step) => dictList(step) !== undefined)) return null;
     if (term === null) return { term: null, from: place, strip: path };
     return permittedAt(term, path) === null ? null : { term, from: null, strip: path };
@@ -2751,10 +2777,8 @@ export class Admission {
       EvaluationKey,
     ])[] = [[value, node, [], [], false, [], false, true, []]];
     // a cell's position: its value's place in the literal's own source, never its index in a list one step filtered
-    const cellKey = (key: EvaluationKey, d: Definition): EvaluationKey => [
-      ...key,
-      program.places[d.value!]?.site?.start ?? 0,
-    ];
+    const cellKey = (key: EvaluationKey, d: Definition): EvaluationKey =>
+      joinSteps(key, [program.places[d.value!]?.site?.start ?? 0]);
     while (pending.length > 0) {
       const [current, at, path, strip, deep, via, after, single, key] = pending.pop()!;
       program.work.charge("indexSteps");
@@ -2776,8 +2800,9 @@ export class Admission {
           single,
           via,
         };
-        const list = stops.written.get(path.join("."));
-        if (list === undefined) stops.written.set(path.join("."), [inherits]);
+        const text = keptText(this.#work, path);
+        const list = stops.written.get(text);
+        if (list === undefined) stops.written.set(text, [inherits]);
         else list.push(inherits);
       }
       const literal = term === null && program.hasOf.has(current);
@@ -2804,12 +2829,12 @@ export class Admission {
       if (!after && !literal && term === null && this.#sourceOf(current) === null) {
         const carried = this.#carriersOf(current, strip);
         if (carried.length > 0) {
-          pending.push([current, at, path, strip, deep, via, true, single, [...key, OWN]]);
+          pending.push([current, at, path, strip, deep, via, true, single, joinSteps(key, [OWN])]);
           for (let index = carried.length - 1; index >= 0; index -= 1) {
             const [operand, rest, role, position] = carried[index]!;
             const through = program.projOf.has(current)
               ? via
-              : [...via, { value: current, node: at, path, strip, operand, role }];
+              : joinSteps(via, [{ value: current, node: at, path, strip, operand, role }]);
             pending.push([
               operand,
               at,
@@ -2819,14 +2844,14 @@ export class Admission {
               through,
               false,
               single,
-              [...key, position],
+              joinSteps(key, [position]),
             ]);
           }
           continue;
         }
       }
       const map = term !== null ? stops.written : literal ? stops.literals : stops.values;
-      const pathKey = this.#pathText(path);
+      const pathKey = keptText(this.#work, path);
       // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2; a copy only
       // where it reads the same snapshot, r4.68 (1); and only through the same operations, selected alike: an operand
       // a `get` never gives is no copy of the store's own element beside it, Astra r5 D1)
@@ -2836,8 +2861,16 @@ export class Admission {
         map === stops.values &&
         this.#sourceOf(current) !== null
       ) {
-        const identity = `${pathKey}|${strip.join(".")}|${this.#viaSignature(via)}|${deep}|${single}|${contract.identityOf(current).id}|${contract.readSnapshot(current) ?? ""}`;
-        program.work.charge("indexSteps", textUnits(identity.length));
+        const identity = keptParts(
+          this.#work,
+          pathKey,
+          strip,
+          this.#viaSignature(via),
+          deep,
+          single,
+          contract.identityOf(current).id,
+          contract.readSnapshot(current) ?? "",
+        );
         if (sources.has(identity)) continue;
         sources.add(identity);
       }
@@ -2858,14 +2891,12 @@ export class Admission {
       else list.push(stop);
       if (!literal) continue;
       const next = cells(current, null);
-      // (each cell's path and evaluation key are its literal's one step longer: charged by their lengths, TABLE r4.58)
-      program.work.charge("indexSteps", next.length * (path.length + key.length + 2));
       for (let index = next.length - 1; index >= 0; index -= 1) {
         const [d, step] = next[index]!;
         pending.push([
           d.value!,
           d.node ?? at,
-          [...path, step],
+          keptSteps(this.#work, path, [step]),
           [],
           false,
           via,
@@ -2909,7 +2940,7 @@ export class Admission {
       null;
     for (let length = 0; length <= at.length; length += 1) {
       program.work.charge("checks");
-      const written = this.#snapshots(stops.written.get(at.slice(0, length).join(".")), false);
+      const written = this.#snapshots(stops.written.get(pathText(at.slice(0, length))), false);
       for (const stop of written ?? []) {
         program.work.charge("checks");
         if (copy !== null && compareKeys(stop.key, copy.key) > 0) break;
@@ -2917,7 +2948,7 @@ export class Admission {
         // read out of has it alone, and each operation surely gives it)
         if (stop.deep && length === at.length && !(stop.single && this.#selects(stop, true)))
           continue;
-        const rest = [...stop.strip, ...at.slice(length)];
+        const rest = joinSteps(stop.strip, at.slice(length));
         const term =
           stop.from === null
             ? permittedAt(stop.term!, rest)
@@ -2933,12 +2964,12 @@ export class Admission {
     // (a value a projection selects stands for its parts below the path, never at it)
     for (let length = 0; length <= at.length; length += 1) {
       const list = this.#snapshots(
-        stops.values.get(at.slice(0, length).join(".")),
+        stops.values.get(pathText(at.slice(0, length))),
         length === at.length,
       );
       if (list !== undefined) lists.push({ list, length });
     }
-    const literals = this.#snapshots(stops.literals.get(at.join(".")), true);
+    const literals = this.#snapshots(stops.literals.get(pathText(at)), true);
     if (literals !== undefined) lists.push({ list: literals, length: at.length });
     const positions = lists.map(() => 0);
     for (;;) {
@@ -2964,7 +2995,7 @@ export class Admission {
       if (next.via.some((level) => TYPED_ROLES.has(level.role))) continue;
       const rest = at.slice(lists[best]!.length);
       const items = withoutEmpty(
-        this.#run(values.valueItems(next.value, next.node, [...next.strip, ...rest])),
+        this.#run(values.valueItems(next.value, next.node, joinSteps(next.strip, rest))),
       );
       const definite = items.some((item) => item.tag === "unknown") ? [] : deciding(items);
       // (an operand its operation does not give decides nothing, F17a, F17b)
@@ -3016,7 +3047,13 @@ export class Admission {
         contract.readSnapshot(stop.value) ??
         (contract.resultKey(stop.value) === null ? null : `c${contract.identityOf(stop.value).id}`);
       if (read !== null) {
-        const snapshot = `${this.#viaSignature(stop.via)}|${stop.strip.join(".")}|${stop.deep}|${stop.single}|${read}`;
+        const snapshot = joinParts(
+          this.#viaSignature(stop.via),
+          stop.strip,
+          stop.deep,
+          stop.single,
+          read,
+        );
         if (seen.has(snapshot)) continue;
         seen.add(snapshot);
       }
@@ -3048,10 +3085,11 @@ export class Admission {
     for (const level of via) {
       const carried = withoutEmpty(
         this.#run(
-          this.pass.values.valueItems(level.value, level.node, [
-            ...level.strip,
-            ...at.slice(level.path.length),
-          ]),
+          this.pass.values.valueItems(
+            level.value,
+            level.node,
+            joinSteps(level.strip, at.slice(level.path.length)),
+          ),
         ),
       );
       if (!definite.every((tag) => carried.some((own) => own.tag === tag && own.cert === "def")))
@@ -3110,7 +3148,7 @@ export class Admission {
     if (d.value === undefined) return [];
     const out: { stop: Stop; rest: readonly string[] }[] = [];
     for (let length = 0; length <= at.length; length += 1)
-      for (const stop of this.#keyStops(d, at.slice(0, length).join(".")).distinct()) {
+      for (const stop of this.#keyStops(d, pathText(at.slice(0, length))).distinct()) {
         this.pass.program.work.charge("checks");
         out.push({ stop, rest: at.slice(length) });
       }
@@ -3143,7 +3181,7 @@ export class Admission {
     // data only its own sitings, the inline ones it skips never read, Codex r24 F2's neighbours)
     const lists: (readonly Siting[])[] = [];
     for (let length = 0; length <= at.length; length += 1) {
-      const stops = this.#keyStops(d, at.slice(0, length).join("."));
+      const stops = this.#keyStops(d, pathText(at.slice(0, length)));
       lists.push(named ? stops.namedSitings() : stops.sitings());
     }
     const positions = lists.map(() => 0);
@@ -3186,7 +3224,7 @@ export class Admission {
    * the ones C1 may be sited at (`ingressSiteOf`) and the named data among them (`#namedBeside`).
    */
   #keyStops(d: Definition, key: string): KeyStops {
-    const memoKey = `${d.uid}|${key}`;
+    const memoKey = joinParts(d.uid, key);
     const known = this.#keyed.get(memoKey);
     if (known !== undefined) return known;
     const { program, definitions } = this.pass;
@@ -3268,6 +3306,7 @@ export class Admission {
         return (named = this.#distinct(out));
       },
     };
+    keepText(this.#work, memoKey.length);
     this.#keyed.set(memoKey, entry);
     return entry;
   }
@@ -3334,8 +3373,8 @@ export class Admission {
     for (const { stop, rest } of this.#contributions(d, at)) {
       const source = this.#sourceOf(stop.value);
       if (source === null || inline.has(stop.value)) continue;
-      const path = [...stop.strip, ...rest];
-      const key = keyOf(keyPlace(source), [...keyPath(source), ...path]);
+      const path = joinSteps(stop.strip, rest);
+      const key = keyBelow(source, path);
       if (withoutEmpty(this.#run(contract.contractOf(key))).some(concrete)) continue;
       if (this.#run(values.valueItems(stop.value, stop.node, path)).some(isExternal))
         // (an operation's own read: the destination's check at the store's value, TABLE r4.63 (3))
@@ -3379,7 +3418,7 @@ export class Admission {
    * those only a typed default reads (F18: its data's C1 at the call's ingress, TABLE r4.66 (3)).
    */
   #ownLeaves(d: Definition, typed = true): ReadonlySet<PlaceId> {
-    const memoKey = `${d.uid}|${typed}`;
+    const memoKey = joinParts(d.uid, typed);
     const known = this.#ownReads.get(memoKey);
     if (known !== undefined) return known;
     const { program, definitions, values } = this.pass;
@@ -3425,7 +3464,7 @@ export class Admission {
     let level: Level = { values: [value], whole: program.hasOf.has(value) ? null : value };
     let key = `${value}`;
     for (let index = 0; index + 1 < at.length && level.whole === null; index += 1) {
-      key = `${key}.${at[index]!}`;
+      key = stepText(key, at[index]!);
       let next = this.#levels.get(key);
       if (next === undefined) {
         const values: PlaceId[] = [];
@@ -3433,6 +3472,7 @@ export class Admission {
           for (const d of this.storesAt(current, at[index]!)) values.push(d.value!);
         program.work.charge("checks", values.length + 1);
         next = { values, whole: values.find((current) => !program.hasOf.has(current)) ?? null };
+        keepText(this.#work, key.length);
         this.#levels.set(key, next);
       }
       level = next;
@@ -3475,7 +3515,7 @@ export class Admission {
           d.value === undefined ? "" : this.#conflictClass(d.value),
         );
         const kinds = [...new Set(classes)].sort();
-        const key = `${landing ?? ""}|${kinds.join(",")}`;
+        const key = joinParts(landing ?? "", kinds.join(","));
         let paths = conflicts.get(key);
         if (paths === undefined) {
           const firstOf = new Map<string, Definition>();
@@ -3520,7 +3560,7 @@ export class Admission {
       };
       // the error at the innermost offending expression (r4.35), the element rejected (A6)
       const offended = (d: Definition, path: readonly string[]): void => {
-        const at = path.join(".");
+        const at = pathText(path);
         const inner =
           path.length > 0
             ? this.offendingAt(d, path, (items) =>
@@ -3541,7 +3581,7 @@ export class Admission {
         if (identity !== null && known === undefined) offending.set(identity, found);
         const below = known !== undefined ? [] : (shared ?? this.#pathsBelow(d.value, []));
         for (const path of [[], ...below]) {
-          const at = path.join(".");
+          const at = keptText(this.#work, path);
           const own = [...new Set(deciding(this.valueAt(d, path)).map((item) => item.tag))];
           if (!first.has(at)) {
             // A4: a copy of a written binding gives its written type, whatever it holds now, where it is the earliest
@@ -3591,7 +3631,12 @@ export class Admission {
       this.#termIds.set(expected, term);
     }
     const by = c.kind === "load" ? "load" : c.contract.name;
-    return `f18|${by}|${term}|${fallback === undefined ? "" : contract.identityOf(fallback).id}`;
+    return joinParts(
+      "f18",
+      by,
+      term,
+      fallback === undefined ? "" : contract.identityOf(fallback).id,
+    );
   }
 
   // ------------------------------------------------------------------------------------------- the landing index
@@ -3897,7 +3942,7 @@ export class Admission {
 
   /** A store's destination: the stored value's path; an added value's the collection's element (C9 r4.6). */
   #destPath(d: Definition): readonly string[] {
-    return d.kind === "add" ? [...d.path, "element"] : d.path;
+    return d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
   }
 
   /**
@@ -3932,20 +3977,21 @@ export class Admission {
    * store and path, reading only its prefixes' named data (`#keyStops`).
    */
   #namedBeside(d: Definition, at: readonly string[]): ReadonlySet<PlaceId> {
-    const memoKey = `${d.uid}|${at.join(".")}`;
+    const memoKey = joinParts(d.uid, at);
     const known = this.#beside.get(memoKey);
     if (known !== undefined) return known;
     const { program, values } = this.pass;
     const out = new Set<PlaceId>();
     for (let length = 0; length <= at.length; length += 1)
-      for (const stop of this.#keyStops(d, at.slice(0, length).join(".")).named()) {
+      for (const stop of this.#keyStops(d, pathText(at.slice(0, length))).named()) {
         program.work.charge("checks");
         for (const item of this.#run(
-          values.valueItems(stop.value, stop.node, [...stop.strip, ...at.slice(length)]),
+          values.valueItems(stop.value, stop.node, joinSteps(stop.strip, at.slice(length))),
         ))
           if (isExternal(item) && item.ingress !== undefined)
             for (const ingress of this.#leafIngresses(item.ingress)) out.add(ingress);
       }
+    keepText(this.#work, memoKey.length);
     this.#beside.set(memoKey, out);
     return out;
   }
@@ -4054,7 +4100,7 @@ export class Admission {
     const unreached = item.ingress !== undefined && this.#resolve(item.ingress);
     if (item.ingress !== undefined && item.loose !== true && !unreached) return;
     if (here === null) return;
-    const at = `${here.target}|${here.site.file}:${here.site.start}`;
+    const at = keptParts(this.#work, here.target, `${here.site.file}:${here.site.start}`);
     if (this.#hostSeen.has(at)) return;
     this.#hostSeen.add(at);
     this.readChecks.push({
@@ -4187,7 +4233,8 @@ export class Admission {
           ? this.#againstOf(d, destination).length > 0
           : lists.live(d) &&
             stops.some(
-              (stop) => this.#againstOf(d, [...destination, ...elements(d, stop.path)]).length > 0,
+              (stop) =>
+                this.#againstOf(d, joinSteps(destination, elements(d, stop.path))).length > 0,
             ));
       if (!owed) continue;
       const record = elements(d, stops[0]!.recordPath);
@@ -4199,11 +4246,11 @@ export class Admission {
           length += 1;
         common = length;
       }
-      const path = [...destination, ...record.slice(0, common)];
+      const path = joinSteps(destination, record.slice(0, common));
       const tags = this.#againstOf(d, path);
       const label = this.pathLabel(d.place, path);
       const against: RequiredKind[] = tags.length > 0 ? tags.map(requiredKind) : ["unknown"];
-      const key = keyOf(d.place, path);
+      const key = keptKey(this.#work, d.place, path);
       const check = boundaryCheck(
         stops[0]!.site,
         label,

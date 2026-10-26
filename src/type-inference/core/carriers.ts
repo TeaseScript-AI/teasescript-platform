@@ -1,5 +1,6 @@
 import type { PlaceId } from "../graph.js";
 import { choiceLabels, defaultOf, REFERENCE } from "./contract.js";
+import { keptSteps } from "./budget.js";
 import { SELECTED_TEXT, SELECTED_VALUE } from "./definitions.js";
 import type { ItemTag } from "./items.js";
 import {
@@ -224,7 +225,7 @@ export function carried(
       // (a dict's `values` are its elements: read at an element path only)
       if (when === "dict" && below.length === 0 && !elements) continue;
     }
-    out.push([operand, [...below, ...strip], role, position]);
+    out.push([operand, keptSteps(program.work, below, strip), role, position]);
   }
   return out;
 }

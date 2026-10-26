@@ -1,4 +1,4 @@
-import type { WorkLedger } from "./budget.js";
+import { joinParts, keepText, type WorkLedger } from "./budget.js";
 import { itemsSignature, type IngressCell, type Item, type ItemScope } from "./items.js";
 
 /*
@@ -322,6 +322,8 @@ export class Solver {
     }
     const node = this.#active.get(demand.key);
     if (node === undefined) {
+      // (a new demand keeps its key: its text charged first, TABLE r4.58)
+      keepText(this.#work, demand.key.length);
       const created: DemandNode = {
         demand,
         index: this.#counter++,
@@ -550,7 +552,7 @@ export class Solver {
   #anchored(component: Component, member: DemandNode, items: readonly Item[]): readonly Item[] {
     return items.map((item) => {
       if (item.ingress === undefined) return item;
-      const key = `${member.demand.key}|${item.tag}`;
+      const key = joinParts(member.demand.key, item.tag);
       let cell = component.cells.get(key);
       if (cell === undefined) component.cells.set(key, (cell = this.#scope.ingress.cell()));
       if (item.ingress !== cell)

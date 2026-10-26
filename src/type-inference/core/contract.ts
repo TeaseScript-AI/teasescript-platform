@@ -8,10 +8,24 @@ import type {
   TypeTerm,
 } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { textUnits } from "./budget.js";
+import {
+  joinParts,
+  joinSteps,
+  keep,
+  keptParts,
+  keptSteps,
+  keptText,
+  pathText,
+  splitPath,
+  textUnits,
+  type WorkLedger,
+} from "./budget.js";
 import type { ReadRoute } from "./values.js";
 import {
   ingressLeaf,
+  keptKey,
+  keptKeyBelow,
+  keyBelow,
   keyOf,
   keyPath,
   keyPlace,
@@ -570,11 +584,14 @@ export class Contract {
 
   public constructor(readonly pass: CorePass) {}
 
+  /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */
+  get #work(): WorkLedger {
+    return this.pass.program.work;
+  }
+
   /** S3 §1's route of a literal's value at a path: the contract's past an element step over a copy (F12). */
   public literalRoute(literal: PlaceId, rest: readonly string[], node: FlowNode | null): ReadRoute {
-    return this.#overCopy.has(`${literal}|${rest.join(".")}|${node?.id ?? "-"}`)
-      ? "contract"
-      : "exact";
+    return this.#overCopy.has(joinParts(literal, rest, node?.id ?? "-")) ? "contract" : "exact";
   }
 
   // ------------------------------------------------------------------------------------------- the contract of a key
@@ -583,7 +600,7 @@ export class Contract {
   public *contractOf(key: Key): Work<readonly Item[]> {
     const site = this.pass.program.places[keyPlace(key)]?.site ?? null;
     return yield {
-      key: `c|${key}`,
+      key: joinParts("c", key),
       kind: "contract",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -689,7 +706,7 @@ export class Contract {
     // a demand per element step, so a chain of collections read from collections (a function's result returning
     // another's) is followed on the solver's explicit stack, and a copy cycle is solved as its component
     const several = yield {
-      key: `s|${at}`,
+      key: joinParts("s", at),
       kind: "contract",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -705,7 +722,7 @@ export class Contract {
     for (let length = collection.length; length >= 0 && count < 2; length -= 1) {
       this.pass.program.work.charge("invSteps");
       const stored = this.prefixStores(keyOf(place, collection.slice(0, length)));
-      const below = [...collection.slice(length), "element"];
+      const below = joinSteps(collection.slice(length), ["element"]);
       for (const entry of stored.list) {
         if (count >= 2) break;
         count += yield* this.#elementsOf(entry, below);
@@ -725,15 +742,11 @@ export class Contract {
     program.work.charge("invSteps");
     if (withoutEmpty(yield* this.entryAt(entry, below)).length === 0) return 0;
     if (entry.key !== undefined)
-      return (yield* this.severalElements(
-        keyOf(keyPlace(entry.key), [...keyPath(entry.key), ...below]),
-      ))
-        ? 2
-        : 1;
+      return (yield* this.severalElements(keyBelow(entry.key, below))) ? 2 : 1;
     if (entry.value === undefined || entry.elem !== undefined || !program.hasOf.has(entry.value))
       return 1;
     // a literal: its elements at the step, through its own fields and elements; a value it holds counts once
-    const path = [...(entry.at ?? []), ...below];
+    const path = joinSteps(entry.at ?? [], below);
     let values: readonly PlaceId[] = [entry.value];
     let count = 0;
     for (const [index, step] of path.entries()) {
@@ -866,7 +879,7 @@ export class Contract {
   public *receiverKinds(key: Key): Work<readonly Item[]> {
     const site = this.pass.program.places[keyPlace(key)]?.site ?? null;
     return yield {
-      key: `rc|${key}`,
+      key: joinParts("rc", key),
       kind: "contract",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -882,7 +895,7 @@ export class Contract {
   public *valueReceiver(receiver: PlaceId): Work<readonly Item[]> {
     const site = this.pass.program.places[receiver]?.site ?? null;
     return yield {
-      key: `cv|${receiver}`,
+      key: joinParts("cv", receiver),
       kind: "contract",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -920,7 +933,7 @@ export class Contract {
                   group,
                   rest,
                   withWriter(
-                    yield* this.contractOfValueAt(group.literal, [...group.at, ...rest]),
+                    yield* this.contractOfValueAt(group.literal, joinSteps(group.at, rest)),
                     group.w,
                   ),
                 ),
@@ -971,7 +984,7 @@ export class Contract {
     // F5: an add's element; an `addAll` contributes kinds, never emptiness (M unchanged)
     if (entry.elem !== undefined) {
       if (rest[0] !== "element") return [];
-      const at = [...(entry.at ?? []), ...rest.slice(1)];
+      const at = joinSteps(entry.at ?? [], rest.slice(1));
       const items = this.#annotated(
         entry,
         at,
@@ -984,16 +997,13 @@ export class Contract {
       return this.#annotated(
         entry,
         rest,
-        withWriter(
-          yield* this.contractOf(keyOf(keyPlace(entry.key), [...keyPath(entry.key), ...rest])),
-          entry.w,
-        ),
+        withWriter(yield* this.contractOf(keyBelow(entry.key, rest)), entry.w),
       );
     return this.#annotated(
       entry,
       rest,
       withWriter(
-        yield* this.contractOfValueAt(entry.value!, [...(entry.at ?? []), ...rest]),
+        yield* this.contractOfValueAt(entry.value!, joinSteps(entry.at ?? [], rest)),
         entry.w,
       ),
     );
@@ -1071,7 +1081,7 @@ export class Contract {
     base: readonly LevelGroup[],
     path: readonly string[],
   ): readonly LevelGroup[] {
-    const memoKey = `${prefix}|${path.join(".")}`;
+    const memoKey = joinParts(prefix, path);
     const known = this.#levelGroups.get(memoKey);
     if (known !== undefined) return known;
     this.#keepText(memoKey.length);
@@ -1091,7 +1101,7 @@ export class Contract {
       const above: string[] = [];
       let id = 0;
       this.#keep(group.at.length + path.length);
-      for (const step of [...group.at, ...path]) {
+      for (const step of joinSteps(group.at, path)) {
         above.push(levels.at.get(id) ?? "");
         id = this.#pathBelow(id, step);
       }
@@ -1215,7 +1225,7 @@ export class Contract {
   public *subAt(sub: Key, rest: readonly string[]): Work<readonly Item[]> {
     const site = this.pass.program.places[keyPlace(sub)]?.site ?? null;
     return yield {
-      key: `s|${sub}|${rest.join(".")}`,
+      key: joinParts("s", sub, rest),
       kind: "contract",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -1228,7 +1238,7 @@ export class Contract {
     program.work.charge("invSteps");
     const base = keyPath(sub);
     return mergeItems(
-      yield* this.#contractAlong(keyPlace(sub), [...base, ...rest], base.length + 1),
+      yield* this.#contractAlong(keyPlace(sub), joinSteps(base, rest), base.length + 1),
       program.scope,
     );
   }
@@ -1300,7 +1310,7 @@ export class Contract {
         else if (after[0] === "element") {
           // the list's own selection takes its own emptiness (open); a deeper selection's marker is that selection's
           if (dictList(step) === "values") {
-            const below = yield* read([...before, ...after], at);
+            const below = yield* read(joinSteps(before, after), at);
             out.push(...(after.length === 1 ? withoutEmpty(below) : below));
           } else if (after.length === 1)
             // a key is text, possible: no literal holds a derived list's element (r4.47, P3)
@@ -1335,10 +1345,10 @@ export class Contract {
         return yield* this.#contractIteration(projection.owner, rest);
       if (measuresLength(projection.step))
         return yield* this.#contractLength(projection.owner, projection.step, rest);
-      const elements = yield* this.contractOfValueAt(projection.owner, [
-        stepName(projection.step),
-        ...rest,
-      ]);
+      const elements = yield* this.contractOfValueAt(
+        projection.owner,
+        joinSteps([stepName(projection.step)], rest),
+      );
       if (!selectsElement(projection.step)) return elements;
       const owners = withoutEmpty(yield* this.contractOfValue(projection.owner));
       return withOwnSelection(elements, owners, this.pass);
@@ -1358,7 +1368,7 @@ export class Contract {
     ) {
       const site = program.places[value]?.site ?? operation.site;
       const demand: Demand = {
-        key: rest.length === 0 ? `cop|${value}` : `cop|${value}|${rest.join(".")}`,
+        key: rest.length === 0 ? joinParts("cop", value) : joinParts("cop", value, rest),
         kind: "contract",
         file: site.file,
         offset: site.start,
@@ -1399,7 +1409,7 @@ export class Contract {
     if (operation !== undefined) {
       const site = program.places[value]?.site ?? operation.site;
       const demand: Demand = {
-        key: `cop|${value}`,
+        key: joinParts("cop", value),
         kind: "contract",
         file: site.file,
         offset: site.start,
@@ -1426,7 +1436,10 @@ export class Contract {
     for (const item of withoutEmpty(yield* this.contractOfValue(owner))) {
       if (item.tag === "list" || item.tag === "set")
         out.push(
-          ...belowSelected(yield* this.contractOfValueAt(owner, ["element", ...rest]), rest),
+          ...belowSelected(
+            yield* this.contractOfValueAt(owner, joinSteps(["element"], rest)),
+            rest,
+          ),
         );
       else if ((item.tag === "dict" || kindElement(item.tag) !== undefined) && rest.length === 0)
         out.push(
@@ -1443,7 +1456,7 @@ export class Contract {
   *#contractLength(owner: PlaceId, step: string, rest: readonly string[]): Work<readonly Item[]> {
     // F19a before F14: a receiver that may be a reference has the runtime's members, its `length` among them
     if (heldReference(yield* this.valueReceiver(owner)))
-      return yield* this.contractOfValueAt(owner, [step, ...rest]);
+      return yield* this.contractOfValueAt(owner, joinSteps([step], rest));
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.contractOfValue(owner))) {
       if (
@@ -1455,7 +1468,7 @@ export class Contract {
         if (rest.length === 0) out.push(carried(makeItem("integer", item.writer), [item]));
       } else if (item.tag === "object" || REFERENCE.has(item.tag))
         // an object's own `length` (F11), a reference's member (F19a)
-        out.push(...(yield* this.contractOfValueAt(owner, [step, ...rest])));
+        out.push(...(yield* this.contractOfValueAt(owner, joinSteps([step], rest))));
       else if (item.tag === "unknown") out.push(item);
     }
     return mergeItems(out, this.pass.program.scope);
@@ -1477,7 +1490,10 @@ export class Contract {
     if (c.kind === "get")
       return mergeItems(
         [
-          ...belowSelected(yield* this.contractOfValueAt(c.receiver, ["element", ...rest]), rest),
+          ...belowSelected(
+            yield* this.contractOfValueAt(c.receiver, joinSteps(["element"], rest)),
+            rest,
+          ),
           ...(yield* this.contractOfValueAt(c.fallback, rest)),
         ],
         scope,
@@ -1545,7 +1561,10 @@ export class Contract {
           if (rest.length === 0) out.push(carried(makeItem("null"), [item]));
         } else if (COLLECTIONS.has(item.tag))
           out.push(
-            ...belowSelected(yield* this.contractOfValueAt(c.receiver, ["element", ...rest]), rest),
+            ...belowSelected(
+              yield* this.contractOfValueAt(c.receiver, joinSteps(["element"], rest)),
+              rest,
+            ),
           );
       }
       return mergeItems(out, scope);
@@ -1568,7 +1587,7 @@ export class Contract {
             })
           : []),
         ...(kinds.some((item) => kindElement(item.tag) === undefined)
-          ? yield* this.contractOfValueAt(c.receiver, ["element", ...rest.slice(1)])
+          ? yield* this.contractOfValueAt(c.receiver, joinSteps(["element"], rest.slice(1)))
           : []),
         ...(copy.mayHoldNone && rest.length === 1 ? [EMPTY] : []),
       ];
@@ -1685,7 +1704,7 @@ export class Contract {
   public *defaultKinds(fallback: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
     const site = this.pass.program.places[fallback]?.site ?? null;
     return yield {
-      key: `dk|${fallback}|${rest.join(".")}`,
+      key: joinParts("dk", fallback, rest),
       kind: "contract",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -1698,7 +1717,7 @@ export class Contract {
   public *onlyNull(fallback: PlaceId): Work<readonly Item[]> {
     const site = this.pass.program.places[fallback]?.site ?? null;
     return yield {
-      key: `dn|${fallback}`,
+      key: joinParts("dn", fallback),
       kind: "contract",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -1714,7 +1733,7 @@ export class Contract {
   public landsIn(value: PlaceId, path: readonly string[], depth = 0): TypeTerm | null {
     if (depth >= NESTING) return CUT;
     const { program, definitions } = this.pass;
-    const memoKey = `${value}|${path.join(".")}`;
+    const memoKey = joinParts(value, path);
     if (this.#lands.has(memoKey)) return this.#lands.get(memoKey)!;
     this.#lands.set(memoKey, null);
     const keep = (found: TypeTerm | null): TypeTerm | null => {
@@ -1725,11 +1744,11 @@ export class Contract {
     for (const d of definitions.byValue.get(value) ?? []) {
       program.work.charge("checks");
       const written = d.kind === "whole" ? writtenOf(program.place(d.place).kind) : null;
-      const term = written === null ? null : termAt(written, [...d.path, ...path]);
+      const term = written === null ? null : termAt(written, joinSteps(d.path, path));
       if (term !== null) return keep(term);
       const owner = program.cellOwner.get(d.place);
       if (owner?.kind === "cell") {
-        const found = this.landsIn(owner.owner, ["element", ...path], depth + 1);
+        const found = this.landsIn(owner.owner, joinSteps(["element"], path), depth + 1);
         if (found !== null) return keep(found);
       }
     }
@@ -1773,7 +1792,15 @@ export class Contract {
       projection = program.projOf.get(root);
     }
     const node = program.occNode.get(root) ?? null;
-    const snapshot = `${guards.guardedRead(value) ? "g" : ""}${copied}|${node === null ? "-" : `${lists.readSignature(copied, node)}|${handlers.afterSomeCreation(node) ? "h" : ""}`}`;
+    const read = `${guards.guardedRead(value) ? "g" : ""}${copied}`;
+    const snapshot =
+      node === null
+        ? joinParts(read, "-")
+        : joinParts(
+            read,
+            lists.readSignature(copied, node),
+            handlers.afterSomeCreation(node) ? "h" : "",
+          );
     this.#snapshots.set(value, snapshot);
     return snapshot;
   }
@@ -1869,7 +1896,7 @@ export class Contract {
     let at = place;
     let top: { readonly key: Key; readonly guarded: boolean };
     for (;;) {
-      const unaliased = { key: keyOf(at, []), guarded: false };
+      const unaliased = { key: keptKey(this.#work, at, []), guarded: false };
       this.#aliases.set(at, unaliased);
       program.work.charge("invSteps");
       const stores = (definitions.byKey.get(keyOf(at, [])) ?? []).filter((d) => lists.live(d));
@@ -1900,7 +1927,7 @@ export class Contract {
     for (let index = chain.length - 1; index >= 0; index -= 1) {
       const link = chain[index]!;
       top = {
-        key: keyOf(keyPlace(top.key), [...keyPath(top.key), ...keyPath(link.up)]),
+        key: keptKeyBelow(this.#work, top.key, keyPath(link.up)),
         guarded: top.guarded || link.guarded,
       };
       this.#aliases.set(link.place, top);
@@ -1928,7 +1955,7 @@ export class Contract {
       this.#keys.set(at, { id: `k${at}`, key: at, guarded: false, holder: this.#holderOfKey(at) });
       program.work.charge("invSteps");
       const top = this.#rootOfPlace(keyPlace(at));
-      const rooted = keyOf(keyPlace(top.key), [...keyPath(top.key), ...keyPath(at)]);
+      const rooted = keptKeyBelow(this.#work, top.key, keyPath(at));
       let identity: Identity = {
         id: `k${rooted}`,
         key: rooted,
@@ -1952,13 +1979,13 @@ export class Contract {
             : null;
         const path = keyPath(rooted);
         if (entry !== null && entry.key !== undefined) {
-          inner = keyOf(keyPlace(entry.key), [...keyPath(entry.key), ...path]);
+          inner = keyBelow(entry.key, path);
           chain.push({ key: at, rooted, guarded: identity.guarded || entry.guarded });
         } else if (entry !== null && entry.value !== undefined) {
-          const within = [...(entry.at ?? []), ...path];
+          const within = joinSteps(entry.at ?? [], path);
           const source = yield* this.#needValue(entry.value);
           identity = {
-            id: this.#kept(`${source.id}@${within.join(".")}`),
+            id: this.#kept(`${source.id}@${pathText(within)}`),
             key: rooted,
             guarded: identity.guarded || entry.guarded,
             holder: this.#holderAt(source.holder, within),
@@ -2276,8 +2303,8 @@ export class Contract {
           : e.empty === true
             ? "e"
             : e.elem !== undefined
-              ? `a${this.structureOf(e.elem)}@${(e.at ?? []).join(".")}`
-              : `${this.structureOf(e.value!)}@${(e.at ?? []).join(".")}`;
+              ? `a${this.structureOf(e.elem)}@${keptText(this.#work, e.at ?? [])}`
+              : `${this.structureOf(e.value!)}@${keptText(this.#work, e.at ?? [])}`;
     const add = (f: PrefixFrame, e: EntryDraft): void => {
       work.charge("invSteps");
       const id = entryId(e);
@@ -2367,8 +2394,8 @@ export class Contract {
         else {
           yield* adding(this, f, {
             ...(e.key !== undefined
-              ? { key: keyOf(keyPlace(e.key), [...keyPath(e.key), ...projection]) }
-              : { value: e.value!, at: [...(e.at ?? []), ...projection] }),
+              ? { key: keptKeyBelow(this.#work, e.key, projection) }
+              : { value: e.value!, at: keptSteps(this.#work, e.at ?? [], projection) }),
             ...(e.guarded ? { guarded: true } : {}),
             ingress: e.ingress,
           });
@@ -2519,7 +2546,7 @@ export class Contract {
     const own = new Map<string, Set<Key>>();
     for (const step of this.#subFirstOf(place)) {
       this.pass.program.work.charge("invSteps");
-      own.set(step, new Set([keyOf(place, [])]));
+      own.set(step, new Set([keptKey(this.#work, place, [])]));
     }
     const layer = this.#layer(own, inner.subs);
     this.#aliasLayers.set(inner, layer);
@@ -2531,10 +2558,10 @@ export class Contract {
    * the keys below the path alone (r4.46 (3): never the place's whole key set per copy).
    */
   #projectedLayer(place: PlaceId, projection: readonly string[]): SubLayer | null {
-    const id = `${place}|${projection.join(".")}`;
+    const id = keptParts(this.#work, place, projection);
     if (this.#projectedLayers.has(id)) return this.#projectedLayers.get(id)!;
     const { program, definitions, lists } = this.pass;
-    const sub = keyOf(place, projection);
+    const sub = keptKey(this.#work, place, projection);
     const own = new Map<string, Set<Key>>();
     for (const below of definitions.keysBelow(sub)) {
       program.work.charge("invSteps");
@@ -2607,7 +2634,7 @@ export class Contract {
     for (const below of definitions.keysBelow(sub)) {
       program.work.charge("invSteps");
       if ((definitions.byKey.get(below) ?? []).some((d) => lists.live(d)))
-        paths.add(keyPath(below).slice(base.length).join("."));
+        paths.add(keptText(this.#work, keyPath(below).slice(base.length)));
     }
     this.#subPaths.set(sub, paths);
     return paths;
@@ -2640,7 +2667,7 @@ export class Contract {
           let held = false;
           for (let length = 1; length <= rest.length && !held; length += 1) {
             work.charge("invSteps");
-            held = own.has(rest.slice(0, length).join("."));
+            held = own.has(pathText(rest.slice(0, length)));
           }
           if (!held) continue;
           let defs = found.get(sub);
@@ -2687,12 +2714,12 @@ export class Contract {
     at: readonly string[] = [],
   ): void {
     this.pass.program.work.charge("invSteps");
-    const key = `${to.id}|${shift.join(".")}|${at.join(".")}`;
+    const key = joinParts(to.id, shift, at);
     if (holder.refSeen.has(key)) return;
     this.#keepText(key.length);
     holder.refSeen.add(key);
     this.facts.markNodes += 1;
-    const where = at.join(".");
+    const where = keptText(this.#work, at);
     const list = holder.refsAt.get(where);
     if (list === undefined) holder.refsAt.set(where, [{ to, shift }]);
     else list.push({ to, shift });
@@ -2716,7 +2743,7 @@ export class Contract {
   /** A stored value's holder at a path below it (a place of copies of one value, lifted). */
   #holderAt(holder: Holder | null, path: readonly string[]): Holder | null {
     if (holder === null || path.length === 0) return holder;
-    const id = `${holder.id}@${path.join(".")}`;
+    const id = `${holder.id}@${keptText(this.#work, path)}`;
     const known = this.#holders.get(id);
     if (known !== undefined) return known;
     const lifted = this.#newHolder(id);
@@ -2755,7 +2782,7 @@ export class Contract {
         continue;
       const callable = program.callableAt(node);
       if (!callables.has(callable)) callables.set(callable, callables.size);
-      const base = keyOf(binding, [...steps.reverse(), ...read.path]);
+      const base = keptKey(this.#work, binding, joinSteps(steps.reverse(), read.path));
       const groupKey = `${base}#${callables.get(callable)}#${node.file}`;
       let group = byKey.get(groupKey);
       if (group === undefined) {
@@ -2857,12 +2884,12 @@ export class Contract {
     };
     for (let length = 1; length <= rest.length; length += 1) {
       const q = rest.slice(0, length);
-      const candidates = guards.testedBelow(q.join("."));
+      const candidates = guards.testedBelow(pathText(q));
       if (candidates === undefined) continue;
       program.work.charge("eventSteps", Math.min(candidates.size, byBase.size) + 1);
       for (const base of common(candidates, byBase)) {
         const entry = byBase.get(base)!;
-        const tested = keyOf(keyPlace(base), [...keyPath(base), ...q]);
+        const tested = keyBelow(base, q);
         const branchCallables = guards.branchCallables(tested);
         const operandCallables = guards.operandCallables(tested);
         if (branchCallables !== undefined) {
@@ -2915,8 +2942,7 @@ export class Contract {
         for (const entry of list) {
           program.work.charge("invSteps");
           if (entry.guarded) holder.guarded.add(path);
-          if (entry.holder !== null)
-            this.#refer(holder, entry.holder, [], path === "" ? [] : path.split("."));
+          if (entry.holder !== null) this.#refer(holder, entry.holder, [], splitPath(path));
         }
     }
   }
@@ -2929,7 +2955,12 @@ export class Contract {
   #depthOf(holder: Holder): number {
     if (holder.depth !== undefined) return holder.depth;
     const { guards, program } = this.pass;
-    const steps = (at: string): number => (at === "" ? 0 : at.split(".").length);
+    // (a path's steps counted by its dots, no array made)
+    const steps = (at: string): number => {
+      let count = at === "" ? 0 : 1;
+      for (let index = at.indexOf("."); index >= 0; index = at.indexOf(".", index + 1)) count += 1;
+      return count;
+    };
     const stack: {
       readonly holder: Holder;
       readonly references: readonly (readonly [string, HolderReference])[];
@@ -2999,7 +3030,7 @@ export class Contract {
       work.charge("eventSteps");
       const depth = this.#depthOf(asked);
       const rest = at.length > depth ? at.slice(0, depth) : at;
-      const memoKey = rest.join(".");
+      const memoKey = pathText(rest);
       asked.memo ??= new Map();
       const known = asked.memo.get(memoKey);
       if (known !== undefined) return known;
@@ -3029,7 +3060,7 @@ export class Contract {
         work.charge("eventSteps");
         this.facts.markVisits += 1;
         if (!frame.hit)
-          answer = ask(reference.to, [...reference.shift, ...frame.rest.slice(frame.length)]);
+          answer = ask(reference.to, joinSteps(reference.shift, frame.rest.slice(frame.length)));
         continue;
       }
       if (!frame.hit && frame.length < frame.rest.length) {
@@ -3116,7 +3147,7 @@ export class Contract {
    * of a sorted copy, or a text's `textUnits`; so the allowance stops a deep literal's indexes before the heap does.
    */
   #keep(units: number): void {
-    this.pass.program.work.charge("literalUnits", units);
+    keep(this.#work, units);
   }
 
   /** Charges a text of `length` UTF-16 code units the literal work keeps. */
@@ -3445,7 +3476,7 @@ export class Contract {
 
   /** F11: the first object at the path without the property, once per (path, property): its token, or `null`. */
   #lackingAt(index: LiteralIndex, path: string, step: string): Writer | null {
-    const key = `${path}|${step}`;
+    const key = joinParts(path, step);
     const known = index.lacking.get(key);
     if (known !== undefined) return known;
     this.#keepText(key.length);
@@ -3479,12 +3510,8 @@ export class Contract {
     const items = this.entered(
       root,
       node === undefined || node === null
-        ? yield* this.contractOf(keyOf(keyPlace(copied), [...keyPath(copied), ...below]))
-        : yield* this.contractRead(
-            keyOf(keyPlace(copied), [...keyPath(copied), ...below]),
-            node,
-            "member",
-          ),
+        ? yield* this.contractOf(keyBelow(copied, below))
+        : yield* this.contractRead(keyBelow(copied, below), node, "member"),
     );
     return guards.guardedRead(read, below) ? marked(items) : items;
   }
@@ -3603,7 +3630,7 @@ export class Contract {
     }
     // S3 §1's route: past an element step over a copy the contract answered (F12)
     if (exact && overCopy)
-      this.#overCopy.add(this.#kept(`${literal}|${rest.join(".")}|${node?.id ?? "-"}`));
+      this.#overCopy.add(this.#kept(joinParts(literal, rest, node?.id ?? "-")));
     // §3.4 r4.11: the X word is the read's (`member` past an element step over a copy), shared by every known-kind
     // item, definite ones included, whatever its writer; an unknown keeps its reason's word. Past an element step that
     // gathers several elements the element read makes each kind only possible: its word too, by the precedence
@@ -3740,15 +3767,19 @@ export function* choiceItems(
   // possible where some has one
   const held = function* (option: PlaceId, at: readonly string[]): Work<void> {
     const value =
-      stored.value || stored.text ? withoutEmpty(yield* read(option, [...at, "value"])) : [];
+      stored.value || stored.text
+        ? withoutEmpty(yield* read(option, joinSteps(at, ["value"])))
+        : [];
     const lacking = value.some(isMissing);
     const present = withoutMissing(value);
-    if (!stored.value) out.push(...(yield* read(option, [...at, SELECTED_VALUE, ...rest])));
+    if (!stored.value) out.push(...(yield* read(option, joinSteps(at, [SELECTED_VALUE], rest))));
     else if (present.length > 0 || !lacking)
-      out.push(...(rest.length === 0 ? present : yield* read(option, [...at, "value", ...rest])));
-    if (!stored.text) out.push(...(yield* read(option, [...at, SELECTED_TEXT, ...rest])));
+      out.push(
+        ...(rest.length === 0 ? present : yield* read(option, joinSteps(at, ["value"], rest))),
+      );
+    if (!stored.text) out.push(...(yield* read(option, joinSteps(at, [SELECTED_TEXT], rest))));
     else if (lacking) {
-      const text = yield* read(option, [...at, "text", ...rest]);
+      const text = yield* read(option, joinSteps(at, ["text"], rest));
       out.push(...(present.length > 0 ? weaken(text) : text));
     }
   };
@@ -3762,7 +3793,7 @@ export function* choiceItems(
     if (object !== null && selected !== null) {
       // an element of a written list or set reads as its literal analogue, below the list's element step (F12 r4.7)
       const key = object.value !== null ? "value" : "text";
-      const reading = element ? read(place, [key, ...rest], true) : read(selected, rest);
+      const reading = element ? read(place, joinSteps([key], rest), true) : read(selected, rest);
       out.push(...(yield* reading));
       return;
     }
@@ -3790,7 +3821,7 @@ export function* choiceItems(
         content.elements.every((element) => element.object !== null)
       )
         for (const step of [SELECTED_VALUE, SELECTED_TEXT])
-          out.push(...(yield* read(argument, ["element", step, ...rest])));
+          out.push(...(yield* read(argument, joinSteps(["element", step], rest))));
       else
         for (const element of content.elements) yield* button(element.place, element.object, true);
       continue;
