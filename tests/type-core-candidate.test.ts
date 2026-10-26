@@ -444,25 +444,28 @@ test("every positive-list record the candidate route reaches plans and runs as i
   );
   assert.equal(accepted.length + counted, positive);
   // the literal witnesses of the rules (§5.2): each class and each original outcome the note names
+  // each discharge by its kind and site: two at one site are classified each by its own check
   const verdicts: readonly (readonly [string, string, string])[] = [
-    ["cp9-cells/r6-bugs/admission/use-before-overwrite", "38:43", "preempted"],
-    ["cp9-cells/r6-bugs/admission/use-before-overwrite", "12:30", "violable"],
-    ["cp9-cells/s4/s6/owner/ingress/dead-consumer", "42:47", "unreachable"],
-    ["cp9-cells/s4/s6/owner/ingress/dead-consumer", "9:23", "violable"],
-    ["cp9-cells/s4/followup/fit/literal-mixed-repeat", "7:18", "violable"],
-    ["cp9-cells/r46/m3/two-ingress-targets", "59:63", "violable"],
-    ["cp9-cells/r46/m3/two-ingress-targets", "80:84", "violable"],
+    ["cp9-cells/r6-bugs/admission/use-before-overwrite", "integer-use@38:43", "preempted"],
+    ["cp9-cells/r6-bugs/admission/use-before-overwrite", "store@12:30", "violable"],
+    ["cp9-cells/s4/s6/owner/ingress/dead-consumer", "integer-use@42:47", "unreachable"],
+    ["cp9-cells/s4/s6/owner/ingress/dead-consumer", "store@9:23", "violable"],
+    ["cp9-cells/s4/followup/fit/literal-mixed-repeat", "integer-use@7:18", "violable"],
+    ["cp9-cells/r46/m3/two-ingress-targets", "store@59:63", "violable"],
+    ["cp9-cells/r46/m3/two-ingress-targets", "store@80:84", "violable"],
+    // a member check and a count at one site: the run fails the member first, or the count with the member there
+    ["cp9-cells/witness/sol-missing-member-direct", "member@54:62", "violable"],
+    ["cp9-cells/witness/sol-missing-member-direct", "integer-use@54:62", "preempted"],
+    ["cp9-cells/r44/own-selector/own-last-count", "member@27:33", "not violable"],
+    ["cp9-cells/r44/own-selector/own-last-count", "integer-use@27:33", "violable"],
   ];
-  for (const [name, at, verdict] of verdicts) {
-    const found = [...classOf].filter(
-      ([key]) => key.startsWith(`${name}#`) && key.endsWith(`@${at}`),
-    );
-    assert.deepEqual(
-      found.map(([, found]) => found),
-      [verdict],
-      `${name} at ${at}: ${JSON.stringify(found)}`,
-    );
-  }
+  assert.deepEqual(
+    verdicts.map(([name, at]) => `${name}#${at} ${classOf.get(`${name}#${at}`)}`),
+    verdicts.map(([name, at, verdict]) => `${name}#${at} ${verdict}`),
+    JSON.stringify(
+      [...classOf].filter(([key]) => verdicts.some(([name]) => key.startsWith(`${name}#`))),
+    ),
+  );
   for (const [name, failure] of [
     ["cp9-cells/X5/outside-definition", "TSR043@28:29"],
     ["cp9-cells/r46/m3/two-ingress-targets", "TSR058@80:84"],
