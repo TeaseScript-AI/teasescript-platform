@@ -30,6 +30,7 @@ import {
   DEFAULT_CHAIN_MATRIX,
   INFERRED_COPY_MATRIX,
   OBJECT_PROPERTY_MATRIX,
+  UNION_RULE_MATRIX,
   UNRESTRICTED_COLLECTION_MATRIX,
   V30_TYPE_MATRIX,
   WRITTEN_DOMAIN_MATRIX,
@@ -103,6 +104,7 @@ function programs(): Program[] {
     ...INFERRED_COPY_MATRIX,
     ...OBJECT_PROPERTY_MATRIX,
     ...DEFAULT_CHAIN_MATRIX,
+    ...UNION_RULE_MATRIX,
   ])
     if (!sources.has(source)) {
       sources.add(source);

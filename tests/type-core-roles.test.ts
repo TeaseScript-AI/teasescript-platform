@@ -96,9 +96,9 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
  * selected collection (the named data's C1 at the selecting expression, the inline data's boundary alone: r4.63 (1), (2),
  * TABLE r4.67 (3)) and inline data or a host member beside an own read's named data (the merged item's C1 at the store's
  * value, the member's own place's at its read: r4.70 (1)), a choice over a held list (§3.3's record boundary beside C1),
- * a union holding a reference across two carriers (opaque by dispatch, checked at its consumer), and nullable root and
- * inner receivers of a member (r4.60 beside each receiver's C5 check). The mixed selected-value and absent-value-text
- * lists in both element orders are the cells test's (D1).
+ * a union holding a reference across two carriers (a list or the speaker from an unrestricted dict's values; opaque by
+ * dispatch, checked at its consumer), and nullable root and inner receivers of a member (r4.60 beside each receiver's C5
+ * check). The mixed selected-value and absent-value-text lists in both element orders are the cells test's (D1).
  */
 test("the role matrix's compositions give their exact records, in both orders (§6)", () => {
   for (const [name, source, text] of COMPOSITIONS) {

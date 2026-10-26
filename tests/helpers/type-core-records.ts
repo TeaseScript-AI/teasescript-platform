@@ -5,8 +5,8 @@ import type {
   CoreOutcome,
   CoreRecord,
   DiagnosticClass,
-  DiagnosticKind,
   ObligationKind,
+  RecordDiagnostic,
 } from "../../src/type-inference/core/result.js";
 
 /** A site as records are compared: the file's path and the half-open span `[offset, end)` (S6's exact records). */
@@ -17,7 +17,7 @@ export interface CompactSite {
 }
 
 export interface CompactDiagnostic {
-  readonly kind: DiagnosticKind;
+  readonly kind: RecordDiagnostic["kind"];
   readonly class: DiagnosticClass;
   readonly site: CompactSite;
   /** `null`: not asserted. */
@@ -77,11 +77,12 @@ const CLASSES: Readonly<Record<DiagnosticClass, true>> = {
   "warning-runtime-check": true,
   "compile-error": true,
 };
-const DIAGNOSTIC_KINDS: Readonly<Record<DiagnosticKind, true>> = {
+const DIAGNOSTIC_KINDS: Readonly<Record<RecordDiagnostic["kind"], true>> = {
   "written-target": true,
   "member-read": true,
   "integer-use": true,
   operator: true,
+  "written-type": true,
 };
 const OBLIGATION_KINDS: Readonly<Record<ObligationKind, true>> = {
   "copy-type": true,
