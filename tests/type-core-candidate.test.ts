@@ -245,9 +245,9 @@ function assignments(
  *   and a plan exactly where it is not a compile error, alike on the one-file route;
  * - **discharges:** each obligation discharged by one rule (`derive`), a checked store or the runtime;
  * - **checked stores:** the plan's are exactly the derived ones, target, spans and whole type;
- * - **runs:** the original as written, each host input at the value that fits the earliest check it feeds, and every
- *   companion whose plan checks the same stores, under every assignment of the domain to its host inputs, each
- *   predicted by the rules and run on the engine. A companion that is a compile error or checks differently is a
+ * - **runs:** the original as written, its outcome with each host input at the value that fits the earliest check it
+ *   feeds, and the original and every companion whose plan checks the same stores under every assignment of the
+ *   domain to their host inputs, each predicted by the rules and run on the engine. A companion that is a compile error or checks differently is a
  *   different program, counted and not run as this record's.
  * Each discharge is then classified by the runs: violable (a run fails there), preempted (a value that violates it
  * always fails an earlier check first), not violable (no derived value violates it) or unreachable (no run evaluates
@@ -351,9 +351,18 @@ test("every positive-list record the candidate route reaches plans and runs as i
     originals.set(record.name, original.failure);
     runs += 1;
     // the companions with the same checked stores, under every assignment of their inputs
-    const observed: { run: PredictedRun; events: readonly CheckEvent[] }[] = [
-      { run: original, events: evaluate(source, stores, { hostValue: fitting }, true).events },
-    ];
+    const observed: { run: PredictedRun; events: readonly CheckEvent[] }[] = [];
+    // the original under every assignment of its host input too: a violating value stops at its check, as derived
+    for (const inputs of assignments(["hostValue"])) {
+      const ran = runGlobals(result.plan, inputs);
+      assert.deepEqual(
+        ran,
+        evaluate(source, stores, inputs).run,
+        `${record.name}, the original with ${JSON.stringify(inputs)}`,
+      );
+      observed.push({ run: ran, events: evaluate(source, stores, inputs, true).events });
+      runs += 1;
+    }
     for (const companion of companions(source)) {
       const compiled = insideSlice(() =>
         inBothOrders(() =>
