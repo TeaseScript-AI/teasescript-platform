@@ -1922,9 +1922,12 @@ export class Admission {
    * (C10: the destination's check sits at the store), so the store's own site stands for it, as for named data at a
    * decided place below a selecting operation (the set's sites).
    */
-  public ingressSiteOf(d: Definition, at: readonly string[]): SourceSite {
+  public ingressSiteOf(d: Definition, at: readonly string[], item?: Item): SourceSite {
     const { program, definitions } = this.pass;
     if (d.kind !== "whole") return d.site;
+    // (the item's own ingress among them first, where it names one: the contribution that brought it)
+    const own = item?.ingress === undefined ? null : this.#leafIngresses(item.ingress);
+    let first: SourceSite | null = null;
     for (const { stop } of this.#contributions(d, at)) {
       if (stop.via.some((level) => OWN_ROLES.has(level.role))) continue;
       if (this.#namedBelowCombining(stop) || this.#namedMember(stop))
@@ -1937,9 +1940,11 @@ export class Admission {
         projection = program.projOf.get(value)
       )
         value = projection.owner;
-      if (definitions.ingress.has(value)) return this.#contributionSite(stop, d);
+      if (!definitions.ingress.has(value)) continue;
+      if (own === null || own.has(value)) return this.#contributionSite(stop, d);
+      first ??= this.#contributionSite(stop, d);
     }
-    return d.site;
+    return first ?? d.site;
   }
 
   /**
@@ -2217,7 +2222,7 @@ export class Admission {
    */
   #landingIndex(): LandingIndex {
     if (this.#landings !== null) return this.#landings;
-    const { program, definitions, lists, contract } = this.pass;
+    const { program, definitions, lists } = this.pass;
     const byStore = new Map<Definition, IngressStop[]>();
     const byIngress = new Map<PlaceId, Landing>();
     const entry = (ingress: PlaceId): Landing => {
@@ -2261,17 +2266,16 @@ export class Admission {
       }
       return own;
     };
-    // r4.63 (3): host data in the default of a typed `load` or `fromJson` of an inferred place is the call's: the
-    // boundary at the call validates the loaded value, so the default owes no own read; the innermost such call
+    // r4.63 (3), r4.66 (2): host data in the default of a `load` or `fromJson` of an inferred place typed by that
+    // default (its kinds definite) is the call's: the boundary at the call validates the loaded value, so the default
+    // owes no own read; a default without definite kinds types nothing, its read an own read as any; the innermost
+    // such call
     const typedDefault = (via: readonly Via[]): PlaceId | null => {
       for (let index = via.length - 1; index >= 0; index -= 1) {
         const level = via[index]!;
         if (!TYPED_ROLES.has(level.role)) continue;
         program.work.charge("indexSteps");
-        const c = program.opOf.get(level.value);
-        if (c === undefined || !("result" in c)) continue;
-        const written = (c.kind === "load" ? c.receiver : null) ?? contract.landsIn(c.result, []);
-        return written === null ? level.value : null;
+        return this.typedByDefault(level.value) ? level.value : null;
       }
       return null;
     };
@@ -2361,6 +2365,28 @@ export class Admission {
     }
     this.#landings = { byStore, byIngress };
     return this.#landings;
+  }
+
+  /**
+   * Whether an ingress is a `load` or a `fromJson` typed by its default alone (F18): no declared or written expected
+   * type, a default whose own kinds type it.
+   */
+  public typedByDefault(value: PlaceId): boolean {
+    const { program, contract } = this.pass;
+    const c = program.opOf.get(value);
+    if (c === undefined || !("result" in c)) return false;
+    const parses =
+      c.kind === "operation" &&
+      c.contract.family === "conversion" &&
+      conversionCategory(c.contract.name)?.kind === "parses";
+    if (c.kind !== "load" && !parses) return false;
+    if (c.kind === "load" && (c.key === null || c.receiver !== null)) return false;
+    const fallback = c.kind === "load" ? (c.fallback ?? undefined) : defaultOf(c);
+    return (
+      fallback !== undefined &&
+      contract.landsIn(c.result, []) === null &&
+      this.#f18Kinds(c) !== null
+    );
   }
 
   /** Whether a value is surely a text or a collection, whose length is built in (F14): no kind of it unknown or other. */

@@ -11,7 +11,7 @@ import type { CompactRecord } from "./helpers/type-core-records.js";
  * `comparison.md`), transcribed as their 46 placement and endpoint classes, each named and inline, without and with a
  * later store, in both orders. Each shape's complete multiset of C1, C9 and C10 records (§5.1: every `copy-type` check,
  * a destination's own null-check, and their written-target warnings with their context words) is compared exactly with
- * the rule function, §5.1's table with TABLE r4.60 and r4.63–r4.65:
+ * the rule function, §5.1's table with TABLE r4.60 and r4.63–r4.66:
  * - inline whole data owes one store boundary at the host value's own span, against the type admitted there, and C1
  *   beside it at that span unless its place is published (r4.63 (1)); reached through a projection of the carrier's
  *   result, it is a member of the data;
@@ -21,8 +21,9 @@ import type { CompactRecord } from "./helpers/type-core-records.js";
  * - a member of host data owes C1 at the member read in any state (r4.60);
  * - a `get`'s or an `otherwise`'s default owes its own read's `[unknown]` boundary, the destination's C1 at the store's
  *   value span, and C10's family check only where the direct value has a family (r4.63 (3), r4.65 (1));
- * - a `load`'s or `fromJson`'s typed default owes no own read; the call is the ingress, its boundary against the
- *   destination, with C1 beside it where the place is decided elsewhere;
+ * - a `load`'s or `fromJson`'s default: the call is the ingress, its boundary against the destination, with C1 beside
+ *   it where a consumer meets the loaded value; a default with definite kinds (a literal) types the call and owes no own
+ *   read, a host value's own read stays an own read, and named data owes its source's boundary (r4.66 (2));
  * - a loop variable owes the boundary against its own contract and C1 beside it (r4.63 (4)); a loop over host data
  *   owes one boundary, at the host value, of the ingress landing on the loop variable (r4.64, r4.65 (2)).
  * A place's state is S4's decision, taken as given: published by its one store, decided by the later store, or, for a
@@ -129,6 +130,7 @@ const CLASSES: readonly FloorClass[] = [
     form: (k, v) => `load("parcel", default: [${k}, ${v}][1])`,
     endpoints: BOTH,
     data: "typed",
+    declares: true,
   },
   {
     carrier: "load default",
@@ -144,6 +146,7 @@ const CLASSES: readonly FloorClass[] = [
     form: (k, v) => `fromJson("broken", default: [${k}, ${v}][1])`,
     endpoints: BOTH,
     data: "typed",
+    declares: true,
   },
   {
     carrier: "parse default",
@@ -268,73 +271,6 @@ const CLASSES: readonly FloorClass[] = [
   },
 ];
 
-/**
- * The shapes whose records differ from the rule function on a reading the lead has not ruled, each with its records
- * exactly as the head gives them; the list must be empty at the pull request's head.
- */
-const HELD: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
-  // named data in a typed default of an inferred place: the head owes its source's own boundary where a consumer meets the loaded value; the rule function reads r4.63 (3) as covering it (held for the lead)
-  [
-    "load default/whole default/collection/named/later",
-    [
-      "B copy-type out [list] 39:72",
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out.element [integer] 39:72",
-      "D warning-runtime-check 39:72 unknown",
-    ],
-  ],
-  [
-    "load default/whole default/collection/named/no-later",
-    [
-      "B copy-type out [list] 39:72",
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out.element [integer] 39:72",
-      "D warning-runtime-check 39:72 unknown",
-    ],
-  ],
-  [
-    "load default/whole default/scalar/named/later",
-    [
-      "B copy-type out [integer] 37:68",
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 37:68",
-      "D warning-runtime-check 37:68 later",
-    ],
-  ],
-  [
-    "parse default/whole default/collection/named/later",
-    [
-      "B copy-type out [list] 39:76",
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out.element [integer] 39:76",
-      "D warning-runtime-check 39:76 unknown",
-    ],
-  ],
-  [
-    "parse default/whole default/collection/named/no-later",
-    [
-      "B copy-type out [list] 39:76",
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out.element [integer] 39:76",
-      "D warning-runtime-check 39:76 unknown",
-    ],
-  ],
-  [
-    "parse default/whole default/scalar/named/later",
-    [
-      "B copy-type out [integer] 37:72",
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 37:72",
-      "D warning-runtime-check 37:72 later",
-    ],
-  ],
-  // a typed call's literal default holding host data, a later store deciding the collection's element: the rule function reads C1 as owed beside the call's boundary, the head owes none (held for the lead)
-  ["load default/literal default/collection/inline/later", ["B copy-type out [list] 10:56"]],
-  ["load default/literal default/collection/named/later", ["B copy-type out [list] 33:76"]],
-  ["parse default/literal default/collection/inline/later", ["B copy-type out [list] 10:60"]],
-  ["parse default/literal default/collection/named/later", ["B copy-type out [list] 33:80"]],
-]);
-
 interface Shape {
   readonly name: string;
   readonly source: string;
@@ -361,7 +297,7 @@ function callSpan(source: string, start: number): string {
 
 type State = "published" | "later" | "decided";
 
-/** The records `floor`'s shape owes by the rule function (§5.1 with TABLE r4.60, r4.63–r4.65), sorted. */
+/** The records `floor`'s shape owes by the rule function (§5.1 with TABLE r4.60, r4.63–r4.66), sorted. */
 function owed(
   floor: FloorClass,
   endpoint: Endpoint,
@@ -438,7 +374,14 @@ function owed(
       );
       out.push(`B copy-type out [${collection ? "list" : kind}] ${call}`);
       const [target, state] = collection ? ["out.element", element] : ["out", whole];
-      if (state !== "published") c1(target, kind, call, state);
+      if (state === "published") break;
+      // (a consumer meets the loaded value: the destination's check beside the call's boundary)
+      c1(target, kind, call, state);
+      // r4.66 (2): a default types its call where its kinds are definite, a literal's; a host value's own read stays an
+      // own read; named data owes its source's boundary wherever the loaded value meets a consumer
+      const typed = floor.placement === "literal default" || collection;
+      if (named) out.push(`B copy-type parcel [unknown] ${ingress}`);
+      else if (!typed) out.push(`B copy-type hostValue [unknown] ${ingress}`);
       break;
     }
     case "loop-cell": {
@@ -546,34 +489,21 @@ function records(source: string): string[] {
   return forward;
 }
 
-test("the carrier floor's complete C1, C9 and C10 records are what the rule function owes, in both orders (§6, §5.1, r4.60, r4.63–r4.65)", (t) => {
+test("the carrier floor's complete C1, C9 and C10 records are what the rule function owes, in both orders (§6, §5.1, r4.60, r4.63–r4.66)", (t) => {
   const all = shapes();
   assert.equal(all.length, 184);
   assert.equal(new Set(all.map((shape) => shape.name)).size, 184);
   const wrong: string[] = [];
-  let held = 0;
   for (const shape of all) {
     const actual = records(shape.source);
-    const until = HELD.get(shape.name);
-    if (until !== undefined) {
-      held += 1;
-      // (a held shape gives exactly its listed records, and still not the rule's)
-      if (JSON.stringify(actual) !== JSON.stringify([...until].sort()))
-        wrong.push(
-          `${shape.name}: held as ${JSON.stringify(until)}, got ${JSON.stringify(actual)}`,
-        );
-      else if (JSON.stringify(actual) === JSON.stringify(shape.expected))
-        wrong.push(`${shape.name}: held, yet as the rule owes`);
-      continue;
-    }
     if (JSON.stringify(actual) !== JSON.stringify(shape.expected))
       wrong.push(
-        `[${JSON.stringify(shape.name)}, ${JSON.stringify(actual)}], // expected ${JSON.stringify(shape.expected)}`,
+        `${shape.name}: ${JSON.stringify(actual)}, the rule owes ${JSON.stringify(shape.expected)}`,
       );
   }
   t.diagnostic(
     `${all.length} shapes in ${new Set(all.map((shape) => shape.name.split("/").slice(0, 3).join("/"))).size} ` +
-      `classes compared exactly; ${held} held for the lead`,
+      "classes compared exactly",
   );
   assert.deepEqual(wrong, [], wrong.join("\n"));
 });

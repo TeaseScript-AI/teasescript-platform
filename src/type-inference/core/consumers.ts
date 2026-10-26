@@ -566,14 +566,17 @@ export class Consumers {
           written || at.length <= inserted || d.kind === "const"
             ? null
             : admission.wholeBelow(d.value!, at);
+        // (a `load` or `fromJson` typed by its default alone validates the loaded value by the default's own kinds: host
+        // data the default holds leaves the path's kind open, its contribution C1's, TABLE r4.66 (3))
+        const record =
+          whole !== null && definitions.ingress.has(whole) && !admission.typedByDefault(whole);
         const wholeKinds =
           whole === null || definitions.ingress.has(whole)
             ? []
             : withoutEmpty(this.#run(this.pass.values.valueItems(whole, d.node, [])));
         const below =
           whole !== null &&
-          (definitions.ingress.has(whole) ||
-            (wholeKinds.length > 0 && wholeKinds.every((item) => isExternal(item))));
+          (record || (wholeKinds.length > 0 && wholeKinds.every((item) => isExternal(item))));
         // every concrete kind that does not fit, definite or possible, owes its check (TABLE §4, r4.46)
         const offending = items
           .filter(
@@ -594,28 +597,31 @@ export class Consumers {
             !isExternal(item)
               ? d.site
               : d.kind === "whole"
-                ? admission.ingressSiteOf(d, at)
+                ? admission.ingressSiteOf(d, at, item)
                 : admission.cellSited(d.site, item, d),
             label,
             later(item),
             nullableTags,
           );
-        // C9: at the ingress store (an addAll's at its elements' destination); else each external item's
-        if (d.value !== undefined && definitions.ingress.has(d.value)) {
-          if (at.length === 0 || (d.kind === "add" && at.length === 1 && at[0] === "element"))
-            admission.boundaryAt(d);
-        } else
-          for (const item of items)
-            admission.boundaryFor(
-              item,
-              this.#obligation(
-                "copy-type",
-                admission.cellSited(d.site, item, d),
-                label,
-                tags.map(requiredKind),
-                `validate ${label} against ${tags.join("|")}`,
-              ),
-            );
+        // C9: at the ingress store (an addAll's at its elements' destination); and each external item's, so named data
+        // a typed default holds keeps its own boundary (TABLE r4.66 (2))
+        if (
+          d.value !== undefined &&
+          definitions.ingress.has(d.value) &&
+          (at.length === 0 || (d.kind === "add" && at.length === 1 && at[0] === "element"))
+        )
+          admission.boundaryAt(d);
+        for (const item of items)
+          admission.boundaryFor(
+            item,
+            this.#obligation(
+              "copy-type",
+              admission.cellSited(d.site, item, d),
+              label,
+              tags.map(requiredKind),
+              `validate ${label} against ${tags.join("|")}`,
+            ),
+          );
         // a null beside external data owes its null-check, unless the destination's admitted type holds null; a possible
         // null into a non-nullable type a null-check, a definite one an error
         const external = items.some(isExternal);

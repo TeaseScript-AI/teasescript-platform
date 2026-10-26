@@ -2950,8 +2950,9 @@ test("a literal's verdicts are shared only where its named elements hold the sam
  * The value carriers (round 11; the walk of `answers.ts` `#propertyNames`): each carrier over a direct, a named, a
  * computed and a projected list, in a literal beside the same carrier over another list (A8), stored before and after
  * its source changes (A2), and carrying host data with no consumer (C1, C9); in both orders. A carrier that gives
- * possible elements (a removal, a choice's answer) decides nothing (A2), and a load's or a parse's value is the external
- * data its boundary checks whole (A7).
+ * possible elements (a removal, a choice's answer) decides nothing (A2); a load or a parse typed by its default alone
+ * validates the loaded value by the default's own kinds, so host data the default holds leaves the elements' kind open,
+ * C1's beside the call's boundary (TABLE r4.66 (3)).
  */
 /*
  * The regressions of review rounds 11 to 17, Astra's and the external reviewer's below assert the answers layer: their
@@ -2976,7 +2977,6 @@ test("a value any carrier gives brings its elements' types, decided and checked 
     ["a choice", (value) => `askChoice [{text: "A", value: ${value}}]`],
   ];
   const possible = new Set(["removeFirst", "a choice"]);
-  const external = new Set(["load's default", "a parse's default"]);
   // a list (a set for `toList`) of one element, and how the matrix's kinds of value hold it
   const list = (carrier: string, element: string): string =>
     carrier === "toList" ? `set[${element}]` : `[${element}]`;
@@ -3047,9 +3047,7 @@ test("a value any carrier gives brings its elements' types, decided and checked 
     // (a removal's possible element decides nothing, F7, yet the elements are published with the literal's whole
     // numbers, so the named host data owes its check: C9 r4.12, r4.50 (1))
     const expected =
-      (possible.has(carrier) && carrier !== "removeFirst") || external.has(carrier)
-        ? "valid"
-        : "warning-runtime-check";
+      possible.has(carrier) && carrier !== "removeFirst" ? "valid" : "warning-runtime-check";
     if (carried.outcome !== expected || warned !== (expected === "warning-runtime-check"))
       differing.push(`${carrier}, host data: ${carried.outcome}`);
   }
