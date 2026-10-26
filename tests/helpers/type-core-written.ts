@@ -302,13 +302,8 @@ export interface WrittenCase {
   /** How the place under test is decided (`Decision`), for the test's account of what the route takes. */
   readonly decision: string;
   readonly levels: readonly (readonly string[])[];
-  /** The plan's checked stores in order, `start:end type`, where the candidate route takes the source. */
+  /** The plan's checked stores, all of them in order, `start:end type`, where the candidate route takes the source. */
   readonly checks: readonly string[];
-  /**
-   * Whether `checks` are all the plan's: with a literal initial value; with the host value as the initial value too, a
-   * copy of the written binding may be checked as well.
-   */
-  readonly exact: boolean;
   /** Per host value, `null` where it fits, else where it stops (`TSR058@start:end`). */
   readonly runs: readonly (readonly [SerializableRuntimeValue, string | null])[];
   /**
@@ -322,9 +317,9 @@ export interface WrittenCase {
    */
   readonly executable: boolean;
   /**
-   * The lines whose store brings a host value to a level of its destination that is decided (not every kind): each has
-   * the runtime-check warning there (`written-target`, `warning-runtime-check`), and no other diagnostic is reported;
-   * where `exact` is false, a copy of the host-started binding may warn as well (C9 r4.50 (1)).
+   * The lines whose store brings a host value to a level of its destination that is decided (not every kind), or carries
+   * a host-started binding's external data on (`CARRIED`): each has the runtime-check warning there (`written-target`,
+   * `warning-runtime-check`), and no other diagnostic is reported.
    */
   readonly warned: readonly string[];
   /**
@@ -517,9 +512,18 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
         )),
   ];
   // (a store warns where its host value lands at a decided level: whole at the place's own, else at its leaf's)
-  const warned = stores.flatMap(({ of, whole: atRoot, line }) =>
-    levelsOf(of)[atRoot ? 0 : leafDepth(of)]!.includes("unknown") ? [] : [line],
+  const carried = (literal === null ? CARRIED[decision] : [])
+    .filter(([, depth]) => leafDepth(form) > depth)
+    .map(([line]) => ({ ...span(line, ""), of: placed, line }));
+  const checked = [...stores, ...carried].sort(
+    (a, b) => source.indexOf(`${a.line}\n`) - source.indexOf(`${b.line}\n`),
   );
+  const warned = [
+    ...stores.flatMap(({ of, whole: atRoot, line }) =>
+      levelsOf(of)[atRoot ? 0 : leafDepth(of)]!.includes("unknown") ? [] : [line],
+    ),
+    ...carried.map(({ line }) => line),
+  ];
   return {
     name: `${type}, ${decision}, ${host}`,
     source,
@@ -527,8 +531,7 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
     form: formText(placed),
     decision,
     levels: levelsOf(placed),
-    checks: stores.map(({ store, of }) => `${store} ${checkedText(of)}`),
-    exact: literal !== null,
+    checks: checked.map(({ store, of }) => `${store} ${checkedText(of)}`),
     runs,
     globals: literal === null ? { hostInit: initial! } : {},
     executable:
@@ -537,6 +540,51 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
     boundaries: boundaries.sort(),
   };
 }
+
+/**
+ * The copies each decision makes of `typed` and of the places between it and the copy, in source order, each with the
+ * steps it projects below `typed`'s root (`typed[0]`: one). Where `typed` starts as a host value (`hostInit`) below the
+ * root of what a copy takes (`let typed: T[] = [hostInit]` copied whole, `T[][]` through `typed[0]`), the copy carries
+ * that external data on and owes its runtime check where it lands, against its destination's whole type (C9 r4.50 (1));
+ * a host value at that root is checked whole where it is stored, and an `otherwise` or a `get` gives its own result.
+ */
+const CARRIED: Readonly<Record<Decision, readonly (readonly [string, number])[]>> = {
+  written: [],
+  "early copy": [["let copy = typed", 0]],
+  "later copy": [["copy = typed", 0]],
+  "copy of a copy": [
+    ["let middle = typed", 0],
+    ["let copy = middle", 0],
+  ],
+  "copy of a copy of a copy": [
+    ["let first = typed", 0],
+    ["let second = first", 0],
+    ["let copy = second", 0],
+  ],
+  projection: [["let copy = typed[0]", 1]],
+  "copy of a projection": [
+    ["let middle = typed[0]", 1],
+    ["let copy = middle", 1],
+  ],
+  "copy of an empty intermediate": [
+    ["middle = typed", 0],
+    ["let copy = middle", 0],
+  ],
+  "later copy of an empty intermediate": [
+    ["middle = typed", 0],
+    ["copy = middle", 0],
+  ],
+  "copy of a null intermediate": [
+    ["middle = typed", 0],
+    ["let copy = middle", 0],
+  ],
+  "copy of a null-element intermediate": [
+    ["middle = typed", 0],
+    ["let copy = middle", 0],
+  ],
+  "copy of an otherwise": [],
+  "copy of a get default": [],
+};
 
 /**
  * The form a seeded intermediate's copy holds (Astra's F2: the inherited decision keeps the intermediate's own `null`):
@@ -664,7 +712,6 @@ function literalNull(): WrittenCase {
     decision: "a copy of a literal with null beside the copy",
     levels: levelsOf(form),
     checks: [`${start}:${start + hostLine.length} list<integer|null>`],
-    exact: true,
     runs: HOST_VALUES.map((given) => [
       given,
       fits(leafForm(form), given) ? null : `TSR058@${stored}`,
@@ -704,7 +751,6 @@ function nullSwap(): WrittenCase {
     decision: "a swap of a null intermediate",
     levels: levelsOf(form),
     checks: [`${start}:${start + hostLine.length} integer|null`],
-    exact: true,
     runs: HOST_VALUES.map((given) => [given, fits(form, given) ? null : `TSR058@${site}`]),
     globals: {},
     executable: true,
@@ -881,18 +927,81 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
   return out;
 })();
 
+/** The decisions a composition takes (`compositionsOf`). */
+const COMPOSED: readonly Decision[] = ["written", "early copy", "later copy"];
+
+/**
+ * V30 §13's compositions of a type name `t` beyond `V30_TYPE_MATRIX`'s forms (Astra's M1): unions inside a typed set or
+ * dict (§13's valid examples), at deeper list levels, with an optional member or optional whole, of three names; optional
+ * set elements and dict values and optional typed sets and dicts; optional layers in mixed collections; typed sets and
+ * dicts inside lists, sets and dicts; three mixed levels; and every placement of `?` in lists nested to depth three. A
+ * union holding a whole collection beside another type is §13's error and has none: `list`, `set` and `dict` take no
+ * union; `null?` is `null`, so `null` takes no optional leaf.
+ */
+function compositionsOf(t: Form, u: Form, base: string): Form[] {
+  const opt = (of: Form): Form => (base === "null" ? of : optional(of));
+  const third = name(base === "boolean" ? "integer" : "boolean");
+  const collected = base !== "object" && UNRESTRICTED.has(base);
+  const unions = collected
+    ? []
+    : [
+        collection("set", union(t, u)),
+        collection("dict", union(t, u)),
+        collection("list", collection("list", union(t, u))),
+        collection("list", collection("list", collection("list", union(t, u)))),
+        optional(union(t, u)),
+        ...(base === "null"
+          ? []
+          : [union(optional(t), u), collection("list", union(optional(t), u))]),
+        union(t, u, third),
+      ];
+  const optionals: Form[] = [];
+  for (const depth of [2, 3])
+    for (let mask = 0; mask < 1 << (depth + 1); mask += 1) {
+      if (base === "null" && mask & 1) continue;
+      let form = mask & 1 ? optional(t) : t;
+      for (let level = 1; level <= depth; level += 1) {
+        form = collection("list", form);
+        if (mask & (1 << level)) form = optional(form);
+      }
+      optionals.push(form);
+    }
+  return [
+    ...unions,
+    collection("set", opt(t)),
+    collection("dict", opt(t)),
+    optional(collection("set", t)),
+    optional(collection("dict", t)),
+    optional(collection("set", opt(t))),
+    optional(collection("dict", opt(t))),
+    collection("set", optional(collection("list", t))),
+    collection("dict", optional(collection("list", t))),
+    collection("set", collection("list", opt(t))),
+    collection("dict", collection("list", opt(t))),
+    collection("list", collection("set", t)),
+    collection("list", collection("dict", t)),
+    collection("set", collection("set", t)),
+    collection("dict", collection("dict", t)),
+    collection("set", collection("dict", t)),
+    collection("dict", collection("set", t)),
+    collection("set", collection("list", collection("list", t))),
+    collection("dict", collection("list", collection("list", t))),
+    ...optionals,
+  ];
+}
+
 /**
  * V30 §13's written-type matrix (the orchestrator's instruction): every type name (the scalars, `null`, the
  * unrestricted `list`, `set`, `dict`, `object`, the program-control names) in each form §13 lists, `T`, `T?`, `T[]`,
  * `T set`, `T dict`, `T?[]`, `T[]?`, `T | U` and `(T | U)[]` (beside `string`, `integer` for a `string`), nested to depth
- * three (`T[][]`, `T?[][]`, `T[]?[]`, `T[] set`, `T[] dict`, `T[][][]`; `null?` is `null`, so the forms that only make
- * `null` optional are left out, while its optional collection layers, `null[]?` and `null[]?[]`, remain), × the place
- * written, an early
- * or a later copy, a copy at the end of a chain of two or three copies, for a list form a copy of its element (a typed
- * index projection) or a copy of that copy × the host value direct, named or held at an index; and for a form of depth
- * one at most a copy of a place typed by each seed (`SEEDS`), the host value direct. A union holding a whole collection
- * beside another type
- * is §13's compile error and has no form here: the compiler does not report it yet, pre-existing (r4.75 (3)).
+ * three (`T[][]`, `T?[][]`, `T[]?[]`, `T[] set`, `T[] dict`, `T[][][]`), × the place written, an early or a later copy, a
+ * copy at the end of a chain of two or three copies, for a list form a copy of its element (a typed index projection)
+ * or a copy of that copy × the host value direct, named or held at an index; for a form of depth one at most a copy of
+ * a place typed by each seed (`SEEDS`), the host value direct; and the compositions §13's grammar makes of the name
+ * through the same depth (`compositionsOf`), written, an early and a later copy, the host value direct. `null?` is
+ * `null`, so the forms that only make `null` optional are left out, while its optional collection layers (`null[]?`,
+ * `null[]?[]`) remain. A union holding a whole collection beside another type is §13's compile error and has no form
+ * here: the compiler does not report it yet, pre-existing (r4.75 (3)).
  */
 export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
   const out: WrittenCase[] = [];
@@ -919,6 +1028,15 @@ export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
       // a union never holds a whole collection beside another type (§13): unions of the others only
       ...(collected ? [] : [union(t, other), collection("list", union(t, other))]),
     ];
+    // the compositions §13's grammar makes of them through the claimed depth (Astra's M1), each written, an early and a
+    // later copy, the host value direct
+    // (each written text once: `null set?` is both an optional set of `null` and one of `null?`)
+    const known = new Set(forms.map(formText));
+    for (const form of compositionsOf(t, other, base)) {
+      if (known.has(formText(form))) continue;
+      known.add(formText(form));
+      for (const decision of COMPOSED) out.push(writtenCase(form, decision, "direct"));
+    }
     for (const form of forms) {
       if (depthOf(form) > 3) continue;
       const list = form.kind === "collection" && form.collection === "list";
@@ -968,7 +1086,7 @@ export const INFERRED_COPY_MATRIX: readonly WrittenCase[] = (() => {
           const kinds: string[] = [...leafKinds].sort();
           const levels = [...Array.from({ length: depth }, () => ["list"]), kinds];
           out.push({
-            name: `${widening} into the source ${copied} the copy, depth ${depth}, ${host}`,
+            name: `copy ${copied} ${widening} into the source, depth ${depth}, ${host}`,
             source,
             place: "copy",
             form: wrap(kinds.join("|"), 0),
@@ -977,7 +1095,6 @@ export const INFERRED_COPY_MATRIX: readonly WrittenCase[] = (() => {
             checks: [
               `${start}:${end} ${"list<".repeat(depth)}${kinds.join("|")}${">".repeat(depth)}`,
             ],
-            exact: true,
             runs: HOST_VALUES.map((given) => [
               given,
               kindsOf(given).some((kind) => kinds.includes(kind))
@@ -1030,7 +1147,6 @@ export const DEFAULT_CHAIN_MATRIX: readonly WrittenCase[] = (() => {
         decision: "a copy of the default",
         levels,
         checks: [],
-        exact: true,
         runs: [],
         globals: {},
         executable: false,

@@ -207,15 +207,9 @@ function failing(cases: readonly WrittenCase[]): {
         ...new Set(c.warned.map((line) => `warning-runtime-check written-target ${line}`)),
       ].sort();
       const outcome = diagnostics.length > 0 ? "warning-runtime-check" : "valid";
-      // (a copy of a host-started binding may owe its runtime check too: only warnings, and those required)
       if (
         seen.outcome !== outcome ||
-        (c.exact
-          ? JSON.stringify(seen.diagnostics) !== JSON.stringify(diagnostics)
-          : !diagnostics.every((found) => seen.diagnostics.includes(found)) ||
-            !seen.diagnostics.every((found) =>
-              found.startsWith("warning-runtime-check written-target "),
-            ))
+        JSON.stringify(seen.diagnostics) !== JSON.stringify(diagnostics)
       )
         wrong.push(`${name}: ${seen.outcome}, diagnostics ${JSON.stringify(seen.diagnostics)}`);
       const inside = seen.checks !== "outside";
@@ -228,12 +222,7 @@ function failing(cases: readonly WrittenCase[]): {
       if (!inside) continue;
       if (shared) full += 1;
       const checks = seen.checks;
-      if (
-        checks === "no plan" ||
-        (c.exact
-          ? JSON.stringify(checks) !== JSON.stringify(c.checks)
-          : !c.checks.every((check) => checks.includes(check)))
-      )
+      if (checks === "no plan" || JSON.stringify(checks) !== JSON.stringify(c.checks))
         wrong.push(`${name}: checks ${JSON.stringify(checks)}`);
       const runs = c.runs.map(([, stop]) =>
         stop === null

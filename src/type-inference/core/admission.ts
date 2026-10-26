@@ -131,6 +131,7 @@ function cyclesOf(
         members.push(member);
         if (member === frame.place) break;
       }
+      work.charge("indexSteps", targets.length);
       if (members.length > 1 || targets.includes(frame.place))
         for (const member of members) out.set(member, frame.place);
     }
