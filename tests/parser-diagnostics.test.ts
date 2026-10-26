@@ -247,6 +247,9 @@ test("a string or regex without its closing delimiter reports only that", () => 
     ['let text = "a ${1 +', ["TSL005 14-19", "TSL003 11-19", "TSP012 19-19"]],
     ['let n = f(g("unfinished', ["TSL003 12-23", "TSP017 23-23", "TSP017 23-23"]],
     ["let n = length(/ab", ["TSL009 15-18", "TSP017 18-18"]],
+    // A `/` after a mode word stays a division where main read one: the ask's question is what misses its quote.
+    ['say prose / askText "x', ["TSL003 20-22"]],
+    ['let q = askNumber prose / askText "x', ["TSL003 34-36"]],
   ] as const) {
     for (const compilation of [
       compileSource(source),
@@ -263,7 +266,9 @@ test("a string or regex without its closing delimiter reports only that", () => 
     }
   }
   // Where the lexer took a `/` for division, a string that the regex holds still makes the parse try a regex there.
-  assert.deepEqual(compileSource('say prose /"abc/\nexit').diagnostics, []);
+  for (const source of ['say prose /"abc/\nexit', 'let answer = askText prose /"abc/\nexit']) {
+    assert.deepEqual(compileSource(source).diagnostics, [], source);
+  }
 });
 
 test("a command reports its missing operand only when the operand reported nothing", () => {
@@ -275,9 +280,13 @@ test("a command reports its missing operand only when the operand reported nothi
     ['let v = load("unfinished', ["TSL003 13-24", "TSP017 24-24"]],
     ["say 1 +", ["TSP012 7-7"]],
     ['say "a", 1 +', ["TSP012 12-12"]],
+    ['showButton "ok", timeout: "unfinished', ["TSL003 26-37"]],
+    ['let x = askText prefill: "unfinished', ["TSL003 25-36"]],
+    ['let c = askChoice "a", prefill: "unfinished', ["TSL003 32-43"]],
     // An operand that is not there at all is still reported.
     ["wait", ["TSP012 4-4"]],
     ["showButton", ["TSP028 10-10"]],
+    ['showButton "ok", timeout:', ["TSP028 25-25"]],
     ["let v = load(default: 1)", ["TSP036 8-24"]],
     ["say", ["TSP006 3-3"]],
   ] as const) {

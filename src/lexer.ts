@@ -29,13 +29,6 @@ const diagnosticCodes = {
   unterminatedRegex: "TSL009",
 } as const satisfies Record<string, OwnedDiagnosticCode<"lexer", "error">>;
 
-/** The errors of a string or regex without its closing delimiter, each reported from where the literal starts. */
-export const UNCLOSED_LITERAL_CODES: ReadonlySet<string> = new Set([
-  diagnosticCodes.unterminatedString,
-  diagnosticCodes.unterminatedBlockString,
-  diagnosticCodes.unterminatedRegex,
-]);
-
 /**
  * Tokenizes the accepted core-language milestone. A `/` at an offset of `regexStarts` starts a regex literal, as one does
  * wherever the token before shows that the grammar expects a value there; the parser finds the other places (V30 §8).

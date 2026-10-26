@@ -17,11 +17,11 @@ const SAVE_VALUE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set(["as"]);
 /** `save <value> as <key>`; both operands are full expressions. */
 export function parseSaveStatement(parser: Parser): SaveStatement | null {
   const command = parser.advance();
-  let diagnosticCount = parser.diagnostics.length;
+  let mark = parser.mark();
   const value = parser.parseStorageOperand(SAVE_VALUE_DELIMITERS);
   if (value === null) {
     parser.reportMissing(
-      diagnosticCount,
+      mark,
       parserDiagnosticCode.expectedExpression,
       "Expected a value to save after 'save'.",
     );
@@ -36,11 +36,11 @@ export function parseSaveStatement(parser: Parser): SaveStatement | null {
     parser.synchronizeStatement(true);
     return null;
   }
-  diagnosticCount = parser.diagnostics.length;
+  mark = parser.mark();
   const key = parser.parseStorageOperand(NO_STORAGE_DELIMITERS);
   if (key === null) {
     parser.reportMissing(
-      diagnosticCount,
+      mark,
       parserDiagnosticCode.expectedStorageKey,
       "Expected a storage key after 'as'.",
     );
@@ -57,11 +57,11 @@ export function parseSaveStatement(parser: Parser): SaveStatement | null {
 
 export function parseDeleteStatement(parser: Parser): DeleteStatement | null {
   const command = parser.advance();
-  const diagnosticCount = parser.diagnostics.length;
+  const mark = parser.mark();
   const key = parser.parseStorageOperand(NO_STORAGE_DELIMITERS);
   if (key === null) {
     parser.reportMissing(
-      diagnosticCount,
+      mark,
       parserDiagnosticCode.expectedStorageKey,
       "Expected a storage key after 'delete'.",
     );
@@ -111,12 +111,12 @@ export function* parseLoadExpression(parser: Parser): ParseTask<LoadExpression |
   // The key ends at a bare `default`, the earlier fallback form, so that the message below names the fix.
   const enclosing = parser.storageDelimiters;
   parser.storageDelimiters = new Set([...enclosing, "default"]);
-  const diagnosticCount = parser.diagnostics.length;
+  const mark = parser.mark();
   const key = yield* parseChild(parser.parseOr());
   parser.storageDelimiters = enclosing;
   if (key === null) {
     parser.reportMissing(
-      diagnosticCount,
+      mark,
       parserDiagnosticCode.expectedStorageKey,
       "Expected a storage key after 'load'.",
     );
@@ -139,11 +139,11 @@ export function* parseLoadExpression(parser: Parser): ParseTask<LoadExpression |
     defaultValue = yield* parseChild(parser.parseOr());
   } else if (defaultOffset !== null && parser.atNamedDefault(defaultOffset)) {
     for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) parser.advance();
-    const diagnosticCount = parser.diagnostics.length;
+    const mark = parser.mark();
     defaultValue = yield* parseChild(parser.parseColonValueTask(false));
     if (defaultValue === null) {
       parser.reportMissing(
-        diagnosticCount,
+        mark,
         parserDiagnosticCode.expectedExpression,
         "Expected a fallback value after 'default:'.",
       );

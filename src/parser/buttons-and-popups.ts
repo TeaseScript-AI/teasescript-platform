@@ -68,11 +68,11 @@ export function* parseShowPopupParts(parser: Parser): ParseTask<ShowPopupParts |
     parser.recordCommand(command, call.span.end.offset, false);
     return { arguments: call.arguments, span: copySpan(call.span) };
   }
-  const diagnosticCount = parser.diagnostics.length;
+  const mark = parser.mark();
   const message = yield* parseChild(parser.parseOr());
   if (message === null) {
     parser.reportMissing(
-      diagnosticCount,
+      mark,
       parserDiagnosticCode.expectedExpression,
       "Expected the popup's message after 'showPopup', as in 'showPopup \"Task completed\"'.",
     );
@@ -207,11 +207,11 @@ export function* parseShowButtonParts(parser: Parser): ParseTask<ShowButtonParts
     parser.synchronizeStatement();
     return null;
   }
-  const diagnosticCount = parser.diagnostics.length;
+  const mark = parser.mark();
   const label = yield* parseChild(parser.parseOr());
   if (label === null) {
     parser.reportMissing(
-      diagnosticCount,
+      mark,
       parserDiagnosticCode.expectedInteractionText,
       "Expected button text after 'showButton'.",
     );
@@ -234,9 +234,11 @@ export function* parseShowButtonParts(parser: Parser): ParseTask<ShowButtonParts
         : null;
     if (option === null) break;
     for (let skipped = 0; skipped < offset + 2; skipped += 1) parser.advance();
+    const mark = parser.mark();
     const value = yield* parseChild(parser.parseColonValueTask(false));
     if (value === null) {
-      parser.reportInsertion(
+      parser.reportMissing(
+        mark,
         parserDiagnosticCode.expectedInteractionText,
         option === "background"
           ? "Expected a button background colour."
@@ -302,7 +304,7 @@ export function* parseShowPermanentButtonParts(
   const enclosing = parser.blockEndsCompactInteraction;
   parser.blockEndsCompactInteraction = true;
   const textStart = parser.current;
-  const diagnosticCount = parser.diagnostics.length;
+  const mark = parser.mark();
   const text = yield* parseChild(parser.parseOr());
   const textEnd = parser.current;
   const options = text === null ? null : yield* parseChild(parsePermanentButtonOptions(parser));
@@ -310,11 +312,11 @@ export function* parseShowPermanentButtonParts(
   if (text !== null) parser.recordCommand(command, parser.lastEnd(), true);
   if (text === null) {
     // Text that reported its own error, as `"Stop" + {`, needs no second one.
-    if (parser.diagnostics.length === diagnosticCount)
-      parser.reportInsertion(
-        parserDiagnosticCode.expectedInteractionText,
-        "Expected button text after 'showPermanentButton'.",
-      );
+    parser.reportMissing(
+      mark,
+      parserDiagnosticCode.expectedInteractionText,
+      "Expected button text after 'showPermanentButton'.",
+    );
     // The block belongs to the button.
     if (parser.check(TokenKind.LeftBrace)) parser.skipMalformedBlock();
     else parser.synchronizeStatement();

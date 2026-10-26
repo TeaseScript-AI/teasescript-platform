@@ -33,7 +33,7 @@ import {
   type StatementCommand,
   type ValueCommand,
 } from "./language-facts.js";
-import { lex, UNCLOSED_LITERAL_CODES } from "./lexer.js";
+import { lex } from "./lexer.js";
 import { readMisplacedHeader, readScriptHeader, type ScriptHeader } from "./script-header.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { TokenKind, type Token } from "./token.js";
@@ -183,10 +183,16 @@ interface SharedParse {
    */
   readonly newlineRuns: { readonly starts: Int32Array; readonly ends: Int32Array };
   /**
-   * The lexer's reports of a string or regex without its closing delimiter, by the offset where the literal starts. A
-   * parse that cannot read such a literal counts that report as its error there, so nothing around it reports another.
+   * Errors that only follow the lexer's report of a string or regex without its closing delimiter, as "Expected an
+   * expression" after `let text = "unfinished`. The parse keeps them, so that every decision it makes is the same as
+   * without this set, but `parse` leaves them out (see `Parser.reportMissing`).
    */
-  readonly unclosedLiterals: ReadonlyMap<number, Diagnostic>;
+  readonly followUps: WeakSet<Diagnostic>;
+}
+/** A point in a parse, from which `Parser.reportMissing` tells what a failed part reported. */
+export interface ParseMark {
+  readonly diagnostics: number;
+  readonly unclosedLiterals: number;
 }
 /** A `say` value parsed at a token position in one parsing context, with what its parse left behind. */
 interface ParsedSayValue {
@@ -197,6 +203,8 @@ interface ParsedSayValue {
   readonly parts: SayParts | null;
   readonly end: number;
   readonly diagnostics: readonly Diagnostic[];
+  /** The literals without their closing delimiter that its parse failed to read (see `Parser.unclosedLiterals`). */
+  readonly unclosedLiterals: number;
   /** The offsets of the `/` where its parse expected a value (see `Parser.regexStarts`). */
   readonly regexStarts: readonly number[];
   /** The statement and command ranges its parse recorded. */
@@ -233,10 +241,7 @@ export function parse(source: string): ParseResult {
   const regexStarts = new Set<number>();
   for (;;) {
     const header = readScriptHeader(lex(source, regexStarts));
-    const parser = new Parser(
-      header.programTokens,
-      sharedParse(header.programTokens, header.diagnostics),
-    );
+    const parser = new Parser(header.programTokens);
     const program = parser.parseProgram();
     const added = parser.regexStarts.filter((offset) => !regexStarts.has(offset));
     if (added.length > 0 && parser.diagnostics.length > 0) {
@@ -250,33 +255,12 @@ export function parse(source: string): ParseResult {
       header: header.header,
       diagnostics: Object.freeze([
         ...header.diagnostics,
-        // A lexer report that the parse counted (see `SharedParse.unclosedLiterals`) is listed once.
-        ...parser.diagnostics.filter(
-          (diagnostic) =>
-            parser.shared.unclosedLiterals.get(diagnostic.span.start.offset) !== diagnostic,
-        ),
+        ...parser.diagnostics.filter((diagnostic) => !parser.shared.followUps.has(diagnostic)),
       ]),
       statementRanges: Object.freeze(statements),
       commandRanges: Object.freeze(commands),
     });
   }
-}
-
-/** What the parsers over `tokens` share, with the lexer's `diagnostics` of them. */
-function sharedParse(tokens: readonly Token[], diagnostics: readonly Diagnostic[]): SharedParse {
-  const unclosedLiterals = new Map<number, Diagnostic>();
-  for (const diagnostic of diagnostics) {
-    if (UNCLOSED_LITERAL_CODES.has(diagnostic.code))
-      unclosedLiterals.set(diagnostic.span.start.offset, diagnostic);
-  }
-  return {
-    openers: innermostOpeners(tokens),
-    closers: null,
-    sayValues: new Map(),
-    recoveredStrings: new WeakSet(),
-    newlineRuns: newlineRuns(tokens),
-    unclosedLiterals,
-  };
 }
 
 /** The public members serve `parse` and the modules in `parser/`, and are internal to the parser. */
@@ -292,6 +276,11 @@ export class Parser {
    * a speculative parser keeps its own.
    */
   public readonly regexStarts: number[] = [];
+  /**
+   * The strings and regexes without their closing delimiter that this parse failed to read; the lexer reports them.
+   * Like its diagnostics, a speculative parser counts its own.
+   */
+  public unclosedLiterals = 0;
   public current = 0;
   #commaLookahead: {
     readonly at: number;
@@ -319,7 +308,14 @@ export class Parser {
 
   public constructor(
     public readonly tokens: readonly Token[],
-    shared: SharedParse,
+    shared: SharedParse = {
+      openers: innermostOpeners(tokens),
+      closers: null,
+      sayValues: new Map(),
+      recoveredStrings: new WeakSet(),
+      newlineRuns: newlineRuns(tokens),
+      followUps: new WeakSet(),
+    },
   ) {
     this.shared = shared;
   }
@@ -809,12 +805,10 @@ export class Parser {
   }
 
   public *parseRequiredExpressionTask(): ParseTask<Expression | null> {
-    const diagnosticCount = this.diagnostics.length;
+    const mark = this.mark();
     const expression = yield* parseChild(this.parseOr());
-    // A failed expression that already reported its own error needs no generic one after it.
-    if (expression === null && this.diagnostics.length === diagnosticCount) {
-      this.reportInsertion(parserDiagnosticCode.expectedExpression, "Expected an expression.");
-    }
+    if (expression === null)
+      this.reportMissing(mark, parserDiagnosticCode.expectedExpression, "Expected an expression.");
     return expression;
   }
 
@@ -863,10 +857,10 @@ export class Parser {
       const operator = this.#matchOperator(TokenKind.KeywordOr) ?? this.#matchSymbolicOr();
       if (operator === null) break;
       this.skipContinuationNewlines();
-      const diagnosticCount = this.diagnostics.length;
+      const mark = this.mark();
       const right = yield* parseChild(this.#parseAnd());
       if (right === null) {
-        this.#reportMissingOperand("or", "Expected an expression after 'or'.", diagnosticCount);
+        this.#reportMissingOperand("or", "Expected an expression after 'or'.", mark);
         return null;
       }
       expression = this.#binary(expression, right, "or", operator);
@@ -882,10 +876,10 @@ export class Parser {
         this.#matchSymbol(TokenKind.Ampersand, "oneOrTwo", "and", "if a and b { ... }");
       if (operator === null) break;
       this.skipContinuationNewlines();
-      const diagnosticCount = this.diagnostics.length;
+      const mark = this.mark();
       const right = yield* parseChild(this.#parseNot());
       if (right === null) {
-        this.#reportMissingOperand("and", "Expected an expression after 'and'.", diagnosticCount);
+        this.#reportMissingOperand("and", "Expected an expression after 'and'.", mark);
         return null;
       }
       expression = this.#binary(expression, right, "and", operator);
@@ -899,11 +893,11 @@ export class Parser {
       operators.push(this.previous());
       this.skipContinuationNewlines();
     }
-    const diagnosticCount = this.diagnostics.length;
+    const mark = this.mark();
     let expression = yield* parseChild(this.#parseComparison());
     if (expression === null) {
       if (operators.length > 0)
-        this.#reportMissingOperand("not", "Expected an expression after 'not'.", diagnosticCount);
+        this.#reportMissingOperand("not", "Expected an expression after 'not'.", mark);
       return null;
     }
     for (let index = operators.length - 1; index >= 0; index -= 1) {
@@ -982,16 +976,15 @@ export class Parser {
       operators.push(this.previous());
       this.skipContinuationNewlines();
     }
-    const diagnosticCount = this.diagnostics.length;
+    const mark = this.mark();
     let value = yield* parseChild(parse());
     if (value === null) {
-      if (operators.length === 0) this.#reportMissingOperand(symbol, missing, diagnosticCount);
-      else
-        this.#reportMissingOperand("not", "Expected an expression after 'not'.", diagnosticCount);
+      if (operators.length === 0) this.#reportMissingOperand(symbol, missing, mark);
+      else this.#reportMissingOperand("not", "Expected an expression after 'not'.", mark);
       return null;
     }
     if (operators.length === 0) return value;
-    report(operators, value, this.diagnostics.length === diagnosticCount);
+    report(operators, value, this.diagnostics.length === mark.diagnostics);
     for (let index = operators.length - 1; index >= 0; index -= 1) {
       value = this.#unary(operators[index]!, value, "not");
     }
@@ -1002,9 +995,9 @@ export class Parser {
    * Reports the value missing after `symbol`, unless the operand reported its own error, as the `==` of `a and x ==`
    * does. Before the `{` that ends a block head, as in `if x == {`, the message says that the `{` starts the block.
    */
-  #reportMissingOperand(symbol: string, message: string, diagnosticCount: number): void {
-    if (this.diagnostics.length !== diagnosticCount) return;
-    this.reportInsertion(
+  #reportMissingOperand(symbol: string, message: string, mark: ParseMark): void {
+    this.reportMissing(
+      mark,
       parserDiagnosticCode.expectedExpression,
       this.#atHeadBlock()
         ? `Expected a value after '${symbol}': the '{' that follows starts the block. Write the value before the '{'.`
@@ -1599,8 +1592,9 @@ export class Parser {
     }
     if (this.match(TokenKind.RegexLiteral)) {
       const source = tokenValue(token);
+      // The lexer reported a literal without its closing slash.
       if (token.lexeme.length < source.length + 2) {
-        this.countUnclosedLiteral(token);
+        this.unclosedLiterals += 1;
         return null;
       }
       return Object.freeze({
@@ -2017,22 +2011,27 @@ export class Parser {
     );
   }
 
-  /** Counts the lexer's report of the string or regex without its closing delimiter at `start` as this parse's error. */
-  public countUnclosedLiteral(start: Token): void {
-    const report = this.shared.unclosedLiterals.get(start.span.start.offset);
-    if (report !== undefined) this.diagnostics.push(report);
+  public mark(): ParseMark {
+    return { diagnostics: this.diagnostics.length, unclosedLiterals: this.unclosedLiterals };
   }
 
   /**
-   * Reports the operand missing here, unless its failed parse, which started at `diagnosticCount` diagnostics, reported
-   * its own error, as `1 +` in `wait 1 +` and the unclosed string of `wait "1 s` do.
+   * Reports the part missing here, at `at` or else before the next token, unless the part that failed since `mark`
+   * reported its own error, as `1 +` in `wait 1 +` does. A part that failed at a string or regex without its closing
+   * delimiter gets the error all the same, so that every later decision is the same, but only as a follow-up of the
+   * lexer's report (see `SharedParse.followUps`).
    */
   public reportMissing(
-    diagnosticCount: number,
+    mark: ParseMark,
     code: (typeof parserDiagnosticCode)[keyof typeof parserDiagnosticCode],
     message: string,
+    at?: Token,
   ): void {
-    if (this.diagnostics.length === diagnosticCount) this.reportInsertion(code, message);
+    if (this.diagnostics.length !== mark.diagnostics) return;
+    if (at === undefined) this.reportInsertion(code, message);
+    else this.reportToken(code, message, at);
+    if (this.unclosedLiterals !== mark.unclosedLiterals)
+      this.shared.followUps.add(this.diagnostics.at(-1)!);
   }
 
   public reportInsertion(
