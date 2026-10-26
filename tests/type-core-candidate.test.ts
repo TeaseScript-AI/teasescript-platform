@@ -1580,6 +1580,115 @@ test("a copy of a written collection admits its written domain at every level, n
 });
 
 /**
+ * AD-3 (TABLE r4.52; X1 drops flow facts, never a written type): host data stored into a written place in dead code (a
+ * function nothing calls, after `exit`, a branch on `false`) is checked against the written domain, as in live code,
+ * never against `unknown`. Per place and dead shape, in both orders: the admitted domain at each collection level
+ * (decision), C9's `against` and site, and, where the candidate route takes the program, the plan's checked stores, each
+ * equal to the live form's (the function called; the statements live).
+ */
+test("a dead store of host data into a written place is checked against its written domain, as live (AD-3)", (t) => {
+  const sorted = (kinds: readonly string[]): string[] => [...kinds].sort();
+  const places: readonly (readonly [string, string, string, readonly (readonly string[])[]])[] = [
+    ["a written scalar", "out", "let out: integer = 1\nout = hostValue", [["integer"]]],
+    [
+      "a written list",
+      "out",
+      "let out: integer[] = [1]\nout = [hostValue]",
+      [["list"], ["integer"]],
+    ],
+    [
+      "a written list of lists",
+      "out",
+      "let out: integer[][] = [[1]]\nout = [[hostValue]]",
+      [["list"], ["list"], ["integer"]],
+    ],
+    [
+      "a copy of a written list",
+      "copy",
+      "let typed: integer[] = [1]\nlet copy = typed\ncopy = [hostValue]",
+      [["list"], ["integer"]],
+    ],
+  ];
+  const indented = (body: string): string =>
+    body
+      .split("\n")
+      .map((line) => `  ${line}`)
+      .join("\n");
+  // per dead shape: the program with `body` dead, and its live form
+  const shapes: readonly (readonly [string, (body: string) => string, (body: string) => string])[] =
+    [
+      [
+        "a function nothing calls",
+        (body) => `function use(x) {\n${indented(body)}\n}\nexit\n`,
+        (body) => `function use(x) {\n${indented(body)}\n}\nuse(1)\nexit\n`,
+      ],
+      ["after exit", (body) => `exit\n${body}\n`, (body) => `${body}\nexit\n`],
+      [
+        "a branch on a literal false",
+        (body) => `if false {\n${indented(body)}\n}\nexit\n`,
+        (body) => `${body}\nexit\n`,
+      ],
+    ];
+  const observe = (source: string, name: string, levels: number) => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const place = new CoreProgram(request).places.find(
+      ({ kind }) => kind.kind === "binding" && kind.name === name,
+    )!;
+    const text = (start: number, end: number): string => `'${source.slice(start, end)}'`;
+    return inBothOrders(() => {
+      const answers = analyseCore(request);
+      const plan = insideSlice(() => candidate(source))?.plan ?? null;
+      return {
+        levels: Array.from({ length: levels }, (_, level) => {
+          const admitted = answers.place(place.id, Array<string>(level).fill("element")).admitted;
+          return admitted.by === "undecided" ? ["undecided"] : sorted(admitted.kinds);
+        }),
+        boundaries: answers.checks
+          .filter((check) => check.boundary)
+          .map(
+            (check) =>
+              `${check.target} [${sorted(check.against).join(", ")}] ${text(check.site.start, check.site.end)}`,
+          )
+          .sort(),
+        plan:
+          plan === null
+            ? null
+            : typeChecks(plan)
+                .map(({ so, eo, type }) => `${text(so, eo)} ${typeText(type)}`)
+                .sort(),
+      };
+    });
+  };
+  const wrong: string[] = [];
+  let plans = 0;
+  for (const [what, name, body, levels] of places)
+    for (const [where, dead, live] of shapes) {
+      const expected = observe(live(body), name, levels.length);
+      const found = observe(dead(body), name, levels.length);
+      const written = levels.map(sorted);
+      if (JSON.stringify(expected.levels) !== JSON.stringify(written))
+        wrong.push(`${what}, live: levels ${JSON.stringify(expected.levels)}`);
+      if (
+        expected.boundaries.length === 0 ||
+        expected.boundaries.some((line) => line.includes("unknown"))
+      )
+        wrong.push(`${what}, live: boundaries ${expected.boundaries.join("; ")}`);
+      if (found.plan !== null && expected.plan !== null) plans += 1;
+      else found.plan = expected.plan = null;
+      if (JSON.stringify(found) !== JSON.stringify(expected))
+        wrong.push(
+          `${what}, ${where}: ${JSON.stringify(found)} against ${JSON.stringify(expected)}`,
+        );
+    }
+  t.diagnostic(
+    `${places.length * shapes.length} dead programs, ${plans} with plans on the candidate route`,
+  );
+  assert.ok(plans > 0, "the candidate route takes some");
+  assert.deepEqual(wrong, []);
+});
+
+/**
  * The owner's rule (TABLE r4.59) over a sample of the cells the candidate route reaches: host data, its slice's ingress,
  * inline and named, into a written, a decided and a published place, at a scalar and at a collection endpoint. Each
  * program compiles alike in both orders and checks exactly the store that brings the data, against the whole type its

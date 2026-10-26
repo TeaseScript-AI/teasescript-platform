@@ -166,6 +166,24 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
       "takeAll(s)",
     ],
   ];
+  // host data a dead call passes for a written parameter: the live form's warning and boundary, against that type
+  const hostArguments: readonly (readonly [string, string, string])[] = [
+    ["host data for a whole number", takesInteger, "take(hostValue)"],
+    [
+      "host data in a list of whole numbers",
+      "function takeAll(counts: integer[]) {\n  say counts\n}\ntakeAll([1])",
+      "takeAll([hostValue])",
+    ],
+  ];
+  for (const reversed of [false, true])
+    for (const [what, before, body] of hostArguments) {
+      const live = analysed(`${before}\n${body}\nexit\n`, reversed);
+      for (const [where, shape] of shapes) {
+        const found = analysed(shape(before, body), reversed);
+        if (JSON.stringify(found) !== JSON.stringify(live))
+          differing.push(`${what}, ${where}${reversed ? " reversed" : ""}: ${found.join("; ")}`);
+      }
+    }
   // a kind only the reaching definition decides: the live form's error, a warning in dead code
   const flowOnly: readonly (readonly [string, string, string])[] = [
     ["a count stored a number last", "let n = 1\nn = 2.5", "repeat n {}"],
