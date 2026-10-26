@@ -4128,7 +4128,9 @@ test("a class decides through its earliest member no guard of the path holds, in
  *   below the copied path between them, whose later copies carry it at `f0` and whose earlier ones are `later`;
  * - Astra's M1 witnesses: a conditional store below the copied path before and between the copies;
  * - Astra's F3 shapes: two choice reads of `root.f` answer at their own nodes, the one after an effectful call by the
- *   call's word; an argument inside `root != null and use(root)` carries the operand's guard into its parameter.
+ *   call's word; an argument inside `root != null and use(root)` carries the operand's guard into its parameter;
+ * - two reads of one key in one literal with a call storing to it between them are two key reads (TABLE r4.68 (1)): the
+ *   later one's element carries the call's kind, as the same reads in three statements do.
  */
 test("the carrier design's witnesses give their exact records, in both orders (S6-CARRIERS §6)", () => {
   const nested = "let raw = hostValue\nlet root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}}\n";
@@ -4265,6 +4267,13 @@ test("the carrier design's witnesses give their exact records, in both orders (S
       "F3, an argument under no guard",
       `let root = {f: 2.5}\n${use}if use(root) {\n  say "yes"\n}\n`,
       "outcome compile-error\nD written-target error 57:60 -",
+    ],
+    [
+      "a named key read before and after a call storing to it, in one literal (TABLE r4.68 (1))",
+      "global root = 1\nfunction bump {\n  root = 2.0\n  return 0\n}\nlet box = [root, bump(), root]\nrepeat box[2] {}\n",
+      `outcome warning-runtime-check
+      D integer-use warning 96:102 call
+      C integer-check box.element [integer] 96:102`,
     ],
   ];
   for (const [name, source, text] of witnesses) {

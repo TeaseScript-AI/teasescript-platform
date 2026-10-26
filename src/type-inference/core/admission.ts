@@ -2258,9 +2258,10 @@ export class Admission {
       }
       const map = term !== null ? stops.written : literal ? stops.literals : stops.values;
       const pathKey = path.join(".");
-      // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2)
+      // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2; a copy only
+      // where it reads the same snapshot, r4.68 (1))
       if (path.length > 0 && map === stops.values && this.#sourceOf(current) !== null) {
-        const identity = `${pathKey}|${strip.join(".")}|${contract.identityOf(current).id}`;
+        const identity = `${pathKey}|${strip.join(".")}|${contract.identityOf(current).id}|${contract.readSnapshot(current) ?? ""}`;
         if (sources.has(identity)) continue;
         sources.add(identity);
       }
@@ -2395,10 +2396,10 @@ export class Admission {
   }
 
   /**
-   * A list of a walk's stops as the decider reads it, once per list: each snapshot once (TABLE §8: one key read here),
-   * so of the reads of one key through one chain of operations at one strip only the first is read, the later ones
-   * holding what it holds (k reads of one host global, decided at k paths: Codex r23 F1); `shallow` leaves out the
-   * values a projection selects.
+   * A list of a walk's stops as the decider reads it, once per list: each snapshot once (TABLE §8: one key read here,
+   * r4.68 (1)), so of the reads of one key through one chain of operations at one strip that read the same only the
+   * first is read, the later ones holding what it holds (k reads of one host global, decided at k paths: Codex r23 F1);
+   * `shallow` leaves out the values a projection selects.
    */
   #snapshots(list: readonly Stop[] | undefined, shallow: boolean): readonly Stop[] | undefined {
     if (list === undefined) return undefined;
@@ -2406,15 +2407,15 @@ export class Admission {
     if (memo === undefined) this.#snapshotLists.set(list, (memo = []));
     const known = memo[shallow ? 1 : 0];
     if (known !== undefined) return known;
-    const { program, contract, guards } = this.pass;
+    const { program, contract } = this.pass;
     const seen = new Map<readonly Via[], Set<string>>();
     const out: Stop[] = [];
     for (const stop of list) {
       program.work.charge("checks");
       if (shallow && stop.deep) continue;
-      const copied = contract.copiedKey(stop.value);
-      if (copied !== null) {
-        const snapshot = `${stop.strip.join(".")}|${stop.deep}|${stop.single}|${guards.guardedRead(stop.value) ? "g" : ""}${copied}`;
+      const read = contract.readSnapshot(stop.value);
+      if (read !== null) {
+        const snapshot = `${stop.strip.join(".")}|${stop.deep}|${stop.single}|${read}`;
         let reads = seen.get(stop.via);
         if (reads === undefined) seen.set(stop.via, (reads = new Set()));
         if (reads.has(snapshot)) continue;

@@ -526,6 +526,8 @@ export class Contract {
   /** A carrier value's identity by its shape (`#identityWork`), interned; a plain literal's (`#signatureWork`). */
   readonly #carrierIds = new Map<string, string>();
   readonly #literalIds = new Map<string, string>();
+  /** Per read, its snapshot (`readSnapshot`). */
+  readonly #snapshots = new Map<PlaceId, string>();
   /** Each value's structure identity (`structureOf`), and its interned shapes. */
   readonly #structures = new Map<PlaceId, string>();
   readonly #structureIds = new Map<string, string>();
@@ -1675,6 +1677,29 @@ export class Contract {
       current = projection.owner;
     }
     return keyOf(program.occurrenceOf.get(current)!, steps.reverse());
+  }
+
+  /**
+   * A read's snapshot (TABLE §8, r4.68 (1)): the key it copies, its guard bit and that key's exact-path signature at the
+   * read's own node (`aliasSignature`, where the value side reads it), so reads of one key in one literal are one key
+   * read only where they read the same: a guard, or a call storing to the key between them, keeps them apart. Once per
+   * read; `null` for no read.
+   */
+  public readSnapshot(value: PlaceId): string | null {
+    const known = this.#snapshots.get(value);
+    if (known !== undefined) return known;
+    const copied = this.copiedKey(value);
+    if (copied === null) return null;
+    const { program, lists, guards } = this.pass;
+    let root = value;
+    for (let projection = program.projOf.get(root); projection !== undefined;) {
+      root = projection.owner;
+      projection = program.projOf.get(root);
+    }
+    const node = program.occNode.get(root) ?? null;
+    const snapshot = `${guards.guardedRead(value) ? "g" : ""}${copied}|${node === null ? "-" : lists.aliasSignature(copied, node)}`;
+    this.#snapshots.set(value, snapshot);
+    return snapshot;
   }
 
   /** A call's result read further (`snapshot()`, `snapshot().data`): the callee's result key (F20), else `null`. */
@@ -3015,7 +3040,7 @@ export class Contract {
 
   *#indexWork(literal: PlaceId): IdentityWork {
     if (this.#literals.has(literal)) return;
-    const { program, definitions, guards } = this.pass;
+    const { program, definitions } = this.pass;
     const index: LiteralIndex = {
       terms: new Map(),
       reads: new Map(),
@@ -3085,12 +3110,13 @@ export class Contract {
           put(index.others, path, { g, value });
           continue;
         }
-        // (k reads of one host global are one entry as well, their leaves unioned: an occurrence stays fresh as its own
-        // leaf, never as an entry each path reads again, S6-CARRIERS §3.1, Codex r23 F1)
+        // one snapshot: one key read here, where nothing between the reads changes what they read (r4.68 (1))
+        const snapshot = this.readSnapshot(value)!;
+        // (k reads of one host global are one entry as well, by their snapshot, their leaves unioned: an occurrence
+        // stays fresh as its own leaf, never as an entry each path reads again, S6-CARRIERS §3.1, Codex r23 F1)
         const leaf = this.#ingressLeaf(value);
-        const id = `${path}|${leaf === undefined ? source.id : (yield* this.#needKey(this.copiedKey(value)!)).id}`;
-        // one snapshot: one key read here
-        const exactId = `${path}|${guards.guardedRead(value) ? "g" : ""}${this.copiedKey(value)}`;
+        const id = `${path}|${leaf === undefined ? source.id : snapshot}`;
+        const exactId = `${path}|${snapshot}`;
         const read = reads.get(id);
         if (read === undefined) {
           this.facts.literalEntries += 1;
