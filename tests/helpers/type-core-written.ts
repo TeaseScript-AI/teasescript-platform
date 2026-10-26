@@ -943,7 +943,8 @@ const COMPOSED: readonly Decision[] = ["written", "early copy", "later copy"];
  * and their dict forms); the other placements of `?` around unions (`(T | U)?[]`, `(T | U)[]?`, `(T | U) set?`); other
  * member combinations, four or more names, and unions nested further (`((T | U) set)[]`); the other three-level mixed
  * sequences (`T set[][]`, `T[] set[]`, `T dict[] set`, …). A union holding a whole collection beside another type is
- * §13's error and has none: `list`, `set` and `dict` take no union; `null?` is `null`, so `null` takes no optional leaf.
+ * §13's error (`UNION_RULE_MATRIX`) and has none: `list`, `set` and `dict` take no union; `null?` is `null`, so `null`
+ * takes no optional leaf.
  */
 function compositionsOf(t: Form, u: Form, base: string): Form[] {
   const opt = (of: Form): Form => (base === "null" ? of : optional(of));
@@ -1008,7 +1009,7 @@ function compositionsOf(t: Form, u: Form, base: string): Form[] {
  * through the same depth (`compositionsOf`), written, an early and a later copy, the host value direct. `null?` is
  * `null`, so the forms that only make `null` optional are left out, while its optional collection layers (`null[]?`,
  * `null[]?[]`) remain. A union holding a whole collection beside another type is §13's compile error and has no form
- * here: the compiler does not report it yet, pre-existing (r4.75 (3)).
+ * here: `UNION_RULE_MATRIX` holds those.
  */
 export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
   const out: WrittenCase[] = [];
@@ -1054,6 +1055,168 @@ export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
         for (const decision of seedsOf(form)) out.push(writtenCase(form, decision, "direct"));
     }
   }
+  return out;
+})();
+
+/** A source of V30 §13's union rule (`UNION_RULE_MATRIX`): one written type at one place. */
+export interface UnionRuleCase {
+  readonly name: string;
+  readonly source: string;
+  /**
+   * Its one diagnostic, a compile error at the written type (`start:end`) naming the offending union (`start:end`) and
+   * the suggestion V30 gives for its example `h`'s form, else `null`; `null` for a valid control, which has none.
+   */
+  readonly error: {
+    readonly site: string;
+    readonly union: string;
+    readonly suggestion: string | null;
+  } | null;
+}
+
+/** The places a type is written (V30 §13; ADR 0021 3.4, and 4.1 for a type test), each with a value that fits it. */
+const UNION_PLACES: readonly (readonly [string, (type: string, value: string) => string])[] = [
+  ["a variable", (type, value) => `let x: ${type} = ${value}`],
+  ["a global", (type, value) => `global x: ${type} = ${value}`],
+  ["a parameter", (type) => `function use(x: ${type}) {\n}`],
+  ["a result", (type, value) => `function make: ${type} {\n return ${value}\n}`],
+  ["a type test", (type) => `if hostValue is ${type} {\n say "yes"\n}`],
+  [
+    "a case's type test",
+    (type) => `switch hostValue {\n case is ${type} { say "yes" }\n default { say "no" }\n}`,
+  ],
+];
+
+/** The places inside another type, at a variable: a list or set element, a dict value, an optional, a list's list. */
+const UNION_NESTINGS: readonly ((of: Form) => Form)[] = [
+  (of) => collection("list", of),
+  (of) => collection("set", of),
+  (of) => collection("dict", of),
+  (of) => optional(of),
+  (of) => collection("list", collection("list", of)),
+];
+
+/** An empty value of a form's first whole collection, else `null`: a value that every form here admits. */
+function emptyOf(form: Form): string {
+  for (const member of members(form)) {
+    const kind =
+      member.kind === "collection"
+        ? member.collection
+        : member.kind === "name"
+          ? member.name
+          : null;
+    if (kind === "list") return "[]";
+    if (kind === "set") return "set[]";
+    if (kind === "dict") return "dict{}";
+  }
+  return "null";
+}
+
+/**
+ * V30's suggestion for its example `h`'s form, here `integer[]` beside a type name that is no collection, not `null` and
+ * not `integer` (`g`'s form has none): the union inside the list, its members in their written order.
+ */
+function suggestionOf(pair: readonly Form[]): string | null {
+  const texts = pair.map(formText);
+  const at = texts.indexOf("integer[]");
+  const other = pair[1 - at];
+  return at < 0 ||
+    other?.kind !== "name" ||
+    ["integer", "null", "list", "set", "dict"].includes(other.name)
+    ? null
+    : `(${texts.map((text) => (text === "integer[]" ? "integer" : text)).join(" | ")})[]`;
+}
+
+/**
+ * V30 §13's union rule (TABLE r4.75 (3); the forms `f`–`p`): a union never holds a whole list, set or dict beside
+ * another type. Axes: each whole collection form (`integer[]`, `integer set`, `integer dict`, `list`, `set`, `dict`,
+ * `integer[]?`, `integer?[]`) beside each type name that is no collection (at a variable all of them, elsewhere `integer`,
+ * the collections' own element type as in `g`, `string` as in `h`, `object` and `range`) or beside another collection
+ * (`string[]`, `string set`, `string dict`, `list`, `set`, `dict`; not the same name twice) × the members in both orders
+ * × the place it is written: a variable, a global, a parameter, a result, a type test, a case's type test, and at a
+ * variable inside a list, a set, a dict, an optional and a list of lists. Each is one compile error at the written type,
+ * naming the union, with V30's suggestion for `h`'s form (`suggestionOf`). Valid controls: each whole collection beside
+ * `null`, its optional form, in both orders at the same places, with no diagnostic. A union inside a collection and the
+ * other valid forms are `V30_TYPE_MATRIX`'s.
+ */
+export const UNION_RULE_MATRIX: readonly UnionRuleCase[] = (() => {
+  const integer = name("integer");
+  const string = name("string");
+  const wholes = [
+    collection("list", integer),
+    collection("set", integer),
+    collection("dict", integer),
+    name("list"),
+    name("set"),
+    name("dict"),
+    optional(collection("list", integer)),
+    collection("list", optional(integer)),
+  ];
+  const otherWholes = [
+    collection("list", string),
+    collection("set", string),
+    collection("dict", string),
+    name("list"),
+    name("set"),
+    name("dict"),
+  ];
+  const everyName = [...SCALAR_NAMES, "object", ...CONTROL_NAMES].map(name);
+  const representatives = ["integer", "string", "object", "range"].map(name);
+  const places = [
+    ...UNION_PLACES.map(([place, line], index) => ({
+      place,
+      line,
+      around: (of: Form) => of,
+      every: index === 0,
+    })),
+    ...UNION_NESTINGS.map((around) => ({
+      place: "a variable",
+      line: UNION_PLACES[0]![1],
+      around,
+      every: false,
+    })),
+  ];
+  const out: UnionRuleCase[] = [];
+  const sources = new Set<string>();
+  for (const { place, line, around, every } of places)
+    for (const whole of wholes) {
+      const besides = [
+        ...(every ? everyName : representatives),
+        ...otherWholes.filter((other) => formText(other) !== formText(whole)),
+      ];
+      const pairs = [
+        ...besides.flatMap((other) =>
+          [
+            [whole, other],
+            [other, whole],
+          ].map((pair) => ({ pair, valid: false })),
+        ),
+        { pair: [whole, name("null")], valid: true },
+        { pair: [name("null"), whole], valid: true },
+      ];
+      for (const { pair, valid } of pairs) {
+        const type = formText(around(union(...pair)));
+        const source = `${line(type, emptyOf(around(union(...pair))))}\nexit\n`;
+        // (a pair of two unrestricted collections comes from either of them)
+        if (sources.has(source)) continue;
+        sources.add(source);
+        const start = source.indexOf(type);
+        if (start < 0 || source.lastIndexOf(type) !== start)
+          throw new Error(`The written type is not once in ${JSON.stringify(source)}.`);
+        const unionText = formText(union(...pair));
+        const unionStart = start + type.indexOf(unionText);
+        out.push({
+          name: `${place}: ${type}`,
+          source,
+          error: valid
+            ? null
+            : {
+                site: `${start}:${start + type.length}`,
+                union: `${unionStart}:${unionStart + unionText.length}`,
+                suggestion: suggestionOf(pair),
+              },
+        });
+      }
+    }
   return out;
 })();
 

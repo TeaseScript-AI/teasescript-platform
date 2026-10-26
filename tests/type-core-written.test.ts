@@ -3,10 +3,11 @@ import test from "node:test";
 
 import { compileSourceWithBackend } from "../src/compiler.js";
 import type { InstructionPlan, TypePlan } from "../src/plan/model.js";
-import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
+import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
+import { coreRecord } from "../src/type-inference/core/result.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
@@ -17,6 +18,7 @@ import {
   INFERRED_COPY_MATRIX,
   OBJECT_PROPERTY_MATRIX,
   UNRESTRICTED_COLLECTION_MATRIX,
+  UNION_RULE_MATRIX,
   type UnrestrictedCase,
   V30_TYPE_MATRIX,
   WRITTEN_DOMAIN_MATRIX,
@@ -34,6 +36,8 @@ import {
  * that brings a host value to a decided level, nothing else. Whether the candidate route takes a source is each row's
  * own axis (`executable`): a row it takes must plan and run, a row it does not is checked in the decision layer alone.
  * Each exact source is analysed, planned and run once per mode, and every row that holds it is compared with that.
+ * V30 §13's union rule (`UNION_RULE_MATRIX`, its examples) is a compile error with no plan: the decision layer and the
+ * candidate route's rejection.
  */
 
 function inBothOrders<T>(run: () => T): T {
@@ -335,6 +339,243 @@ test("V30 §13's written types, each form and copy, admit what they permit in ev
     `${V30_TYPE_MATRIX.length} sources (${full} in all three layers), both orders, sharing on and off; ` +
       `decision layer only (outside the candidate slice): ${decisionOnly}; forbidden values only (no host value is ` +
       `a timer, media or message handle or a speaker): ${forbiddenOnly}`,
+  );
+  assert.deepEqual(wrong, []);
+});
+
+/**
+ * A request's outcome and every diagnostic, sorted, each `class kind start:end`; a written type's error as
+ * `written-type start:end union start:end suggests …` (`WrittenTypeError`).
+ */
+function writtenErrors(request: CoreAnalysisRequest) {
+  const answers = analyseCore(request);
+  return {
+    outcome: answers.outcome,
+    diagnostics: answers.diagnostics
+      .map((found) =>
+        found.kind === "written-type"
+          ? `written-type ${found.site.start}:${found.site.end} union ${found.union.start}:${found.union.end} ` +
+            `suggests ${found.suggestion}`
+          : `${found.class} ${found.kind} ${found.site.start}:${found.site.end}`,
+      )
+      .sort(),
+  };
+}
+
+/** A single-file request (no binding ids, unlike `prepare`). */
+function requestOf(source: string): CoreAnalysisRequest {
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+  assert.ok(request !== null, `${JSON.stringify(source)}: its file parses and resolves`);
+  return request;
+}
+
+/** Whether the candidate route compiles a source, rather than rejecting it as outside its slice. */
+function routeTakes(source: string): boolean {
+  try {
+    compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND);
+    return true;
+  } catch (error) {
+    if (!(error instanceof CandidateOutsideSlice)) throw error;
+    return false;
+  }
+}
+
+/**
+ * V30 §13's union examples (`:1406–1416`) as V30 writes them, and each union with its members in the other order:
+ * `a`–`e` valid, `f`–`p` one compile error at the written type naming the union, `h`'s form (`T | U[]`, so `n`'s, `o`'s
+ * and `p`'s union too) with V30's suggestion. Each line is the written type, its offending union and the suggestion.
+ * `p` is written `function p: …`: V30's `function p(): …` breaks §11's "Parentheses are omitted when there are no
+ * parameters" (TSP026), so its type is never checked.
+ */
+const V30_UNION_EXAMPLES: readonly (readonly [string, string?, string?, (string | null)?])[] = [
+  ['let a: (integer | string)[] = [1, "two"]'],
+  ['let a: (string | integer)[] = [1, "two"]'],
+  ['let b: (integer | string) set = set[1, "two"]'],
+  ['let b: (string | integer) set = set[1, "two"]'],
+  ["let c: (integer | string) dict = dict{}"],
+  ["let c: (string | integer) dict = dict{}"],
+  ["let d: integer?[] = [1, null]"],
+  ["let e: integer[]? = null"],
+  ["let f: integer[] | string[] = []", "integer[] | string[]", "integer[] | string[]", null],
+  ["let f: string[] | integer[] = []", "string[] | integer[]", "string[] | integer[]", null],
+  ['let g: string[] | string = "a"', "string[] | string", "string[] | string", null],
+  ['let g: string | string[] = "a"', "string | string[]", "string | string[]", null],
+  [
+    "let h: integer | string[] = 1",
+    "integer | string[]",
+    "integer | string[]",
+    "(integer | string)[]",
+  ],
+  [
+    "let h: string[] | integer = 1",
+    "string[] | integer",
+    "string[] | integer",
+    "(string | integer)[]",
+  ],
+  [
+    "let i: integer set | string set = set[]",
+    "integer set | string set",
+    "integer set | string set",
+    null,
+  ],
+  [
+    "let i: string set | integer set = set[]",
+    "string set | integer set",
+    "string set | integer set",
+    null,
+  ],
+  [
+    "let j: integer dict | string dict = dict{}",
+    "integer dict | string dict",
+    "integer dict | string dict",
+    null,
+  ],
+  [
+    "let j: string dict | integer dict = dict{}",
+    "string dict | integer dict",
+    "string dict | integer dict",
+    null,
+  ],
+  ["let k: integer[] | string set = []", "integer[] | string set", "integer[] | string set", null],
+  ["let k: string set | integer[] = []", "string set | integer[]", "string set | integer[]", null],
+  ["let l: list | integer = []", "list | integer", "list | integer", null],
+  ["let l: integer | list = []", "integer | list", "integer | list", null],
+  [
+    "let m: (integer[] | string[])[] = []",
+    "(integer[] | string[])[]",
+    "integer[] | string[]",
+    null,
+  ],
+  [
+    "let m: (string[] | integer[])[] = []",
+    "(string[] | integer[])[]",
+    "string[] | integer[]",
+    null,
+  ],
+  [
+    "let n: (integer | string[]) dict = dict{}",
+    "(integer | string[]) dict",
+    "integer | string[]",
+    "(integer | string)[]",
+  ],
+  [
+    "let n: (string[] | integer) dict = dict{}",
+    "(string[] | integer) dict",
+    "string[] | integer",
+    "(string | integer)[]",
+  ],
+  [
+    "function o(x: integer | string[]) { }",
+    "integer | string[]",
+    "integer | string[]",
+    "(integer | string)[]",
+  ],
+  [
+    "function o(x: string[] | integer) { }",
+    "string[] | integer",
+    "string[] | integer",
+    "(string | integer)[]",
+  ],
+  [
+    'function p: integer[] | string { return "a" }',
+    "integer[] | string",
+    "integer[] | string",
+    "(integer | string)[]",
+  ],
+  [
+    'function p: string | integer[] { return "a" }',
+    "string | integer[]",
+    "string | integer[]",
+    "(string | integer)[]",
+  ],
+];
+
+test("V30 §13's union examples: f–p one compile error at the written type naming the union, h's form with its suggestion, a–e valid (r4.75 (3))", () => {
+  const wrong: string[] = [];
+  for (const [line, type, unionText, suggestion] of V30_UNION_EXAMPLES)
+    // (also in code that never runs: the rule reads the written type alone)
+    for (const source of [`${line}\nexit\n`, `exit\n${line}\n`]) {
+      const request = requestOf(source);
+      const run = () => writtenErrors(request);
+      const seen = inBothOrders(run);
+      assert.deepEqual(
+        inBothOrders(() => withoutSharing(run)),
+        seen,
+      );
+      let expected: ReturnType<typeof writtenErrors> = { outcome: "valid", diagnostics: [] };
+      if (type !== undefined && unionText !== undefined) {
+        const start = source.indexOf(type);
+        const at = start + type.indexOf(unionText);
+        expected = {
+          outcome: "compile-error",
+          diagnostics: [
+            `written-type ${start}:${start + type.length} union ${at}:${at + unionText.length} suggests ${suggestion}`,
+          ],
+        };
+        if (routeTakes(source))
+          wrong.push(`${JSON.stringify(source)}: the candidate route takes it`);
+      }
+      if (JSON.stringify(seen) !== JSON.stringify(expected))
+        wrong.push(`${JSON.stringify(source)}: ${JSON.stringify(seen)}`);
+    }
+  assert.deepEqual(wrong, []);
+  // the record carries the union and the suggestion as data beside the written type's site
+  const h = "let h: integer | string[] = 1\nexit\n";
+  assert.deepEqual(coreRecord(coreResult(analyseCore(requestOf(h))), ["main.tease"]).diagnostics, [
+    {
+      class: "compile-error",
+      kind: "written-type",
+      site: { file: "main.tease", offset: 7, end: 25 },
+      union: { file: "main.tease", offset: 7, end: 25 },
+      suggestion: "(integer | string)[]",
+    },
+  ]);
+  // a written type of another file errs in that file
+  const project = coreRequest(
+    [
+      { path: "main.tease", source: "exit\n" },
+      { path: "other.tease", source: "function use(x: list | integer) {\n}\n" },
+    ],
+    GLOBALS,
+  );
+  assert.ok(project !== null);
+  assert.deepEqual(
+    analyseCore(project).diagnostics.map((found) => [found.kind, found.site]),
+    [["written-type", { file: 1, start: 16, end: 30 }]],
+  );
+  // the place keeps its written type (TABLE A1, A4): stores and copies that fit it add nothing to the one error
+  const kept = writtenErrors(
+    requestOf('let h: integer | string[] = 1\nh = ["a"]\nlet copy = h\ncopy = 2\nh = copy\nexit\n'),
+  );
+  assert.deepEqual(kept, {
+    outcome: "compile-error",
+    diagnostics: ["written-type 7:25 union 7:25 suggests (integer | string)[]"],
+  });
+});
+
+test("V30 §13's union rule at every place and depth: one compile error at the written type naming the union (r4.75 (3))", (t) => {
+  const wrong: string[] = [];
+  let errors = 0;
+  for (const c of UNION_RULE_MATRIX) {
+    const request = requestOf(c.source);
+    const seen = inBothOrders(() => writtenErrors(request));
+    const expected =
+      c.error === null
+        ? { outcome: "valid", diagnostics: [] }
+        : {
+            outcome: "compile-error",
+            diagnostics: [
+              `written-type ${c.error.site} union ${c.error.union} suggests ${c.error.suggestion}`,
+            ],
+          };
+    if (c.error !== null) errors += 1;
+    if (JSON.stringify(seen) !== JSON.stringify(expected))
+      wrong.push(`${c.name}: ${JSON.stringify(seen)}`);
+    if (routeTakes(c.source)) wrong.push(`${c.name}: the candidate route takes it`);
+  }
+  t.diagnostic(
+    `${UNION_RULE_MATRIX.length} sources (${errors} errors, ${UNION_RULE_MATRIX.length - errors} valid controls), ` +
+      "both orders; the candidate route takes none (a written union is outside its slice until S10)",
   );
   assert.deepEqual(wrong, []);
 });
