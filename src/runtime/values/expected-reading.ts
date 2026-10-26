@@ -1,0 +1,265 @@
+import type { TypePlan } from "../../plan/model.js";
+import {
+  cloneCapturedSerializableValue,
+  getSerializableDictEntry,
+  getSerializableProperty,
+  setCapturedSerializableProperty,
+  type SerializableRuntimeObject,
+  type SerializableRuntimeValue,
+} from "./serializable-values.js";
+import { isDict, isList, isObject, isSet } from "./value-predicates.js";
+import { matchesValueType } from "./value-types.js";
+import { VALUE_KIND_NAMES } from "../../value-kinds.js";
+
+/*
+ * Reading a value as the type a script expects of it, field by field (ADR 0021 rules 2.6 and 6.5): what `fromJson`
+ * reads, and what a `load` finds stored. JSON reads a JSON object, which parses to a dict, as an object where the type
+ * is one; a stored value is read as it is. Deep values are read without native recursion.
+ */
+
+/** A field of a record that the default supplies: its path from the record, and what the record holds there. */
+export interface MissingField {
+  readonly path: readonly string[];
+  /** The value found there, or `undefined` for a missing field. */
+  readonly found: SerializableRuntimeValue | undefined;
+  /** The type the field is read as. */
+  readonly type: TypePlan;
+}
+
+/**
+ * How a value reads as a type: whole, as the type reads it (JSON objects as objects); as a record whose listed `fields`
+ * the default supplies, a nested object's by its own fields; or not at all, which takes the whole default.
+ */
+export type ExpectedReading =
+  | { readonly kind: "whole"; readonly value: SerializableRuntimeValue }
+  | { readonly kind: "fields"; readonly fields: readonly MissingField[] }
+  | { readonly kind: "none" };
+
+/**
+ * Whether `type` takes every value: the type of a property that nothing settles, a `null` in an object default (F18),
+ * which JSON may leave out without a warning (ADR 0021 rule 2.6).
+ */
+export function takesEveryValue(type: TypePlan): boolean {
+  if (type.kind !== "union") return false;
+  const open = new Set(
+    type.members.flatMap((member) =>
+      member.kind === "object"
+        ? member.properties.length === 0
+          ? ["object"]
+          : []
+        : "element" in member
+          ? member.element === null
+            ? [member.kind]
+            : []
+          : [member.kind],
+    ),
+  );
+  return VALUE_KIND_NAMES.every((kind) => open.has(kind));
+}
+
+/** The value of a record's field: an object's property, or for JSON also a dict's entry. */
+function fieldOf(
+  record: SerializableRuntimeValue,
+  name: string,
+  json: boolean,
+): SerializableRuntimeValue | undefined {
+  if (isObject(record)) return getSerializableProperty(record, name);
+  if (json && isDict(record)) return getSerializableDictEntry(record, name)?.value;
+  return undefined;
+}
+
+/** Whether a value is a record that an object type reads field by field: an object, or for JSON a dict. */
+function isRecordValue(value: SerializableRuntimeValue, json: boolean): boolean {
+  return isObject(value) || (json && isDict(value));
+}
+
+/**
+ * `value` read whole as `type`, or `undefined` where it does not fit. A stored value fits as the runtime type checks
+ * take it (`matchesValueType`). JSON is read as the type: a dict where the type is an object becomes an object of the
+ * type's properties, each of which it must have, its other keys left out, and lists, sets and dicts are read element by
+ * element; a union reads a value that fits it as it is, and otherwise as its first object member.
+ */
+function readWhole(
+  value: SerializableRuntimeValue,
+  type: TypePlan,
+  json: boolean,
+): SerializableRuntimeValue | undefined {
+  const fits = matchesValueType(value, type);
+  if (fits || !json) return fits ? value : undefined;
+  interface Frame {
+    /** The parts to read, each with its type, and what the frame builds of their results. */
+    readonly parts: readonly (readonly [SerializableRuntimeValue, TypePlan])[];
+    readonly build: (read: readonly SerializableRuntimeValue[]) => SerializableRuntimeValue;
+    readonly results: SerializableRuntimeValue[];
+  }
+  /** The frame that reads `part` as `of`, or the part's result where it needs none (`undefined`: it does not fit). */
+  const open = (
+    part: SerializableRuntimeValue,
+    of: TypePlan,
+  ): Frame | { readonly result: SerializableRuntimeValue | undefined } => {
+    if (matchesValueType(part, of)) return { result: part };
+    const object = of.kind === "union" ? of.members.find((member) => member.kind === "object") : of;
+    if (object?.kind === "object") {
+      if (!isRecordValue(part, true)) return { result: undefined };
+      const parts: (readonly [SerializableRuntimeValue, TypePlan])[] = [];
+      for (const property of object.properties) {
+        const field = fieldOf(part, property.name, true);
+        if (field === undefined) return { result: undefined };
+        parts.push([field, property.type]);
+      }
+      return {
+        parts,
+        build: (read) => ({
+          kind: "object",
+          properties: object.properties.map((property, index) => ({
+            name: property.name,
+            value: read[index]!,
+          })),
+        }),
+        results: [],
+      };
+    }
+    if ((of.kind === "list" || of.kind === "set") && of.element !== null) {
+      const items =
+        of.kind === "list" ? (isList(part) ? part.items : null) : isSet(part) ? part.items : null;
+      if (items === null) return { result: undefined };
+      const { kind, element } = of;
+      return {
+        parts: items.map((item) => [item, element] as const),
+        build: (read) => ({ kind, items: [...read] }),
+        results: [],
+      };
+    }
+    if (of.kind === "dict" && of.element !== null && isDict(part)) {
+      const { element } = of;
+      return {
+        parts: part.entries.map((entry) => [entry.value, element] as const),
+        build: (read) => ({
+          kind: "dict",
+          entries: part.entries.map((entry, index) => ({ key: entry.key, value: read[index]! })),
+        }),
+        results: [],
+      };
+    }
+    return { result: undefined };
+  };
+  const first = open(value, type);
+  if ("result" in first) return first.result;
+  const frames: Frame[] = [first];
+  for (;;) {
+    const frame = frames[frames.length - 1]!;
+    if (frame.results.length === frame.parts.length) {
+      frames.pop();
+      const built = frame.build(frame.results);
+      if (frames.length === 0) return built;
+      frames[frames.length - 1]!.results.push(built);
+      continue;
+    }
+    const [part, of] = frame.parts[frame.results.length]!;
+    const next = open(part, of);
+    if (!("result" in next)) frames.push(next);
+    else if (next.result === undefined) return undefined;
+    else frame.results.push(next.result);
+  }
+}
+
+/**
+ * How `value` reads as `type` (see `ExpectedReading`). Only an object type reads by field: a record whose every listed
+ * field reads whole is whole; otherwise each missing field, or one that does not read whole, is the default's, a nested
+ * object's by its own fields where it is a record too, in the type's order. Any other type reads whole or not at all.
+ */
+export function readExpected(
+  value: SerializableRuntimeValue,
+  type: TypePlan,
+  json: boolean,
+): ExpectedReading {
+  if (type.kind !== "object" || !isRecordValue(value, json)) {
+    const whole = type.kind === "object" ? undefined : readWhole(value, type, json);
+    return whole === undefined ? { kind: "none" } : { kind: "whole", value: whole };
+  }
+  const fields: MissingField[] = [];
+  const frames: {
+    readonly record: SerializableRuntimeValue;
+    readonly type: Extract<TypePlan, { kind: "object" }>;
+    readonly path: readonly string[];
+    next: number;
+  }[] = [{ record: value, type, path: [], next: 0 }];
+  while (frames.length > 0) {
+    const frame = frames[frames.length - 1]!;
+    if (frame.next === frame.type.properties.length) {
+      frames.pop();
+      continue;
+    }
+    const property = frame.type.properties[frame.next++]!;
+    const path = [...frame.path, property.name];
+    const found = fieldOf(frame.record, property.name, json);
+    if (found === undefined) fields.push({ path, found, type: property.type });
+    else if (property.type.kind === "object" && isRecordValue(found, json))
+      frames.push({ record: found, type: property.type, path, next: 0 });
+    else if (readWhole(found, property.type, json) === undefined)
+      fields.push({ path, found, type: property.type });
+  }
+  if (fields.length > 0) return { kind: "fields", fields };
+  const whole = readWhole(value, type, json);
+  return whole === undefined ? { kind: "none" } : { kind: "whole", value: whole };
+}
+
+/**
+ * The record `candidate` repaired from `fallback` as `type` reads it (ADR 0021 rules 2.6 and 6.5): each listed field
+ * that reads whole is the candidate's, read as the type reads it; a nested object that is a record in both is repaired
+ * the same way; any other field is the fallback's. A stored record keeps its other fields and is copied, never changed;
+ * JSON keeps only the listed ones. A candidate or fallback that is no record gives the fallback.
+ */
+export function repairedRecord(
+  candidate: SerializableRuntimeValue,
+  fallback: SerializableRuntimeValue,
+  type: TypePlan,
+  json: boolean,
+): SerializableRuntimeValue {
+  if (type.kind !== "object" || !isRecordValue(candidate, json) || !isObject(fallback))
+    return fallback;
+  // a stored record's copy keeps its other fields; JSON builds an object of the listed ones
+  // EVIDENCE: invariant: a stored record is an object (`isRecordValue` without JSON), and so is its copy.
+  const root: SerializableRuntimeObject = json
+    ? { kind: "object", properties: [] }
+    : (cloneCapturedSerializableValue(candidate) as SerializableRuntimeObject);
+  const pending: {
+    readonly candidate: SerializableRuntimeValue;
+    readonly fallback: SerializableRuntimeObject;
+    readonly type: Extract<TypePlan, { kind: "object" }>;
+    readonly into: SerializableRuntimeObject;
+  }[] = [{ candidate, fallback, type, into: root }];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop())
+    for (const property of next.type.properties) {
+      const found = fieldOf(next.candidate, property.name, json);
+      const given = getSerializableProperty(next.fallback, property.name);
+      if (
+        found !== undefined &&
+        given !== undefined &&
+        property.type.kind === "object" &&
+        isRecordValue(found, json) &&
+        isObject(given)
+      ) {
+        // the copy holds the stored field already; JSON's starts empty
+        let into = getSerializableProperty(next.into, property.name);
+        if (into === undefined) {
+          into = { kind: "object", properties: [] };
+          next.into.properties.push({ name: property.name, value: into });
+        }
+        pending.push({
+          candidate: found,
+          fallback: given,
+          type: property.type,
+          // EVIDENCE: invariant: the field is the stored object's copy or the empty object just added.
+          into: into as SerializableRuntimeObject,
+        });
+        continue;
+      }
+      const whole = found === undefined ? undefined : readWhole(found, property.type, json);
+      // a stored field that reads whole is in the copy already
+      if (whole !== undefined && !json) continue;
+      const value = whole ?? given;
+      if (value !== undefined) setCapturedSerializableProperty(next.into, property.name, value);
+    }
+  return root;
+}

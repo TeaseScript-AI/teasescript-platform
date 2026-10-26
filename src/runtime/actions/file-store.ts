@@ -2,6 +2,7 @@ import type { FileStoreInstruction } from "../../plan/model.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import type { Evaluator } from "../evaluator.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
+import { readExpected } from "../values/expected-reading.js";
 import { jsonText, valueFromJson } from "../values/json-base64.js";
 import { emitDeveloperWarning } from "../operations/media-lifecycle.js";
 import {
@@ -109,8 +110,11 @@ export function executeFileStore(
     }
     result = request.result;
   }
-  const needed = result === USE_DEFAULT;
-  const value = result === USE_DEFAULT ? null : result;
+  let needed = result === USE_DEFAULT;
+  let value = result === USE_DEFAULT ? null : result;
+  // the JSON read as the call's expected type: a record with fields the default supplies waits for it in the result
+  if (instruction.expected !== undefined && result !== USE_DEFAULT)
+    ({ needed, value } = evaluator.readJson(result, instruction.expected, copySpan(span)));
   setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, value);
   evaluator.trace?.writeTemporary(evaluator.callFrameId(), instruction.destinationTemporary, value);
   if (instruction.defaultTemporary !== null) {
@@ -180,6 +184,14 @@ function startFileStore(
     case "fromJson": {
       const read = typeof value === "string" ? valueFromJson(value, span) : undefined;
       if (read === undefined) return { result: USE_DEFAULT };
+      // JSON of another kind than the call expects gives its default before any file is stored
+      if (
+        instruction.expected !== undefined &&
+        readExpected(read, instruction.expected, true).kind === "none"
+      ) {
+        evaluator.readJson(read, instruction.expected, copySpan(span));
+        return { result: USE_DEFAULT };
+      }
       if (!files) return { result: read };
       const store: RuntimeFileToStore[] = [];
       const found = new Set<string>();

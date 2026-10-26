@@ -29,10 +29,12 @@ import {
   handleKindOf,
 } from "../../handle-members.js";
 import { missingMemberMessage } from "../values/string-operations.js";
+import { missingPropertyMessage } from "../../object-properties.js";
 import { isTextMethod, unknownTextMemberMessage } from "../../text-operations.js";
 import {
   cloneCapturedSerializableValue,
   getSerializableDictEntry,
+  getSerializableProperty,
   setCapturedSerializableDictValue,
   setCapturedSerializableProperty,
   type SerializableRuntimeObject,
@@ -68,10 +70,15 @@ import { findBindingLocation } from "./bindings.js";
 
 // Assignment and its checks, and prepared references: preparing, restoring, and resolving them.
 
+/**
+ * Stores `value` into `target`. `requireExisting`: a property store fails with `TSR017` before it changes anything when
+ * the object has no such property (`AssignInstruction.requireExisting`).
+ */
 export function assign(
   evaluator: Evaluator,
   target: AssignmentTargetPlan,
   value: SerializableRuntimeValue,
+  requireExisting = false,
 ): void {
   if (target.kind === "identifier") {
     const location = findBindingLocation(evaluator.snapshot, evaluator.plan, target.name);
@@ -128,6 +135,21 @@ export function assign(
         )
       : null;
   if (target.kind === "property") {
+    // before anything changes, prepared references included
+    if (
+      requireExisting &&
+      isObject(object) &&
+      getSerializableProperty(object, target.name) === undefined
+    )
+      throw fault(
+        "TSR017",
+        missingPropertyMessage(
+          receiverLabel(evaluator, target.object),
+          target.name,
+          object.properties.map((property) => property.name),
+        ),
+        target.span,
+      );
     if (receiverDescriptor !== null && !receiverDescriptor.detached) {
       const mutationStep: PreparedReferenceStep = { kind: "property", name: target.name };
       detachPreparedReferencesForMutation(evaluator.snapshot, {

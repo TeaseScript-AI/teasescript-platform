@@ -15,6 +15,7 @@ import { quotedText } from "./value-text.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 import { isAngle, isAnyDuration, isDict, isList, isObject, isSet } from "./value-predicates.js";
 import { describeValue, VALUE_KINDS } from "../../value-kinds.js";
+import type { MissingField } from "./expected-reading.js";
 import { copySpan } from "../../plan/source-location.js";
 
 /**
@@ -37,6 +38,18 @@ export function assertValueType(
     `${capitalize(check.place)} holds ${describeType(check.type)}, so it cannot take ${taken}.${typeFix(mismatch)}`,
     copySpan(span),
   );
+}
+
+/**
+ * Checks a selected fallback or default (ADR 0021 rule 7.1, `BinaryExpressionPlan.fallbackCheck`): `null` always passes;
+ * any other value is checked as `assertValueType` checks it.
+ */
+export function assertFallbackType(
+  value: SerializableRuntimeValue,
+  check: TypeCheckPlan,
+  span: SourceSpan | PlanSourceLocation,
+): void {
+  if (value !== null) assertValueType(value, check, span);
 }
 
 /**
@@ -110,6 +123,30 @@ export function storedValueMismatch(
       ? `is ${describeValue(value)}`
       : `has ${describeValue(mismatch.value)} at ${mismatch.path}`;
   return `Storage key ${JSON.stringify(key)} is loaded as ${describeType(type)} here, but the saved value ${saved}. This load uses its default, and the saved value is kept.`;
+}
+
+/**
+ * The developer warning `TSW016` for a field of a stored record that a load takes from its default, missing or of
+ * another type (V30 §25, `StorageLoadExpressionPlan.repair`).
+ */
+export function storedFieldMismatch(key: string, field: MissingField): string {
+  const name = field.path.join(".");
+  const saved =
+    field.found === undefined ? `has no '${name}'` : `has ${describeValue(field.found)} there`;
+  return `Storage key ${JSON.stringify(key)} is loaded with '${name}' as ${describeType(field.type)} here, but the saved value ${saved}. This load takes '${name}' from its default, and the saved value is kept.`;
+}
+
+/** The developer warning `TSW020` for JSON of another kind than `fromJson` reads it as, which gives its default. */
+export function jsonKindMismatch(value: SerializableRuntimeValue, type: TypePlan): string {
+  return `fromJson(...) reads this JSON as ${describeType(type)}, but it is ${describeValue(value)}, so the call gives its default.`;
+}
+
+/** The developer warning `TSW020` for a field of JSON read as an object that `fromJson` takes from its default. */
+export function jsonFieldMismatch(field: MissingField): string {
+  const name = field.path.join(".");
+  const found =
+    field.found === undefined ? `the JSON has no '${name}'` : `it is ${describeValue(field.found)}`;
+  return `fromJson(...) reads '${name}' of this JSON as ${describeType(field.type)}, but ${found}, so the call takes '${name}' from its default.`;
 }
 
 interface TypeMismatch {

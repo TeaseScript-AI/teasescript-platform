@@ -10,15 +10,19 @@ import {
 
 // The types a plan names: in runtime type checks, type tests, storage key types, and prepared form answers.
 
-/** Validates the optional `typeCheck` of a receiving instruction, call argument, or `add` call. */
+/**
+ * Validates the optional `typeCheck` of a receiving instruction, call argument, or `add` call, or another check of the
+ * same shape that `field` names, such as a `fallbackCheck`.
+ */
 export function validateOptionalTypeCheck(
   owner: Record<string, unknown>,
   path: string,
   errors: PlanValidationError[],
+  field: "typeCheck" | "fallbackCheck" = "typeCheck",
 ): void {
-  if (!("typeCheck" in owner)) return;
-  const check = owner.typeCheck;
-  const checkPath = `${path}.typeCheck`;
+  if (!(field in owner)) return;
+  const check = owner[field];
+  const checkPath = `${path}.${field}`;
   if (!isRecord(check)) {
     errors.push(planError("TSC002", "A type check must be an object.", checkPath));
     return;

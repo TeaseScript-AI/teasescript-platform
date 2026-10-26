@@ -233,6 +233,12 @@ export interface AssignInstruction extends InstructionBase {
   /** For `+=` and `-=`, the computed result, which is also what {@link typeCheck} checks. */
   readonly value: ExpressionPlan;
   readonly typeCheck?: TypeCheckPlan;
+  /**
+   * For a property store into an object that may lack the property (ADR 0021 rule 1.4): the store fails with `TSR017`
+   * before it changes anything when the object has no such property, instead of adding it. Only the coarse core emits
+   * it.
+   */
+  readonly requireExisting?: true;
 }
 
 export interface ValidateAssignmentTargetInstruction extends InstructionBase {
@@ -328,6 +334,17 @@ export interface StoreTemporaryInstruction extends InstructionBase {
    * default of a `get`, the check of a default that decided the element or value type.
    */
   readonly typeCheck?: TypeCheckPlan;
+  /**
+   * For the fallback of an `otherwise` or the `default:` of a call that runs instructions: its check, as
+   * `BinaryExpressionPlan.fallbackCheck` describes it.
+   */
+  readonly fallbackCheck?: TypeCheckPlan;
+  /**
+   * For the default of a `load` or `fromJson` that repairs a record (see `StorageLoadExpressionPlan.repair` and
+   * `CallExpressionPlan.expected`): the type the record in `temporaryId`, which the call or load left there, is
+   * repaired against, each missing or wrong field taken from the default; without a record there, the default itself.
+   */
+  readonly repair?: TypePlan;
 }
 
 /** Captures the resolved output speaker before later say operands run. */
@@ -1004,6 +1021,8 @@ export interface FileStoreInstruction extends InstructionBase {
   /** The written `files:` of a conversion that takes it; `null` without one, which means `true`. */
   readonly files: ExpressionPlan | null;
   readonly destinationTemporary: number;
+  /** For `fromJson`: the type it reads the JSON as (see `CallExpressionPlan.expected`). */
+  readonly expected?: TypePlan;
 }
 
 /** The calls that lock and open text and stored files, which `lock` instructions run (V30 §13). */
@@ -1195,6 +1214,12 @@ export interface StorageLoadExpressionPlan extends ExpressionPlanBase {
   readonly key: ExpressionPlan;
   readonly default: ExpressionPlan | null;
   readonly type: TypePlan | null;
+  /**
+   * With an object `type`: a stored object whose fields do not all fit is repaired field by field instead of replaced
+   * (ADR 0021 rule 6.5): each missing or wrong field takes the default's, with `TSW016` naming it, and the stored value
+   * stays as it is. Only the coarse core emits it.
+   */
+  readonly repair?: true;
 }
 
 /**
@@ -1340,6 +1365,19 @@ export interface CallExpressionPlan extends ExpressionPlanBase {
    * when it is used.
    */
   readonly typeCheck?: TypeCheckPlan;
+  /**
+   * For a `get`: on a list, an index that is not a whole number fails with `TSR024` instead of selecting the default; a
+   * whole number the list does not have still selects it. Only the coarse core emits it.
+   */
+  readonly indexCheck?: true;
+  /** For a call with a `default:`: its check, as `BinaryExpressionPlan.fallbackCheck` describes it. */
+  readonly fallbackCheck?: TypeCheckPlan;
+  /**
+   * For `fromJson`: the type it reads the JSON as (ADR 0021 rule 2.6). JSON of another kind gives the default, with
+   * `TSW020`; an object type reads a JSON object as an object of its properties, each missing or wrong one taken from the
+   * default, with `TSW020` naming it, and the JSON's other keys left out. Only the coarse core emits it.
+   */
+  readonly expected?: TypePlan;
 }
 
 /** `value is T` or `value is not T`: whether the value fits the type, by the matcher of the runtime type checks. */
@@ -1400,6 +1438,12 @@ export interface BinaryExpressionPlan extends ExpressionPlanBase {
     | "otherwise";
   readonly left: ExpressionPlan;
   readonly right: ExpressionPlan;
+  /**
+   * For `otherwise`, the fallback's check where it is selected (ADR 0021 rule 7.1): a value other than `null` that does
+   * not fit fails with `TSR058` at the fallback. On a call it checks the selected `default:` instead, in place of the
+   * call's own check of a default. Only the coarse core emits it.
+   */
+  readonly fallbackCheck?: TypeCheckPlan;
 }
 
 export interface RangeExpressionPlan extends ExpressionPlanBase {

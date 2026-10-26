@@ -44,6 +44,10 @@ export function requiredInstructionTemporaries(
       }
       break;
     case "storeTemporary":
+      collect(instruction.value);
+      // a default that repairs a record reads it from its own temporary
+      if (instruction.repair !== undefined) output.add(instruction.temporaryId);
+      break;
     case "bindDefaultParameter":
     case "prepareSayText":
     case "returnValue":

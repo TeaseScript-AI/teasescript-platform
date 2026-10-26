@@ -109,12 +109,17 @@ import {
   isPermanentButton,
 } from "./values/value-predicates.js";
 import {
+  assertFallbackType,
   assertValueType,
   cannotConvert,
   describeShownValue,
+  jsonFieldMismatch,
+  jsonKindMismatch,
   matchesValueType,
+  storedFieldMismatch,
   storedValueMismatch,
 } from "./values/value-types.js";
+import { readExpected, repairedRecord, takesEveryValue } from "./values/expected-reading.js";
 import { contextRootId, findRoot } from "./scopes/activations.js";
 import {
   bindingKey,
@@ -162,6 +167,7 @@ import {
   listPosition,
   elementProperty,
   emptyCollection,
+  notWholeIndex,
 } from "./evaluation/access.js";
 import {
   assign,
@@ -283,6 +289,8 @@ export class Evaluator {
 
   /** Whether the call or `load` of `evaluateWithoutDefault` needs its default. */
   #defaultNeeded = false;
+  /** The JSON record a `fromJson` that needs its default leaves for it to repair (see `readJson`), until its call takes it. */
+  #retained: SerializableRuntimeValue | undefined;
 
   public constructor(
     public readonly snapshot: RuntimeSnapshot,
@@ -320,14 +328,16 @@ export class Evaluator {
 
   /**
    * Evaluates a call or `load` whose `default:` runs as the instructions after it (see
-   * `StoreTemporaryInstruction.defaultTemporary`): its value, or `USE_DEFAULT` when it needs the default.
+   * `StoreTemporaryInstruction.defaultTemporary`), and whether it needs the default.
    */
-  public evaluateWithoutDefault(
-    expression: ExpressionPlan,
-  ): SerializableRuntimeValue | typeof USE_DEFAULT {
+  public evaluateWithoutDefault(expression: ExpressionPlan): {
+    readonly needed: boolean;
+    /** The value, or where the default is needed the record it repairs (see `StoreTemporaryInstruction.repair`) or `null`. */
+    readonly value: SerializableRuntimeValue;
+  } {
     this.#defaultNeeded = false;
     const { value } = this.evaluateMachine(expression, false, true);
-    return this.#defaultNeeded ? USE_DEFAULT : value;
+    return { needed: this.#defaultNeeded, value };
   }
 
   /** Evaluates the start value of a global or a speaker property. */
@@ -1131,6 +1141,8 @@ export class Evaluator {
             continue;
           }
           value = binary(this, expression, frame.value, result.value);
+          if (expression.fallbackCheck !== undefined)
+            assertFallbackType(value, expression.fallbackCheck, expression.right.span);
           break;
         case "range":
           if (frame.stage === 0) {
@@ -1187,7 +1199,10 @@ export class Evaluator {
               cloneCapturedSerializableValue(result.value),
               expression.typeCheck,
               fallback.span,
+              expression.fallbackCheck,
             );
+            if (frame.candidate !== undefined && expression.expected !== undefined)
+              value = repairedRecord(frame.candidate, value, expression.expected, true);
             break;
           }
           // The default runs only when the call needs it, after the other arguments and the call's own work.
@@ -1206,9 +1221,12 @@ export class Evaluator {
               frame.lazy !== -1 || frame.probe,
             );
             if (called === USE_DEFAULT) {
+              frame.candidate = this.#retained;
+              this.#retained = undefined;
               if (frame.probe) {
+                // the record left to repair waits for the default's instructions in the result's temporary
                 this.#defaultNeeded = true;
-                value = null;
+                value = frame.candidate ?? null;
                 break;
               }
               frame.stage = 3;
@@ -1247,20 +1265,25 @@ export class Evaluator {
           if (frame.stage === 1) {
             const key = storageKey(result.value, "load", expression.key.span);
             const entry = findScriptStorageEntry(this.snapshot, key);
-            if (
-              entry !== undefined &&
-              this.#storedValueFits(key, entry.value, expression.type, expression.span)
-            ) {
-              value = entry.value;
+            const fits =
+              entry === undefined
+                ? false
+                : expression.repair === true && expression.type !== null
+                  ? this.#storedRecordFits(key, entry.value, expression.type, expression.span)
+                  : this.#storedValueFits(key, entry.value, expression.type, expression.span);
+            if (fits === true) {
+              value = entry!.value;
               if (trace !== null) {
                 trace.readStorage(key);
                 trace.load(key, true, false, value, expression.span);
               }
               break;
             }
+            // a stored record with fields to take from the default is repaired from it (ADR 0021 rule 6.5)
+            if (fits === "fields") frame.candidate = entry!.value;
             if (expression.default === null) {
-              value = null;
-              // A probe's default runs as the instructions after it.
+              // A probe's default runs as the instructions after it, which repair the record it leaves.
+              value = frame.probe ? (frame.candidate ?? null) : null;
               if (frame.probe) this.#defaultNeeded = true;
               trace?.load(key, false, false, value, expression.span);
               break;
@@ -1282,6 +1305,8 @@ export class Evaluator {
               },
               expression.default!.span,
             );
+          if (frame.candidate !== undefined)
+            value = repairedRecord(frame.candidate, value, expression.type!, false);
           trace?.load(frame.key!, false, true, value, expression.span);
           break;
       }
@@ -1320,8 +1345,12 @@ export class Evaluator {
     );
   }
 
-  public assign(target: AssignmentTargetPlan, value: SerializableRuntimeValue): void {
-    return assign(this, target, value);
+  public assign(
+    target: AssignmentTargetPlan,
+    value: SerializableRuntimeValue,
+    requireExisting = false,
+  ): void {
+    return assign(this, target, value, requireExisting);
   }
 
   /**
@@ -1406,8 +1435,8 @@ export class Evaluator {
   ): SerializableRuntimeValue | typeof USE_DEFAULT {
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
-      if (isConversion(name))
-        return this.#conversion(
+      if (isConversion(name)) {
+        const converted = this.#conversion(
           name,
           positional,
           named,
@@ -1415,6 +1444,14 @@ export class Evaluator {
           expression.arguments[0]?.value,
           expression.span,
         );
+        // the JSON read as the call's expected type (ADR 0021 rule 2.6)
+        if (name !== "fromJson" || expression.expected === undefined || converted === USE_DEFAULT)
+          return converted;
+        const read = this.readJson(converted, expression.expected, expression.span);
+        if (!read.needed) return read.value;
+        if (read.value !== null) this.#retained = read.value;
+        return USE_DEFAULT;
+      }
       if (name === "hashText") return hashedText(positional, named, expression.span);
       if (isRandomFunction(name))
         return randomFunction(this, name, positional, named, expression.span);
@@ -1598,6 +1635,17 @@ export class Evaluator {
       return rangeList(receiver, expression.span);
     }
     if (expression.callee.kind === "property") {
+      // a list `get` that checks its index rejects one that is no whole number before it selects anything
+      if (expression.indexCheck === true && isList(receiver)) {
+        const index = positional[0];
+        if (!(typeof index === "number" && Number.isInteger(index)))
+          throw notWholeIndex(
+            this,
+            expression.arguments[0]!.value,
+            index ?? null,
+            expression.arguments[0]!.value.span,
+          );
+      }
       return callCollection(
         this,
         receiver!,
@@ -1637,6 +1685,45 @@ export class Evaluator {
     if (warning === null) return true;
     this.warn("TSW016", warning, span);
     return false;
+  }
+
+  /**
+   * `fromJson`'s JSON read as its expected type (`CallExpressionPlan.expected`, ADR 0021 rule 2.6): its value, or that
+   * the call needs its default, with the record the default repairs or `null`; each fallback with `TSW020`.
+   */
+  public readJson(
+    parsed: SerializableRuntimeValue,
+    expected: TypePlan,
+    span: SourceSpan,
+  ): { readonly needed: boolean; readonly value: SerializableRuntimeValue } {
+    const reading = readExpected(parsed, expected, true);
+    if (reading.kind === "whole") return { needed: false, value: reading.value };
+    if (reading.kind === "none") {
+      this.warn("TSW020", jsonKindMismatch(parsed, expected), span);
+      return { needed: true, value: null };
+    }
+    // a property nothing settles takes the default's without a warning when the JSON lacks it
+    for (const field of reading.fields)
+      if (!takesEveryValue(field.type)) this.warn("TSW020", jsonFieldMismatch(field), span);
+    return { needed: true, value: parsed };
+  }
+
+  /**
+   * Whether a stored value fits a load's object type field by field (`StorageLoadExpressionPlan.repair`, V30 §25):
+   * `true`; `"fields"` for a record whose missing or wrong fields its default supplies, each with a warning naming it;
+   * or `false` for a value of another kind, with the load's warning.
+   */
+  #storedRecordFits(
+    key: string,
+    value: SerializableRuntimeValue,
+    type: TypePlan,
+    span: SourceSpan,
+  ): boolean | "fields" {
+    const reading = readExpected(value, type, false);
+    if (reading.kind === "whole") return true;
+    if (reading.kind === "none") return this.#storedValueFits(key, value, type, span);
+    for (const field of reading.fields) this.warn("TSW016", storedFieldMismatch(key, field), span);
+    return "fields";
   }
 
   public warn(code: DeveloperWarningCode, message: string, span: SourceSpan): void {
@@ -1913,6 +2000,11 @@ interface EvaluationFrame {
   lazy: number;
   /** The root of `evaluateWithoutDefault`, whose default runs as the instructions after it. */
   probe: boolean;
+  /**
+   * The record a `load` or `fromJson` repairs from its default once that is evaluated (`StorageLoadExpressionPlan.repair`,
+   * `CallExpressionPlan.expected`), or `undefined`.
+   */
+  candidate: SerializableRuntimeValue | undefined;
   /** With a debug trace, the causes collected for this frame's value. */
   deps: DebugDependencies | null;
 }
@@ -1972,6 +2064,7 @@ function evaluationFrame(
     named: expression.kind === "call" ? Object.create(null) : null,
     lazy: expression.kind === "call" ? lazyDefaultArgumentIndex(expression) : -1,
     probe,
+    candidate: undefined,
     deps: null,
   };
 }
@@ -1980,14 +2073,19 @@ function evaluationFrame(
  * The default that a call uses, checked as the call checks it: a `get` default that decided the element or value type
  * of an empty list or dict must fit it also in the parts the compiler could not know (ADR 0021 rule 1.7), and a
  * conversion's must be what its `CONVERSIONS` entry takes. `fileFromBase64`, `decryptText`, and `decryptFile` take any
- * default.
+ * default. A `fallbackCheck` (`BinaryExpressionPlan.fallbackCheck`) is the default's whole check instead.
  */
 export function acceptedDefault(
   operation: LazyDefaultOperation,
   value: SerializableRuntimeValue,
   typeCheck: TypeCheckPlan | undefined,
   span: SourceSpan,
+  fallbackCheck?: TypeCheckPlan,
 ): SerializableRuntimeValue {
+  if (fallbackCheck !== undefined) {
+    assertFallbackType(value, fallbackCheck, span);
+    return value;
+  }
   if (typeCheck !== undefined) assertValueType(value, typeCheck, span);
   if (isConversion(operation)) {
     const conversion: Conversion = CONVERSIONS[operation];

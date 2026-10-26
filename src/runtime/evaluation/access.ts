@@ -316,6 +316,46 @@ function optionalLabel(evaluator: Evaluator, plan: ExpressionPlan | null): strin
   return plan === null ? null : receiverLabel(evaluator, plan);
 }
 
+/** The index as a message names it: a number as written, or its label; `null` for none. */
+function writtenIndexLabel(evaluator: Evaluator, indexPlan: ExpressionPlan | null): string | null {
+  // A label is only written for the failure.
+  const index = indexPlan === null ? null : loweredOperand(evaluator.plan, indexPlan);
+  return index === null
+    ? null
+    : index.kind === "literal"
+      ? typeof index.value === "number"
+        ? String(index.value)
+        : null
+      : planLabel(index, evaluator.plan);
+}
+
+/**
+ * `TSR024` for a list index `value` that is not a whole number, `indexPlan` as written, or `null` for an argument: of an
+ * index read or store, a `removeAt(...)`, or a `get` that checks its index (`CallExpressionPlan.indexCheck`).
+ */
+export function notWholeIndex(
+  evaluator: Evaluator,
+  indexPlan: ExpressionPlan | null,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): RuntimeFault {
+  const indexLabel = writtenIndexLabel(evaluator, indexPlan);
+  const subject = indexLabel === null ? "this" : `'${indexLabel}'`;
+  const fix =
+    typeof value === "number"
+      ? " Round it with floor(...), round(...), or ceil(...) first."
+      : value === null
+        ? ` Check that ${indexLabel === null ? "the index" : `'${indexLabel}'`} is not null first.`
+        : typeof value === "string" && numberFromText(value) !== undefined
+          ? " Convert the text with toInteger(...) first."
+          : "";
+  return fault(
+    "TSR024",
+    `A list index must be a whole number (integer), but ${subject} is ${describeShownValue(value)}.${fix}`,
+    span,
+  );
+}
+
 /**
  * The position `value` gives in `list`, which `receiver` gives: `TSR024` unless it is a whole number and `TSR025` unless
  * the list has it. `indexPlan` is the index as written, or `null` for an argument such as of `removeAt(...)`.
@@ -331,32 +371,8 @@ export function listPosition(
 ): number {
   if (listHasPosition(list.items.length, value)) return value;
   const whole = typeof value === "number" && Number.isInteger(value);
-  // A label is only written for the failure.
-  const index = indexPlan === null ? null : loweredOperand(evaluator.plan, indexPlan);
-  const indexLabel =
-    index === null
-      ? null
-      : index.kind === "literal"
-        ? typeof index.value === "number"
-          ? String(index.value)
-          : null
-        : planLabel(index, evaluator.plan);
-  if (!whole) {
-    const subject = indexLabel === null ? "this" : `'${indexLabel}'`;
-    const fix =
-      typeof value === "number"
-        ? " Round it with floor(...), round(...), or ceil(...) first."
-        : value === null
-          ? ` Check that ${indexLabel === null ? "the index" : `'${indexLabel}'`} is not null first.`
-          : typeof value === "string" && numberFromText(value) !== undefined
-            ? " Convert the text with toInteger(...) first."
-            : "";
-    throw fault(
-      "TSR024",
-      `A list index must be a whole number (integer), but ${subject} is ${describeShownValue(value)}.${fix}`,
-      span,
-    );
-  }
+  if (!whole) throw notWholeIndex(evaluator, indexPlan, value, span);
+  const indexLabel = writtenIndexLabel(evaluator, indexPlan);
   const length = list.items.length;
   const owner = receiverLabel(evaluator, receiver);
   const named = owner === null ? "the list" : `'${owner}'`;

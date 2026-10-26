@@ -19,7 +19,7 @@ import {
   validateTemporaryId,
 } from "../validation-support.js";
 import { PROPERTY_FIELDS, validateExpression } from "./expressions.js";
-import { validateOptionalTypeCheck } from "./type-plans.js";
+import { validateOptionalTypeCheck, validateTypePlan } from "./type-plans.js";
 import { validateInteractionInstruction } from "./interaction.js";
 
 /**
@@ -70,7 +70,7 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["declareBinding", "name", "value", "typeCheck"],
   ["prepareReference", "expression", "destinationTemporary"],
   ["validateAssignmentTarget", "target"],
-  ["assign", "target", "value", "typeCheck"],
+  ["assign", "target", "value", "typeCheck", "requireExisting"],
   ["validateCallReceiver", "receiver", "method"],
   ["evaluate", "expression"],
   ["jumpIfFalse", "condition", "target"],
@@ -85,6 +85,8 @@ const INSTRUCTION_FIELDS = fieldsByKind([
     "defaultTemporary",
     "defaultOf",
     "typeCheck",
+    "fallbackCheck",
+    "repair",
   ],
   ["clearTemporary", "temporaryId"],
   ["clearTemporaries", "temporaryIds"],
@@ -194,6 +196,19 @@ export function validateInstruction(
       validatePreparedAssignmentTarget(value.target, `${path}.target`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
       validateOptionalTypeCheck(value, path, errors);
+      if (
+        "requireExisting" in value &&
+        (value.requireExisting !== true ||
+          !isRecord(value.target) ||
+          value.target.kind !== "property")
+      )
+        errors.push(
+          planError(
+            "TSC002",
+            "Only a property store can require an existing property.",
+            `${path}.requireExisting`,
+          ),
+        );
       return;
     case "validateCallReceiver":
       validateExpression(value.receiver, `${path}.receiver`, errors, false, temporaryCount);
@@ -252,6 +267,8 @@ export function validateInstruction(
         );
       }
       validateOptionalTypeCheck(value, path, errors);
+      validateOptionalTypeCheck(value, path, errors, "fallbackCheck");
+      if ("repair" in value) validateTypePlan(value.repair, `${path}.repair`, errors);
       if ("defaultTemporary" in value) {
         validateDefaultTemporary(
           value.defaultTemporary,
@@ -264,7 +281,9 @@ export function validateInstruction(
           !isDefaultProbe(value.value) ||
           value.expectBoolean !== false ||
           "typeCheck" in value ||
-          "defaultOf" in value
+          "defaultOf" in value ||
+          "fallbackCheck" in value ||
+          "repair" in value
         )
           errors.push(
             planError(
@@ -702,11 +721,19 @@ function validateFileStoreInstruction(
       "defaultTemporary",
       "files",
       "destinationTemporary",
+      ...("expected" in value ? ["expected"] : []),
       "span",
     ])
   ) {
     errors.push(planError("TSC002", "File store instruction has an invalid shape.", path));
     return;
+  }
+  if ("expected" in value) {
+    if (value.call !== "fromJson")
+      errors.push(
+        planError("TSC002", "Only a 'fromJson' call reads an expected type.", `${path}.expected`),
+      );
+    validateTypePlan(value.expected, `${path}.expected`, errors);
   }
   const call = value.call;
   const conversion = typeof call === "string" && isConversion(call) && takesFiles(call);

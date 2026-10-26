@@ -21,6 +21,7 @@ import {
   validateTemporaryId,
 } from "../validation-support.js";
 import { validateOptionalTypeCheck, validateTypePlan } from "./type-plans.js";
+import { lazyDefaultArgumentIndex } from "../expression-children.js";
 
 // Expression shapes: each node of an expression tree, object properties, and tag query steps.
 
@@ -43,12 +44,12 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["template", "parts"],
   ["property", "object", "name"],
   ["index", "object", "index"],
-  ["call", "callee", "arguments", "typeCheck"],
+  ["call", "callee", "arguments", "typeCheck", "indexCheck", "fallbackCheck", "expected"],
   ["unary", "operator", "operand"],
   ["unit", "operand", "calendar", "unit"],
   ["angleUnit", "operand", "unit"],
   ["typeTest", "value", "type", "negated"],
-  ["binary", "operator", "left", "right"],
+  ["binary", "operator", "left", "right", "fallbackCheck"],
   ["range", "start", "end", "inclusive"],
   ["tagQuery", "catalog", "from", "select", "operands", "steps"],
 ]);
@@ -391,6 +392,48 @@ function validateExpressionNode(
             `${path}.typeCheck`,
           ),
         );
+      if (
+        "indexCheck" in value &&
+        (value.indexCheck !== true ||
+          !isRecord(value.callee) ||
+          value.callee.kind !== "property" ||
+          value.callee.name !== "get")
+      )
+        errors.push(
+          planError("TSC002", "Only a 'get' call checks its index.", `${path}.indexCheck`),
+        );
+      validateOptionalTypeCheck(value, path, errors, "fallbackCheck");
+      if (
+        "fallbackCheck" in value &&
+        !(
+          isRecord(value.callee) &&
+          Array.isArray(value.arguments) &&
+          value.arguments.every(isRecord) &&
+          lazyDefaultArgumentIndex({ callee: value.callee, arguments: value.arguments }) !== -1
+        )
+      )
+        errors.push(
+          planError(
+            "TSC002",
+            "Only a call with its 'default:' checks the default.",
+            `${path}.fallbackCheck`,
+          ),
+        );
+      if ("expected" in value) {
+        if (
+          !isRecord(value.callee) ||
+          value.callee.kind !== "identifier" ||
+          value.callee.name !== "fromJson"
+        )
+          errors.push(
+            planError(
+              "TSC002",
+              "Only a 'fromJson' call reads an expected type.",
+              `${path}.expected`,
+            ),
+          );
+        validateTypePlan(value.expected, `${path}.expected`, errors);
+      }
       pending.push({ kind: "arguments", value: value.arguments, path: `${path}.arguments` });
       pending.push({ value: value.callee, path: `${path}.callee`, assignmentTarget: false });
       return;
@@ -426,6 +469,11 @@ function validateExpressionNode(
       if (!(typeof value.operator === "string" && binaryOperators.has(value.operator))) {
         errors.push(planError("TSC002", "Invalid binary operator.", `${path}.operator`));
       }
+      validateOptionalTypeCheck(value, path, errors, "fallbackCheck");
+      if ("fallbackCheck" in value && value.operator !== "otherwise")
+        errors.push(
+          planError("TSC002", "Only 'otherwise' checks a fallback.", `${path}.fallbackCheck`),
+        );
       pending.push(
         { value: value.right, path: `${path}.right`, assignmentTarget: false },
         { value: value.left, path: `${path}.left`, assignmentTarget: false },
@@ -479,11 +527,25 @@ function validateExpressionNode(
       return;
     }
     case "storageLoad":
-      if (!hasExactKeys(value, ["kind", "key", "default", "type", "span"])) {
+      if (
+        !hasExactKeys(
+          value,
+          "repair" in value
+            ? ["kind", "key", "default", "type", "repair", "span"]
+            : ["kind", "key", "default", "type", "span"],
+        )
+      ) {
         errors.push(planError("TSC002", "Storage-load expression has an invalid shape.", path));
       } else if (value.type !== null) {
         validateTypePlan(value.type, `${path}.type`, errors);
       }
+      if (
+        "repair" in value &&
+        (value.repair !== true || !isRecord(value.type) || value.type.kind !== "object")
+      )
+        errors.push(
+          planError("TSC002", "Only a load of an object type repairs it.", `${path}.repair`),
+        );
       if (value.default !== null) {
         pending.push({ value: value.default, path: `${path}.default`, assignmentTarget: false });
       }

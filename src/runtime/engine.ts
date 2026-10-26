@@ -26,7 +26,13 @@ import {
 } from "./instructions/say.js";
 import { showPermanentButton } from "./instructions/show-permanent-button.js";
 import { writeStorage } from "./instructions/storage-write.js";
-import { advance, currentCallFrameId, currentFrame, fault } from "./instructions/support.js";
+import {
+  advance,
+  currentCallFrameId,
+  currentFrame,
+  fault,
+  readTemporary,
+} from "./instructions/support.js";
 import { executeWait, startTimer } from "./instructions/timers.js";
 import { leaveScopes } from "./scopes/captures.js";
 import {
@@ -103,10 +109,10 @@ import { startTimerHandler, timerHandlerDispatchable } from "./operations/timer-
 import { stopAllTimersForSessionEnd } from "./operations/timer-lifecycle.js";
 import { copySpan } from "../plan/source-location.js";
 import { notBoolean, notLogicalOperand } from "./evaluation/operators.js";
-import { USE_DEFAULT } from "./evaluation/support.js";
+import { repairedRecord } from "./values/expected-reading.js";
 import { stopAllMediaForSessionEnd } from "./operations/media-lifecycle.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
-import { assertValueType } from "./values/value-types.js";
+import { assertFallbackType, assertValueType } from "./values/value-types.js";
 
 export interface RuntimeRunOptions {
   readonly instructionBudget?: number;
@@ -863,7 +869,7 @@ function executePlannedInstruction(
         const value = evaluator.evaluate(instruction.value);
         if (instruction.typeCheck !== undefined)
           assertValueType(value, instruction.typeCheck, instruction.value.span);
-        evaluator.assign(instruction.target, value);
+        evaluator.assign(instruction.target, value, instruction.requireExisting === true);
       }
       advance(snapshot);
       return;
@@ -907,9 +913,7 @@ function executePlannedInstruction(
     case "storeTemporary": {
       if (instruction.defaultTemporary !== undefined) {
         // The call or load without its default: the instructions after it run the default only when it is needed.
-        const probed = evaluator.evaluateWithoutDefault(instruction.value);
-        const needed = probed === USE_DEFAULT;
-        const value = needed ? null : probed;
+        const { needed, value } = evaluator.evaluateWithoutDefault(instruction.value);
         setCapturedTemporary(snapshot.temporaries, instruction.temporaryId, value);
         setCapturedTemporary(snapshot.temporaries, instruction.defaultTemporary, needed);
         if (evaluator.trace !== null) {
@@ -935,9 +939,22 @@ function executePlannedInstruction(
           value,
           instruction.typeCheck,
           instruction.value.span,
+          instruction.fallbackCheck,
         );
-      else if (instruction.typeCheck !== undefined)
-        assertValueType(value, instruction.typeCheck, instruction.value.span);
+      else {
+        if (instruction.typeCheck !== undefined)
+          assertValueType(value, instruction.typeCheck, instruction.value.span);
+        if (instruction.fallbackCheck !== undefined)
+          assertFallbackType(value, instruction.fallbackCheck, instruction.value.span);
+      }
+      // a default that repairs the record its call or load left in the temporary (ADR 0021 rules 2.6 and 6.5)
+      if (instruction.repair !== undefined)
+        value = repairedRecord(
+          readTemporary(snapshot.temporaries, instruction.temporaryId, instruction.span),
+          value,
+          instruction.repair,
+          instruction.defaultOf === "fromJson",
+        );
       setCapturedTemporary(snapshot.temporaries, instruction.temporaryId, value);
       if (evaluator.trace !== null) {
         const copied =
