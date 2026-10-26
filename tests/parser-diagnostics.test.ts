@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProject } from "../src/compiler.js";
+import { compileProject, compileSourceWithBackend } from "../src/compiler.js";
 import { compileSource } from "../src/index.js";
 import { parse } from "../src/parser.js";
+import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 
 test("reports a missing speaker identifier and parses the next statement", () => {
   const source = "speaker\nexit";
@@ -230,6 +231,39 @@ test("where only text written out in quotes is allowed, a failed interpolation r
       source,
     );
   }
+});
+
+test("a string or regex without its closing delimiter reports only that", () => {
+  for (const [source, expected] of [
+    ['let text = "unfinished', ["TSL003 11-22"]],
+    ['let text = "a"\ntext = "unfinished', ["TSL003 22-33"]],
+    ['global text = "unfinished', ["TSL003 14-25"]],
+    ['let text = """\nunfinished', ["TSL004 11-25"]],
+    ['say "unfinished', ["TSL003 4-15"]],
+    ['let text = "a ${1', ["TSL005 14-17", "TSL003 11-17"]],
+    ["let pattern = /ab\nexit", ["TSL009 14-17"]],
+    // Other errors stay: a value missing before or inside the string, and brackets that its delimiter does not close.
+    ['let a = ()\nlet b = "unfinished', ["TSL003 19-30", "TSP012 9-9"]],
+    ['let text = "a ${1 +', ["TSL005 14-19", "TSL003 11-19", "TSP012 19-19"]],
+    ['let n = f(g("unfinished', ["TSL003 12-23", "TSP017 23-23", "TSP017 23-23"]],
+    ["let n = length(/ab", ["TSL009 15-18", "TSP017 18-18"]],
+  ] as const) {
+    for (const compilation of [
+      compileSource(source),
+      compileSourceWithBackend(source, {}, CORE_BACKEND),
+    ]) {
+      assert.deepEqual(
+        compilation.diagnostics.map(
+          ({ code, span }) => `${code} ${span.start.offset}-${span.end.offset}`,
+        ),
+        expected,
+        source,
+      );
+      assert.equal(compilation.plan, null, source);
+    }
+  }
+  // Where the lexer took a `/` for division, a string that the regex holds still makes the parse try a regex there.
+  assert.deepEqual(compileSource('say prose /"abc/\nexit').diagnostics, []);
 });
 
 test("accepts physical continuation lines inside block-string interpolation", () => {

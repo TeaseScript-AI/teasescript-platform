@@ -33,7 +33,7 @@ import {
   type StatementCommand,
   type ValueCommand,
 } from "./language-facts.js";
-import { lex } from "./lexer.js";
+import { lex, UNCLOSED_LITERAL_CODES } from "./lexer.js";
 import { readMisplacedHeader, readScriptHeader, type ScriptHeader } from "./script-header.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { TokenKind, type Token } from "./token.js";
@@ -182,6 +182,11 @@ interface SharedParse {
    * a run, or giving it back after a missing closer, costs the same at every level of nesting.
    */
   readonly newlineRuns: { readonly starts: Int32Array; readonly ends: Int32Array };
+  /**
+   * The lexer's reports of a string or regex without its closing delimiter, by the offset where the literal starts. A
+   * parse that cannot read such a literal counts that report as its error there, so nothing around it reports another.
+   */
+  readonly unclosedLiterals: ReadonlyMap<number, Diagnostic>;
 }
 /** A `say` value parsed at a token position in one parsing context, with what its parse left behind. */
 interface ParsedSayValue {
@@ -228,7 +233,10 @@ export function parse(source: string): ParseResult {
   const regexStarts = new Set<number>();
   for (;;) {
     const header = readScriptHeader(lex(source, regexStarts));
-    const parser = new Parser(header.programTokens);
+    const parser = new Parser(
+      header.programTokens,
+      sharedParse(header.programTokens, header.diagnostics),
+    );
     const program = parser.parseProgram();
     const added = parser.regexStarts.filter((offset) => !regexStarts.has(offset));
     if (added.length > 0 && parser.diagnostics.length > 0) {
@@ -240,11 +248,35 @@ export function parse(source: string): ParseResult {
       program,
       regexStarts,
       header: header.header,
-      diagnostics: Object.freeze([...header.diagnostics, ...parser.diagnostics]),
+      diagnostics: Object.freeze([
+        ...header.diagnostics,
+        // A lexer report that the parse counted (see `SharedParse.unclosedLiterals`) is listed once.
+        ...parser.diagnostics.filter(
+          (diagnostic) =>
+            parser.shared.unclosedLiterals.get(diagnostic.span.start.offset) !== diagnostic,
+        ),
+      ]),
       statementRanges: Object.freeze(statements),
       commandRanges: Object.freeze(commands),
     });
   }
+}
+
+/** What the parsers over `tokens` share, with the lexer's `diagnostics` of them. */
+function sharedParse(tokens: readonly Token[], diagnostics: readonly Diagnostic[]): SharedParse {
+  const unclosedLiterals = new Map<number, Diagnostic>();
+  for (const diagnostic of diagnostics) {
+    if (UNCLOSED_LITERAL_CODES.has(diagnostic.code))
+      unclosedLiterals.set(diagnostic.span.start.offset, diagnostic);
+  }
+  return {
+    openers: innermostOpeners(tokens),
+    closers: null,
+    sayValues: new Map(),
+    recoveredStrings: new WeakSet(),
+    newlineRuns: newlineRuns(tokens),
+    unclosedLiterals,
+  };
 }
 
 /** The public members serve `parse` and the modules in `parser/`, and are internal to the parser. */
@@ -287,13 +319,7 @@ export class Parser {
 
   public constructor(
     public readonly tokens: readonly Token[],
-    shared: SharedParse = {
-      openers: innermostOpeners(tokens),
-      closers: null,
-      sayValues: new Map(),
-      recoveredStrings: new WeakSet(),
-      newlineRuns: newlineRuns(tokens),
-    },
+    shared: SharedParse,
   ) {
     this.shared = shared;
   }
@@ -1573,8 +1599,10 @@ export class Parser {
     }
     if (this.match(TokenKind.RegexLiteral)) {
       const source = tokenValue(token);
-      // The lexer reported a literal without its closing slash.
-      if (token.lexeme.length < source.length + 2) return null;
+      if (token.lexeme.length < source.length + 2) {
+        this.countUnclosedLiteral(token);
+        return null;
+      }
       return Object.freeze({
         kind: "regexLiteral",
         source,
@@ -1987,6 +2015,12 @@ export class Parser {
       parserDiagnosticCode.expectedSpeakerAfterAs,
       "Expected a speaker identifier after 'as'.",
     );
+  }
+
+  /** Counts the lexer's report of the string or regex without its closing delimiter at `start` as this parse's error. */
+  public countUnclosedLiteral(start: Token): void {
+    const report = this.shared.unclosedLiterals.get(start.span.start.offset);
+    if (report !== undefined) this.diagnostics.push(report);
   }
 
   public reportInsertion(

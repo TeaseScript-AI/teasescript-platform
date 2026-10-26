@@ -256,7 +256,10 @@ export function* parseStringLiteral(parser: Parser, start: Token): ParseTask<Str
     valid = false;
     parser.advance();
   }
-  if (!parser.match(TokenKind.StringEnd)) return null;
+  if (!parser.match(TokenKind.StringEnd)) {
+    parser.countUnclosedLiteral(start);
+    return null;
+  }
   if (!valid) return null;
   const literal: StringLiteral = Object.freeze({
     kind: "stringLiteral",
