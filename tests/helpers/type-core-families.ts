@@ -1637,6 +1637,20 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
+    name: "A4-self-copies",
+    measures:
+      "A4 through copies, §8 width: a place copied into k fields of itself, a cycle of copies (Sol's round 3 B3 on #1049)",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: object = {v: 1}",
+          "let a = typed",
+          `a = {${fields(k, () => "a", "p")}}`,
+          "exit",
+        ),
+      ),
+  },
+  {
     name: "A4-wide-copies",
     measures:
       "A4, §8 width: one record of k fields, each a copy of one written binding, every field read",

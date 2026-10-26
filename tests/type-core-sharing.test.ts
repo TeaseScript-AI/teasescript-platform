@@ -94,7 +94,8 @@ function programs(): Program[] {
   for (const { name, files } of ORACLE_PROGRAMS) out.push({ name: `oracle ${name}`, files });
   // external round 7 B1's written copies (`WRITTEN_COPY_MATRIX`)
   for (const { name, source } of WRITTEN_COPY_MATRIX) out.push(one(`written copy ${name}`, source));
-  // the merged S6's written-domain matrices (`type-core-written.ts`)
+  // the merged S6's written-domain matrices (`type-core-written.ts`), each exact source once (Astra's D3)
+  const sources = new Set<string>();
   for (const { name, source } of [
     ...WRITTEN_DOMAIN_MATRIX,
     ...UNRESTRICTED_COLLECTION_MATRIX,
@@ -103,7 +104,10 @@ function programs(): Program[] {
     ...OBJECT_PROPERTY_MATRIX,
     ...DEFAULT_CHAIN_MATRIX,
   ])
-    out.push({ ...one(`written domain ${name}`, source), sourceOrderOnCi: true });
+    if (!sources.has(source)) {
+      sources.add(source);
+      out.push({ ...one(`written domain ${name}`, source), sourceOrderOnCi: true });
+    }
   // Astra's round-5 D1 witness: a decider beside an unselected read of its source (her B1 shape is the oracle's)
   out.push(
     one(
@@ -116,7 +120,8 @@ function programs(): Program[] {
   return out;
 }
 
-const GLOBALS = ["hostValue"];
+// (a written-domain matrix's host-started binding reads `hostInit`, `WrittenCase.globals`)
+const GLOBALS = ["hostValue", "hostInit"];
 
 /** A program's request and its bindings, built once for its four analyses. */
 interface Prepared {

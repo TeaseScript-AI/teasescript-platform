@@ -72,11 +72,79 @@ interface InheritedCopy {
   readonly strip: readonly string[];
 }
 
+/**
+ * The cycles of places a graph of copies holds (Tarjan's strongly connected components, with an explicit stack): each
+ * place in one, a place copied into itself too, by the cycle's number.
+ */
+function cyclesOf(
+  edges: ReadonlyMap<PlaceId, readonly InheritedCopy[]>,
+  work: { charge(counter: "indexSteps"): void },
+): Map<PlaceId, number> {
+  const out = new Map<PlaceId, number>();
+  const order = new Map<PlaceId, number>();
+  const low = new Map<PlaceId, number>();
+  const stack: PlaceId[] = [];
+  const onStack = new Set<PlaceId>();
+  const next = (place: PlaceId): readonly PlaceId[] =>
+    (edges.get(place) ?? []).map((copy) => copy.place);
+  const enter = (place: PlaceId): void => {
+    low.set(place, order.size);
+    order.set(place, order.size);
+    stack.push(place);
+    onStack.add(place);
+  };
+  for (const start of edges.keys()) {
+    if (order.has(start)) continue;
+    enter(start);
+    const frames: { readonly place: PlaceId; at: number }[] = [{ place: start, at: 0 }];
+    while (frames.length > 0) {
+      const frame = frames[frames.length - 1]!;
+      const targets = next(frame.place);
+      work.charge("indexSteps");
+      if (frame.at < targets.length) {
+        const target = targets[frame.at]!;
+        frame.at += 1;
+        if (!order.has(target)) {
+          enter(target);
+          frames.push({ place: target, at: 0 });
+        } else if (onStack.has(target))
+          low.set(frame.place, Math.min(low.get(frame.place)!, order.get(target)!));
+        continue;
+      }
+      frames.pop();
+      const parent = frames[frames.length - 1];
+      if (parent !== undefined)
+        low.set(parent.place, Math.min(low.get(parent.place)!, low.get(frame.place)!));
+      if (low.get(frame.place) !== order.get(frame.place)) continue;
+      const members: PlaceId[] = [];
+      for (;;) {
+        const member = stack.pop()!;
+        onStack.delete(member);
+        members.push(member);
+        if (member === frame.place) break;
+      }
+      if (members.length > 1 || targets.includes(frame.place))
+        for (const member of members) out.set(member, frame.place);
+    }
+  }
+  return out;
+}
+
 /** `#inheritedAt`'s signal: a scan needs another place's inherited type first, taken before it is scanned again. */
 class Unresolved extends Error {
   public constructor(readonly key: Key) {
     super(`unresolved ${key}`);
   }
+}
+
+/**
+ * A copied written type as a place's own decision admits it: with its `null` where the decision is nullable beside the
+ * copy (S6-CARRIERS §4.2: a `null` before the written decider, a literal's `null` element), so a copy of the place keeps
+ * that too (Astra's F2 on #1049).
+ */
+function optionalOf(term: TypeTerm | null, nullable: boolean): TypeTerm | null {
+  if (term === null || !nullable || typeTags(term).includes("null")) return term;
+  return { kind: "union", members: [term, { kind: "atom", name: "null" }] };
 }
 
 /** The part below an unrestricted written part: every kind fits it. */
@@ -478,6 +546,11 @@ export class Admission {
   readonly #inherited = new Map<Key, TypeTerm | null>();
   /** The places and paths whose decisions wait on each other through copies, by cycle (`#cut`): a union-find. */
   readonly #cycles = new Map<Key, Key>();
+  /**
+   * The deepest path a written type can reach through copies (`#inheritedAt`): the written copies' landing paths with
+   * their types' element levels, and every copy of an inheriting place's own landing path beside them.
+   */
+  #reach = 0;
   #resolving = false;
   readonly #whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
@@ -594,6 +667,13 @@ export class Admission {
           else continue;
           this.#a4Keys.add(keyOf(d.place, at));
         }
+    for (const { path, term } of this.#a4Copies) {
+      let depth = path.length;
+      for (let step = ["element"]; termAt(term, step) !== null; step = [...step, "element"])
+        depth = path.length + step.length;
+      this.#reach = Math.max(this.#reach, depth);
+    }
+    for (const { path } of this.#a4Inherits) this.#reach += path.length;
   }
 
   /**
@@ -636,14 +716,21 @@ export class Admission {
   /**
    * A4 through copies (ADR 0021 1.3; r4.75 (1), (1a)): the written type an unwritten place's own decision copies at a
    * path, through whatever copy of a written binding it comes (a chain of copies, a projection, a selected carrier, a
-   * literal, a parameter's default), at every collection level: `#scan`'s copied type, `null` where a value decides the
-   * path or nothing does. A copy of the place carries that type there. Once per place and path, iteratively: a scan
+   * literal, a parameter's default), at every collection level: `#scan`'s copied type, with the place's own `null`
+   * where its decision is nullable beside the copy (`optionalOf`), `null` where a value decides the path or nothing does. A copy of the place carries that type there. Once per place and path, iteratively: a scan
    * that needs another place's type first stops (`Unresolved`) and is taken again after it, so a chain of copies never
-   * deepens the native stack. A scan that needs a place whose own scan is waiting, at any path, closes a cycle of copies:
-   * those waiting from there on and the needed one are joined (`#cycles`), and a copy between two of them carries no
-   * written type (`#cut`): a cycle of copies decides nothing written, whichever of its places is asked first.
+   * deepens the native stack. A scan that needs the very place and path whose own scan is waiting closes a cycle of
+   * copies: those waiting from there on are joined (`#cycles`), and a copy between two of them carries no written type
+   * (`#cut`): a cycle of copies decides nothing written, whichever of its places is asked first. A place at another path
+   * is no cycle (`a.q = a`: `a.q.p` needs `a.p`). Past the deepest path a written type reaches (`#reach`) a place
+   * inherits only what its path's prefix there leaves below it (an unrestricted part), so a copy nesting a place in
+   * itself never deepens without end.
    */
   #inheritedAt(place: PlaceId, path: readonly string[]): TypeTerm | null {
+    if (path.length > this.#reach) {
+      const above = this.#inheritedAt(place, path.slice(0, this.#reach));
+      return above === null ? null : permittedAt(above, path.slice(this.#reach));
+    }
     const key = keyOf(place, path);
     const known = this.#inherited.get(key);
     if (known !== undefined) return known;
@@ -651,29 +738,39 @@ export class Admission {
     this.#resolving = true;
     try {
       const pending: Key[] = [key];
-      // (per place, the positions of its waiting scans)
-      const waiting = new Map<PlaceId, number[]>([[place, [0]]]);
+      // (the positions of the waiting scans, and the last cycle closed)
+      const waiting = new Map<Key, number>([[key, 0]]);
+      let closed = "";
       while (pending.length > 0) {
         const next = pending[pending.length - 1]!;
         try {
           const inputs = this.#inputs(keyPlace(next), keyPath(next));
           const found = inputs === null ? null : this.#scan(inputs.direct, inputs.prefixes, next);
-          this.#inherited.set(next, found?.copied ?? null);
+          this.#inherited.set(
+            next,
+            found === null ? null : optionalOf(found.copied, found.nullable),
+          );
           pending.pop();
-          waiting.get(keyPlace(next))!.pop();
+          waiting.delete(next);
         } catch (error) {
           if (!(error instanceof Unresolved)) throw error;
-          const needed = keyPlace(error.key);
-          const from = waiting.get(needed)?.at(-1);
+          const from = waiting.get(error.key);
           if (from !== undefined) {
+            const cycle = `${next}|${error.key}`;
+            // (a scan that asks again across the cycle just closed inherits nothing: it never waits on itself twice)
+            if (cycle === closed) {
+              this.#inherited.set(next, null);
+              pending.pop();
+              waiting.delete(next);
+              continue;
+            }
+            closed = cycle;
             for (let index = from; index < pending.length; index += 1)
               this.#join(pending[index]!, error.key);
             continue;
           }
+          waiting.set(error.key, pending.length);
           pending.push(error.key);
-          const positions = waiting.get(needed);
-          if (positions === undefined) waiting.set(needed, [pending.length - 1]);
-          else positions.push(pending.length - 1);
         }
       }
     } finally {
@@ -687,7 +784,8 @@ export class Admission {
    * (`#inheritedAt`), none where the two wait on each other through copies (`#cut`).
    */
   #inheritedInto(from: PlaceId, path: readonly string[], into: Key | null): TypeTerm | null {
-    const source = keyOf(from, path);
+    // (past the deepest path a written type reaches, the place's path there is what it waits on, `#inheritedAt`)
+    const source = keyOf(from, path.length > this.#reach ? path.slice(0, this.#reach) : path);
     if (into !== null && this.#cut(into, source)) return null;
     const term = this.#inheritedAt(from, path);
     return into !== null && this.#cut(into, source) ? null : term;
@@ -878,27 +976,28 @@ export class Admission {
         paths.add(path.join("."));
     }
     const copied = new Map<Key, Set<TypeTerm>>();
-    // (per place, the paths copies of written types land at, and per place and path the rests below it)
-    const landed = new Map<PlaceId, Set<string>>();
-    const below = new Map<string, Set<string>>();
-    let furthest = 0;
-    const land = (place: PlaceId, path: readonly string[]): boolean => {
-      const at = path.join(".");
-      let own = landed.get(place);
-      if (own === undefined) landed.set(place, (own = new Set()));
-      if (own.has(at)) return false;
-      own.add(at);
+    // (per place and path, the rests below it of the paths copies of written types land at in the place: all of them,
+    // and its base ones, those its own written copies and its copies from outside its cycle of places bring)
+    const below = { all: new Map<string, Set<string>>(), base: new Map<string, Set<string>>() };
+    const land = (place: PlaceId, path: readonly string[], base: boolean): boolean => {
+      let grew = false;
+      for (const rests of base ? [below.all, below.base] : [below.all]) {
+        const own = `${place}|=${path.join(".")}`;
+        if (rests.has(own)) continue;
+        rests.set(own, new Set());
+        grew = true;
+        for (let length = 0; length < path.length; length += 1) {
+          work.charge("indexSteps");
+          const prefix = `${place}|${path.slice(0, length).join(".")}`;
+          let found = rests.get(prefix);
+          if (found === undefined) rests.set(prefix, (found = new Set()));
+          found.add(path.slice(length).join("."));
+        }
+      }
       let paths = roots.get(place);
       if (paths === undefined) roots.set(place, (paths = new Set()));
-      paths.add(at);
-      for (let length = 0; length < path.length; length += 1) {
-        work.charge("indexSteps");
-        const prefix = `${place}|${path.slice(0, length).join(".")}`;
-        let rests = below.get(prefix);
-        if (rests === undefined) below.set(prefix, (rests = new Set()));
-        rests.add(path.slice(length).join("."));
-      }
-      return true;
+      paths.add(path.join("."));
+      return grew;
     };
     for (const { place, path, term } of this.#a4Copies) {
       // (once per landing path and written type: k copies of one binding into one literal are one)
@@ -908,36 +1007,43 @@ export class Admission {
       work.charge("indexSteps");
       if (terms.has(term)) continue;
       terms.add(term);
-      land(place, path);
-      furthest = Math.max(furthest, path.length);
+      land(place, path, true);
       for (let step = ["element"]; termAt(term, step) !== null; step = [...step, "element"]) {
         work.charge("indexSteps");
-        land(place, [...path, ...step]);
-        furthest = Math.max(furthest, path.length + step.length);
+        land(place, [...path, ...step], true);
       }
     }
     // A4 through copies: a copy of a place that may inherit a written type lands at its path, and below it at the paths
-    // copies of written types land at in that place, sources before their copies; no deeper than the written copies'
-    // paths and every such copy's own path together (a cycle of copies that nests the place in itself stops there)
+    // copies of written types land at in that place, sources before their copies; within a cycle of places (a place
+    // copied into itself, `a = {p: a}`) it brings the place's base paths only, so no path grows by going round
     const bySource = new Map<PlaceId, InheritedCopy[]>();
     for (const copy of this.#a4Inherits) {
       const list = bySource.get(copy.from);
       if (list === undefined) bySource.set(copy.from, [copy]);
       else list.push(copy);
-      furthest += copy.path.length;
     }
+    const cycleOf = cyclesOf(bySource, work);
+    // (each source queued once at a time: taken again only where its paths grew after it was taken)
     const sources = [...bySource.keys()];
-    for (let index = 0; index < sources.length; index += 1)
+    const queued = new Set(sources);
+    for (let index = 0; index < sources.length; index += 1) {
+      queued.delete(sources[index]!);
       for (const { place, path, from, strip } of bySource.get(sources[index]!)!) {
         work.charge("indexSteps");
-        let grew = land(place, path);
-        for (const rest of [...(below.get(`${from}|${strip.join(".")}`) ?? [])]) {
+        const cycle = cycleOf.get(from);
+        const across = cycle === undefined || cycle !== cycleOf.get(place);
+        let grew = land(place, path, across);
+        const rests = (across ? below.all : below.base).get(`${from}|${strip.join(".")}`);
+        for (const rest of [...(rests ?? [])]) {
           work.charge("indexSteps");
-          const at = [...path, ...rest.split(".")];
-          if (at.length <= furthest) grew = land(place, at) || grew;
+          grew = land(place, [...path, ...rest.split(".")], across) || grew;
         }
-        if (grew && bySource.has(place)) sources.push(place);
+        if (grew && bySource.has(place) && !queued.has(place)) {
+          queued.add(place);
+          sources.push(place);
+        }
       }
+    }
     const groups: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
     for (const [root, paths] of roots)
       for (const path of paths) groups.push({ root, path: path === "" ? [] : path.split(".") });

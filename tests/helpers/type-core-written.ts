@@ -173,15 +173,105 @@ function leafLiteral(form: Form): string | null {
   }
 }
 
-/** The host values every run tries, each with the kinds it is: a value fits a level that admits one of them. */
-const HOST_VALUES: readonly (readonly [SerializableRuntimeValue, readonly string[]])[] = [
-  [2, ["integer", "number"]],
-  [2.5, ["number"]],
-  ["text", ["string"]],
-  [true, ["boolean"]],
-  [null, ["null"]],
-  [{ kind: "list", items: [1] }, ["list"]],
+const list = (...items: SerializableRuntimeValue[]): SerializableRuntimeValue => ({
+  kind: "list",
+  items,
+});
+
+/** The host values every run tries: one of each scalar kind, and a list of whole numbers. */
+const HOST_VALUES: readonly SerializableRuntimeValue[] = [2, 2.5, "text", true, null, list(1)];
+
+/**
+ * A host value of each kind the host can give besides the scalars (a timer, media or message handle and a speaker
+ * reference only the runtime makes, so no host value is one: rows of those kinds run forbidden values only).
+ */
+const KIND_SAMPLES: readonly SerializableRuntimeValue[] = [
+  { kind: "date", year: 2026, month: 1, day: 2 },
+  { kind: "time", hour: 1, minute: 2, second: 3, millisecond: 0 },
+  { kind: "datetime", year: 2026, month: 1, day: 2, hour: 1, minute: 2, second: 3, millisecond: 0 },
+  { kind: "absoluteDateTime", epochMilliseconds: 0 },
+  { kind: "duration", milliseconds: 1_000 },
+  { kind: "calendarDuration", months: 1, days: 2, milliseconds: 0 },
+  { kind: "angle", degrees: 90 },
+  { kind: "range", start: 0, end: 3, inclusive: false },
+  { kind: "regex", source: "a", flags: "" },
+  { kind: "script", path: "main.tease" },
+  { kind: "set", items: [1] },
+  { kind: "dict", entries: [{ key: "a", value: 1 }] },
+  { kind: "object", properties: [{ name: "p", value: 1 }] },
 ];
+
+/**
+ * The values a run adds where none of `HOST_VALUES` fits every checked store (Astra's D2): each kind's value bare and in
+ * lists nested to depth four (a `list[][][]`'s whole value), the first that fits.
+ */
+const FITTING_POOL: readonly SerializableRuntimeValue[] = (() => {
+  const out: SerializableRuntimeValue[] = [];
+  for (const sample of [2, 2.5, "ok", true, null, ...KIND_SAMPLES]) {
+    let value: SerializableRuntimeValue = sample;
+    out.push(value);
+    for (let depth = 1; depth <= 4; depth += 1) out.push((value = list(value)));
+  }
+  return out;
+})();
+
+/** The kinds a host value is: a whole number an `integer` and a `number`, a record its own kind. */
+function kindsOf(value: SerializableRuntimeValue): string[] {
+  if (value === null) return ["null"];
+  if (typeof value === "number")
+    return Number.isInteger(value) ? ["integer", "number"] : ["number"];
+  if (typeof value === "string") return ["string"];
+  if (typeof value === "boolean") return ["boolean"];
+  return [value.kind];
+}
+
+/** Whether a host value fits a form (V30 §13; the plan's check): each element of a list or set, each value of a dict. */
+function fits(form: Form, value: SerializableRuntimeValue): boolean {
+  switch (form.kind) {
+    case "name":
+      return kindsOf(value).includes(form.name);
+    case "optional":
+      return value === null || fits(form.of, value);
+    case "union":
+      return form.members.some((member) => fits(member, value));
+    case "collection":
+      if (value === null || typeof value !== "object" || value.kind !== form.collection)
+        return false;
+      return value.kind === "dict"
+        ? value.entries.every((entry) => fits(form.of, entry.value))
+        : value.kind === "list" || value.kind === "set"
+          ? value.items.every((item) => fits(form.of, item))
+          : false;
+  }
+}
+
+/** The form at `valueOf`'s leaf: a name's, an optional's (with its `null` where it wraps no collection), a union's. */
+function leafForm(form: Form): Form {
+  switch (form.kind) {
+    case "name":
+      return form;
+    case "optional":
+      return form.of.kind === "collection" ? leafForm(form.of) : optional(leafForm(form.of));
+    case "union":
+      return union(...form.members.map(leafForm));
+    case "collection":
+      return leafForm(form.of);
+  }
+}
+
+/** Whether the candidate route takes a written form: no set or dict element type and no written union (S10). */
+function inSlice(form: Form): boolean {
+  switch (form.kind) {
+    case "name":
+      return true;
+    case "optional":
+      return inSlice(form.of);
+    case "union":
+      return false;
+    case "collection":
+      return form.collection === "list" && inSlice(form.of);
+  }
+}
 
 type Decision =
   | "written"
@@ -191,7 +281,10 @@ type Decision =
   | "copy of a copy of a copy"
   | "projection"
   | "copy of a projection"
-  | "copy of a later-typed copy"
+  | "copy of an empty intermediate"
+  | "later copy of an empty intermediate"
+  | "copy of a null intermediate"
+  | "copy of a null-element intermediate"
   | "copy of an otherwise"
   | "copy of a get default";
 
@@ -218,6 +311,22 @@ export interface WrittenCase {
   readonly exact: boolean;
   /** Per host value, `null` where it fits, else where it stops (`TSR058@start:end`). */
   readonly runs: readonly (readonly [SerializableRuntimeValue, string | null])[];
+  /**
+   * The other host values every run gives: a written binding with no literal of its form starts as `hostInit`, a value
+   * of its form (else one no host value can be, which stops every run there).
+   */
+  readonly globals: Readonly<Record<string, SerializableRuntimeValue>>;
+  /**
+   * Whether the candidate route takes the source by its own axes (Astra's D1): no set or dict element type, no written
+   * union, no `otherwise` or `get` (S10) and no function; else the decision layer alone.
+   */
+  readonly executable: boolean;
+  /**
+   * The lines whose store brings a host value to a level of its destination that is decided (not every kind): each has
+   * the runtime-check warning there (`written-target`, `warning-runtime-check`), and no other diagnostic is reported;
+   * where `exact` is false, a copy of the host-started binding may warn as well (C9 r4.50 (1)).
+   */
+  readonly warned: readonly string[];
   /**
    * The program's C9 boundaries, sorted, each `root level [kinds] start:end`: one per store that brings the host value,
    * at the host read, against what its destination admits at the level it lands at; none where that level admits every
@@ -270,12 +379,25 @@ function siteIn(source: string, line: string, of: string): string {
 function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
   const type = formText(form);
   const literal = leafLiteral(form);
-  const init = valueOf(form, literal ?? "hostValue");
+  const init = valueOf(form, literal ?? "hostInit");
+  // (a host-started binding's own value: one of its form where a host value can be, so the copies after it run)
+  const fittingAt = FITTING_POOL.findIndex((given) => fits(leafForm(form), given));
+  const initial =
+    literal === null
+      ? fittingAt >= 0
+        ? FITTING_POOL[fittingAt]!
+        : HOST_VALUES.find((given) => !fits(leafForm(form), given))!
+      : null;
   const projected = decision === "projection" || decision === "copy of a projection";
-  const placed = projected && form.kind === "collection" ? form.of : form;
+  const placed = projected && form.kind === "collection" ? form.of : seeded(form, decision);
   const leaf = host === "direct" ? "hostValue" : host === "named" ? "h" : "[hostValue][0]";
-  // (a later copy's host store holds the host value whole: a literal around it would decide its levels first, A2)
-  const value = decision === "later copy" ? leaf : valueOf(placed, leaf);
+  // (a later copy's host store holds the host value whole: a literal around it would decide its levels first, A2; an
+  // empty intermediate's copies take it whole too, Astra's F1)
+  const whole =
+    decision === "later copy" ||
+    decision === "copy of an empty intermediate" ||
+    decision === "later copy of an empty intermediate";
+  const value = whole ? leaf : valueOf(placed, leaf);
   const lines = [
     ...(host === "named" ? ["let h = hostValue"] : []),
     `let typed: ${type} = ${init}`,
@@ -310,14 +432,21 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
       hostLine = `copy = ${value}`;
       lines.push("let middle = typed[0]", "let copy = middle", hostLine);
       break;
-    case "copy of a later-typed copy":
+    case "copy of an empty intermediate":
       hostLine = `copy = ${value}`;
-      lines.push(
-        `let middle = ${form.kind === "collection" && form.collection === "list" ? "[]" : "null"}`,
-        "middle = typed",
-        "let copy = middle",
-        hostLine,
-      );
+      lines.push("let middle = []", "middle = typed", "let copy = middle", hostLine);
+      break;
+    case "later copy of an empty intermediate":
+      hostLine = `let copy = ${value}`;
+      lines.push("let middle = []", "middle = typed", hostLine, "copy = middle");
+      break;
+    case "copy of a null intermediate":
+      hostLine = `copy = ${value}`;
+      lines.push("let middle = null", "middle = typed", "let copy = middle", hostLine);
+      break;
+    case "copy of a null-element intermediate":
+      hostLine = `copy = ${value}`;
+      lines.push("let middle = [null]", "middle = typed", "let copy = middle", hostLine);
       break;
     case "copy of an otherwise":
       hostLine = `copy = ${value}`;
@@ -338,16 +467,36 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
   // host store's, at the leaf or whole
   const stores = [
     ...(literal === null
-      ? [{ ...span(`let typed: ${type} = ${init}`, init), whole: false, of: form }]
+      ? [
+          {
+            ...span(`let typed: ${type} = ${init}`, init),
+            whole: false,
+            of: form,
+            line: `let typed: ${type} = ${init}`,
+          },
+        ]
       : []),
-    { ...span(hostLine, value), whole: decision === "later copy", of: placed },
+    { ...span(hostLine, value), whole, of: placed, line: hostLine },
   ];
-  const runs = HOST_VALUES.map(
-    ([given, is]): readonly [SerializableRuntimeValue, string | null] => {
-      const stop = stores.find((store) => !fitsAt(store.of, store.whole, is));
-      return [given, stop === undefined ? null : `TSR058@${stop.value}`];
-    },
-  );
+  const stopOf = (given: SerializableRuntimeValue): string | null => {
+    const stop = stores.find(
+      (store, index) =>
+        !fits(
+          store.whole ? store.of : leafForm(store.of),
+          index === 0 && literal === null ? initial! : given,
+        ),
+    );
+    return stop === undefined ? null : `TSR058@${stop.value}`;
+  };
+  const tried = [...HOST_VALUES];
+  if (tried.every((given) => stopOf(given) !== null)) {
+    const fitting = FITTING_POOL.find((given) => stopOf(given) === null);
+    if (fitting !== undefined) tried.push(fitting);
+  }
+  const runs = tried.map((given): readonly [SerializableRuntimeValue, string | null] => [
+    given,
+    stopOf(given),
+  ]);
   const place = decision === "written" ? "typed" : "copy";
   const boundaries = [
     ...(literal === null
@@ -355,7 +504,7 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
           "typed",
           levelsOf(form),
           leafDepth(form),
-          siteIn(source, `let typed: ${type} = ${init}`, "hostValue"),
+          siteIn(source, `let typed: ${type} = ${init}`, "hostInit"),
         )
       : []),
     ...(host === "named"
@@ -363,10 +512,14 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
       : boundaryAt(
           place,
           levelsOf(placed),
-          decision === "later copy" ? 0 : leafDepth(placed),
+          whole ? 0 : leafDepth(placed),
           siteIn(source, hostLine, "hostValue"),
         )),
   ];
+  // (a store warns where its host value lands at a decided level: whole at the place's own, else at its leaf's)
+  const warned = stores.flatMap(({ of, whole: atRoot, line }) =>
+    levelsOf(of)[atRoot ? 0 : leafDepth(of)]!.includes("unknown") ? [] : [line],
+  );
   return {
     name: `${type}, ${decision}, ${host}`,
     source,
@@ -377,23 +530,26 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
     checks: stores.map(({ store, of }) => `${store} ${checkedText(of)}`),
     exact: literal !== null,
     runs,
+    globals: literal === null ? { hostInit: initial! } : {},
+    executable:
+      inSlice(form) && decision !== "copy of an otherwise" && decision !== "copy of a get default",
+    warned,
     boundaries: boundaries.sort(),
   };
 }
 
 /**
- * Whether a host value of the kinds `is` fits a form: at its innermost element (`valueOf`'s leaf), or whole, a list
- * value's element (an integer, `HOST_VALUES`) fitting the level below.
+ * The form a seeded intermediate's copy holds (Astra's F2: the inherited decision keeps the intermediate's own `null`):
+ * after a `null` start the form made optional, after a `[null]` start its element made optional; else the form.
  */
-function fitsAt(form: Form, whole: boolean, is: readonly string[]): boolean {
-  if (!whole) return is.some((kind) => leafKinds(form).includes(kind));
-  const levels = levelsOf(form);
-  if (!is.some((kind) => levels[0]!.includes(kind))) return false;
-  if (!is.includes("list") || levels.length < 2) return true;
-  return (
-    levels[1]!.includes("unknown") ||
-    ["integer", "number"].some((kind) => levels[1]!.includes(kind))
-  );
+function seeded(form: Form, decision: Decision): Form {
+  if (decision === "copy of a null intermediate")
+    return levelsOf(form)[0]!.includes("null") ? form : optional(form);
+  if (decision === "copy of a null-element intermediate" && form.kind === "collection")
+    return levelsOf(form)[1]!.includes("null")
+      ? form
+      : collection(form.collection, optional(form.of));
+  return form;
 }
 
 /** A form's depth: its collections' nesting. */
@@ -426,21 +582,40 @@ const DECISIONS: readonly Decision[] = [
 const PROJECTIONS: readonly Decision[] = ["projection", "copy of a projection"];
 
 /**
- * Where a copied place's own written type comes from besides a whole copy at its start (Sol's round 2: the seeds): a copy
- * after an untyped start, a selected `otherwise`, an empty list's `get` default; its copy keeps the type (r4.75 (1)).
+ * Where a copied place's own written type comes from besides a whole copy at its start (Sol's round 2: the seeds; Astra's
+ * F1, F2): a later store after an empty list (its copy taken before or after the host value) or after `null`, a list of
+ * `null` before it, a selected `otherwise`, an empty list's `get` default; its copy keeps the place's decision (r4.75
+ * (1)), the place's own `null` included.
  */
 const SEEDS: readonly Decision[] = [
-  "copy of a later-typed copy",
+  "copy of an empty intermediate",
+  "later copy of an empty intermediate",
+  "copy of a null intermediate",
+  "copy of a null-element intermediate",
   "copy of an otherwise",
   "copy of a get default",
 ];
+
+/** The seeds that start the intermediate as a list: the forms that are a list, not optional. */
+const LIST_SEEDS: readonly Decision[] = [
+  "copy of an empty intermediate",
+  "later copy of an empty intermediate",
+  "copy of a null-element intermediate",
+];
+
+/** The seeds that apply to a form. */
+const seedsOf = (form: Form): readonly Decision[] =>
+  form.kind === "collection" && form.collection === "list"
+    ? SEEDS
+    : SEEDS.filter((seed) => !LIST_SEEDS.includes(seed));
 
 /**
  * The merged S6's B1 (the reviewer's written-domain matrix, rebuilt by axes): nine element domains (the four usual
  * scalars, each optional, and `null` alone) × list depths 0–3, the outermost list optional or not × the place written,
  * an early or a later copy, a copy at the end of a chain of two or three copies, a copy of the written list's element
  * (a typed index projection) or a copy of that copy, a copy of a place typed by each seed (`SEEDS`) × the host value
- * direct, named or held at an index.
+ * direct, named or held at an index; and a swap of a `null` intermediate (`nullSwap`) and a copy of a literal with `null`
+ * beside its written copy (`literalNull`).
  */
 export const WRITTEN_DOMAIN_MATRIX: readonly WrittenCase[] = (() => {
   const out: WrittenCase[] = [];
@@ -455,13 +630,88 @@ export const WRITTEN_DOMAIN_MATRIX: readonly WrittenCase[] = (() => {
         let form = domain;
         for (let level = 0; level < depth; level += 1) form = collection("list", form);
         if (outerOptional) form = optional(form);
-        for (const decision of [...DECISIONS, ...PROJECTIONS, ...SEEDS]) {
+        for (const decision of [...DECISIONS, ...PROJECTIONS, ...seedsOf(form)]) {
           if (PROJECTIONS.includes(decision) && (outerOptional || depth === 0)) continue;
           for (const host of HOSTS) out.push(writtenCase(form, decision, host));
         }
       }
+  out.push(nullSwap(), literalNull());
   return out;
 })();
+
+/**
+ * Sol's round 3 B1: a literal's `null` beside a written copy makes its element optional (A8, ADR 0021 1.3), so a copy of
+ * the literal's place keeps it; the host value then stored into the copy's element.
+ */
+function literalNull(): WrittenCase {
+  const hostLine = "out = [hostValue]";
+  const lines = [
+    "let typed: integer = 1",
+    "let middle = [null, typed]",
+    "let out = middle",
+    hostLine,
+  ];
+  const source = `${[...lines, 'say "DONE"', "exit"].join("\n")}\n`;
+  const start = source.indexOf(`${hostLine}\n`);
+  const site = siteIn(source, hostLine, "hostValue");
+  const stored = siteIn(source, hostLine, "[hostValue]");
+  const form = collection("list", optional(name("integer")));
+  return {
+    name: "integer, a copy of a literal with null beside the copy, direct",
+    source,
+    place: "out",
+    form: formText(form),
+    decision: "a copy of a literal with null beside the copy",
+    levels: levelsOf(form),
+    checks: [`${start}:${start + hostLine.length} list<integer|null>`],
+    exact: true,
+    runs: HOST_VALUES.map((given) => [
+      given,
+      fits(leafForm(form), given) ? null : `TSR058@${stored}`,
+    ]),
+    globals: {},
+    executable: true,
+    warned: [hostLine],
+    boundaries: [`out 1 [integer,null] ${site}`],
+  };
+}
+
+/**
+ * Astra's F2 in a swap: `a` is optional by its own `null` before its written copy, so `tmp`, its copy, is too, past the
+ * swap's copies back (`a = b`, `b = tmp`); the host value then stored into `tmp`.
+ */
+function nullSwap(): WrittenCase {
+  const hostLine = "tmp = hostValue";
+  const lines = [
+    "let typed: integer = 1",
+    "let a = null",
+    "a = typed",
+    "let b = 2",
+    "let tmp = a",
+    "a = b",
+    "b = tmp",
+    hostLine,
+  ];
+  const source = `${[...lines, 'say "DONE"', "exit"].join("\n")}\n`;
+  const start = source.indexOf(`${hostLine}\n`);
+  const site = siteIn(source, hostLine, "hostValue");
+  const form = optional(name("integer"));
+  return {
+    name: "integer, a swap of a null intermediate, direct",
+    source,
+    place: "tmp",
+    form: formText(form),
+    decision: "a swap of a null intermediate",
+    levels: levelsOf(form),
+    checks: [`${start}:${start + hostLine.length} integer|null`],
+    exact: true,
+    runs: HOST_VALUES.map((given) => [given, fits(form, given) ? null : `TSR058@${site}`]),
+    globals: {},
+    executable: true,
+    warned: [hostLine],
+    boundaries: [`tmp 0 [integer,null] ${site}`],
+  };
+}
 
 /**
  * One source of `UNRESTRICTED_COLLECTION_MATRIX` or `OBJECT_PROPERTY_MATRIX`: contents an unrestricted part takes, which
@@ -475,6 +725,8 @@ export interface UnrestrictedCase {
   readonly path: readonly string[];
   /** The kinds the place admits at each prefix of `path`, from the place itself, `unknown` (every kind) last. */
   readonly levels: readonly (readonly string[])[];
+  /** Whether the candidate route takes the source by its own axes: a list's literals, never a set's, dict's or object's. */
+  readonly executable: boolean;
 }
 
 /**
@@ -536,6 +788,7 @@ export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() =
             place,
             path: Array<string>(levels.length - 1).fill("element"),
             levels,
+            executable: kind === "list",
           });
         }
   return out;
@@ -546,8 +799,9 @@ export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() =
  * every kind (V30 §13; r4.74 (2)) in each form that holds one, `object`, `object?`, `object | string`, and as a list's
  * element at depths 1 and 2, optional or in a union too × the property's contents (an integer, text, a boolean, `null`,
  * a list, the host value) × the place written, a copy of it at the end of a chain of one to three copies, a copy of the
- * property (a projection) or a copy of that copy, a copy of a place typed after a `null` start, each then taking them. Nothing is owed: no diagnostic, no check, no
- * boundary. The candidate route does not take object literals: the decision layer only.
+ * property (a projection) or a copy of that copy, a copy of a place typed after a `null` start, each then taking them.
+ * Nothing is owed: no diagnostic, no check, no boundary. The candidate route does not take object literals: the decision
+ * layer only.
  */
 export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
   const out: UnrestrictedCase[] = [];
@@ -582,7 +836,7 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
         "copy of a copy of a copy",
         "projection",
         "copy of a projection",
-        "copy of a later-typed copy",
+        "copy of a null intermediate",
       ] as const) {
         const projected = arrival === "projection" || arrival === "copy of a projection";
         const place = arrival === "written" ? "typed" : "copy";
@@ -597,7 +851,7 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
           ],
           projection: [`let copy = typed${index}.p`],
           "copy of a projection": [`let middle = typed${index}.p`, "let copy = middle"],
-          "copy of a later-typed copy": [
+          "copy of a null intermediate": [
             "let middle = null",
             "middle = typed",
             "let copy = middle",
@@ -613,7 +867,14 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
           source: `${[...lines, 'say "DONE"', "exit"].join("\n")}\n`,
           place,
           path: projected ? [] : property,
-          levels: projected ? [["unknown"]] : [...levelsOf(form), ["unknown"]],
+          // (a `null` start before the written copy keeps its `null` in the copy, Astra's F2)
+          levels: projected
+            ? [["unknown"]]
+            : [
+                ...levelsOf(arrival === "copy of a null intermediate" ? optional(form) : form),
+                ["unknown"],
+              ],
+          executable: false,
         });
       }
   }
@@ -624,7 +885,9 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
  * V30 §13's written-type matrix (the orchestrator's instruction): every type name (the scalars, `null`, the
  * unrestricted `list`, `set`, `dict`, `object`, the program-control names) in each form §13 lists, `T`, `T?`, `T[]`,
  * `T set`, `T dict`, `T?[]`, `T[]?`, `T | U` and `(T | U)[]` (beside `string`, `integer` for a `string`), nested to depth
- * three (`T[][]`, `T?[][]`, `T[]?[]`, `T[] set`, `T[] dict`, `T[][][]`; `null?` is `null`), × the place written, an early
+ * three (`T[][]`, `T?[][]`, `T[]?[]`, `T[] set`, `T[] dict`, `T[][][]`; `null?` is `null`, so the forms that only make
+ * `null` optional are left out, while its optional collection layers, `null[]?` and `null[]?[]`, remain), × the place
+ * written, an early
  * or a later copy, a copy at the end of a chain of two or three copies, for a list form a copy of its element (a typed
  * index projection) or a copy of that copy × the host value direct, named or held at an index; and for a form of depth
  * one at most a copy of a place typed by each seed (`SEEDS`), the host value direct. A union holding a whole collection
@@ -637,7 +900,7 @@ export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
     const t = name(base);
     const other = name(base === "string" ? "integer" : "string");
     const collected = base !== "object" && UNRESTRICTED.has(base);
-    // (`null?` is `null`: the optional forms of `null` are its plain ones)
+    // (`null?` is `null`: the forms that only make `null` optional are its plain ones; an optional collection stays)
     const opt = (of: Form): Form => (base === "null" ? of : optional(of));
     const forms: Form[] = [
       t,
@@ -663,7 +926,7 @@ export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
         for (const host of HOSTS) out.push(writtenCase(form, decision, host));
       // (the seeds with the host value direct: every placement of it is the written-domain matrix's)
       if (depthOf(form) <= 1)
-        for (const decision of SEEDS) out.push(writtenCase(form, decision, "direct"));
+        for (const decision of seedsOf(form)) out.push(writtenCase(form, decision, "direct"));
     }
   }
   return out;
@@ -715,12 +978,18 @@ export const INFERRED_COPY_MATRIX: readonly WrittenCase[] = (() => {
               `${start}:${end} ${"list<".repeat(depth)}${kinds.join("|")}${">".repeat(depth)}`,
             ],
             exact: true,
-            runs: HOST_VALUES.map(([given, is]) => [
+            runs: HOST_VALUES.map((given) => [
               given,
-              is.some((kind) => kinds.includes(kind))
+              kindsOf(given).some((kind) => kinds.includes(kind))
                 ? null
                 : `TSR058@${end - value.length}:${end}`,
             ]),
+            globals: {},
+            executable: true,
+            // (a copy taken after the `null`: its own store holds `null`, which decides nothing, and the host value
+            // nothing either, so its contract's kinds are published: a host value brought inline owes its boundary
+            // only, a named one, which another store brought, its check at the store too, r4.50 (1))
+            warned: widening === "null" && copied === "after" && host !== "named" ? [] : [hostLine],
             boundaries:
               host === "named"
                 ? [`h 0 [unknown] ${siteIn(source, "let h = hostValue", "hostValue")}`]
@@ -763,6 +1032,9 @@ export const DEFAULT_CHAIN_MATRIX: readonly WrittenCase[] = (() => {
         checks: [],
         exact: true,
         runs: [],
+        globals: {},
+        executable: false,
+        warned: [" out = hostValue"],
         boundaries: boundaryAt("out", levels, 0, siteIn(source, " out = hostValue", "hostValue")),
       });
     }

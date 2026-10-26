@@ -7,6 +7,7 @@ import { analyseCore, type Answers } from "../src/type-inference/core/answers.js
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
+import type { PlaceId } from "../src/type-inference/graph.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
@@ -29,7 +30,10 @@ import {
  * target's level and `against`, none at a level that admits every kind), the plan (each store that brings a host value
  * checked against the whole written type) and
  * the runs (each host value that fits says DONE, each other one stops at TSR058 at the first checked store's value,
- * nothing said). A source the candidate route does not take is checked in the decision layer alone.
+ * nothing said). The decision layer also holds the outcome and every diagnostic: a runtime-check warning at each store
+ * that brings a host value to a decided level, nothing else. Whether the candidate route takes a source is each row's
+ * own axis (`executable`): a row it takes must plan and run, a row it does not is checked in the decision layer alone.
+ * Each exact source is analysed, planned and run once per mode, and every row that holds it is compared with that.
  */
 
 function inBothOrders<T>(run: () => T): T {
@@ -61,19 +65,33 @@ function checksOf(plan: InstructionPlan): string[] {
   );
 }
 
+/** The host globals a source may read: the host value, and a host-started binding's own (`WrittenCase.globals`). */
+const GLOBALS = ["hostValue", "hostInit"];
+
+/** A source's request and its bindings' ids, once per exact source (a `CoreProgram` builds its graph and dominators). */
+const prepared = new Map<
+  string,
+  { readonly request: CoreAnalysisRequest; readonly ids: Map<string, PlaceId> }
+>();
+
+function prepare(source: string) {
+  let known = prepared.get(source);
+  if (known === undefined) {
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+    assert.ok(request !== null, `${JSON.stringify(source)}: its file parses and resolves`);
+    const ids = new Map<string, PlaceId>();
+    for (const { id, kind } of new CoreProgram(request).places)
+      if (kind.kind === "binding" && !ids.has(kind.name)) ids.set(kind.name, id);
+    prepared.set(source, (known = { request, ids }));
+  }
+  return known;
+}
+
 /**
  * The place's admitted kinds at each prefix of `path`, and the program's C9 boundaries, sorted, each as `root level
  * [against] start:end` (`WrittenCase.boundaries`).
  */
-function decision(
-  answers: Answers,
-  request: CoreAnalysisRequest,
-  place: string,
-  path: readonly string[],
-) {
-  const id = new CoreProgram(request).places.find(
-    ({ kind }) => kind.kind === "binding" && kind.name === place,
-  )!.id;
+function decision(answers: Answers, id: PlaceId, path: readonly string[]) {
   return {
     levels: Array.from({ length: path.length + 1 }, (_, length) => {
       const admitted = answers.place(id, path.slice(0, length)).admitted;
@@ -90,27 +108,50 @@ function decision(
   };
 }
 
+/** The line of `source` an offset is on. */
+function lineAt(source: string, offset: number): string {
+  const end = source.indexOf("\n", offset);
+  return source.slice(source.lastIndexOf("\n", offset - 1) + 1, end < 0 ? undefined : end);
+}
+
 /** A written case's element path down its levels. */
 const elementsOf = (c: WrittenCase): string[] => Array<string>(c.levels.length - 1).fill("element");
 
-/** Every layer of one source in one order: the decision, and the plan and its runs where the route takes it. */
-function observe(c: WrittenCase, request: CoreAnalysisRequest) {
-  const answers = analyseCore(request);
+/**
+ * Every layer of one source in one order: the decision (its analysis released before the route compiles), and the plan
+ * and its runs where the route takes it.
+ */
+function observe(c: WrittenCase) {
+  const { request, ids } = prepare(c.source);
+  const decided = (() => {
+    const answers = analyseCore(request);
+    return {
+      ...decision(answers, ids.get(c.place)!, elementsOf(c)),
+      outcome: answers.outcome,
+      diagnostics: [
+        ...new Set(
+          answers.diagnostics.map(
+            (found) => `${found.class} ${found.kind} ${lineAt(c.source, found.site.start)}`,
+          ),
+        ),
+      ].sort(),
+    };
+  })();
   let plan: InstructionPlan | null | "outside";
   try {
-    plan = compileSourceWithBackend(c.source, { globals: ["hostValue"] }, CORE_BACKEND).plan;
+    plan = compileSourceWithBackend(c.source, { globals: GLOBALS }, CORE_BACKEND).plan;
   } catch (error) {
     if (!(error instanceof CandidateOutsideSlice)) throw error;
     plan = "outside";
   }
   return {
-    ...decision(answers, request, c.place, elementsOf(c)),
+    ...decided,
     checks: plan === "outside" ? "outside" : plan === null ? "no plan" : checksOf(plan),
     runs:
       plan === "outside" || plan === null
         ? []
         : c.runs.map(([value]) => {
-            const ran = runGlobals(plan, { hostValue: value });
+            const ran = runGlobals(plan, { ...c.globals, hostValue: value });
             return {
               status: ran.status,
               failure: ran.failure,
@@ -120,38 +161,73 @@ function observe(c: WrittenCase, request: CoreAnalysisRequest) {
   };
 }
 
+/** Each exact input's observation per mode, shared by every row that holds it (Astra's D3). */
+const observations = new Map<string, ReturnType<typeof observe>>();
+
+function observed(c: WrittenCase, shared: boolean): ReturnType<typeof observe> {
+  const key = JSON.stringify([
+    shared,
+    c.source,
+    c.place,
+    c.levels.length,
+    c.runs.map(([value]) => value),
+    c.globals,
+  ]);
+  let found = observations.get(key);
+  if (found === undefined) {
+    found = inBothOrders(() => (shared ? observe(c) : withoutSharing(() => observe(c))));
+    observations.set(key, found);
+  }
+  return found;
+}
+
 /**
- * The sources of `cases` that fail a layer, how many the route took in every layer, and the forms and the decisions it
- * took in none of their sources (the decision layer alone).
+ * The sources of `cases` that fail a layer, how many the route took in every layer, the forms and the decisions it took
+ * in none of their sources, and the rows it took whose kinds no host value has (each runs forbidden values only).
  */
 function failing(cases: readonly WrittenCase[]): {
   wrong: string[];
   full: number;
   decisionOnly: string;
+  forbiddenOnly: string;
 } {
   const wrong: string[] = [];
   const taken = { forms: new Map<string, boolean>(), decisions: new Map<string, boolean>() };
+  const forbiddenOnly = new Set<string>();
   let full = 0;
   for (const c of cases) {
-    const request = coreRequest([{ path: "main.tease", source: c.source }]);
-    assert.ok(request !== null, `${c.name}: its file parses and resolves`);
     for (const shared of [true, false]) {
-      const observed = inBothOrders(() =>
-        shared ? observe(c, request) : withoutSharing(() => observe(c, request)),
-      );
+      const seen = observed(c, shared);
       const name = `${c.name}${shared ? "" : " (no sharing)"}`;
-      if (JSON.stringify(observed.levels) !== JSON.stringify(c.levels.map(sorted)))
-        wrong.push(`${name}: admits ${JSON.stringify(observed.levels)}`);
-      if (JSON.stringify(observed.boundaries) !== JSON.stringify(c.boundaries))
-        wrong.push(`${name}: C9 boundaries ${JSON.stringify(observed.boundaries)}`);
+      if (JSON.stringify(seen.levels) !== JSON.stringify(c.levels.map(sorted)))
+        wrong.push(`${name}: admits ${JSON.stringify(seen.levels)}`);
+      if (JSON.stringify(seen.boundaries) !== JSON.stringify(c.boundaries))
+        wrong.push(`${name}: C9 boundaries ${JSON.stringify(seen.boundaries)}`);
+      const diagnostics = [
+        ...new Set(c.warned.map((line) => `warning-runtime-check written-target ${line}`)),
+      ].sort();
+      const outcome = diagnostics.length > 0 ? "warning-runtime-check" : "valid";
+      // (a copy of a host-started binding may owe its runtime check too: only warnings, and those required)
+      if (
+        seen.outcome !== outcome ||
+        (c.exact
+          ? JSON.stringify(seen.diagnostics) !== JSON.stringify(diagnostics)
+          : !diagnostics.every((found) => seen.diagnostics.includes(found)) ||
+            !seen.diagnostics.every((found) =>
+              found.startsWith("warning-runtime-check written-target "),
+            ))
+      )
+        wrong.push(`${name}: ${seen.outcome}, diagnostics ${JSON.stringify(seen.diagnostics)}`);
+      const inside = seen.checks !== "outside";
+      if (inside !== c.executable)
+        wrong.push(`${name}: the route ${inside ? "takes" : "does not take"} it`);
       if (shared) {
-        const inside = observed.checks !== "outside";
         taken.forms.set(c.form, (taken.forms.get(c.form) ?? false) || inside);
         taken.decisions.set(c.decision, (taken.decisions.get(c.decision) ?? false) || inside);
       }
-      if (observed.checks === "outside") continue;
+      if (!inside) continue;
       if (shared) full += 1;
-      const checks = observed.checks;
+      const checks = seen.checks;
       if (
         checks === "no plan" ||
         (c.exact
@@ -164,8 +240,15 @@ function failing(cases: readonly WrittenCase[]): {
           ? { status: "halted", failure: null, says: ["DONE"] }
           : { status: "failed", failure: stop, says: [] },
       );
-      if (observed.runs.length > 0 && JSON.stringify(observed.runs) !== JSON.stringify(runs))
-        wrong.push(`${name}: runs ${JSON.stringify(observed.runs)}`);
+      if (JSON.stringify(seen.runs) !== JSON.stringify(runs))
+        wrong.push(`${name}: runs ${JSON.stringify(seen.runs)}`);
+      // (every row the route takes runs a forbidden value, and a conforming one where its kinds are a host value's)
+      if (!c.runs.some(([, stop]) => stop !== null)) wrong.push(`${name}: no forbidden run`);
+      if (!c.runs.some(([, stop]) => stop === null)) {
+        if (!/timer|media|messageHandle|speaker/.test(c.form))
+          wrong.push(`${name}: no conforming run`);
+        else if (shared) forbiddenOnly.add(c.form);
+      }
     }
   }
   const none = (map: Map<string, boolean>): string =>
@@ -174,6 +257,7 @@ function failing(cases: readonly WrittenCase[]): {
     wrong,
     full,
     decisionOnly: `forms ${none(taken.forms)}; decisions ${none(taken.decisions)}`,
+    forbiddenOnly: [...forbiddenOnly].join(", ") || "none",
   };
 }
 
@@ -193,23 +277,26 @@ function owing(cases: readonly UnrestrictedCase[]): { wrong: string[]; full: num
   const wrong: string[] = [];
   let full = 0;
   for (const c of cases) {
-    const request = coreRequest([{ path: "main.tease", source: c.source }]);
-    assert.ok(request !== null, `${c.name}: its file parses and resolves`);
+    const { request, ids } = prepare(c.source);
     for (const shared of [true, false]) {
       const run = () => {
         const answers = analyseCore(request);
+        const levels = decision(answers, ids.get(c.place)!, c.path).levels;
+        const result = {
+          outcome: answers.outcome,
+          diagnostics: answers.diagnostics.length,
+          checks: answers.checks.length,
+        };
         let plan: InstructionPlan | null | "outside";
         try {
-          plan = compileSourceWithBackend(c.source, { globals: ["hostValue"] }, CORE_BACKEND).plan;
+          plan = compileSourceWithBackend(c.source, { globals: GLOBALS }, CORE_BACKEND).plan;
         } catch (error) {
           if (!(error instanceof CandidateOutsideSlice)) throw error;
           plan = "outside";
         }
         return {
-          levels: decision(answers, request, c.place, c.path).levels,
-          outcome: answers.outcome,
-          diagnostics: answers.diagnostics.length,
-          checks: answers.checks.length,
+          levels,
+          ...result,
           plan:
             plan === "outside"
               ? "outside"
@@ -228,7 +315,7 @@ function owing(cases: readonly UnrestrictedCase[]): { wrong: string[]; full: num
         outcome: "valid",
         diagnostics: 0,
         checks: 0,
-        plan: observed.plan === "outside" ? "outside" : { checks: [], says: ["DONE"] },
+        plan: c.executable ? { checks: [], says: ["DONE"] } : "outside",
       };
       if (JSON.stringify(observed) !== JSON.stringify(expected))
         wrong.push(`${c.name}${shared ? "" : " (no sharing)"}: ${JSON.stringify(observed)}`);
@@ -254,10 +341,11 @@ test("an object's properties take any contents in every form, copy and projectio
 });
 
 test("V30 §13's written types, each form and copy, admit what they permit in every layer (merged S6 B1, B2)", (t) => {
-  const { wrong, full, decisionOnly } = failing(V30_TYPE_MATRIX);
+  const { wrong, full, decisionOnly, forbiddenOnly } = failing(V30_TYPE_MATRIX);
   t.diagnostic(
     `${V30_TYPE_MATRIX.length} sources (${full} in all three layers), both orders, sharing on and off; ` +
-      `decision layer only (outside the candidate slice): ${decisionOnly}`,
+      `decision layer only (outside the candidate slice): ${decisionOnly}; forbidden values only (no host value is ` +
+      `a timer, media or message handle or a speaker): ${forbiddenOnly}`,
   );
   assert.deepEqual(wrong, []);
 });
@@ -279,14 +367,13 @@ test("a copy of an unannotated parameter whose default copies a written binding 
 });
 
 test("a copy keeps its source's written type past a later copy back, and agrees with its source on a cycle of copies (Sol r2)", () => {
-  const levelsOf = (source: string, places: readonly string[]) => {
-    const request = coreRequest([{ path: "main.tease", source }]);
-    assert.ok(request !== null);
+  const levelsOf = (source: string, places: readonly string[], path = ["element"]) => {
+    const { request, ids } = prepare(source);
     const run = () => {
       const answers = analyseCore(request);
       return {
         outcome: answers.outcome,
-        levels: places.map((place) => decision(answers, request, place, ["element"]).levels),
+        levels: places.map((place) => decision(answers, ids.get(place)!, path).levels),
       };
     };
     const shared = inBothOrders(run);
@@ -301,9 +388,10 @@ test("a copy keeps its source's written type past a later copy back, and agrees 
     "let typed: null[] = [null]\nlet a = null\nlet b = a\na = typed\na = b\nlet out = b\nout = [hostValue]\nexit\n",
     ["b", "out"],
   );
+  // (`a`'s own `null` start before its written copy makes it optional, and its copies with it: Astra's F2)
   assert.deepEqual(back.levels, [
-    [["list"], ["null"]],
-    [["list"], ["null"]],
+    [["list", "null"], ["null"]],
+    [["list", "null"], ["null"]],
   ]);
   const swap = levelsOf(
     "let typed: integer?[] = [1]\nlet a = typed\nlet b = [2]\nlet tmp = a\na = b\nb = tmp\ntmp = [null]\nexit\n",
@@ -316,4 +404,18 @@ test("a copy keeps its source's written type past a later copy back, and agrees 
     ["b", "out"],
   );
   assert.deepEqual(cycle.levels[1]![1], cycle.levels[0]![1]);
+  // a place copied into itself at another path is no cycle: `a.q.p` copies `a.p` (Sol's round 3 B2), in either order
+  const inside = levelsOf(
+    "let typed: null = null\nlet a = {p: typed, q: null}\na.q = a\nlet out = a.q.p\nout = hostValue\nexit\n",
+    ["out"],
+    [],
+  );
+  assert.deepEqual(inside, { outcome: "warning-runtime-check", levels: [[["null"]]] });
+  // a place nesting itself without end stops at the deepest path a written type reaches, within the allowance
+  const nesting = levelsOf(
+    "let typed: integer[] = [1]\nlet a = null\na = a[0]\na = [[typed]]\nlet out = a\nexit\n",
+    ["out"],
+    [],
+  );
+  assert.notEqual(nesting.outcome, "budget-error");
 });
