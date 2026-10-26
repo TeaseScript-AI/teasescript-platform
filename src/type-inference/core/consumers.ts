@@ -172,6 +172,8 @@ export class Consumers {
   readonly admission: Admission;
   /** The values a consumer answered by the quiet path (§3.3). */
   readonly quiet = new Set<PlaceId>();
+  /** The class sides whose members' values a quiet proof has already marked quiet (§4.4). */
+  readonly #quietSides = new Set<string>();
   /** Each consumer read's demand and the work it was the first to compute (S3 §5: a counter only here). */
   readonly reads: ReadWork[] = [];
   #reading: FlowNode | null = null;
@@ -440,7 +442,9 @@ export class Consumers {
       // an opaque value C5's obligation at its access (A7)
       if (decision.published) {
         for (const candidate of decision.candidates)
-          for (const [index, d] of [candidate.d, ...(candidate.members ?? [])].entries()) {
+          // (its members by reference, read one by one only while each owes: no per-path member list, Codex r22 F1)
+          for (let index = 0; index <= (candidate.members?.length ?? 0); index += 1) {
+            const d = index === 0 ? candidate.d : candidate.members![index - 1]!;
             const { at } = candidate;
             this.#reading = d.node;
             // (S6-CARRIERS §4.4: the representative's site is its class's proof, each member a visit)
@@ -652,7 +656,8 @@ export class Consumers {
       };
       // S6-CARRIERS §4.4: a class's quiet proofs, one per side of the decider, each its side's first member but the
       // decider's own store; a proof that emits nothing (no diagnostic, rejection or check) proves its side quiet, else
-      // each member of the side is visited
+      // each member of the side is visited. The class in source order (its representative, then its members by
+      // reference), each side a range of it found by a binary search: no per-path member list (Codex r22 F1)
       const emitted = (): number =>
         this.diagnostics.length + admission.rejections + admission.readChecks.length;
       const order = decider === null ? null : admission.sourceOrder(decider);
@@ -661,25 +666,47 @@ export class Consumers {
           visit(d, at);
           continue;
         }
-        const sides: Definition[][] = [[], []];
-        for (const member of [d, ...members])
-          sides[order !== null && admission.sourceOrder(member) < order ? 0 : 1]!.push(member);
-        for (const side of sides) {
-          const proof = side.find((member) => member !== decider || at.length > 0);
-          if (proof === undefined) continue;
+        const member = (index: number): Definition => (index === 0 ? d : members[index - 1]!);
+        const size = members.length + 1;
+        let split = 0;
+        if (order !== null) {
+          let high = size;
+          while (split < high) {
+            const middle = (split + high) >> 1;
+            program.work.charge("quietProofs");
+            if (admission.sourceOrder(member(middle)) < order) split = middle + 1;
+            else high = middle;
+          }
+        }
+        for (const [low, high] of [
+          [0, split],
+          [split, size],
+        ] as const) {
+          let proof = low;
+          if (proof < high && member(proof) === decider && at.length === 0) proof += 1;
+          if (proof >= high) continue;
           program.work.charge("quietProofs");
           const was = emitted();
-          visit(proof, at);
-          const rest = side.filter((member) => member !== proof);
+          visit(member(proof), at);
+          const value = member(proof).value;
           if (emitted() === was) {
-            // (equivalent values are quiet alike, §3.3)
-            if (proof.value !== undefined && this.quiet.has(proof.value))
-              this.#skip(...rest.map((m) => m.value));
+            // (equivalent values are quiet alike, §3.3: each side's once)
+            const side = `${d.uid}|${low}|${high}`;
+            if (value !== undefined && this.quiet.has(value) && !this.#quietSides.has(side)) {
+              this.#quietSides.add(side);
+              program.work.charge("checksSkipped");
+              for (let index = low; index < high; index += 1) {
+                program.work.charge("checksSkipped");
+                const skipped = member(index).value;
+                if (index !== proof && skipped !== undefined) this.quiet.add(skipped);
+              }
+            }
             continue;
           }
-          for (const member of rest) {
+          for (let index = low; index < high; index += 1) {
+            if (index === proof) continue;
             program.work.charge("c1Visits");
-            visit(member, at);
+            visit(member(index), at);
           }
         }
       }
