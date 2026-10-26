@@ -21,7 +21,7 @@ regenerate S6's committed fixture").
 
 ## Refresh to the set's revision `81b3a0c4…` (M4 step S6b)
 
-Opus, 2026-10-26, builder for M4 step S6b (lead Fable). Both files are regenerated from the set's revision
+Opus, builder for M4 step S6b (lead Fable). Both files are regenerated from the set's revision
 `81b3a0c419ed542b…` (1,981 gate records) and its deferred records `77b11b86eae67cf7…` (9) with the tooling unchanged:
 `convert.py` `ba04601abfc9e012…`, `verify.py` `9a5b8e73c7bd46f9…`, `collection-rewrites.json` `981e40ee…`.
 

@@ -46,6 +46,7 @@ import {
   firstContext,
   firstWriter,
   makeItem,
+  marksOf,
   mergeItems,
   reasonContext,
   REASON,
@@ -94,17 +95,11 @@ export function unknownItem(reasons: number, writer: Writer | null = null): Item
  * result, F10's conversion, F14's length, F27's key) is guarded, and possible, where one of them is.
  */
 export function carried(item: Item, from: readonly Item[]): Item {
+  const marks = marksOf(from);
   const guard = from.find((each) => each.guarded === true);
-  const made =
-    guard === undefined
-      ? item
-      : {
-          ...item,
-          cert: "pos" as const,
-          guarded: true as const,
-          context: item.context ?? guard.context,
-        };
-  return from.some((each) => each.called === true) ? { ...made, called: true } : made;
+  return guard === undefined
+    ? { ...item, ...marks }
+    : { ...item, ...marks, cert: "pos", context: item.context ?? guard.context };
 }
 
 /** A typeless load's `default: null` beside its external data: the null carries the ingress's word (§3.4 r4.11). */
@@ -193,7 +188,7 @@ function belowUnknown(item: Item): Item {
     context: item.context,
     ...(item.ingress === undefined ? {} : { ingress: item.ingress }),
     ...(item.loose === true ? { loose: true } : {}),
-    ...(item.guarded === true ? { guarded: true } : {}),
+    ...marksOf([item]),
   });
 }
 
@@ -638,9 +633,9 @@ export class Contract {
       const at = termAt(written, path);
       if (at !== null) {
         const stored = yield* this.#contractAlong(place, path, 0, receiver.floor);
-        const guarded = stored.some((item) => item.guarded === true);
+        const marks = marksOf(stored);
         const tags = typeTags(at).map((tag) =>
-          makeItem(tag, null, guarded ? { cert: "pos", guarded: true } : {}),
+          makeItem(tag, null, { ...marks, ...(marks.guarded === true ? { cert: "pos" } : {}) }),
         );
         return path.at(-1) === "element" && stored.some((item) => item.tag === "empty")
           ? [...tags, EMPTY]

@@ -260,7 +260,9 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
   ];
   // a kind that came through a call (`called`) stays possible in dead code, so a guarded value copied from a call's
   // result, a field or element of one, or a parameter copied in a callee only a dead call calls, warns as on `main`: the
-  // live form's record, X1's word on the use (review r3 B3's shapes, standing, with an operation, a length and a merge)
+  // live form's record, X1's word on the use (reviews r3's and r4's B3 shapes, standing, with an operation, a length
+  // and a merge); a written destination keeps the flag as it keeps the guard mark
+  const written = `global n = 2.0\nfunction f(x: number): number {\n  return x\n}\nfunction fs(x: number[]): number[] {\n  return x\n}`;
   const transfers: readonly (readonly [string, string, string])[] = [
     [
       "a copy",
@@ -307,11 +309,44 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
       "global n = 2.0\nfunction f(x: number): number {\n  if hostValue { return f(x) }\n  return x\n}",
       "if n is integer { let v = f(n)\nrepeat v {} }",
     ],
+    ["a written copy", written, "if n is integer { let v: number = f(n)\nrepeat v {} }"],
+    ["a written list", written, "if n is integer { let v: number[] = [f(n)]\nrepeat v.first {} }"],
+    [
+      "a written list a call returns",
+      written,
+      "if n is integer { let v: number[] = fs([n])\nrepeat v.first {} }",
+    ],
+    [
+      "a copy of a written copy",
+      written,
+      "if n is integer { let v: number = f(n)\nlet w = v\nrepeat w {} }",
+    ],
+    [
+      "a written element",
+      written,
+      "if n is integer { let v: number = fs([n]).first\nrepeat v {} }",
+    ],
+    [
+      "a written nested list",
+      written,
+      "if n is integer { let v: number[][] = [[f(n)]]\nrepeat v.first.first {} }",
+    ],
+    [
+      "a store into a written place",
+      written,
+      "if n is integer { let v: number = 0\nv = f(n)\nrepeat v {} }",
+    ],
   ];
-  // such a copy as a dead call's argument for a written parameter stays unchecked, as every dead argument was on `main`
-  const copiedArgument = [
-    `global n = 2.0\nfunction f(x: number): number {\n  return x\n}\n${takesInteger}`,
-    "if n is integer { let v = f(n)\ntake(v) }",
+  // such a copy, written or not, as a dead call's argument for a written parameter stays unchecked, as every dead
+  // argument was on `main`
+  const copiedArguments: readonly (readonly [string, string])[] = [
+    [`${written}\n${takesInteger}`, "if n is integer { let v = f(n)\ntake(v) }"],
+    [`${written}\n${takesInteger}`, "if n is integer { let v: number = f(n)\ntake(v) }"],
+  ];
+  // a member of a call's unknown result as a dead argument: the live form's record without the argument's own C7 (r4 N2)
+  const unknownArgument = [
+    `function raw {\n  return hostValue\n}\n${takesInteger}`,
+    "let v = raw()\ntake(v.field)",
   ] as const;
   for (const reversed of [false, true]) {
     const order = reversed ? " reversed" : "";
@@ -332,12 +367,23 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
           differing.push(`${what}, ${where}${order}: ${found.join("; ")}`);
       }
     }
+    for (const [before, body] of copiedArguments)
+      for (const [where, shape] of shapes) {
+        const found = analysed(shape(before, body), reversed);
+        if (JSON.stringify(found) !== JSON.stringify(["valid"]))
+          differing.push(
+            `a guarded copy for a written parameter, ${body}, ${where}${order}: ${found.join("; ")}`,
+          );
+      }
+    const unknownLive = analysed(`${unknownArgument.join("\n")}\nexit\n`, reversed);
+    const ownCheck = (line: string): boolean =>
+      line.startsWith("written-target ") || line.startsWith("copy-type take.count ");
+    if (unknownLive.filter(ownCheck).length !== 2)
+      differing.push(`a member of an unknown result, live${order}: ${unknownLive.join("; ")}`);
     for (const [where, shape] of shapes) {
-      const found = analysed(shape(...copiedArgument), reversed);
-      if (JSON.stringify(found) !== JSON.stringify(["valid"]))
-        differing.push(
-          `a guarded copy for a written parameter, ${where}${order}: ${found.join("; ")}`,
-        );
+      const found = analysed(shape(...unknownArgument), reversed);
+      if (JSON.stringify(found) !== JSON.stringify(unknownLive.filter((line) => !ownCheck(line))))
+        differing.push(`a member of an unknown result, ${where}${order}: ${found.join("; ")}`);
     }
     for (const [what, before, body] of guardedResults)
       for (const program of [

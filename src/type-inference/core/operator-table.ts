@@ -5,6 +5,7 @@ import {
   firstContext,
   firstWriter,
   makeItem,
+  marksOf,
   mergeItems,
   ownContext,
   REASON,
@@ -180,13 +181,7 @@ export function operationItems(
       (first, item) => firstContext(first, ownContext(item)),
       null,
     );
-    const shared = {
-      reasons,
-      context,
-      cert: "pos" as const,
-      ...(combination.some((item) => item.guarded === true) ? { guarded: true as const } : {}),
-      ...(combination.some((item) => item.called === true) ? { called: true as const } : {}),
-    };
+    const shared = { reasons, context, cert: "pos" as const, ...marksOf(combination) };
     // A2, A3 r4.36: a result kind of a combination holding external data (an external unknown, or an operand item that is
     // itself possible solely through external data)
     const external = combination.some(

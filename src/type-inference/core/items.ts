@@ -79,12 +79,15 @@ export interface Item {
   readonly ingress?: IngressNode;
   /** External data that no ingress store brought, merged beside some that one did (C9). */
   readonly loose?: true;
-  /** The guard mark: the value was read under a test of its path, so no consumer errs on it (§3.2). */
+  /**
+   * The guard mark: the value was read under a test of its path, so no consumer errs on it (§3.2). An item made from
+   * others takes it from them through `marksOf`, as it takes `called`.
+   */
   readonly guarded?: true;
   /**
    * The value came through a call: a parameter's or a result's (F20–F22), travelling as the guard mark does. A dead call
    * binds nothing (F21), so in dead code such a kind may lack the marks its call would give: there it is never definite
-   * and no consumer errs on it (AD-3).
+   * (AD-3).
    */
   readonly called?: true;
   /** The unknown operand, by `fanIdentity`, whose operator rows this item is one of (§4 r4.14). */
@@ -106,6 +109,22 @@ export function makeItem(
   fields: ItemFields = {},
 ): Item {
   return { tag, cert: "def", reasons: 0, writer, context: null, ...fields };
+}
+
+/**
+ * The marks an item made from others takes from them: the guard mark where one of them is guarded (§3.2), and the
+ * through-a-call flag where one came through a call (AD-3). Every item rebuilt from others takes its marks here (the
+ * merge of one kind, an operator's rows, `carried`'s transfers, a written domain's kinds, a step below an unknown), so
+ * the two travel together.
+ */
+export function marksOf(from: readonly Item[]): {
+  readonly guarded?: true;
+  readonly called?: true;
+} {
+  return {
+    ...(from.some((each) => each.guarded === true) ? { guarded: true as const } : {}),
+    ...(from.some((each) => each.called === true) ? { called: true as const } : {}),
+  };
 }
 
 /** The mark of an element read that may find no element (TABLE §1 M): not a value, so no consumer checks it. */
@@ -225,8 +244,7 @@ function isLoose(item: Item): boolean {
 }
 
 function mergePair(first: Item, other: Item, ingress: IngressGraph): Item {
-  const guarded = first.guarded === true || other.guarded === true;
-  const called = first.called === true || other.called === true;
+  const marks = marksOf([first, other]);
   const node =
     first.ingress === undefined && other.ingress === undefined
       ? undefined
@@ -242,15 +260,14 @@ function mergePair(first: Item, other: Item, ingress: IngressGraph): Item {
   const extOnly = first.extOnly === true && other.extOnly === true;
   return {
     tag: first.tag,
-    cert: !guarded && (first.cert === "def" || other.cert === "def") ? "def" : "pos",
+    cert: marks.guarded !== true && (first.cert === "def" || other.cert === "def") ? "def" : "pos",
     reasons: first.reasons | other.reasons,
     writer: firstWriter(first.writer, other.writer),
     context: firstContext(first.context, other.context),
     ...(word === undefined ? {} : { word }),
     ...(node === undefined ? {} : { ingress: node }),
     ...(loose ? { loose: true } : {}),
-    ...(guarded ? { guarded: true } : {}),
-    ...(called ? { called: true } : {}),
+    ...marks,
     ...(fan === undefined ? {} : { fan }),
     ...(extOnly ? { extOnly: true } : {}),
   };
