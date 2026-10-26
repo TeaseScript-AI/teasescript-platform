@@ -6,7 +6,7 @@ import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 import type { PlainKind, ScalarKind } from "../value-kinds.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 102;
+export const INSTRUCTION_PLAN_VERSION = 103;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {

@@ -2052,9 +2052,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 102 | Player profile (owner decision, 2026-10-23): the instruction that copies the player profile into `player` is `copyPlayerProfile`, and a read of one of its person fields is `{ kind: "playerProfileField", name }`; plan validation previously accepted `copyAccount` and `accountField` instead. |
+| Instruction plan | 103 | The new type analysis's runtime checks (the port of the coarse core, step S7; only its plans carry them until it is selected): an `assign` of a property may carry `requireExisting`, a call `indexCheck`, `fallbackCheck`, and `expected`, a `binary` `otherwise` `fallbackCheck`, a `storeTemporary` `fallbackCheck` and `repair`, a `fileStore` of `fromJson` `expected`, and a `storageLoad` `repair`, which plan validation previously rejected; a plan without them runs as before. |
 | Runtime snapshot | 90 | Player profile (owner decision, 2026-10-23): the person fields the host gave at the start are kept as `playerProfile`; previously they were kept as `account`. |
-| Checkpoint | 126 | The player-profile plan and snapshot contracts. |
+| Checkpoint | 127 | The plan contract of the new type analysis's runtime checks. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -2086,6 +2086,9 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Instruction plan history
 
+- Revision 102: Player profile (owner decision, 2026-10-23): the instruction that copies the player profile into
+  `player` is `copyPlayerProfile`, and a read of one of its person fields is `{ kind: "playerProfileField", name }`;
+  plan validation previously accepted `copyAccount` and `accountField` instead.
 - Revision 101: Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `setFallback` instruction, a
   `transfer` destination names a file's entry, never a label, and no `goto` stands in a global function or its blocks;
   plan validation previously accepted all three.
@@ -2453,6 +2456,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 126: The player-profile plan and snapshot contracts.
 - Revision 125: The plan and snapshot contracts of files entered at their top.
 - Revision 124: The single-argument-copy snapshot contract.
 - Revision 123: the public key plan and snapshot contracts.
