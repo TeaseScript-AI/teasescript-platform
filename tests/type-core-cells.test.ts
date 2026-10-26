@@ -54,10 +54,10 @@ test("the core gives the expected record for every record of the cells it comple
 });
 
 /**
- * TABLE r4.63–r4.65's rule function as the set pins it (`cells-rule-function.jsonl`, the set's revision `24ea519a…`):
+ * TABLE r4.63–r4.66's rule function as the set pins it (`cells-rule-function.jsonl`, the set's revision `81b3a0c4…`):
  * its ten records, each compared whole in both orders, as the set's are, but those `heldBack` names.
  */
-test("the core gives the expected record for every rule-function record, in both orders (r4.63–r4.65)", () => {
+test("the core gives the expected record for every rule-function record, in both orders (r4.63–r4.66)", () => {
   const records = readFixture("cells-rule-function.jsonl");
   assert.equal(records.length, 10);
   for (const record of records) {

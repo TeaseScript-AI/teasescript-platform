@@ -50,10 +50,6 @@ export function heldBack(record: FixtureRecord): string | null {
   // C5's obligation on the receiver; the record, derived under r4.33, lacks it
   if (record.name === "cp9-cells/r8/get-dispatch/unknown")
     return "r4.60: the destination's C1 check, record corrected in the set, refreshed at S6b";
-  // TABLE r4.64 (C9 r4.10): whether a `say`, which requires no kind, is a consumer that reaches external data and so
-  // owes its boundary; the core's consumers that require none do not (`let x = hostValue`, `say x`: no check either)
-  if (record.name === "cp9-cells/s6/rule-function/loop/unknown-read")
-    return "r4.64: a say as C9's consumer reach, held for the lead";
   return null;
 }
 
