@@ -1,10 +1,14 @@
 import type {
   AssignmentStatement,
+  BinaryExpression,
+  CallExpression,
   Expression,
   Identifier,
   LetStatement,
   ListLiteral,
+  LoadExpression,
   Program,
+  PropertyAccessExpression,
   Statement,
 } from "../../ast.js";
 import { messageColorDiagnostics } from "../../authored-presentation.js";
@@ -15,21 +19,35 @@ import {
   repeatCountFix,
   repeatCountMessage,
 } from "../../loop-rules.js";
-import type { TypeCheckPlan } from "../../plan/model.js";
+import type { TypeCheckPlan, TypePlan, TypePropertyPlan } from "../../plan/model.js";
+import { compileChild, runCompileTask, type CompileTask } from "../../compiler/continuation.js";
 import type { SourceSpan } from "../../source.js";
 import { KnownValues } from "../../static-evaluation.js";
-import { members, openType, union, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
+import {
+  members,
+  nonNullType,
+  openType,
+  union,
+  UNKNOWN_TYPE,
+  type StaticType,
+} from "../../static-types.js";
 import { typeFromAnnotation } from "../../static-types/annotations.js";
 import { typeKey } from "../../storage-types.js";
 import { typePlan } from "../../type-plans.js";
-import { VALUE_KINDS } from "../../value-kinds.js";
-import type { FactSite, RuntimeCheckSite, SolvedTypeFacts, TypeCheckResult } from "../backend.js";
+import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../value-kinds.js";
+import type {
+  CoreRuntimeChecks,
+  FactSite,
+  RuntimeCheckSite,
+  SolvedTypeFacts,
+  TypeCheckResult,
+} from "../backend.js";
 import type { PlaceId, SourceSite } from "../graph.js";
 import { closedType, type Answers } from "./answers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import type { Item, ItemTag } from "./items.js";
 import type { CoreAnalysisRequest } from "./program.js";
-import type { CoreDiagnostic, Obligation } from "./result.js";
+import type { CoreDiagnostic, Obligation, RequiredKind } from "./result.js";
 
 /*
  * The consumer of the coarse core (the port plan's S5, completed in S9b): one walk over the source with the core's
@@ -51,6 +69,14 @@ function factSite(file: number, span: SourceSpan): FactSite {
   return { file, start: span.start.offset, end: span.end.offset };
 }
 
+/** An operand and the expressions it holds in parentheses, outermost first. */
+function operands(expression: Expression): Expression[] {
+  const found = [expression];
+  for (let at = expression; at.kind === "parenthesizedExpression"; at = at.expression)
+    found.push(at.expression);
+  return found;
+}
+
 /** The source of a program inside the slice, walked once: its statements, its expressions and what each belongs to. */
 export class SliceIndex {
   readonly lets: LetStatement[] = [];
@@ -60,6 +86,19 @@ export class SliceIndex {
   readonly lists: ListLiteral[] = [];
   /** The reads of variables and host values. */
   readonly reads: Identifier[] = [];
+  /** The reads of a property, not as a store's target. */
+  readonly properties: PropertyAccessExpression[] = [];
+  /** The calls and loads, in source order. */
+  readonly calls: CallExpression[] = [];
+  readonly loads: LoadExpression[] = [];
+  /** The values `say` shows. */
+  readonly shown: Expression[] = [];
+  /** The `otherwise`, call or load that each fallback or `default:` belongs to, by its operand and what it holds. */
+  readonly #fallbackOf = new Map<Expression, BinaryExpression | CallExpression | LoadExpression>();
+  /** The property store whose target's receiver each expression is. */
+  readonly #storeOfReceiver = new Map<Expression, AssignmentStatement>();
+  /** The `get` call whose index each expression is. */
+  readonly #getOfIndex = new Map<Expression, CallExpression>();
   readonly #file = new Map<object, number>();
   readonly #bySite = new Map<string, Expression>();
   readonly #statementsBySite = new Map<string, Statement>();
@@ -93,6 +132,12 @@ export class SliceIndex {
               break;
             case "assignmentStatement":
               pending.push({ expression: statement.value, store: statement, whole: true });
+              // a property store reads its receiver, which a member check at the store reads (C5c)
+              if (statement.target.kind === "propertyAccessExpression") {
+                for (const held of operands(statement.target.object))
+                  this.#storeOfReceiver.set(held, statement);
+                pending.push({ expression: statement.target.object, store: null, whole: false });
+              }
               break;
             case "ifStatement":
               if (statement.elseBlock?.kind === "block") statements(statement.elseBlock.statements);
@@ -107,6 +152,7 @@ export class SliceIndex {
               pending.push({ expression: statement.count, store: null, whole: false });
               break;
             case "sayStatement":
+              this.shown.push(statement.value);
               pending.push({ expression: statement.value, store: null, whole: false });
               break;
           }
@@ -140,6 +186,46 @@ export class SliceIndex {
             pending.push({ expression: expression.expression, store, whole });
             break;
           }
+          case "objectLiteral":
+            for (let at = expression.properties.length - 1; at >= 0; at -= 1)
+              pending.push({ expression: expression.properties[at]!.value, store, whole });
+            break;
+          case "propertyAccessExpression":
+            this.properties.push(expression);
+            pending.push({ expression: expression.object, store, whole: false });
+            break;
+          case "binaryExpression":
+            // `otherwise`, the slice's one operator
+            for (const held of operands(expression.right)) this.#fallbackOf.set(held, expression);
+            pending.push({ expression: expression.right, store, whole: false });
+            pending.push({ expression: expression.left, store, whole: false });
+            break;
+          case "callExpression": {
+            this.calls.push(expression);
+            for (const argument of expression.arguments)
+              if (argument.kind === "namedArgument" && argument.name.name === "default")
+                for (const held of operands(argument.value)) this.#fallbackOf.set(held, expression);
+            const method =
+              expression.callee.kind === "propertyAccessExpression" ? expression.callee : null;
+            const index = expression.arguments[0];
+            if (method?.property.name === "get" && index?.kind === "positionalArgument") {
+              this.#role.set(index.value, "index");
+              for (const held of operands(index.value)) this.#getOfIndex.set(held, expression);
+            }
+            for (let at = expression.arguments.length - 1; at >= 0; at -= 1)
+              pending.push({ expression: expression.arguments[at]!.value, store, whole: false });
+            if (method !== null) pending.push({ expression: method.object, store, whole: false });
+            break;
+          }
+          case "loadExpression":
+            this.loads.push(expression);
+            if (expression.defaultValue !== null) {
+              for (const held of operands(expression.defaultValue))
+                this.#fallbackOf.set(held, expression);
+              pending.push({ expression: expression.defaultValue, store, whole: false });
+            }
+            pending.push({ expression: expression.key, store, whole: false });
+            break;
         }
       }
     });
@@ -181,6 +267,23 @@ export class SliceIndex {
   /** Whether `expression` is a `repeat` count or an index. */
   public roleOf(expression: Expression): "count" | "index" | undefined {
     return this.#role.get(expression);
+  }
+
+  /** The `otherwise` whose fallback, or the call or load whose `default:`, `expression` is or holds in parentheses. */
+  public fallbackOf(
+    expression: Expression,
+  ): BinaryExpression | CallExpression | LoadExpression | undefined {
+    return this.#fallbackOf.get(expression);
+  }
+
+  /** The property store whose target's receiver `expression` is, or holds in parentheses. */
+  public storeOfReceiver(expression: Expression): AssignmentStatement | undefined {
+    return this.#storeOfReceiver.get(expression);
+  }
+
+  /** The `get` call whose index `expression` is, or holds in parentheses. */
+  public getOfIndex(expression: Expression): CallExpression | undefined {
+    return this.#getOfIndex.get(expression);
   }
 
   public site(node: Statement | Expression): SourceSite {
@@ -264,6 +367,32 @@ function diagnosticOf(
   );
   const severity =
     diagnostic.class === "compile-error" ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning;
+  // a member of a receiver, which a read or a store needs (C5), is TSV043's rule (D3 (a))
+  if (diagnostic.kind === "member-read")
+    return createDiagnostic(
+      severity,
+      "TSV043",
+      diagnostic.class === "compile-error"
+        ? `'${text}' does not have the property or member that the script uses here.`
+        : `The compiler cannot prove that '${text}' has the property or member that the script uses here, so ` +
+            "the script checks it when it runs.",
+      expression.span,
+    );
+  // a fallback or a default of another type than the value it stands in for (C10)
+  if (
+    diagnostic.kind === "written-target" &&
+    index.fallbackOf(expression) !== undefined &&
+    (diagnostic.class === "compile-error" || diagnostic.obligation.target === text)
+  )
+    return createDiagnostic(
+      severity,
+      "TSV041",
+      diagnostic.class === "compile-error"
+        ? `'${text}' does not fit the type of the value it stands in for.`
+        : `The compiler cannot prove that '${text}' fits the type of the value it stands in for, so the script ` +
+            "checks it when it runs.",
+      expression.span,
+    );
   if (diagnostic.kind === "written-target") {
     const store = index.storeOf(expression);
     const name =
@@ -311,7 +440,7 @@ export function coreCheckResult(
   const diagnostics: Diagnostic[][] = request.files.map(() => []);
   const sited = new Set<string>();
   for (const diagnostic of answers.diagnostics) {
-    if (diagnostic.kind !== "written-target" && diagnostic.kind !== "integer-use")
+    if (diagnostic.kind === "operator")
       throw new Error(`The slice has no ${diagnostic.kind} diagnostic.`);
     sited.add(`${diagnostic.site.file}:${diagnostic.site.start}:${diagnostic.site.end}`);
     diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, answers, index, request));
@@ -351,9 +480,11 @@ export function coreCheckResult(
     } else if (statement.kind === "sayStatement")
       diagnostics[index.fileOf(statement)]!.push(...messageColorDiagnostics(statement.value));
   for (const list of diagnostics) list.sort((a, b) => a.span.start.offset - b.span.start.offset);
+  const { checks, core } = runtimeChecks(answers, index, request);
   return {
     diagnostics,
-    runtimeChecks: runtimeChecks(answers, index),
+    runtimeChecks: checks,
+    coreChecks: core,
     formShapes: new Map(),
     ways: { paths, operands: new Map() },
     unreachable: unreachable(answers, index),
@@ -364,41 +495,268 @@ export function coreCheckResult(
 }
 
 /**
- * The runtime checks the core's C1 obligations and C9's boundary checks owe (S3 §4, `copy-type` and the boundary
- * rows): the destination's written type, checked where the store's instruction stores the value. One store owes one
- * check, whatever the obligations inside its value.
+ * The runtime checks the core's obligations owe, through S3 §4's discharge map: C1's and C9's at the store that brings
+ * the value into its place, the destination's written type or, else, its admitted type at the stored path, one check per
+ * store whatever the obligations inside its value; a typed load's own type (F18), which repairs an object per field
+ * (ADR 0021 rule 6.5); and the new content only the core emits (`CoreRuntimeChecks`): a property store that needs the
+ * property (C5c), a list `get` that needs a whole number (C2), the check of a selected fallback or default (C10) and
+ * `fromJson`'s expected type (F18). A boundary at a load or a `fromJson` that no store takes is its own type's.
  */
-function runtimeChecks(answers: Answers, index: SliceIndex): Map<RuntimeCheckSite, TypeCheckPlan> {
-  const owed: Obligation[] = [
-    ...answers.diagnostics.flatMap((diagnostic) =>
-      diagnostic.class === "warning-runtime-check" && diagnostic.kind === "written-target"
-        ? [diagnostic.obligation]
-        : [],
-    ),
-    ...answers.checks.filter((check) => check.boundary),
-  ];
+function runtimeChecks(
+  answers: Answers,
+  index: SliceIndex,
+  request: CoreAnalysisRequest,
+): { checks: Map<RuntimeCheckSite, TypeCheckPlan>; core: CoreRuntimeChecks } {
+  const textOf = (node: Expression): string => {
+    const file = index.fileOf(node);
+    return request.files[file]!.source.slice(node.span.start.offset, node.span.end.offset);
+  };
   const lets = declarations(answers, index);
   const checks = new Map<RuntimeCheckSite, TypeCheckPlan>();
+  const core = {
+    requireExisting: new Set<AssignmentStatement>(),
+    indexChecks: new Set<CallExpression>(),
+    fallbackChecks: new Map<BinaryExpression | CallExpression, TypeCheckPlan>(),
+    expected: new Map<CallExpression, TypePlan>(),
+    repairs: new Set<LoadExpression>(),
+  };
+  const owed: Obligation[] = [];
+  for (const diagnostic of answers.diagnostics) {
+    if (diagnostic.class !== "warning-runtime-check") continue;
+    const expression = index.expressionAt(diagnostic.site);
+    switch (diagnostic.kind) {
+      case "written-target": {
+        // C10's obligation names the fallback's own text as its target, C1's a place (S6's departure 6)
+        const owner =
+          diagnostic.obligation.target === textOf(expression)
+            ? index.fallbackOf(expression)
+            : undefined;
+        if (owner === undefined) owed.push(diagnostic.obligation);
+        // C10: a load's default is checked as the load's result; any other where it is selected
+        else if (owner.kind !== "loadExpression" && !core.fallbackChecks.has(owner)) {
+          const type = kindsPlan(diagnostic.obligation.against);
+          if (type !== null)
+            core.fallbackChecks.set(owner, { type, place: `the value of '${textOf(owner)}'` });
+        }
+        break;
+      }
+      case "member-read": {
+        // C5c: a store whose receiver may lack the property, or not be an object, needs it there
+        const store = index.storeOfReceiver(expression);
+        if (store !== undefined) core.requireExisting.add(store);
+        break;
+      }
+      case "integer-use": {
+        // C2: a list `get` checks its index's kind; a count or an index read is the runtime's own check
+        const call = index.getOfIndex(expression);
+        if (call !== undefined) core.indexChecks.add(call);
+        break;
+      }
+      case "operator":
+        break;
+    }
+  }
+  owed.push(...answers.checks.filter((check) => check.boundary));
+  // the types a typed load and a `fromJson` read their value as (F18)
+  const typed = new Set<Expression>();
+  for (const load of index.loads) {
+    const type = expectedPlan(answers, index, load, lets);
+    if (type === null) continue;
+    typed.add(load);
+    checks.set(load, { type, place: `Storage key ${textOf(unwrap(load.key))}` });
+    if (type.kind === "object") core.repairs.add(load);
+  }
+  for (const call of index.calls)
+    if (call.callee.kind === "identifier" && call.callee.name === "fromJson") {
+      const type = expectedPlan(answers, index, call, lets);
+      if (type === null) continue;
+      typed.add(call);
+      core.expected.set(call, type);
+    }
   for (const obligation of owed) {
     // a boundary check against `unknown` is the runtime's validation of representable external data, which runs for
     // every plan: no plan content (S3 §4)
     if (obligation.against.length === 1 && obligation.against[0] === "unknown") continue;
-    const store = index.storeOf(index.expressionAt(obligation.site));
-    if (store === undefined) throw new Error("A check of the slice belongs to no store.");
+    const expression = index.expressionAt(obligation.site);
+    const store = index.storeOf(expression);
+    if (store === undefined) {
+      if (obligation.boundary && typed.has(expression)) continue;
+      throw new Error("A check of the slice belongs to no store.");
+    }
     if (checks.has(store)) continue;
-    const declaration = declarationOf(answers, index, lets, store);
-    // the destination's own contract: its written type, else its admitted type (A1–A9, C9 r4.12)
-    const place = answers.at(nodeOf(answers, index, declaration))?.place;
-    const type = typePlan(
-      declaration.typeAnnotation !== null
-        ? typeFromAnnotation(declaration.typeAnnotation)
-        : place === null || place === undefined
-          ? UNKNOWN_TYPE
-          : admittedType(answers, place.id, place.path),
-    );
-    if (type !== null) checks.set(store, { type, place: `'${declaration.name.name}'` });
+    const type = storedPlan(answers, index, lets, store);
+    if (type !== null) checks.set(store, type);
   }
-  return checks;
+  return { checks, core };
+}
+
+/** The check of a store: the destination's written type, or else its admitted type at the stored path (A1–A9). */
+function storedPlan(
+  answers: Answers,
+  index: SliceIndex,
+  lets: ReadonlyMap<PlaceId, LetStatement>,
+  store: Store,
+): TypeCheckPlan | null {
+  const declaration = declarationOf(answers, index, lets, store);
+  const whole = store.kind === "letStatement" || store.target.kind === "identifier";
+  const place = answers.at(nodeOf(answers, index, store))?.place;
+  const type = typePlan(
+    whole && declaration.typeAnnotation !== null
+      ? typeFromAnnotation(declaration.typeAnnotation)
+      : place === null || place === undefined
+        ? UNKNOWN_TYPE
+        : admittedType(answers, place.id, place.path),
+  );
+  if (type === null) return null;
+  const name = [declaration.name.name, ...(whole ? [] : (place?.path ?? []))].join(".");
+  return { type, place: `'${name}'` };
+}
+
+/** The plan of the kinds an obligation requires: each kind, a collection's elements and an object's properties left open. */
+function kindsPlan(kinds: readonly (ItemTag | RequiredKind)[]): TypePlan | null {
+  const members = [...new Set(kinds)].flatMap((kind): TypePlan[] =>
+    kind === "non-null" || kind === "unknown" || kind === "empty" ? [] : [kindPlan(kind)],
+  );
+  if (kinds.includes("unknown") || members.length === 0) return null;
+  return members.length === 1 ? members[0]! : { kind: "union", members };
+}
+
+/** A kind's plan with its parts left open. */
+function kindPlan(kind: ValueKind): TypePlan {
+  if (kind === "list" || kind === "set" || kind === "dict") return { kind, element: null };
+  if (kind === "object") return { kind: "object", properties: [] };
+  return { kind };
+}
+
+/**
+ * Every value: the plan of a property whose type nothing settles (a `null` in an object default, F18), which a record
+ * must still have, so that a missing one takes the default's.
+ */
+const ANY_VALUE: TypePlan = { kind: "union", members: VALUE_KIND_NAMES.map(kindPlan) };
+
+/**
+ * The type a typed load or `fromJson` reads its value as (F18, S3 §3): the written type of the variable it lands in
+ * directly, else its default's, a literal's parts by their own answers and another value's by its place; `null` where
+ * the result's kinds hold an unknown or only `null` (F19), or a load's key is computed.
+ */
+function expectedPlan(
+  answers: Answers,
+  index: SliceIndex,
+  call: CallExpression | LoadExpression,
+  lets: ReadonlyMap<PlaceId, LetStatement>,
+): TypePlan | null {
+  if (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") return null;
+  const tags = (answers.at(nodeOf(answers, index, call))?.items ?? []).map((item) => item.tag);
+  if (tags.includes("unknown") || !tags.some((tag) => tag !== "null" && tag !== "empty"))
+    return null;
+  const store = index.storeOf(call);
+  if (
+    store !== undefined &&
+    unwrap(store.kind === "letStatement" ? store.initializer : store.value) === call
+  ) {
+    const declaration = declarationOf(answers, index, lets, store);
+    if (
+      declaration.typeAnnotation !== null &&
+      (store.kind === "letStatement" || store.target.kind === "identifier")
+    )
+      return typePlan(nonNullType(typeFromAnnotation(declaration.typeAnnotation)));
+  }
+  const fallback =
+    call.kind === "loadExpression"
+      ? call.defaultValue
+      : (call.arguments.find(
+          (argument) => argument.kind === "namedArgument" && argument.name.name === "default",
+        )?.value ?? null);
+  if (fallback === null) return null;
+  return withoutNull(runCompileTask(valuePlanTask(answers, index, fallback, true)));
+}
+
+/** A plan without its `null` member, or `null` when nothing else is left. */
+function withoutNull(plan: TypePlan | null): TypePlan | null {
+  if (plan === null || plan.kind !== "union") return plan?.kind === "null" ? null : plan;
+  const members = plan.members.filter((member) => member.kind !== "null");
+  return members.length === 0
+    ? null
+    : members.length === 1
+      ? members[0]!
+      : { kind: "union", members };
+}
+
+function unwrap(expression: Expression): Expression {
+  let current = expression;
+  while (current.kind === "parenthesizedExpression") current = current.expression;
+  return current;
+}
+
+/**
+ * The plan of a value's kinds as the core answers them: an object literal's properties by their values, another
+ * object's by the core's answer one level down, a list literal's elements by their own, another collection's by its
+ * place; a property that only `null` or an unknown gives is `ANY_VALUE` (`top` false), the whole value `null` then.
+ */
+function* valuePlanTask(
+  answers: Answers,
+  index: SliceIndex,
+  expression: Expression,
+  top: boolean,
+): CompileTask<TypePlan | null> {
+  const node = unwrap(expression);
+  const flow = nodeOf(answers, index, node);
+  const answer = answers.at(flow);
+  const tags = [...new Set((answer?.items ?? []).map((item) => item.tag))].filter(
+    (tag) => tag !== "empty",
+  );
+  if (tags.includes("unknown") || !tags.some((tag) => tag !== "null"))
+    return top ? null : ANY_VALUE;
+  const members: TypePlan[] = [];
+  for (const tag of tags)
+    if (tag === "object") {
+      const properties: TypePropertyPlan[] = [];
+      if (node.kind === "objectLiteral")
+        for (const property of node.properties)
+          properties.push({
+            name: property.name.name,
+            type: (yield* compileChild(valuePlanTask(answers, index, property.value, false)))!,
+          });
+      else
+        for (const [name, items] of answers.properties(flow)) {
+          const kinds = items.map((item) => item.tag);
+          properties.push({
+            name,
+            type:
+              kinds.includes("unknown") || !kinds.some((kind) => kind !== "null")
+                ? ANY_VALUE
+                : (kindsPlan(kinds) ?? ANY_VALUE),
+          });
+        }
+      members.push({ kind: "object", properties });
+    } else if (tag === "list" || tag === "set" || tag === "dict") {
+      let element: TypePlan | null = null;
+      if ((node.kind === "listLiteral" || node.kind === "setLiteral") && node.elements.length > 0) {
+        const elements: TypePlan[] = [];
+        for (const item of node.elements) {
+          const plan = yield* compileChild(valuePlanTask(answers, index, item, true));
+          if (plan === null) {
+            elements.length = 0;
+            break;
+          }
+          elements.push(plan);
+        }
+        element = elements.length === 0 ? null : unionOf(elements);
+      } else if (answer?.place !== null && answer?.place !== undefined)
+        element = kindsPlan(
+          answers
+            .place(answer.place.id, [...answer.place.path, "element"])
+            .contract.kinds.map((item) => item.tag),
+        );
+      members.push({ kind: tag, element });
+    } else if (tag !== "unknown") members.push(kindPlan(tag));
+  return unionOf(members);
+}
+
+/** One plan of several: the plan itself, or the union of their members. */
+function unionOf(plans: readonly TypePlan[]): TypePlan {
+  const members = plans.flatMap((plan) => (plan.kind === "union" ? plan.members : [plan]));
+  return members.length === 1 ? members[0]! : { kind: "union", members };
 }
 
 /**

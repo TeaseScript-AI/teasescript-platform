@@ -1,4 +1,5 @@
 import type {
+  CallExpression,
   Expression,
   TagQueryExpression,
   TypeTestExpression,
@@ -11,6 +12,7 @@ import type {
   TypeCheckPlan,
   PlanSourceLocation,
   TagQueryExpressionPlan,
+  TypePlan,
   UnitPlan,
 } from "../../plan/model.js";
 import { canonicalRegexFlags } from "../../regex.js";
@@ -22,7 +24,11 @@ import {
   isTakePhotoCall,
 } from "../../capture-call.js";
 import { durationLiteralValue } from "../../duration.js";
-import type { RuntimeCheckSite } from "../../type-inference/backend.js";
+import {
+  NO_CORE_CHECKS,
+  type CoreRuntimeChecks,
+  type RuntimeCheckSite,
+} from "../../type-inference/backend.js";
 import { typeFromAnnotation } from "../../static-types/annotations.js";
 import { typePlan } from "../../type-plans.js";
 import {
@@ -79,6 +85,7 @@ export function normalizeUnaryExpression(
 export function compileExpression(
   expression: Expression,
   typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
+  core: CoreRuntimeChecks = NO_CORE_CHECKS,
 ): ExpressionPlan {
   const plans = new WeakMap<Expression, ExpressionPlan>();
   const work: { expression: Expression; expanded: boolean }[] = [{ expression, expanded: false }];
@@ -86,7 +93,7 @@ export function compileExpression(
     const frame = work.pop()!;
     const current = unwrapParentheses(frame.expression);
     if (frame.expanded) {
-      plans.set(current, assembleExpression(current, child, typeChecks));
+      plans.set(current, assembleExpression(current, child, typeChecks, core));
       continue;
     }
     if (plans.has(current)) continue;
@@ -109,6 +116,33 @@ export function withTypeCheck(typeCheck: TypeCheckPlan | undefined): { typeCheck
   return typeCheck === undefined ? {} : { typeCheck };
 }
 
+/** The optional `fallbackCheck` of an `otherwise`, a call with its `default:`, or the instruction that selects it. */
+export function withFallbackCheck(check: TypeCheckPlan | undefined): {
+  fallbackCheck?: TypeCheckPlan;
+} {
+  return check === undefined ? {} : { fallbackCheck: check };
+}
+
+/**
+ * The `repair` of the instruction that selects the default of a load or a `fromJson` that reads an object type (see
+ * `StoreTemporaryInstruction.repair`); nothing for any other type.
+ */
+export function repairedBy(type: TypePlan | null | undefined): { repair?: TypePlan } {
+  return type !== null && type !== undefined && type.kind === "object" ? { repair: type } : {};
+}
+
+/** A call's content only the coarse core gives (`CoreRuntimeChecks`): a `get`'s index check, `fromJson`'s expected type. */
+export function coreCallContent(
+  expression: CallExpression,
+  core: CoreRuntimeChecks,
+): { indexCheck?: true; expected?: TypePlan } {
+  const expected = core.expected.get(expression);
+  return {
+    ...(core.indexChecks.has(expression) ? { indexCheck: true as const } : {}),
+    ...(expected === undefined ? {} : { expected }),
+  };
+}
+
 /** The unit of a unit expression, which the plan keeps as written, with or without `calendar`. */
 export function unitOf(expression: UnitExpression): UnitPlan {
   return expression.calendar
@@ -125,6 +159,7 @@ function assembleExpression(
   expression: Expression,
   child: (expression: Expression) => ExpressionPlan,
   typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
+  core: CoreRuntimeChecks,
 ): ExpressionPlan {
   switch (expression.kind) {
     case "booleanLiteral":
@@ -247,6 +282,8 @@ function assembleExpression(
               },
         ),
         ...withTypeCheck(typeChecks.get(expression)),
+        ...coreCallContent(expression, core),
+        ...withFallbackCheck(core.fallbackChecks.get(expression)),
         span: planSpan(expression.span),
       };
     case "unaryExpression": {
@@ -282,6 +319,7 @@ function assembleExpression(
         operator: expression.operator,
         left: child(expression.left),
         right: child(expression.right),
+        ...withFallbackCheck(core.fallbackChecks.get(expression)),
         span: planSpan(expression.span),
       };
     case "rangeExpression":
@@ -298,6 +336,7 @@ function assembleExpression(
         key: child(expression.key),
         default: expression.defaultValue === null ? null : child(expression.defaultValue),
         type: typeChecks.get(expression)?.type ?? null,
+        ...(core.repairs.has(expression) ? { repair: true as const } : {}),
         span: planSpan(expression.span),
       };
     case "tagQueryExpression":

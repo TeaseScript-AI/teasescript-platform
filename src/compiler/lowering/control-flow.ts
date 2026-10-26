@@ -10,7 +10,12 @@ import type {
 } from "../../plan/model.js";
 import { compileChild, type CompileTask } from "../continuation.js";
 import type { InstructionCompiler, LoopStatement, LoweredExpression } from "./compiler.js";
-import { unwrapParentheses, planSpan, typeTestPlan } from "./expression-plans.js";
+import {
+  unwrapParentheses,
+  planSpan,
+  typeTestPlan,
+  withFallbackCheck,
+} from "./expression-plans.js";
 
 // Branches and loops: `if`, `switch`, loops, and a right side of `and`, `or`, or `otherwise` that runs instructions.
 
@@ -268,6 +273,7 @@ export function* lowerFallbackTask(
     temporaryId: resultTemporary,
     value: right.plan,
     expectBoolean: false,
+    ...withFallbackCheck(compiler.coreChecks.fallbackChecks.get(expression)),
     span: planSpan(expression.right.span),
   });
   compiler.instructions[conditional] = {

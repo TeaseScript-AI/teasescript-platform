@@ -42,6 +42,7 @@ import {
 import { stopsTypeCheck } from "./semantic/diagnostics.js";
 import { speakerFlowDiagnostics, type SpeakerFlowInput } from "./speaker-flow.js";
 import type {
+  CoreRuntimeChecks,
   RuntimeCheckSite,
   TypeAnalysisBackend,
   TypeCheckResult,
@@ -204,6 +205,7 @@ function compileProjectFiles(
       checked.formShapes,
       checked.storageTypes,
       trace,
+      checked.coreChecks,
     );
     // Which code can run, the endings, and the flow of speaker properties follow the plan, which runs exactly as the
     // session will (V30 §30, §37).
@@ -323,6 +325,7 @@ function parseFile(path: string, source: string): CompiledProjectFile {
 /** What the checks of a project give the lowering and the checks that follow the plan. */
 interface CheckedProject {
   readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
+  readonly coreChecks: CoreRuntimeChecks | null;
   readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
   readonly storageTypes: readonly StorageTypePlan[];
   readonly speakerFlow: SpeakerFlowInput;
@@ -402,6 +405,7 @@ function checkProject(
       ? null
       : {
           typeChecks: types.runtimeChecks,
+          coreChecks: types.coreChecks ?? null,
           formShapes: types.formShapes,
           storageTypes: types.storageTypes,
           speakerFlow: types.speakerFlow,
@@ -698,6 +702,7 @@ function lowerProject(
   formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>,
   storageTypes: readonly StorageTypePlan[],
   trace: LoweringTrace,
+  coreChecks: CoreRuntimeChecks | null,
 ): InstructionPlan | null {
   let current = files[0]!;
   let failure: ReturnType<typeof compiledPlanValidationDiagnostic>;
@@ -718,6 +723,7 @@ function lowerProject(
       formShapes,
       storageTypes,
       trace,
+      coreChecks,
     );
     current = files[0]!;
     failure = compiledPlanValidationDiagnostic(compiled);

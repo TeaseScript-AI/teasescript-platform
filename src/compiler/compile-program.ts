@@ -22,7 +22,11 @@ import { freezeInstructionPlan } from "../plan/freeze.js";
 import { MAIN_FILE_PATH } from "../project-paths.js";
 import { createSourceSpan } from "../source.js";
 import { sourceSpanToPlanLocation } from "../plan/source-location.js";
-import type { RuntimeCheckSite } from "../type-inference/backend.js";
+import {
+  NO_CORE_CHECKS,
+  type CoreRuntimeChecks,
+  type RuntimeCheckSite,
+} from "../type-inference/backend.js";
 import {
   InstructionCompiler,
   type LoweringCounters,
@@ -62,7 +66,7 @@ export function compileStableProgram(
  * `main.tease` starts with the start values of the globals and speakers of every file, in session-start order.
  * `typeChecks` are the runtime checks the type check recorded for values the compiler cannot know, and `images` is the
  * validated image catalog, in path order. `trace` receives what an analysis of the plan needs to read it back as
- * source (see `LoweringTrace`).
+ * source (see `LoweringTrace`). `coreChecks` are the runtime checks only the coarse core owes (`CoreRuntimeChecks`).
  */
 export function compileStableProject(
   projectFiles: readonly StableProjectFile[],
@@ -72,6 +76,7 @@ export function compileStableProject(
   formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape> = new Map(),
   storageTypes: readonly StorageTypePlan[] = [],
   trace: LoweringTrace | null = null,
+  coreChecks: CoreRuntimeChecks | null = null,
 ): InstructionPlan {
   const instructions: Instruction[] = [];
   const functions: CompiledFunctionDefinition[] = [];
@@ -100,6 +105,7 @@ export function compileStableProject(
       captures,
       formShapes,
       trace,
+      coreChecks ?? NO_CORE_CHECKS,
     );
     const startInstruction = instructions.length;
     if (fileIndex === 0)
