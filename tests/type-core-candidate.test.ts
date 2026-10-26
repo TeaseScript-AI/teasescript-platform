@@ -40,6 +40,7 @@ import {
   companions,
   derive,
   evaluate,
+  syntaxOf,
   Underivable,
   type CheckEvent,
   type PredictedRun,
@@ -48,7 +49,6 @@ import { heldBack, readFixture } from "./helpers/type-core-fixture.js";
 import {
   assignments,
   derivedStores,
-  DOMAIN,
   plannedStores,
   runGlobals,
 } from "./helpers/type-core-route.js";
@@ -223,6 +223,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
   let positive = 0;
   let plans = 0;
   let runs = 0;
+  let compared = 0;
   for (const record of readFixture()) {
     if (heldBack(record) !== null) continue;
     positive += 1;
@@ -267,17 +268,18 @@ test("every positive-list record the candidate route reaches plans and runs as i
     assert.deepEqual(diagnosed(single), diagnosed(result), `${record.name}: the one-file route`);
     if (result.plan === null) continue;
     plans += 1;
-    // discharges and checked stores, by rule (a construct the rules do not cover fails here, named)
-    const derived = (() => {
+    // discharges and checked stores, by rule (a construct the rules do not cover fails here, named); the source's syntax
+    // serves every evaluation of it below
+    const [syntax, { stores, discharges }] = (() => {
       try {
-        return derive(source, record.expected);
+        const syntax = syntaxOf(source);
+        return [syntax, derive(syntax, record.expected)] as const;
       } catch (error) {
         if (error instanceof Underivable)
           throw new Error(`${record.name}: underivable: ${error.message}`);
         throw error;
       }
     })();
-    const { stores, discharges } = derived;
     assert.deepEqual(
       plannedStores(result.plan),
       derivedStores(stores),
@@ -288,36 +290,39 @@ test("every positive-list record the candidate route reaches plans and runs as i
       derivedStores(stores),
       `${record.name}: the one-file route's`,
     );
-    // runs: the original, as written, each input at the value fitting the earliest check it feeds
-    const fitting =
-      DOMAIN.find((value) => {
-        const fed = evaluate(source, stores, { hostValue: value }, true).events.find((event) =>
-          event.from.has("hostValue"),
-        );
+    // runs: the original under every assignment of its host input (in the domain's order), each run once, predicted
+    // stopping at its first failing check and evaluated through every check (for the discharges)
+    const plan = result.plan;
+    const own = assignments(["hostValue"]).map((inputs) => ({
+      inputs,
+      ran: runGlobals(plan, inputs),
+      predicted: evaluate(syntax, stores, inputs).run,
+      events: evaluate(syntax, stores, inputs, true).events,
+    }));
+    // the original, as written: each input at the value fitting the earliest check it feeds
+    const original =
+      own.find(({ events }) => {
+        const fed = events.find((event) => event.from.has("hostValue"));
         return fed === undefined || fed.fits;
-      }) ?? DOMAIN[0]!;
-    const original = runGlobals(result.plan, { hostValue: fitting });
-    assert.deepEqual(
-      original,
-      evaluate(source, stores, { hostValue: fitting }).run,
-      `${record.name}: the original`,
-    );
-    originals.set(record.name, original.failure);
-    runs += 1;
-    // the companions with the same checked stores, under every assignment of their inputs
+      }) ?? own[0]!;
+    assert.deepEqual(original.ran, original.predicted, `${record.name}: the original`);
+    originals.set(record.name, original.ran.failure);
+    compared += 1;
+    // under every assignment: a violating value stops at its check, as derived
     const observed: { run: PredictedRun; events: readonly CheckEvent[] }[] = [];
-    // the original under every assignment of its host input too: a violating value stops at its check, as derived
-    for (const inputs of assignments(["hostValue"])) {
-      const ran = runGlobals(result.plan, inputs);
+    for (const { inputs, ran, predicted, events } of own) {
       assert.deepEqual(
         ran,
-        evaluate(source, stores, inputs).run,
+        predicted,
         `${record.name}, the original with ${JSON.stringify(inputs)}`,
       );
-      observed.push({ run: ran, events: evaluate(source, stores, inputs, true).events });
+      observed.push({ run: ran, events });
       runs += 1;
+      compared += 1;
     }
-    for (const companion of companions(source)) {
+    // the companions with the same checked stores, under every assignment of their inputs
+    const ranCompanions = companionRuns.get(record.name) ?? [];
+    for (const companion of companions(syntax)) {
       const compiled = insideSlice(() =>
         inBothOrders(() =>
           compileSourceWithBackend(
@@ -335,21 +340,21 @@ test("every positive-list record the candidate route reaches plans and runs as i
         derivedStores(stores),
         `${at}: the checked stores`,
       );
+      const companionSyntax = syntaxOf(companion.source);
       for (const inputs of assignments(companion.globals)) {
         const ran = runGlobals(compiled.plan, inputs);
         assert.deepEqual(
           ran,
-          evaluate(companion.source, stores, inputs).run,
+          evaluate(companionSyntax, stores, inputs).run,
           `${record.name}, companion ${companion.label}, with ${JSON.stringify(inputs)}`,
         );
-        observed.push({
-          run: ran,
-          events: evaluate(companion.source, stores, inputs, true).events,
-        });
-        companionRuns.set(record.name, [...(companionRuns.get(record.name) ?? []), ran]);
+        observed.push({ run: ran, events: evaluate(companionSyntax, stores, inputs, true).events });
+        ranCompanions.push(ran);
         runs += 1;
+        compared += 1;
       }
     }
+    if (ranCompanions.length > 0) companionRuns.set(record.name, ranCompanions);
     // each discharge classified by the runs: a store's at its value, the runtime's at its use
     for (const discharge of discharges) {
       if (discharge.by === "native" && discharge.what === "representable") {
@@ -385,8 +390,8 @@ test("every positive-list record the candidate route reaches plans and runs as i
       .join(", ");
   t.diagnostic(
     `${positive} positive-list records: ${accepted.length} on the candidate route, ${plans} with a plan, ${runs} ` +
-      `runs predicted and run; discharges: ${listed(classes)}; outside the candidate slice until S7–S9b: ` +
-      listed(outside),
+      `runs, ${compared} comparisons with a predicted run (each original's is its fitting assignment's run); ` +
+      `discharges: ${listed(classes)}; outside the candidate slice until S7–S9b: ${listed(outside)}`,
   );
   assert.equal(accepted.length + counted, positive);
   // the literal witnesses of the rules (§5.2): each class and each original outcome the note names
@@ -946,13 +951,14 @@ test("the derived evaluator sites a parenthesised value's failure at its content
   ] as const) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
-    const { stores } = derive(source, compactAnalysis(request));
+    const syntax = syntaxOf(source);
+    const { stores } = derive(syntax, compactAnalysis(request));
     const compiled = inBothOrders(() => candidate(source));
     assert.ok(compiled.plan !== null, source);
     assert.deepEqual(plannedStores(compiled.plan), derivedStores(stores), source);
     const ran = runGlobals(compiled.plan, { hostValue });
     assert.equal(ran.failure, failure, source);
-    assert.deepEqual(ran, evaluate(source, stores, { hostValue }).run, source);
+    assert.deepEqual(ran, evaluate(syntax, stores, { hostValue }).run, source);
   }
 });
 

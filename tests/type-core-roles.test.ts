@@ -8,7 +8,7 @@ import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
-import { derive, evaluate } from "./helpers/type-core-derived.js";
+import { derive, evaluate, syntaxOf } from "./helpers/type-core-derived.js";
 import { recordDifferences, recordOf } from "./helpers/type-core-records.js";
 import {
   assignments,
@@ -66,7 +66,8 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
     routed += 1;
     const request = coreRequest([{ path: "main.tease", source: shape.source }]);
     assert.ok(request !== null && plan !== null, shape.name);
-    const { stores } = derive(shape.source, compactAnalysis(request));
+    const syntax = syntaxOf(shape.source);
+    const { stores } = derive(syntax, compactAnalysis(request));
     assert.deepEqual(
       plannedStores(plan),
       derivedStores(stores),
@@ -75,7 +76,7 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
     for (const inputs of assignments(["hostValue"]))
       assert.deepEqual(
         runGlobals(plan, inputs),
-        evaluate(shape.source, stores, inputs).run,
+        evaluate(syntax, stores, inputs).run,
         `${shape.name} with ${JSON.stringify(inputs)}`,
       );
   }

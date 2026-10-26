@@ -47,10 +47,17 @@ export function derivedText(type: DerivedType): string {
     : `${type.kind}<${derivedText(type.element)}>`;
 }
 
-function statementsOf(source: string): readonly Statement[] {
+/** A source as the rules read it: its text and its statements, parsed once for all its derivations and runs. */
+export interface Syntax {
+  readonly source: string;
+  readonly statements: readonly Statement[];
+}
+
+/** `source`'s syntax for the rules; nothing here changes it, so each evaluation starts afresh from the same statements. */
+export function syntaxOf(source: string): Syntax {
   const parsed = parse(source);
   if (parsed.diagnostics.length > 0) throw new Underivable("the source does not parse");
-  return parsed.program.statements;
+  return { source, statements: parsed.program.statements };
 }
 
 /** Every statement of a program, nested blocks included, in source order. */
@@ -167,10 +174,10 @@ function byStore(check: CompactCheck): boolean {
  * the map does not know cannot be dropped.
  */
 export function derive(
-  source: string,
+  syntax: Syntax,
   record: CompactRecord,
 ): { readonly stores: readonly DerivedStore[]; readonly discharges: readonly Discharge[] } {
-  const statements = allStatements(statementsOf(source));
+  const statements = allStatements(syntax.statements);
   const owed = new Map<Statement, { path: readonly string[]; against: readonly string[] }[]>();
   const discharges: {
     check: CompactCheck;
@@ -274,8 +281,7 @@ function replaced(source: string, edits: readonly (readonly [number, number, str
  * literal a store writes whole given a same-width integer spelling, `(1)` for `1.5`; and `say "AFTER"` inserted before
  * a final `exit` where the program does not exit first. The original itself is not a companion: it runs as written.
  */
-export function companions(source: string): readonly Companion[] {
-  const statements = statementsOf(source);
+export function companions({ source, statements }: Syntax): readonly Companion[] {
   const all = expressions(statements);
   const hosts = all.filter(
     (expression) => expression.kind === "identifier" && expression.name === HOST,
@@ -390,19 +396,18 @@ function fitsType(value: SerializableRuntimeValue, type: DerivedType): boolean {
 }
 
 /**
- * A run of `source` by the rules, with `inputs` the host globals' values: the plan's checked stores `stores` fail with
+ * A run of the source by the rules, with `inputs` the host globals' values: the plan's checked stores `stores` fail with
  * TSR058 at their value when it does not fit their type; a `repeat` count that is not a whole number of at least 0 fails
  * with TSR043 at the count, a list index that is not a whole number with TSR024, one the list does not have with
  * TSR025, both at the index. With `through`, a failing check is recorded and the run goes on, so a later check's value
  * is still seen (a preempted discharge).
  */
 export function evaluate(
-  source: string,
+  { statements }: Syntax,
   stores: readonly DerivedStore[],
   inputs: Readonly<Record<string, SerializableRuntimeValue>>,
   through = false,
 ): { readonly run: PredictedRun; readonly events: readonly CheckEvent[] } {
-  const statements = statementsOf(source);
   const env = new Map<string, Value>();
   const said: { text: string; at: number }[] = [];
   const events: CheckEvent[] = [];
