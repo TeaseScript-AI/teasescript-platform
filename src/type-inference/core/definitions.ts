@@ -151,6 +151,8 @@ export class DefinitionIndex {
   /** The stores and adds into places; and the returns, arguments and parameter defaults (C9's transfers). */
   readonly storeDefs: Definition[] = [];
   readonly transferDefs: Definition[] = [];
+  /** A dead call's arguments for written parameters, by the parameter's key: candidates, never definitions (F22). */
+  readonly deadArguments = new Map<Key, Definition[]>();
   /** A binding's declaration: its initializer or its loop binding. */
   readonly declOf = new Map<PlaceId, Definition>();
   /** F5a: a loop's exit definition per collection key. */
@@ -379,7 +381,7 @@ export class DefinitionIndex {
   /**
    * F21, F22: each argument is a whole store into its parameter at the parameter's binding node in the callee. A dead
    * call binds nothing (F21), but its argument for a written parameter is still checked against that type (F22, AD-3):
-   * a store at the dead call, as a dead store into a place is, and no transfer.
+   * a candidate at the dead call, and no definition, so no contract, exact path or event of the parameter holds it.
    */
   #arguments(constraint: Extract<CoreProgram["constraints"][number], { kind: "call" }>): void {
     const program = this.program;
@@ -392,7 +394,7 @@ export class DefinitionIndex {
       const place = program.places[parameter];
       if (place?.kind.kind !== "parameter" || (dead !== null && place.kind.written === null))
         return;
-      const d = this.#add({
+      const binding: Omit<Definition, "uid"> = {
         kind: "whole",
         weak: false,
         key: keyOf(parameter, []),
@@ -406,9 +408,11 @@ export class DefinitionIndex {
         fn: constraint.fn,
         recv: null,
         prep: null,
-      });
+      };
+      const d = dead === null ? this.#add(binding) : { uid: this.#serial++, ...binding };
       this.#candidate(d, d.key);
       if (dead === null) this.transferDefs.push(d);
+      else append(this.deadArguments, d.key, d);
     };
     constraint.arguments.forEach((argument, index) => bind(fn.parameters[index], argument));
     for (const named of constraint.named)

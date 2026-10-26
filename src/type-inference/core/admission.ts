@@ -823,7 +823,10 @@ export class Admission {
       if (candidate.d.how !== "argument" || transfer || lists.singleSite(candidate.d.fn))
         candidates.set(`${candidate.d.uid}|${candidate.at.join(".")}`, candidate);
     if (transfer && path.length > 0)
-      for (const d of definitions.byKey.get(keyOf(root, [])) ?? [])
+      for (const d of [
+        ...(definitions.byKey.get(keyOf(root, [])) ?? []),
+        ...(definitions.deadArguments.get(keyOf(root, [])) ?? []),
+      ])
         if (lists.live(d) && d.kind === "whole")
           candidates.set(`${d.uid}|${path.join(".")}`, { d, at: path });
     for (const { key: prefix, rest } of prefixes) {
@@ -978,7 +981,10 @@ export class Admission {
     for (let length = 0; length < path.length; length += 1) {
       program.work.charge("checks");
       const prefix = keyOf(root, path.slice(0, length));
-      if ((definitions.byKey.get(prefix) ?? []).some((d) => d.kind === "whole" || d.kind === "add"))
+      if (
+        (definitions.byKey.get(prefix) ?? []).some((d) => d.kind === "whole" || d.kind === "add") ||
+        definitions.deadArguments.has(prefix)
+      )
         prefixes.push({ key: prefix, rest: path.slice(length) });
     }
     return direct.length === 0 && prefixes.length === 0 ? null : { direct, prefixes };
