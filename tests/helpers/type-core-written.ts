@@ -313,7 +313,7 @@ export interface WrittenCase {
   readonly globals: Readonly<Record<string, SerializableRuntimeValue>>;
   /**
    * Whether the candidate route takes the source by its own axes (Astra's D1): no set or dict element type, no written
-   * union, no `otherwise` or `get` (S10) and no function; else the decision layer alone.
+   * union (S10) and no function (S7's slice takes `otherwise` and `get`); else the decision layer alone.
    */
   readonly executable: boolean;
   /**
@@ -534,8 +534,7 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
     checks: checked.map(({ store, of }) => `${store} ${checkedText(of)}`),
     runs,
     globals: literal === null ? { hostInit: initial! } : {},
-    executable:
-      inSlice(form) && decision !== "copy of an otherwise" && decision !== "copy of a get default",
+    executable: inSlice(form),
     warned,
     boundaries: boundaries.sort(),
   };
@@ -771,7 +770,7 @@ export interface UnrestrictedCase {
   readonly path: readonly string[];
   /** The kinds the place admits at each prefix of `path`, from the place itself, `unknown` (every kind) last. */
   readonly levels: readonly (readonly string[])[];
-  /** Whether the candidate route takes the source by its own axes: a list's literals, never a set's, dict's or object's. */
+  /** Whether the candidate route takes the source by its own axes: a list's or an object's literals, never a set's or dict's. */
   readonly executable: boolean;
 }
 
@@ -920,7 +919,8 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
                 ...levelsOf(arrival === "copy of a null intermediate" ? optional(form) : form),
                 ["unknown"],
               ],
-          executable: false,
+          // (S7's slice takes object literals, property stores and reads)
+          executable: inSlice(form),
         });
       }
   }

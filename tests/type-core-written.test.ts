@@ -328,7 +328,7 @@ test("an unrestricted written collection takes any known contents, owing nothing
 test("an object's properties take any contents in every form, copy and projection, owing nothing (merged S6 B2, Sol r1)", (t) => {
   const { wrong, full } = owing(OBJECT_PROPERTY_MATRIX);
   t.diagnostic(
-    `${OBJECT_PROPERTY_MATRIX.length} sources (${full} planned and run; object literals are outside the candidate slice), both orders, sharing on and off`,
+    `${OBJECT_PROPERTY_MATRIX.length} sources (${full} planned and run), both orders, sharing on and off`,
   );
   assert.deepEqual(wrong, []);
 });
