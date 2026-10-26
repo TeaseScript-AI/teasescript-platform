@@ -1,3 +1,4 @@
+import { codePointWidth } from "./code-points.js";
 import { compileRegexProgram, type RegexProgram } from "./regex-engine.js";
 import { groupedDigits, messageText } from "./runtime/values/text-length.js";
 
@@ -479,8 +480,4 @@ function escapeEnd(source: string, start: number): number {
     return end;
   }
   return start + 1 + codePointWidth(source, start + 1);
-}
-
-function codePointWidth(text: string, index: number): number {
-  return text.codePointAt(index)! > 0xffff ? 2 : 1;
 }

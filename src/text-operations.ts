@@ -4,6 +4,7 @@
  */
 
 import { argumentCountMessage, argumentsTaken } from "./argument-rules.js";
+import { codePointWidth } from "./code-points.js";
 import { isDictMethod } from "./dict-operations.js";
 import { isAnyHandleMethod } from "./handle-members.js";
 import { isListMethod, LIST_METHODS } from "./list-methods.js";
@@ -375,8 +376,7 @@ export function readsPosition(method: TextSignature, domain: TextDomain): boolea
 /** The number of characters of a text: its Unicode code points. */
 export function stringLength(text: string): number {
   let length = 0;
-  for (let index = 0; index < text.length; index += text.codePointAt(index)! > 0xffff ? 2 : 1)
-    length += 1;
+  for (let index = 0; index < text.length; index += codePointWidth(text, index)) length += 1;
   return length;
 }
 

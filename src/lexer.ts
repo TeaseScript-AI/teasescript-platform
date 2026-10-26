@@ -1,3 +1,4 @@
+import { codePointWidth } from "./code-points.js";
 import type { OwnedDiagnosticCode } from "./diagnostic-codes.js";
 import { parseChild, runParse, type ParseTask } from "./parse-continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
@@ -820,11 +821,11 @@ class Lexer {
   }
 
   #advanceCodePoint(): string {
-    const codePoint = this.source.codePointAt(this.#offset);
-    if (codePoint === undefined) return "";
-    const character = String.fromCodePoint(codePoint);
-    this.#offset += character.length;
-    this.#column += character.length;
+    if (this.#offset >= this.source.length) return "";
+    const width = codePointWidth(this.source, this.#offset);
+    const character = this.source.slice(this.#offset, this.#offset + width);
+    this.#offset += width;
+    this.#column += width;
     return character;
   }
 
@@ -979,10 +980,9 @@ function decodeStringText(raw: string, removed: ReadonlySet<number>): string {
       continue;
     }
     if (raw[offset] !== "\\") {
-      const codePoint = raw.codePointAt(offset)!;
-      const character = String.fromCodePoint(codePoint);
-      value += character;
-      offset += character.length;
+      const width = codePointWidth(raw, offset);
+      value += raw.slice(offset, offset + width);
+      offset += width;
       continue;
     }
     offset += 1;
@@ -994,8 +994,7 @@ function decodeStringText(raw: string, removed: ReadonlySet<number>): string {
     const newlineAfterEscape = physicalNewlineLength(raw, offset);
     if (newlineAfterEscape > 0) continue;
     if (offset >= raw.length) continue;
-    const codePoint = raw.codePointAt(offset)!;
-    const escaped = String.fromCodePoint(codePoint);
+    const escaped = raw.slice(offset, offset + codePointWidth(raw, offset));
     value += escapeValue(escaped) ?? escaped;
     offset += escaped.length;
   }

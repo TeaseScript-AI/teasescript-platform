@@ -1,3 +1,4 @@
+import { codePointWidth } from "../../code-points.js";
 import type { RuntimeErrorCode } from "../../diagnostic-codes.js";
 import type { PlanSourceLocation } from "../../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../../source.js";
@@ -64,19 +65,14 @@ export function missingMemberMessage(
 /** The number of code points before UTF-16 `offset`, which must be a code-point boundary. */
 function codePointCount(text: string, offset: number): number {
   let count = 0;
-  for (let index = 0; index < offset; index += utf16Width(text, index)) count += 1;
+  for (let index = 0; index < offset; index += codePointWidth(text, index)) count += 1;
   return count;
 }
 
 /** The UTF-16 offset of code point `index`, counting on from a known `offset` that is code point `from`. */
 function utf16Offset(text: string, index: number, offset = 0, from = 0): number {
-  for (let count = from; count < index; count += 1) offset += utf16Width(text, offset);
+  for (let count = from; count < index; count += 1) offset += codePointWidth(text, offset);
   return offset;
-}
-
-/** 2 for a surrogate pair at `offset`, otherwise 1; a lone surrogate is one code point, as in `for...of`. */
-function utf16Width(text: string, offset: number): number {
-  return text.codePointAt(offset)! > 0xffff ? 2 : 1;
 }
 
 /** Whether `offset` does not fall between the two halves of a surrogate pair. */
@@ -255,9 +251,8 @@ export function callStringMethod(
       return upper ? text.toUpperCase() : text.toLowerCase();
     }
     case "uppercaseFirst": {
-      const codePoint = text.codePointAt(0);
-      if (codePoint === undefined) return text;
-      const firstText = String.fromCodePoint(codePoint);
+      if (text.length === 0) return text;
+      const firstText = text.slice(0, codePointWidth(text, 0));
       const first = firstText.toUpperCase();
       checkTextLength(text.length - firstText.length + first.length, "uppercaseFirst", span);
       return first + text.slice(firstText.length);
@@ -478,7 +473,7 @@ function* regexMatches(
     const [start, end] = match;
     if (end! > start!) from = end!;
     else if (end === text.length) return;
-    else from = end! + utf16Width(text, end!);
+    else from = end! + codePointWidth(text, end!);
   }
 }
 
