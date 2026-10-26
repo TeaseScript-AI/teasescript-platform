@@ -4130,7 +4130,9 @@ test("a class decides through its earliest member no guard of the path holds, in
  * - Astra's F3 shapes: two choice reads of `root.f` answer at their own nodes, the one after an effectful call by the
  *   call's word; an argument inside `root != null and use(root)` carries the operand's guard into its parameter;
  * - two reads of one key in one literal with a call storing to it between them are two key reads (TABLE r4.68 (1)): the
- *   later one's element carries the call's kind, as the same reads in three statements do.
+ *   later one's element carries the call's kind, as the same reads in three statements do; so are two with a call
+ *   between them that registers a handler storing the key (X7, H9), whose later read takes the contract, as both do
+ *   after the registration.
  */
 test("the carrier design's witnesses give their exact records, in both orders (S6-CARRIERS §6)", () => {
   const nested = "let raw = hostValue\nlet root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}}\n";
@@ -4274,6 +4276,20 @@ test("the carrier design's witnesses give their exact records, in both orders (S
       `outcome warning-runtime-check
       D integer-use warning 96:102 call
       C integer-check box.element [integer] 96:102`,
+    ],
+    [
+      "a read after a call registering a handler that stores the key, in one literal (Codex r25 F1)",
+      'let n = 1\nfunction register {\n  showPermanentButton "Change" { n = 1.5 }\n  return 0\n}\nlet xs = [n, register(), n]\nrepeat xs[2] {}\n',
+      `outcome warning-runtime-check
+      D integer-use warning 121:126 member
+      C integer-check xs.element [integer] 121:126`,
+    ],
+    [
+      "both reads after the registration (Codex r25 F1's control)",
+      'let n = 1\nfunction register {\n  showPermanentButton "Change" { n = 1.5 }\n  return 0\n}\nregister()\nlet xs = [n, 0, n]\nrepeat xs[2] {}\n',
+      `outcome warning-runtime-check
+      D integer-use warning 123:128 member
+      C integer-check xs.element [integer] 123:128`,
     ],
   ];
   for (const [name, source, text] of witnesses) {
