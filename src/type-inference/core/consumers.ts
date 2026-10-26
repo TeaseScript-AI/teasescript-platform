@@ -591,7 +591,9 @@ export class Consumers {
               (item.tag === "unknown" &&
                 (at.length === 0
                   ? isOpaque(item) || isExternal(item)
-                  : below
+                  : // (an own read's data is no record's: its boundary checks nothing against the destination,
+                    // TABLE r4.67 (2))
+                    below && !admission.ownReadItem(item, d)
                     ? isOpaque(item) && item.reasons !== REASON.missing
                     : contributes(item))),
           )

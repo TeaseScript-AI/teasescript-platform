@@ -2951,9 +2951,11 @@ test("a literal's verdicts are shared only where its named elements hold the sam
  * The value carriers (round 11; the walk of `answers.ts` `#propertyNames`): each carrier over a direct, a named, a
  * computed and a projected list, in a literal beside the same carrier over another list (A8), stored before and after
  * its source changes (A2), and carrying host data with no consumer (C1, C9); in both orders. A carrier that gives
- * possible elements (a removal, a choice's answer) decides nothing (A2); a load or a parse typed by its default alone
- * validates the loaded value by the default's own kinds, so host data the default holds leaves the elements' kind open,
- * C1's beside the call's boundary (TABLE r4.66 (3)).
+ * possible elements (a removal, a choice's answer) decides nothing (A2), yet its elements are published with the
+ * literal's whole numbers, so named host data it carries owes its check, a choice's as a removal's (A7, A8, TABLE r4.67
+ * (1): the round's `valid` for the choice was an artifact of a source dropped past the longest key); a load or a parse
+ * typed by its default alone validates the loaded value by the default's own kinds, so host data the default holds
+ * leaves the elements' kind open, C1's beside the call's boundary (TABLE r4.66 (3)).
  */
 /*
  * The regressions of review rounds 11 to 17, Astra's and the external reviewer's below assert the answers layer: their
@@ -2962,7 +2964,7 @@ test("a literal's verdicts are shared only where its named elements hold the sam
  * prove plan and run in `type-core-candidate.test.ts` (the projections of a literal, the endpoint matrix, the cell
  * sample).
  */
-test("a value any carrier gives brings its elements' types, decided and checked as a literal's, in both orders (round 11)", () => {
+test("a value any carrier gives brings its elements' types, decided and checked as a literal's, a choice's published as a removal's, in both orders (round 11, TABLE r4.67 (1))", () => {
   const carriers: readonly (readonly [string, (value: string) => string])[] = [
     ["projection", (value) => `[${value}][0]`],
     ["otherwise", (value) => `${value} otherwise ${value}`],
@@ -3045,11 +3047,9 @@ test("a value any carrier gives brings its elements' types, decided and checked 
       (diagnostic) =>
         diagnostic.kind === "written-target" && diagnostic.class === "warning-runtime-check",
     );
-    // (a removal's possible element decides nothing, F7, yet the elements are published with the literal's whole
-    // numbers, so the named host data owes its check: C9 r4.12, r4.50 (1))
-    const expected =
-      possible.has(carrier) && carrier !== "removeFirst" ? "valid" : "warning-runtime-check";
-    if (carried.outcome !== expected || warned !== (expected === "warning-runtime-check"))
+    // (a removal's or a choice's possible element decides nothing, F7, yet the elements are published with the
+    // literal's whole numbers, so the named host data owes its check: C9 r4.12, r4.50 (1), TABLE r4.67 (1))
+    if (carried.outcome !== "warning-runtime-check" || !warned)
       differing.push(`${carrier}, host data: ${carried.outcome}`);
   }
   assert.deepEqual(differing, []);

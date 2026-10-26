@@ -424,29 +424,6 @@ const ROLES: Readonly<Record<CarrierRole, Readonly<Record<Placement, Row | strin
   },
 };
 
-/** Path discovery: a source read past the program's longest key is dropped (`#collect`), so its literal's paths go undecided. */
-const CUT =
-  "held for the lead: out.element is never decided, so r4.60's C1 there is not owed; with any longer key elsewhere " +
-  "in the program it is (the source read past the longest key is dropped from the literal's structure)";
-/** A7's whole-store exception (r4.9) below an own read, whose boundary is against `[unknown]`. */
-const BELOW_OWN =
-  "held for the lead: decided by the later store, the default's element C1 falls under A7's whole-store exception, " +
-  "although the own read's boundary checks it against nothing; published, it is owed";
-
-/** The shapes held for a ruling, by name, each with its reason (the step report gives them). */
-const HELD: ReadonlyMap<string, string> = new Map([
-  ["concatenation/operand/member receiver/collection/inline/no-later", CUT],
-  ["concatenation/operand/member receiver/collection/named/no-later", CUT],
-  ["copy/receiver/member receiver/collection/inline/no-later", CUT],
-  ["copy/receiver/member receiver/collection/named/no-later", CUT],
-  ["removal/receiver/member receiver/collection/inline/no-later", CUT],
-  ["removal/receiver/member receiver/collection/named/no-later", CUT],
-  ["get/receiver/member receiver/collection/inline/no-later", CUT],
-  ["get/receiver/member receiver/collection/named/no-later", CUT],
-  ["get/default/member receiver/collection/inline/later", BELOW_OWN],
-  ["get/default/member receiver/collection/named/later", BELOW_OWN],
-]);
-
 test("every carrier role's placements owe the rule function's complete C1, C9 and C10 records, in both orders (§6, §5.1)", (t) => {
   assert.deepEqual(Object.keys(ROLES).sort(), [...CARRIER_ROLES].sort());
   const classes: RuleClass[] = [];
@@ -458,16 +435,10 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
       else classes.push({ carrier: role, placement, ...row });
     }
   const all = shapesOf(classes);
-  for (const name of HELD.keys())
-    assert.ok(
-      all.some((shape) => shape.name === name),
-      `${name}: a held shape the matrix generates`,
-    );
   const wrong: string[] = [];
   const outside = new Map<string, number>();
   let routed = 0;
   for (const shape of all) {
-    if (HELD.has(shape.name)) continue;
     const actual = records(shape.source);
     if (JSON.stringify(actual) !== JSON.stringify(shape.expected))
       wrong.push(
@@ -500,8 +471,8 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
       );
   }
   t.diagnostic(
-    `${all.length - HELD.size} of ${all.length} shapes in ${classes.length} role placements compared exactly, ` +
-      `${HELD.size} held for the lead, ${routed} planned and run on the candidate route; outside the slice until ` +
+    `${all.length} shapes in ${classes.length} role placements compared exactly, ` +
+      `${routed} planned and run on the candidate route; outside the slice until ` +
       `S7–S9b (the records only): ${[...outside].map(([what, count]) => `${what} ${count}`).join(", ")}; ` +
       `no shape: ${none.join("; ")}`,
   );
@@ -511,7 +482,9 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
 /**
  * The role matrix's compositions (S6-CARRIERS §6), as exact records in both orders: round 4's eight choice regressions
  * (inline data a published choice selects owes the store's boundary at the host value, an unselected property none),
- * a carrier of a carrier and a carrier inside a literal inside a carrier (inline and named), a choice over a held list
+ * a carrier of a carrier and a carrier inside a literal inside a carrier (inline and named), inline and named data in one
+ * selected collection (the named data's C1 at the selecting expression, the inline data's boundary alone: r4.63 (1), (2),
+ * TABLE r4.67 (3)), a choice over a held list
  * (§3.3's record boundary beside C1), a union holding a reference across two carriers (opaque by dispatch, checked at
  * its consumer), and nullable root and inner receivers of a member (r4.60 beside each receiver's C5 check). The mixed
  * selected-value and absent-value-text lists in both element orders are the cells test's (D1).
@@ -567,6 +540,15 @@ test("the role matrix's compositions give their exact records, in both orders (�
       D written-target warning 35:38 unknown
       C copy-type out [integer] 35:38
       B copy-type raw [unknown] 10:19`,
+    ],
+    [
+      "inline and named data in one selected collection (TABLE r4.67 (3))",
+      'let raw = hostValue\nlet out = [[1], [hostValue], [raw]][2]\nsay "AFTER"\n',
+      `outcome warning-runtime-check
+      D written-target warning 30:58 unknown
+      C copy-type out.element [integer] 30:58
+      B copy-type raw [unknown] 10:19
+      B copy-type out.element [integer] 37:46`,
     ],
     [
       "a choice over a held list",

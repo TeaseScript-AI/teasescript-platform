@@ -401,6 +401,8 @@ export class Admission {
   readonly #hostSeen = new Set<string>();
   /** Per provenance node, the ingresses its leaves name, and whether one of them no walk reached (`#resolve`). */
   readonly #nodeIngresses = new Map<IngressNode, ReadonlySet<PlaceId>>();
+  /** Per store, the ingresses that reach its value through an operation's own read (`#ownLeaves`). */
+  readonly #ownReads = new Map<number, ReadonlySet<PlaceId>>();
   /** Per store and path, the ingresses of named data it brings beside its inline data (`#namedBeside`). */
   readonly #beside = new Map<string, ReadonlySet<PlaceId>>();
   readonly #resolved = new Map<IngressNode, boolean>();
@@ -1755,9 +1757,10 @@ export class Admission {
         // reaches is a recursion: cut); any other value through the values it carries
         const source = this.#sourceOf(current);
         if (source !== null) {
-          if (strip.length > 0 && keyPath(source).length + strip.length > this.#longestKey())
-            continue;
-          const key = keyOf(keyPlace(source), [...keyPath(source), ...strip]);
+          // (read past the longest key, it is cut there, never dropped: whether a literal holds a source, and so which
+          // obligations its paths owe, never depends on the keys elsewhere in the program, TABLE r4.67 (1))
+          const room = Math.max(0, this.#longestKey() - keyPath(source).length);
+          const key = keyOf(keyPlace(source), [...keyPath(source), ...strip.slice(0, room)]);
           sources.set(`${at.join(".")}|${key}`, { below: at, key });
           continue;
         }
@@ -2453,8 +2456,13 @@ export class Admission {
   public ingressSiteOf(d: Definition, at: readonly string[], item?: Item): SourceSite {
     const { program, definitions } = this.pass;
     if (d.kind !== "whole") return d.site;
-    // (the item's own ingress among them first, where it names one: the contribution that brought it)
+    // (the item's own ingress among them first, where it names one: the contribution that brought it; an item carrying
+    // named data the store brings beside its inline data is that named data's C1, sited by its rule, the inline data
+    // owing only its boundary: r4.63 (1), (2), TABLE r4.67 (3))
     const own = item?.ingress === undefined ? null : this.#leafIngresses(item.ingress);
+    const stops = this.#landingIndex().byStore.get(d);
+    const beside = own === null || stops === undefined ? null : this.#namedBeside(d, at, stops);
+    const named = beside !== null && [...own!].some((ingress) => beside.has(ingress));
     let first: SourceSite | null = null;
     for (const { stop } of this.#contributions(d, at)) {
       if (stop.via.some((level) => OWN_ROLES.has(level.role))) continue;
@@ -2468,7 +2476,7 @@ export class Admission {
         projection = program.projOf.get(value)
       )
         value = projection.owner;
-      if (!definitions.ingress.has(value)) continue;
+      if (!definitions.ingress.has(value) || named) continue;
       if (own === null || own.has(value)) return this.#contributionSite(stop, d);
       first ??= this.#contributionSite(stop, d);
     }
@@ -2558,6 +2566,55 @@ export class Admission {
     const site = program.places[value]?.site ?? null;
     const node = site === null ? null : program.exprAt(site);
     return node === null || program.live(node);
+  }
+
+  /**
+   * Whether an external item a store brings is an operation's own read's data alone (C10: a fallback's, a default's):
+   * each ingress it names reaches the store's value through an own read, as host data or in named data. Its boundary is
+   * against `[unknown]`, so A7's whole-store exception never stands in for the destination's check of it (TABLE r4.67
+   * (2)).
+   */
+  public ownReadItem(item: Item, d: Definition): boolean {
+    if (item.ingress === undefined) return false;
+    const ingresses = this.#leafIngresses(item.ingress);
+    if (ingresses.size === 0) return false;
+    const own = this.#ownLeaves(d);
+    for (const ingress of ingresses) {
+      this.pass.program.work.charge("checks");
+      if (!own.has(ingress)) return false;
+    }
+    return true;
+  }
+
+  /** The ingresses that reach a store's value through an operation's own read, once per store. */
+  #ownLeaves(d: Definition): ReadonlySet<PlaceId> {
+    const known = this.#ownReads.get(d.uid);
+    if (known !== undefined) return known;
+    const { program, definitions, values } = this.pass;
+    const own = new Set<PlaceId>();
+    if (d.value !== undefined) {
+      const stops = this.#stopsOf(d.value, d.node);
+      for (const map of [stops.written, stops.values, stops.literals])
+        for (const list of map.values())
+          for (const stop of list) {
+            program.work.charge("checks");
+            if (!stop.via.some((level) => OWN_ROLES.has(level.role))) continue;
+            let base = stop.value;
+            while (!definitions.ingress.has(base) && program.projOf.has(base)) {
+              program.work.charge("checks");
+              base = program.projOf.get(base)!.owner;
+            }
+            if (definitions.ingress.has(base)) {
+              own.add(base);
+              continue;
+            }
+            for (const item of this.#run(values.valueItems(stop.value, stop.node, stop.strip)))
+              if (isExternal(item) && item.ingress !== undefined)
+                for (const ingress of this.#leafIngresses(item.ingress)) own.add(ingress);
+          }
+    }
+    this.#ownReads.set(d.uid, own);
+    return own;
   }
 
   /**
@@ -3073,12 +3130,19 @@ export class Admission {
     const memoKey = `${d.uid}|${at.join(".")}`;
     const known = this.#beside.get(memoKey);
     if (known !== undefined) return known;
-    const { program, values } = this.pass;
+    const { program, values, definitions } = this.pass;
     const inline = new Set(stops.filter((stop) => stop.whole).map((stop) => stop.ingress));
     const out = new Set<PlaceId>();
     for (const { stop, rest } of this.#contributions(d, at)) {
       program.work.charge("checks");
+      // (host data itself, or a member of it, is the store's own ingress, no named data: its global has a key too)
+      let base = stop.value;
+      while (!definitions.ingress.has(base) && program.projOf.has(base)) {
+        program.work.charge("checks");
+        base = program.projOf.get(base)!.owner;
+      }
       if (
+        definitions.ingress.has(base) ||
         this.#sourceOf(stop.value) === null ||
         stop.via.some((level) => inline.has(level.value) || OWN_ROLES.has(level.role))
       )
