@@ -230,8 +230,15 @@ export function replaceKeptTexts(
   const below = (path: readonly string[] | null, name: string): readonly string[] | null =>
     path === null ? null : [...path, name];
   for (let slot = pending.pop(); slot !== undefined; slot = pending.pop()) {
-    const { part, type: of, path } = slot;
-    if (path !== null && path.length > 0 && supplied.has(path.join("\u0000"))) continue;
+    const { part, type: of } = slot;
+    if (slot.path !== null && slot.path.length > 0 && supplied.has(slot.path.join("\u0000")))
+      continue;
+    // a field reading recurses only into a record read as an object type (`readExpected`); any other field it reads
+    // whole (`readWhole`), whole-fit first, whatever a sibling's repair
+    const path =
+      slot.path !== null && of !== null && of.kind === "object" && isRecordValue(part, true)
+        ? slot.path
+        : null;
     if (typeof part === "string") {
       if (of !== null && !matchesValueType(part, of)) continue;
       const replaced = replace(part);
@@ -239,7 +246,7 @@ export function replaceKeptTexts(
       continue;
     }
     if (!isList(part) && !isDict(part)) continue;
-    // kept whole where it fits as it is (below a field reading's record), else read by its type's member of its kind
+    // kept whole where it fits as it is (off a field reading's record path), else read by its type's member of its kind
     let member: TypePlan | null = null;
     if (of !== null && !(path === null && matchesValueType(part, of))) {
       const found = of.kind === "union" ? memberFor(part, of.members) : of;

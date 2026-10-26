@@ -15,8 +15,10 @@ import {
 import type { RuntimeScriptStorageEntrySnapshot } from "../src/runtime/host-data/script-storage.js";
 import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
+import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { propertyStep } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -600,7 +602,7 @@ function throughFileStore(
   hostValue: string,
   payload: Readonly<Record<string, unknown>>,
   checkpoints: boolean,
-): Ran & { readonly stored: number } {
+): Ran & { readonly stored: number; readonly snapshot: RuntimeSnapshot } {
   const kept = (snapshot: RuntimeSnapshot): RuntimeSnapshot =>
     checkpoints
       ? deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, snapshot))).snapshot
@@ -623,7 +625,7 @@ function throughFileStore(
     result = run(plan, kept(completed.snapshot));
     events.push(...result.events);
   }
-  return { ...summary(events, result.snapshot.status), stored };
+  return { ...summary(events, result.snapshot.status), stored, snapshot: result.snapshot };
 }
 
 test("a file store keeps the files of the fields fromJson keeps, never of a key it leaves out or a field its default supplies, across the store's answer and its checkpoints (Astra B2)", () => {
@@ -674,6 +676,96 @@ test("a file store keeps the files of the fields fromJson keeps, never of a key 
       assert.deepEqual(ran(refused), halted(["0"], [`TSW019@${parse}`]), source);
     }
   }
+});
+
+test("a field fromJson keeps whole beside a sibling its default repairs keeps its files, at depths one and two, across the store's answer and its checkpoints, on both lowerings (Astra r2 B4)", () => {
+  // the core answers the field `null` in the default as unknown, so the reading keeps whatever the JSON holds there
+  const witness = "fromJson(hostValue, default: {n: 0, payload: null})";
+  const witnessSource = `let out = ${witness}\nsay "AFTER"\nexit\n`;
+  const request = coreRequest([{ path: "main.tease", source: witnessSource }], OPTIONS.globals);
+  assert.ok(request !== null);
+  const answers = analyseCore(request);
+  const call = answers.graph.expressionAt({
+    file: 0,
+    start: witnessSource.indexOf(witness),
+    end: witnessSource.indexOf(witness) + witness.length,
+  });
+  assert.ok(call !== undefined);
+  assert.ok(
+    answers.valueAt(call, [propertyStep("payload")]).items.some((item) => item.tag === "unknown"),
+  );
+  const photo = pngDataUrl(1);
+  const dict = (
+    entries: Readonly<Record<string, SerializableRuntimeValue>>,
+  ): SerializableRuntimeValue => ({
+    kind: "dict",
+    entries: Object.entries(entries).map(([key, value]) => ({ key, value })),
+  });
+  // each default, JSON whose unknown field (`null` in the default) holds a file beside a field the default repairs, and
+  // the value the call gives, the file as `kept`: its stored reference, or its data URL where no file is stored
+  for (const [fallback, json, given] of [
+    // Astra's witness: `n` missing, `payload` kept whole
+    [
+      "{n: 0, payload: null}",
+      `{"payload": {"photo": "${photo}"}}`,
+      (kept: string) => object({ n: 0, payload: dict({ photo: kept }) }),
+    ],
+    [
+      "{n: 0, payload: null}",
+      `{"n": "bad", "payload": {"photo": "${photo}"}}`,
+      (kept: string) => object({ n: 0, payload: dict({ photo: kept }) }),
+    ],
+    // depth two: the repair inside the nested record that keeps the field, outside it, and beside it
+    [
+      "{a: {n: 0, payload: null}}",
+      `{"a": {"payload": {"photo": "${photo}"}}}`,
+      (kept: string) => object({ a: object({ n: 0, payload: dict({ photo: kept }) }) }),
+    ],
+    [
+      "{n: 0, a: {payload: null}}",
+      `{"a": {"payload": {"photo": "${photo}"}}}`,
+      (kept: string) => object({ n: 0, a: object({ payload: dict({ photo: kept }) }) }),
+    ],
+    [
+      "{a: {n: 0}, payload: null}",
+      `{"a": {"n": "x"}, "payload": {"photo": "${photo}"}}`,
+      (kept: string) => object({ a: object({ n: 0 }), payload: dict({ photo: kept }) }),
+    ],
+  ] as const)
+    for (const files of ["", ", files: false"]) {
+      const source = `let out = fromJson(hostValue, default: ${fallback}${files})\nsay "AFTER"\nexit\n`;
+      const parse = at(source, `fromJson(hostValue, default: ${fallback}${files})`);
+      assert.ok(
+        decision(source).checks.some((check) => check.endsWith(`boundary @${parse}`)),
+        source,
+      );
+      const plan = candidatePlan(source);
+      assert.ok(
+        contentOf(plan).some(
+          (entry) =>
+            entry.startsWith(`expected ${files === "" ? "fileStore" : "call"}@${parse} {`) &&
+            entry.includes("dict<any>"),
+        ),
+        `${source}: ${JSON.stringify(contentOf(plan))}`,
+      );
+      if (files !== "") {
+        const result = runWith(plan, json);
+        assert.deepEqual(ran(result), halted(["AFTER"], [`TSW020@${parse}`]), source);
+        assert.deepEqual(bound(result.snapshot, "out"), given(photo), source);
+        continue;
+      }
+      for (const checkpoints of [false, true]) {
+        const result = throughFileStore(
+          plan,
+          json,
+          { kind: "stored", references: [STORED] },
+          checkpoints,
+        );
+        assert.equal(result.stored, 1, `${source}: the kept field's file is stored`);
+        assert.deepEqual(ran(result), halted(["AFTER"], [`TSW020@${parse}`]), source);
+        assert.deepEqual(bound(result.snapshot, "out"), given(STORED), source);
+      }
+    }
 });
 
 /** A stored value of the records below, as the host gives it: a record of its fields, nested records too. */
