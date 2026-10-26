@@ -3697,3 +3697,51 @@ test("a choice list's earliest evaluated ingress names C1's site, in both elemen
     assert.deepEqual(recordDifferences(expected, reversed), [], `${source} reversed`);
   }
 });
+
+/**
+ * S6-CARRIERS §3.1 (the first design review's B3): an identity holding an ingress occurrence is fresh, so two equal
+ * computations over host data stay two contract entries and each keeps its leaf: a consumer that meets either
+ * payload brings each store's boundary, at each host value. The whole record, in both orders.
+ */
+test("two equal computations over host data keep each ingress's boundary (S6-CARRIERS §3.1, design B3)", () => {
+  const source =
+    'let flagHost = askBoolean "flag"\nlet box = {payload: hostValue otherwise null}\n' +
+    "if flagHost { box = {payload: hostValue otherwise null} }\nlet count: integer = box.payload\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const at = (offset: number, end: number) => ({ file: "main.tease", offset, end });
+  const expected: CompactRecord = {
+    outcome: "warning-runtime-check",
+    diagnostics: [
+      { kind: "written-target", class: "warning-runtime-check", site: at(158, 169), context: null },
+      { kind: "written-target", class: "warning-runtime-check", site: at(158, 169), context: null },
+    ],
+    checks: [
+      {
+        kind: "copy-type",
+        target: "count",
+        against: ["integer"],
+        boundary: false,
+        site: at(158, 169),
+      },
+      {
+        kind: "null-check",
+        target: "count",
+        against: ["integer"],
+        boundary: false,
+        site: at(158, 169),
+      },
+      { kind: "copy-type", target: "box", against: ["object"], boundary: true, site: at(53, 62) },
+      { kind: "copy-type", target: "box", against: ["object"], boundary: true, site: at(109, 118) },
+    ],
+  };
+  const forward = compactAnalysis(request);
+  const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+    withConsumerOrder(
+      (list) => [...list].reverse(),
+      () => compactAnalysis(request),
+    ),
+  );
+  assert.deepEqual(recordDifferences(expected, forward), []);
+  assert.deepEqual(recordDifferences(expected, reversed), []);
+});
