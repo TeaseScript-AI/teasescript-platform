@@ -2051,6 +2051,47 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
 ];
 
 /**
+ * S6-CARRIERS §4.5, §4.7: k adds of one record to one list, and a choice of k options of one record, every field read.
+ * The value side's add chain and choice items are inherited products (on `main` too); admission's own counters are gated
+ * as linear, each total's 64 → 128 step only as a regression check at its measured doubling (r4.45's form).
+ */
+export const ADMISSION_SAME_SOURCES: readonly KnownProduct[] = [
+  {
+    name: "A5-same-source-adds",
+    measures: "§4.5, A5: k `xs.add(root)` of one k-field record, every field of `xs[0]` read",
+    // 29,571 / 59,846 units at k = 64, 128 in both orders (2.0312); admission's counters at most 2.05 (`checks`), the
+    // value side's reaching-definition walk 2.32 (`rdWalk`, as on `main`)
+    measured: 2.04,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = []",
+          rows(k, () => "xs.add(root)"),
+          rows(k, (i) => `repeat xs[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-same-source-choices",
+    measures: "§4.5, A8: a choice of k options whose value is one k-field record, every field read",
+    // 42,947 / 126,852 units at k = 64, 128 in both orders (2.9645): the value side's choice items, one per option at
+    // each field read (`mergeItems` 3.87, `eventSteps` 3.72, as on `main`); admission's counters at most 2.08 (`checks`)
+    measured: 2.97,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "a${i}", value: root}`).join(", ")}`,
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+];
+
+/**
  * Product (c) of W34's class: k literals of two typed ingresses (a `load` or a parse) of one k-field record default
  * added to one list, every field read. The solver's demands are S4's product, as on `main` (each literal holding an
  * ingress its own identity, TABLE §8 r4.15: k contract entries for each of the k reads), so the total is not gated as

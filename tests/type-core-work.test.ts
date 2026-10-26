@@ -10,6 +10,7 @@ import {
   ADMISSION_FAMILIES,
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
+  ADMISSION_SAME_SOURCES,
   W34_KNOWN_PRODUCTS,
   W34_VARIANTS,
   W44_VARIANTS,
@@ -142,6 +143,41 @@ test("admission's work on literals of typed ingresses of one default grows with 
         if (doubling > COUNTER_DOUBLING)
           steep.push(
             `${family.name}${reversed ? " reversed" : ""} ${counter}: ${doubling.toFixed(3)}`,
+          );
+      }
+    }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * S6-CARRIERS §4.7 (`ADMISSION_SAME_SOURCES`): admission's own counters on same-source adds and choices grow with the
+ * program in either order; each total's 64 → 128 step, the value side's inherited product included, is a regression
+ * check at its measured doubling, not a bound at larger sizes.
+ */
+test("admission's work on same-source adds and choices grows with the program in either order", () => {
+  const steep: string[] = [];
+  for (const family of ADMISSION_SAME_SOURCES)
+    for (const reversed of [false, true]) {
+      const small = analysed(family, 64, reversed).budget;
+      const large = analysed(family, 128, reversed).budget;
+      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+      const doubling = (before: number, after: number): number =>
+        (2 * (after / Math.max(1, before))) / scale;
+      const name = `${family.name}${reversed ? " reversed" : ""}`;
+      if (doubling(small.total, large.total) > family.measured)
+        steep.push(`${name}: ${doubling(small.total, large.total).toFixed(3)}`);
+      for (const counter of [
+        "checks",
+        "checksSkipped",
+        "aliasSteps",
+        "eligibility",
+        "quietProofs",
+        "c1Visits",
+      ] as const) {
+        const after = large.counts.get(counter) ?? 0;
+        if (after >= 200 && doubling(small.counts.get(counter) ?? 0, after) > COUNTER_DOUBLING)
+          steep.push(
+            `${name} ${counter}: ${doubling(small.counts.get(counter) ?? 0, after).toFixed(3)}`,
           );
       }
     }
