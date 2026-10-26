@@ -1996,6 +1996,28 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   })),
+  // §3.2 with S6-CARRIERS §4.6 (Codex r21 B1): k stores of a computed child over a k-field record, each under a test of
+  // a different field, one field read; each operand read's marks below it come from the guard regions holding it, never
+  // from each tested field in turn
+  ...(
+    [
+      ["wrapped", "{data: [root].get(0, default: root)}", "data."],
+      ["direct", "[root].get(0, default: root)", ""],
+    ] as const
+  ).map(([variant, value, at]): WorkFamily => ({
+    name: `A2-guarded-computed-children-${variant}`,
+    measures: `§3.2, §4.6: k stores of \`${value}\`, each under a test of another field, one field read (Codex r21 B1)`,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "2.0")}}`,
+          `let box = ${value}`,
+          rows(k, (i) => `if root.f${i} != null { box = ${value} }`),
+          `repeat box.${at}f0 {}`,
+          "exit",
+        ),
+      ),
+  })),
 ];
 
 /**

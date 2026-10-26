@@ -37,6 +37,21 @@ export interface OperandRegion {
   readonly end: number;
 }
 
+/**
+ * Guard regions of several tested keys, each labelled by its key's path below a common key, sorted by where they start:
+ * laminar (two regions nest or lie apart: dominator subtrees, logical operands), so each has the nearest region holding
+ * it and a skew-binary jump up that chain, along which the ends only grow (`#holding`). `laminar` is false where two
+ * regions overlap without nesting; each label's own regions are then asked.
+ */
+interface Nest {
+  readonly starts: readonly number[];
+  readonly ends: readonly number[];
+  readonly labels: readonly string[];
+  readonly parents: readonly number[];
+  readonly jumps: readonly number[];
+  readonly laminar: boolean;
+}
+
 const COMPARISONS: ReadonlySet<string> = new Set(["<", "<=", ">", ">="]);
 
 /** The operands a test at a truth position tests: a null comparison's, a type test's, a comparison's. */
@@ -59,7 +74,12 @@ export class GuardIndex {
   readonly #operandCallables = new Map<Key, Set<Callable | null>>();
   /** The keys with a tested key strictly below them: a copy of one carries its read as a mark (§3.2 r4.15). */
   readonly belowTested = new Set<Key>();
-  readonly #testedPaths = new Map<Key, (readonly string[])[]>();
+  /** Per key, the tested keys strictly below it, and the guard regions of those keys once asked (`guardedBelow`). */
+  readonly #testedUnder = new Map<Key, Key[]>();
+  readonly #nests = new Map<
+    Key,
+    { readonly branches: Map<Callable | null, Nest>; readonly operands: Map<number, Nest> }
+  >();
   /** The tested keys q below each key, per relative path q, and the longest such path (§8 r4.23's holders). */
   #testedRelative: Map<string, Set<Key>> | null = null;
   #byPlace: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> | null = null;
@@ -117,16 +137,168 @@ export class GuardIndex {
         work.charge("indexSteps");
         this.belowTested.add(prefix);
         if (!first) continue;
-        let paths = this.#testedPaths.get(prefix);
-        if (paths === undefined) this.#testedPaths.set(prefix, (paths = []));
-        paths.push(keyPath(key).slice(keyPath(prefix).length));
+        let keys = this.#testedUnder.get(prefix);
+        if (keys === undefined) this.#testedUnder.set(prefix, (keys = []));
+        keys.push(key);
       }
     }
   }
 
-  /** The paths below `key`, relative to it, of the tested keys strictly below it (§3.2: where a read of it is marked). */
-  public testedPathsBelow(key: Key): readonly (readonly string[])[] {
-    return this.#testedPaths.get(key) ?? [];
+  /**
+   * §3.2 at a read of `key` in `node`: the paths below `key`, relative to it, of the tested keys whose guard regions
+   * hold the node, each only where no shorter one of them holds it (that one marks every path below it already). Per
+   * key, the regions of every tested key below it, laminar: a binary search, a jump to the innermost region holding the
+   * node, and the regions holding that one, never each tested key in turn (Codex r21 B1).
+   */
+  public guardedBelow(key: Key, node: FlowNode): readonly string[] {
+    const program = this.program;
+    if (!program.reached(node)) return [];
+    const nests = this.#nestsBelow(recordKey(key));
+    if (nests === null) return [];
+    const held = new Set<string>();
+    const branches = nests.branches.get(program.callableAt(node));
+    if (branches !== undefined) this.#holding(branches, program.position(node), held);
+    const operands = node.span === null ? undefined : nests.operands.get(node.file);
+    if (operands !== undefined && node.span !== null)
+      this.#holding(operands, node.span.start.offset, held);
+    const out: string[] = [];
+    for (const path of held) {
+      let shorter = false;
+      for (let cut = path.indexOf("."); cut >= 0 && !shorter; cut = path.indexOf(".", cut + 1)) {
+        program.work.charge("eventSteps");
+        shorter = held.has(path.slice(0, cut));
+      }
+      if (!shorter) out.push(path);
+    }
+    program.work.charge("eventSteps", sortCost(out.length));
+    return out.sort();
+  }
+
+  /** `guardedBelow` at a value's read below its property and element projections (as `guardedRead`). */
+  public guardedBelowRead(value: PlaceId): readonly string[] {
+    const program = this.program;
+    const steps: string[] = [];
+    let current = value;
+    for (let projection = program.projOf.get(current); projection !== undefined;) {
+      steps.push(projection.step === "iteration" ? "element" : stepName(projection.step));
+      current = projection.owner;
+      projection = program.projOf.get(current);
+    }
+    const binding = program.occurrenceOf.get(current);
+    const node = program.occNode.get(current);
+    if (binding === undefined || node === undefined || node === null) return [];
+    return this.guardedBelow(keyOf(binding, steps.reverse()), node);
+  }
+
+  /** The regions of the tested keys strictly below `key`, by callable and by file, built once per key asked. */
+  #nestsBelow(
+    key: Key,
+  ): {
+    readonly branches: Map<Callable | null, Nest>;
+    readonly operands: Map<number, Nest>;
+  } | null {
+    const known = this.#nests.get(key);
+    if (known !== undefined) return known;
+    const under = this.#testedUnder.get(key);
+    if (under === undefined) return null;
+    const program = this.program;
+    const depth = keyPath(key).length;
+    type Entry = { readonly start: number; readonly end: number; readonly label: string };
+    const branches = new Map<Callable | null, Entry[]>();
+    const operands = new Map<number, Entry[]>();
+    const add = <K>(into: Map<K, Entry[]>, at: K, entry: Entry): void => {
+      program.work.charge("indexSteps");
+      const list = into.get(at);
+      if (list === undefined) into.set(at, [entry]);
+      else list.push(entry);
+    };
+    for (const tested of under) {
+      const label = keyPath(tested).slice(depth).join(".");
+      for (const [callable, regions] of this.#branches.get(tested) ?? [])
+        for (const entry of regions.list)
+          add(branches, callable, {
+            start: program.position(entry),
+            end: program.positionEnd(entry),
+            label,
+          });
+      for (const [file, regions] of this.#operands.get(tested) ?? [])
+        for (const region of regions.list)
+          add(operands, file, { start: region.start, end: region.end, label });
+    }
+    const nests = {
+      branches: new Map([...branches].map(([at, list]) => [at, this.#nest(list)] as const)),
+      operands: new Map([...operands].map(([at, list]) => [at, this.#nest(list)] as const)),
+    };
+    this.#nests.set(key, nests);
+    return nests;
+  }
+
+  /** Sorts regions by where they start (the longer first) and links each to the nearest one holding it. */
+  #nest(entries: { readonly start: number; readonly end: number; readonly label: string }[]): Nest {
+    const work = this.program.work;
+    work.charge("indexSteps", sortCost(entries.length));
+    entries.sort((a, b) => a.start - b.start || b.end - a.end);
+    const parents: number[] = [];
+    const jumps: number[] = [];
+    const depths: number[] = [];
+    const open: number[] = [];
+    let laminar = true;
+    for (const [index, entry] of entries.entries()) {
+      work.charge("indexSteps");
+      while (open.length > 0 && entries[open.at(-1)!]!.end < entry.start) open.pop();
+      const parent = open.at(-1) ?? -1;
+      if (parent >= 0 && entries[parent]!.end < entry.end) laminar = false;
+      parents.push(parent);
+      depths.push(parent < 0 ? 0 : depths[parent]! + 1);
+      // (Myers's skew-binary jumps: an ancestor search in logarithmic steps)
+      const up = parent < 0 ? -1 : jumps[parent]!;
+      const further = up < 0 ? -1 : jumps[up]!;
+      jumps.push(
+        further >= 0 && depths[parent]! - depths[up]! === depths[up]! - depths[further]!
+          ? further
+          : parent,
+      );
+      open.push(index);
+    }
+    return {
+      starts: entries.map((entry) => entry.start),
+      ends: entries.map((entry) => entry.end),
+      labels: entries.map((entry) => entry.label),
+      parents,
+      jumps,
+      laminar,
+    };
+  }
+
+  /** Adds the labels of a nest's regions holding `at` to `held`: the last region starting by `at`, up to one holding it. */
+  #holding(nest: Nest, at: number, held: Set<string>): void {
+    const work = this.program.work;
+    let low = 0;
+    let high = nest.starts.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      work.charge("eventSteps");
+      if (nest.starts[middle]! <= at) low = middle + 1;
+      else high = middle;
+    }
+    if (!nest.laminar) {
+      for (let index = 0; index < low; index += 1) {
+        work.charge("eventSteps");
+        if (nest.ends[index]! >= at) held.add(nest.labels[index]!);
+      }
+      return;
+    }
+    // (up the chain the regions end no earlier: a jump whose region ends before `at` passes every region below it)
+    let index = low - 1;
+    while (index >= 0 && nest.ends[index]! < at) {
+      work.charge("eventSteps");
+      const jump = nest.jumps[index]!;
+      index = jump >= 0 && nest.ends[jump]! < at ? nest.parents[jump]! : nest.parents[index]!;
+    }
+    for (; index >= 0; index = nest.parents[index]!) {
+      work.charge("eventSteps");
+      held.add(nest.labels[index]!);
+    }
   }
 
   /**

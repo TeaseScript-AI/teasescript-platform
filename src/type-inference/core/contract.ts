@@ -14,7 +14,6 @@ import {
   keyOf,
   keyPath,
   keyPlace,
-  recordKey,
   recordPath,
   SELECTED_TEXT,
   SELECTED_VALUE,
@@ -530,6 +529,8 @@ export class Contract {
   /** Each value's structure identity (`structureOf`), and its interned shapes. */
   readonly #structures = new Map<PlaceId, string>();
   readonly #structureIds = new Map<string, string>();
+  /** The structures that hold a carrier whose operand read is marked below it (`#guardsBelow`): no level's members. */
+  readonly #markedStructures = new Set<string>();
   /** A literal's sub-structure below each path, and what stands at each path itself (`#levelsOf`). */
   readonly #literalLevels = new Map<
     PlaceId,
@@ -982,7 +983,9 @@ export class Contract {
    * A prefix entry as a level's member (§4.6): a literal stored whole, or a projection of one by property or index
    * steps, the selected prefix normalized to the literal and the steps into it, so the k projections
    * `({noise: hostValue otherwise null, data: root}).data` are the literals at `data`, whose level holds the read of
-   * `root` once; `null` for any other entry, which answers each path itself.
+   * `root` once; `null` for any other entry, which answers each path itself, and for a literal holding a carrier whose
+   * operand read is marked below it: such literals differ by where their reads are marked, so a level of k of them
+   * would be k groups at every path, its work beside each entry's own answer (Codex r21 B1).
    */
   #levelMember(entry: PrefixEntry): LevelGroup | null {
     if (
@@ -1004,6 +1007,7 @@ export class Contract {
       steps.push(stepName(projection.step));
       value = projection.owner;
     }
+    if (this.#markedStructures.has(this.structureOf(value))) return null;
     return {
       literal: value,
       at: steps.reverse(),
@@ -2007,6 +2011,7 @@ export class Contract {
     } else if (program.hasOf.has(value)) {
       const index = yield* this.#needIndex(value);
       let plain = index.references.size === 0;
+      let marked = false;
       const parts: string[] = [];
       const paths = new Set([
         ...index.terms.keys(),
@@ -2020,23 +2025,36 @@ export class Contract {
         for (const entry of [...(index.reads.get(path) ?? []), ...(index.others.get(path) ?? [])]) {
           const part = yield* this.#needStructure(entry.value);
           if (part.startsWith("v")) plain = false;
+          marked ||= this.#markedStructures.has(part);
           parts.push(`s${part}`);
         }
         for (const object of index.objects.get(path)?.list ?? [])
           parts.push(`{${[...object.names].sort().join(",")}}`);
       }
       parts.push(`empty:${[...index.empty].sort().join(",")}`);
-      if (plain) id = this.#internStructure(`l(${parts.join(";")})`);
+      if (plain) {
+        id = this.#internStructure(`l(${parts.join(";")})`);
+        if (marked) this.#markedStructures.add(id);
+      }
     } else {
       const carried = this.#carried(value, true);
       if (carried !== null) {
         const parts: string[] = [];
-        for (const input of carried.of)
-          parts.push(
-            input === null ? "" : `${yield* this.#needStructure(input)}${this.#guardsBelow(input)}`,
-          );
-        if (!parts.some((part) => part.startsWith("v")))
+        let marked = false;
+        for (const input of carried.of) {
+          if (input === null) {
+            parts.push("");
+            continue;
+          }
+          const part = yield* this.#needStructure(input);
+          const below = this.#guardsBelow(input);
+          marked ||= below !== "" || this.#markedStructures.has(part);
+          parts.push(`${part}${below}`);
+        }
+        if (!parts.some((part) => part.startsWith("v"))) {
           id = this.#internStructure(`${carried.name}(${parts.join(",")})`);
+          if (marked) this.#markedStructures.add(id);
+        }
       }
     }
     this.#structures.set(value, id);
@@ -2045,17 +2063,19 @@ export class Contract {
   /**
    * The tested paths below a carrier's operand read that the read is guarded at (§3.2), as part of the carrier's
    * structure: no holder records a carrier operand's marks, as a literal's holder records its reads' (r4.15), so two
-   * carriers share a structure only where their operand reads are marked alike below them (Codex r20 B1).
+   * carriers share a structure only where their operand reads are marked alike below them (Codex r20 B1). Each the
+   * outermost of nested ones, the guard index's regions holding the read, never each tested path in turn (Codex r21 B1).
    */
   #guardsBelow(operand: PlaceId): string {
     const { guards, definitions } = this.pass;
-    const key = this.copiedKey(operand);
-    if (key === null || definitions.ingress.has(operand) || this.identityOf(operand).guarded)
+    if (
+      this.copiedKey(operand) === null ||
+      definitions.ingress.has(operand) ||
+      this.identityOf(operand).guarded
+    )
       return "";
-    const marked: string[] = [];
-    for (const below of guards.testedPathsBelow(recordKey(key)))
-      if (guards.guardedRead(operand, below)) marked.push(below.join("."));
-    return marked.length === 0 ? "" : `g[${marked.sort().join(";")}]`;
+    const marked = guards.guardedBelowRead(operand);
+    return marked.length === 0 ? "" : `g[${marked.join(";")}]`;
   }
 
   #internStructure(shape: string): string {
