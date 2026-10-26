@@ -136,7 +136,10 @@ export function storedFieldMismatch(key: string, field: MissingField): string {
   return `Storage key ${JSON.stringify(key)} is loaded with '${name}' as ${describeType(field.type)} here, but the saved value ${saved}. This load takes '${name}' from its default, and the saved value is kept.`;
 }
 
-/** The developer warning `TSW020` for JSON of another kind than `fromJson` reads it as, which gives its default. */
+/**
+ * The developer warning `TSW020` for JSON of another kind than `fromJson` reads it as, which gives its default. Its
+ * sentence is provisional and neutral until the owner decides the sentences (D1, S8).
+ */
 export function jsonKindMismatch(value: SerializableRuntimeValue, type: TypePlan): string {
   const mismatch = findTypeMismatch(value, type);
   const found =
@@ -146,7 +149,10 @@ export function jsonKindMismatch(value: SerializableRuntimeValue, type: TypePlan
   return `fromJson(...) reads this JSON as ${describeType(type)}, but ${found}, so the call gives its default.`;
 }
 
-/** The developer warning `TSW020` for a field of JSON read as an object that `fromJson` takes from its default. */
+/**
+ * The developer warning `TSW020` for a field of JSON read as an object that `fromJson` takes from its default. Its
+ * sentence is provisional and neutral until the owner decides the sentences (D1, S8).
+ */
 export function jsonFieldMismatch(field: MissingField): string {
   const name = field.path.join(".");
   const found =
