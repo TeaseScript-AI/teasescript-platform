@@ -8,7 +8,14 @@ import type {
 import { boundParameterName } from "../../function-arguments.js";
 import { compileChild, type CompileTask } from "../continuation.js";
 import type { InstructionCompiler, LoweredExpression, ControlOrigin } from "./compiler.js";
-import { unwrapParentheses, withTypeCheck, planSpan } from "./expression-plans.js";
+import {
+  coreCallContent,
+  repairedBy,
+  unwrapParentheses,
+  withFallbackCheck,
+  withTypeCheck,
+  planSpan,
+} from "./expression-plans.js";
 
 // Calls, the script's own functions included, and `load`, with a `default:` that runs only when it is used.
 
@@ -128,6 +135,10 @@ export function* lowerCallTask(
       ),
       // The check of a `get` default goes with the default.
       ...(omitted === null ? withTypeCheck(compiler.typeChecks.get(expression)) : {}),
+      ...coreCallContent(expression, compiler.coreChecks),
+      ...(omitted === null
+        ? withFallbackCheck(compiler.coreChecks.fallbackChecks.get(expression))
+        : {}),
       span: planSpan(expression.span),
     },
     temporaryIds: [
@@ -147,7 +158,7 @@ export function* lowerLazyDefaultTask(
   compiler: InstructionCompiler,
   probe: (temporaryId: number, defaultTemporary: number) => void,
   defaultValue: Expression,
-  accept: Pick<StoreTemporaryInstruction, "defaultOf" | "typeCheck">,
+  accept: Pick<StoreTemporaryInstruction, "defaultOf" | "typeCheck" | "fallbackCheck" | "repair">,
   origin: Extract<ControlOrigin, { kind: "default" }>["expression"],
 ): CompileTask<LoweredExpression> {
   const resultTemporary = compiler.allocateTemporary();
@@ -193,6 +204,7 @@ export function* lowerLoadTask(
   const key = yield* compileChild(compiler.lowerExpressionTask(expression.key));
   const defaultValue = expression.defaultValue;
   const type = compiler.typeChecks.get(expression)?.type ?? null;
+  const repair = compiler.coreChecks.repairs.has(expression);
   if (defaultValue === null || !compiler.emitsInstructions(defaultValue)) {
     const lowered =
       defaultValue === null
@@ -204,6 +216,7 @@ export function* lowerLoadTask(
         key: key.plan,
         default: lowered?.plan ?? null,
         type,
+        ...(repair ? { repair: true as const } : {}),
         span: planSpan(expression.span),
       },
       temporaryIds: [...key.temporaryIds, ...(lowered?.temporaryIds ?? [])],
@@ -223,6 +236,7 @@ export function* lowerLoadTask(
             key: key.plan,
             default: null,
             type,
+            ...(repair ? { repair: true as const } : {}),
             span: planSpan(expression.span),
           },
           expectBoolean: false,
@@ -238,6 +252,7 @@ export function* lowerLoadTask(
               type: { kind: "union", members: [check.type, { kind: "null" }] },
               place: check.place,
             },
+            ...(repair ? repairedBy(check.type) : {}),
           },
       expression,
     ),

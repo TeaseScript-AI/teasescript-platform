@@ -8,7 +8,7 @@ import type { InstructionCompiler, LoweredExpression } from "./compiler.js";
 import { prepareInteractionSpeaker } from "./interactions.js";
 import { lowerAskQuestionTask } from "./asks.js";
 import { lowerLazyDefaultTask } from "./calls.js";
-import { planSpan } from "./expression-plans.js";
+import { planSpan, repairedBy, withFallbackCheck } from "./expression-plans.js";
 
 // File store and lock calls: their operands wait in temporaries, so every run of the instruction reads the same values.
 
@@ -59,6 +59,7 @@ export function* lowerFileStoreTask(
   const value = operands.value;
   if (value === null) throw new TypeError(`${call}(...) reached lowering without its value.`);
   const store = (destinationTemporary: number, defaultTemporary: number | null): void => {
+    const expected = compiler.coreChecks.expected.get(expression);
     compiler.instructions.push({
       kind: "fileStore",
       call,
@@ -66,6 +67,7 @@ export function* lowerFileStoreTask(
       defaultTemporary,
       files: operands.files,
       destinationTemporary,
+      ...(expected === undefined ? {} : { expected }),
       span: planSpan(expression.span),
     });
     compiler.emitTemporaryCleanup(temporaryIds, expression.span);
@@ -76,7 +78,11 @@ export function* lowerFileStoreTask(
         compiler,
         store,
         lazy.argument.value,
-        { defaultOf: lazy.operation },
+        {
+          defaultOf: lazy.operation,
+          ...withFallbackCheck(compiler.coreChecks.fallbackChecks.get(expression)),
+          ...repairedBy(compiler.coreChecks.expected.get(expression)),
+        },
         expression,
       ),
     );
@@ -204,7 +210,10 @@ export function* lowerLockTask(
         compiler,
         lock,
         lazy.argument.value,
-        { defaultOf: lazy.operation },
+        {
+          defaultOf: lazy.operation,
+          ...withFallbackCheck(compiler.coreChecks.fallbackChecks.get(expression)),
+        },
         expression,
       ),
     );

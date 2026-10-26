@@ -555,6 +555,12 @@ export const DIAGNOSTIC_CODES = {
     "File that the Player could not keep",
     "docs/RUNTIME.md#stored-files",
   ),
+  TSW020: entry(
+    ["runtime"],
+    "warning",
+    "JSON that does not fit fromJson's expected type",
+    "docs/RUNTIME.md#json-and-base64-text",
+  ),
 
   TSK001: entry(
     ["checkpoint"],

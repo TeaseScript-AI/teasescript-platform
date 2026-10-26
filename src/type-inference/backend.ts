@@ -1,5 +1,6 @@
 import type {
   AssignmentStatement,
+  BinaryExpression,
   CallArgument,
   CallExpression,
   Expression,
@@ -140,7 +141,35 @@ export interface TypeCheckResult {
   readonly storageTypes: readonly { readonly key: string; readonly type: TypePlan }[];
   /** The value an expression of the source is known to have, for the checks that follow the plan (see `KnownValues`). */
   readonly known: (expression: Expression) => KnownValue | undefined;
+  /** The runtime checks only the coarse core owes (see `CoreRuntimeChecks`); never in the legacy backend's result. */
+  readonly coreChecks?: CoreRuntimeChecks;
 }
+
+/**
+ * The runtime checks of the discharge map's new rows (the port plan's S3 §4), as plan content that only the coarse core
+ * emits, so a legacy plan keeps today's runtime behaviour until the core is selected (D7).
+ */
+export interface CoreRuntimeChecks {
+  /** The property stores into an object that may lack the property (C5c): the store requires it. */
+  readonly requireExisting: ReadonlySet<AssignmentStatement>;
+  /** The list `get` calls whose index may be no whole number (C2): the call rejects it. */
+  readonly indexChecks: ReadonlySet<CallExpression>;
+  /** The check of the fallback of an `otherwise`, or of a call's `default:`, where it is selected (C10). */
+  readonly fallbackChecks: ReadonlyMap<BinaryExpression | CallExpression, TypeCheckPlan>;
+  /** The type a `fromJson` call reads its JSON as (F18, ADR 0021 rule 2.6). */
+  readonly expected: ReadonlyMap<CallExpression, TypePlan>;
+  /** The loads with an object type that take a bad or missing field from their default (ADR 0021 rule 6.5). */
+  readonly repairs: ReadonlySet<LoadExpression>;
+}
+
+/** No core checks, which lowering reads for a legacy result. */
+export const NO_CORE_CHECKS: CoreRuntimeChecks = {
+  requireExisting: new Set(),
+  indexChecks: new Set(),
+  fallbackChecks: new Map(),
+  expected: new Map(),
+  repairs: new Set(),
+};
 
 /**
  * Where a value is stored in a place of known type: a `let` or assignment, the start value of a `global`, a list or

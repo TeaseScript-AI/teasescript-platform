@@ -44,9 +44,8 @@ test("the core gives the expected record for every record of the cells it comple
   assert.deepEqual(Object.fromEntries(held), {
     "the adapters' records (S9b)": 9,
     "stage 3b's cells (S10)": 653,
-    "AD-2: load's per-field repair (S7)": 5,
   });
-  assert.equal(asserted.length, 1_314);
+  assert.equal(asserted.length, 1_319);
   const deviating = new Map<string, number>();
   let shortened = 0;
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)

@@ -34,11 +34,13 @@ import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
+import { VALUE_KIND_NAMES } from "../src/value-kinds.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import {
   companions,
   derive,
+  derivedText,
   evaluate,
   syntaxOf,
   Underivable,
@@ -48,7 +50,9 @@ import {
 import { heldBack, readFixture } from "./helpers/type-core-fixture.js";
 import {
   assignments,
+  derivedContent,
   derivedStores,
+  plannedContent,
   plannedStores,
   runGlobals,
 } from "./helpers/type-core-route.js";
@@ -192,6 +196,22 @@ function checksOf(plan: InstructionPlan): string[] {
   return typeChecks(plan).map(({ so, eo, type }) => `${so}:${eo} ${typeText(type)}`);
 }
 
+/** The code a checked store fails with (S3 §4). */
+const STORE_CODES: readonly (string | null)[] = ["TSR058"];
+
+/**
+ * The codes each runtime discharge fails with, as the derived evaluation gives them: a whole-number use at a count or an
+ * index, an element of an empty list, a member a receiver may lack or not be able to hold, a selected fallback; a typed
+ * parse's or load's reading never fails (`null`, its event).
+ */
+const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
+  "integer-use": ["TSR024", "TSR043"],
+  empty: ["TSR018", "TSR019"],
+  member: ["TSR003", "TSR004", "TSR008", "TSR016", "TSR017", "TSR061", "TSR062"],
+  fallback: ["TSR058"],
+  "typed-ingress": [null],
+};
+
 /**
  * The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; TABLE r4.59; the lead's answer 3). Every
  * record of the positive list (the cells test's: all but those `heldBack` names) is tried on the candidate route in both
@@ -245,8 +265,8 @@ test("every positive-list record the candidate route reaches plans and runs as i
         .filter((diagnostic) => kinds[diagnostic.code] !== undefined)
         .map(
           (diagnostic) =>
-            `${diagnostic.severity} ${kinds[diagnostic.code]} ` +
-            `${diagnostic.span.start.offset}:${diagnostic.span.end.offset}`,
+            `${diagnostic.severity} ${diagnostic.code === "TSV043" && diagnostic.message.includes("property or member") ? "member-read" : kinds[diagnostic.code]} ` +
+            `${diagnostic.span.start.offset}:${diagnostic.message.includes("property or member") ? diagnostic.span.start.offset : diagnostic.span.end.offset}`,
         )
         .sort();
     assert.deepEqual(
@@ -255,7 +275,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
         .map(
           (diagnostic) =>
             `${diagnostic.class === "compile-error" ? "error" : "warning"} ${diagnostic.kind} ` +
-            `${diagnostic.site.offset}:${diagnostic.site.end}`,
+            `${diagnostic.site.offset}:${diagnostic.kind === "member-read" ? diagnostic.site.offset : diagnostic.site.end}`,
         )
         .sort(),
       record.name,
@@ -270,7 +290,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
     plans += 1;
     // discharges and checked stores, by rule (a construct the rules do not cover fails here, named); the source's syntax
     // serves every evaluation of it below
-    const [syntax, { stores, discharges }] = (() => {
+    const [syntax, { stores, discharges, content }] = (() => {
       try {
         const syntax = syntaxOf(source);
         return [syntax, derive(syntax, record.expected)] as const;
@@ -280,6 +300,16 @@ test("every positive-list record the candidate route reaches plans and runs as i
         throw error;
       }
     })();
+    assert.deepEqual(
+      plannedContent(result.plan, source),
+      derivedContent(content, source),
+      `${record.name}: S7 content`,
+    );
+    assert.deepEqual(
+      plannedContent(single.plan!, source),
+      derivedContent(content, source),
+      `${record.name}: one-file S7 content`,
+    );
     assert.deepEqual(
       plannedStores(result.plan),
       derivedStores(stores),
@@ -296,8 +326,8 @@ test("every positive-list record the candidate route reaches plans and runs as i
     const own = assignments(["hostValue"]).map((inputs) => ({
       inputs,
       ran: runGlobals(plan, inputs),
-      predicted: evaluate(syntax, stores, inputs).run,
-      events: evaluate(syntax, stores, inputs, true).events,
+      predicted: evaluate(syntax, stores, inputs, false, content).run,
+      events: evaluate(syntax, stores, inputs, true, content).events,
     }));
     // the original, as written: each input at the value fitting the earliest check it feeds
     const original =
@@ -341,21 +371,30 @@ test("every positive-list record the candidate route reaches plans and runs as i
         `${at}: the checked stores`,
       );
       const companionSyntax = syntaxOf(companion.source);
+      const companionContent = derive(companionSyntax, record.expected).content;
+      assert.deepEqual(
+        plannedContent(compiled.plan, companion.source),
+        derivedContent(companionContent, companion.source),
+        `${at}: S7 content`,
+      );
       for (const inputs of assignments(companion.globals)) {
         const ran = runGlobals(compiled.plan, inputs);
         assert.deepEqual(
           ran,
-          evaluate(companionSyntax, stores, inputs).run,
+          evaluate(companionSyntax, stores, inputs, false, companionContent).run,
           `${record.name}, companion ${companion.label}, with ${JSON.stringify(inputs)}`,
         );
-        observed.push({ run: ran, events: evaluate(companionSyntax, stores, inputs, true).events });
+        observed.push({
+          run: ran,
+          events: evaluate(companionSyntax, stores, inputs, true, companionContent).events,
+        });
         ranCompanions.push(ran);
         runs += 1;
         compared += 1;
       }
     }
     if (ranCompanions.length > 0) companionRuns.set(record.name, ranCompanions);
-    // each discharge classified by the runs: a store's at its value, the runtime's at its use
+    // each discharge classified by the runs: a store's at its value, the runtime's at its use, each by its own check
     for (const discharge of discharges) {
       if (discharge.by === "native" && discharge.what === "representable") {
         classes.set(
@@ -368,14 +407,20 @@ test("every positive-list record the candidate route reaches plans and runs as i
         discharge.by === "store"
           ? `${discharge.store.valueSo}:${discharge.store.valueEo}`
           : discharge.site;
-      const key = `${record.name}#${named}`;
+      // each discharge by its own check's codes, never another's at the same site
+      const codes = discharge.by === "store" ? STORE_CODES : (NATIVE_CODES[discharge.what] ?? []);
+      const own = (code: string | null): boolean => codes.includes(code);
+      const key = `${record.name}#${discharge.by === "store" ? "store" : discharge.what}@${named}`;
       if (classOf.has(key)) continue;
-      const at = `@${named}`;
-      const verdict = observed.some(({ run: ran }) => ran.failure?.endsWith(at) === true)
+      const ownAt = (event: CheckEvent): boolean => event.site === named && own(event.code);
+      const verdict = observed.some(({ run: ran }) => {
+        const [code, at] = ran.failure?.split("@") ?? [];
+        return at === named && own(code ?? null);
+      })
         ? "violable"
-        : observed.some(({ events }) => events.some((event) => event.site === named && !event.fits))
+        : observed.some(({ events }) => events.some((event) => ownAt(event) && !event.fits))
           ? "preempted"
-          : observed.some(({ events }) => events.some((event) => event.site === named))
+          : observed.some(({ events }) => events.some(ownAt))
             ? "not violable"
             : "unreachable";
       classOf.set(key, verdict);
@@ -391,21 +436,32 @@ test("every positive-list record the candidate route reaches plans and runs as i
   t.diagnostic(
     `${positive} positive-list records: ${accepted.length} on the candidate route, ${plans} with a plan, ${runs} ` +
       `runs, ${compared} comparisons with a predicted run (each original's is its fitting assignment's run); ` +
-      `discharges: ${listed(classes)}; outside the candidate slice until S7–S9b: ${listed(outside)}`,
+      `discharges: ${listed(classes)}; outside the candidate slice (later port steps): ${listed(outside)}`,
   );
   assert.equal(accepted.length + counted, positive);
   // the literal witnesses of the rules (§5.2): each class and each original outcome the note names
+  // each discharge by its kind and site: two at one site are classified each by its own check
   const verdicts: readonly (readonly [string, string, string])[] = [
-    ["cp9-cells/r6-bugs/admission/use-before-overwrite", "38:43", "preempted"],
-    ["cp9-cells/r6-bugs/admission/use-before-overwrite", "12:30", "violable"],
-    ["cp9-cells/s4/s6/owner/ingress/dead-consumer", "42:47", "unreachable"],
-    ["cp9-cells/s4/s6/owner/ingress/dead-consumer", "9:23", "violable"],
-    ["cp9-cells/s4/followup/fit/literal-mixed-repeat", "7:18", "violable"],
-    ["cp9-cells/r46/m3/two-ingress-targets", "59:63", "violable"],
-    ["cp9-cells/r46/m3/two-ingress-targets", "80:84", "violable"],
+    ["cp9-cells/r6-bugs/admission/use-before-overwrite", "integer-use@38:43", "preempted"],
+    ["cp9-cells/r6-bugs/admission/use-before-overwrite", "store@12:30", "violable"],
+    ["cp9-cells/s4/s6/owner/ingress/dead-consumer", "integer-use@42:47", "unreachable"],
+    ["cp9-cells/s4/s6/owner/ingress/dead-consumer", "store@9:23", "violable"],
+    ["cp9-cells/s4/followup/fit/literal-mixed-repeat", "integer-use@7:18", "violable"],
+    ["cp9-cells/r46/m3/two-ingress-targets", "store@59:63", "violable"],
+    ["cp9-cells/r46/m3/two-ingress-targets", "store@80:84", "violable"],
+    // a member check and a count at one site: the run fails the member first, or the count with the member there
+    ["cp9-cells/witness/sol-missing-member-direct", "member@54:62", "violable"],
+    ["cp9-cells/witness/sol-missing-member-direct", "integer-use@54:62", "preempted"],
+    ["cp9-cells/r44/own-selector/own-last-count", "member@27:33", "not violable"],
+    ["cp9-cells/r44/own-selector/own-last-count", "integer-use@27:33", "violable"],
   ];
-  for (const [name, at, verdict] of verdicts)
-    assert.equal(classOf.get(`${name}#${at}`), verdict, `${name} at ${at}`);
+  assert.deepEqual(
+    verdicts.map(([name, at]) => `${name}#${at} ${classOf.get(`${name}#${at}`)}`),
+    verdicts.map(([name, at, verdict]) => `${name}#${at} ${verdict}`),
+    JSON.stringify(
+      [...classOf].filter(([key]) => verdicts.some(([name]) => key.startsWith(`${name}#`))),
+    ),
+  );
   for (const [name, failure] of [
     ["cp9-cells/X5/outside-definition", "TSR043@28:29"],
     ["cp9-cells/r46/m3/two-ingress-targets", "TSR058@80:84"],
@@ -441,6 +497,204 @@ test("every positive-list record the candidate route reaches plans and runs as i
     "cp9-cells/r8/written-list/mixed",
   ])
     assert.ok(accepted.includes(name), `${name} inside the slice`);
+});
+
+test("the S7 oracle derives receiving written types and observes native discharges", () => {
+  for (const [prefix, initializer] of [
+    ["let out: number = ", 'fromJson("2.5", default: 0, files: false)'],
+    ["let out: number = ", 'load("count", default: 0)'],
+    ["let out: number? = 0\nout = ", 'fromJson("2.5", default: null, files: false)'],
+    ["let out: number? = 0\nout = ", 'load("count", default: 0)'],
+    ["let out: number? = ", 'fromJson("null", default: 0, files: false)'],
+  ] as const) {
+    const source = `${prefix}${initializer}\nsay out\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const derived = derive(syntaxOf(source), compactAnalysis(request));
+    const owner = `${prefix.length}:${source.indexOf("\n", prefix.length)}`;
+    assert.deepEqual(
+      derivedContent(derived.content, source),
+      [
+        initializer.startsWith("load")
+          ? `load ${owner} ${prefix.includes("number?") ? "null|number" : "number"} repair=false`
+          : `expected ${owner} ${prefix.includes("number?") ? "null|number" : "number"}`,
+      ],
+      source,
+    );
+    const compiled = candidate(source);
+    assert.ok(compiled.plan !== null, source);
+    assert.deepEqual(
+      plannedContent(compiled.plan, source),
+      derivedContent(derived.content, source),
+      source,
+    );
+    assert.deepEqual(
+      runGlobals(compiled.plan, {}),
+      evaluate(syntaxOf(source), derived.stores, {}, false, derived.content).run,
+      source,
+    );
+  }
+  for (const operand of ['load("count", default: 0)', 'fromJson("1", default: 0, files: false)']) {
+    const source = `say ${operand}\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const derived = derive(syntaxOf(source), compactAnalysis(request));
+    const ingress = derived.discharges.filter(
+      (entry) => entry.by === "native" && entry.what === "typed-ingress",
+    );
+    assert.equal(ingress.length, 1, source);
+    const predicted = evaluate(syntaxOf(source), derived.stores, {}, false, derived.content);
+    assert.ok(
+      predicted.events.some((event) => event.site === `4:${source.indexOf("\n")}` && event.fits),
+      source,
+    );
+    const compiled = candidate(source);
+    assert.ok(compiled.plan !== null, source);
+    assert.deepEqual(runGlobals(compiled.plan, {}), predicted.run, source);
+  }
+  for (const access of ["v.first", "v.last", "v[0]"]) {
+    const source = `let v = hostValue\nlet out: integer = ${access}\nsay out\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const derived = derive(syntaxOf(source), compactAnalysis(request));
+    const accessSite = `${source.indexOf(access)}:${source.indexOf(access) + access.length}`;
+    assert.ok(
+      derived.discharges.some(
+        (entry) => entry.by === "native" && entry.what === "member" && entry.site === accessSite,
+      ),
+      source,
+    );
+    if (access !== "v[0]")
+      assert.ok(
+        derived.discharges.some(
+          (entry) => entry.by === "native" && entry.what === "empty" && entry.site === accessSite,
+        ),
+        source,
+      );
+    const compiled = candidate(source);
+    assert.ok(compiled.plan !== null, source);
+    for (const hostValue of [
+      null,
+      { kind: "list", items: [] },
+      { kind: "list", items: [2] },
+      { kind: "set", items: [] },
+      { kind: "dict", entries: [] },
+    ] satisfies SerializableRuntimeValue[]) {
+      const predicted = evaluate(
+        syntaxOf(source),
+        derived.stores,
+        { hostValue },
+        false,
+        derived.content,
+      );
+      assert.deepEqual(
+        runGlobals(compiled.plan, { hostValue }),
+        predicted.run,
+        `${access}: ${JSON.stringify(hostValue)}`,
+      );
+      if (hostValue?.kind === "list" && hostValue.items.length === 0)
+        assert.equal(
+          predicted.run.failure,
+          access === "v[0]"
+            ? `TSR025@${source.indexOf("0]")}:${source.indexOf("0]") + 1}`
+            : `TSR018@${accessSite}`,
+          source,
+        );
+    }
+  }
+});
+
+test("the S7 oracle derives object admissions and default structures from their source places", () => {
+  const cases = [
+    ["let p = {n: 1}\np = hostValue\nsay p.n\nexit\n", "store", "{n: integer}"],
+    [
+      "let p = {stats: {n: 1}}\np = hostValue\nsay p.stats.n\nexit\n",
+      "store",
+      "{stats: {n: integer}}",
+    ],
+    ["let p: object = {n: 1}\np = hostValue\nsay p.n\nexit\n", "store", "{}"],
+    [
+      "let p = fromJson(hostValue, default: [{stats: {n: 0}}, {stats: {n: 1.5}}], files: false)\nsay p[0].stats.n\nexit\n",
+      "expected",
+      "list<{stats: {n: number}}>",
+    ],
+    [
+      'let p = fromJson(hostValue, default: fromJson("{}", default: {n: 0}, files: false), files: false)\nsay p.n\nexit\n',
+      "expected",
+      "{n: integer}",
+    ],
+    [
+      'let p = fromJson(hostValue, default: load("p", default: {n: 0}), files: false)\nsay p.n\nexit\n',
+      "expected",
+      "{n: integer}",
+    ],
+    [
+      "let xs: number[] = [fromJson(hostValue, default: 0, files: false)]\nsay xs[0]\nexit\n",
+      "expected",
+      "number",
+    ],
+    [
+      'let n: number? = fromJson(hostValue, default: 0, files: false) otherwise fromJson("2.5", default: 0, files: false)\nsay n\nexit\n',
+      "expected",
+      "null|number",
+    ],
+    [
+      // a `null` field of the default that nothing else types stays unknown (ADR 0021 2.6)
+      "let p = fromJson(hostValue, default: {n: null, m: 0}, files: false)\nsay p.m\nexit\n",
+      "expected",
+      `{n: ${derivedText({ kind: "kinds", kinds: VALUE_KIND_NAMES })}, m: integer}`,
+    ],
+  ] as const;
+  const inputs: readonly SerializableRuntimeValue[] = [
+    // the fixture route's domain
+    2,
+    "text",
+    true,
+    2.5,
+    null,
+    "null",
+    "1.5",
+    "{}",
+    '{"n":3}',
+    '{"stats":{"n":3}}',
+    { kind: "object", properties: [{ name: "n", value: 3 }] },
+    { kind: "object", properties: [{ name: "n", value: "bad" }] },
+    {
+      kind: "object",
+      properties: [
+        { name: "stats", value: { kind: "object", properties: [{ name: "n", value: 3 }] } },
+      ],
+    },
+  ];
+  const failures: string[] = [];
+  for (const [source, check, expected] of cases) {
+    try {
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null);
+      const derived = derive(syntaxOf(source), compactAnalysis(request));
+      const content = derivedContent(derived.content, source);
+      assert.ok(
+        (check === "store"
+          ? derivedStores(derived.stores)
+          : content.filter((entry) => entry.startsWith("expected "))
+        ).some((entry) => entry.endsWith(` ${expected}`)),
+        source,
+      );
+      const compiled = inBothOrders(() => candidate(source));
+      assert.ok(compiled.plan !== null, source);
+      assert.deepEqual(plannedStores(compiled.plan), derivedStores(derived.stores), source);
+      assert.deepEqual(plannedContent(compiled.plan, source), content, source);
+      for (const hostValue of inputs)
+        assert.deepEqual(
+          runGlobals(compiled.plan, { hostValue }),
+          evaluate(syntaxOf(source), derived.stores, { hostValue }, false, derived.content).run,
+          `${source} with ${JSON.stringify(hostValue)}`,
+        );
+    } catch (error) {
+      failures.push(`${source}\n${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  assert.deepEqual(failures, [], failures.join("\n"));
 });
 
 test("C1's copy check and C9's boundary check run where external data enters a written place", () => {
@@ -1214,8 +1468,9 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
   "parse default": [
     {
       data: "its own read",
-      scalar: 'let out = fromJson("1", default: [1, D][1])',
-      collection: 'let out = fromJson("[]", default: [1, D])',
+      // text that is not JSON, so the default is the value
+      scalar: 'let out = fromJson("broken", default: [1, D][1])',
+      collection: 'let out = fromJson("broken", default: [1, D])',
       rule: { data: "typed", own: (k, _, h) => (k === "1" ? `[1, ${h}][1]` : `[1, ${h}]`) },
     },
   ],
@@ -1387,7 +1642,7 @@ test("every carrier kind leaves an obligation for the external data it gives a p
           }
       }
   t.diagnostic(
-    `${shapes} shapes, ${routed} on the candidate route; outside the slice until S7–S9b (the answers only): ` +
+    `${shapes} shapes, ${routed} on the candidate route; outside the slice (later port steps; the answers only): ` +
       [...outside].map(([shape, what]) => `${shape}: ${what}`).join(", ") +
       `; no shape: ${none.join("; ")}`,
   );
@@ -1525,7 +1780,12 @@ test("a decider beside an unselected read of its source is the selected read its
   )!;
   assert.deepEqual(
     inBothOrders(() => analyseCore(request).place(place.id, ["element"]).admitted),
-    { by: "decided", kinds: ["integer", "null"], decider: { file: 0, start: 68, end: 71 } },
+    {
+      by: "decided",
+      kinds: ["integer", "null"],
+      decider: { file: 0, start: 68, end: 71 },
+      inherited: false,
+    },
   );
 });
 

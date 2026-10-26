@@ -1203,7 +1203,12 @@ structured validation errors. Storage values, loaded values, and action payloads
 
 Each `storageLoad` carries `type`, the type its `load` reads the stored value as, or `null` for a load the compiler
 cannot type ([ADR 0021 §6](decisions/0021-static-types.md)). A stored value that does not fit it is ignored for that
-load: developer warning `TSW016` at the load, then the default; the entry stays in the view.
+load: developer warning `TSW016` at the load, then the default; the entry stays in the view. A `storageLoad` with
+`repair: true`, which only the new type analysis emits for an object `type`, repairs a stored object instead: each
+missing field, or one of another type, nested objects field by field, takes the default's, with one `TSW016` naming each
+such field, and the load's copy keeps the stored object's other fields. Its default runs only when a field needs it;
+when the default runs as instructions, the load leaves the stored object in the result's temporary, and the
+`storeTemporary` that selects the default carries `repair`, the type it repairs that object against.
 `InstructionPlan.storageTypes` lists, unique and in key order, the type that every typed load of a storage key written
 as a string literal accepts; every non-null saved value under such a key, also through a computed key, must fit it, or
 the `save` fails with `TSR058`, after `TSR055` for a value that cannot be stored. Host storage and debugging edits may
@@ -1565,6 +1570,15 @@ JSON reading does not for keys that look like whole numbers, and so that any dep
   recognized type into a stored file and gives its reference; a dict key and any other data URL stay text. A file that
   occurs twice is read or stored once. `files:` that is not true or false is compile error `TSV043` for a known type and
   runtime error `TSR059` otherwise.
+- A `fromJson` call or file store instruction with `expected`, which only the new type analysis emits
+  ([ADR 0021 rule 2.6](decisions/0021-static-types.md)), reads the JSON as that type. JSON of another kind gives the
+  default with developer warning `TSW020`, before any file is stored. An object type reads a JSON object as an object of
+  its properties, nested objects the same way: each missing property, or one of another type, takes the default's, with
+  one `TSW020` naming each, and the JSON's other keys are left out. The file store stores only the files of the parts
+  the call keeps: a key the type leaves out, or a property the default supplies, is never stored. The default runs only
+  when a property needs it; one that runs as instructions finds the JSON's dict in the result's temporary, and the
+  `storeTemporary` that selects it carries `repair`, the type it reads that dict as. Text that is not JSON still gives
+  the default without a warning.
 
 `hashText` ([V30 §13](specifications/accepted-syntaxes-v30.md#hashes)) is a pure core built-in as well, and gives its
 result at once: native `crypto.subtle.digest` always waits, so the engine has its own SHA-256 (FIPS 180-4,
@@ -1581,7 +1595,9 @@ Like `toJson` and `fromJson` without a written `files: false`, they are protecte
 `fileStore` instruction, whose operands are temporaries or literals evaluated once in written order, and whose
 `default:` runs after it, only when it is used; plan validation rejects them as ordinary calls. `fileFromBase64` requires `default:` (`TSV020`), and the others take no named arguments
 (`TSV022`). A value the compiler knows is not text is `TSV043`, and the result of `fileFromBase64` is text or the
-default's type. The instruction first finds the files it needs:
+default's type. In a plan of the new type analysis, the `storeTemporary` that selects the default of `fileFromBase64`,
+and of `decryptText` and `decryptFile` ([Locks](#locks)), may carry `fallbackCheck`: a default other than `null` that
+does not fit it fails with `TSR058`. The instruction first finds the files it needs:
 
 - `fileFromBase64` reads text as `fromBase64` does, ignoring spaces and line breaks, with the URL alphabet and without
   padding, or the Base64 data of a `data:<type>;base64,…` URL, whose declared type it ignores. Anything else, also a
@@ -2038,9 +2054,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 102 | Player profile (owner decision, 2026-10-23): the instruction that copies the player profile into `player` is `copyPlayerProfile`, and a read of one of its person fields is `{ kind: "playerProfileField", name }`; plan validation previously accepted `copyAccount` and `accountField` instead. |
+| Instruction plan | 103 | The new type analysis's runtime checks (the port of the coarse core, step S7; only its plans carry them until it is selected): an `assign` of a property may carry `requireExisting`, a call `indexCheck`, `fallbackCheck`, and `expected`, a `binary` `otherwise` `fallbackCheck`, a `storeTemporary` `fallbackCheck` and `repair`, a `fileStore` of `fromJson` `expected`, and a `storageLoad` `repair`, which plan validation previously rejected; a plan without them runs as before. |
 | Runtime snapshot | 90 | Player profile (owner decision, 2026-10-23): the person fields the host gave at the start are kept as `playerProfile`; previously they were kept as `account`. |
-| Checkpoint | 126 | The player-profile plan and snapshot contracts. |
+| Checkpoint | 127 | The plan contract of the new type analysis's runtime checks. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -2072,6 +2088,9 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Instruction plan history
 
+- Revision 102: Player profile (owner decision, 2026-10-23): the instruction that copies the player profile into
+  `player` is `copyPlayerProfile`, and a read of one of its person fields is `{ kind: "playerProfileField", name }`;
+  plan validation previously accepted `copyAccount` and `accountField` instead.
 - Revision 101: Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `setFallback` instruction, a
   `transfer` destination names a file's entry, never a label, and no `goto` stands in a global function or its blocks;
   plan validation previously accepted all three.
@@ -2439,6 +2458,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 126: The player-profile plan and snapshot contracts.
 - Revision 125: The plan and snapshot contracts of files entered at their top.
 - Revision 124: The single-argument-copy snapshot contract.
 - Revision 123: the public key plan and snapshot contracts.

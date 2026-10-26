@@ -535,6 +535,8 @@ export class Admission {
    * 0021 1.3: the kinds present never narrow a written domain, the lead's ruling on external round 7 B1).
    */
   readonly #permitsNull = new Set<Key>();
+  /** The paths a copy of a written type decides, not the place's own (A4 through copies, r4.75 (1)). */
+  readonly #inheritsWritten = new Set<Key>();
   /** The paths a written type, or a copy of one, leaves unrestricted (`permittedAt`): no decision, every kind fits. */
   readonly #unrestricted = new Set<Key>();
   /** The site of the contribution each decision took (S3 §1's admitted answer), `null` for a written type. */
@@ -1158,6 +1160,8 @@ export class Admission {
       }
     }
     if (tags === null) return null;
+    if (byWritten && writtenTags === null) this.#inheritsWritten.add(key);
+    else this.#inheritsWritten.delete(key);
     // an unrestricted written part, or a copy's, decides nothing: every kind fits there, no store owes it anything
     if (tags.includes("unknown")) {
       this.#unrestricted.add(key);
@@ -1534,6 +1538,11 @@ export class Admission {
         (this.#nullable.get(key) !== false && kinds.some((item) => item.tag === "null")))
       ? [...tags, "null"]
       : tags;
+  }
+
+  /** Whether a copy of a written type decides a place's path, not the place's own written type (A4, r4.75 (1)). */
+  public inheritsWritten(place: PlaceId, path: readonly string[]): boolean {
+    return this.#inheritsWritten.has(keyOf(place, path));
   }
 
   /**

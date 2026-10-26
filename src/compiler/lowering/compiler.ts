@@ -35,7 +35,11 @@ import {
   isTakePhotoCall,
 } from "../../capture-call.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
-import type { RuntimeCheckSite } from "../../type-inference/backend.js";
+import {
+  NO_CORE_CHECKS,
+  type CoreRuntimeChecks,
+  type RuntimeCheckSite,
+} from "../../type-inference/backend.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
 import {
   expressionChildren as instructionEmissionChildren,
@@ -71,6 +75,8 @@ import {
   normalizeUnaryExpression,
   compileExpression,
   withTypeCheck,
+  withFallbackCheck,
+  repairedBy,
   unitOf,
   planSpan,
   tagQueryPlan,
@@ -228,6 +234,8 @@ export class InstructionCompiler {
     public readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape> = new Map(),
     /** Receives the trace of the lowering, when an analysis asks for it. */
     private readonly trace: LoweringTrace | null = null,
+    /** The runtime checks only the coarse core owes, which legacy results do not have. */
+    public readonly coreChecks: CoreRuntimeChecks = NO_CORE_CHECKS,
   ) {
     this.#functionIdBase = functions.length;
     const functionByName = new Map<
@@ -261,7 +269,7 @@ export class InstructionCompiler {
       this.instructions.push({
         kind: "declareGlobal",
         name: declaration.name.name,
-        value: compileExpression(declaration.initial, this.typeChecks),
+        value: compileExpression(declaration.initial, this.typeChecks, this.coreChecks),
         ...withTypeCheck(this.typeChecks.get(declaration)),
         file,
         span: planSpan(declaration.span),
@@ -273,7 +281,7 @@ export class InstructionCompiler {
       name: declaration.name.name,
       properties: declaration.properties.map((property) => ({
         name: property.name.name,
-        value: compileExpression(property.value, this.typeChecks),
+        value: compileExpression(property.value, this.typeChecks, this.coreChecks),
         span: planSpan(property.span),
       })),
       file,
@@ -506,6 +514,9 @@ export class InstructionCompiler {
           target: target.plan,
           value: assigned,
           ...withTypeCheck(this.typeChecks.get(statement)),
+          ...(this.coreChecks.requireExisting.has(statement)
+            ? { requireExisting: true as const }
+            : {}),
           span: planSpan(statement.span),
         });
         this.emitTemporaryCleanup(
@@ -766,7 +777,10 @@ export class InstructionCompiler {
   public *lowerExpressionTask(expression: Expression): CompileTask<LoweredExpression> {
     expression = unwrapParentheses(expression);
     if (this.contextualSpeakerTemporary === null && !this.emitsInstructions(expression))
-      return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
+      return {
+        plan: compileExpression(expression, this.typeChecks, this.coreChecks),
+        temporaryIds: [],
+      };
     if (expression.kind === "interactionExpression") {
       return yield* compileChild(lowerInteractionTask(this, expression));
     }
@@ -878,13 +892,19 @@ export class InstructionCompiler {
       case "numberLiteral":
       case "durationLiteral":
       case "regexLiteral":
-        return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
+        return {
+          plan: compileExpression(expression, this.typeChecks, this.coreChecks),
+          temporaryIds: [],
+        };
       case "stringLiteral": {
         const interpolations = expression.parts
           .filter((part) => part.kind === "stringInterpolation")
           .map((part) => part.expression);
         if (interpolations.length === 0) {
-          return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
+          return {
+            plan: compileExpression(expression, this.typeChecks, this.coreChecks),
+            temporaryIds: [],
+          };
         }
         const ids: number[] = [];
         const loweredInterpolations = yield* compileChild(
@@ -917,7 +937,10 @@ export class InstructionCompiler {
             temporaryIds: [],
           };
         }
-        return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
+        return {
+          plan: compileExpression(expression, this.typeChecks, this.coreChecks),
+          temporaryIds: [],
+        };
       case "parenthesizedExpression":
         return yield* compileChild(this.lowerExpressionTask(expression.expression));
       case "listLiteral":
@@ -1003,7 +1026,12 @@ export class InstructionCompiler {
               });
             },
             lazy.argument.value,
-            { defaultOf: lazy.operation, ...withTypeCheck(this.typeChecks.get(expression)) },
+            {
+              defaultOf: lazy.operation,
+              ...withTypeCheck(this.typeChecks.get(expression)),
+              ...withFallbackCheck(this.coreChecks.fallbackChecks.get(expression)),
+              ...repairedBy(this.coreChecks.expected.get(expression)),
+            },
             expression,
           ),
         );
@@ -1058,7 +1086,10 @@ export class InstructionCompiler {
           !this.emitsInstructions(leftExpression) &&
           !this.emitsInstructions(rightExpression)
         ) {
-          return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
+          return {
+            plan: compileExpression(expression, this.typeChecks, this.coreChecks),
+            temporaryIds: [],
+          };
         }
         const [left, right] = yield* compileChild(
           this.lowerOrderedExpressionsTask([leftExpression, rightExpression]),
@@ -1069,6 +1100,7 @@ export class InstructionCompiler {
             operator: expression.operator,
             left: left!.plan,
             right: right!.plan,
+            ...withFallbackCheck(this.coreChecks.fallbackChecks.get(expression)),
             span: planSpan(expression.span),
           },
           temporaryIds: [...left!.temporaryIds, ...right!.temporaryIds],

@@ -6,6 +6,7 @@ import {
   type StoredAngle,
 } from "./angle.js";
 import type { CallExpression, Expression, Identifier, Program } from "./ast.js";
+import type { TypePlan } from "./plan/model.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import { CONVERSIONS, fitsDefault, isConversion } from "./conversions.js";
 import {
@@ -29,6 +30,7 @@ import { isNumericFunction } from "./numeric-functions.js";
 import { canonicalRegexFlags, regexFlagProblem } from "./regex.js";
 import { withRegexWorkPool } from "./regex-engine.js";
 import { readCollection, readDict } from "./runtime/values/collection-operations.js";
+import { readExpected, repairedRecord } from "./runtime/values/expected-reading.js";
 import { listFunctionValue } from "./runtime/values/list-statistics.js";
 import {
   conversionResult,
@@ -48,6 +50,7 @@ import { temporalMethod } from "./runtime/values/temporal-operations.js";
 import { withTextLengthLimit } from "./runtime/values/text-length.js";
 import { isDict, isList, isSet, isTemporal } from "./runtime/values/value-predicates.js";
 import { joinedText, visibleText } from "./runtime/values/value-text.js";
+import { matchesValueType } from "./runtime/values/value-types.js";
 import type { SourceSpan } from "./source.js";
 import type { TemporalContext } from "./temporal.js";
 import { recordValidationTestWork } from "./validation-testing.js";
@@ -468,6 +471,8 @@ export const KNOWN_VALUE_WORK = 10_000_000;
 export class KnownValues {
   readonly #values = new Map<Expression, KnownValue | undefined>();
   readonly #initializer: (identifier: Identifier) => Expression | undefined;
+  /** The type a `fromJson` call reads its JSON as, where the plan gives it one (`CallExpressionPlan.expected`). */
+  readonly #expected: (call: CallExpression) => TypePlan | undefined;
   /** The work left (see `KNOWN_VALUE_WORK`), which regex searches also use up. */
   readonly #work = { remaining: KNOWN_VALUE_WORK };
   /** The work each list, set, dict, regex, or date and time value takes (see `knownSize`), once it was measured. */
@@ -475,8 +480,10 @@ export class KnownValues {
 
   public constructor(
     initializer: (identifier: Identifier) => Expression | undefined = () => undefined,
+    expected: (call: CallExpression) => TypePlan | undefined = () => undefined,
   ) {
     this.#initializer = initializer;
+    this.#expected = expected;
   }
 
   /**
@@ -680,7 +687,7 @@ export class KnownValues {
         }
         if (input > this.#work.remaining) return undefined;
         this.#work.remaining -= input;
-        return this.#run(() => callValue(expression, known));
+        return this.#run(() => callValue(expression, known, this.#expected(expression)));
       }
       default:
         return knownValue(expression, known);
@@ -709,6 +716,7 @@ export class KnownValues {
 function callValue(
   call: CallExpression,
   known: (operand: Expression) => KnownValue | undefined,
+  expected: TypePlan | undefined,
 ): KnownValue | undefined {
   // A `default:` runs only when the call gives it.
   const lazy = lazyDefaultArgument(call);
@@ -736,6 +744,19 @@ function callValue(
           throw NEEDS_SESSION;
         },
       });
+      // `fromJson` reads its JSON as its expected type, as the runtime does (ADR 0021 rule 2.6); a value that does not
+      // have that type fails the run's checks
+      if (expected !== undefined) {
+        const reading =
+          converted === undefined ? undefined : readExpected(converted, expected, true);
+        if (reading?.kind === "whole") return reading.value;
+        const value = fallback();
+        const read =
+          value !== undefined && converted !== undefined && reading?.kind === "fields"
+            ? repairedRecord(converted, value, expected, true)
+            : value;
+        return read !== undefined && matchesValueType(read, expected) ? read : undefined;
+      }
       if (converted !== undefined) return converted;
       // A default that the conversion does not take fails the run.
       const value = fallback();

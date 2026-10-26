@@ -10,7 +10,8 @@ import { readFixture } from "./helpers/type-core-fixture.js";
 
 /**
  * The discharge map of the port plan's S3 note (§4, "Completeness"): every check the core emits has a row, which names
- * the runtime check that discharges it, and that check exists today or is S7's new plan content. A check is placed in
+ * the runtime check that discharges it: the runtime's own, or plan content only the core emits (S7, the map's "new"
+ * rows, run through the candidate route in `type-core-discharge-runtime.test.ts`). A check is placed in
  * its row by its kind and by where it stands in the source: a store's value, an argument or a return (C1, C7), an
  * insertion's argument, a fallback's or a default's operand (C10), a use (C2–C6, C11–C13).
  */
@@ -25,27 +26,24 @@ const ROWS = [
   ["C9: a boundary against unknown", "the runtime's validation of representable external data"],
   [
     "F18: a fromJson's expected type where it is read",
-    "S7: expected on the conversion and the file store",
+    "expected on the conversion or the file store",
   ],
   ["C2, C5a: a null at a use", "the runtime's check at the use"],
   ["C5b, C5c: a member at a read or a call", "the runtime's check at the access"],
-  ["C5c: a property's presence at a store", "S7: requireExisting on the store"],
+  ["C5c: a property's presence at a store", "requireExisting on the store"],
   ["C2: a whole number at a use", "the runtime's check at the use"],
-  ["C2: the index of a list's get", "S7: the index check on the get"],
+  ["C2: the index of a list's get", "indexCheck on the get"],
   ["C3, C4, C11, C12, C13: an operand", "the runtime's check at the operation"],
   ["C6: an element selection", "the runtime's check at the selection"],
-  ["C10: a get's, a conversion's or a load's default", "the final instruction's typeCheck"],
-  ["C10: an otherwise's fallback", "S7: fallbackCheck on the final instruction"],
+  ["C10: a get's, a conversion's or a load's default", "the call's fallbackCheck, the load's type"],
+  ["C10: an otherwise's fallback", "fallbackCheck on the otherwise or its final instruction"],
   [
     "C10: the lazy default of fileFromBase64, decryptText or decryptFile",
-    "S7: fallbackCheck on the instruction that selects it",
+    "fallbackCheck on the instruction that selects it",
   ],
 ] as const;
 
 type Row = (typeof ROWS)[number][0];
-
-/** The rows whose executable check is S7's new plan content (S3 §4's "new" rows). */
-const NEW: readonly Row[] = ROWS.filter(([, check]) => check.startsWith("S7:")).map(([row]) => row);
 
 /** The expressions that contain a site, outermost first. */
 function enclosing(program: unknown, start: number, end: number): Expression[] {
@@ -165,7 +163,7 @@ function rowOf(check: Obligation, program: unknown): Row | null {
 /** Programs beside the set for the rows its records do not reach: the set's lazy file and lock defaults are all `null`. */
 const BESIDE = ['let file = fileFromBase64("!", default: hostValue)\nexit'];
 
-test("every check the core emits has a row of the discharge map, its runtime check existing or S7's (S3 §4)", () => {
+test("every check the core emits has a row of the discharge map, which names its runtime check (S3 §4)", () => {
   const witnessed = new Map<Row, number>();
   const unplaced: string[] = [];
   const records = [
@@ -189,11 +187,4 @@ test("every check the core emits has a row of the discharge map, its runtime che
     ROWS.map(([row]) => row).filter((row) => !witnessed.has(row)),
     [],
   );
-  assert.deepEqual(NEW, [
-    "F18: a fromJson's expected type where it is read",
-    "C5c: a property's presence at a store",
-    "C2: the index of a list's get",
-    "C10: an otherwise's fallback",
-    "C10: the lazy default of fileFromBase64, decryptText or decryptFile",
-  ]);
 });
