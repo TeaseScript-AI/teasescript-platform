@@ -130,10 +130,7 @@ test("execution compiles the reported prepared source", () => {
 
 test("required campaign reaches same-seed determinism and varied source-fuzz families", () => {
   const config = defaultPropertyCampaignConfig();
-  const cases = Array.from(
-    { length: config.runs },
-    (_, index) => runPropertyCampaign({ ...config, caseIndex: index }).firstCase,
-  );
+  const cases = singletonCases();
   assert.ok(cases.some((result) => result.id === "same-seed-is-deterministic"));
   assertSourceFamilyCoverage(cases, "valid", VALID_SOURCE_FAMILIES);
   assertSourceFamilyCoverage(cases, "near-valid", NEAR_VALID_SOURCE_FAMILIES);
@@ -277,12 +274,26 @@ function createSourceCase(seed: number, index: number, classification: "valid" |
     : createNearValidSourceCase(seed, index);
 }
 
-function sourceCaseConfig(classification: "valid" | "near-valid") {
+let singletons: readonly PropertyCaseResult[] | undefined;
+
+/**
+ * Each case of the required campaign, run alone as a replay selects it. The cases are deterministic, so the tests that
+ * look one up or survey them share one run of the catalogue; the required campaign itself still runs on its own.
+ */
+function singletonCases(): readonly PropertyCaseResult[] {
   const config = defaultPropertyCampaignConfig();
-  const result = Array.from(
+  singletons ??= Array.from(
     { length: config.runs },
     (_, index) => runPropertyCampaign({ ...config, caseIndex: index }).firstCase,
-  ).find((caseResult) => caseResult.context.includes(`classification=${classification}`));
+  );
+  return singletons;
+}
+
+function sourceCaseConfig(classification: "valid" | "near-valid") {
+  const config = defaultPropertyCampaignConfig();
+  const result = singletonCases().find((caseResult) =>
+    caseResult.context.includes(`classification=${classification}`),
+  );
   assert.ok(result, `expected a ${classification} source case`);
   return { ...config, caseIndex: result.index };
 }
