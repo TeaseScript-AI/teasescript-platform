@@ -1432,8 +1432,22 @@ export class Admission {
           if (cell !== null) return null;
           cell = { path, value: entry.value };
         }
-      // (one read, one guard: equal reads of one source in one literal are one entry, alike guarded or not)
+      // (one read, one guard: equal reads of one source in one literal are one entry, alike guarded or not; and the
+      // read the only contribution at and below its path, no term, object or empty collection of the literal's own
+      // there beside it, Codex r22 F5)
       if (cell === null || [...index.exact.values()].flat().length !== 1) return null;
+      const at = cell.path;
+      const beside = (path: string): boolean => path === at || path.startsWith(`${at}.`);
+      for (const paths of [
+        index.terms.keys(),
+        index.objects.keys(),
+        index.empty.keys(),
+        index.lacking.keys(),
+      ])
+        for (const path of paths) {
+          program.work.charge("aliasSteps");
+          if (beside(path)) return null;
+        }
       const read = this.#stablePath(cell.value, d.node);
       if (read === null) return null;
       alias = {

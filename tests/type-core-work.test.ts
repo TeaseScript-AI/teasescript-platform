@@ -390,6 +390,16 @@ test("every alias member answers as its class does at every decided path, in bot
       ],
     }));
   });
+  // a list cell beside a term of its literal's own at its path, plain and guarded: no alias (Codex r22 F5)
+  const beside = ["box = [root, 2.0]", "if root != null {\n  box = [root, 2.0]\n}"].map((copy) => ({
+    name: `a list cell beside its literal's own term: ${copy}`,
+    files: [
+      {
+        path: "main.tease",
+        source: `let root = 1\nlet box = [root, 2.0]\n${copy}\nrepeat box[0] {}\nexit`,
+      },
+    ],
+  }));
   for (const reversed of [false, true]) {
     for (const family of [
       ...WORK_FAMILIES,
@@ -399,7 +409,7 @@ test("every alias member answers as its class does at every decided path, in bot
       ...ADMISSION_FAMILIES,
     ])
       for (const k of [2, 3, 5]) run(`${family.name} at ${k}`, family.program(k), reversed);
-    for (const { name, files } of [...witnesses, ...aliases]) run(name, files, reversed);
+    for (const { name, files } of [...witnesses, ...aliases, ...beside]) run(name, files, reversed);
   }
   for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")])
     if (coreRequest(record.files) !== null) run(record.name, record.files, false);
