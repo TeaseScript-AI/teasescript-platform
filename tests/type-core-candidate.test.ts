@@ -651,7 +651,8 @@ test("admission's decided types and C9's boundary checks compile and run on the 
 
 test("external data a literal carries is warned and checked at its store before any later effect, read or not (the owner's F1)", () => {
   // per program C1's warning at the host expression, the store checks and, per host value, the run's messages and
-  // failure: no consumer reads the list
+  // failure: no consumer reads the list (the first and the third program are also r4.59's sample cells, its decided list
+  // element and decided nested list element inline, checked here with its fraction too)
   for (const [source, warnings, checked, runs] of [
     [
       'let xs = [1, hostValue]\nsay "AFTER"\nexit\n',
@@ -660,6 +661,7 @@ test("external data a literal carries is warned and checked at its store before 
       [
         [2, ["AFTER"], null],
         ["bad", [], "TSR058@9:23"],
+        [2.5, [], "TSR058@9:23"],
       ],
     ],
     [
@@ -678,6 +680,7 @@ test("external data a literal carries is warned and checked at its store before 
       [
         [2, ["AFTER"], null],
         ["bad", [], "TSR058@9:27"],
+        [2.5, [], "TSR058@9:27"],
       ],
     ],
     [
@@ -1766,14 +1769,6 @@ test("a sample of the slice's cells checks host data in the plan and stops a bad
       [2.5],
     ],
     [
-      "decided list element, inline",
-      "let xs = [1, hostValue]",
-      "",
-      "list<integer>",
-      2,
-      ["bad", 2.5],
-    ],
-    [
       "decided list element, named",
       "let raw = hostValue\nlet xs = [1, raw]",
       "let xs",
@@ -1781,14 +1776,8 @@ test("a sample of the slice's cells checks host data in the plan and stops a bad
       2,
       ["bad", 2.5],
     ],
-    [
-      "decided nested list element, inline",
-      "let xs = [[1], [hostValue]]",
-      "",
-      "list<list<integer>>",
-      2,
-      ["bad", 2.5],
-    ],
+    // (the decided list element and the decided nested list element, inline, are the owner's F1 test's first and third
+    // programs, checked there with these values)
     ["decided scalar, a later store", "let n = hostValue\nn = 1", "", "integer", 2, ["bad", 2.5]],
     ["published scalar, inline", "let n = [1, hostValue][1]", "", "integer", 2, ["bad", 2.5]],
     [
