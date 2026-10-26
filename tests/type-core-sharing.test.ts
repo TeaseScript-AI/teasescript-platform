@@ -27,6 +27,7 @@ import { COMPOSITIONS, roleClasses } from "./helpers/type-core-roles.js";
 import { shapesOf } from "./helpers/type-core-rule.js";
 import { CARRIER_WITNESSES, WRITTEN_COPY_MATRIX } from "./helpers/type-core-witnesses.js";
 import {
+  DEFAULT_CHAIN_MATRIX,
   INFERRED_COPY_MATRIX,
   OBJECT_PROPERTY_MATRIX,
   UNRESTRICTED_COLLECTION_MATRIX,
@@ -99,6 +100,7 @@ function programs(): Program[] {
     ...V30_TYPE_MATRIX,
     ...INFERRED_COPY_MATRIX,
     ...OBJECT_PROPERTY_MATRIX,
+    ...DEFAULT_CHAIN_MATRIX,
   ])
     out.push(one(`written domain ${name}`, source));
   // Astra's round-5 D1 witness: a decider beside an unselected read of its source (her B1 shape is the oracle's)

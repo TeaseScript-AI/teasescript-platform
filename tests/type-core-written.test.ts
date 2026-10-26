@@ -12,6 +12,7 @@ import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { runGlobals } from "./helpers/type-core-route.js";
 import {
+  DEFAULT_CHAIN_MATRIX,
   INFERRED_COPY_MATRIX,
   OBJECT_PROPERTY_MATRIX,
   UNRESTRICTED_COLLECTION_MATRIX,
@@ -119,14 +120,17 @@ function observe(c: WrittenCase, request: CoreAnalysisRequest) {
   };
 }
 
-/** The sources of `cases` that fail a layer, and how many the route took in every layer. */
+/**
+ * The sources of `cases` that fail a layer, how many the route took in every layer, and the forms and the decisions it
+ * took in none of their sources (the decision layer alone).
+ */
 function failing(cases: readonly WrittenCase[]): {
   wrong: string[];
   full: number;
-  decisionOnly: Set<string>;
+  decisionOnly: string;
 } {
   const wrong: string[] = [];
-  const decisionOnly = new Set<string>();
+  const taken = { forms: new Map<string, boolean>(), decisions: new Map<string, boolean>() };
   let full = 0;
   for (const c of cases) {
     const request = coreRequest([{ path: "main.tease", source: c.source }]);
@@ -140,10 +144,12 @@ function failing(cases: readonly WrittenCase[]): {
         wrong.push(`${name}: admits ${JSON.stringify(observed.levels)}`);
       if (JSON.stringify(observed.boundaries) !== JSON.stringify(c.boundaries))
         wrong.push(`${name}: C9 boundaries ${JSON.stringify(observed.boundaries)}`);
-      if (observed.checks === "outside") {
-        if (shared) decisionOnly.add(c.form);
-        continue;
+      if (shared) {
+        const inside = observed.checks !== "outside";
+        taken.forms.set(c.form, (taken.forms.get(c.form) ?? false) || inside);
+        taken.decisions.set(c.decision, (taken.decisions.get(c.decision) ?? false) || inside);
       }
+      if (observed.checks === "outside") continue;
       if (shared) full += 1;
       const checks = observed.checks;
       if (
@@ -162,7 +168,13 @@ function failing(cases: readonly WrittenCase[]): {
         wrong.push(`${name}: runs ${JSON.stringify(observed.runs)}`);
     }
   }
-  return { wrong, full, decisionOnly };
+  const none = (map: Map<string, boolean>): string =>
+    [...map].flatMap(([name, inside]) => (inside ? [] : [name])).join(", ") || "none";
+  return {
+    wrong,
+    full,
+    decisionOnly: `forms ${none(taken.forms)}; decisions ${none(taken.decisions)}`,
+  };
 }
 
 test("a written type or a copy of it admits its written domain at every level, null alone included (merged S6 B1)", (t) => {
@@ -245,7 +257,7 @@ test("V30 §13's written types, each form and copy, admit what they permit in ev
   const { wrong, full, decisionOnly } = failing(V30_TYPE_MATRIX);
   t.diagnostic(
     `${V30_TYPE_MATRIX.length} sources (${full} in all three layers), both orders, sharing on and off; ` +
-      `decision layer only (outside the candidate slice): ${[...decisionOnly].join(", ")}`,
+      `decision layer only (outside the candidate slice): ${decisionOnly}`,
   );
   assert.deepEqual(wrong, []);
 });
@@ -256,4 +268,52 @@ test("a copy of an unannotated source has its whole-source type, a later fractio
     `${INFERRED_COPY_MATRIX.length} sources (${full} in all three layers), both orders, sharing on and off`,
   );
   assert.deepEqual(wrong, []);
+});
+
+test("a copy of an unannotated parameter whose default copies a written binding has the written type (F21, r4.75 (1))", (t) => {
+  const { wrong, full } = failing(DEFAULT_CHAIN_MATRIX);
+  t.diagnostic(
+    `${DEFAULT_CHAIN_MATRIX.length} sources (${full} in all three layers; a function is outside the candidate slice), both orders, sharing on and off`,
+  );
+  assert.deepEqual(wrong, []);
+});
+
+test("a copy keeps its source's written type past a later copy back, and agrees with its source on a cycle of copies (Sol r2)", () => {
+  const levelsOf = (source: string, places: readonly string[]) => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const run = () => {
+      const answers = analyseCore(request);
+      return {
+        outcome: answers.outcome,
+        levels: places.map((place) => decision(answers, request, place, ["element"]).levels),
+      };
+    };
+    const shared = inBothOrders(run);
+    assert.deepEqual(
+      inBothOrders(() => withoutSharing(run)),
+      shared,
+    );
+    return shared;
+  };
+  // a copy back into the source after its own written copy closes no cycle its decision waits on
+  const back = levelsOf(
+    "let typed: null[] = [null]\nlet a = null\nlet b = a\na = typed\na = b\nlet out = b\nout = [hostValue]\nexit\n",
+    ["b", "out"],
+  );
+  assert.deepEqual(back.levels, [
+    [["list"], ["null"]],
+    [["list"], ["null"]],
+  ]);
+  const swap = levelsOf(
+    "let typed: integer?[] = [1]\nlet a = typed\nlet b = [2]\nlet tmp = a\na = b\nb = tmp\ntmp = [null]\nexit\n",
+    ["tmp"],
+  );
+  assert.deepEqual(swap, { outcome: "valid", levels: [[["list"], ["integer", "null"]]] });
+  // a cycle of copies before the source's written copy: the copy admits what its source does
+  const cycle = levelsOf(
+    "let typed: null[] = [null]\nlet a = null\nlet b = a\na = b\na = typed\nlet out = b\nout = [hostValue]\nexit\n",
+    ["b", "out"],
+  );
+  assert.deepEqual(cycle.levels[1]![1], cycle.levels[0]![1]);
 });

@@ -64,6 +64,21 @@ export function fits(tag: ItemTag, ref: ItemTag, written: boolean): boolean {
   );
 }
 
+/** A copy of a place that may inherit a written type (`#inheriting`): where it lands, and the path into the place. */
+interface InheritedCopy {
+  readonly place: PlaceId;
+  readonly path: readonly string[];
+  readonly from: PlaceId;
+  readonly strip: readonly string[];
+}
+
+/** `#inheritedAt`'s signal: a scan needs another place's inherited type first, taken before it is scanned again. */
+class Unresolved extends Error {
+  public constructor(readonly key: Key) {
+    super(`unresolved ${key}`);
+  }
+}
+
 /** The part below an unrestricted written part: every kind fits it. */
 const OPEN: TypeTerm = { kind: "dynamic", why: "unwritten parts" };
 
@@ -295,6 +310,11 @@ interface Stop {
   readonly path: readonly string[];
   /** A copy of a written binding's written type, else `null`. */
   readonly term: TypeTerm | null;
+  /**
+   * A copy of an unwritten place that may inherit a written type (`#inheriting`): that place, its type at each path the
+   * one its own decision copies there (`#inheritedAt`); else `null`.
+   */
+  readonly from: PlaceId | null;
   /** The path into the value its contribution stands at (a projection's step into its owner, F12). */
   readonly strip: readonly string[];
   /**
@@ -444,10 +464,21 @@ export class Admission {
   readonly #deciderSites = new Map<Key, SourceSite | null>();
   readonly #copies = new Map<
     PlaceId,
-    readonly { readonly path: readonly string[]; readonly term: TypeTerm }[]
+    readonly {
+      readonly path: readonly string[];
+      readonly binding: PlaceId;
+      readonly strip: readonly string[];
+    }[]
   >();
-  /** Per unwritten binding, the written type a chain of whole copies gives it (`#chainTerm`), or none. */
-  readonly #chainTerms = new Map<PlaceId, TypeTerm | null>();
+  /** The copies of places that may inherit a written type (`#inheriting`), where they land. */
+  readonly #a4Inherits: InheritedCopy[] = [];
+  /** A4 through copies (`#copyGraph`): the unwritten places a copy of a written binding reaches, copy by copy. */
+  readonly #inheriting = new Set<PlaceId>();
+  /** Per unwritten place and path, the written type its own decision copies there (`#inheritedAt`), or none. */
+  readonly #inherited = new Map<Key, TypeTerm | null>();
+  /** The places and paths whose decisions wait on each other through copies, by cycle (`#cut`): a union-find. */
+  readonly #cycles = new Map<Key, Key>();
+  #resolving = false;
   readonly #whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
   readonly #stops = new Map<PlaceId, Stops>();
@@ -538,7 +569,10 @@ export class Admission {
     for (const d of definitions.transferDefs)
       if (d.how === "parameter default") this.#defaulted.add(d.place);
     // A4: the copies of written bindings the stores, adds, returns, parameter defaults and single-site arguments bring
-    // (a multi-site argument decides nothing, F21), where they land
+    // (a multi-site argument decides nothing, F21), where they land; and the copies of the unwritten places that may
+    // inherit a written type through them, at any chain length (r4.75 (1)), each decided by the type that place's own
+    // decision copies at the path (`#inheritedAt`)
+    this.#copyGraph();
     for (const d of [...definitions.storeDefs, ...definitions.transferDefs])
       if (
         (d.kind === "whole" || d.kind === "add") &&
@@ -546,15 +580,140 @@ export class Admission {
         (d.how !== "argument" || pass.lists.singleSite(d.fn)) &&
         !this.#besideDefault(d)
       )
-        for (const { path, term } of this.#writtenCopies(d.value)) {
+        for (const { path, binding, strip } of this.#copySources(d.value)) {
           const at = [
             ...d.path,
             ...(d.kind === "add" && d.how !== "elements" ? ["element"] : []),
             ...path,
           ];
+          const written = writtenOf(program.place(binding).kind);
+          const term = written === null ? null : permittedAt(written, strip);
+          if (term !== null) this.#a4Copies.push({ place: d.place, path: at, term });
+          else if (written === null && this.#inheriting.has(binding))
+            this.#a4Inherits.push({ place: d.place, path: at, from: binding, strip });
+          else continue;
           this.#a4Keys.add(keyOf(d.place, at));
-          this.#a4Copies.push({ place: d.place, path: at, term });
         }
+  }
+
+  /**
+   * A4 through copies (ADR 0021 1.3: a copy of a binding with a written type keeps that type, so a copy of that copy does
+   * too; r4.75 (1)), from every definition's stores: the unwritten places a copy of a written binding lands in, then
+   * those a copy of such a place lands in, at any path (`#inheriting`). Only their copies carry an inherited type.
+   */
+  #copyGraph(): void {
+    const { program, definitions } = this.pass;
+    const work = program.work;
+    const targets = new Set(program.occurrenceOf.values());
+    const edges = new Map<PlaceId, PlaceId[]>();
+    const seeds: PlaceId[] = [];
+    for (const list of definitions.byKey.values())
+      for (const d of list) {
+        work.charge("indexSteps");
+        if (d.value === undefined) continue;
+        if (!targets.has(d.place) || writtenOf(program.place(d.place).kind) !== null) continue;
+        for (const { binding } of this.#copySources(d.value)) {
+          work.charge("indexSteps");
+          if (writtenOf(program.place(binding).kind) !== null) seeds.push(d.place);
+          else {
+            const out = edges.get(binding);
+            if (out === undefined) edges.set(binding, [d.place]);
+            else out.push(d.place);
+          }
+        }
+      }
+    const queue = [...new Set(seeds)];
+    for (const place of queue) this.#inheriting.add(place);
+    for (let index = 0; index < queue.length; index += 1)
+      for (const next of edges.get(queue[index]!) ?? []) {
+        work.charge("indexSteps");
+        if (this.#inheriting.has(next)) continue;
+        this.#inheriting.add(next);
+        queue.push(next);
+      }
+  }
+
+  /**
+   * A4 through copies (ADR 0021 1.3; r4.75 (1), (1a)): the written type an unwritten place's own decision copies at a
+   * path, through whatever copy of a written binding it comes (a chain of copies, a projection, a selected carrier, a
+   * literal, a parameter's default), at every collection level: `#scan`'s copied type, `null` where a value decides the
+   * path or nothing does. A copy of the place carries that type there. Once per place and path, iteratively: a scan
+   * that needs another place's type first stops (`Unresolved`) and is taken again after it, so a chain of copies never
+   * deepens the native stack. A scan that needs a place whose own scan is waiting, at any path, closes a cycle of copies:
+   * those waiting from there on and the needed one are joined (`#cycles`), and a copy between two of them carries no
+   * written type (`#cut`): a cycle of copies decides nothing written, whichever of its places is asked first.
+   */
+  #inheritedAt(place: PlaceId, path: readonly string[]): TypeTerm | null {
+    const key = keyOf(place, path);
+    const known = this.#inherited.get(key);
+    if (known !== undefined) return known;
+    if (this.#resolving) throw new Unresolved(key);
+    this.#resolving = true;
+    try {
+      const pending: Key[] = [key];
+      // (per place, the positions of its waiting scans)
+      const waiting = new Map<PlaceId, number[]>([[place, [0]]]);
+      while (pending.length > 0) {
+        const next = pending[pending.length - 1]!;
+        try {
+          const inputs = this.#inputs(keyPlace(next), keyPath(next));
+          const found = inputs === null ? null : this.#scan(inputs.direct, inputs.prefixes, next);
+          this.#inherited.set(next, found?.copied ?? null);
+          pending.pop();
+          waiting.get(keyPlace(next))!.pop();
+        } catch (error) {
+          if (!(error instanceof Unresolved)) throw error;
+          const needed = keyPlace(error.key);
+          const from = waiting.get(needed)?.at(-1);
+          if (from !== undefined) {
+            for (let index = from; index < pending.length; index += 1)
+              this.#join(pending[index]!, error.key);
+            continue;
+          }
+          pending.push(error.key);
+          const positions = waiting.get(needed);
+          if (positions === undefined) waiting.set(needed, [pending.length - 1]);
+          else positions.push(pending.length - 1);
+        }
+      }
+    } finally {
+      this.#resolving = false;
+    }
+    return this.#inherited.get(key)!;
+  }
+
+  /**
+   * The written type a copy of `from` at `path` carries into the decision of `into`: what `from` inherits there
+   * (`#inheritedAt`), none where the two wait on each other through copies (`#cut`).
+   */
+  #inheritedInto(from: PlaceId, path: readonly string[], into: Key | null): TypeTerm | null {
+    const source = keyOf(from, path);
+    if (into !== null && this.#cut(into, source)) return null;
+    const term = this.#inheritedAt(from, path);
+    return into !== null && this.#cut(into, source) ? null : term;
+  }
+
+  /** Whether two decisions wait on each other through copies (`#cycles`). */
+  #cut(a: Key, b: Key): boolean {
+    return this.#cycles.has(a) && this.#cycles.has(b) && this.#root(a) === this.#root(b);
+  }
+
+  #root(key: Key): Key {
+    let root = key;
+    while (this.#cycles.get(root) !== root) root = this.#cycles.get(root)!;
+    for (let at = key; at !== root;) {
+      const parent = this.#cycles.get(at)!;
+      this.#cycles.set(at, root);
+      at = parent;
+    }
+    return root;
+  }
+
+  #join(a: Key, b: Key): void {
+    for (const key of [a, b]) if (!this.#cycles.has(key)) this.#cycles.set(key, key);
+    const x = this.#root(a);
+    const y = this.#root(b);
+    if (x !== y) this.#cycles.set(x, y);
   }
 
   #run<T>(work: Work<T>): T {
@@ -719,6 +878,28 @@ export class Admission {
         paths.add(path.join("."));
     }
     const copied = new Map<Key, Set<TypeTerm>>();
+    // (per place, the paths copies of written types land at, and per place and path the rests below it)
+    const landed = new Map<PlaceId, Set<string>>();
+    const below = new Map<string, Set<string>>();
+    let furthest = 0;
+    const land = (place: PlaceId, path: readonly string[]): boolean => {
+      const at = path.join(".");
+      let own = landed.get(place);
+      if (own === undefined) landed.set(place, (own = new Set()));
+      if (own.has(at)) return false;
+      own.add(at);
+      let paths = roots.get(place);
+      if (paths === undefined) roots.set(place, (paths = new Set()));
+      paths.add(at);
+      for (let length = 0; length < path.length; length += 1) {
+        work.charge("indexSteps");
+        const prefix = `${place}|${path.slice(0, length).join(".")}`;
+        let rests = below.get(prefix);
+        if (rests === undefined) below.set(prefix, (rests = new Set()));
+        rests.add(path.slice(length).join("."));
+      }
+      return true;
+    };
     for (const { place, path, term } of this.#a4Copies) {
       // (once per landing path and written type: k copies of one binding into one literal are one)
       const at = keyOf(place, path);
@@ -727,14 +908,36 @@ export class Admission {
       work.charge("indexSteps");
       if (terms.has(term)) continue;
       terms.add(term);
-      let paths = roots.get(place);
-      if (paths === undefined) roots.set(place, (paths = new Set()));
-      paths.add(path.join("."));
-      for (let below = ["element"]; termAt(term, below) !== null; below = [...below, "element"]) {
+      land(place, path);
+      furthest = Math.max(furthest, path.length);
+      for (let step = ["element"]; termAt(term, step) !== null; step = [...step, "element"]) {
         work.charge("indexSteps");
-        paths.add([...path, ...below].join("."));
+        land(place, [...path, ...step]);
+        furthest = Math.max(furthest, path.length + step.length);
       }
     }
+    // A4 through copies: a copy of a place that may inherit a written type lands at its path, and below it at the paths
+    // copies of written types land at in that place, sources before their copies; no deeper than the written copies'
+    // paths and every such copy's own path together (a cycle of copies that nests the place in itself stops there)
+    const bySource = new Map<PlaceId, InheritedCopy[]>();
+    for (const copy of this.#a4Inherits) {
+      const list = bySource.get(copy.from);
+      if (list === undefined) bySource.set(copy.from, [copy]);
+      else list.push(copy);
+      furthest += copy.path.length;
+    }
+    const sources = [...bySource.keys()];
+    for (let index = 0; index < sources.length; index += 1)
+      for (const { place, path, from, strip } of bySource.get(sources[index]!)!) {
+        work.charge("indexSteps");
+        let grew = land(place, path);
+        for (const rest of [...(below.get(`${from}|${strip.join(".")}`) ?? [])]) {
+          work.charge("indexSteps");
+          const at = [...path, ...rest.split(".")];
+          if (at.length <= furthest) grew = land(place, at) || grew;
+        }
+        if (grew && bySource.has(place)) sources.push(place);
+      }
     const groups: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
     for (const [root, paths] of roots)
       for (const path of paths) groups.push({ root, path: path === "" ? [] : path.split(".") });
@@ -820,7 +1023,7 @@ export class Admission {
       return null;
     }
     if (tags === null) {
-      const found = this.#scan(direct, prefixes);
+      const found = this.#scan(direct, prefixes, key);
       if (found !== null)
         ({ tags, nullable, byWritten, permitsNull, decider, site: deciderSite } = found);
       else {
@@ -955,11 +1158,10 @@ export class Admission {
     ): { readonly guard: boolean; readonly domain: string; readonly items: readonly string[] } => {
       const alias = this.#aliases.get(d)!;
       const key = aliasKeyAt(alias, rest);
-      const domain = key === null ? null : this.#writtenDomain(alias);
       return {
         guard: key !== null && guards.narrowed(key, alias.read),
         domain: JSON.stringify(
-          domain === null ? null : permittedAt(domain, rest.slice(alias.at.length)),
+          key === null ? null : this.#writtenDomainAt(alias, rest.slice(alias.at.length)),
         ),
         items: this.valueAt(d, rest)
           .map((item) => itemText(item, writers))
@@ -1039,19 +1241,22 @@ export class Admission {
   }
 
   /**
-   * A2, A4: the earliest contribution in source order that decides a path, with what it decides: a lazy merge of the
-   * direct stores and the prefixes' whole stores and adds, each read only as far as the scan goes; `null` where none
-   * decides.
+   * A2, A4: the earliest contribution in source order that decides a path (`into`, the decision's own place and path),
+   * with what it decides: a lazy merge of the direct stores and the prefixes' whole stores and adds, each read only as
+   * far as the scan goes; `null` where none decides.
    */
   #scan(
     direct: readonly Candidate[],
     prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[],
+    into: Key,
   ): {
     readonly tags: ItemTag[];
     readonly nullable: boolean;
     readonly byWritten: boolean;
     /** The copied written type admits `null` at the path (`#permitsNull`). */
     readonly permitsNull: boolean;
+    /** The copied written type at the path, where a copy decides it (`#inheritedAt`). */
+    readonly copied: TypeTerm | null;
     readonly decider: Definition;
     readonly site: SourceSite | null;
   } | null {
@@ -1103,7 +1308,7 @@ export class Admission {
       const d = scans[best]!.ds[position]!;
       const at = scans[best]!.at(position);
       work.charge("checks", scans.length);
-      const first = d.value === undefined ? null : this.#earliestDecider(d.value, d.node, at);
+      const first = d.value === undefined ? null : this.#earliestDecider(d.value, d.node, at, into);
       const copied = first?.term ?? null;
       if (copied !== null) {
         // (its type stays strict, but a literal's `null` elements beside the copy make the place optional, ADR 0021
@@ -1118,6 +1323,7 @@ export class Admission {
               evaluate(d, at).some((item) => item.tag === "null")),
           byWritten: true,
           permitsNull: copiedTags.includes("null"),
+          copied,
           decider: d,
           site: first?.site ?? d.site,
         };
@@ -1134,6 +1340,7 @@ export class Admission {
           nullable: true,
           byWritten: false,
           permitsNull: false,
+          copied: null,
           decider: d,
           site: first?.site ?? d.site,
         };
@@ -1224,7 +1431,7 @@ export class Admission {
         key,
         inputs === null || below
           ? null
-          : (this.#scan(inputs.direct, inputs.prefixes)?.site ?? null),
+          : (this.#scan(inputs.direct, inputs.prefixes, key)?.site ?? null),
       );
     }
     return this.#deciderSites.get(key)!;
@@ -1632,17 +1839,31 @@ export class Admission {
       handlers.afterSomeCreation(read.read) ? "h" : "",
       // (the member's own copied binding's written type at its read, A4's decider, whatever its chain resolves to:
       // `let b: integer[] = raw` is no `let a = raw`, TABLE r4.72)
-      JSON.stringify(this.#writtenDomain(alias)),
+      this.#writtenDomainKey(alias),
     ].join("|");
   }
 
   /**
-   * The written type an alias's read copies at its path (A4: a copy of a written binding is decided by it), `null`
-   * where the copied binding has none there; the member's own, never its chain's end's (TABLE r4.72, Astra r5 B1).
+   * The written type an alias's read copies at its path (A4: a copy of a written binding is decided by it), as the class
+   * key holds it: the type, or the unwritten place whose own decision it copies with the path into it (`#inheritedAt`),
+   * `null` where the copied binding has none; the member's own, never its chain's end's (TABLE r4.72, Astra r5 B1).
    */
-  #writtenDomain(alias: Alias): TypeTerm | null {
+  #writtenDomainKey(alias: Alias): string {
     const written = this.#writtenSource(alias.value, []);
-    return written === null ? null : permittedAt(written.term, written.strip);
+    if (written === null) return "null";
+    return written.from === null
+      ? JSON.stringify(permittedAt(written.term!, written.strip))
+      : `inherits ${written.from} ${written.strip.join(".")}`;
+  }
+
+  /** The written type an alias's read copies at `rest` below its path (`#writtenDomainKey`), `null` where none. */
+  #writtenDomainAt(alias: Alias, rest: readonly string[]): TypeTerm | null {
+    const written = this.#writtenSource(alias.value, []);
+    if (written === null) return null;
+    const path = [...written.strip, ...rest];
+    return written.from === null
+      ? permittedAt(written.term!, path)
+      : this.#inheritedAt(written.from, path);
   }
 
   /**
@@ -2232,26 +2453,28 @@ export class Admission {
   }
 
   /**
-   * A4: the copies of written bindings a stored value holds, with their paths, directly, through the literals that hold
-   * them, or through the values that carry them (a projection, an operation: its written type at the path read into
-   * it), in element order; once per value.
+   * A4: the bindings a stored value copies, with the paths they land at and the path into each (`strip`), directly,
+   * through the literals that hold them, or through the values that carry them (a projection, an operation: the path
+   * read into it), in element order; once per value.
    */
-  #writtenCopies(
+  #copySources(
     value: PlaceId,
-  ): readonly { readonly path: readonly string[]; readonly term: TypeTerm }[] {
+  ): readonly {
+    readonly path: readonly string[];
+    readonly binding: PlaceId;
+    readonly strip: readonly string[];
+  }[] {
     const known = this.#copies.get(value);
     if (known !== undefined) return known;
     const { program, definitions } = this.pass;
-    const out: { path: readonly string[]; term: TypeTerm }[] = [];
+    const out: { path: readonly string[]; binding: PlaceId; strip: readonly string[] }[] = [];
     const pending: [PlaceId, readonly string[], readonly string[]][] = [[value, [], []]];
     while (pending.length > 0) {
       const [current, path, strip] = pending.pop()!;
       program.work.charge("indexSteps");
       const binding = program.occurrenceOf.get(current);
       if (binding !== undefined) {
-        const written = this.#typeOf(binding);
-        const term = written === null ? null : permittedAt(written, strip);
-        if (term !== null) out.push({ path, term });
+        out.push({ path, binding, strip });
         continue;
       }
       const next: [PlaceId, readonly string[], readonly string[]][] = [];
@@ -2275,72 +2498,40 @@ export class Admission {
   }
 
   /**
-   * A4, F12: the written binding a value copies, directly or through its projections (`typed[0]`, `typed.first`), with
-   * the path into the written type it stands at: the projections' steps, then `strip`; `null` for any other value, and
-   * for a projection the written type has no path for (a dict's lists, a length).
+   * A4, F12: the binding a value copies, directly or through its projections (`typed[0]`, `typed.first`), with the path
+   * into it the copy stands at: the projections' steps, then `strip`; with its written type (`term`), or, for an
+   * unwritten place that may inherit one (`#inheriting`), that place (`from`: its type at each path the one its own
+   * decision copies, `#inheritedAt`); `null` for any other value, and for a projection the written type has no path for
+   * (a dict's lists, a length).
    */
   #writtenSource(
     value: PlaceId,
     strip: readonly string[],
-  ): { readonly term: TypeTerm; readonly strip: readonly string[] } | null {
+  ): {
+    readonly term: TypeTerm | null;
+    readonly from: PlaceId | null;
+    readonly strip: readonly string[];
+  } | null {
     const { program, contract } = this.pass;
     const binding = program.occurrenceOf.get(value);
     if (binding !== undefined) {
-      const term = this.#typeOf(binding);
-      return term === null ? null : { term, strip };
+      const term = writtenOf(program.place(binding).kind);
+      if (term !== null) return { term, from: null, strip };
+      return this.#inheriting.has(binding) ? { term: null, from: binding, strip } : null;
     }
     const key = program.projOf.has(value) ? contract.copiedKey(value) : null;
-    const term = key === null ? null : this.#typeOf(keyPlace(key));
-    if (key === null || term === null) return null;
+    if (key === null) return null;
+    const place = keyPlace(key);
+    const term = writtenOf(program.place(place).kind);
+    if (term === null && !this.#inheriting.has(place)) return null;
     // (a projection of a receiver that may be a reference is the runtime's member, no copy: F19a)
     for (let at = value; program.projOf.has(at); at = program.projOf.get(at)!.owner)
       if (this.#keepsOwn(at)) return null;
     const steps = keyPath(key);
     const path = [...steps, ...strip];
-    return steps.some((step) => dictList(step) !== undefined) || permittedAt(term, path) === null
-      ? null
-      : { term, strip: path };
-  }
-
-  /** A binding's written type, or the one a chain of whole copies of a written binding gives it (`#chainTerm`). */
-  #typeOf(binding: PlaceId): TypeTerm | null {
-    return writtenOf(this.pass.program.place(binding).kind) ?? this.#chainTerm(binding);
-  }
-
-  /**
-   * A4 through copies (ADR 0021 1.3: a copy of a binding with a written type keeps that type, so a copy of that copy
-   * does too; the lead's ruling on the merged S6's chains): the written type an unwritten binding has where its earliest
-   * decider, in source order, is a whole copy of a binding with one, written or itself such a copy, or of a projection of
-   * such a binding (`let middle = typed[0]`: the type at that path); `null` where another definite contribution decides
-   * first (A2), and on a cycle of copies.
-   */
-  #chainTerm(binding: PlaceId): TypeTerm | null {
-    const known = this.#chainTerms.get(binding);
-    if (known !== undefined) return known;
-    const { program, definitions, lists } = this.pass;
-    // (a cycle of copies closes on nothing written: it decides nothing)
-    this.#chainTerms.set(binding, null);
-    const stores = (definitions.byKey.get(keyOf(binding, [])) ?? []).filter(
-      (d) =>
-        d.kind === "whole" &&
-        d.value !== undefined &&
-        lists.live(d) &&
-        (d.how !== "argument" || lists.singleSite(d.fn)),
-    );
-    program.work.charge("checks", stores.length + sortCost(stores.length));
-    let found: TypeTerm | null = null;
-    for (const d of [...stores].sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b))) {
-      // (a whole copy of such a binding, or of a projection of one: its written type at the projection's path, F12)
-      const source = this.#writtenSource(d.value!, []);
-      if (source !== null) {
-        found = permittedAt(source.term, source.strip);
-        if (found !== null) break;
-      }
-      const items = this.valueAt(d, []);
-      if (!items.some((item) => item.tag === "unknown") && deciding(items).length > 0) break;
-    }
-    this.#chainTerms.set(binding, found);
-    return found;
+    if (steps.some((step) => dictList(step) !== undefined)) return null;
+    if (term === null) return { term: null, from: place, strip: path };
+    return permittedAt(term, path) === null ? null : { term, from: null, strip: path };
   }
 
   /**
@@ -2396,6 +2587,26 @@ export class Admission {
       program.work.charge("indexSteps");
       const written = this.#writtenSource(current, strip);
       const term = written?.term ?? null;
+      // A4 through copies: a copy of an unwritten place that may inherit a written type stands as a written copy too,
+      // carrying at each path the type that place's own decision copies there (`#inheritedAt`); its value stays where
+      // it stood, and decides where it carries none
+      if (!after && written !== null && written.from !== null) {
+        const inherits: Stop = {
+          key,
+          value: current,
+          node: at,
+          path,
+          term: null,
+          from: written.from,
+          strip: written.strip,
+          deep,
+          single,
+          via,
+        };
+        const list = stops.written.get(path.join("."));
+        if (list === undefined) stops.written.set(path.join("."), [inherits]);
+        else list.push(inherits);
+      }
       const literal = term === null && program.hasOf.has(current);
       // a literal read into stands by its cells on the path
       if (literal && strip.length > 0) {
@@ -2462,7 +2673,8 @@ export class Admission {
         node: at,
         path,
         term,
-        strip: written?.strip ?? strip,
+        from: null,
+        strip: term !== null ? written!.strip : strip,
         deep,
         single,
         via,
@@ -2499,8 +2711,9 @@ export class Admission {
 
   /**
    * A2, A4, A8 (ADR 0021 1.1–1.3): the earliest contribution in evaluation order that decides a stored value's path: a
-   * copy of a written binding (its written type at the rest of the path), or a value whose items there are of definite
-   * kinds; a `null` or an unknown decides nothing, and a value an unknown may stand beside (a read, a copy, a call)
+   * copy of a written binding (its written type at the rest of the path), or of a place that inherits one there, taken
+   * into the decision of `into` (`#inheritedInto`; `null` outside a place's decision), or a value whose items there are
+   * of definite kinds; a `null` or an unknown decides nothing, and a value an unknown may stand beside (a read, a copy, a call)
    * neither, while a literal's other elements still may (A8: `[1, hostValue]`'s elements are whole numbers, Sol's
    * records for the owner's F1); a later copy never comes before an earlier definite element. The place's decision and
    * the literal's own elements (`literalElements`) both take it, so they cannot pick opposite deciders. `null` where
@@ -2510,6 +2723,7 @@ export class Admission {
     value: PlaceId,
     node: FlowNode,
     at: readonly string[],
+    into: Key | null,
   ): { readonly term: TypeTerm | null; readonly site: SourceSite | null } | null {
     const { program, values } = this.pass;
     const stops = this.#stopsOf(value, node);
@@ -2527,7 +2741,11 @@ export class Admission {
         // read out of has it alone, and each operation surely gives it)
         if (stop.deep && length === at.length && !(stop.single && this.#selects(stop, true)))
           continue;
-        const term = permittedAt(stop.term!, [...stop.strip, ...at.slice(length)]);
+        const rest = [...stop.strip, ...at.slice(length)];
+        const term =
+          stop.from === null
+            ? permittedAt(stop.term!, rest)
+            : this.#inheritedInto(stop.from, rest, into);
         // (a written copy an operation carries decides only where the operation selects it: an operand it never gives
         // is no copy of the place, while a selected copy keeps its whole written type, A4)
         if (term !== null && (stop.via.length === 0 || this.#selects(stop)))
@@ -2560,7 +2778,8 @@ export class Admission {
         )
           best = index;
       const next = best < 0 ? null : lists[best]!.list[positions[best]!]!;
-      if (next === null || (copy !== null && compareKeys(copy.key, next.key) < 0))
+      // (a copy of a place that inherits a written type comes before that copy's own value, A4)
+      if (next === null || (copy !== null && compareKeys(copy.key, next.key) <= 0))
         return copy === null ? null : { term: copy.term, site: siteOf(copy.stop) };
       program.work.charge("checks", lists.length);
       positions[best]! += 1;
@@ -3151,7 +3370,7 @@ export class Admission {
           if (!first.has(at)) {
             // A4: a copy of a written binding gives its written type, whatever it holds now, where it is the earliest
             // decider on the path
-            const copied = this.#earliestDecider(d.value, d.node, path)?.term ?? null;
+            const copied = this.#earliestDecider(d.value, d.node, path, null)?.term ?? null;
             const kinds = [...new Set(own.map(family))];
             if (copied !== null)
               first.set(at, {

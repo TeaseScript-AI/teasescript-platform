@@ -126,3 +126,35 @@ test("an element read through a chain of 2,048 returned results is answered with
   );
   assert.deepEqual([forward, reversed], ["valid", "valid"]);
 });
+
+/**
+ * Sol's round 2 on #1049 (B3): a copy at the end of a chain of 4,096 copies, each place declared before its source is
+ * copied into it, keeps the written type the chain starts from (r4.75 (1)): resolved one place at a time on the heap,
+ * never one native frame per link.
+ */
+test("a copy at the end of a chain of 4,096 copies keeps the written type within the native stack", () => {
+  const size = 4_096;
+  const request = program([
+    "let typed: null = null",
+    ...Array.from({ length: size }, (_, index) => `let a${index} = null`),
+    ...Array.from({ length: size - 1 }, (_, index) => `a${index} = a${index + 1}`),
+    `a${size - 1} = typed`,
+    "let out = a0",
+    "out = hostValue",
+  ]);
+  const observe = () => {
+    const answers = analyseCore(request);
+    return {
+      outcome: answers.outcome,
+      against: answers.checks
+        .filter((check) => check.boundary && check.target === "out")
+        .map((check) => check.against),
+    };
+  };
+  const forward = observe();
+  const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+    withConsumerOrder((list) => [...list].reverse(), observe),
+  );
+  const expected = { outcome: "warning-runtime-check", against: [["null"]] };
+  assert.deepEqual([forward, reversed], [expected, expected]);
+});

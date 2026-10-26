@@ -190,7 +190,10 @@ type Decision =
   | "copy of a copy"
   | "copy of a copy of a copy"
   | "projection"
-  | "copy of a projection";
+  | "copy of a projection"
+  | "copy of a later-typed copy"
+  | "copy of an otherwise"
+  | "copy of a get default";
 
 type Host = "direct" | "named" | "index-held";
 
@@ -203,6 +206,8 @@ export interface WrittenCase {
   /** The binding under test: the written one, or the copy. */
   readonly place: string;
   readonly form: string;
+  /** How the place under test is decided (`Decision`), for the test's account of what the route takes. */
+  readonly decision: string;
   readonly levels: readonly (readonly string[])[];
   /** The plan's checked stores in order, `start:end type`, where the candidate route takes the source. */
   readonly checks: readonly string[];
@@ -258,7 +263,9 @@ function siteIn(source: string, line: string, of: string): string {
  * The source of `form` under `decision` with the host value `host`: `typed` written with the form, initialised with a
  * literal of it (else the host value), then the place that receives the host value (`typed` itself, a copy taken
  * before or after that store, a copy at the end of a chain of two or three copies, or, with `projection`, a copy of the
- * written list's element, with `copy of a projection` a copy of that copy).
+ * written list's element, with `copy of a projection` a copy of that copy; or a copy of a place whose written type comes
+ * later than its start, `[]` for a list and `null` otherwise, through a selected `otherwise`, or as an empty list's
+ * `get` default: the seeds of Sol's round 2).
  */
 function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
   const type = formText(form);
@@ -302,6 +309,23 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
     case "copy of a projection":
       hostLine = `copy = ${value}`;
       lines.push("let middle = typed[0]", "let copy = middle", hostLine);
+      break;
+    case "copy of a later-typed copy":
+      hostLine = `copy = ${value}`;
+      lines.push(
+        `let middle = ${form.kind === "collection" && form.collection === "list" ? "[]" : "null"}`,
+        "middle = typed",
+        "let copy = middle",
+        hostLine,
+      );
+      break;
+    case "copy of an otherwise":
+      hostLine = `copy = ${value}`;
+      lines.push("let middle = null otherwise typed", "let copy = middle", hostLine);
+      break;
+    case "copy of a get default":
+      hostLine = `copy = ${value}`;
+      lines.push("let middle = [].get(0, default: typed)", "let copy = middle", hostLine);
       break;
   }
   const source = `${[...lines, 'say "DONE"', "exit"].join("\n")}\n`;
@@ -348,6 +372,7 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
     source,
     place,
     form: formText(placed),
+    decision,
     levels: levelsOf(placed),
     checks: stores.map(({ store, of }) => `${store} ${checkedText(of)}`),
     exact: literal !== null,
@@ -401,10 +426,21 @@ const DECISIONS: readonly Decision[] = [
 const PROJECTIONS: readonly Decision[] = ["projection", "copy of a projection"];
 
 /**
+ * Where a copied place's own written type comes from besides a whole copy at its start (Sol's round 2: the seeds): a copy
+ * after an untyped start, a selected `otherwise`, an empty list's `get` default; its copy keeps the type (r4.75 (1)).
+ */
+const SEEDS: readonly Decision[] = [
+  "copy of a later-typed copy",
+  "copy of an otherwise",
+  "copy of a get default",
+];
+
+/**
  * The merged S6's B1 (the reviewer's written-domain matrix, rebuilt by axes): nine element domains (the four usual
  * scalars, each optional, and `null` alone) × list depths 0–3, the outermost list optional or not × the place written,
  * an early or a later copy, a copy at the end of a chain of two or three copies, a copy of the written list's element
- * (a typed index projection) or a copy of that copy × the host value direct, named or held at an index.
+ * (a typed index projection) or a copy of that copy, a copy of a place typed by each seed (`SEEDS`) × the host value
+ * direct, named or held at an index.
  */
 export const WRITTEN_DOMAIN_MATRIX: readonly WrittenCase[] = (() => {
   const out: WrittenCase[] = [];
@@ -419,7 +455,7 @@ export const WRITTEN_DOMAIN_MATRIX: readonly WrittenCase[] = (() => {
         let form = domain;
         for (let level = 0; level < depth; level += 1) form = collection("list", form);
         if (outerOptional) form = optional(form);
-        for (const decision of [...DECISIONS, ...PROJECTIONS]) {
+        for (const decision of [...DECISIONS, ...PROJECTIONS, ...SEEDS]) {
           if (PROJECTIONS.includes(decision) && (outerOptional || depth === 0)) continue;
           for (const host of HOSTS) out.push(writtenCase(form, decision, host));
         }
@@ -510,7 +546,7 @@ export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() =
  * every kind (V30 §13; r4.74 (2)) in each form that holds one, `object`, `object?`, `object | string`, and as a list's
  * element at depths 1 and 2, optional or in a union too × the property's contents (an integer, text, a boolean, `null`,
  * a list, the host value) × the place written, a copy of it at the end of a chain of one to three copies, a copy of the
- * property (a projection) or a copy of that copy, each then taking them. Nothing is owed: no diagnostic, no check, no
+ * property (a projection) or a copy of that copy, a copy of a place typed after a `null` start, each then taking them. Nothing is owed: no diagnostic, no check, no
  * boundary. The candidate route does not take object literals: the decision layer only.
  */
 export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
@@ -546,24 +582,30 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
         "copy of a copy of a copy",
         "projection",
         "copy of a projection",
+        "copy of a later-typed copy",
       ] as const) {
         const projected = arrival === "projection" || arrival === "copy of a projection";
         const place = arrival === "written" ? "typed" : "copy";
-        const chain =
-          arrival === "copy"
-            ? ["let copy = typed"]
-            : arrival === "copy of a copy"
-              ? ["let middle = typed", "let copy = middle"]
-              : arrival === "copy of a copy of a copy"
-                ? ["let first = typed", "let second = first", "let copy = second"]
-                : arrival === "projection"
-                  ? [`let copy = typed${index}.p`]
-                  : arrival === "copy of a projection"
-                    ? [`let middle = typed${index}.p`, "let copy = middle"]
-                    : [];
+        const chain: Record<typeof arrival, readonly string[]> = {
+          written: [],
+          copy: ["let copy = typed"],
+          "copy of a copy": ["let middle = typed", "let copy = middle"],
+          "copy of a copy of a copy": [
+            "let first = typed",
+            "let second = first",
+            "let copy = second",
+          ],
+          projection: [`let copy = typed${index}.p`],
+          "copy of a projection": [`let middle = typed${index}.p`, "let copy = middle"],
+          "copy of a later-typed copy": [
+            "let middle = null",
+            "middle = typed",
+            "let copy = middle",
+          ],
+        };
         const lines = [
           `let typed: ${type} = ${valueOf(form, "{p: 1}")}`,
-          ...chain,
+          ...chain[arrival],
           projected ? `copy = ${content}` : `${place}${index}.p = ${content}`,
         ];
         out.push({
@@ -583,9 +625,11 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
  * unrestricted `list`, `set`, `dict`, `object`, the program-control names) in each form §13 lists, `T`, `T?`, `T[]`,
  * `T set`, `T dict`, `T?[]`, `T[]?`, `T | U` and `(T | U)[]` (beside `string`, `integer` for a `string`), nested to depth
  * three (`T[][]`, `T?[][]`, `T[]?[]`, `T[] set`, `T[] dict`, `T[][][]`; `null?` is `null`), × the place written, an early
- * or a later copy, a copy at the end of a chain of two or three copies, and for a list form a copy of its element (a
- * typed index projection) or a copy of that copy × the host value direct, named or held at an index. A union holding a whole collection beside another type is §13's compile error and has no form here: the
- * compiler does not report it yet, pre-existing, with the lead.
+ * or a later copy, a copy at the end of a chain of two or three copies, for a list form a copy of its element (a typed
+ * index projection) or a copy of that copy × the host value direct, named or held at an index; and for a form of depth
+ * one at most a copy of a place typed by each seed (`SEEDS`), the host value direct. A union holding a whole collection
+ * beside another type
+ * is §13's compile error and has no form here: the compiler does not report it yet, pre-existing (r4.75 (3)).
  */
 export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
   const out: WrittenCase[] = [];
@@ -617,6 +661,9 @@ export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
       const list = form.kind === "collection" && form.collection === "list";
       for (const decision of [...DECISIONS, ...(list ? PROJECTIONS : [])])
         for (const host of HOSTS) out.push(writtenCase(form, decision, host));
+      // (the seeds with the host value direct: every placement of it is the written-domain matrix's)
+      if (depthOf(form) <= 1)
+        for (const decision of SEEDS) out.push(writtenCase(form, decision, "direct"));
     }
   }
   return out;
@@ -662,6 +709,7 @@ export const INFERRED_COPY_MATRIX: readonly WrittenCase[] = (() => {
             source,
             place: "copy",
             form: wrap(kinds.join("|"), 0),
+            decision: `copy ${copied} the store`,
             levels,
             checks: [
               `${start}:${end} ${"list<".repeat(depth)}${kinds.join("|")}${">".repeat(depth)}`,
@@ -679,5 +727,44 @@ export const INFERRED_COPY_MATRIX: readonly WrittenCase[] = (() => {
                 : boundaryAt("copy", levels, depth, siteIn(source, hostLine, "hostValue")),
           });
         }
+  return out;
+})();
+
+/**
+ * A chain through an unannotated parameter's default (F21, ADR 0021 1.5: the default is the parameter's start value,
+ * checked once at the function against the body, and an argument beside it decides nothing; r4.75 (1)): `p = typed`
+ * makes `p` a copy of the written binding, so `let out = p` in the body has its type, with a call before or after the
+ * function, or two calls, each passing another kind. A function is outside the candidate slice: the decision layer only.
+ */
+export const DEFAULT_CHAIN_MATRIX: readonly WrittenCase[] = (() => {
+  const out: WrittenCase[] = [];
+  for (const form of [name("null"), optional(name("integer")), collection("list", name("string"))])
+    for (const calls of ["a call before", "a call after", "two calls"] as const) {
+      const type = formText(form);
+      const call = `use(${leafKinds(form).includes("string") ? "true" : '"other"'})`;
+      const lines = [
+        `let typed: ${type} = ${valueOf(form, leafLiteral(form)!)}`,
+        ...(calls === "a call before" ? [call] : []),
+        "function use(p = typed) {",
+        " let out = p",
+        " out = hostValue",
+        "}",
+        ...(calls === "a call after" ? [call] : calls === "two calls" ? [call, call] : []),
+      ];
+      const source = `${[...lines, "exit"].join("\n")}\n`;
+      const levels = levelsOf(form);
+      out.push({
+        name: `${type}, a copy of the default, ${calls}`,
+        source,
+        place: "out",
+        form: type,
+        decision: "a copy of the default",
+        levels,
+        checks: [],
+        exact: true,
+        runs: [],
+        boundaries: boundaryAt("out", levels, 0, siteIn(source, " out = hostValue", "hostValue")),
+      });
+    }
   return out;
 })();
