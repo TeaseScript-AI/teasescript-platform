@@ -256,7 +256,11 @@ export function* parseStringLiteral(parser: Parser, start: Token): ParseTask<Str
     valid = false;
     parser.advance();
   }
-  if (!parser.match(TokenKind.StringEnd)) return null;
+  // The lexer reported a string that reaches the end of the file.
+  if (!parser.match(TokenKind.StringEnd)) {
+    parser.unclosedLiterals += 1;
+    return null;
+  }
   if (!valid) return null;
   const literal: StringLiteral = Object.freeze({
     kind: "stringLiteral",
@@ -284,18 +288,17 @@ function* parseStringInterpolation(
   if (parser.check(TokenKind.StringEnd) || parser.check(TokenKind.EndOfFile)) {
     return null;
   }
-  const diagnosticCount = parser.diagnostics.length;
+  const mark = parser.mark();
   const expression = yield* parseChild(parser.parseOr());
   // Only a failure that reported nothing itself gets an error here.
-  const reported = parser.diagnostics.length !== diagnosticCount;
+  const reported = parser.diagnostics.length !== mark.diagnostics;
   if (expression === null) {
-    if (!reported) {
-      parser.reportToken(
-        parserDiagnosticCode.unsupportedStringExpression,
-        "Expected a supported expression inside the string interpolation.",
-        parser.peek(),
-      );
-    }
+    parser.reportMissing(
+      mark,
+      parserDiagnosticCode.unsupportedStringExpression,
+      "Expected a supported expression inside the string interpolation.",
+      parser.peek(),
+    );
     parser.synchronizeInterpolation();
     parser.match(TokenKind.InterpolationEnd);
     return null;

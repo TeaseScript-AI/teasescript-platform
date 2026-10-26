@@ -205,9 +205,11 @@ export function* parseInteractionExpression(
         parser.identifier(parser.advance()),
       );
       parser.advance();
+      const mark = parser.mark();
       const value = yield* parseChild(parser.parseColonValueTask(false));
       if (value === null) {
-        parser.reportInsertion(
+        parser.reportMissing(
+          mark,
           parserDiagnosticCode.expectedInteractionText,
           name.name === "prefill"
             ? "Expected a prefill value after 'prefill:'."
@@ -258,9 +260,11 @@ export function* parseInteractionExpression(
     if (askOptionAt(parser, 0, askOptionNames("choice")) !== null) {
       const name = parser.advance();
       parser.advance();
+      const mark = parser.mark();
       prefill = yield* parseChild(parser.parseColonValueTask(false));
       if (prefill === null) {
-        parser.reportInsertion(
+        parser.reportMissing(
+          mark,
           parserDiagnosticCode.expectedInteractionText,
           "Expected a prefill value after 'prefill:'.",
         );
@@ -299,12 +303,14 @@ export function* parseInteractionExpression(
       parser.advance();
       colonSpan = copySpan(parser.previous().span);
     }
+    const mark = parser.mark();
     const expression = yield* parseChild(
       optionValue === null ? parser.parseOr() : parser.parseColonValueTask(false),
     );
     if (expression === null) {
       missingChoiceOptionWasReported = true;
-      parser.reportInsertion(
+      parser.reportMissing(
+        mark,
         parserDiagnosticCode.expectedChoiceOption,
         optionValue === null
           ? "Expected at least one choice option."

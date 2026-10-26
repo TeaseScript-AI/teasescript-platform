@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProject } from "../src/compiler.js";
+import { compileProject, compileSourceWithBackend } from "../src/compiler.js";
 import { compileSource } from "../src/index.js";
 import { parse } from "../src/parser.js";
+import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 
 test("reports a missing speaker identifier and parses the next statement", () => {
   const source = "speaker\nexit";
@@ -227,6 +228,73 @@ test("where only text written out in quotes is allowed, a failed interpolation r
     assert.deepEqual(
       compileSource(source).diagnostics.map((diagnostic) => diagnostic.code),
       [code],
+      source,
+    );
+  }
+});
+
+test("a string or regex without its closing delimiter reports only that", () => {
+  for (const [source, expected] of [
+    ['let text = "unfinished', ["TSL003 11-22"]],
+    ['let text = "a"\ntext = "unfinished', ["TSL003 22-33"]],
+    ['global text = "unfinished', ["TSL003 14-25"]],
+    ['let text = """\nunfinished', ["TSL004 11-25"]],
+    ['say "unfinished', ["TSL003 4-15"]],
+    ['let text = "a ${1', ["TSL005 14-17", "TSL003 11-17"]],
+    ["let pattern = /ab\nexit", ["TSL009 14-17"]],
+    // Other errors stay: a value missing before or inside the string, and brackets that its delimiter does not close.
+    ['let a = ()\nlet b = "unfinished', ["TSL003 19-30", "TSP012 9-9"]],
+    ['let text = "a ${1 +', ["TSL005 14-19", "TSL003 11-19", "TSP012 19-19"]],
+    ['let n = f(g("unfinished', ["TSL003 12-23", "TSP017 23-23", "TSP017 23-23"]],
+    ["let n = length(/ab", ["TSL009 15-18", "TSP017 18-18"]],
+    // A `/` after a mode word stays a division where main read one: the ask's question is what misses its quote.
+    ['say prose / askText "x', ["TSL003 20-22"]],
+    ['let q = askNumber prose / askText "x', ["TSL003 34-36"]],
+  ] as const) {
+    for (const compilation of [
+      compileSource(source),
+      compileSourceWithBackend(source, {}, CORE_BACKEND),
+    ]) {
+      assert.deepEqual(
+        compilation.diagnostics.map(
+          ({ code, span }) => `${code} ${span.start.offset}-${span.end.offset}`,
+        ),
+        expected,
+        source,
+      );
+      assert.equal(compilation.plan, null, source);
+    }
+  }
+  // Where the lexer took a `/` for division, a string that the regex holds still makes the parse try a regex there.
+  for (const source of ['say prose /"abc/\nexit', 'let answer = askText prose /"abc/\nexit']) {
+    assert.deepEqual(compileSource(source).diagnostics, [], source);
+  }
+});
+
+test("a command reports its missing operand only when the operand reported nothing", () => {
+  for (const [source, expected] of [
+    ["wait 1 +", ["TSP012 8-8"]],
+    ['wait "unfinished', ["TSL003 5-16"]],
+    ['showButton "unfinished', ["TSL003 11-22"]],
+    ['save "unfinished', ["TSL003 5-16"]],
+    ['let v = load("unfinished', ["TSL003 13-24", "TSP017 24-24"]],
+    ["say 1 +", ["TSP012 7-7"]],
+    ['say "a", 1 +', ["TSP012 12-12"]],
+    ['showButton "ok", timeout: "unfinished', ["TSL003 26-37"]],
+    ['let x = askText prefill: "unfinished', ["TSL003 25-36"]],
+    ['let c = askChoice "a", prefill: "unfinished', ["TSL003 32-43"]],
+    // An operand that is not there at all is still reported.
+    ["wait", ["TSP012 4-4"]],
+    ["showButton", ["TSP028 10-10"]],
+    ['showButton "ok", timeout:', ["TSP028 25-25"]],
+    ["let v = load(default: 1)", ["TSP036 8-24"]],
+    ["say", ["TSP006 3-3"]],
+  ] as const) {
+    assert.deepEqual(
+      compileSource(source).diagnostics.map(
+        ({ code, span }) => `${code} ${span.start.offset}-${span.end.offset}`,
+      ),
+      expected,
       source,
     );
   }

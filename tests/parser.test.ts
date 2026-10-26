@@ -501,13 +501,7 @@ test("say used as a value takes its text and pacing compact or in parentheses, w
       ]),
     ];
   };
-  assert.deepEqual(grouped('say ("x") +\nexit'), [
-    [
-      ["TSP012", 12],
-      ["TSP006", 12],
-    ],
-    [],
-  ]);
+  assert.deepEqual(grouped('say ("x") +\nexit'), [[["TSP012", 12]], []]);
   assert.deepEqual(grouped('say ("x"), instant, foo\nexit'), [
     [["TSP002", 18]],
     [

@@ -37,10 +37,12 @@ export function parseShowImageStatement(parser: Parser): ShowImageStatement | nu
   )
     return null;
   const tagged = parser.checkIdentifier("tagged");
+  const mark = parser.mark();
   const image = tagged ? parseTaggedQuery(parser, "images") : parser.parseExpression();
   if (image === null) {
     if (!tagged) {
-      parser.reportInsertion(
+      parser.reportMissing(
+        mark,
         parserDiagnosticCode.expectedExpression,
         "Expected an image file or null after 'showImage'.",
       );
@@ -146,9 +148,11 @@ export function* parseMediaParts(parser: Parser): ParseTask<MediaParts | null> {
   if (parser.check(TokenKind.KeywordRepeat)) {
     repeat = Object.freeze({ kind: "indefinite", span: copySpan(parser.advance().span) });
   }
+  const mark = parser.mark();
   const file = yield* parseChild(parser.parseOr());
   if (file === null) {
-    parser.reportInsertion(
+    parser.reportMissing(
+      mark,
       parserDiagnosticCode.expectedExpression,
       `Expected a media file such as "sounds/bell.mp3" after '${command.lexeme}'.`,
     );
@@ -402,16 +406,16 @@ function* parseMediaCue(parser: Parser): ParseTask<MediaCue | null> {
   if (kind !== "finish") {
     const enclosing = parser.blockEndsCompactInteraction;
     parser.blockEndsCompactInteraction = true;
-    const diagnosticCount = parser.diagnostics.length;
+    const mark = parser.mark();
     offset = yield* parseChild(parser.parseOr());
     parser.blockEndsCompactInteraction = enclosing;
     if (offset === null) {
       // A position that reported its own error, as `2 s + {`, needs no second one, and its block still parses.
-      if (parser.diagnostics.length === diagnosticCount)
-        parser.reportInsertion(
-          parserDiagnosticCode.expectedExpression,
-          `Expected a cue position such as '30 s' after '${keyword.lexeme}'.`,
-        );
+      parser.reportMissing(
+        mark,
+        parserDiagnosticCode.expectedExpression,
+        `Expected a cue position such as '30 s' after '${keyword.lexeme}'.`,
+      );
       if (parser.check(TokenKind.LeftBrace)) yield* parseChild(parser.parseBlock());
       else parser.synchronizeStatement(true);
       return null;

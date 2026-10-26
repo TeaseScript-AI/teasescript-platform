@@ -194,10 +194,16 @@ export function* parseSayParts(parser: Parser, statement: boolean): ParseTask<Sa
   }
 
   const valueStart = parser.peek().kind;
+  let mark = parser.mark();
   const value = yield* parseChild(parser.parseOr());
   if (value === null) {
+    // A failed string has its error already: its own, or the lexer's for a missing closing quote.
     if (valueStart !== TokenKind.StringStart)
-      parser.reportInsertion(parserDiagnosticCode.expectedString, "Expected a string after 'say'.");
+      parser.reportMissing(
+        mark,
+        parserDiagnosticCode.expectedString,
+        "Expected a string after 'say'.",
+      );
     if (statement) parser.synchronizeStatement();
     return null;
   }
@@ -210,9 +216,11 @@ export function* parseSayParts(parser: Parser, statement: boolean): ParseTask<Sa
       pacing = "instant";
       instantSpan = copySpan(endSpan);
     } else {
+      mark = parser.mark();
       const parsedPacing = yield* parseChild(parser.parseOr());
       if (parsedPacing === null) {
-        parser.reportInsertion(
+        parser.reportMissing(
+          mark,
           parserDiagnosticCode.expectedExpression,
           "Expected a pacing value after ','.",
         );
@@ -248,6 +256,7 @@ export function* parseSayValue(parser: Parser): ParseTask<SayParts | null> {
   );
   if (known !== undefined) {
     parser.diagnostics.push(...known.diagnostics);
+    parser.unclosedLiterals += known.unclosedLiterals;
     parser.regexStarts.push(...known.regexStarts);
     parser.statementRanges.push(known.ranges);
     parser.current = known.end;
@@ -261,6 +270,7 @@ export function* parseSayValue(parser: Parser): ParseTask<SayParts | null> {
     recoveredAtStatementBoundary: parser.recoveredAtStatementBoundary,
   };
   const diagnosticCount = parser.diagnostics.length;
+  const unclosedLiterals = parser.unclosedLiterals;
   const regexStartCount = parser.regexStarts.length;
   const rangeCount = parser.statementRanges.length;
   const parts = yield* parseChild(parseSayParts(parser, false));
@@ -269,6 +279,7 @@ export function* parseSayValue(parser: Parser): ParseTask<SayParts | null> {
     parts,
     end: parser.current,
     diagnostics: parser.diagnostics.slice(diagnosticCount),
+    unclosedLiterals: parser.unclosedLiterals - unclosedLiterals,
     regexStarts: parser.regexStarts.slice(regexStartCount),
     ranges: { list: parser.statementRanges, from: rangeCount, to: parser.statementRanges.length },
     recovered: parser.recoveredAtStatementBoundary,
