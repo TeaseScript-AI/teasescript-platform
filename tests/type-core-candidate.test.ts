@@ -51,7 +51,8 @@ import {
   plannedStores,
   runGlobals,
 } from "./helpers/type-core-route.js";
-import { recordDifferences } from "./helpers/type-core-records.js";
+import { recordDifferences, recordOf } from "./helpers/type-core-records.js";
+import { BOTH, owed, records, type Endpoint, type RuleClass } from "./helpers/type-core-rule.js";
 
 // The coarse core on the test-only candidate route (the port plan's S5): source, candidate compile, plan, runtime.
 
@@ -1128,34 +1129,45 @@ interface CarrierShape {
   readonly data: string;
   readonly scalar: string;
   readonly collection: string | { readonly none: string };
-  /** Whether the data stands in the operation's own read (C10: a default the operation's value is checked with). */
-  readonly own?: true;
+  /** Where the data stands by the rule function's terms (§5.1's rows), per endpoint where they differ. */
+  readonly rule: Rule | ((endpoint: Endpoint) => Rule);
   readonly lists?: readonly [scalar: number, collection: number];
   readonly read?: string;
 }
 
+/** A shape's class for the rule function (`owed`): its data's row and the carrier's facts. */
+type Rule = Omit<RuleClass, "carrier" | "placement" | "form" | "endpoints">;
+
 const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
   projection: [
-    { data: "in a literal", scalar: "let out = [1, D][1]", collection: "let out = [[1, D]][0]" },
+    {
+      data: "in a literal",
+      scalar: "let out = [1, D][1]",
+      collection: "let out = [[1, D]][0]",
+      rule: { data: "cell", declares: true },
+    },
     {
       data: "a member",
       scalar: "let out = [1, D[0]][1]",
       collection: "let out = [[1], D[0]][1]",
       lists: [1, 2],
+      rule: { data: "member", declares: true, member: (h) => `${h}[0]` },
     },
   ],
   iteration: [
     {
       data: "in a literal",
-      scalar: "for item in [1, D] {\n  let out = item\n  LATER\n}",
-      collection: "for item in [[1, D]] {\n  let out = item\n  LATER\n}",
+      scalar: "for entry in [1, D] {\n  let out = entry\n  LATER\n}",
+      collection: "for entry in [[1, D]] {\n  let out = entry\n  LATER\n}",
+      rule: { data: "loop-cell", loop: true },
     },
     {
       data: "a member",
-      scalar: "for item in D {\n  let out = [1, item][1]\n  LATER\n}",
-      collection: "for item in D {\n  let out = [[1], item][1]\n  LATER\n}",
+      scalar: "for entry in D {\n  let out = [1, entry][1]\n  LATER\n}",
+      collection: "for entry in D {\n  let out = [[1], entry][1]\n  LATER\n}",
       lists: [1, 2],
-      read: "item",
+      read: "entry",
+      rule: { data: "loop-operand", loop: true, declares: true },
     },
   ],
   otherwise: [
@@ -1164,6 +1176,7 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
       scalar: "let out = D otherwise 1",
       collection: "let out = D otherwise [1]",
       lists: [0, 1],
+      rule: { data: "whole" },
     },
   ],
   get: [
@@ -1171,12 +1184,14 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
       data: "in a literal",
       scalar: "let out = [1, D].get(1, default: 1)",
       collection: "let out = [[1, D]].get(0, default: [])",
+      rule: { data: "cell", declares: true },
     },
     {
       data: "a member",
       scalar: "let out = D.get(0, default: 1)",
       collection: "let out = D.get(0, default: [1])",
       lists: [1, 2],
+      rule: { data: "member", member: (h, k) => `${h}.get(0, default: ${k})` },
     },
   ],
   "load default": [
@@ -1184,7 +1199,7 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
       data: "its own read",
       scalar: 'let out = load("k", default: [1, D][1])',
       collection: 'let out = load("k", default: [1, D])',
-      own: true,
+      rule: { data: "typed", own: (k, _, h) => (k === "1" ? `[1, ${h}][1]` : `[1, ${h}]`) },
     },
   ],
   "parse default": [
@@ -1192,7 +1207,7 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
       data: "its own read",
       scalar: 'let out = fromJson("1", default: [1, D][1])',
       collection: 'let out = fromJson("[]", default: [1, D])',
-      own: true,
+      rule: { data: "typed", own: (k, _, h) => (k === "1" ? `[1, ${h}][1]` : `[1, ${h}]`) },
     },
   ],
   copy: [
@@ -1200,12 +1215,15 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
       data: "in a literal",
       scalar: "let out = [1, D].take(2)[1]",
       collection: "let out = [1, D].take(2)",
+      rule: { data: "cell", declares: true },
     },
     {
       data: "a member",
       scalar: "let out = [1, D.take(1)[0]][1]",
       collection: "let out = [[1], D.take(1)][1]",
       lists: [1, 1],
+      // (the copy is what the operation reads of its receiver, the member C1 sits at: r4.60)
+      rule: { data: "member", declares: true, member: (h) => `${h}.take(1)`, listed: true },
     },
   ],
   removal: [
@@ -1213,12 +1231,14 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
       data: "in a literal",
       scalar: "let out = [1, D].removeFirst()",
       collection: "let out = [[1, D]].removeFirst()",
+      rule: { data: "cell", combining: true },
     },
     {
       data: "a member",
       scalar: "let out = [1, D.removeFirst()][1]",
       collection: "let out = [[1], D.removeFirst()][1]",
       lists: [1, 2],
+      rule: { data: "member", declares: true, member: (h) => `${h}.removeFirst()` },
     },
   ],
   concatenation: [
@@ -1227,6 +1247,11 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
       scalar: "let out = ([1] + D)[1]",
       collection: "let out = [1] + D",
       lists: [1, 1],
+      // (an element of the result is a member of the data; the result itself a list whatever the data holds)
+      rule: (endpoint) =>
+        endpoint === "scalar"
+          ? { data: "through", combining: true }
+          : { data: "whole", combining: true, listed: true },
     },
   ],
   choice: [
@@ -1234,19 +1259,21 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
       data: "an option",
       scalar: "let out = askChoice 1, D",
       collection: { none: "a button's value is never a list or a set (V30 §19, TSV029)" },
+      rule: { data: "cell" },
     },
   ],
 };
 
 /**
  * Invariant O over the carrier table (`carriers.ts`), without exception (r4.60): each kind of `CARRIER_KINDS` has its
- * shapes, each named or inline, without and with a later store, in both orders. The place is admitted an integer where the data stands (published or
- * decided), and the data owes an obligation that checks it against that type, at its read or at the value that holds
- * it: named data A7's `copy-type` warning and check (r4.50 (1)), inline data C9's boundary or C1's check (r4.12), data
- * in the operation's own read the operation's boundary (C10, r4.57). Where the candidate route reaches a shape (TABLE
- * r4.59), its plan checks the declaration against the whole type, a fitting value says AFTER and halts, and each bad one
- * fails at the declaration's value with nothing said; a shape outside the slice is proved at the answers, the route's
- * reason reported.
+ * shapes, each named or inline, without and with a later store, in both orders. The place is admitted an integer where
+ * the data stands (published or decided), and the shape's complete multiset of C1, C9 and C10 records is what the rule
+ * function owes (`type-core-rule.ts`, §5.1): named data A7's `copy-type` warning and check (r4.50 (1)) beside its source's
+ * own boundary, inline data C9's boundary or C1's check (r4.12, r4.63 (1)), a member's C1 at what is read of it (r4.60),
+ * data in the operation's own read the operation's boundary (C10, r4.57), every site and multiplicity (Astra r5 D2).
+ * Where the candidate route reaches a shape (TABLE r4.59), its plan checks the declaration against the whole type, a
+ * fitting value says AFTER and halts, and each bad one fails at the declaration's value with nothing said; a shape
+ * outside the slice is proved at the answers, the route's reason reported.
  */
 test("every carrier kind leaves an obligation for the external data it gives a place admitted a kind (O, A7, C9 r4.12, C10, r4.59)", (t) => {
   assert.deepEqual(Object.keys(CARRIER_SHAPES).sort(), [...CARRIER_KINDS].sort());
@@ -1255,14 +1282,9 @@ test("every carrier kind leaves an obligation for the external data it gives a p
   let shapes = 0;
   let routed = 0;
   for (const kind of CARRIER_KINDS)
-    for (const {
-      data: placed,
-      scalar,
-      collection,
-      own = false,
-      lists = [0, 0],
-      read,
-    } of CARRIER_SHAPES[kind])
+    for (const { data: placed, scalar, collection, rule, lists = [0, 0], read } of CARRIER_SHAPES[
+      kind
+    ])
       for (const [endpoint, template, wrap] of [
         ["scalar", scalar, lists[0]],
         ["collection", collection, lists[1]],
@@ -1292,48 +1314,28 @@ test("every carrier kind leaves an obligation for the external data it gives a p
                   : source.indexOf("hostValue");
             const holder = source.lastIndexOf("\n", data) + 1;
             const end = source.indexOf("\n", holder);
-            const [opening, place] = /^ *(?:let|for) (\w+) (?:=|in) /.exec(source.slice(holder))!;
+            const [opening] = /^ *(?:let|for) \w+ (?:=|in) /.exec(source.slice(holder))!;
             const value = holder + opening.length;
-            const targets =
-              endpoint === "scalar"
-                ? [`${place} integer`]
-                : [`${place}.element integer`, `${place} list`];
-            const answered = inBothOrders(() => {
-              const request = coreRequest([{ path: "main.tease", source }]);
-              assert.ok(request !== null, name);
-              const { diagnostics, checks } = compactAnalysis(request);
-              return {
-                admitted: admittedOf(source, "out", endpoint === "scalar" ? [] : ["element"]).split(
-                  "@",
-                )[0],
-                warned: diagnostics
-                  .flatMap((d) => (d.kind === "written-target" ? [d.site.offset] : []))
-                  .sort((a, b) => a - b),
-                obligations: checks
-                  .flatMap((check) =>
-                    check.kind === "copy-type" &&
-                    (check.site.offset === data || check.site.offset === value) &&
-                    targets.includes(`${check.target} ${check.against.join("|")}`)
-                      ? [{ boundary: check.boundary, at: check.site.offset }]
-                      : [],
-                  )
-                  .sort((a, b) => a.at - b.at || Number(a.boundary) - Number(b.boundary)),
-              };
-            });
-            assert.equal(answered.admitted, "decided integer", name);
-            assert.ok(answered.obligations.length > 0, `${name}: an obligation checks the data`);
-            if (own)
-              assert.ok(
-                answered.obligations.some(({ boundary, at }) => boundary && at === value),
-                `${name}: the operation's boundary`,
-              );
-            else if (named)
-              assert.ok(
-                answered.obligations.some(
-                  ({ boundary, at }) => !boundary && answered.warned.includes(at),
-                ),
-                `${name}: A7's warning and check`,
-              );
+            // the complete C1, C9 and C10 multiset the rule function owes (S6-CARRIERS §5.1), the named source's own
+            // boundary, every site and multiplicity included, in both orders (Astra r5 D2)
+            const owes = typeof rule === "function" ? rule(endpoint) : rule;
+            assert.deepEqual(
+              records(source),
+              owed(
+                { carrier: kind, placement: placed, form: () => "", endpoints: BOTH, ...owes },
+                endpoint,
+                named,
+                later,
+                source,
+                "raw",
+              ),
+              name,
+            );
+            assert.equal(
+              admittedOf(source, "out", endpoint === "scalar" ? [] : ["element"]).split("@")[0],
+              "decided integer",
+              name,
+            );
             shapes += 1;
             let compiled: { readonly checks: readonly string[] | null } | null = null;
             try {
@@ -1461,6 +1463,38 @@ test("a copy of a written binding keeps its type beside a copy of the same sourc
         );
       }
     }
+});
+
+/**
+ * A checked store followed by an effect inside a branch (S6-CARRIERS §5.3, Astra r5 D3): the declaration owes exactly
+ * its C1 and its boundary, the plan checks it against `integer` before the branch, the fitting host value says AFTER
+ * and halts, and each bad one fails at the declaration's value before the branch's effect, nothing said.
+ */
+test("a checked store's check runs before an effect inside a later branch (S6-CARRIERS §5.3)", () => {
+  const source = 'let n: integer = hostValue\nif true {\n  say "AFTER"\n}\nexit\n';
+  const record = inBothOrders(() =>
+    compactAnalysis(coreRequest([{ path: "main.tease", source }])!),
+  );
+  assert.deepEqual(
+    recordDifferences(
+      recordOf(`outcome warning-runtime-check
+        D written-target warning 17:26 unknown
+        C copy-type n [integer] 17:26
+        B copy-type n [integer] 17:26`),
+      record,
+    ),
+    [],
+  );
+  const plan = inBothOrders(() => candidate(source).plan);
+  assert.ok(plan !== null);
+  assert.deepEqual(checksOf(plan), ["0:26 integer"]);
+  assert.deepEqual(runWith(plan, 2), { status: "halted", says: ["AFTER"], failure: null });
+  for (const bad of [2.5, "bad"])
+    assert.deepEqual(
+      runWith(plan, bad),
+      { status: "failed", says: [], failure: "TSR058@17:26" },
+      JSON.stringify(bad),
+    );
 });
 
 /**

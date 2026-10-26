@@ -56,6 +56,8 @@ export interface RuleClass {
   readonly iterable?: (h: string) => string;
   /** The kind the known element gives (`text` for the selected-text choices). */
   readonly kind?: "string";
+  /** The carrier gives a list whatever its data holds (a copy method, a list's `+`): a collection's own kind fits. */
+  readonly listed?: true;
 }
 
 export const BOTH: readonly Endpoint[] = ["scalar", "collection"];
@@ -89,18 +91,22 @@ function callSpan(source: string, start: number): string {
 
 type State = "published" | "later" | "decided";
 
-/** The records `floor`'s shape owes by the rule function (§5.1 with TABLE r4.60, r4.63–r4.66), sorted. */
-function owed(
+/**
+ * The records `floor`'s shape owes by the rule function (§5.1 with TABLE r4.60, r4.63–r4.66), sorted: for its source,
+ * the named data's binding `name` where it is named (`let name = hostValue` first).
+ */
+export function owed(
   floor: RuleClass,
   endpoint: Endpoint,
   named: boolean,
   later: boolean,
   source: string,
+  name = "parcel",
 ): string[] {
   const out: string[] = [];
   const collection = endpoint === "collection";
   const kind = floor.kind ?? "integer";
-  const host = named ? "parcel" : "hostValue";
+  const host = named ? name : "hostValue";
   const ingress = spanOf(source, "hostValue");
   const first = named ? source.indexOf("\n") + 1 : 0;
   const read = spanOf(source, host, first);
@@ -121,10 +127,12 @@ function owed(
   const whole: State = later ? "later" : "published";
   const element: State = floor.declares === true ? "decided" : whole;
   const paths = (list: string): (readonly [string, string, State])[] => [
-    ["out", collection ? list : kind, whole],
+    ...(collection && floor.listed === true
+      ? []
+      : [["out", collection ? list : kind, whole] as const]),
     ...(collection ? [["out.element", kind, element] as const] : []),
   ];
-  if (named && floor.data !== "typed") out.push(`B copy-type parcel [unknown] ${ingress}`);
+  if (named && floor.data !== "typed") out.push(`B copy-type ${name} [unknown] ${ingress}`);
   switch (floor.data) {
     case "cell": {
       const [target, state] = collection ? ["out.element", element] : ["out", whole];
@@ -180,7 +188,7 @@ function owed(
       // r4.66 (2): a default types its call where its kinds are definite, a literal's; a host value's own read stays an
       // own read; named data owes its source's boundary wherever the loaded value meets a consumer, and a default that
       // reads a member of the data is itself that consumer (C5, r4.66 (1)), whatever the place's state
-      const data = named ? "parcel" : "hostValue";
+      const data = named ? name : "hostValue";
       const reads = ownText.includes(".");
       if (reads) out.push(`B copy-type ${data} [unknown] ${ingress}`);
       const [target, state] = collection ? ["out.element", element] : ["out", whole];
