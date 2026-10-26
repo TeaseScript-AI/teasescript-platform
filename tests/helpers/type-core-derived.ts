@@ -543,10 +543,10 @@ function literalType(
         })),
       };
     case "identifier":
-      return heldShape(at, statements, seen);
     case "propertyAccessExpression":
     case "indexExpression":
-      return sourceShape(at, statements, seen);
+      // the candidate route leaves out a typed parse's or load's default that reads a variable
+      throw new Underivable("a default that reads a variable");
     case "loadExpression":
       return expectedType(at, statements, seen);
     case "callExpression":
@@ -556,90 +556,6 @@ function literalType(
     default:
       return null;
   }
-}
-
-/**
- * What a named default holds where it is read (F18 takes the default's kinds there): a written variable's written type;
- * else its last whole store before the read's statement, each later property store replacing its path, a `null` there
- * leaving the property unknown (ADR 0021 2.6). A store inside a branch or a loop before the read, or a read inside one,
- * is outside these straight-line rules.
- */
-function heldShape(
-  read: Extract<Expression, { kind: "identifier" }>,
-  statements: readonly Statement[],
-  seen: Set<string>,
-): DerivedType | null {
-  if (seen.has(read.name)) return null;
-  const next = new Set([...seen, read.name]);
-  const written = statements.find(
-    (statement) =>
-      statement.kind === "letStatement" &&
-      statement.name.name === read.name &&
-      statement.typeAnnotation !== null,
-  );
-  if (written?.kind === "letStatement" && written.typeAnnotation !== null)
-    return writtenType(written.typeAnnotation);
-  const blocks = statements.filter(
-    (statement) => statement.kind === "repeatStatement" || statement.kind === "ifStatement",
-  );
-  const nested = (node: { readonly span: Expression["span"] }): boolean =>
-    blocks.some(
-      (block) =>
-        block.span.start.offset < node.span.start.offset &&
-        node.span.end.offset <= block.span.end.offset,
-    );
-  const before = statements.filter((statement) => {
-    const store = storeOf(statement);
-    return (
-      store !== null &&
-      (store.name === read.name || store.name.startsWith(`${read.name}.`)) &&
-      statement.span.end.offset <= read.span.start.offset
-    );
-  });
-  if (nested(read) || before.some(nested))
-    throw new Underivable("a named default stored or read in a branch or a loop");
-  let shape: DerivedType | null = null;
-  for (const statement of before) {
-    const store = storeOf(statement)!;
-    const value = unwrap(store.value);
-    const held: DerivedType | null =
-      value.kind === "nullLiteral"
-        ? { kind: "kinds", kinds: ["null"] }
-        : literalType(value, statements, next);
-    if (store.name === read.name) shape = held;
-    else
-      shape = replacedShape(
-        shape,
-        store.name.slice(read.name.length + 1).split("."),
-        held === null || (held.kind === "kinds" && held.kinds.every((kind) => kind === "null"))
-          ? { kind: "kinds", kinds: VALUE_KIND_NAMES }
-          : held,
-      );
-  }
-  return shape;
-}
-
-/** `type` with the property at `path` replaced by `value`, or added where the object lacks it. */
-function replacedShape(
-  type: DerivedType | null,
-  path: readonly string[],
-  value: DerivedType,
-): DerivedType | null {
-  if (path.length === 0) return value;
-  if (type?.kind !== "object") return type;
-  const [name, ...rest] = path;
-  const found = type.properties.some((property) => property.name === name);
-  return {
-    kind: "object",
-    properties: [
-      ...type.properties.map((property) =>
-        property.name === name
-          ? { name, type: replacedShape(property.type, rest, value) ?? value }
-          : property,
-      ),
-      ...(found || rest.length > 0 ? [] : [{ name: name!, type: value }]),
-    ],
-  };
 }
 
 function unionTypes(types: readonly DerivedType[]): DerivedType {

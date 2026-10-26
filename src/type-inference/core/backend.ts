@@ -19,7 +19,7 @@ import {
   nodeOf,
   SLICE_DEPTH,
   SliceIndex,
-  UnfollowedStructure,
+  OutsideContract,
 } from "./consumer.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 
@@ -85,11 +85,11 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
       const facts = coreFacts(answers, index, core);
       return { checked, facts: () => facts };
     } catch (error) {
-      if (error instanceof UnfollowedStructure)
+      if (error instanceof OutsideContract)
         throw outsideSlice(core, {
           file: index.fileOf(error.expression),
           span: error.expression.span,
-          what: "a value whose structure the slice does not follow",
+          what: error.what,
         });
       // the questions after the analysis spend the same allowance (TABLE §8); its fallback is S8's
       if (!(error instanceof BudgetExhausted)) throw error;

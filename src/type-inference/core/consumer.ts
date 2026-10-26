@@ -97,8 +97,8 @@ export class SliceIndex {
   readonly #parent = new Map<Expression, Expression>();
   /** The name of the property each value of an object literal gives. */
   readonly #propertyOf = new Map<Expression, string>();
-  /** Where each property name is first written, in a literal or as a store's target: its file and offset. */
-  readonly #written = new Map<string, readonly [number, number]>();
+  /** Where each property name is written, in a literal or as a store's target: its files and offsets. */
+  readonly #written = new Map<string, (readonly [number, number])[]>();
   readonly #file = new Map<object, number>();
   readonly #bySite = new Map<string, Expression>();
   readonly #statementsBySite = new Map<string, Statement>();
@@ -330,27 +330,40 @@ export class SliceIndex {
 
   #write(name: string, file: number, span: SourceSpan): void {
     const known = this.#written.get(name);
-    if (
-      known === undefined ||
-      file < known[0] ||
-      (file === known[0] && span.start.offset < known[1])
-    )
-      this.#written.set(name, [file, span.start.offset]);
+    if (known === undefined) this.#written.set(name, [[file, span.start.offset]]);
+    else known.push([file, span.start.offset]);
   }
 
   /**
-   * Property names in the order the program first writes them, in a literal or as a store's target, so that a record's
-   * fields keep the order its source gives them (a repair's warnings, a parsed record's fields); others after them, by
-   * name.
+   * Property names in the order `source` writes them, in its literals or as its stores' targets, so that a record's
+   * fields keep the order its own source gives them (a repair's warnings, a parsed record's fields); names it does not
+   * write follow, in the order the program first writes them, then by name.
    */
-  public inWrittenOrder(names: Iterable<string>): string[] {
-    const at = (name: string): readonly [number, number] =>
-      this.#written.get(name) ?? [Infinity, Infinity];
-    return [...names].sort((a, b) => {
-      const [fileA, offsetA] = at(a);
-      const [fileB, offsetB] = at(b);
-      return fileA - fileB || offsetA - offsetB || (a < b ? -1 : a > b ? 1 : 0);
-    });
+  public inWrittenOrder(names: Iterable<string>, source: Expression): string[] {
+    const file = this.fileOf(source);
+    const { start, end } = { start: source.span.start.offset, end: source.span.end.offset };
+    const at = (name: string): readonly [number, number, number] => {
+      let inside = Infinity;
+      let first: readonly [number, number] = [Infinity, Infinity];
+      for (const written of this.#written.get(name) ?? []) {
+        if (written[0] === file && written[1] >= start && written[1] < end)
+          inside = Math.min(inside, written[1]);
+        if (written[0] < first[0] || (written[0] === first[0] && written[1] < first[1]))
+          first = written;
+      }
+      return [inside, ...first];
+    };
+    const compare = <T>(a: T, b: T): number => (a === b ? 0 : a < b ? -1 : 1);
+    return [...names]
+      .map((name) => ({ name, key: at(name) }))
+      .sort(
+        (a, b) =>
+          compare(a.key[0], b.key[0]) ||
+          compare(a.key[1], b.key[1]) ||
+          compare(a.key[2], b.key[2]) ||
+          compare(a.name, b.name),
+      )
+      .map(({ name }) => name);
   }
 
   /** The name of the property whose value `expression` is in an object literal, or `undefined`. */
@@ -805,13 +818,17 @@ function unwrap(expression: Expression): Expression {
 }
 
 /**
- * A value whose contract is deeper than the slice follows (`SLICE_DEPTH`): a store's or a typed parse's or load's. The
- * candidate route rejects its program rather than check less than the core decided.
+ * A contract the plan cannot carry exactly as the core decided it: one deeper than the slice follows (`SLICE_DEPTH`), a
+ * record field that some records of a list lack, a typed parse's or load's default that reads a variable
+ * (`readsPlace`). The candidate route rejects its program, at `expression`, rather than check less than the core decided.
  */
-export class UnfollowedStructure extends Error {
-  public constructor(readonly expression: Expression) {
-    super("The slice does not follow the structure of this value.");
-    this.name = "UnfollowedStructure";
+export class OutsideContract extends Error {
+  public constructor(
+    readonly expression: Expression,
+    readonly what: string,
+  ) {
+    super(`The slice does not follow ${what}.`);
+    this.name = "OutsideContract";
   }
 }
 
@@ -869,7 +886,23 @@ class Contracts {
    */
   public expected(call: CallExpression | LoadExpression): TypePlan | null {
     if (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") return null;
-    return runCompileTask(this.#answerTask(nodeOf(this.answers, this.index, call), call, []));
+    const fallback = call.kind === "loadExpression" ? call.defaultValue : defaultOf(call);
+    if (fallback !== null && readsPlace(fallback))
+      throw new OutsideContract(
+        fallback,
+        "a typed parse's or load's default that reads a variable",
+      );
+    return runCompileTask(
+      this.#answerTask(
+        {
+          node: nodeOf(this.answers, this.index, call),
+          call,
+          source: fallback ?? call,
+          landing: this.#landing(call),
+        },
+        [],
+      ),
+    );
   }
 
   /**
@@ -964,7 +997,8 @@ class Contracts {
       case "set":
       case "dict":
         if (plan.element === null) return plan;
-        if (path.length + 1 >= SLICE_DEPTH) throw new UnfollowedStructure(at);
+        if (path.length + 1 >= SLICE_DEPTH)
+          throw new OutsideContract(at, "a value whose structure the slice does not follow");
         return {
           kind: plan.kind,
           element: yield* compileChild(this.#fillTask(id, [...path, "element"], plan.element, at)),
@@ -972,9 +1006,10 @@ class Contracts {
       case "object": {
         if (plan.properties.length > 0 || this.answers.place(id, path).admitted.by !== "decided")
           return plan;
-        if (path.length + 1 >= SLICE_DEPTH) throw new UnfollowedStructure(at);
+        if (path.length + 1 >= SLICE_DEPTH)
+          throw new OutsideContract(at, "a value whose structure the slice does not follow");
         const properties: TypePropertyPlan[] = [];
-        for (const name of this.index.inWrittenOrder(this.answers.placeProperties(id, path))) {
+        for (const name of this.index.inWrittenOrder(this.answers.placeProperties(id, path), at)) {
           const below = [...path, propertyStep(name)];
           if (this.answers.place(id, below).admitted.by === "undecided") continue;
           const type = yield* compileChild(this.#contractTask(id, below, at));
@@ -991,46 +1026,118 @@ class Contracts {
    * The core's answer at `path` below a call's value as a plan: its kinds (a written target's, else the default's,
    * F18), integers among numbers as numbers (the decided family, ADR 0021 1.2), a collection's elements and an object's
    * properties below by the same rule. At the call itself an unknown or only `null` gives no plan; below it such a level
-   * takes every value (ADR 0021 2.6: `null` leaves a value unknown). A record's field that some of its sources lack
-   * (`missing`) has the kinds the others give, and a missing one is the default's; inside a collection, where no default
-   * supplies it, and deeper than the slice follows, the program leaves the slice.
+   * takes every value (ADR 0021 2.6: `[]` leaves the element type open, a `null` in the default stays unknown). A
+   * record's field that some of its sources lack (`missing`) has the kinds the others give, and a missing one is the
+   * default's. The program leaves the slice where the plan cannot carry the core's answer exactly: where the place the
+   * call lands in types such an open level (the core answers the call and the place differently there), where records
+   * of a list lack fields no default supplies, and deeper than the slice follows.
    */
-  *#answerTask(
-    node: FlowNode,
-    call: Expression,
-    path: readonly string[],
-  ): CompileTask<TypePlan | null> {
-    const answer = this.answers.valueAt(node, path);
+  *#answerTask(at: AnsweredCall, path: readonly string[]): CompileTask<TypePlan | null> {
+    const answer = this.answers.valueAt(at.node, path);
     const held = new Set<ItemTag>();
     let lacking = false;
-    for (const item of answer.items)
-      if (item.tag === "unknown" && item.reasons === REASON.missing) lacking = true;
-      else if (item.tag !== "empty") held.add(item.tag);
+    for (const item of answer.items) {
+      if (item.tag === "unknown" && (item.reasons & REASON.missing) !== 0) {
+        lacking = true;
+        if (item.reasons !== REASON.missing) held.add("unknown");
+      } else if (item.tag !== "empty") held.add(item.tag);
+    }
+    if (lacking && path.includes("element"))
+      throw new OutsideContract(at.call, "a value whose structure the slice does not follow");
     if (held.has("number")) held.delete("integer");
-    if (held.has("unknown") || ![...held].some((tag) => tag !== "null"))
-      return path.length === 0 ? null : ANY_VALUE;
-    if (path.length + 1 >= SLICE_DEPTH || (lacking && path.includes("element")))
-      throw new UnfollowedStructure(call);
+    if (held.has("unknown") || ![...held].some((tag) => tag !== "null")) {
+      if (path.length === 0) return null;
+      if (
+        at.landing !== null &&
+        this.answers.place(at.landing.id, [...at.landing.path, ...path]).admitted.by !== "undecided"
+      )
+        throw new OutsideContract(
+          at.call,
+          "an open part of a typed parse's or load's default that its destination types",
+        );
+      return ANY_VALUE;
+    }
+    if (path.length + 1 >= SLICE_DEPTH)
+      throw new OutsideContract(at.call, "a value whose structure the slice does not follow");
     const members: TypePlan[] = [];
     for (const tag of VALUE_KIND_NAMES.filter((kind) => held.has(kind)))
       if (tag === "list" || tag === "set" || tag === "dict") {
-        const element = yield* compileChild(this.#answerTask(node, call, [...path, "element"]));
+        const element = yield* compileChild(this.#answerTask(at, [...path, "element"]));
         // elements that take every value leave the collection open, as a store's check has it
         members.push({ kind: tag, element: element === ANY_VALUE ? null : element });
       } else if (tag === "object") {
         const properties: TypePropertyPlan[] = [];
-        for (const name of this.index.inWrittenOrder(answer.properties))
+        for (const name of this.index.inWrittenOrder(answer.properties, at.source))
           properties.push({
             name,
             // EVIDENCE: invariant: below the call a level always has a plan (`ANY_VALUE` at the least).
-            type: (yield* compileChild(
-              this.#answerTask(node, call, [...path, propertyStep(name)]),
-            ))!,
+            type: (yield* compileChild(this.#answerTask(at, [...path, propertyStep(name)])))!,
           });
         members.push({ kind: "object", properties });
       } else members.push(kindPlan(tag));
     return unionOf(members);
   }
+}
+
+/** A typed parse or load whose expected type `Contracts.#answerTask` reads: its node, its default, where it lands. */
+interface AnsweredCall {
+  readonly node: FlowNode;
+  readonly call: Expression;
+  /** The source of its record's fields' order: its default, or the call. */
+  readonly source: Expression;
+  readonly landing: Landing | null;
+}
+
+/** The `default:` a call's value falls back on, or `null`. */
+function defaultOf(call: CallExpression): Expression | null {
+  return (
+    call.arguments.find(
+      (argument) => argument.kind === "namedArgument" && argument.name.name === "default",
+    )?.value ?? null
+  );
+}
+
+/**
+ * Whether a default reads anything but literal data: a variable, a property or an element of one, or any operation but
+ * a typed parse or load of literal data. Where the core answers a call by such a default, its answer follows the stores
+ * that reach the read while the result's place keeps the type the program settled (a question for the core's F18), so
+ * the slice leaves it out.
+ */
+function readsPlace(fallback: Expression): boolean {
+  const pending = [fallback];
+  for (let at = pending.pop(); at !== undefined; at = pending.pop())
+    switch (at.kind) {
+      case "numberLiteral":
+      case "booleanLiteral":
+      case "nullLiteral":
+        break;
+      case "stringLiteral":
+        if (at.parts.some((part) => part.kind !== "stringText")) return true;
+        break;
+      case "parenthesizedExpression":
+        pending.push(at.expression);
+        break;
+      case "listLiteral":
+      case "setLiteral":
+        pending.push(...at.elements);
+        break;
+      case "objectLiteral":
+        pending.push(...at.properties.map((property) => property.value));
+        break;
+      case "loadExpression":
+        if (at.defaultValue !== null) pending.push(at.defaultValue);
+        break;
+      case "callExpression": {
+        const inner = defaultOf(at);
+        if (at.callee.kind !== "identifier" || at.callee.name !== "fromJson" || inner === null)
+          return true;
+        pending.push(inner);
+        break;
+      }
+      default:
+        return true;
+    }
+  return false;
 }
 
 /**

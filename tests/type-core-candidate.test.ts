@@ -197,6 +197,22 @@ function checksOf(plan: InstructionPlan): string[] {
   return typeChecks(plan).map(({ so, eo, type }) => `${so}:${eo} ${typeText(type)}`);
 }
 
+/** The code a checked store fails with (S3 §4). */
+const STORE_CODES: readonly (string | null)[] = ["TSR058"];
+
+/**
+ * The codes each runtime discharge fails with, as the derived evaluation gives them: a whole-number use at a count or an
+ * index, an element of an empty list, a member a receiver may lack or not be able to hold, a selected fallback; a typed
+ * parse's or load's reading never fails (`null`, its event).
+ */
+const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
+  "integer-use": ["TSR024", "TSR043"],
+  empty: ["TSR018", "TSR019"],
+  member: ["TSR003", "TSR004", "TSR008", "TSR016", "TSR017", "TSR061", "TSR062"],
+  fallback: ["TSR058"],
+  "typed-ingress": [null],
+};
+
 /**
  * The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; TABLE r4.59; the lead's answer 3). Every
  * record of the positive list (the cells test's: all but those `heldBack` names) is tried on the candidate route in both
@@ -392,14 +408,9 @@ test("every positive-list record the candidate route reaches plans and runs as i
           discharge.by === "store"
             ? `${discharge.store.valueSo}:${discharge.store.valueEo}`
             : discharge.site;
-        // a store's and a fallback's check fails with TSR058, a typed reading gives its default, the runtime's own
-        // checks fail with their codes: a discharge is not classified by another's check at the same site
-        const own = (code: string | null): boolean =>
-          discharge.by === "store" || discharge.what === "fallback"
-            ? code === "TSR058"
-            : discharge.what === "typed-ingress"
-              ? code === null
-              : code !== null && code !== "TSR058";
+        // each discharge by its own check's codes, never another's at the same site
+        const codes = discharge.by === "store" ? STORE_CODES : (NATIVE_CODES[discharge.what] ?? []);
+        const own = (code: string | null): boolean => codes.includes(code);
         const key = `${record.name}#${discharge.by === "store" ? "store" : discharge.what}@${named}`;
         if (classOf.has(key)) continue;
         const ownAt = (event: CheckEvent): boolean => event.site === named && own(event.code);
@@ -599,9 +610,9 @@ test("the S7 oracle derives object admissions and default structures from their 
     ],
     ["let p: object = {n: 1}\np = hostValue\nsay p.n\nexit\n", "store", "{}"],
     [
-      "let d = {stats: {n: 0}}\nd.stats.n = 1.5\nlet p = fromJson(hostValue, default: d, files: false)\nsay p.stats.n\nexit\n",
+      "let p = fromJson(hostValue, default: [{stats: {n: 0}}, {stats: {n: 1.5}}], files: false)\nsay p[0].stats.n\nexit\n",
       "expected",
-      "{stats: {n: number}}",
+      "list<{stats: {n: number}}>",
     ],
     [
       'let p = fromJson(hostValue, default: fromJson("{}", default: {n: 0}, files: false), files: false)\nsay p.n\nexit\n',
@@ -624,15 +635,10 @@ test("the S7 oracle derives object admissions and default structures from their 
       "null|number",
     ],
     [
-      // where the parse reads it, the default holds `null` there: unknown (ADR 0021 2.6), as the core answers it
-      "let d = {n: 0}\nd.n = null\nlet p = fromJson(hostValue, default: d, files: false)\nsay p.n\nexit\n",
+      // a `null` field of the default that nothing else types stays unknown (ADR 0021 2.6)
+      "let p = fromJson(hostValue, default: {n: null, m: 0}, files: false)\nsay p.m\nexit\n",
       "expected",
-      `{n: ${derivedText({ kind: "kinds", kinds: VALUE_KIND_NAMES })}}`,
-    ],
-    [
-      "let d = {n: 0}\nd = fromJson(hostValue, default: d, files: false)\nsay d.n\nexit\n",
-      "expected",
-      "{n: integer}",
+      `{n: ${derivedText({ kind: "kinds", kinds: VALUE_KIND_NAMES })}, m: integer}`,
     ],
   ] as const;
   const inputs: readonly SerializableRuntimeValue[] = [

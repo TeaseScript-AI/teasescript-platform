@@ -793,10 +793,10 @@ test("a store's check, a parse's expected type and a fallback's check keep the s
     ran(runWith(store, object({ stats: object({ n: "bad" }) }))),
     failed(`TSR058@${at(whole, "hostValue")}`),
   );
-  // a named object default gives what it holds at every depth, on both lowerings
+  // a nested object default gives its structure at every depth, on both lowerings
   for (const files of ["", ", files: false"]) {
-    const named = `let d = {stats: {count: 0}}\nlet p = fromJson(hostValue, default: d${files})\nsay p.stats.count\nexit\n`;
-    const parse = at(named, `fromJson(hostValue, default: d${files})`);
+    const named = `let p = fromJson(hostValue, default: {stats: {count: 0}}${files})\nsay p.stats.count\nexit\n`;
+    const parse = at(named, `fromJson(hostValue, default: {stats: {count: 0}}${files})`);
     assert.ok(decision(named).checks.includes(`copy-type p [object] boundary @${parse}`));
     const plan = candidatePlan(named);
     assert.ok(
@@ -860,15 +860,6 @@ test("a store's check, a parse's expected type and a fallback's check keep the s
     assert.deepEqual(contentOf(plan), [`expected call@${call} ${expected}`], source);
     assert.deepEqual(ran(runWith(plan, json)), halted([said]), source);
   }
-  // the default's kinds as the core reads them, through a copy of a written list: what it holds (F18)
-  const copied =
-    'let a: number[] = [0]\nlet b = a\nlet p = fromJson(hostValue, default: b, files: false)\nsay p[0]\nsay "AFTER"\nexit\n';
-  const parse = at(copied, "fromJson(hostValue, default: b, files: false)");
-  const plan = candidatePlan(copied);
-  assert.deepEqual(contentOf(plan), [`expected call@${parse} list<integer>`]);
-  assert.deepEqual(checkedStores(plan), ["'p' list<integer>"]);
-  assert.deepEqual(ran(runWith(plan, "[3]")), halted(["3", "AFTER"]));
-  assert.deepEqual(ran(runWith(plan, "[1.5]")), halted(["0", "AFTER"], [`TSW020@${parse}`]));
 });
 
 test("a typed parse's known value is the one its run gets: a known bad count is still the kept check's error (S7 review r2 B4)", () => {
@@ -936,15 +927,12 @@ test("a typed parse's or load's expected type is the core's own answer at the ca
   // a record as deep as the slice follows repairs its leaf; deeper, and fields some records of a list lack, which no
   // default supplies there, leave the slice rather than check less than the core decided
   const deep = (depth: number): string =>
-    `let d = ${"{f: ".repeat(depth)}0${"}".repeat(depth)}\nlet out = fromJson(hostValue, default: d, files: false)\n` +
+    `let out = fromJson(hostValue, default: ${"{f: ".repeat(depth)}0${"}".repeat(depth)}, files: false)\n` +
     `say out${".f".repeat(depth)}\nsay "AFTER"\nexit\n`;
   const followed = deep(128);
   assert.deepEqual(
     ran(runWith(candidatePlan(followed), `${'{"f":'.repeat(128)}"bad"${"}".repeat(128)}`)),
-    halted(
-      ["0", "AFTER"],
-      [`TSW020@${at(followed, "fromJson(hostValue, default: d, files: false)")}`],
-    ),
+    halted(["0", "AFTER"], [`TSW020@10:${followed.indexOf("\n")}`]),
   );
   for (const source of [
     deep(255),
@@ -957,6 +945,80 @@ test("a typed parse's or load's expected type is the core's own answer at the ca
         error.what === "a value whose structure the slice does not follow",
       source.slice(0, 80),
     );
+});
+
+test("a typed parse's or load's contract stays the one the core decided, or its program leaves the slice, in three layers, in both orders (S7 review r4 B1, B2, N1)", () => {
+  // a default that reads a variable: the core's answer at the call follows the stores that reach the read, the result's
+  // place the type the program settled; the slice leaves both out until the core's F18 relates them (a lead question)
+  const reading = "a typed parse's or load's default that reads a variable";
+  const structure = "a value whose structure the slice does not follow";
+  for (const [source, what] of [
+    [
+      "let d = {n: 0}\nd.n = null\nlet out = fromJson(hostValue, default: d, files: false)\nsay out.n\nexit\n",
+      reading,
+    ],
+    [
+      "let d = {n: 1.5}\nd.n = 0\nlet out = fromJson(hostValue, default: d, files: false)\nsay out.n\nexit\n",
+      reading,
+    ],
+    [
+      "let d = {a: {n: 0}}\nlet out = fromJson(hostValue, default: d.a, files: false)\nsay out.n\nexit\n",
+      reading,
+    ],
+    ['let d = {n: 0}\nlet out = load("k", default: d)\nsay out.n\nexit\n', reading],
+    [
+      "let a: number[] = [0]\nlet b = a\nlet out = fromJson(hostValue, default: b, files: false)\nexit\n",
+      reading,
+    ],
+    // fields some records of a list lack, also where a record gives them as `null` or host data
+    [
+      "let out = fromJson(hostValue, default: [{n: null, a: 1}, {m: null, a: 2}], files: false)\nsay out[0].a\nexit\n",
+      structure,
+    ],
+    [
+      "let out = fromJson(hostValue, default: [{n: null}, {m: null}], files: false)\nexit\n",
+      structure,
+    ],
+  ] as const)
+    assert.throws(
+      () => compileSourceWithBackend(source, OPTIONS, CORE_BACKEND),
+      (error) => error instanceof CandidateOutsideSlice && error.what === what,
+      source,
+    );
+  // a `null` field of the default that the program types elsewhere: the core answers the call with it unknown and the
+  // place with that type, so the slice leaves it out too
+  assert.throws(
+    () =>
+      compileSourceWithBackend(
+        "let p = fromJson(hostValue, default: {a: 1, b: null}, files: false)\np.b = 2\nsay p.a\nexit\n",
+        OPTIONS,
+        CORE_BACKEND,
+      ),
+    (error) =>
+      error instanceof CandidateOutsideSlice &&
+      error.what === "an open part of a typed parse's or load's default that its destination types",
+  );
+  // where nothing else types it, it stays unknown: any JSON value there, the others read as typed
+  const open =
+    'let p = fromJson(hostValue, default: {a: 1, b: null}, files: false)\nsay p.a\nsay "AFTER"\nexit\n';
+  const parse = at(open, "fromJson(hostValue, default: {a: 1, b: null}, files: false)");
+  const plan = candidatePlan(open);
+  assert.deepEqual(checkedStores(plan), ["'p' {a: integer}"]);
+  assert.ok(
+    contentOf(plan).some((entry) => entry.startsWith(`expected call@${parse} {a: integer, b: `)),
+    JSON.stringify(contentOf(plan)),
+  );
+  assert.deepEqual(ran(runWith(plan, '{"a": 3, "b": "x"}')), halted(["3", "AFTER"]));
+  assert.deepEqual(
+    ran(runWith(plan, '{"a": "x", "b": 4}')),
+    halted(["1", "AFTER"], [`TSW020@${parse}`]),
+  );
+  // a record's fields keep its own default's order, whatever another record writes first
+  const ordered =
+    "let unused = {b: 0, a: 0}\nlet p = fromJson(hostValue, default: {a: 1, b: 2}, files: false)\nsay p.a\nexit\n";
+  assert.deepEqual(contentOf(candidatePlan(ordered)), [
+    `expected call@${at(ordered, "fromJson(hostValue, default: {a: 1, b: 2}, files: false)")} {a: integer, b: integer}`,
+  ]);
 });
 
 test("the candidate route rejects the loads whose storage rules S9b brings (S3 §3)", () => {
