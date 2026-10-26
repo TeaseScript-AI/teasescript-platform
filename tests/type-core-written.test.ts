@@ -411,6 +411,16 @@ test("a copy keeps its source's written type past a later copy back, and agrees 
     [],
   );
   assert.deepEqual(inside, { outcome: "warning-runtime-check", levels: [[["null"]]] });
+  // a cycle of whole copies brings every member the written type's paths (Sol's round 4 B1)
+  const round = levelsOf(
+    "let typed: null[] = [null]\nlet a0 = typed\nlet a1 = a0\nlet a2 = a1\na0 = a2\nlet out = a2\nout = hostValue\nexit\n",
+    ["a1", "a2", "out"],
+  );
+  assert.deepEqual(round.levels, [
+    [["list"], ["null"]],
+    [["list"], ["null"]],
+    [["list"], ["null"]],
+  ]);
   // a place nesting itself without end stops at the deepest path a written type reaches, within the allowance
   const nesting = levelsOf(
     "let typed: integer[] = [1]\nlet a = null\na = a[0]\na = [[typed]]\nlet out = a\nexit\n",

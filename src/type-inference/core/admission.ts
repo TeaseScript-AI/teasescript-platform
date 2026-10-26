@@ -78,15 +78,23 @@ interface InheritedCopy {
  */
 function cyclesOf(
   edges: ReadonlyMap<PlaceId, readonly InheritedCopy[]>,
-  work: { charge(counter: "indexSteps"): void },
+  work: { charge(counter: "indexSteps", units?: number): void },
 ): Map<PlaceId, number> {
   const out = new Map<PlaceId, number>();
   const order = new Map<PlaceId, number>();
   const low = new Map<PlaceId, number>();
   const stack: PlaceId[] = [];
   const onStack = new Set<PlaceId>();
-  const next = (place: PlaceId): readonly PlaceId[] =>
-    (edges.get(place) ?? []).map((copy) => copy.place);
+  // (each place's copies' places, once: Sol's round 4 B2)
+  const adjacency = new Map<PlaceId, readonly PlaceId[]>();
+  for (const [place, copies] of edges) {
+    work.charge("indexSteps", copies.length);
+    adjacency.set(
+      place,
+      copies.map((copy) => copy.place),
+    );
+  }
+  const next = (place: PlaceId): readonly PlaceId[] => adjacency.get(place) ?? [];
   const enter = (place: PlaceId): void => {
     low.set(place, order.size);
     order.set(place, order.size);
@@ -1015,7 +1023,8 @@ export class Admission {
     }
     // A4 through copies: a copy of a place that may inherit a written type lands at its path, and below it at the paths
     // copies of written types land at in that place, sources before their copies; within a cycle of places (a place
-    // copied into itself, `a = {p: a}`) it brings the place's base paths only, so no path grows by going round
+    // copied into itself, `a = {p: a}`) it brings the place's base paths only, and a copy that adds or takes a step
+    // keeps them out of its own base, so no path grows by going round
     const bySource = new Map<PlaceId, InheritedCopy[]>();
     for (const copy of this.#a4Inherits) {
       const list = bySource.get(copy.from);
@@ -1032,11 +1041,14 @@ export class Admission {
         work.charge("indexSteps");
         const cycle = cycleOf.get(from);
         const across = cycle === undefined || cycle !== cycleOf.get(place);
-        let grew = land(place, path, across);
+        // (within a cycle a whole copy, no step added or taken, carries the base paths on as base: they keep their
+        // length going round, so a cycle of whole copies brings each member every one, Sol's round 4 B1)
+        const keeps = across || (path.length === 0 && strip.length === 0);
+        let grew = land(place, path, keeps);
         const rests = (across ? below.all : below.base).get(`${from}|${strip.join(".")}`);
         for (const rest of [...(rests ?? [])]) {
           work.charge("indexSteps");
-          grew = land(place, [...path, ...rest.split(".")], across) || grew;
+          grew = land(place, [...path, ...rest.split(".")], keeps) || grew;
         }
         if (grew && bySource.has(place) && !queued.has(place)) {
           queued.add(place);
