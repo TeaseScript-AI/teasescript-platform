@@ -2,8 +2,6 @@ import type { TypePlan } from "../../plan/model.js";
 import {
   cloneCapturedSerializableValue,
   getSerializableDictEntry,
-  getSerializableProperty,
-  setCapturedSerializableProperty,
   type SerializableRuntimeObject,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
@@ -57,15 +55,17 @@ export function takesEveryValue(type: TypePlan): boolean {
   return VALUE_KIND_NAMES.every((kind) => open.has(kind));
 }
 
-/** The value of a record's field: an object's property, or for JSON also a dict's entry. */
-function fieldOf(
+/** A record's fields by name: an object's properties, indexed once, or for JSON a dict's entries, which are. */
+function fieldsOf(
   record: SerializableRuntimeValue,
-  name: string,
   json: boolean,
-): SerializableRuntimeValue | undefined {
-  if (isObject(record)) return getSerializableProperty(record, name);
-  if (json && isDict(record)) return getSerializableDictEntry(record, name)?.value;
-  return undefined;
+): (name: string) => SerializableRuntimeValue | undefined {
+  if (isObject(record)) {
+    const fields = new Map(record.properties.map((property) => [property.name, property.value]));
+    return (name) => fields.get(name);
+  }
+  if (json && isDict(record)) return (name) => getSerializableDictEntry(record, name)?.value;
+  return () => undefined;
 }
 
 /** Whether a value is a record that an object type reads field by field: an object, or for JSON a dict. */
@@ -102,8 +102,9 @@ function readWhole(
     if (object?.kind === "object") {
       if (!isRecordValue(part, true)) return { result: undefined };
       const parts: (readonly [SerializableRuntimeValue, TypePlan])[] = [];
+      const fieldOf = fieldsOf(part, true);
       for (const property of object.properties) {
-        const field = fieldOf(part, property.name, true);
+        const field = fieldOf(property.name);
         if (field === undefined) return { result: undefined };
         parts.push([field, property.type]);
       }
@@ -179,11 +180,11 @@ export function readExpected(
   }
   const fields: MissingField[] = [];
   const frames: {
-    readonly record: SerializableRuntimeValue;
+    readonly fieldOf: (name: string) => SerializableRuntimeValue | undefined;
     readonly type: Extract<TypePlan, { kind: "object" }>;
     readonly path: readonly string[];
     next: number;
-  }[] = [{ record: value, type, path: [], next: 0 }];
+  }[] = [{ fieldOf: fieldsOf(value, json), type, path: [], next: 0 }];
   while (frames.length > 0) {
     const frame = frames[frames.length - 1]!;
     if (frame.next === frame.type.properties.length) {
@@ -192,10 +193,10 @@ export function readExpected(
     }
     const property = frame.type.properties[frame.next++]!;
     const path = [...frame.path, property.name];
-    const found = fieldOf(frame.record, property.name, json);
+    const found = frame.fieldOf(property.name);
     if (found === undefined) fields.push({ path, found, type: property.type });
     else if (property.type.kind === "object" && isRecordValue(found, json))
-      frames.push({ record: found, type: property.type, path, next: 0 });
+      frames.push({ fieldOf: fieldsOf(found, json), type: property.type, path, next: 0 });
     else if (readWhole(found, property.type, json) === undefined)
       fields.push({ path, found, type: property.type });
   }
@@ -224,15 +225,29 @@ export function repairedRecord(
     ? { kind: "object", properties: [] }
     : (cloneCapturedSerializableValue(candidate) as SerializableRuntimeObject);
   const pending: {
-    readonly candidate: SerializableRuntimeValue;
-    readonly fallback: SerializableRuntimeObject;
+    readonly candidate: (name: string) => SerializableRuntimeValue | undefined;
+    readonly fallback: (name: string) => SerializableRuntimeValue | undefined;
     readonly type: Extract<TypePlan, { kind: "object" }>;
     readonly into: SerializableRuntimeObject;
-  }[] = [{ candidate, fallback, type, into: root }];
-  for (let next = pending.pop(); next !== undefined; next = pending.pop())
+  }[] = [
+    { candidate: fieldsOf(candidate, json), fallback: fieldsOf(fallback, false), type, into: root },
+  ];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    // the copy's own fields, indexed once, where a field of the record is replaced or added
+    const into = new Map(next.into.properties.map((property) => [property.name, property]));
+    const put = (name: string, value: SerializableRuntimeValue): void => {
+      const copied = cloneCapturedSerializableValue(value);
+      const existing = into.get(name);
+      if (existing !== undefined) existing.value = copied;
+      else {
+        const property = { name, value: copied };
+        next.into.properties.push(property);
+        into.set(name, property);
+      }
+    };
     for (const property of next.type.properties) {
-      const found = fieldOf(next.candidate, property.name, json);
-      const given = getSerializableProperty(next.fallback, property.name);
+      const found = next.candidate(property.name);
+      const given = next.fallback(property.name);
       if (
         found !== undefined &&
         given !== undefined &&
@@ -241,17 +256,19 @@ export function repairedRecord(
         isObject(given)
       ) {
         // the copy holds the stored field already; JSON's starts empty
-        let into = getSerializableProperty(next.into, property.name);
-        if (into === undefined) {
-          into = { kind: "object", properties: [] };
-          next.into.properties.push({ name: property.name, value: into });
+        let below = into.get(property.name)?.value;
+        if (below === undefined) {
+          below = { kind: "object", properties: [] };
+          const added = { name: property.name, value: below };
+          next.into.properties.push(added);
+          into.set(property.name, added);
         }
         pending.push({
-          candidate: found,
-          fallback: given,
+          candidate: fieldsOf(found, json),
+          fallback: fieldsOf(given, false),
           type: property.type,
           // EVIDENCE: invariant: the field is the stored object's copy or the empty object just added.
-          into: into as SerializableRuntimeObject,
+          into: below as SerializableRuntimeObject,
         });
         continue;
       }
@@ -259,7 +276,8 @@ export function repairedRecord(
       // a stored field that reads whole is in the copy already
       if (whole !== undefined && !json) continue;
       const value = whole ?? given;
-      if (value !== undefined) setCapturedSerializableProperty(next.into, property.name, value);
+      if (value !== undefined) put(property.name, value);
     }
+  }
   return root;
 }

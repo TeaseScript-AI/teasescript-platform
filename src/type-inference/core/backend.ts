@@ -13,7 +13,14 @@ import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } fr
 import type { SourceSite } from "../graph.js";
 import { analyseCore, type Answers } from "./answers.js";
 import { BudgetExhausted } from "./budget.js";
-import { coreCheckResult, coreFacts, nodeOf, SLICE_DEPTH, SliceIndex } from "./consumer.js";
+import {
+  coreCheckResult,
+  coreFacts,
+  nodeOf,
+  SLICE_DEPTH,
+  SliceIndex,
+  UnfollowedDefault,
+} from "./consumer.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 
 /*
@@ -78,6 +85,12 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
       const facts = coreFacts(answers, index, core);
       return { checked, facts: () => facts };
     } catch (error) {
+      if (error instanceof UnfollowedDefault)
+        throw outsideSlice(core, {
+          file: index.fileOf(error.expression),
+          span: error.expression.span,
+          what: "a default whose structure the slice does not follow",
+        });
       // the questions after the analysis spend the same allowance (TABLE §8); its fallback is S8's
       if (!(error instanceof BudgetExhausted)) throw error;
       throw outsideSlice(core, overAllowance(core.files));
@@ -143,9 +156,7 @@ function annotationOutside(annotation: TypeAnnotation): TypeAnnotation | null {
 function outsideSyntax(files: readonly CoreFile[], globals: ReadonlySet<string>): Outside | null {
   // the keys loaded so far, each once in the project: the agreement of a key's loads is S9b's (S3 §3)
   const loaded = new Set<string>();
-  for (const [file, { program, source: text }] of files.entries()) {
-    const source = (node: Expression): string =>
-      text.slice(node.span.start.offset, node.span.end.offset);
+  for (const [file, { program }] of files.entries()) {
     const lets = letNames(program);
     const outside = (span: SourceSpan, what: string): Outside => ({ file, span, what });
     const pending: (Statement | Expression)[] = [...program.statements].reverse();
@@ -237,15 +248,14 @@ function outsideSyntax(files: readonly CoreFile[], globals: ReadonlySet<string>)
         }
         case "loadExpression": {
           const key = unwrapped(node.key);
-          if (
-            key.kind !== "stringLiteral" ||
-            key.parts.some((part) => part.kind !== "stringText") ||
-            node.defaultValue === null ||
-            unwrapped(node.defaultValue).kind === "nullLiteral" ||
-            loaded.has(source(key))
-          )
+          // the key as the session names it, whatever its spelling
+          const name =
+            key.kind === "stringLiteral" && key.parts.every((part) => part.kind === "stringText")
+              ? key.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("")
+              : null;
+          if (name === null || node.defaultValue === null || loaded.has(name))
             return outside(node.span, "this load expression");
-          loaded.add(source(key));
+          loaded.add(name);
           push([node.key, node.defaultValue]);
           break;
         }
@@ -415,6 +425,13 @@ function outsideAnswers(
   for (const value of index.shown)
     if (beyond(value, SHOWN))
       return { file: index.fileOf(value), span: value.span, what: "this say" };
+  // a load whose default is only null: without a declared type, the storage rules' error (F19, S9b's)
+  for (const load of index.loads)
+    if (
+      load.defaultValue !== null &&
+      !kindsAt(load.defaultValue).some((tag) => tag !== "null" && tag !== "empty")
+    )
+      return { file: index.fileOf(load), span: load.span, what: "this load expression" };
   for (const call of index.calls)
     for (const argument of call.arguments) {
       const allowed = argumentKinds(call, argument);

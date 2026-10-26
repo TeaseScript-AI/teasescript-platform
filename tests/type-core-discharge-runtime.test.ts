@@ -15,7 +15,7 @@ import {
 import type { RuntimeScriptStorageEntrySnapshot } from "../src/runtime/host-data/script-storage.js";
 import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
-import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -323,11 +323,45 @@ test("an otherwise's selected fallback is checked against the value's family, in
   }
 });
 
+/** A stored file of the session, which `decryptFile` reads. */
+const STORED = "stored:1";
+
+/**
+ * A run of `plan` with `hostValue` and the stored file, the Player answering each lock that it could not open, a
+ * checkpoint round trip on both sides of each answer.
+ */
+function notOpened(plan: InstructionPlan, hostValue: SerializableRuntimeValue): Ran {
+  const restored = (snapshot: RuntimeSnapshot): RuntimeSnapshot =>
+    deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, snapshot))).snapshot;
+  let result = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue }, storedFiles: [STORED] }),
+  );
+  const events = [...result.events];
+  for (let guard = 0; result.snapshot.status === "waiting"; guard += 1) {
+    assert.ok(guard < 5, "the script keeps waiting");
+    const snapshot = restored(result.snapshot);
+    const action = snapshot.foregroundAction!;
+    assert.equal(action.kind, "lock");
+    const completed = completeAction(
+      plan,
+      snapshot,
+      { actionId: action.actionId, actionKind: "lock", payload: { kind: "notOpened" } },
+      { capturedMedia: { holds: () => true } },
+    );
+    assert.equal(completed.outcome.kind, "completed", JSON.stringify(completed.outcome));
+    events.push(...completed.events);
+    result = run(plan, restored(completed.snapshot));
+    events.push(...result.events);
+  }
+  return summary(events, result.snapshot.status);
+}
+
 test("the default of fileFromBase64, decryptText and decryptFile is checked where it is selected, in three layers, in both orders (C10, S3 §4)", () => {
   for (const call of [
     'fileFromBase64("!"',
     'decryptText("!", password: "pw"',
-    'decryptFile("!", password: "pw"',
+    `decryptFile("${STORED}", password: "pw"`,
   ]) {
     const source = `let value = ${call}, default: hostValue)\nsay "AFTER"\nexit\n`;
     const site = at(source, "hostValue");
@@ -336,13 +370,15 @@ test("the default of fileFromBase64, decryptText and decryptFile is checked wher
     assert.ok(known.checks.includes(`copy-type hostValue [string] @${site}`), source);
     const plan = candidatePlan(source);
     assert.ok(contentOf(plan).includes(`fallbackCheck storeTemporary@${site} string`), source);
-    // `decryptFile` checks that "!" is a stored file first, and fails there whatever its default
-    if (call.startsWith("decryptFile")) continue;
-    assert.deepEqual(ran(runWith(plan, "abc")), halted(["AFTER"]), source);
-    assert.deepEqual(ran(runWith(plan, null)), halted(["AFTER"]), source);
-    assert.deepEqual(ran(runWith(plan, 3)), failed(`TSR058@${site}`), source);
+    // `decryptFile` opens a stored file: the Player cannot, so the default is selected
+    const play = call.startsWith("decryptFile")
+      ? notOpened
+      : (of: InstructionPlan, value: SerializableRuntimeValue) => ran(runWith(of, value));
+    assert.deepEqual(play(plan, "abc"), halted(["AFTER"]), source);
+    assert.deepEqual(play(plan, null), halted(["AFTER"]), source);
+    assert.deepEqual(play(plan, 3), failed(`TSR058@${site}`), source);
     // the legacy plan takes any default, as it did
-    assert.deepEqual(ran(runWith(legacyPlan(source), 3)), halted(["AFTER"]), source);
+    assert.deepEqual(play(legacyPlan(source), 3), halted(["AFTER"]), source);
   }
 });
 
@@ -724,4 +760,69 @@ test("plan validation rejects S7's fields where they do not belong (S3 §4's ser
   }
   // the unchanged plan is valid
   assert.deepEqual(validateInstructionPlan(JSON.parse(json)).errors, []);
+});
+
+test("a store's check, a parse's expected type and a fallback's check keep the structure the core decided, in both orders (S7 review r1 B1, B2, B4)", () => {
+  // a record stored whole from host data: its boundary validates the decided fields (C9 at the record level, A7)
+  const whole = 'let p = {n: 1}\np = hostValue\nsay p.n\nsay "AFTER"\nexit\n';
+  const store = candidatePlan(whole);
+  assert.deepEqual(ran(runWith(store, object({ n: 3 }))), halted(["3", "AFTER"]));
+  assert.deepEqual(
+    ran(runWith(store, object({ n: "bad" }))),
+    failed(`TSR058@${at(whole, "hostValue")}`),
+  );
+  // a named object default gives its fields' types at every depth, on both lowerings
+  for (const files of ["", ", files: false"]) {
+    const named = `let d = {stats: {count: 0}}\nlet p = fromJson(hostValue, default: d${files})\nsay p.stats.count\nexit\n`;
+    const parse = at(named, `fromJson(hostValue, default: d${files})`);
+    const plan = candidatePlan(named);
+    assert.ok(
+      contentOf(plan).some((entry) => entry.endsWith(`@${parse} {stats: {count: integer}}`)),
+      JSON.stringify(contentOf(plan)),
+    );
+    assert.deepEqual(ran(runWith(plan, '{"stats": {"count": 3}}')), halted(["3"]));
+    assert.deepEqual(
+      ran(runWith(plan, '{"stats": {"count": "bad"}}')),
+      halted(["0"], [`TSW020@${parse}`]),
+    );
+  }
+  // a fallback's elements: C10 at the fallback's element depth checks the selected list where it is selected
+  const nested =
+    'let xs = [[1], null][1]\nlet n = (xs otherwise [hostValue, 2])[1]\nsay n\nsay "AFTER"\nexit\n';
+  const fallback = at(nested, "[hostValue, 2]");
+  assert.ok(
+    decision(nested).checks.includes(
+      `copy-type [hostValue, 2].element [integer, number] @${fallback}`,
+    ),
+  );
+  const checked = candidatePlan(nested);
+  assert.ok(
+    contentOf(checked).includes(
+      `fallbackCheck binary@${at(nested, "xs otherwise [hostValue, 2]")} list<integer|number>`,
+    ),
+    JSON.stringify(contentOf(checked)),
+  );
+  assert.deepEqual(ran(runWith(checked, 3)), halted(["2", "AFTER"]));
+  assert.deepEqual(ran(runWith(checked, "bad")), failed(`TSR058@${fallback}`));
+  // the written type of the place a parse lands in directly, through a literal's elements, nullable as written
+  const listed =
+    "let xs: number[] = [fromJson(hostValue, default: 0, files: false)]\nsay xs[0]\nexit\n";
+  assert.deepEqual(ran(runWith(candidatePlan(listed), "1.5")), halted(["1.5"]));
+  const optional = "let n: integer? = fromJson(hostValue, default: 0, files: false)\nsay n\nexit\n";
+  assert.deepEqual(ran(runWith(candidatePlan(optional), "null")), halted(["null"]));
+  assert.deepEqual(ran(runWith(candidatePlan(optional), "3")), halted(["3"]));
+});
+
+test("the candidate route rejects the loads whose storage rules S9b brings (S3 §3)", () => {
+  for (const source of [
+    // one key, two spellings: the agreement of a key's loads
+    'let a = load("k", default: 0)\nlet b = load("""k""", default: "x")\nexit\n',
+    // a default that is only null, without a declared type
+    'let d = null\nlet a = load("x", default: d)\nexit\n',
+  ])
+    assert.throws(
+      () => compileSourceWithBackend(source, OPTIONS, CORE_BACKEND),
+      (error) => error instanceof CandidateOutsideSlice && error.what === "this load expression",
+      source,
+    );
 });
