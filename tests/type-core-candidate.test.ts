@@ -1277,6 +1277,109 @@ test("a written scalar a singleton literal gives stays strict on the candidate r
   assert.equal(compiled.plan, null);
 });
 
+/**
+ * Deep and broad list literals on the candidate route (TABLE r4.58): their indexes share one text per path and order
+ * their identities by path id, and the core charges what they keep. A read 64 levels into a literal, through two
+ * aliases, of external data 32 levels in and of the last of 512 elements or 300 rows; and two literals 40 deep stored
+ * into one place, alike, differing at their leaf's kind, or one holding an empty list at its depth: each compiles to
+ * its diagnostics, and its plan runs to the says and the failure its leaves give, in both orders. (Records, dicts and
+ * sets are outside the slice until it is complete, S9b; the core's deep reads of them are `deep-literal-scale.test.ts`'s.)
+ */
+test("deep and broad list literals compile and run as their leaves give, in both orders (TABLE r4.58)", () => {
+  const nested = (depth: number, leaf: string): string =>
+    `${"[".repeat(depth)}${leaf}${"]".repeat(depth)}`;
+  const reads = (name: string, depth: number): string => `${name}${"[0]".repeat(depth)}`;
+  const counted = (read: string, word: string): string =>
+    `let n: integer = ${read}\nrepeat n {\n  say "${word}"\n}\nexit\n`;
+  const compiled = (source: string) =>
+    inBothOrders(() => {
+      const result = candidate(source);
+      return { sited: sited(result), plan: result.plan };
+    });
+  const says = (word: string, count: number): string[] => Array<string>(count).fill(word);
+
+  // a read 64 levels in, quiet, and the same read of text, C1's error at the read
+  const deep = `let value = ${nested(64, "3")}\n${counted(reads("value", 64), "deep")}`;
+  const quiet = compiled(deep);
+  assert.deepEqual(quiet.sited, []);
+  assert.ok(quiet.plan !== null);
+  assert.deepEqual(checksOf(quiet.plan), []);
+  assertRuns(quiet.plan, "deep", says("deep", 3), [[0, null]]);
+  const text = `let value = ${nested(64, '"x"')}\n${counted(reads("value", 64), "deep")}`;
+  assert.deepEqual(compiled(text), {
+    sited: [`error TSV041@${text.indexOf("value[0]")}`],
+    plan: null,
+  });
+
+  // external data 32 levels in: the store warns and checks it, where the read stands
+  const host = `let value = ${nested(32, "hostValue")}\n${counted(reads("value", 32), "host")}`;
+  const read = host.indexOf("value[0]");
+  const external = compiled(host);
+  assert.deepEqual(external.sited, [`warning TSV041@${read}`]);
+  assert.ok(external.plan !== null);
+  assertRuns(external.plan, "host", says("host", 2), [
+    [2, null],
+    ["x", `TSR058@${read}:${read + reads("value", 32).length}`],
+  ]);
+
+  // two aliases of a literal 48 deep; the last of 512 elements; the last of 300 rows
+  for (const [name, source, count] of [
+    [
+      "aliases",
+      `let a = ${nested(48, "2")}\nlet b = a\nlet c = b\n${counted(reads("c", 48), "aliases")}`,
+      2,
+    ],
+    ["breadth", `let row = [${"0, ".repeat(511)}2]\n${counted("row[511]", "breadth")}`, 2],
+    [
+      "rows",
+      `let grid = [${Array.from({ length: 300 }, (_, i) => `[${i % 3}]`).join(", ")}]\n${counted("grid[299][0]", "rows")}`,
+      299 % 3,
+    ],
+  ] as const) {
+    const result = compiled(source);
+    assert.deepEqual(result.sited, [], name);
+    assert.ok(result.plan !== null, name);
+    assertRuns(result.plan, name, says(name, count), [[0, null]]);
+  }
+
+  // two literals 40 deep stored into one place: alike they are one integer; a text leaf is A6's error at it; an empty
+  // list at their depth fails the read where it is taken
+  const twice = (other: string, word: string): string =>
+    `let pick = ${nested(40, "1")}\nlet flag: boolean = hostValue\nif flag {\n  pick = ${other}\n}\n${counted(reads("pick", 40), word)}`;
+  const flag = (source: string): string => {
+    const at = source.indexOf("hostValue");
+    return `TSR058@${at}:${at + "hostValue".length}`;
+  };
+  const alike = twice(nested(40, "2"), "alike");
+  const both = compiled(alike);
+  assert.deepEqual(both.sited, [`warning TSV041@${alike.indexOf("hostValue")}`]);
+  assert.ok(both.plan !== null);
+  assertRuns(both.plan, "alike", says("alike", 1), [
+    [false, null],
+    [2, flag(alike)],
+  ]);
+  assertRuns(both.plan, "alike", says("alike", 2), [[true, null]]);
+  const textual = twice(nested(40, '"x"'), "textual");
+  assert.deepEqual(compiled(textual), {
+    sited: [
+      `warning TSV041@${textual.indexOf("hostValue")}`,
+      `error TSV041@${textual.indexOf('"x"')}`,
+    ],
+    plan: null,
+  });
+  const emptied = twice(nested(39, "[]"), "emptied");
+  const empty = compiled(emptied);
+  assert.deepEqual(empty.sited, [`warning TSV041@${emptied.indexOf("hostValue")}`]);
+  assert.ok(empty.plan !== null);
+  assertRuns(empty.plan, "emptied", says("emptied", 1), [[false, null]]);
+  const last = emptied.lastIndexOf("[0]") + 1;
+  assert.deepEqual(runWith(empty.plan, true), {
+    status: "failed",
+    says: [],
+    failure: `TSR025@${last}:${last + 1}`,
+  });
+});
+
 /** The admitted type of the binding `name` at `path`: its kinds and its decider's offset. */
 function admittedOf(source: string, name: string, path: readonly string[] = []): string {
   const request = coreRequest([{ path: "main.tease", source }]);
