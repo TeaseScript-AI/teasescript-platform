@@ -1464,6 +1464,25 @@ test("a copy of a written binding keeps its type beside a copy of the same sourc
 });
 
 /**
+ * A2 with F17b and A8: of a literal's elements, one read the literal's `get` never gives and a direct read of the same
+ * snapshot beside it, the direct read decides; a walk's stop shares another's only through the same operations, selected
+ * alike (Astra r5 D1): the decider is the direct `raw` at 68:71, never the later `"tail"`.
+ */
+test("a decider beside an unselected read of its source is the selected read itself (A2, F17b, Astra r5 D1)", () => {
+  const source =
+    'let raw = hostValue\nraw = 1\nlet out = [[raw].get(9, default: null), raw, "tail"]\nrepeat out[0] {}\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const place = new CoreProgram(request).places.find(
+    ({ kind }) => kind.kind === "binding" && kind.name === "out",
+  )!;
+  assert.deepEqual(
+    inBothOrders(() => analyseCore(request).place(place.id, ["element"]).admitted),
+    { by: "decided", kinds: ["integer", "null"], decider: { file: 0, start: 68, end: 71 } },
+  );
+});
+
+/**
  * The owner's rule (TABLE r4.59) over a sample of the cells the candidate route reaches: host data, its slice's ingress,
  * inline and named, into a written, a decided and a published place, at a scalar and at a collection endpoint. Each
  * program compiles alike in both orders and checks exactly the store that brings the data, against the whole type its

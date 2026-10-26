@@ -443,6 +443,8 @@ export class Admission {
   readonly #someOwn = new Map<number, Map<IngressNode, boolean>>();
   readonly #wholeItems = new Map<number, Map<IngressNode, boolean>>();
   readonly #firstStops = new Map<number, Map<IngressNode, IngressStop | null>>();
+  /** Per chain of a walk's operations, its signature (`#viaSignature`). */
+  readonly #viaSignatures = new WeakMap<readonly Via[], string>();
   /** Per store, its landing stops by ingress (`#storeIngresses`). */
   readonly #byIngress = new Map<number, StoreIngresses>();
   /** Per list of a walk's stops, the decider's snapshots of it, all and the unselected ones (`#snapshots`). */
@@ -2304,14 +2306,15 @@ export class Admission {
       const map = term !== null ? stops.written : literal ? stops.literals : stops.values;
       const pathKey = path.join(".");
       // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2; a copy only
-      // where it reads the same snapshot, r4.68 (1))
+      // where it reads the same snapshot, r4.68 (1); and only through the same operations, selected alike: an operand
+      // a `get` never gives is no copy of the store's own element beside it, Astra r5 D1)
       if (
         sharing() &&
         path.length > 0 &&
         map === stops.values &&
         this.#sourceOf(current) !== null
       ) {
-        const identity = `${pathKey}|${strip.join(".")}|${contract.identityOf(current).id}|${contract.readSnapshot(current) ?? ""}`;
+        const identity = `${pathKey}|${strip.join(".")}|${this.#viaSignature(via)}|${deep}|${single}|${contract.identityOf(current).id}|${contract.readSnapshot(current) ?? ""}`;
         if (sources.has(identity)) continue;
         sources.add(identity);
       }
@@ -2489,6 +2492,21 @@ export class Admission {
       out.push(stop);
     }
     return out;
+  }
+
+  /**
+   * A chain of operations by what selects through it (S6-CARRIERS §4.5's via signature): each level's carrier value
+   * and role, its operand aside, so a choice's options read alike while a fallback's two operands, or a `get`'s receiver
+   * and default, stay apart. Once per chain.
+   */
+  #viaSignature(via: readonly Via[]): string {
+    let known = this.#viaSignatures.get(via);
+    if (known === undefined) {
+      this.pass.program.work.charge("checks", via.length);
+      known = via.map((level) => `${level.value}:${level.role}`).join(">");
+      this.#viaSignatures.set(via, known);
+    }
+    return known;
   }
 
   /**

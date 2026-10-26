@@ -67,6 +67,13 @@ function programs(): Program[] {
       for (const k of [2, 3])
         out.push({ name: `${family.name} at ${k}`, files: family.program(k) });
   for (const { name, files } of ORACLE_PROGRAMS) out.push({ name: `oracle ${name}`, files });
+  // Astra's round-5 D1 witness: a decider beside an unselected read of its source (her B1 shape is the oracle's)
+  out.push(
+    one(
+      "a decider beside an unselected read of its source",
+      'let raw = hostValue\nraw = 1\nlet out = [[raw].get(9, default: null), raw, "tail"]\nrepeat out[0] {}\nexit\n',
+    ),
+  );
   for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")])
     out.push({ name: record.name, files: record.files });
   return out;
