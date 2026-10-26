@@ -650,11 +650,11 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
   // F7b, C12 (Astra B3): a receiver that may be a list or a dict owes the dict key only as a check; a dict an error
   [
     "C12 remove on a possible list or dict",
-    // (a written result: two returns of different kinds would be admission's error, ADR 0021 1.5; the written union is
-    // also V30 §13's error, the `-`, beside C12's check)
-    'let flag = askBoolean "flag"\nfunction selected: integer[] | integer dict {\n  if flag { return [1] }\n  return dict {key: 1}\n}\nsay selected().remove(1)\nexit',
-    "compile-error",
-    "- unknown",
+    // (a value of an unrestricted dict: two returns of different kinds would be admission's error, ADR 0021 1.5, and a
+    // written union of a list and a dict V30 §13's)
+    'let pool: dict = dict{a: [1], b: dict{k: 1}}\nsay pool.get("a", default: []).remove(1)\nexit',
+    "warning-runtime-check",
+    "unknown",
   ],
   ["C12 remove on a dict", "let d = dict {key: 1}\nsay d.remove(1)\nexit", "compile-error", "-"],
   // F11, F12, C2, C5 (Astra B1): a property named as an internal step is the object's property
@@ -3871,7 +3871,7 @@ test("an operation the receiver's or the key's decision leaves opaque or externa
     ],
     [
       "a get's default",
-      "let typed: integer[] = [1]\nlet holder: integer[][] | speaker = [[1]]\nlet xs = holder.get(0, default: typed)\nxs = [2.5]",
+      'speaker vera { length: 2 }\nlet typed: integer[] = [1]\nlet pool: dict = dict{a: [[1]], b: vera}\nlet holder = pool.get("a", default: vera)\nlet xs = holder.get(0, default: typed)\nxs = [2.5]',
       false,
     ],
     ["a take", 'let typed: integer[] | speaker = [1]\nlet xs = typed.take(1)\nxs.add("ok")', false],
@@ -3901,7 +3901,8 @@ test("an operation the receiver's or the key's decision leaves opaque or externa
       const run = (): CompactRecord =>
         withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
       const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
-      // (a written union of a collection and the speaker is also V30 §13's error, which this test sets aside)
+      // (a written union of a collection and the speaker, the only receiver with a written type that may be a reference
+      // and holds a list, is also V30 §13's error, which this test sets aside)
       const got = record.diagnostics
         .filter((d) => d.class === "compile-error" && d.kind !== "written-type")
         .map((d) => `${d.class}@${d.site.offset}`);

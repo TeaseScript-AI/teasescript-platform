@@ -256,38 +256,35 @@ test("a receiver that may be a reference answers by F19a before its exact value 
   const read = (source: string, text: string): string => {
     const { answers, node } = analysed(source);
     const at = answers.at(node(text));
-    // (a written union of a list and the speaker is also V30 §13's error, which these reads set aside)
-    const diagnostics = answers.diagnostics
-      .filter((d) => d.kind !== "written-type")
-      .map((d) => `${d.kind} ${d.class}`)
-      .sort();
+    const diagnostics = answers.diagnostics.map((d) => `${d.kind} ${d.class}`).sort();
     const checks = answers.checks.map((check) => check.kind).sort();
     return `${at?.route}: ${at?.items.map((item) => item.tag).join(",")}; ${diagnostics.join(", ")}; ${checks.join(", ")}`;
   };
   const vera = "speaker vera { length: 2 }\n";
   const opaque =
     "unknown; integer-use warning-runtime-check, member-read warning-runtime-check; integer-check, null-check";
-  const maybeVera =
-    "function h(flag: boolean): integer[]|speaker {\n  if flag { return vera }\n  return [1]\n}\n";
+  // a list or the speaker: a value of an unrestricted dict (a written union of a list and the speaker is V30 §13's
+  // error, and two returns of different kinds admission's, ADR 0021 1.5)
+  const pool = "let pool: dict = dict{a: [1], b: vera}\n";
+  const maybeVera = `${pool}function h {\n  return pool.get("a", default: vera)\n}\n`;
   assert.deepEqual(
     [
-      // a written union with text or a list, and a late store of the speaker
+      // a written union of text and the speaker, a list or the speaker, and a late store of the speaker
       read(
         `${vera}let alias: string|speaker = "abc"\nrepeat alias.length {}\nexit`,
         "alias.length",
       ),
       read(
-        `${vera}let alias: integer[]|speaker = [1]\nrepeat alias.length {}\nexit`,
+        `${vera}${pool}let alias = pool.get("a", default: vera)\nrepeat alias.length {}\nexit`,
         "alias.length",
       ),
       // (a late store that may be the speaker: a definite one would be admission's error and be ignored, A6)
       read(
-        `${vera}${maybeVera}let alias = [1]\nrepeat alias.length {}\nalias = h(true)\nexit`,
+        `${vera}${maybeVera}let alias = [1]\nrepeat alias.length {}\nalias = h()\nexit`,
         "alias.length",
       ),
-      // a function's result that may be the speaker or a list: no integer beside the member (a written result: two
-      // returns of different kinds would be admission's error, ADR 0021 1.5)
-      read(`${vera}${maybeVera}repeat h(true).length {}\nexit`, "h(true).length"),
+      // a function's result that may be the speaker or a list: no integer beside the member
+      read(`${vera}${maybeVera}repeat h().length {}\nexit`, "h().length"),
       // the pure reference, and a method of a written union
       read(`${vera}let alias = vera\nrepeat alias.length {}\nexit`, "alias.length"),
       read(
@@ -325,11 +322,7 @@ test("a `get` on a receiver that may be a reference is the runtime's, no default
       );
       assert.ok(node !== undefined, call);
       const at = answers.at(node);
-      // (a written union of a list and the speaker is also V30 §13's error, which these reads set aside)
-      const diagnostics = answers.diagnostics
-        .filter((d) => d.kind !== "written-type")
-        .map((d) => `${d.kind} ${d.class}`)
-        .sort();
+      const diagnostics = answers.diagnostics.map((d) => `${d.kind} ${d.class}`).sort();
       const checks = answers.checks.map((check) => check.kind).sort();
       return `${at?.route}: ${at?.items.map((item) => item.tag).join(",")}; ${diagnostics.join(", ")}; ${checks.join(", ")}`;
     });
@@ -341,11 +334,13 @@ test("a `get` on a receiver that may be a reference is the runtime's, no default
     "value: unknown; integer-use warning-runtime-check, member-read warning-runtime-check, written-target warning-runtime-check; copy-type, integer-check, null-check";
   const got: string[] = [];
   const want: string[] = [];
+  // (a list or the speaker: a value of an unrestricted dict, as in the test before)
+  const pool = "let pool: dict = dict{a: [1], b: vera}\n";
   for (const [setup, after, expected] of [
-    ["let alias: integer[]|speaker = [1]", "", opaque],
+    [`${pool}let alias = pool.get("a", default: vera)`, "", opaque],
     [
-      "function h(flag: boolean): integer[]|speaker {\n  if flag { return vera }\n  return [1]\n}\nlet alias = [1]",
-      "alias = h(true)\n",
+      `${pool}function h {\n  return pool.get("a", default: vera)\n}\nlet alias = [1]`,
+      "alias = h()\n",
       late,
     ],
     ["let alias = vera", "", opaque],

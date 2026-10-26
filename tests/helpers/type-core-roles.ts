@@ -513,13 +513,12 @@ export const COMPOSITIONS: readonly (readonly [string, string, string])[] = (() 
     ],
     [
       "a union holding a reference across two carriers",
-      "let holder: integer[] | speaker = [1]\nlet out = [holder][0].get(0, default: 7)\nrepeat out {}\n",
-      `outcome compile-error
-      D written-type error 12:31 -
-      D member-read warning 48:59 unmodelled
-      D integer-use warning 86:89 unmodelled
-      C null-check [holder][0] [non-null] 48:59
-      C integer-check out [integer] 86:89`,
+      'speaker vera { length: 2 }\nlet pool: dict = dict{a: [1], b: vera}\nlet holder = pool.get("a", default: vera)\nlet out = [holder][0].get(0, default: 7)\nrepeat out {}\n',
+      `outcome warning-runtime-check
+      D member-read warning 118:129 unmodelled
+      D integer-use warning 156:159 unmodelled
+      C null-check [holder][0] [non-null] 118:129
+      C integer-check out [integer] 156:159`,
     ],
     [
       "a member of nullable root and inner receivers",
