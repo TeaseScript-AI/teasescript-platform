@@ -31,6 +31,7 @@ import {
 import { conversionCategory, dictList, measuresLength } from "./method-categories.js";
 import { propertyStep, stepName } from "./program.js";
 import { elementStep, type Obligation, type RequiredKind } from "./result.js";
+import { sharing } from "./sharing.js";
 import type { Work } from "./solver.js";
 import { getProof } from "./values.js";
 
@@ -185,6 +186,8 @@ interface Alias {
   readonly source: Key;
   readonly read: FlowNode;
   readonly at: readonly string[];
+  /** The read itself: the copy whose binding's written type, A4's, its class keeps (TABLE r4.72, Astra r5 B1). */
+  readonly value: PlaceId;
   /** Whether its class is its read's chain's end (§4.1's chains): its items keep their own link's writer. */
   chained?: true;
 }
@@ -875,14 +878,24 @@ export class Admission {
     const report = memberOracle!.report;
     // (a member read through a chain of copies, or its class's, carries its own links' writers, provenance and not the
     // answer: that pair's answers are compared with them set aside, the published records' writers guarded apart)
-    const answer = (d: Definition, rest: readonly string[], writers: boolean): string[] => {
+    // (and its admission: the written type A4 decides it by at the path, TABLE r4.72)
+    const answer = (
+      d: Definition,
+      rest: readonly string[],
+      writers: boolean,
+    ): { readonly guard: boolean; readonly domain: string; readonly items: readonly string[] } => {
       const alias = this.#aliases.get(d)!;
-      const items = this.valueAt(d, rest);
       const key = aliasKeyAt(alias, rest);
-      return [
-        key !== null && guards.narrowed(key, alias.read) ? "g" : "",
-        ...items.map((item) => itemText(item, writers)).sort(),
-      ];
+      const domain = key === null ? null : this.#writtenDomain(alias);
+      return {
+        guard: key !== null && guards.narrowed(key, alias.read),
+        domain: JSON.stringify(
+          domain === null ? null : termAt(domain, rest.slice(alias.at.length)),
+        ),
+        items: this.valueAt(d, rest)
+          .map((item) => itemText(item, writers))
+          .sort(),
+      };
     };
     const marks = (d: Definition, rest: readonly string[], writers: boolean): string[] =>
       marked(this.valueAt(d, rest))
@@ -896,17 +909,21 @@ export class Admission {
           const writers =
             this.#aliases.get(representative)!.chained !== true &&
             this.#aliases.get(member)!.chained !== true;
-          const [first, ...items] = answer(representative, rest, writers);
-          const [own, ...theirs] = answer(member, rest, writers);
+          const theirs = answer(representative, rest, writers);
+          const own = answer(member, rest, writers);
           // (each with its own guard: a guarded one's answer is the other's marked)
           const expected =
-            own === first ? items : own === "g" ? marks(representative, rest, writers) : items;
-          const actual = own !== first && first === "g" ? marks(member, rest, writers) : theirs;
+            own.guard === theirs.guard || !own.guard
+              ? theirs.items
+              : marks(representative, rest, writers);
+          const actual =
+            own.guard !== theirs.guard && theirs.guard ? marks(member, rest, writers) : own.items;
           report(
-            JSON.stringify(expected) === JSON.stringify(actual)
+            own.domain === theirs.domain && JSON.stringify(expected) === JSON.stringify(actual)
               ? null
-              : `${keyOf(root, path)}: the member at ${member.site.start} answers ${JSON.stringify(actual)} at ` +
-                  `${rest.join(".")}, its class at ${representative.site.start} ${JSON.stringify(expected)}`,
+              : `${keyOf(root, path)}: the member at ${member.site.start} answers ${JSON.stringify(actual)} ` +
+                  `(written ${own.domain}) at ${rest.join(".")}, its class at ${representative.site.start} ` +
+                  `${JSON.stringify(expected)} (written ${theirs.domain})`,
           );
         }
       }
@@ -1448,20 +1465,21 @@ export class Admission {
   /**
    * S6-CARRIERS §4.1: the class a whole store's value is an alias in: where it is a stable source path (`#stablePath`),
    * or a literal whose one read cell is one and whose other cells are terms, at that cell's path, the literal's identity
-   * beside it (r4.17: no guard in it). The path, with the read's exact-path signature (`aliasSignature`) and the
-   * handlers' facts at its node: stores of one class bring equal answers below the path, their own guards apart (a
-   * literal's only below its cell, `#covers`); `null` for any other store (an own entry).
+   * beside it (r4.17: no guard in it). The path, with the read's exact-path signature (`aliasSignature`), the
+   * handlers' facts at its node and the written type A4 decides the copy by: stores of one class bring equal answers
+   * below the path, their own guards apart (a literal's only below its cell, `#covers`); `null` for any other store (an
+   * own entry).
    */
   #aliasKey(d: Definition): string | null {
     const { program, lists, handlers, contract } = this.pass;
-    if (d.kind !== "whole" || d.value === undefined) return null;
+    if (d.kind !== "whole" || d.value === undefined || !sharing()) return null;
     program.work.charge("aliasSteps");
     let alias: Alias | null = null;
     let shape = "";
     let written = "";
     const whole = this.#stablePath(d.value, d.node);
     if (whole !== null) {
-      alias = { source: whole.source, read: whole.read, at: [] };
+      alias = { source: whole.source, read: whole.read, at: [], value: d.value };
       written = whole.written;
     } else if (program.hasOf.has(d.value)) {
       const index = contract.literalIndex(d.value);
@@ -1498,6 +1516,7 @@ export class Admission {
         source: read.source,
         read: read.read,
         at: cell.path === "" ? [] : cell.path.split("."),
+        value: cell.value,
       };
       written = read.written;
       shape = `${contract.identityOf(d.value).id}@${cell.path}`;
@@ -1516,7 +1535,19 @@ export class Admission {
       read.written,
       lists.aliasSignature(read.source, read.read),
       handlers.afterSomeCreation(read.read) ? "h" : "",
+      // (the member's own copied binding's written type at its read, A4's decider, whatever its chain resolves to:
+      // `let b: integer[] = raw` is no `let a = raw`, TABLE r4.72)
+      JSON.stringify(this.#writtenDomain(alias)),
     ].join("|");
+  }
+
+  /**
+   * The written type an alias's read copies at its path (A4: a copy of a written binding is decided by it), `null`
+   * where the copied binding has none there; the member's own, never its chain's end's (TABLE r4.72, Astra r5 B1).
+   */
+  #writtenDomain(alias: Alias): TypeTerm | null {
+    const written = this.#writtenSource(alias.value, []);
+    return written === null ? null : termAt(written.term, written.strip);
   }
 
   /**
@@ -2274,7 +2305,12 @@ export class Admission {
       const pathKey = path.join(".");
       // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2; a copy only
       // where it reads the same snapshot, r4.68 (1))
-      if (path.length > 0 && map === stops.values && this.#sourceOf(current) !== null) {
+      if (
+        sharing() &&
+        path.length > 0 &&
+        map === stops.values &&
+        this.#sourceOf(current) !== null
+      ) {
         const identity = `${pathKey}|${strip.join(".")}|${contract.identityOf(current).id}|${contract.readSnapshot(current) ?? ""}`;
         if (sources.has(identity)) continue;
         sources.add(identity);
@@ -2434,6 +2470,7 @@ export class Admission {
    * first; any other stop as itself.
    */
   #distinct(list: readonly Stop[]): Stop[] {
+    if (!sharing()) return [...list];
     const { program, contract } = this.pass;
     const seen = new Map<readonly Via[], Set<string>>();
     const out: Stop[] = [];

@@ -2281,3 +2281,119 @@ export const ADMISSION_INGRESS_PRESETS: readonly WorkFamily[] = [
       ),
     ),
 }));
+
+/**
+ * The member-answer oracle's own programs (S6-CARRIERS §4.1, condition (a)): Astra's two M1 witnesses (a conditional
+ * store below the copied path before and between the copies), every alias form (a copy, a literal's cell, a list's, a
+ * nested one, a literal index, a chain's link) beside the events its class answers through (a conditional store before
+ * or between the copies, a copy under a test of its source or of a field, a store between them), literal cells beside
+ * their literal's own contribution, which no alias may hold, and Astra's round-5 B1 shape (a written copy of a source
+ * beside an unwritten one, at depths one and two, either first: two classes by their written types, TABLE r4.72). The
+ * work test's oracle and the sharing differential run them.
+ */
+export const ORACLE_PROGRAMS: readonly {
+  readonly name: string;
+  readonly files: readonly SourceFile[];
+}[] = (() => {
+  const witnesses = ["before", "between"].map((at) => ({
+    name: `M1, the conditional store ${at} the copies`,
+    files: [
+      {
+        path: "main.tease",
+        source: [
+          "let raw = hostValue",
+          "let root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}}",
+          "let box = {f0: null, f1: null}",
+          ...(at === "before"
+            ? ["if raw != null { root.nested.f0 = 1 }", "box = root.nested", "box = root.nested"]
+            : ["box = root.nested", "if raw != null { root.nested.f0 = 1 }", "box = root.nested"]),
+          "repeat box.f0 {}",
+          "repeat box.f1 {}",
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  }));
+  // every alias form (a copy, a literal's cell, a list's, a nested one, a literal index, a chain's link) beside the
+  // events its class answers through: a conditional store before or between the copies, a copy under a test of its
+  // source or of a field, a store between them
+  const forms = [
+    ["a copy", "root.nested", "", "root.nested"],
+    ["a cell", "{data: root.nested}", ".data", "root.nested"],
+    ["a list cell", "[root.nested]", "[0]", "root.nested"],
+    ["a nested cell", "{a: {b: root.nested}}", ".a.b", "root.nested"],
+    ["a literal index", "root.items[0]", "", "root.items[0]"],
+    ["a chain's link", "link", "", "root.nested"],
+  ] as const;
+  const aliases = forms.flatMap(([form, value, at, source]) => {
+    const copy = `box = ${value}`;
+    const situations: readonly (readonly [string, readonly string[]])[] = [
+      ["a conditional store before", [`if raw != null { ${source}.f0 = 1 }`, copy, copy]],
+      ["a conditional store between", [copy, `if raw != null { ${source}.f0 = 1 }`, copy]],
+      ["a guarded copy", [copy, `if ${source} != null { ${copy} }`, copy]],
+      ["a field-guarded copy", [`if ${source}.f0 != null { ${copy} }`, copy]],
+      ["a store between", [copy, `${source}.f1 = 2`, copy]],
+    ];
+    return situations.map(([situation, steps]) => ({
+      name: `${form}, ${situation}`,
+      files: [
+        {
+          path: "main.tease",
+          source: [
+            "let raw = hostValue",
+            "let root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}, items: [{f0: 1, f1: [1, raw][1]}]}",
+            "let link = root.nested",
+            at === "" ? "let box = {f0: null, f1: null}" : `let box = ${value}`,
+            ...steps,
+            `repeat box${at}.f0 {}`,
+            `repeat box${at}.f1 {}`,
+            "exit",
+          ].join("\n"),
+        },
+      ],
+    }));
+  });
+  // a cell beside a term of its literal's own at its path, or below an object of it without the cell's property (its
+  // `missing` there), plain and guarded: no alias (Codex r22 F5, r23 F2)
+  const beside = (
+    [
+      ["[root, 2.0]", "[0]"],
+      ["[{f: root}, {g: 1}]", "[0].f"],
+      ["dict{a: {f: root}, b: {g: 1}}", '["a"].f'],
+    ] as const
+  ).flatMap(([literal, read]) =>
+    [`box = ${literal}`, `if root != null {\n  box = ${literal}\n}`].map((copy) => ({
+      name: `a cell beside its literal's own contribution: ${copy}`,
+      files: [
+        {
+          path: "main.tease",
+          source: `let root = 1\nlet box = ${literal}\n${copy}\nrepeat box${read} {}\nexit`,
+        },
+      ],
+    })),
+  );
+  const written = [false, true].flatMap((nested) =>
+    [
+      ["a", "b"],
+      ["b", "a"],
+    ].map(([first, second]) => ({
+      name: `a written copy beside a copy of its source, ${nested ? "depth two" : "depth one"}, ${first} first`,
+      files: [
+        {
+          path: "main.tease",
+          source: [
+            `let raw = [${nested ? "[hostValue]" : "hostValue"}]`,
+            "let a = raw",
+            `let b: integer[]${nested ? "[]" : ""} = raw`,
+            `let out = ${first}`,
+            `out = ${second}`,
+            `out = [${nested ? "[hostValue]" : "hostValue"}]`,
+            'say "AFTER"',
+            "exit",
+          ].join("\n"),
+        },
+      ],
+    })),
+  );
+  return [...witnesses, ...aliases, ...beside, ...written];
+})();

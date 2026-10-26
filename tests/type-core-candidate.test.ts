@@ -1379,6 +1379,91 @@ test("every carrier kind leaves an obligation for the external data it gives a p
 });
 
 /**
+ * A copy of a written binding keeps its type beside an unwritten copy of the same source (A4, TABLE r4.72, Astra r5
+ * B1): `let a = raw`, `let b: integer[] = raw`, then `out` takes both, and a later store brings other host data. The
+ * written copy decides `out`'s element by `integer[]`, whichever copy comes first, at depths one and two: each of the
+ * three stores owes its C1 against the whole written type, the host data its boundary; the plan checks every store; the
+ * fitting host value says AFTER and each bad one fails at the third store's value, nothing said.
+ */
+test("a copy of a written binding keeps its type beside a copy of the same source, in both orders (A4, TABLE r4.72)", () => {
+  for (const nested of [false, true])
+    for (const [first, second] of [
+      ["a", "b"],
+      ["b", "a"],
+    ] as const) {
+      const wrap = (text: string): string => (nested ? `[${text}]` : text);
+      const source =
+        `let raw = [${wrap("hostValue")}]\nlet a = raw\nlet b: integer[]${nested ? "[]" : ""} = raw\n` +
+        `let out = ${first}\nout = ${second}\nout = [${wrap("otherHost")}]\nsay "AFTER"\nexit\n`;
+      const name = `${nested ? "depth two" : "depth one"}, ${first} then ${second}`;
+      const target = nested ? "out.element.element" : "out.element";
+      const at = (text: string, from = 0): string => {
+        const start = source.indexOf(text, from);
+        return `${start}:${start + text.length}`;
+      };
+      const host = at("otherHost");
+      const tail = source.indexOf("out = [");
+      const checks = inBothOrders(() => {
+        const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "otherHost"]);
+        assert.ok(request !== null, name);
+        return compactAnalysis(request)
+          .checks.filter((check) => check.target === target && check.kind === "copy-type")
+          .map(
+            (check) =>
+              `${check.boundary ? "B" : "C"} [${check.against.join("|")}] ${check.site.offset}:${check.site.end}`,
+          )
+          .sort();
+      });
+      assert.deepEqual(
+        checks,
+        [
+          `C [integer] ${at(first, source.indexOf("let out = "))}`,
+          `C [integer] ${at(second, source.indexOf("\nout = "))}`,
+          `C [integer] ${host}`,
+          `B [integer] ${host}`,
+        ].sort(),
+        name,
+      );
+      const options = { globals: ["hostValue", "otherHost"] };
+      const plan = inBothOrders(() => compileSourceWithBackend(source, options, CORE_BACKEND).plan);
+      assert.ok(plan !== null, name);
+      const type = nested ? "list<list<integer>>" : "list<integer>";
+      // (each statement's span: `b`'s declaration, which holds host data under its written type, and out's three stores)
+      const line = (text: string): string => {
+        const start = source.indexOf(text);
+        return `${start}:${source.indexOf("\n", start)} ${type}`;
+      };
+      assert.deepEqual(
+        checksOf(plan),
+        [line("let b"), line("let out"), line(`out = ${second}`), line("out = [")],
+        `${name}: b's store and every store of out checked`,
+      );
+      const end = source.indexOf("\n", tail);
+      for (const otherHost of [1, 2.5, "bad"]) {
+        const result = run(
+          plan,
+          createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue: 1, otherHost } }),
+        );
+        const failure = result.events.find((event) => event.kind === "runtimeFailure");
+        assert.deepEqual(
+          {
+            status: result.snapshot.status,
+            says: result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+            failure:
+              failure?.kind === "runtimeFailure"
+                ? `${failure.code}@${failure.span.start.offset}:${failure.span.end.offset}`
+                : null,
+          },
+          otherHost === 1
+            ? { status: "halted", says: ["AFTER"], failure: null }
+            : { status: "failed", says: [], failure: `TSR058@${tail + 6}:${end}` },
+          `${name} with ${JSON.stringify(otherHost)}`,
+        );
+      }
+    }
+});
+
+/**
  * The owner's rule (TABLE r4.59) over a sample of the cells the candidate route reaches: host data, its slice's ingress,
  * inline and named, into a written, a decided and a published place, at a scalar and at a collection endpoint. Each
  * program compiles alike in both orders and checks exactly the store that brings the data, against the whole type its

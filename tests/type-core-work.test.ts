@@ -12,6 +12,7 @@ import {
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
+  ORACLE_PROGRAMS,
   W34_KNOWN_PRODUCTS,
   W34_VARIANTS,
   W44_VARIANTS,
@@ -333,83 +334,7 @@ test("every alias member answers as its class does at every decided path, in bot
         : analyseCore(request),
     );
   };
-  const witnesses = ["before", "between"].map((at) => ({
-    name: `M1, the conditional store ${at} the copies`,
-    files: [
-      {
-        path: "main.tease",
-        source: [
-          "let raw = hostValue",
-          "let root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}}",
-          "let box = {f0: null, f1: null}",
-          ...(at === "before"
-            ? ["if raw != null { root.nested.f0 = 1 }", "box = root.nested", "box = root.nested"]
-            : ["box = root.nested", "if raw != null { root.nested.f0 = 1 }", "box = root.nested"]),
-          "repeat box.f0 {}",
-          "repeat box.f1 {}",
-          "exit",
-        ].join("\n"),
-      },
-    ],
-  }));
-  // every alias form (a copy, a literal's cell, a list's, a nested one, a literal index, a chain's link) beside the
-  // events its class answers through: a conditional store before or between the copies, a copy under a test of its
-  // source or of a field, a store between them
-  const forms = [
-    ["a copy", "root.nested", "", "root.nested"],
-    ["a cell", "{data: root.nested}", ".data", "root.nested"],
-    ["a list cell", "[root.nested]", "[0]", "root.nested"],
-    ["a nested cell", "{a: {b: root.nested}}", ".a.b", "root.nested"],
-    ["a literal index", "root.items[0]", "", "root.items[0]"],
-    ["a chain's link", "link", "", "root.nested"],
-  ] as const;
-  const aliases = forms.flatMap(([form, value, at, source]) => {
-    const copy = `box = ${value}`;
-    const situations: readonly (readonly [string, readonly string[]])[] = [
-      ["a conditional store before", [`if raw != null { ${source}.f0 = 1 }`, copy, copy]],
-      ["a conditional store between", [copy, `if raw != null { ${source}.f0 = 1 }`, copy]],
-      ["a guarded copy", [copy, `if ${source} != null { ${copy} }`, copy]],
-      ["a field-guarded copy", [`if ${source}.f0 != null { ${copy} }`, copy]],
-      ["a store between", [copy, `${source}.f1 = 2`, copy]],
-    ];
-    return situations.map(([situation, steps]) => ({
-      name: `${form}, ${situation}`,
-      files: [
-        {
-          path: "main.tease",
-          source: [
-            "let raw = hostValue",
-            "let root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}, items: [{f0: 1, f1: [1, raw][1]}]}",
-            "let link = root.nested",
-            at === "" ? "let box = {f0: null, f1: null}" : `let box = ${value}`,
-            ...steps,
-            `repeat box${at}.f0 {}`,
-            `repeat box${at}.f1 {}`,
-            "exit",
-          ].join("\n"),
-        },
-      ],
-    }));
-  });
-  // a cell beside a term of its literal's own at its path, or below an object of it without the cell's property (its
-  // `missing` there), plain and guarded: no alias (Codex r22 F5, r23 F2)
-  const beside = (
-    [
-      ["[root, 2.0]", "[0]"],
-      ["[{f: root}, {g: 1}]", "[0].f"],
-      ["dict{a: {f: root}, b: {g: 1}}", '["a"].f'],
-    ] as const
-  ).flatMap(([literal, read]) =>
-    [`box = ${literal}`, `if root != null {\n  box = ${literal}\n}`].map((copy) => ({
-      name: `a cell beside its literal's own contribution: ${copy}`,
-      files: [
-        {
-          path: "main.tease",
-          source: `let root = 1\nlet box = ${literal}\n${copy}\nrepeat box${read} {}\nexit`,
-        },
-      ],
-    })),
-  );
+
   for (const reversed of [false, true]) {
     for (const family of [
       ...WORK_FAMILIES,
@@ -419,7 +344,7 @@ test("every alias member answers as its class does at every decided path, in bot
       ...ADMISSION_FAMILIES,
     ])
       for (const k of [2, 3, 5]) run(`${family.name} at ${k}`, family.program(k), reversed);
-    for (const { name, files } of [...witnesses, ...aliases, ...beside]) run(name, files, reversed);
+    for (const { name, files } of ORACLE_PROGRAMS) run(name, files, reversed);
   }
   for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")])
     if (coreRequest(record.files) !== null) run(record.name, record.files, false);

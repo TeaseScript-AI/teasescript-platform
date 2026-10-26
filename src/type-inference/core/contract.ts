@@ -58,6 +58,7 @@ import {
 } from "./items.js";
 import { operationItems, type Operator } from "./operator-table.js";
 import { propertyStep, stepName, type ValueConstraint } from "./program.js";
+import { sharing } from "./sharing.js";
 import type { Decision, Demand, Work } from "./solver.js";
 
 /*
@@ -991,6 +992,7 @@ export class Contract {
    */
   #levelMember(entry: PrefixEntry): LevelGroup | null {
     if (
+      !sharing() ||
       entry.value === undefined ||
       entry.at !== undefined ||
       entry.key !== undefined ||
@@ -3116,8 +3118,13 @@ export class Contract {
         // (k reads of one host global are one entry as well, by their snapshot, their leaves unioned: an occurrence
         // stays fresh as its own leaf, never as an entry each path reads again, S6-CARRIERS §3.1, Codex r23 F1)
         const leaf = this.#ingressLeaf(value);
-        const id = `${path}|${leaf === undefined ? source.id : snapshot}`;
-        const exactId = `${path}|${snapshot}`;
+        const id = !sharing()
+          ? `${path}|v${value}`
+          : `${path}|${leaf === undefined ? source.id : snapshot}`;
+        // (the value side reads an exact entry by its first read alone, so an ingress occurrence keeps its own: its
+        // items carry its own leaf, which one shared entry would drop; the read entry above unions them, TABLE r4.72)
+        const exactId =
+          !sharing() || leaf !== undefined ? `${path}|v${value}` : `${path}|${snapshot}`;
         const read = reads.get(id);
         if (read === undefined) {
           this.facts.literalEntries += 1;
