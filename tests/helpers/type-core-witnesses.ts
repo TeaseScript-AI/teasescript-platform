@@ -1,3 +1,5 @@
+import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
+
 /*
  * S6-CARRIERS §6's carrier witnesses, each a name, its program before its final `exit` and its exact record: the cells
  * test compares them in both orders, the sharing differential runs them (the cells test's comment lists what each is).
@@ -160,4 +162,145 @@ export const CARRIER_WITNESSES: readonly (readonly [string, string, string])[] =
       C integer-check xs.element [integer] 123:128`,
     ],
   ];
+})();
+
+/** One source of `WRITTEN_COPY_MATRIX`: its place, the domain per level and the host values that fit and misfit. */
+export interface WrittenCopyCase {
+  readonly name: string;
+  readonly source: string;
+  /** The binding the host value lands in: the written one itself, or its copy. */
+  readonly place: string;
+  /** The written domain at each level from the place's root down, `null` included where written. */
+  readonly levels: readonly (readonly string[])[];
+  /** The checked type of the store bringing the host value, as written. */
+  readonly checked: string;
+  /** The store bringing the host value: its statement's span, and its value's (where a bad value stops). */
+  readonly store: string;
+  readonly value: string;
+  readonly fits: readonly SerializableRuntimeValue[];
+  readonly misfits: readonly SerializableRuntimeValue[];
+}
+
+/**
+ * External round 7 B1's matrix (the lead's ruling: a place a written type decides, directly or through a copy, admits
+ * the written domain at every collection level, `null` included; the kinds stored never narrow it): four scalar kinds
+ * × list depths 0–3 × the innermost element nullable or not × the place written, an early copy of a written binding or
+ * a later one × the host value direct, named or held at an index (288 sources), beside an empty original, optional
+ * inner lists and their optional elements. Each expectation is the declared type's.
+ */
+export const WRITTEN_COPY_MATRIX: readonly WrittenCopyCase[] = (() => {
+  const kinds = {
+    integer: { literal: "1", fits: 2, misfits: [2.5, "text"] },
+    number: { literal: "1.5", fits: 2.5, misfits: ["text"] },
+    string: { literal: '"a"', fits: "b", misfits: [2] },
+    boolean: { literal: "true", fits: false, misfits: ["text"] },
+  } as const;
+  const wrap = (text: string, depth: number): string =>
+    "[".repeat(depth) + text + "]".repeat(depth);
+  const out: WrittenCopyCase[] = [];
+  const add = (
+    name: string,
+    lines: readonly string[],
+    place: string,
+    hostLine: string,
+    value: string,
+    levels: readonly (readonly string[])[],
+    checked: string,
+    fits: readonly SerializableRuntimeValue[],
+    misfits: readonly SerializableRuntimeValue[],
+  ): void => {
+    const source = `${[...lines, 'say "DONE"', "exit"].join("\n")}\n`;
+    const start = source.indexOf(`${hostLine}\n`);
+    const end = start + hostLine.length;
+    out.push({
+      name,
+      source,
+      place,
+      levels,
+      checked,
+      store: `${start}:${end}`,
+      value: `${end - value.length}:${end}`,
+      fits,
+      misfits,
+    });
+  };
+  for (const [kind, { literal, fits, misfits }] of Object.entries(kinds))
+    for (const depth of [0, 1, 2, 3])
+      for (const nullable of [true, false])
+        for (const decision of ["written", "early copy", "later copy"] as const)
+          for (const host of ["direct", "named", "index-held"] as const) {
+            const type = `${kind}${nullable ? "?" : ""}${"[]".repeat(depth)}`;
+            const value = wrap(
+              host === "direct" ? "hostValue" : host === "named" ? "h" : "[hostValue][0]",
+              depth,
+            );
+            const lines = [
+              ...(host === "named" ? ["let h = hostValue"] : []),
+              `let typed: ${type} = ${wrap(literal, depth)}`,
+            ];
+            const hostLine =
+              decision === "written"
+                ? `typed = ${value}`
+                : decision === "early copy"
+                  ? `copy = ${value}`
+                  : `let copy = ${value}`;
+            if (decision === "written") lines.push(hostLine);
+            else if (decision === "early copy") lines.push("let copy = typed", hostLine);
+            else lines.push(hostLine, "copy = typed");
+            const scalar = nullable ? [kind, "null"] : [kind];
+            add(
+              `${type}, ${decision}, ${host}`,
+              lines,
+              decision === "written" ? "typed" : "copy",
+              hostLine,
+              value,
+              [...Array.from({ length: depth }, () => ["list"]), scalar],
+              `${"list<".repeat(depth)}${scalar.join("|")}${">".repeat(depth)}`,
+              nullable ? [null, fits] : [fits],
+              nullable ? misfits : [null, ...misfits],
+            );
+          }
+  const list = (items: readonly SerializableRuntimeValue[]): SerializableRuntimeValue => ({
+    kind: "list",
+    items: [...items],
+  });
+  for (const [order, lines] of [
+    ["early copy", ["let copy = typed", "copy = [hostValue]"]],
+    ["later copy", ["let copy = [hostValue]", "copy = typed"]],
+  ] as const) {
+    add(
+      `integer?[] from an empty original, ${order}`,
+      ["let typed: integer?[] = []", ...lines],
+      "copy",
+      lines[order === "early copy" ? 1 : 0],
+      "[hostValue]",
+      [["list"], ["integer", "null"]],
+      "list<integer|null>",
+      [null, 2],
+      [2.5, "text"],
+    );
+    add(
+      `integer[]?[], an optional inner list, ${order}`,
+      ["let typed: integer[]?[] = [[1]]", ...lines],
+      "copy",
+      lines[order === "early copy" ? 1 : 0],
+      "[hostValue]",
+      [["list"], ["list", "null"], ["integer"]],
+      "list<list<integer>|null>",
+      [null, list([2])],
+      [list([null]), list(["text"]), 2],
+    );
+    add(
+      `integer?[]?[], optional elements of an optional inner list, ${order}`,
+      ["let typed: integer?[]?[] = [[1]]", ...lines],
+      "copy",
+      lines[order === "early copy" ? 1 : 0],
+      "[hostValue]",
+      [["list"], ["list", "null"], ["integer", "null"]],
+      "list<list<integer|null>|null>",
+      [null, list([2]), list([null])],
+      [list(["text"]), 2],
+    );
+  }
+  return out;
 })();

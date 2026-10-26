@@ -31,6 +31,7 @@ import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { nodeOf, SliceIndex } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
+import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -53,6 +54,7 @@ import {
 } from "./helpers/type-core-route.js";
 import { recordDifferences, recordOf } from "./helpers/type-core-records.js";
 import { BOTH, owed, records, type Endpoint, type RuleClass } from "./helpers/type-core-rule.js";
+import { WRITTEN_COPY_MATRIX } from "./helpers/type-core-witnesses.js";
 
 // The coarse core on the test-only candidate route (the port plan's S5): source, candidate compile, plan, runtime.
 
@@ -1514,6 +1516,67 @@ test("a decider beside an unselected read of its source is the selected read its
     inBothOrders(() => analyseCore(request).place(place.id, ["element"]).admitted),
     { by: "decided", kinds: ["integer", "null"], decider: { file: 0, start: 68, end: 71 } },
   );
+});
+
+/**
+ * External round 7 B1 (the lead's ruling; A4, F17b; ADR 0021 1.3): a place a written type decides, itself or through
+ * a copy taken before or after the host store, admits the written domain at every collection level, `null` included,
+ * whatever kinds are stored; inferred places stay as their contributions decide. Over `WRITTEN_COPY_MATRIX`, in both
+ * orders and with the sharing on and off: the place's admitted domain at each level and C9's `against` at each of its
+ * targets (decision), the one checked store with the whole written type (plan), a fitting value and a written `null`
+ * saying DONE, a misfit (a fraction or text for an integer, a `null` none is written for) stopping at TSR058 at the
+ * store's value with nothing said (execution).
+ */
+test("a copy of a written collection admits its written domain at every level, null included (external r7 B1)", (t) => {
+  const wrong: string[] = [];
+  const sorted = (kinds: readonly string[]): string[] => [...kinds].sort();
+  for (const c of WRITTEN_COPY_MATRIX) {
+    const request = coreRequest([{ path: "main.tease", source: c.source }]);
+    assert.ok(request !== null, c.name);
+    const place = new CoreProgram(request).places.find(
+      ({ kind }) => kind.kind === "binding" && kind.name === c.place,
+    )!;
+    const levelOf = (target: string): number =>
+      target.split(".").filter((step) => step === "element").length;
+    const expected = {
+      levels: c.levels.map(sorted),
+      checks: [`${c.store} ${c.checked}`],
+      runs: [
+        ...c.fits.map(() => ({ status: "halted", failure: null, says: ["DONE"] })),
+        ...c.misfits.map(() => ({ status: "failed", failure: `TSR058@${c.value}`, says: [] })),
+      ],
+    };
+    const observe = () => {
+      const answers = analyseCore(request);
+      const plan = candidate(c.source).plan!;
+      return {
+        levels: c.levels.map((_, level) => {
+          const admitted = answers.place(place.id, Array<string>(level).fill("element")).admitted;
+          return admitted.by === "undecided" ? ["undecided"] : sorted(admitted.kinds);
+        }),
+        against: answers.checks
+          .filter((check) => check.boundary && check.target.split(".")[0] === c.place)
+          .map((check) => ({ target: check.target, kinds: sorted(check.against) })),
+        checks: checksOf(plan),
+        runs: [...c.fits, ...c.misfits].map((value) => runWith(plan, value)),
+      };
+    };
+    for (const shared of [true, false]) {
+      const { against, ...observed } = inBothOrders(() =>
+        shared ? observe() : withoutSharing(observe),
+      );
+      const name = `${c.name}${shared ? "" : " (no sharing)"}`;
+      if (JSON.stringify(observed) !== JSON.stringify(expected))
+        wrong.push(`${name}: ${JSON.stringify(observed)}`);
+      for (const { target, kinds } of against)
+        if (JSON.stringify(kinds) !== JSON.stringify(sorted(c.levels[levelOf(target)]!)))
+          wrong.push(`${name}: C9 at ${target} against ${JSON.stringify(kinds)}`);
+    }
+  }
+  t.diagnostic(
+    `${WRITTEN_COPY_MATRIX.length} sources, each in both orders with the sharing on and off`,
+  );
+  assert.deepEqual(wrong, []);
 });
 
 /**

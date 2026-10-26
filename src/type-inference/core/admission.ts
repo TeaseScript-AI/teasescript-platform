@@ -395,6 +395,11 @@ export class Admission {
   }[] = [];
   /** Whether each decision admits `null` (a copy of a written type without one does not, A4). */
   readonly #nullable = new Map<Key, boolean>();
+  /**
+   * The decisions a copy of a written type with `null` made: they admit it whatever the stored kinds hold (A4, F17b; ADR
+   * 0021 1.3: the kinds present never narrow a written domain, the lead's ruling on external round 7 B1).
+   */
+  readonly #permitsNull = new Set<Key>();
   /** The site of the contribution each decision took (S3 §1's admitted answer), `null` for a written type. */
   readonly #deciderSites = new Map<Key, SourceSite | null>();
   readonly #copies = new Map<
@@ -737,6 +742,7 @@ export class Admission {
     let tags: ItemTag[] | null =
       writtenTags === null ? null : writtenTags.filter((tag) => tag !== "null");
     let byWritten = writtenTags !== null;
+    let permitsNull = false;
     let decider: Definition | null = null;
     let deciderSite: SourceSite | null = null;
     let published = false;
@@ -773,7 +779,8 @@ export class Admission {
     }
     if (tags === null) {
       const found = this.#scan(direct, prefixes);
-      if (found !== null) ({ tags, nullable, byWritten, decider, site: deciderSite } = found);
+      if (found !== null)
+        ({ tags, nullable, byWritten, permitsNull, decider, site: deciderSite } = found);
       else {
         // C9 r4.12, r4.50 (1): where no contribution decides, but the contract holds kinds beside external data, those
         // kinds are the type the place is published with, so external data a store brings into it owes its check
@@ -797,6 +804,8 @@ export class Admission {
       tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
     this.decided.set(key, tags);
     this.#nullable.set(key, nullable);
+    if (permitsNull) this.#permitsNull.add(key);
+    else this.#permitsNull.delete(key);
     this.#deciderSites.set(key, deciderSite);
     const decidedTags = tags;
     const offends = (items: readonly Item[]): boolean =>
@@ -987,6 +996,8 @@ export class Admission {
     readonly tags: ItemTag[];
     readonly nullable: boolean;
     readonly byWritten: boolean;
+    /** The copied written type admits `null` at the path (`#permitsNull`). */
+    readonly permitsNull: boolean;
     readonly decider: Definition;
     readonly site: SourceSite | null;
   } | null {
@@ -1052,6 +1063,7 @@ export class Admission {
             (this.pass.program.hasOf.has(d.value!) &&
               evaluate(d, at).some((item) => item.tag === "null")),
           byWritten: true,
+          permitsNull: copiedTags.includes("null"),
           decider: d,
           site: first?.site ?? d.site,
         };
@@ -1067,6 +1079,7 @@ export class Admission {
           tags: [...new Set(definite.map((item) => item.tag))],
           nullable: true,
           byWritten: false,
+          permitsNull: false,
           decider: d,
           site: first?.site ?? d.site,
         };
@@ -1115,8 +1128,9 @@ export class Admission {
    * C9 r4.12 (A1–A7): a destination's admitted type: the written type (its null included), else the decided kinds (an
    * integer decider already widened by an admitted number, a copy of a written integer never: A4), else, where
    * admission decided nothing, the contract's kinds, one family, an integer widened by an admitted number; with `null`
-   * where a null contribution is admitted and the decision admits one (a copy of a written type without it does not);
-   * never the raw union of contributions.
+   * where a null contribution is admitted and the decision admits one (a copy of a written type without it does not),
+   * and wherever a copy of a written type with it decided, whatever is stored (`#permitsNull`); never the raw union of
+   * contributions.
    */
   public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {
     const { program, contract } = this.pass;
@@ -1132,8 +1146,8 @@ export class Admission {
     if (decided === undefined && tags.includes("integer") && kinds.some(admitsNumber))
       tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
     return tags.length > 0 &&
-      this.#nullable.get(key) !== false &&
-      kinds.some((item) => item.tag === "null")
+      (this.#permitsNull.has(key) ||
+        (this.#nullable.get(key) !== false && kinds.some((item) => item.tag === "null")))
       ? [...tags, "null"]
       : tags;
   }
