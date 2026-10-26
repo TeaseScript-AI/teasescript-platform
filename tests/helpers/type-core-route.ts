@@ -26,7 +26,7 @@ export function runGlobals(
 }
 
 /** A checked type in full, its unions' members sorted: the plan's side of `derivedText`. */
-export function planText(type: TypePlan | null): string {
+function planText(type: TypePlan | null): string {
   if (type === null) return "any";
   if (type.kind === "union") return type.members.map(planText).sort().join("|");
   if (type.kind === "list" || type.kind === "set" || type.kind === "dict")

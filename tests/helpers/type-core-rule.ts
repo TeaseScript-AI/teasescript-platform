@@ -69,7 +69,7 @@ export interface Shape {
 }
 
 /** The span of the text `text` at or after `from`. */
-export function spanOf(source: string, text: string, from = 0): string {
+function spanOf(source: string, text: string, from = 0): string {
   const at = source.indexOf(text, from);
   assert.ok(at >= 0, `${text} in ${source}`);
   return `${at}:${at + text.length}`;
