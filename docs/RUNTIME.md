@@ -1574,9 +1574,11 @@ JSON reading does not for keys that look like whole numbers, and so that any dep
   ([ADR 0021 rule 2.6](decisions/0021-static-types.md)), reads the JSON as that type. JSON of another kind gives the
   default with developer warning `TSW020`, before any file is stored. An object type reads a JSON object as an object of
   its properties, nested objects the same way: each missing property, or one of another type, takes the default's, with
-  one `TSW020` naming each, and the JSON's other keys are left out. The default runs only when a property needs it; one
-  that runs as instructions finds the JSON's dict in the result's temporary, and the `storeTemporary` that selects it
-  carries `repair`, the type it reads that dict as. Text that is not JSON still gives the default without a warning.
+  one `TSW020` naming each, and the JSON's other keys are left out. The file store stores only the files of the parts
+  the call keeps: a key the type leaves out, or a property the default supplies, is never stored. The default runs only
+  when a property needs it; one that runs as instructions finds the JSON's dict in the result's temporary, and the
+  `storeTemporary` that selects it carries `repair`, the type it reads that dict as. Text that is not JSON still gives
+  the default without a warning.
 
 `hashText` ([V30 §13](specifications/accepted-syntaxes-v30.md#hashes)) is a pure core built-in as well, and gives its
 result at once: native `crypto.subtle.digest` always waits, so the engine has its own SHA-256 (FIPS 180-4,

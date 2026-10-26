@@ -511,6 +511,116 @@ test("fromJson's object repair waits for a default that runs instructions, also 
   );
 });
 
+/** A PNG's data URL, which `fromJson`'s file store recognizes; `seed` makes each one another file. */
+function pngDataUrl(seed: number): string {
+  const bytes = [
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+    0,
+    0,
+    0,
+    13,
+    0x49,
+    0x48,
+    0x44,
+    0x52,
+    seed,
+  ];
+  return `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`;
+}
+
+/**
+ * A run of `plan` with `hostValue` through the file store's request and the host's `payload`, the snapshot restored from
+ * a checkpoint before the request is answered and after (`checkpoints`), or kept as it is: what it says and warns, and
+ * how many files it asked to store.
+ */
+function throughFileStore(
+  plan: InstructionPlan,
+  hostValue: string,
+  payload: Readonly<Record<string, unknown>>,
+  checkpoints: boolean,
+): Ran & { readonly stored: number } {
+  const kept = (snapshot: RuntimeSnapshot): RuntimeSnapshot =>
+    checkpoints
+      ? deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, snapshot))).snapshot
+      : snapshot;
+  let result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue } }));
+  const events = [...result.events];
+  let stored = 0;
+  if (result.snapshot.status === "waiting") {
+    const action = kept(result.snapshot).foregroundAction;
+    assert.ok(action?.kind === "fileStore" && action.operation === "store");
+    stored = action.files.length;
+    const completed = completeAction(
+      plan,
+      kept(result.snapshot),
+      { actionId: action.actionId, actionKind: "fileStore", payload },
+      { capturedMedia: { holds: () => true } },
+    );
+    assert.equal(completed.outcome.kind, "completed");
+    events.push(...completed.events);
+    result = run(plan, kept(completed.snapshot));
+    events.push(...result.events);
+  }
+  return { ...summary(events, result.snapshot.status), stored };
+}
+
+test("a file store keeps the files of the fields fromJson keeps, never of a key it leaves out or a field its default supplies, across the store's answer and its checkpoints (Astra B2)", () => {
+  const failed = { kind: "failed" };
+  for (const [fallback, json, said, warned, stored] of [
+    // a key the expected type leaves out, at the top and in a nested record: never stored, the call keeps the rest
+    ["{n: 0}", `{"n": 7, "extra": "${pngDataUrl(1)}"}`, ["7"], 0, 0],
+    ["{a: {n: 0}}", `{"a": {"n": 7, "extra": "${pngDataUrl(1)}"}}`, ["7"], 0, 0],
+    // a field of the wrong type holding a data URL: the default's, never stored, the good field kept
+    ["{n: 0, count: 1}", `{"n": 7, "count": "${pngDataUrl(1)}"}`, ["7"], 1, 0],
+    // the control: a field the call keeps needs its file, and only that one
+    [
+      '{n: 0, photo: ""}',
+      `{"n": 7, "photo": "${pngDataUrl(1)}", "extra": "${pngDataUrl(2)}"}`,
+      ["7"],
+      0,
+      1,
+    ],
+  ] as const) {
+    const source = `let out = fromJson(hostValue, default: ${fallback})\nsay out${fallback.startsWith("{a:") ? ".a" : ""}.n\nexit\n`;
+    const parse = at(source, `fromJson(hostValue, default: ${fallback})`);
+    assert.ok(decision(source).checks.some((check) => check.endsWith(`boundary @${parse}`)));
+    const plan = candidatePlan(source);
+    assert.ok(
+      contentOf(plan).some((entry) => entry.startsWith(`expected fileStore@${parse} `)),
+      JSON.stringify(contentOf(plan)),
+    );
+    // the same with the snapshot restored from checkpoints before and after the answer; where the call keeps a file, a
+    // store the Player refuses gives its default with TSW019, as the file store's contract has it
+    for (const checkpoints of [false, true]) {
+      const kept = throughFileStore(
+        plan,
+        json,
+        { kind: "stored", references: ["stored:1"] },
+        checkpoints,
+      );
+      assert.equal(kept.stored, stored, source);
+      assert.deepEqual(
+        { status: kept.status, said: kept.said, failure: kept.failure, warnings: kept.warnings },
+        halted(
+          said,
+          Array.from({ length: warned }, () => `TSW020@${parse}`),
+        ),
+        `${source} with ${json}`,
+      );
+      if (stored === 0) continue;
+      const refused = throughFileStore(plan, json, failed, checkpoints);
+      assert.deepEqual(ran(refused), halted(["0"], [`TSW019@${parse}`]), source);
+    }
+  }
+});
+
 /** A stored value of the records below, as the host gives it: a record of its fields, nested records too. */
 function stored(value: unknown): SerializableRuntimeValue {
   if (typeof value !== "object" || value === null) {

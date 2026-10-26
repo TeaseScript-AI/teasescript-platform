@@ -189,6 +189,101 @@ function readWhole(
   }
 }
 
+/** A place in JSON that holds a part, with the type it is read as there and its field path from a repaired record. */
+interface KeptSlot {
+  readonly part: SerializableRuntimeValue;
+  readonly set: (value: SerializableRuntimeValue) => void;
+  /** `null`: every part of it is kept as it is. */
+  readonly type: TypePlan | null;
+  /** The record's field path that a field reading names, or `null` below a field that reads whole. */
+  readonly path: readonly string[] | null;
+}
+
+/**
+ * Replaces in place each text of `value`, parsed JSON, that a reading as `type` keeps (ADR 0021 rule 2.6) by what
+ * `replace` gives for it, and returns the value: the parts the reading takes, as `readExpected` and `readWhole` take
+ * them. A key the type leaves out, a field the default supplies, and JSON that does not read keep their texts, so a
+ * file store stores the files of what the call keeps, and nothing else (`actions/file-store.ts`). The reading of the
+ * result is the reading of `value`: a replaced text is still text.
+ */
+export function replaceKeptTexts(
+  value: SerializableRuntimeValue,
+  type: TypePlan,
+  replace: (text: string) => string | undefined,
+): SerializableRuntimeValue {
+  const reading = readExpected(value, type, true);
+  if (reading.kind === "none") return value;
+  const supplied = new Set(
+    reading.kind === "fields" ? reading.fields.map((field) => field.path.join("\u0000")) : [],
+  );
+  let root = value;
+  const pending: KeptSlot[] = [
+    {
+      part: value,
+      set: (replaced) => {
+        root = replaced;
+      },
+      type,
+      path: reading.kind === "fields" ? [] : null,
+    },
+  ];
+  const below = (path: readonly string[] | null, name: string): readonly string[] | null =>
+    path === null ? null : [...path, name];
+  for (let slot = pending.pop(); slot !== undefined; slot = pending.pop()) {
+    const { part, type: of, path } = slot;
+    if (path !== null && path.length > 0 && supplied.has(path.join("\u0000"))) continue;
+    if (typeof part === "string") {
+      if (of !== null && !matchesValueType(part, of)) continue;
+      const replaced = replace(part);
+      if (replaced !== undefined) slot.set(replaced);
+      continue;
+    }
+    if (!isList(part) && !isDict(part)) continue;
+    // kept whole where it fits as it is (below a field reading's record), else read by its type's member of its kind
+    let member: TypePlan | null = null;
+    if (of !== null && !(path === null && matchesValueType(part, of))) {
+      const found = of.kind === "union" ? memberFor(part, of.members) : of;
+      if (found === undefined) continue;
+      member = found;
+    }
+    if (isList(part)) {
+      if (member !== null && member.kind !== "list") continue;
+      const element = member === null ? null : member.element;
+      const { items } = part;
+      // last first, so that the stack gives the parts in reading order
+      for (let index = items.length - 1; index >= 0; index -= 1)
+        pending.push({
+          part: items[index] ?? null,
+          set: (replaced) => {
+            items[index] = replaced;
+          },
+          type: element,
+          path: null,
+        });
+      continue;
+    }
+    if (member !== null && member.kind !== "dict" && member.kind !== "object") continue;
+    const listed =
+      member?.kind === "object"
+        ? new Map(member.properties.map((property) => [property.name, property.type]))
+        : null;
+    for (const entry of [...part.entries].reverse()) {
+      // an object type keeps its listed properties only, the others left out
+      const listedType = listed?.get(entry.key);
+      if (listed !== null && listedType === undefined) continue;
+      pending.push({
+        part: entry.value,
+        set: (replaced) => {
+          entry.value = replaced;
+        },
+        type: listedType ?? (member?.kind === "dict" ? member.element : null),
+        path: listed !== null ? below(path, entry.key) : null,
+      });
+    }
+  }
+  return root;
+}
+
 /**
  * How `value` reads as `type` (see `ExpectedReading`). Only an object type reads by field: a record whose every listed
  * field reads whole is whole; otherwise each missing field, or one that does not read whole, is the default's, a nested

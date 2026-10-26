@@ -2,7 +2,7 @@ import type { FileStoreInstruction } from "../../plan/model.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import type { Evaluator } from "../evaluator.js";
 import type { ActionRequestedEvent, InterpreterEvent } from "../events.js";
-import { readExpected } from "../values/expected-reading.js";
+import { readExpected, replaceKeptTexts } from "../values/expected-reading.js";
 import { jsonText, valueFromJson } from "../values/json-base64.js";
 import { emitDeveloperWarning } from "../operations/media-lifecycle.js";
 import {
@@ -195,7 +195,7 @@ function startFileStore(
       if (!files) return { result: read };
       const store: RuntimeFileToStore[] = [];
       const found = new Set<string>();
-      replaceFileDataUrls(read, (file) => {
+      replaceJsonFiles(read, instruction, (file) => {
         if (!found.has(file.base64)) {
           found.add(file.base64);
           store.push(file);
@@ -272,7 +272,7 @@ function finishFileStore(
       const read = typeof value === "string" ? valueFromJson(value, span) : undefined;
       if (read === undefined) throw malformed();
       const references = new Map<string, string>();
-      const result = replaceFileDataUrls(read, (file) => {
+      const result = replaceJsonFiles(read, instruction, (file) => {
         let reference = references.get(file.base64);
         if (reference === undefined) {
           reference = answer[references.size];
@@ -410,6 +410,23 @@ function replaceFileDataUrls(
     else holder.entries[index]!.value = replacement;
   }
   return value;
+}
+
+/**
+ * `replaceFileDataUrls` over what `fromJson` keeps of its JSON: with an expected type (`FileStoreInstruction.expected`),
+ * only the parts the reading takes, so that a key the type leaves out or a field the default supplies is never stored
+ * (ADR 0021 rule 2.6); else the whole value, as today's plans read it.
+ */
+function replaceJsonFiles(
+  read: SerializableRuntimeValue,
+  instruction: FileStoreInstruction,
+  replace: (file: RuntimeFileToStore) => string | undefined,
+): SerializableRuntimeValue {
+  if (instruction.expected === undefined) return replaceFileDataUrls(read, replace);
+  return replaceKeptTexts(read, instruction.expected, (text) => {
+    const file = fileInDataUrl(text);
+    return file === undefined ? undefined : replace(file);
+  });
 }
 
 /** The file a data URL holds when its bytes are of a recognized type; any other text holds none. */
