@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { withLandingIndex } from "../src/type-inference/core/admission.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CARRIER_ROLES, operandsOf } from "../src/type-inference/core/carriers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
@@ -3799,6 +3800,98 @@ test("a guarded read inside a computed child keeps its mark where literals share
       withConsumerOrder(
         (list) => [...list].reverse(),
         () => compactAnalysis(request),
+      ),
+    );
+    assert.deepEqual(recordDifferences(expected, forward), [], source);
+    assert.deepEqual(recordDifferences(expected, reversed), [], `${source} reversed`);
+  }
+});
+
+/**
+ * S6-CARRIERS §3.3, §3.4 (Codex r20 B6, N1, N2), under the landing index until the cutover: a typed `load` or `fromJson`
+ * no store brings, its property never stored or its text only displayed, keeps F18's own check where it runs (r4.57); a
+ * member of host data owes C1 at the member read and C9 at the host value; and a surely measured length is derived
+ * (F14), never the external data of the ingress it measures. The whole record, in both orders.
+ */
+test("the landing index keeps F18's own check, sites a member's C1 at its read and derives a known length (Codex r20 B6, N1, N2)", () => {
+  const at = (offset: number, end: number): CompactSite => ({ file: "main.tease", offset, end });
+  const boundary = (target: string, against: string, site: CompactSite): CompactCheck => ({
+    kind: "copy-type",
+    target,
+    against: [against],
+    boundary: true,
+    site,
+  });
+  const valid = (...checks: CompactCheck[]): CompactRecord => ({
+    outcome: "valid",
+    diagnostics: [],
+    checks,
+  });
+  const cases: readonly (readonly [string, CompactRecord])[] = [
+    [
+      'let out = {unused: load("x", default: 0), kept: 1}.kept\nsay "AFTER"\n',
+      valid(boundary("load.result", "integer", at(19, 40))),
+    ],
+    [
+      'let out = {unused: fromJson("1", default: 0, files: false), kept: 1}.kept\nsay "AFTER"\n',
+      valid(boundary("fromJson.result", "integer", at(19, 58))),
+    ],
+    [
+      'let out = askChoice {text: load("x", default: "one"), value: "two"}\nsay "AFTER"\n',
+      valid(boundary("load.result", "string", at(27, 52))),
+    ],
+    [
+      'let rows = [1]\nrows.add(hostValue.field)\nsay "AFTER"\n',
+      {
+        outcome: "warning-runtime-check",
+        diagnostics: [
+          {
+            kind: "written-target",
+            class: "warning-runtime-check",
+            site: at(24, 39),
+            context: "unknown",
+          },
+          {
+            kind: "member-read",
+            class: "warning-runtime-check",
+            site: at(24, 33),
+            context: "unknown",
+          },
+        ],
+        checks: [
+          {
+            kind: "copy-type",
+            target: "rows.element",
+            against: ["integer"],
+            boundary: false,
+            site: at(24, 39),
+          },
+          {
+            kind: "null-check",
+            target: "hostValue",
+            against: ["non-null"],
+            boundary: false,
+            site: at(24, 33),
+          },
+          boundary("rows.element", "integer", at(24, 33)),
+        ],
+      },
+    ],
+    [
+      'let out = load("x", default: [1]).length\nsay "AFTER"\n',
+      valid(boundary("load.result", "list", at(10, 33))),
+    ],
+  ];
+  for (const [source, expected] of cases) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const forward = withLandingIndex(() => compactAnalysis(request));
+    const reversed = withLandingIndex(() =>
+      withSolverSeam({ reverseWorklist: true }, () =>
+        withConsumerOrder(
+          (list) => [...list].reverse(),
+          () => compactAnalysis(request),
+        ),
       ),
     );
     assert.deepEqual(recordDifferences(expected, forward), [], source);

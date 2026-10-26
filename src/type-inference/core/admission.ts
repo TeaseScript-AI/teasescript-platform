@@ -23,7 +23,7 @@ import {
   type ItemTag,
   type Writer,
 } from "./items.js";
-import { conversionCategory, dictList } from "./method-categories.js";
+import { conversionCategory, dictList, measuresLength } from "./method-categories.js";
 import { propertyStep } from "./program.js";
 import { elementStep, type Obligation, type RequiredKind } from "./result.js";
 import type { Work } from "./solver.js";
@@ -112,6 +112,9 @@ export function withLandingIndex<T>(callback: () => T): T {
   }
 }
 
+/** The kinds whose length is built in (F14): a text's, a collection's. */
+const MEASURED: ReadonlySet<ItemTag> = new Set(["string", "list", "set", "dict"]);
+
 /** The roles whose operand is its operation's own read (C10: an ingress there is checked at its read). */
 const OWN_ROLES: ReadonlySet<CarrierRole> = new Set([
   "otherwise/fallback",
@@ -131,7 +134,10 @@ interface IngressStop {
   readonly path: readonly string[];
   readonly recordPath: readonly string[];
   readonly key: EvaluationKey;
+  /** The ingress's own expression, C9's site (r4.29). */
   readonly site: SourceSite;
+  /** The stop's own expression, C1's site (§3.4): the ingress itself where it is whole, a member read of it else. */
+  readonly reads: SourceSite;
   readonly whole: boolean;
 }
 
@@ -2161,13 +2167,15 @@ export class Admission {
       if (found === undefined) byIngress.set(ingress, (found = { stores: new Set(), own: false }));
       return found;
     };
-    // the ingress a stop is, or reads through projections of it (a member of it)
+    // the ingress a stop is, or reads through projections of it (a member of it); a length of an owner that is surely
+    // a text or a collection is derived (F14), no member of its external data (F15), an object's own `length` one
     const ingressOf = (value: PlaceId): PlaceId | null => {
       let at = value;
       while (!definitions.ingress.has(at)) {
         program.work.charge("indexSteps");
         const projection = program.projOf.get(at);
         if (projection === undefined) return null;
+        if (measuresLength(projection.step) && this.#measured(projection.owner)) return null;
         at = projection.owner;
       }
       return at;
@@ -2206,7 +2214,7 @@ export class Admission {
           for (const stop of list) {
             program.work.charge("indexSteps");
             const own = ownOf(stop.via);
-            const ingress = ingressOf(stop.value);
+            const ingress = this.#lengthAt(stop.value, stop.strip) ? null : ingressOf(stop.value);
             if (ingress !== null) found(stop, ingress, own);
           }
     };
@@ -2231,6 +2239,7 @@ export class Admission {
           recordPath: property < 0 ? stop.path : stop.path.slice(0, property),
           key: stop.key,
           site,
+          reads: program.places[stop.value]?.site ?? site,
           whole:
             ingress === stop.value &&
             stop.strip.every((step) => step === SELECTED_VALUE || step === SELECTED_TEXT),
@@ -2261,6 +2270,21 @@ export class Admission {
     }
     this.#landings = { byStore, byIngress };
     return this.#landings;
+  }
+
+  /** Whether a value is surely a text or a collection, whose length is built in (F14): no kind of it unknown or other. */
+  #measured(value: PlaceId, path: readonly string[] = []): boolean {
+    const kinds = withoutEmpty(this.#run(this.pass.contract.contractOfValueAt(value, path)));
+    return kinds.length > 0 && kinds.every((item) => MEASURED.has(item.tag));
+  }
+
+  /** Whether a stop reads a value's length where it is surely measured (F14): derived, no member of external data. */
+  #lengthAt(value: PlaceId, strip: readonly string[]): boolean {
+    for (let at = 0; at < strip.length; at += 1) {
+      this.pass.program.work.charge("indexSteps");
+      if (measuresLength(strip[at]!) && this.#measured(value, strip.slice(0, at))) return true;
+    }
+    return false;
   }
 
   /** The ingress a leaf names (`ingressLeaf`), or `null` for none of the program's. */
@@ -2395,8 +2419,9 @@ export class Admission {
     if (landingMechanism) {
       const stops = this.#landingIndex().byStore.get(d);
       if (stops === undefined) return site;
+      // (the earliest evaluated of the item's own contributions there: its own expression)
       const ingresses = this.#leafIngresses(item.ingress);
-      return stops.some((stop) => ingresses.has(stop.ingress)) ? stops[0]!.site : site;
+      return stops.find((stop) => ingresses.has(stop.ingress))?.reads ?? site;
     }
     const own = this.#token(d);
     const carried = this.pass.definitions.cellSiteOf.get(own);
@@ -2512,6 +2537,11 @@ export class Admission {
     c: CorePass["program"]["constraints"][number],
   ): { readonly label: string; readonly tags: readonly ItemTag[] } | null {
     if (!("result" in c)) return null;
+    if (landingMechanism) {
+      // (a typed ingress no store brings, an own read or unreached, is checked where it runs: §3.3, r4.57)
+      const found = this.#landingIndex().byIngress.get(c.result);
+      return found === undefined || found.stores.size === 0 ? this.#f18Kinds(c) : null;
+    }
     const token = this.pass.definitions.ingressStore.get(c.result);
     return token === undefined || this.pass.definitions.readIngress.has(writerKey(token))
       ? this.#f18Kinds(c)
