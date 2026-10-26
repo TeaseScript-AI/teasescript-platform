@@ -2299,7 +2299,11 @@ export class Admission {
           program.work.charge("indexSteps");
           if (strip.length === 0 && elements && name !== "element") continue;
           const step = strip.length === 0 ? [...at, name] : at;
-          if (strip.length === 0) path(step);
+          // (a nested cell's path is one step longer than its literal's: charged by its length, TABLE r4.58)
+          if (strip.length === 0) {
+            program.work.charge("indexSteps", step.length);
+            path(step);
+          }
           if (term.kind === "ref")
             for (const d of definitions.cellDefs.get(term.place) ?? [])
               pending.push([d.value!, step, strip.slice(1)]);
@@ -2812,6 +2816,8 @@ export class Admission {
       else list.push(stop);
       if (!literal) continue;
       const next = cells(current, null);
+      // (each cell's path and evaluation key are its literal's one step longer: charged by their lengths, TABLE r4.58)
+      program.work.charge("indexSteps", next.length * (path.length + key.length + 2));
       for (let index = next.length - 1; index >= 0; index -= 1) {
         const [d, step] = next[index]!;
         pending.push([
