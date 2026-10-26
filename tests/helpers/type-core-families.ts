@@ -2068,7 +2068,8 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
  * source's misfit, so each rejection shows only in the pass after the one before it, k passes in all: TABLE §8's
  * passes × stores, each pass charged. A gated known limit by the owner's decision (TABLE r4.49, option A): its doubling
  * at k = 64 → 128 as measured, re-measured and proposed with its counts on a change to admission's passes, never
- * retuned; its trigger, a realistic script reaching the allowance through cascading rejections.
+ * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
+ * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), proposed in the same form.
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -2087,6 +2088,28 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
           'v0 = "x"',
           rows(k, (i) => `let v${i + 1} = v${i}\nv${i + 1} = "x"`),
           `let final: integer = v${k}`,
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-interleaved-conditional-copies",
+    measures:
+      "§4.1, condition (b): k copies of a k-field record of named host data, each after a conditional store below it",
+    // PROPOSED, not accepted (the owner decides it with the merge request): each copy sees one more conditional store
+    // below the copied path, so each has its own signature, k classes, each answered at each of the k fields read
+    // (S6-CARRIERS §4.7's first unmerged shape; a rule beyond the class rule merges them). 373,733 / 1,349,677 units at
+    // k = 64, 128 in both orders (3.6236); the allowance reached at k = 619; at k = 1,024 82,341,445 units, 274.5 % of
+    // its 30,000,000 (the budget error)
+    measured: 3.63,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {nested: {${fields(k, () => "[1, raw][1]")}}}`,
+          `let box = {${fields(k, () => "null")}}`,
+          rows(k, () => "if raw != null {\n  root.nested.f0 = 1\n}\nbox = root.nested"),
+          rows(k, (i) => `repeat box.f${i} {}`),
           "exit",
         ),
       ),
