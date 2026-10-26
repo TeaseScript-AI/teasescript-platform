@@ -1337,7 +1337,7 @@ hideCamera
 ```tease
 save { level: 4 } as "progress"
 delete "progress"
-save points as "punishmentPoints", writableBy: "everyone"
+save 5 as "punishmentPoints", writableBy: "everyone"
 save 5 as "punishmentPoints", teaseId: "019a…"
 ```
 

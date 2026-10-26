@@ -5775,8 +5775,9 @@ The request is atomic and the server validates the complete schema and all activ
 #### Ids and run history
 
 A Tease is named by its tease id, a UUIDv7 that the Writer's Den makes when the Tease is created; on publication, the
-server checks that no one else owns it. A player's id in a Tease, its player id, is a UUIDv7 per player and Tease. It
-cannot be linked to the player's user id, which scripts never see, or to the same player in another Tease.
+server checks that no one else owns it. A user id is a UUIDv7 made when the account is created; scripts never see it. A
+player's id in a Tease, its player id, is a UUIDv7 per player and Tease. It cannot be linked to the player's user id,
+or to the same player in another Tease.
 
 `getTeaseMetadata()` describes the running Tease, and `getTeaseMetadata(id)` another Tease of the same player, named by
 its tease id:
@@ -5785,7 +5786,9 @@ its tease id:
 let me = getTeaseMetadata()
 say "This Tease has id ${me.teaseId}."
 let history = getTeaseMetadata("019a…")
-let lastSession = history.sessions.last
+if history.sessionCount > 0 {
+    let lastSession = history.sessions.last
+}
 ```
 
 The result has `teaseId`, the Tease's id; `playerId`, the current player's id in the running Tease, or `null` for
@@ -5841,7 +5844,7 @@ let total = publishToPlayers(key: "pushupsTotal", playerId: me.teaseId, update: 
 - `tags:` gives the entry's tags for filtering: tag names, or names with a number such as `"level: 4"`, by the rules of
   [Tags](#tags). A Tease decides which tags an entry carries, such as the player's toys or kinks.
 - `publishToPlayers` cannot write outside its own Tease: a `playerId:` from another Tease, or a tease id other than the
-  running Tease's, is a runtime error.
+  running Tease's, is an error.
 
 `update:` is a formula, and `current` in it is the stored value. `current` has this meaning only inside `update:`, as
 `speaker` has one inside a message's text. `default:` is the value of `current` when there is no entry yet; it is
@@ -6684,8 +6687,8 @@ Resolved in this revision:
 - toys have server-generated IDs, may share visible names, can be disabled without script-driven deletion, and have common photos plus initial detailed schemas for butt plugs, dildos, chastity devices, and ball gags;
 - data shared between the players of a Tease uses `publishToPlayers`, `loadFromPlayers`, `countPlayers`,
   `claimFromPlayers`, and `removeFromPlayers`, with `current` contextual only inside `update:`;
-- a player's saved data in another Tease uses `load` and `save` with `teaseId:`, which that Tease allows with
-  `writableBy:`, plus `getTeaseMetadata`;
+- a player's saved data in another Tease is read with `load` and `teaseId:`, and written with `save` and `teaseId:`
+  where that Tease allows it with `writableBy:`; `getTeaseMetadata` gives that Tease's run history;
 - account history uses `getPlayerHistory`; orgasm outcomes are `"orgasm"`, `"ruined"`, or `"denied"`;
 - session checkpoints include sequence-controlled changed state, execution position, deterministic RNG state, and active recoverable runtime state;
 - user identifiers are ASCII, case-sensitive, and follow `[A-Za-z_][A-Za-z0-9_]*`;
