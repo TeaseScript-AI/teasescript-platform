@@ -74,13 +74,15 @@ test("130,000 copies of a root replaced once are analysed within the native stac
 /**
  * Astra r6 N1 (inherited from `main`): a key's own events gather its prefixes' event positions on the heap, so the
  * place of a root stored whole 130,000 times answers at its property with each store an event; 10,000 stores are the
- * control.
+ * control. Every store copies one shared record, a fresh record each being no part of the prefix events (Astra r8 D1:
+ * half the syntax nodes and the heap).
  */
 test("a root stored whole 130,000 times answers at its property within the native stack", () => {
   for (const stores of [10_000, 130_000]) {
     const request = program([
       "let root = {n: 0}",
-      ...rows(stores, "root = {n: 1}"),
+      "let shared = {n: 1}",
+      ...rows(stores, "root = shared"),
       "let box = root",
       "repeat box.n {}",
     ]);
