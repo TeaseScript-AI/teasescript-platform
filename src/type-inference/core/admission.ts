@@ -1135,8 +1135,9 @@ export class Admission {
    * integer decider already widened by an admitted number, a copy of a written integer never: A4), else, where
    * admission decided nothing, the contract's kinds, one family, an integer widened by an admitted number; with `null`
    * where a null contribution is admitted and the decision admits one (a copy of a written type without it does not),
-   * and wherever a copy of a written type with it decided, whatever is stored (`#permitsNull`); never the raw union of
-   * contributions.
+   * and wherever a copy of a written type with it decided, whatever is stored (`#permitsNull`), a written `null` alone
+   * too (`[null]`, a decision like any other, never none: the lead's ruling on the merged S6's B1); never the raw union
+   * of contributions.
    */
   public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {
     const { program, contract } = this.pass;
@@ -1151,8 +1152,9 @@ export class Admission {
     ];
     if (decided === undefined && tags.includes("integer") && kinds.some(admitsNumber))
       tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
-    return tags.length > 0 &&
-      (this.#permitsNull.has(key) ||
+    const permitsNull = this.#permitsNull.has(key);
+    return (tags.length > 0 || permitsNull) &&
+      (permitsNull ||
         (this.#nullable.get(key) !== false && kinds.some((item) => item.tag === "null")))
       ? [...tags, "null"]
       : tags;
