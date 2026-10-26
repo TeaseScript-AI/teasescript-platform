@@ -1,3 +1,5 @@
+import { readCodePoint } from "./code-points.js";
+
 /** The `dc:subject` keywords read from XMP metadata, or why they could not be read. */
 export type XmpKeywordsResult =
   | { readonly kind: "keywords"; readonly keywords: readonly string[] } // dc:subject found; may be empty
@@ -457,7 +459,7 @@ class SubjectReader {
   private name(): string {
     const start = this.at;
     for (;;) {
-      const code = this.text.codePointAt(this.at);
+      const code = this.at < this.text.length ? readCodePoint(this.text, this.at) : undefined;
       const isNameCharacter =
         code !== undefined &&
         (code === 0x3a || (this.at === start ? isNameStart(code) : isNamePart(code)));

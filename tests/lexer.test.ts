@@ -179,6 +179,32 @@ test("counts UTF-16 code units in string token offsets and columns", () => {
   });
 });
 
+test("a text cut inside a surrogate pair is lexed to its own end, also once the lexer is optimized", () => {
+  // Optimized V8 code reads `codePointAt` past the end of such a sliced text (see code-points.ts), which made tokens and
+  // diagnostics end one unit after the source and gave a string's text the half that was cut off.
+  const cut = (whole: string) => whole.slice(0, whole.indexOf("😀") + 1);
+  const sources = [
+    cut('let text = "unfinished 😀 more"'),
+    cut('let text = "unfinished \\😀 more"'),
+    cut("/* a block comment 😀 more"),
+    cut("let pattern = /abc 😀 more/"),
+    cut("let value = 12 😀 more"),
+  ];
+  for (let round = 0; round < 1000; round += 1) {
+    for (const source of sources) {
+      const result = lex(source);
+      const spans = [...result.tokens, ...result.diagnostics].map(({ span }) => span);
+      for (const span of [...spans, ...result.comments]) {
+        assert.ok(span.end.offset <= source.length, `${JSON.stringify(source)}, round ${round}`);
+      }
+      assert.ok(
+        !stringText(result.tokens).includes("\ude00"),
+        `${JSON.stringify(source)}, round ${round}`,
+      );
+    }
+  }
+});
+
 test("diagnoses invalid characters and continues lexing", () => {
   const result = lex("😀@ say");
   assert.deepEqual(result.diagnostics.map(compactDiagnostic), [

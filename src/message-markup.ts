@@ -1,3 +1,4 @@
+import { codePointWidth } from "./code-points.js";
 import { normalizeColor, isNormalizedColor } from "./color.js";
 import { canonicalWebUrl } from "./web-url.js";
 import { isPlainRecord } from "./runtime/values/plain-data.js";
@@ -485,9 +486,9 @@ function splitLines(text: string): SourceLine[] {
 function tokenizeLine(text: string): InputUnit[] {
   const units: InputUnit[] = [];
   for (let index = 0; index < text.length;) {
-    const character = String.fromCodePoint(text.codePointAt(index)!);
+    const character = text.slice(index, index + codePointWidth(text, index));
     if (character === "\\" && index + 1 < text.length) {
-      const next = String.fromCodePoint(text.codePointAt(index + 1)!);
+      const next = text.slice(index + 1, index + 1 + codePointWidth(text, index + 1));
       if (ESCAPABLE_CHARACTERS.has(next)) {
         units.push({ character: next, escaped: true });
         index += 1 + next.length;
