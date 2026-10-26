@@ -110,3 +110,46 @@ test("a record nested 2,048 and 2,049 deep with long property names stops within
   for (const line of lines)
     assert.match(line, /^\d+\t(valid|warning-runtime-check|compile-error|budget-error)$/, line);
 });
+
+/**
+ * A typed leaf referenced 16,384 times at the bottom of a list nested 4,096 deep, never read: admission's discovery of
+ * typed copies kept a path per reference uncharged, and the analysis died at 32 % of the allowance (the deep-literal
+ * review's round-2 witness). Beside it: the same in the reversed orders, and one level deeper; that literal 2,048 deep
+ * copied through 16 variables and read at its bottom; and a copy at every depth, 2,048 levels each a list of the one
+ * below twice, read at its bottom. Each must end with its outcome in a child with the same heap.
+ */
+test("typed copies of a list nested 4,096 deep with 16,384 references stop within the allowance, never crashing", () => {
+  const script = `
+    import {analyseCore} from ${url("../src/type-inference/core/answers.js")};
+    import {withConsumerOrder} from ${url("../src/type-inference/core/consumers.js")};
+    import {withSolverSeam} from ${url("../src/type-inference/core/solver.js")};
+    import {coreRequest} from ${url("./helpers/type-core-analysis.js")};
+    const leaves = Array(16384).fill("leaf").join(",");
+    const deep = (depth) => "let value = " + "[".repeat(depth) + leaves + "]".repeat(depth);
+    const below = (depth) => "[0]".repeat(depth);
+    const chain = Array.from({length: 16}, (_, i) => "let c" + (i + 1) + " = " + (i === 0 ? "value" : "c" + i));
+    const levels = Array.from({length: 2047}, (_, i) => "let x" + (i + 2) + " = [x" + (i + 1) + ", x" + (i + 1) + "]");
+    const cases = [
+      [4096, "fanout", false, [deep(4096)]],
+      [4096, "fanout", true, [deep(4096)]],
+      [4097, "fanout", false, [deep(4097)]],
+      [2048, "chain", false, [deep(2048), ...chain, "let n: integer = c16" + below(2048)]],
+      [2048, "levels", false, ["let x1 = [" + leaves.split(",").slice(0, 16).join(",") + "]", ...levels, "let n: integer = x2048" + below(2048)]],
+    ];
+    for (const [depth, shape, reversed, lines] of cases) {
+      const request = coreRequest([{path: "main.tease", source: ["let leaf: integer = 1", ...lines, "exit"].join("\\n") + "\\n"}]);
+      const run = () => analyseCore(request).outcome;
+      const outcome = reversed
+        ? withConsumerOrder((list) => [...list].reverse(), () => withSolverSeam({reverseWorklist: true}, run))
+        : run();
+      console.log(depth + "\\t" + shape + (reversed ? " reversed" : "") + "\\t" + outcome);
+    }
+  `;
+  const lines = childLines("typed copies", script);
+  assert.deepEqual(
+    lines.map((line) => line.split("\t").slice(0, 2).join(" ")),
+    ["4096 fanout", "4096 fanout reversed", "4097 fanout", "2048 chain", "2048 levels"],
+  );
+  for (const line of lines)
+    assert.match(line, /\t(valid|warning-runtime-check|compile-error|budget-error)$/, line);
+});
