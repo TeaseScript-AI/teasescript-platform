@@ -299,6 +299,9 @@ export class Admission {
   readonly #readSeen = new Set<PlaceId>();
   readonly #hostSeen = new Set<string>();
   readonly #walked = new Set<IngressNode>();
+  /** Per provenance node, the ingresses its leaves name, and whether one of them no walk reached (`#resolve`). */
+  readonly #nodeIngresses = new Map<IngressNode, ReadonlySet<PlaceId>>();
+  readonly #resolved = new Map<IngressNode, boolean>();
   readonly #f18 = new Map<
     PlaceId,
     { readonly label: string; readonly tags: readonly ItemTag[] } | null
@@ -2169,6 +2172,29 @@ export class Admission {
       }
       return at;
     };
+    // the own reads some walk reached through its own row (§3.2: never walked again as their own landing), and per
+    // row of a walk (its carrier and operand) whether it or a row outside it is an own row: each row once, so a stop
+    // costs only the rows no stop before it went through (each value has one syntactic parent, so a row's outer rows
+    // are the same in every stop through it)
+    const reached = new Set<PlaceId>();
+    const ownThrough = new Map<string, boolean>();
+    const ownOf = (via: readonly Via[]): boolean => {
+      let start = via.length;
+      while (start > 0 && !ownThrough.has(`${via[start - 1]!.value}:${via[start - 1]!.operand}`)) {
+        program.work.charge("indexSteps");
+        start -= 1;
+      }
+      let own =
+        start > 0 && ownThrough.get(`${via[start - 1]!.value}:${via[start - 1]!.operand}`) === true;
+      for (const level of via.slice(start)) {
+        if (OWN_ROLES.has(level.role)) {
+          own = true;
+          reached.add(level.operand);
+        }
+        ownThrough.set(`${level.value}:${level.operand}`, own);
+      }
+      return own;
+    };
     const walk = (
       value: PlaceId,
       node: FlowNode,
@@ -2179,13 +2205,9 @@ export class Admission {
         for (const list of map.values())
           for (const stop of list) {
             program.work.charge("indexSteps");
+            const own = ownOf(stop.via);
             const ingress = ingressOf(stop.value);
-            if (ingress !== null)
-              found(
-                stop,
-                ingress,
-                stop.via.some((level) => OWN_ROLES.has(level.role)),
-              );
+            if (ingress !== null) found(stop, ingress, own);
           }
     };
     for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
@@ -2215,14 +2237,24 @@ export class Admission {
         });
       });
     }
-    // an operation's own read is an own read wherever it stands, reached by a store's walk or not (C10)
+    // an operation's own read is an own read wherever it stands (C10): one no walk reached is its own landing, the
+    // outermost first, so a nested own read its enclosing one's walk reaches is walked once
+    const owns: { readonly operand: PlaceId; readonly site: SourceSite }[] = [];
     for (const carrier of [...program.projOf.keys(), ...program.opOf.keys()])
       for (const { operand, own } of operandsOf(program, carrier)) {
         program.work.charge("indexSteps");
         const site = own ? program.places[operand]?.site : null;
-        const node = site === null || site === undefined ? null : program.exprAt(site);
-        if (node !== null) walk(operand, node, (_, ingress) => (entry(ingress).own = true));
+        if (site !== null && site !== undefined) owns.push({ operand, site });
       }
+    program.work.charge("indexSteps", sortCost(owns.length));
+    owns.sort(
+      (a, b) => a.site.file - b.site.file || a.site.start - b.site.start || b.site.end - a.site.end,
+    );
+    for (const { operand, site } of owns) {
+      program.work.charge("indexSteps");
+      const node = reached.has(operand) ? null : program.exprAt(site);
+      if (node !== null) walk(operand, node, (_, ingress) => (entry(ingress).own = true));
+    }
     for (const list of byStore.values()) {
       program.work.charge("checks", sortCost(list.length));
       list.sort((a, b) => compareKeys(a.key, b.key));
@@ -2236,8 +2268,10 @@ export class Admission {
     return this.pass.definitions.ingressAt.get(writerKey(leaf)) ?? null;
   }
 
-  /** The ingresses an item's leaves name. */
-  #leafIngresses(node: IngressNode): Set<PlaceId> {
+  /** The ingresses an item's leaves name, once per provenance node and pass (C1's membership tests read it). */
+  #leafIngresses(node: IngressNode): ReadonlySet<PlaceId> {
+    const known = this.#nodeIngresses.get(node);
+    if (known !== undefined) return known;
     const out = new Set<PlaceId>();
     const seen = new Set<IngressNode>();
     const pending = [node];
@@ -2252,7 +2286,71 @@ export class Admission {
       } else if ("parts" in current) for (const part of current.parts) pending.push(part);
       else if (current.contents !== null) pending.push(current.contents);
     }
+    this.#nodeIngresses.set(node, out);
     return out;
+  }
+
+  /**
+   * S6-CARRIERS §3.4's resolution of a provenance node, once per node and pass: each leaf's ingress sends its store's
+   * boundary, or its own read's check, once; the answer is whether some ingress below the node no walk reached, whose
+   * consumer checks it (r4.10). A node on a cycle through a cell is answered again where it is met (its answer then
+   * depends on where the cycle was entered).
+   */
+  #resolve(root: IngressNode): boolean {
+    const known = this.#resolved.get(root);
+    if (known !== undefined) return known;
+    const { program } = this.pass;
+    const index = this.#landingIndex();
+    const open = new Set<IngressNode>();
+    const frames: {
+      readonly node: IngressNode;
+      readonly parts: readonly IngressNode[];
+      next: number;
+      unreached: boolean;
+      cyclic: boolean;
+    }[] = [];
+    const enter = (node: IngressNode): void => {
+      open.add(node);
+      const parts =
+        "parts" in node
+          ? node.parts
+          : !("ingress" in node) && node.contents !== null
+            ? [node.contents]
+            : [];
+      frames.push({ node, parts, next: 0, unreached: false, cyclic: false });
+    };
+    enter(root);
+    let answer = false;
+    while (frames.length > 0) {
+      const frame = frames.at(-1)!;
+      program.work.charge("checks");
+      if (frame.next < frame.parts.length) {
+        const part = frame.parts[frame.next++]!;
+        const done = this.#resolved.get(part);
+        if (done !== undefined) frame.unreached ||= done;
+        else if (open.has(part)) frame.cyclic = true;
+        else enter(part);
+        continue;
+      }
+      frames.pop();
+      open.delete(frame.node);
+      if ("ingress" in frame.node) {
+        const ingress = this.#leafIngress(frame.node.ingress);
+        const found = ingress === null ? undefined : index.byIngress.get(ingress);
+        if (found !== undefined && found.stores.size > 0)
+          for (const d of found.stores) this.boundaryAt(d);
+        else if (found?.own === true) this.#boundaryAtRead(ingress!);
+        else frame.unreached = ingress !== null;
+      }
+      if (!frame.cyclic) this.#resolved.set(frame.node, frame.unreached);
+      const parent = frames.at(-1);
+      if (parent === undefined) answer = frame.unreached;
+      else {
+        parent.unreached ||= frame.unreached;
+        parent.cyclic ||= frame.cyclic;
+      }
+    }
+    return answer;
   }
 
   // ------------------------------------------------------------------------------------------- C9
@@ -2284,10 +2382,10 @@ export class Admission {
   public ownIngress(item: Item, d: Definition): boolean {
     if (item.ingress === undefined) return false;
     if (landingMechanism) {
+      const stops = this.#landingIndex().byStore.get(d);
+      if (stops === undefined) return false;
       const ingresses = this.#leafIngresses(item.ingress);
-      return (this.#landingIndex().byStore.get(d) ?? []).some(
-        (stop) => stop.whole && ingresses.has(stop.ingress),
-      );
+      return stops.some((stop) => stop.whole && ingresses.has(stop.ingress));
     }
     return this.#tokens(item.ingress).has(this.#token(d));
   }
@@ -2295,7 +2393,8 @@ export class Admission {
   public cellSited(site: SourceSite, item: Item, d: Definition): SourceSite {
     if (item.ingress === undefined) return site;
     if (landingMechanism) {
-      const stops = this.#landingIndex().byStore.get(d) ?? [];
+      const stops = this.#landingIndex().byStore.get(d);
+      if (stops === undefined) return site;
       const ingresses = this.#leafIngresses(item.ingress);
       return stops.some((stop) => ingresses.has(stop.ingress)) ? stops[0]!.site : site;
     }
@@ -2367,14 +2466,7 @@ export class Admission {
     let unreached = false;
     if (item.ingress !== undefined && landingMechanism) {
       // the landing index: an ingress's store's boundary, its own read's check, or the consumer's check (r4.10)
-      const index = this.#landingIndex();
-      for (const ingress of this.#leafIngresses(item.ingress)) {
-        const found = index.byIngress.get(ingress);
-        if (found !== undefined && found.stores.size > 0)
-          for (const d of found.stores) this.boundaryAt(d);
-        else if (found?.own === true) this.#boundaryAtRead(ingress);
-        else unreached = true;
-      }
+      unreached = this.#resolve(item.ingress);
       if (item.loose !== true && !unreached) return;
     } else if (item.ingress !== undefined) {
       const pending = [item.ingress];

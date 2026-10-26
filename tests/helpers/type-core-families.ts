@@ -1889,6 +1889,37 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  // S6-CARRIERS §3.2, §3.4 with Codex r20 B4 and B5: k nested own defaults, each walked once as a landing; k merged
+  // host stores met by k consumers, each provenance node resolved once
+  ...(
+    [
+      ["otherwise", (inner: string) => `null otherwise (${inner})`],
+      ["get", (inner: string) => `[1].get(7, default: ${inner})`],
+      ["load", (inner: string, i: number) => `load("k${i}", default: ${inner})`],
+    ] as const
+  ).map(([variant, wrap]): WorkFamily => ({
+    name: `C9-nested-own-${variant}`,
+    measures: `§3.2, C10: k nested own ${variant} defaults around one host value (Codex r20 B4)`,
+    program: (k) => {
+      let value = "hostValue";
+      for (let i = k - 1; i >= 0; i -= 1) value = wrap(value, i);
+      return main(lines(`let out = ${value}`, "repeat out {}", "exit"));
+    },
+  })),
+  ...(["reads", "typed"] as const).map((variant): WorkFamily => ({
+    name: `C9-merged-leaves-${variant}`,
+    measures: `§3.4: k conditional host stores of one place, k ${variant === "reads" ? "reads" : "typed copies"} of it (Codex r20 B5)`,
+    program: (k) =>
+      main(
+        lines(
+          'let flag = askBoolean "F"',
+          "let pool = hostValue",
+          rows(k, () => "if flag { pool = hostValue }"),
+          rows(k, (i) => (variant === "reads" ? "repeat pool {}" : `let out${i}: integer = pool`)),
+          "exit",
+        ),
+      ),
+  })),
 ];
 
 /**
