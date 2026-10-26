@@ -780,7 +780,9 @@ export class DefinitionLists {
     const mine: Definition[] = [];
     for (const below of this.index.keysBelow(key)) {
       this.#program.work.charge("defScan");
-      mine.push(...(this.index.byKey.get(below) ?? []), ...(this.index.loopAdds.get(below) ?? []));
+      // (one by one: a key's definitions grow with the source, past one call's arguments, external review r6 F1)
+      for (const d of this.index.byKey.get(below) ?? []) mine.push(d);
+      for (const d of this.index.loopAdds.get(below) ?? []) mine.push(d);
     }
     this.#program.work.charge("defScan", mine.length);
     const sorted = this.#sort(mine);

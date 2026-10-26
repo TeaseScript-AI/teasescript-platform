@@ -200,6 +200,25 @@ test("a literal of 150,000 elements beside a host value is admitted within the n
 });
 
 /**
+ * Native resilience (TABLE §8, external review r6 F1): a key's definitions below another, of 130,000 stores to one
+ * property, are listed on the heap, never as one call's arguments; 10,000 stores are the ordinary-size control.
+ */
+test("130,000 stores to one property are analysed within the native stack", () => {
+  for (const stores of [10_000, 130_000]) {
+    const source = [
+      "let root = {n: 0}",
+      ...Array.from({ length: stores }, () => "root.n = 1"),
+      "let box = root",
+      "repeat box.n {}",
+      "exit",
+    ].join("\n");
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    assert.equal(analyseCore(request).outcome, "valid", `${stores} stores`);
+  }
+});
+
+/**
  * Native resilience (TABLE §8, round 10 B5): an element read of a result that a chain of 2,048 functions returns, each
  * the next one's or a list, asks whether several elements meet there through every function's result: on the solver's
  * stack, never one native frame per function.

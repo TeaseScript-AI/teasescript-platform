@@ -1213,7 +1213,7 @@ export class Admission {
       if (!this.#covers(representative, rest)) {
         // (beside or above a literal's alias cell each member stands by itself)
         out ??= list.slice(0, index);
-        out.push(...members);
+        for (const member of members) out.push(member);
         continue;
       }
       const eligible = this.#eligibleAt(representative, prefix, rest);

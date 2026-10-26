@@ -872,10 +872,12 @@ export class Contract {
         // same structure below the path once (with a selection step, every entry by itself)
         const stores = this.prefixStores(prefix);
         if (rest.some((step) => step === SELECTED_VALUE || step === SELECTED_TEXT))
-          for (const entry of stores.list) out.push(...(yield* this.entryAt(entry, rest)));
+          for (const entry of stores.list)
+            for (const item of yield* this.entryAt(entry, rest)) out.push(item);
         else {
           const levels = this.#prefixLevels(prefix, stores);
-          for (const entry of levels.others) out.push(...(yield* this.entryAt(entry, rest)));
+          for (const entry of levels.others)
+            for (const item of yield* this.entryAt(entry, rest)) out.push(item);
           if (levels.base.length > 0)
             for (const group of this.#groupsAt(prefix, levels.base, rest))
               out.push(
