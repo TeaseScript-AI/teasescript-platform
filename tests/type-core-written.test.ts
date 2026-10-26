@@ -12,6 +12,7 @@ import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { runGlobals } from "./helpers/type-core-route.js";
 import {
+  INFERRED_COPY_MATRIX,
   UNRESTRICTED_COLLECTION_MATRIX,
   V30_TYPE_MATRIX,
   WRITTEN_DOMAIN_MATRIX,
@@ -218,6 +219,14 @@ test("V30 §13's written types, each form and copy, admit what they permit in ev
   t.diagnostic(
     `${V30_TYPE_MATRIX.length} sources (${full} in all three layers), both orders, sharing on and off; ` +
       `decision layer only (outside the candidate slice): ${[...decisionOnly].join(", ")}`,
+  );
+  assert.deepEqual(wrong, []);
+});
+
+test("a copy of an unannotated source has its whole-source type, a later fraction or null included (Q1, ADR 0021 1.1, 1.2, r4.28)", (t) => {
+  const { wrong, full } = failing(INFERRED_COPY_MATRIX);
+  t.diagnostic(
+    `${INFERRED_COPY_MATRIX.length} sources (${full} in all three layers), both orders, sharing on and off`,
   );
   assert.deepEqual(wrong, []);
 });

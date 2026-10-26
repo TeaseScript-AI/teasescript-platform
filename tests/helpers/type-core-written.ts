@@ -472,3 +472,58 @@ export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
   }
   return out;
 })();
+
+/**
+ * The reviewer's Q1, ruled (ADR 0021 §1.2: an unannotated `integer` "is a `number` when any of them can store a non-whole
+ * number, wherever that assignment is"; §1.1: "the decided type holds wherever the place is used, also before the value
+ * that decided it"; TABLE r4.28): a copy of an unannotated source has the source's whole-source type, so a fraction or a
+ * `null` stored into the source after the copy was taken widens the copy too, as it would before it. A2's value at the
+ * store's node only selects the decider. Axes: a fraction or a `null` × list depths 0–2 × the copy taken before or after
+ * that store × the host value direct, named or held at an index; the host value then stored into the copy.
+ */
+export const INFERRED_COPY_MATRIX: readonly WrittenCase[] = (() => {
+  const out: WrittenCase[] = [];
+  const wrap = (inner: string, depth: number): string =>
+    "[".repeat(depth) + inner + "]".repeat(depth);
+  for (const [widening, leafKinds] of [
+    ["2.5", ["number"]],
+    ["null", ["integer", "null"]],
+  ] as const)
+    for (const depth of [0, 1, 2])
+      for (const copied of ["before", "after"] as const)
+        for (const host of HOSTS) {
+          const leaf = host === "direct" ? "hostValue" : host === "named" ? "h" : "[hostValue][0]";
+          const value = wrap(leaf, depth);
+          const hostLine = `copy = ${value}`;
+          const lines = [
+            ...(host === "named" ? ["let h = hostValue"] : []),
+            `let original = ${wrap("1", depth)}`,
+            ...(copied === "before" ? ["let copy = original"] : []),
+            `original = ${wrap(widening, depth)}`,
+            ...(copied === "after" ? ["let copy = original"] : []),
+            hostLine,
+          ];
+          const source = `${[...lines, 'say "DONE"', "exit"].join("\n")}\n`;
+          const start = source.indexOf(`${hostLine}\n`);
+          const end = start + hostLine.length;
+          const kinds = [...leafKinds].sort();
+          out.push({
+            name: `${widening} into the source ${copied} the copy, depth ${depth}, ${host}`,
+            source,
+            place: "copy",
+            form: wrap(kinds.join("|"), 0),
+            levels: [...Array.from({ length: depth }, () => ["list"]), kinds],
+            checks: [
+              `${start}:${end} ${"list<".repeat(depth)}${kinds.join("|")}${">".repeat(depth)}`,
+            ],
+            exact: true,
+            runs: HOST_VALUES.map(([given, is]) => [
+              given,
+              is.some((kind) => (kinds as readonly string[]).includes(kind))
+                ? null
+                : `TSR058@${end - value.length}:${end}`,
+            ]),
+          });
+        }
+  return out;
+})();
