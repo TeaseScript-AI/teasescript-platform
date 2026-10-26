@@ -611,8 +611,22 @@ export class Contract {
    * receiver decided as a reference's or not once (F19a, r4.44): a reference's member is the runtime's.
    */
   #keyThrough(key: Key, from: number): Work<readonly Item[]> {
-    const at = memberStep(keyPath(key), from);
+    const at = this.#memberStep(keyPath(key), from);
     return at < 0 ? this.#keyContract(key) : this.#keyListsAt(key, at);
+  }
+
+  /**
+   * `memberStep`: the first step of `path` from `from` on that a built-in value answers, its scan charged by the text it
+   * reads, a unit per eight code units (TABLE r4.58; it keeps nothing, so no text's header), so a long member chain of
+   * long names reaches the allowance by its own work.
+   */
+  #memberStep(path: readonly string[], from: number): number {
+    const at = memberStep(path, from);
+    let length = 0;
+    for (let index = from, end = at < 0 ? path.length : at + 1; index < end; index += 1)
+      length += path[index]!.length + 1;
+    this.pass.program.work.charge("invSteps", length >> 3);
+    return at;
   }
 
   /** `#keyThrough` at the step `at`, the first of the key's path from its `from` on that a built-in value answers. */
@@ -1234,7 +1248,7 @@ export class Contract {
    */
   #through(value: PlaceId, rest: readonly string[], from: number): Work<readonly Item[]> {
     const { program } = this.pass;
-    const at = memberStep(rest, from);
+    const at = this.#memberStep(rest, from);
     if (
       at < 0 ||
       program.occurrenceOf.has(value) ||
