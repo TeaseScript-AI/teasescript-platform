@@ -989,7 +989,7 @@ class Contracts {
               [...path, "element"],
               plan.element,
               at,
-              literalsBelow(records, "element"),
+              recordsBelow(records).elements,
             ),
           ),
         };
@@ -999,16 +999,12 @@ class Contracts {
         if (path.length + 1 >= SLICE_DEPTH)
           throw new OutsideContract(at, "a value whose structure the slice does not follow");
         const properties: TypePropertyPlan[] = [];
-        for (const name of fieldOrder(
-          this.answers.placeProperties(id, path),
-          records,
-          this.index,
-        )) {
-          const step = propertyStep(name);
-          const below = [...path, step];
-          if (this.answers.place(id, below).admitted.by === "undecided") continue;
+        const below = recordsBelow(records);
+        for (const name of fieldOrder(this.answers.placeProperties(id, path), below, this.index)) {
+          const step = [...path, propertyStep(name)];
+          if (this.answers.place(id, step).admitted.by === "undecided") continue;
           const type = yield* compileChild(
-            this.#contractTask(id, below, at, literalsBelow(records, step)),
+            this.#contractTask(id, step, at, below.fields.get(name) ?? []),
           );
           if (type !== null) properties.push({ name, type });
         }
@@ -1062,25 +1058,24 @@ class Contracts {
     if (path.length + 1 >= SLICE_DEPTH)
       throw new OutsideContract(at.call, "a value whose structure the slice does not follow");
     const members: TypePlan[] = [];
+    const below = recordsBelow(records);
     for (const tag of VALUE_KIND_NAMES.filter((kind) => held.has(kind)))
       if (tag === "list" || tag === "set" || tag === "dict") {
         const element = yield* compileChild(
-          this.#answerTask(at, [...path, "element"], literalsBelow(records, "element")),
+          this.#answerTask(at, [...path, "element"], below.elements),
         );
         // elements that take every value leave the collection open, as a store's check has it
         members.push({ kind: tag, element: element === ANY_VALUE ? null : element });
       } else if (tag === "object") {
         const properties: TypePropertyPlan[] = [];
-        for (const name of fieldOrder(answer.properties, records, this.index)) {
-          const step = propertyStep(name);
+        for (const name of fieldOrder(answer.properties, below, this.index))
           properties.push({
             name,
             // EVIDENCE: invariant: below the call a level always has a plan (`ANY_VALUE` at the least).
             type: (yield* compileChild(
-              this.#answerTask(at, [...path, step], literalsBelow(records, step)),
+              this.#answerTask(at, [...path, propertyStep(name)], below.fields.get(name) ?? []),
             ))!,
           });
-        }
         members.push({ kind: "object", properties });
       } else members.push(kindPlan(tag));
     return unionOf(members);
@@ -1117,41 +1112,38 @@ function literalsAt(values: readonly Expression[]): Expression[] {
   return found;
 }
 
-/** The literal data one step below `values`: a record's field of that name, a list's or set's elements. */
-function literalsBelow(values: readonly Expression[], step: string): Expression[] {
-  return literalsAt(values).flatMap((node) =>
-    step === "element"
-      ? node.kind === "listLiteral" || node.kind === "setLiteral"
-        ? node.elements
-        : []
-      : node.kind === "objectLiteral"
-        ? node.properties
-            .filter((property) => propertyStep(property.name.name) === step)
-            .map((property) => property.value)
-        : [],
-  );
+/**
+ * The literal data one step below `values`, found once per level: a list's or set's elements, and each record field's
+ * values by name, the names in the order the records first write them.
+ */
+interface RecordsBelow {
+  readonly elements: readonly Expression[];
+  readonly fields: ReadonlyMap<string, readonly Expression[]>;
+}
+
+function recordsBelow(values: readonly Expression[]): RecordsBelow {
+  const elements: Expression[] = [];
+  const fields = new Map<string, Expression[]>();
+  for (const node of literalsAt(values))
+    if (node.kind === "listLiteral" || node.kind === "setLiteral") elements.push(...node.elements);
+    else if (node.kind === "objectLiteral")
+      for (const property of node.properties) {
+        const found = fields.get(property.name.name);
+        if (found === undefined) fields.set(property.name.name, [property.value]);
+        else found.push(property.value);
+      }
+  return { elements, fields };
 }
 
 /**
  * A record's field names in the order its own literal records at this level write them, so that a repair's warnings and
  * a parsed record's fields follow its source; names they do not write follow, as the program first writes them.
  */
-function fieldOrder(
-  names: Iterable<string>,
-  records: readonly Expression[],
-  index: SliceIndex,
-): string[] {
-  const order = new Map<string, number>();
-  for (const node of literalsAt(records))
-    if (node.kind === "objectLiteral")
-      for (const property of node.properties)
-        if (!order.has(property.name.name)) order.set(property.name.name, order.size);
-  const all = [...names];
+function fieldOrder(names: Iterable<string>, below: RecordsBelow, index: SliceIndex): string[] {
+  const all = new Set(names);
   return [
-    ...all
-      .filter((name) => order.has(name))
-      .sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0)),
-    ...index.inWrittenOrder(all.filter((name) => !order.has(name))),
+    ...[...below.fields.keys()].filter((name) => all.has(name)),
+    ...index.inWrittenOrder([...all].filter((name) => !below.fields.has(name))),
   ];
 }
 
