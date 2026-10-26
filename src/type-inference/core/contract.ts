@@ -465,6 +465,15 @@ export interface LiteralIndex {
 
 const NESTING = 256;
 
+/**
+ * The units a kept text of `length` UTF-16 code units costs (TABLE r4.58): about its size in 8-byte words, a header of
+ * two and one per eight code units, so a short key costs about what an entry does and a long path or signature its
+ * length.
+ */
+function textUnits(length: number): number {
+  return (length + 23) >> 3;
+}
+
 /** The kinds that may have a member an unknown receiver is asked for (A7 r4.10). */
 export const MEMBER_KINDS: readonly ValueKind[] = [
   "string",
@@ -1059,6 +1068,7 @@ export class Contract {
     const memoKey = `${prefix}|${path.join(".")}`;
     const known = this.#levelGroups.get(memoKey);
     if (known !== undefined) return known;
+    this.#keepText(memoKey.length);
     const { program } = this.pass;
     this.#collectMarks();
     // each group's key, to its position in the list; the members themselves at the prefix (a projection's literal at
@@ -1073,10 +1083,11 @@ export class Contract {
       // (what stands at each step above the path: entries read below it, objects lacking the next step, a
       // reference, an empty collection; and whether the literal is a cell, every path then below an element)
       const above: string[] = [];
-      let at = 0;
+      let id = 0;
+      this.#keep(group.at.length + path.length);
       for (const step of [...group.at, ...path]) {
-        above.push(levels.at.get(at) ?? "");
-        at = this.#pathBelow(at, step);
+        above.push(levels.at.get(id) ?? "");
+        id = this.#pathBelow(id, step);
       }
       const cell = program.cellOwner.get(group.literal)?.kind === "cell" ? "cell" : "";
       // (its marks: alike where they cannot depend on steps past the path, else its own, §3.2 r4.23)
@@ -1086,7 +1097,9 @@ export class Contract {
           : this.#depthOf(group.holder) <= path.length
             ? String(this.#marksAt(group.holder, path))
             : group.holder.id;
-      const key = `${levels.below.get(at) ?? ""}|${above.join("|")}|${cell}|${marks}`;
+      const key = this.#kept(
+        `${levels.below.get(id) ?? ""}|${this.#joined(above, "|")}|${cell}|${marks}`,
+      );
       const position = merged.get(key);
       if (position === undefined) {
         merged.set(key, groups.length);
@@ -1110,7 +1123,7 @@ export class Contract {
   /**
    * A literal's structure by path, once (§4.6): what stands at each path of its index itself (its own terms' kinds,
    * its reads' and other values' structures, its objects' property names, a reference, an empty collection), and below
-   * each path everything under it, interned; by the paths' ids (`#pathAt`), -1 for none.
+   * each path everything under it, interned; each by its path's id (`#pathAt`).
    */
   #levelsOf(literal: PlaceId): {
     readonly below: ReadonlyMap<number, string>;
@@ -1130,49 +1143,59 @@ export class Contract {
       index.references,
       index.empty,
     ])
-      for (const text of texts) paths.add(this.#pathId(text));
+      for (const text of texts) {
+        this.#keep(1);
+        paths.add(this.#pathId(text));
+      }
     for (const path of [...paths])
       for (
         let parent = this.#pathParents[path]!;
         parent >= 0 && !paths.has(parent);
         parent = this.#pathParents[parent]!
-      )
+      ) {
+        this.#keep(1);
         paths.add(parent);
+      }
     const at = new Map<number, string>();
     for (const id of paths) {
       program.work.charge("structureSteps");
       const path = this.#pathTexts[id]!;
+      const tags = [...(index.terms.get(path)?.keys() ?? [])].sort();
+      this.#keep(tags.length);
       const parts = [
-        [...(index.terms.get(path)?.keys() ?? [])].sort().join(","),
+        this.#joined(tags, ","),
         ...[...(index.reads.get(path) ?? []), ...(index.others.get(path) ?? [])].map((entry) =>
           this.structureOf(entry.value),
         ),
-        ...(index.objects.get(path)?.list ?? []).map(
-          (object) => `{${[...object.names].sort().join(",")}}`,
-        ),
+        ...(index.objects.get(path)?.list ?? []).map((object) => this.#namesPart(object.names)),
         index.references.has(path) ? "ref" : "",
         index.empty.has(path) ? "empty" : "",
       ];
-      at.set(id, this.#internStructure(`at(${parts.join(";")})`));
+      at.set(id, this.#internStructure(`at(${this.#joined(parts, ";")})`));
     }
     // below a path: its own and, deepest first, every path one step under it
     const below = new Map<number, string>();
     const children = new Map<number, number[]>();
     for (const id of paths) {
       if (id === 0) continue;
+      this.#keep(1);
       const parent = this.#pathParents[id]!;
       let list = children.get(parent);
       if (list === undefined) children.set(parent, (list = []));
       list.push(id);
     }
     const depths = this.#pathDepths;
+    this.#keep(paths.size);
     for (const id of [...paths].sort((a, b) => depths[b]! - depths[a]!)) {
       program.work.charge("structureSteps");
-      const under = (children.get(id) ?? [])
-        .map((child) => `${child}=${below.get(child)}`)
-        .sort()
-        .join(",");
-      below.set(id, this.#internStructure(`below(${at.get(id)};${under})`));
+      const listed = (children.get(id) ?? []).map((child) =>
+        this.#kept(`${child}=${below.get(child)}`),
+      );
+      this.#keep(listed.length);
+      below.set(
+        id,
+        this.#internStructure(`below(${at.get(id)};${this.#joined(listed.sort(), ",")})`),
+      );
     }
     const levels = { below, at };
     this.#literalLevels.set(literal, levels);
@@ -1929,7 +1952,7 @@ export class Contract {
           const within = [...(entry.at ?? []), ...path];
           const source = yield* this.#needValue(entry.value);
           identity = {
-            id: `${source.id}@${within.join(".")}`,
+            id: this.#kept(`${source.id}@${within.join(".")}`),
             key: rooted,
             guarded: identity.guarded || entry.guarded,
             holder: this.#holderAt(source.holder, within),
@@ -2088,19 +2111,19 @@ export class Contract {
       for (const at of this.#pathOrder(index)) {
         program.work.charge("structureSteps");
         const path = this.#pathTexts[at]!;
-        parts.push(`${at}:${[...(index.terms.get(path)?.keys() ?? [])].sort().join(",")}`);
+        parts.push(this.#kindsPart(at, index.terms.get(path)));
         for (const entry of [...(index.reads.get(path) ?? []), ...(index.others.get(path) ?? [])]) {
           const part = yield* this.#needStructure(entry.value);
           if (part.startsWith("v")) plain = false;
           marked ||= this.#markedStructures.has(part);
-          parts.push(`s${part}`);
+          parts.push(this.#kept(`s${part}`));
         }
         for (const object of index.objects.get(path)?.list ?? [])
-          parts.push(`{${[...object.names].sort().join(",")}}`);
+          parts.push(this.#namesPart(object.names));
       }
       parts.push(`empty:${this.#emptyIds(index)}`);
       if (plain) {
-        id = this.#internStructure(`l(${parts.join(";")})`);
+        id = this.#internStructure(`l(${this.#joined(parts, ";")})`);
         if (marked) this.#markedStructures.add(id);
       }
     } else {
@@ -2636,6 +2659,7 @@ export class Contract {
   // ------------------------------------------------------------------------------------ the mark holders (§8 r4.23)
 
   #newHolder(id: string): Holder {
+    this.#keepText(id.length);
     this.facts.markNodes += 1;
     const holder: Holder = {
       id,
@@ -2659,6 +2683,7 @@ export class Contract {
     this.pass.program.work.charge("invSteps");
     const key = `${to.id}|${shift.join(".")}|${at.join(".")}`;
     if (holder.refSeen.has(key)) return;
+    this.#keepText(key.length);
     holder.refSeen.add(key);
     this.facts.markNodes += 1;
     const where = at.join(".");
@@ -2973,6 +2998,7 @@ export class Contract {
       const known = asked.memo.get(memoKey);
       if (known !== undefined) return known;
       // a reference back to itself answers no
+      this.#keepText(memoKey.length);
       asked.memo.set(memoKey, false);
       work.charge("eventSteps", 1 + rest.length);
       stack.push({
@@ -3079,12 +3105,40 @@ export class Contract {
 
   // ---------------------------------------------------------------------------------------- the literal index (§8)
 
-  /** The id of the path one `step` below the path `parent`, made the first time it is asked. */
+  /**
+   * Charges what the literal work keeps before it keeps it (TABLE r4.58): `units` entries, scheduled tasks or elements
+   * of a sorted copy, or a text's `textUnits`; so the allowance stops a deep literal's indexes before the heap does.
+   */
+  #keep(units: number): void {
+    this.pass.program.work.charge("literalUnits", units);
+  }
+
+  /** Charges a text of `length` UTF-16 code units the literal work keeps. */
+  #keepText(length: number): void {
+    this.#keep(textUnits(length));
+  }
+
+  /** A text the literal work keeps, charged by its length. */
+  #kept(text: string): string {
+    this.#keepText(text.length);
+    return text;
+  }
+
+  /** `parts` joined by `separator`, the joined text's length charged first. */
+  #joined(parts: readonly string[], separator: string): string {
+    let length = parts.length === 0 ? 0 : separator.length * (parts.length - 1);
+    for (const part of parts) length += part.length;
+    this.#keepText(length);
+    return parts.join(separator);
+  }
+
+  /** The id of the path one `step` below the path `parent`, made (and charged) the first time it is asked. */
   #pathAt(parent: number, step: string): number {
     let steps = this.#pathSteps[parent];
     if (steps === undefined) this.#pathSteps[parent] = steps = new Map();
     const known = steps.get(step);
     if (known !== undefined) return known;
+    this.#keepText((parent === 0 ? 0 : this.#pathTexts[parent]!.length + 1) + step.length);
     const text = parent === 0 ? step : `${this.#pathTexts[parent]!}.${step}`;
     const id = this.#pathTexts.length;
     this.#pathTexts.push(text);
@@ -3107,18 +3161,36 @@ export class Contract {
 
   /** The paths an index holds kinds, reads, other values or objects at, by id in id order. */
   #pathOrder(index: LiteralIndex): number[] {
+    const maps = [index.terms, index.reads, index.others, index.objects];
+    this.#keep(maps.reduce((sum, map) => sum + map.size, 0));
     const ids = new Set<number>();
-    for (const map of [index.terms, index.reads, index.others, index.objects])
-      for (const path of map.keys()) ids.add(this.#pathId(path));
+    for (const map of maps) for (const path of map.keys()) ids.add(this.#pathId(path));
+    this.#keep(ids.size);
     return [...ids].sort((a, b) => a - b);
   }
 
   /** An index's empty collections' paths, as their ids in order. */
   #emptyIds(index: LiteralIndex): string {
-    return [...index.empty]
-      .map((path) => this.#pathId(path))
-      .sort((a, b) => a - b)
-      .join(",");
+    this.#keep(index.empty.size);
+    return this.#kept(
+      [...index.empty]
+        .map((path) => this.#pathId(path))
+        .sort((a, b) => a - b)
+        .join(","),
+    );
+  }
+
+  /** An object's property names as a signature's part, charged. */
+  #namesPart(names: ReadonlySet<string>): string {
+    this.#keep(names.size);
+    return this.#kept(`{${[...names].sort().join(",")}}`);
+  }
+
+  /** A path's own kinds as a signature's part, charged. */
+  #kindsPart(at: number, kinds: ReadonlyMap<ItemTag, Writer> | undefined): string {
+    const tags = [...(kinds?.keys() ?? [])];
+    this.#keep(tags.length);
+    return this.#kept(`${at}:${tags.sort().join(",")}`);
   }
 
   /**
@@ -3136,6 +3208,9 @@ export class Contract {
   *#indexWork(literal: PlaceId): IdentityWork {
     if (this.#literals.has(literal)) return;
     const { program, definitions } = this.pass;
+    // (TABLE r4.58: each object, collection, array element and map entry it keeps charged one unit as it is made, each
+    // kept text its `textUnits`; here the index's own ten)
+    this.#keep(10);
     const index: LiteralIndex = {
       terms: new Map(),
       reads: new Map(),
@@ -3152,6 +3227,7 @@ export class Contract {
     const put = <T>(map: Map<string, T[]>, path: number, entry: T): void => {
       const text = this.#pathTexts[path]!;
       const list = map.get(text);
+      this.#keep(list === undefined ? 3 : 2);
       if (list === undefined) map.set(text, [entry]);
       else list.push(entry);
     };
@@ -3169,10 +3245,16 @@ export class Contract {
           readonly path: number;
         };
     const pending: Task[] = [];
+    // (a cell's definitions copied, and a task scheduled for each)
+    const cells = (place: PlaceId): Definition[] => {
+      const defs = definitions.cellDefs.get(place) ?? [];
+      this.#keep(2 * defs.length);
+      return [...defs].reverse();
+    };
     if (program.hasOf.has(literal))
       pending.push({ kind: "value", g: null, value: literal, path: 0 });
     else
-      for (const d of [...(definitions.cellDefs.get(literal) ?? [])].reverse())
+      for (const d of cells(literal))
         // a literal's element that admission rejected is ignored (A6, ADR 0021 1.3)
         if (this.pass.lists.live(d))
           pending.push({ kind: "value", g: d, value: d.value!, path: 0 });
@@ -3183,6 +3265,7 @@ export class Contract {
         const { g, value, path } = task;
         const literals = program.hasOf.get(value) ?? [];
         if (literals.length > 0) {
+          this.#keep(2 * literals.length);
           for (const has of [...literals].reverse())
             pending.push({
               kind: "term",
@@ -3200,8 +3283,10 @@ export class Contract {
             put(index.others, path, { g, value });
             continue;
           }
-          if (seen.has(`${path}|${source.id}`)) continue;
-          seen.add(`${path}|${source.id}`);
+          const key = this.#kept(`${path}|${source.id}`);
+          if (seen.has(key)) continue;
+          this.#keep(1);
+          seen.add(key);
           this.facts.literalEntries += 1;
           put(index.others, path, { g, value });
           continue;
@@ -3211,16 +3296,18 @@ export class Contract {
         // (k reads of one host global are one entry as well, by their snapshot, their leaves unioned: an occurrence
         // stays fresh as its own leaf, never as an entry each path reads again, S6-CARRIERS §3.1, Codex r23 F1)
         const leaf = this.#ingressLeaf(value);
-        const id = !sharing()
-          ? `${path}|v${value}`
-          : `${path}|${leaf === undefined ? source.id : snapshot}`;
+        const id = this.#kept(
+          !sharing() ? `${path}|v${value}` : `${path}|${leaf === undefined ? source.id : snapshot}`,
+        );
         // (the value side reads an exact entry by its first read alone, so an ingress occurrence keeps its own: its
         // items carry its own leaf, which one shared entry would drop; the read entry above unions them, TABLE r4.72)
-        const exactId =
-          !sharing() || leaf !== undefined ? `${path}|v${value}` : `${path}|${snapshot}`;
+        const exactId = this.#kept(
+          !sharing() || leaf !== undefined ? `x${path}|v${value}` : `x${path}|${snapshot}`,
+        );
         const read = reads.get(id);
         if (read === undefined) {
           this.facts.literalEntries += 1;
+          this.#keep(2);
           const entry: ReadEntry = {
             g,
             value,
@@ -3235,8 +3322,9 @@ export class Contract {
           if (source.guarded) read.guarded = true;
           if (leaf !== undefined) read.ingress = program.scope.ingress.union(read.ingress, leaf);
         }
-        if (!seen.has(`x${exactId}`)) {
-          seen.add(`x${exactId}`);
+        if (!seen.has(exactId)) {
+          this.#keep(1);
+          seen.add(exactId);
           put(index.exact, path, { g, value });
         }
         continue;
@@ -3244,26 +3332,40 @@ export class Contract {
       // a term of a literal's type standing at the path
       const { site, term, path } = task;
       if (term.kind === "ref") {
-        for (const d of [...(definitions.cellDefs.get(term.place) ?? [])].reverse())
+        for (const d of cells(term.place))
           if (this.pass.lists.live(d)) pending.push({ kind: "value", g: d, value: d.value!, path });
         continue;
       }
       const where = this.#pathTexts[path]!;
       let kinds = index.terms.get(where);
-      if (kinds === undefined) index.terms.set(where, (kinds = new Map()));
-      for (const tag of typeTags(term)) if (!kinds.has(tag)) kinds.set(tag, site);
-      if (term.kind === "atom" && REFERENCE.has(term.name)) index.references.add(where);
+      if (kinds === undefined) {
+        this.#keep(2);
+        index.terms.set(where, (kinds = new Map()));
+      }
+      for (const tag of typeTags(term))
+        if (!kinds.has(tag)) {
+          this.#keep(1);
+          kinds.set(tag, site);
+        }
+      if (term.kind === "atom" && REFERENCE.has(term.name) && !index.references.has(where)) {
+        this.#keep(1);
+        index.references.add(where);
+      }
       if (term.kind === "object") {
         let objects = index.objects.get(where);
-        if (objects === undefined)
+        if (objects === undefined) {
+          this.#keep(4);
           index.objects.set(where, (objects = { list: [], count: new Map() }));
+        }
         // its property names, and the property its button value reads, decided once per record (V30 §19)
         const names = new Set<string>();
         let value: Selected = null;
         let text: Selected = null;
+        // (its names and their entry, its counts, its properties copied, a task per property)
+        this.#keep(2 + 4 * (term.properties?.length ?? 0));
         for (const property of term.properties ?? []) {
           this.facts.selectionVisits += 1;
-          names.add(propertyStep(property.name));
+          names.add(this.#kept(propertyStep(property.name)));
           if (property.name === "value") value ??= property;
           else if (property.name === "text") text ??= property;
         }
@@ -3278,8 +3380,14 @@ export class Contract {
           });
       } else if (term.kind === "list" || term.kind === "set" || term.kind === "dict") {
         const element = term.element;
-        if (element.kind === "ref" && (definitions.cellDefs.get(element.place) ?? []).length === 0)
+        if (
+          element.kind === "ref" &&
+          (definitions.cellDefs.get(element.place) ?? []).length === 0
+        ) {
+          this.#keep(1);
           index.empty.add(this.#pathTexts[this.#pathAt(path, "element")]!);
+        }
+        this.#keep(1);
         pending.push({ kind: "term", site, term: element, path: this.#pathAt(path, "element") });
       }
     }
@@ -3305,24 +3413,24 @@ export class Contract {
     for (const at of this.#pathOrder(index)) {
       this.pass.program.work.charge("invSteps");
       const path = this.#pathTexts[at]!;
-      parts.push(`${at}:${[...(index.terms.get(path)?.keys() ?? [])].sort().join(",")}`);
+      parts.push(this.#kindsPart(at, index.terms.get(path)));
       for (const entry of index.reads.get(path) ?? []) {
         if (entry.ingress !== undefined) plain = false;
-        parts.push(`r${(yield* this.#needValue(entry.value)).id}`);
+        parts.push(this.#kept(`r${(yield* this.#needValue(entry.value)).id}`));
       }
       for (const entry of index.others.get(path) ?? []) {
         const id = (yield* this.#needValue(entry.value)).id;
         if (id.startsWith("v")) plain = false;
-        parts.push(`o${id}`);
+        parts.push(this.#kept(`o${id}`));
       }
       for (const object of index.objects.get(path)?.list ?? [])
-        parts.push(`{${[...object.names].sort().join(",")}}`);
+        parts.push(this.#namesPart(object.names));
     }
     parts.push(`empty:${this.#emptyIds(index)}`);
     // (interned: a literal names its inputs by their own short identities, never by their expansions)
     let signature = `v${literal}`;
     if (plain) {
-      const shape = parts.join(";");
+      const shape = this.#joined(parts, ";");
       signature = this.#literalIds.get(shape) ?? `l${this.#literalIds.size}`;
       this.#literalIds.set(shape, signature);
     }
@@ -3334,6 +3442,7 @@ export class Contract {
     const key = `${path}|${step}`;
     const known = index.lacking.get(key);
     if (known !== undefined) return known;
+    this.#keepText(key.length);
     const objects = index.objects.get(path);
     let token: Writer | null = null;
     if (objects !== undefined && (objects.count.get(step) ?? 0) < objects.list.length)
@@ -3412,15 +3521,17 @@ export class Contract {
       if (length > 0 && rest[length - 1] === "element") elementAbove = true;
       const path = paths[length];
       if (path === undefined) break;
-      const below = rest.slice(length);
+      // (the rest below the path, made only for an entry that stands there)
+      let tail: readonly string[] | undefined;
+      const after = (): readonly string[] => (tail ??= rest.slice(length));
       if (!exact) {
         for (const entry of index.reads.get(path) ?? [])
           out.push(
             ...this.#annotated(
               entry,
-              below,
+              after(),
               withWriter(
-                yield* this.contractOfValueAt(entry.value, below),
+                yield* this.contractOfValueAt(entry.value, after()),
                 entry.g === null ? null : definitions.writerOf(entry.g),
               ),
             ),
@@ -3428,7 +3539,7 @@ export class Contract {
         for (const entry of index.others.get(path) ?? [])
           out.push(
             ...withWriter(
-              yield* this.contractOfValueAt(entry.value, below),
+              yield* this.contractOfValueAt(entry.value, after()),
               entry.g === null ? null : definitions.writerOf(entry.g),
             ),
           );
@@ -3437,13 +3548,15 @@ export class Contract {
         if (copies !== null && copies.length > 0) overCopy = true;
         if (copies !== null)
           for (const entry of copies)
-            out.push(...this.#annotated(entry, below, yield* this.#belowRead(entry.value, below)));
+            out.push(
+              ...this.#annotated(entry, after(), yield* this.#belowRead(entry.value, after())),
+            );
         else
           for (const entry of index.exact.get(path) ?? [])
-            out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, below)));
+            out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
         const others = index.others.get(path) ?? [];
         for (const entry of others)
-          out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, below)));
+          out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
         sources += (copies ?? index.exact.get(path) ?? []).length + others.length;
       }
       // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
@@ -3483,7 +3596,8 @@ export class Contract {
         out.push(EMPTY);
     }
     // S3 §1's route: past an element step over a copy the contract answered (F12)
-    if (exact && overCopy) this.#overCopy.add(`${literal}|${rest.join(".")}|${node?.id ?? "-"}`);
+    if (exact && overCopy)
+      this.#overCopy.add(this.#kept(`${literal}|${rest.join(".")}|${node?.id ?? "-"}`));
     // §3.4 r4.11: the X word is the read's (`member` past an element step over a copy), shared by every known-kind
     // item, definite ones included, whatever its writer; an unknown keeps its reason's word. Past an element step that
     // gathers several elements the element read makes each kind only possible: its word too, by the precedence

@@ -58,6 +58,9 @@ export type WorkCounter =
   | "eventSteps"
   // the contract per demanded path and its source indexes
   | "invSteps"
+  // what the literal indexes, their identities and structures keep, charged before they keep it: each entry, scheduled
+  // task and element of a sorted copy, and each text (a path, a composite key, a signature, a structure) by its size
+  | "literalUnits"
   // the exact path per read and the value per (D, path)
   | "exactQueries"
   | "exactValues"
