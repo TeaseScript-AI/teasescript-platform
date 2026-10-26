@@ -28,9 +28,32 @@ const KINDS: readonly (readonly [string, string, string, string])[] = [
 /** The heap a child may use: about the deepest case's need with a margin, far below what the uncharged work took. */
 const HEAP_MIB = 1_536;
 
+const url = (path: string): string => JSON.stringify(new URL(path, import.meta.url).href);
+
+/**
+ * The lines `script` prints in a child with the capped heap and a timeout, each the depth, tab-separated from what it
+ * reports there; a signal, an error, a non-zero exit or the timeout fails `name`.
+ */
+function childLines(name: string, script: string): string[] {
+  const child = spawnSync(
+    process.execPath,
+    [`--max-old-space-size=${HEAP_MIB}`, "--input-type=module", "--eval", script],
+    { encoding: "utf8", timeout: 120_000, maxBuffer: 256 * 1024 },
+  );
+  const lines = child.stdout.trim().split("\n").filter(Boolean);
+  const reached = `after depth ${lines.at(-1)?.split("\t")[0] ?? "none"}`;
+  assert.equal(child.error, undefined, `${name}: ${child.error?.message} ${reached}`);
+  assert.equal(child.signal, null, `${name}: killed by ${child.signal} ${reached}`);
+  assert.equal(
+    child.status,
+    0,
+    `${name}: exit ${child.status} ${reached}\n${child.stderr.slice(-2_000)}`,
+  );
+  return lines;
+}
+
 for (const [kind, open, close, read] of KINDS)
   test(`a ${kind} literal nested ${DEPTHS.join(", ")} deep compiles or stops within the allowance, never crashing`, () => {
-    const url = (path: string): string => JSON.stringify(new URL(path, import.meta.url).href);
     const script = `
       import {compileSourceWithBackend} from ${url("../src/compiler.js")};
       import {CandidateOutsideSlice, CORE_BACKEND} from ${url("../src/type-inference/core/backend.js")};
@@ -49,21 +72,8 @@ for (const [kind, open, close, read] of KINDS)
         console.log(depth + "\\t" + candidate + "\\t" + analyseCore(request).outcome);
       }
     `;
-    const child = spawnSync(
-      process.execPath,
-      [`--max-old-space-size=${HEAP_MIB}`, "--input-type=module", "--eval", script],
-      { encoding: "utf8", timeout: 120_000, maxBuffer: 256 * 1024 },
-    );
     // (a line per depth: the depth, the candidate's result and the core's outcome)
-    const lines = child.stdout.trim().split("\n").filter(Boolean);
-    const reached = `after depth ${lines.at(-1)?.split("\t")[0] ?? "none"}`;
-    assert.equal(child.error, undefined, `${kind}: ${child.error?.message} ${reached}`);
-    assert.equal(child.signal, null, `${kind}: killed by ${child.signal} ${reached}`);
-    assert.equal(
-      child.status,
-      0,
-      `${kind}: exit ${child.status} ${reached}\n${child.stderr.slice(-2_000)}`,
-    );
+    const lines = childLines(kind, script);
     assert.deepEqual(
       lines.map((line) => Number(line.split("\t")[0])),
       DEPTHS,
@@ -75,3 +85,28 @@ for (const [kind, open, close, read] of KINDS)
         `${kind}: ${line}`,
       );
   });
+
+/**
+ * A record nested 2,048 deep whose property names are each over 1,024 characters long, never read: admission kept the
+ * text of its paths uncharged, and the analysis died at 5 % of the allowance (the deep-literal review's witness). The
+ * core analyses it at that depth and one beyond in a child with the same heap; it must end with its outcome.
+ */
+test("a record nested 2,048 and 2,049 deep with long property names stops within the allowance, never crashing", () => {
+  const depths = [2_048, 2_049];
+  const script = `
+    import {analyseCore} from ${url("../src/type-inference/core/answers.js")};
+    import {coreRequest} from ${url("./helpers/type-core-analysis.js")};
+    for (const depth of ${JSON.stringify(depths)}) {
+      const names = Array.from({length: depth}, (_, i) => "field" + i + "_" + "q".repeat(1024));
+      const source = "let value = " + names.map((name) => "{" + name + ":").join("") + "1" + "}".repeat(depth) + "\\nexit\\n";
+      console.log(depth + "\\t" + analyseCore(coreRequest([{path: "main.tease", source}])).outcome);
+    }
+  `;
+  const lines = childLines("long names", script);
+  assert.deepEqual(
+    lines.map((line) => Number(line.split("\t")[0])),
+    depths,
+  );
+  for (const line of lines)
+    assert.match(line, /^\d+\t(valid|warning-runtime-check|compile-error|budget-error)$/, line);
+});
