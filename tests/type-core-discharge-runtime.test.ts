@@ -1297,14 +1297,32 @@ test("a typed parse or load into a copy of a written type leaves the slice until
   assert.deepEqual(contentOf(plan), [`expected call@${parse} integer`]);
   assert.deepEqual(ran(runWith(plan, "3")), halted(["3", "AFTER"]));
   assert.deepEqual(ran(runWith(plan, "1.5")), halted(["0", "AFTER"], [`TSW020@${parse}`]));
-  // a copy of a place its own literal decides, not of a written type: the default's kinds too
-  const copied =
-    "let base = {n: 1.5}\nlet out = base\nout = fromJson(hostValue, default: {n: 0}, files: false)\nsay out.n\nexit\n";
-  const read = at(copied, "fromJson(hostValue, default: {n: 0}, files: false)");
-  const copiedPlan = candidatePlan(copied);
-  assert.deepEqual(contentOf(copiedPlan), [`expected call@${read} {n: integer}`]);
-  assert.deepEqual(ran(runWith(copiedPlan, '{"n": 3}')), halted(["3"]));
-  assert.deepEqual(ran(runWith(copiedPlan, '{"n": 1.5}')), halted(["0"], [`TSW020@${read}`]));
+  // a copy of a place its own literal decides, not of a written type, whole or selected from a literal (Sol r10 B1):
+  // the default's kinds too
+  for (const copy of [
+    "base",
+    "[base][0]",
+    "[base].get(0, default: {n: 0})",
+    "null otherwise [base][0]",
+  ]) {
+    const copied = `let base = {n: 1.5}\nlet out = ${copy}\nout = fromJson(hostValue, default: {n: 0}, files: false)\nsay out.n\nexit\n`;
+    const read = at(copied, "fromJson(hostValue, default: {n: 0}, files: false)");
+    assert.ok(
+      decision(copied).checks.some((check) => check.endsWith(`boundary @${read}`)),
+      copied,
+    );
+    const copiedPlan = candidatePlan(copied);
+    assert.ok(
+      contentOf(copiedPlan).includes(`expected call@${read} {n: integer}`),
+      `${copied}: ${JSON.stringify(contentOf(copiedPlan))}`,
+    );
+    assert.deepEqual(ran(runWith(copiedPlan, '{"n": 3}')), halted(["3"]), copied);
+    assert.deepEqual(
+      ran(runWith(copiedPlan, '{"n": 1.5}')),
+      halted(["0"], [`TSW020@${read}`]),
+      copied,
+    );
+  }
 });
 
 /** A list value as the runtime holds it. */

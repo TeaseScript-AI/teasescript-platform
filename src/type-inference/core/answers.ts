@@ -141,6 +141,8 @@ export type AdmittedType =
       readonly by: "decided";
       readonly kinds: readonly ItemTag[];
       readonly decider: SourceSite | null;
+      /** Whether a copy of a written type decides it (A4 through copies, r4.75 (1)): a written domain, not its own. */
+      readonly inherited: boolean;
     }
   | { readonly by: "undecided" };
 
@@ -687,6 +689,7 @@ class CoreAnswers implements Answers {
           get decider(): SourceSite | null {
             return admission.deciderAt(id, path);
           },
+          inherited: admission.inheritsWritten(id, path),
         };
   }
 

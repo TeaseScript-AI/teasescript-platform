@@ -1780,7 +1780,12 @@ test("a decider beside an unselected read of its source is the selected read its
   )!;
   assert.deepEqual(
     inBothOrders(() => analyseCore(request).place(place.id, ["element"]).admitted),
-    { by: "decided", kinds: ["integer", "null"], decider: { file: 0, start: 68, end: 71 } },
+    {
+      by: "decided",
+      kinds: ["integer", "null"],
+      decider: { file: 0, start: 68, end: 71 },
+      inherited: false,
+    },
   );
 });
 

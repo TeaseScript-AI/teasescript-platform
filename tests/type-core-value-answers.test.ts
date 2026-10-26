@@ -61,3 +61,28 @@ test("a place's known properties at a path are those its literals and its proper
     ]);
   }
 });
+
+test("a place's admitted domain says whether a copy of a written type decides it (A4 through copies, r4.75 (1); S7)", () => {
+  const source =
+    "let a: number = 0\nlet b = a\nlet out = [a]\nlet own = 1.5\nlet copy = own\nsay b\nexit\n";
+  for (const answers of bothOrders(source)) {
+    const inherited = (name: string, path: readonly string[] = []): string => {
+      // the place the `let` of `name` stores into
+      const start = source.indexOf(`let ${name} = `);
+      const statement = answers.graph.statementAt({
+        file: 0,
+        start,
+        end: source.indexOf("\n", start),
+      });
+      assert.ok(statement !== undefined, name);
+      const place = answers.at(statement)?.place;
+      assert.ok(place !== null && place !== undefined, name);
+      const admitted = answers.place(place.id, path).admitted;
+      return `${admitted.by}${admitted.by === "decided" ? ` ${admitted.inherited}` : ""}`;
+    };
+    assert.equal(inherited("b"), "decided true");
+    assert.equal(inherited("out", ["element"]), "decided true");
+    assert.equal(inherited("copy"), "decided false");
+    assert.equal(inherited("own"), "decided false");
+  }
+});
