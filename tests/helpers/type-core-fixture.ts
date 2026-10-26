@@ -36,17 +36,6 @@ function texts(value: unknown, where: string): string[] {
   });
 }
 
-/** TABLE r4.52 AD-2's records: `load` repairs a stored record per field, with S7's runtime. */
-const LOAD_FIELD_REPAIR = new Set(
-  [
-    "audit-e2",
-    "valid-record-control",
-    "observe-repaired-count",
-    "nested-field",
-    "scalar-field-destination-control",
-  ].map((name) => `cp9-cells/s4/s7/load-field-repair/${name}`),
-);
-
 /**
  * Why a record is held back from the positive list, named by its cell or by its name, or `null` for an asserted record:
  * the tests that assert the set (the cells test's records, the candidate route's plans) hold back the same records.
@@ -58,7 +47,6 @@ export function heldBack(record: FixtureRecord): string | null {
   // with them S0(c)'s class of expectations that rest on the null and written-union deviation and TABLE r4.52 AD-1's
   // re-derived records (each cites one of these cells), enter with S10
   if (record.cells.some((cell) => /^N\d/.test(cell))) return "stage 3b's cells (S10)";
-  if (LOAD_FIELD_REPAIR.has(record.name)) return "AD-2: load's per-field repair (S7)";
   return null;
 }
 
