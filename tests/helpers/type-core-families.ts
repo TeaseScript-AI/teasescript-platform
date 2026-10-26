@@ -2145,7 +2145,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
  * at k = 64 → 128 as measured, re-measured and proposed with its counts on a change to admission's passes, never
  * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
  * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form
- * (TABLE r4.69 (1)).
+ * (TABLE r4.69 (1)), and copies separated by calls storing their source, proposed in it (r4.70 (2)).
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -2187,6 +2187,29 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
           `let box = {${fields(k, () => "null")}}`,
           rows(k, () => "if raw != null {\n  root.nested.f0 = 1\n}\nbox = root.nested"),
           rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-copies-separated-by-storing-calls",
+    measures:
+      "§4.1, condition (b): k copies of a global another callable stores, each after a call storing it, at k fields",
+    // PROPOSED, the owner's decision pending (TABLE r4.70 (2)): each copy reads the global after one more call that
+    // stores it, so each has its own snapshot (r4.68 (1)), k entries of the literal, each read at each of the k fields
+    // (S6-CARRIERS §4.7's second unmerged shape, copies separated by calls while the source is owned away; a rule beyond
+    // the class rule, or S6c's normalization, merges them). 132,548 / 453,830 units at k = 64, 128 in both orders
+    // (3.4742; `main` 1.99, the output linear); at k = 1,024 24,755,020 units, 82.5 % of its 30,000,000; the allowance
+    // reached at k = 1,129
+    measured: 3.48,
+    program: (k) =>
+      main(
+        lines(
+          "global g = hostValue",
+          "function bump {\n  g = 2.0\n  return 0\n}",
+          `let out = [${cells(k, "g, bump()")}][0]`,
+          `out = {${fields(k, () => "1")}}`,
+          rows(k, (i) => `repeat out.f${i} {}`),
           "exit",
         ),
       ),
