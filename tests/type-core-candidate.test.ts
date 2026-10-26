@@ -211,7 +211,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
   let positive = 0;
   let plans = 0;
   let runs = 0;
-  for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")]) {
+  for (const record of readFixture()) {
     if (heldBack(record) !== null) continue;
     positive += 1;
     let result: ReturnType<typeof compileProjectWithBackend>;

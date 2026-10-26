@@ -35,20 +35,31 @@ function analysed(record: FixtureRecord): CompactRecord {
 }
 
 test("the core gives the expected record for every record of the cells it completes", (t) => {
-  assert.ok(asserted.length > 1_100, `asserted ${asserted.length} records`);
+  // the classes held back at the set's revision `81b3a0c4…`, so a refresh that moves records between them shows
+  const held = new Map<string, number>();
+  for (const record of records) {
+    const reason = heldBack(record);
+    if (reason !== null) held.set(reason, (held.get(reason) ?? 0) + 1);
+  }
+  assert.deepEqual(Object.fromEntries(held), {
+    "the adapters' records (S9b)": 9,
+    "stage 3b's cells (S10)": 653,
+    "AD-2: load's per-field repair (S7)": 5,
+  });
+  assert.equal(asserted.length, 1_314);
   const deviating = new Map<string, number>();
-  let records = 0;
+  let shortened = 0;
   const failures = asserted.flatMap((record) => {
     const actual = analysed(record);
     const deviations = endDeviations(record.expected, actual);
-    if (deviations.length > 0) records += 1;
+    if (deviations.length > 0) shortened += 1;
     for (const kind of deviations) deviating.set(kind, (deviating.get(kind) ?? 0) + 1);
     const differences = recordDifferences(record.expected, actual);
     return differences.length === 0 ? [] : [`${record.name}: ${differences.join("; ")}`];
   });
   // (TABLE §3.4, D2: a member read's and an operator's sites are S8's; until then they compare by their start)
   t.diagnostic(
-    `${asserted.length} records compared by whole sites; ${records} compare a member read's or an operator's site ` +
+    `${asserted.length} records compared by whole sites; ${shortened} compare a member read's or an operator's site ` +
       `by its start only, its end differing: ` +
       [...deviating].map(([kind, count]) => `${kind} ${count}`).join(", "),
   );
@@ -56,13 +67,15 @@ test("the core gives the expected record for every record of the cells it comple
 });
 
 /**
- * TABLE r4.63–r4.66's rule function as the set pins it (`cells-rule-function.jsonl`, the set's revision `81b3a0c4…`):
- * its ten records, each compared whole in both orders, as the set's are, but those `heldBack` names.
+ * TABLE r4.63–r4.66's rule function as the set pins it (`cp9-cells/s6/rule-function/…`): its ten records, each compared
+ * whole in both orders, but those `heldBack` names.
  */
 test("the core gives the expected record for every rule-function record, in both orders (r4.63–r4.66)", () => {
-  const records = readFixture("cells-rule-function.jsonl");
-  assert.equal(records.length, 10);
-  for (const record of records) {
+  const ruleFunction = records.filter((record) =>
+    record.name.startsWith("cp9-cells/s6/rule-function/"),
+  );
+  assert.equal(ruleFunction.length, 10);
+  for (const record of ruleFunction) {
     if (heldBack(record) !== null) continue;
     const request = coreRequest(record.files);
     assert.ok(request !== null, `${record.name}: its files parse and resolve`);
