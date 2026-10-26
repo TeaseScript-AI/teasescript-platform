@@ -264,6 +264,9 @@ function hslRgb(hue: number, saturation: number, lightness: number): Rgb {
 
 test("photo colours fail no contrast check that the theme passes, in either mode and contrast", () => {
   const all = photos();
+  // A theme depends only on its intent and surfaces, and the swept photos give all three choices the same colours:
+  // each distinct theme is generated once, keyed by its whole input, and every cell is still checked against it.
+  const themes = new Map<string, ReturnType<typeof generatePlayerTheme>>();
   for (const mode of ["light", "dark"] as const)
     for (const contrast of ["standard", "high"] as const) {
       const intent = { ...defaults[mode], contrast };
@@ -277,10 +280,13 @@ test("photo colours fail no contrast check that the theme passes, in either mode
         for (const choice of [VIBRANT, MUTED, LARGE_VIBRANT]) {
           const result = photoColours(photo.swatches, mode, choice);
           if (!result) continue;
-          const theme = generatePlayerTheme(
-            result.accent ? { ...intent, accentSeed: result.accent } : intent,
-            result.surfaces,
-          );
+          const input = result.accent ? { ...intent, accentSeed: result.accent } : intent;
+          const inputKey = JSON.stringify([input, result.surfaces]);
+          let theme = themes.get(inputKey);
+          if (theme === undefined) {
+            theme = generatePlayerTheme(input, result.surfaces);
+            themes.set(inputKey, theme);
+          }
           const failures = theme.diagnostics
             .filter((item) => item.passes === false && passing.has(key(item)))
             .map((item) => `${key(item)} ${item.ratio.toFixed(3)} < ${item.target}`);
