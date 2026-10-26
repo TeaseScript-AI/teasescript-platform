@@ -527,7 +527,15 @@ export function coreCheckResult(
       }
     } else if (statement.kind === "sayStatement")
       diagnostics[index.fileOf(statement)]!.push(...messageColorDiagnostics(statement.value));
-  for (const list of diagnostics) list.sort((a, b) => a.span.start.offset - b.span.start.offset);
+  // by site, so a file's order does not follow the core's consumer order (a receiver's and a member's warnings start alike)
+  for (const list of diagnostics)
+    list.sort(
+      (a, b) =>
+        a.span.start.offset - b.span.start.offset ||
+        a.span.end.offset - b.span.end.offset ||
+        (a.code < b.code ? -1 : a.code > b.code ? 1 : 0) ||
+        (a.message < b.message ? -1 : a.message > b.message ? 1 : 0),
+    );
   return {
     diagnostics,
     runtimeChecks: checks,
