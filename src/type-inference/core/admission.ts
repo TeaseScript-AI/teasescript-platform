@@ -431,6 +431,8 @@ export class Admission {
     PlaceId,
     readonly { readonly path: readonly string[]; readonly term: TypeTerm }[]
   >();
+  /** Per unwritten binding, the written type a chain of whole copies gives it (`#chainTerm`), or none. */
+  readonly #chainTerms = new Map<PlaceId, TypeTerm | null>();
   readonly #whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
   readonly #stops = new Map<PlaceId, Stops>();
@@ -2232,7 +2234,7 @@ export class Admission {
       program.work.charge("indexSteps");
       const binding = program.occurrenceOf.get(current);
       if (binding !== undefined) {
-        const written = writtenOf(program.place(binding).kind);
+        const written = this.#typeOf(binding);
         const term = written === null ? null : termAt(written, strip);
         if (term !== null) out.push({ path, term });
         continue;
@@ -2269,11 +2271,11 @@ export class Admission {
     const { program, contract } = this.pass;
     const binding = program.occurrenceOf.get(value);
     if (binding !== undefined) {
-      const term = writtenOf(program.place(binding).kind);
+      const term = this.#typeOf(binding);
       return term === null ? null : { term, strip };
     }
     const key = program.projOf.has(value) ? contract.copiedKey(value) : null;
-    const term = key === null ? null : writtenOf(program.place(keyPlace(key)).kind);
+    const term = key === null ? null : this.#typeOf(keyPlace(key));
     if (key === null || term === null) return null;
     // (a projection of a receiver that may be a reference is the runtime's member, no copy: F19a)
     for (let at = value; program.projOf.has(at); at = program.projOf.get(at)!.owner)
@@ -2283,6 +2285,45 @@ export class Admission {
     return steps.some((step) => dictList(step) !== undefined) || termAt(term, path) === null
       ? null
       : { term, strip: path };
+  }
+
+  /** A binding's written type, or the one a chain of whole copies of a written binding gives it (`#chainTerm`). */
+  #typeOf(binding: PlaceId): TypeTerm | null {
+    return writtenOf(this.pass.program.place(binding).kind) ?? this.#chainTerm(binding);
+  }
+
+  /**
+   * A4 through copies (ADR 0021 1.3: a copy of a binding with a written type keeps that type, so a copy of that copy
+   * does too; the lead's ruling on the merged S6's chains): the written type an unwritten binding has where its earliest
+   * decider, in source order, is a whole copy of a binding with one, written or itself such a copy; `null` where another
+   * definite contribution decides first (A2), and on a cycle of copies.
+   */
+  #chainTerm(binding: PlaceId): TypeTerm | null {
+    const known = this.#chainTerms.get(binding);
+    if (known !== undefined) return known;
+    const { program, definitions, lists } = this.pass;
+    // (a cycle of copies closes on nothing written: it decides nothing)
+    this.#chainTerms.set(binding, null);
+    const stores = (definitions.byKey.get(keyOf(binding, [])) ?? []).filter(
+      (d) =>
+        d.kind === "whole" &&
+        d.value !== undefined &&
+        lists.live(d) &&
+        (d.how !== "argument" || lists.singleSite(d.fn)),
+    );
+    program.work.charge("checks", stores.length + sortCost(stores.length));
+    let found: TypeTerm | null = null;
+    for (const d of [...stores].sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b))) {
+      const source = program.occurrenceOf.get(d.value!);
+      if (source !== undefined) {
+        found = this.#typeOf(source);
+        if (found !== null) break;
+      }
+      const items = this.valueAt(d, []);
+      if (!items.some((item) => item.tag === "unknown") && deciding(items).length > 0) break;
+    }
+    this.#chainTerms.set(binding, found);
+    return found;
   }
 
   /**

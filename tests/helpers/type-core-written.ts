@@ -183,7 +183,13 @@ const HOST_VALUES: readonly (readonly [SerializableRuntimeValue, readonly string
   [{ kind: "list", items: [1] }, ["list"]],
 ];
 
-type Decision = "written" | "early copy" | "later copy" | "projection";
+type Decision =
+  | "written"
+  | "early copy"
+  | "later copy"
+  | "copy of a copy"
+  | "copy of a copy of a copy"
+  | "projection";
 
 type Host = "direct" | "named" | "index-held";
 
@@ -211,7 +217,8 @@ export interface WrittenCase {
 /**
  * The source of `form` under `decision` with the host value `host`: `typed` written with the form, initialised with a
  * literal of it (else the host value), then the place that receives the host value (`typed` itself, a copy taken
- * before or after that store, or, with `projection`, a copy of the written list's element).
+ * before or after that store, a copy at the end of a chain of two or three copies, or, with `projection`, a copy of the
+ * written list's element).
  */
 function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
   const type = formText(form);
@@ -238,6 +245,14 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
     case "later copy":
       hostLine = `let copy = ${value}`;
       lines.push(hostLine, "copy = typed");
+      break;
+    case "copy of a copy":
+      hostLine = `copy = ${value}`;
+      lines.push("let middle = typed", "let copy = middle", hostLine);
+      break;
+    case "copy of a copy of a copy":
+      hostLine = `copy = ${value}`;
+      lines.push("let first = typed", "let second = first", "let copy = second", hostLine);
       break;
     case "projection":
       hostLine = `copy = ${value}`;
@@ -306,10 +321,22 @@ function depthOf(form: Form): number {
 }
 
 /**
+ * The decisions the matrices take: the written place, an early or a later copy, and a copy at the end of a chain of two
+ * or three whole copies (A4 reaches through them: the lead's ruling on chains).
+ */
+const DECISIONS: readonly Decision[] = [
+  "written",
+  "early copy",
+  "later copy",
+  "copy of a copy",
+  "copy of a copy of a copy",
+];
+
+/**
  * The merged S6's B1 (the reviewer's written-domain matrix, rebuilt by axes): nine element domains (the four usual
  * scalars, each optional, and `null` alone) × list depths 0–3, the outermost list optional or not × the place written,
- * an early or a later copy, or a copy of the written list's element (a typed index projection) × the host value direct,
- * named or held at an index.
+ * an early or a later copy, a copy at the end of a chain of two or three copies, or a copy of the written list's element
+ * (a typed index projection) × the host value direct, named or held at an index.
  */
 export const WRITTEN_DOMAIN_MATRIX: readonly WrittenCase[] = (() => {
   const out: WrittenCase[] = [];
@@ -324,7 +351,7 @@ export const WRITTEN_DOMAIN_MATRIX: readonly WrittenCase[] = (() => {
         let form = domain;
         for (let level = 0; level < depth; level += 1) form = collection("list", form);
         if (outerOptional) form = optional(form);
-        for (const decision of ["written", "early copy", "later copy", "projection"] as const) {
+        for (const decision of [...DECISIONS, "projection"] as const) {
           if (decision === "projection" && (outerOptional || depth === 0)) continue;
           for (const host of HOSTS) out.push(writtenCase(form, decision, host));
         }
@@ -344,7 +371,7 @@ interface UnrestrictedCase {
  * The merged S6's B2 (the reviewer's unrestricted-collection matrix, rebuilt by axes): `list`, `set` and `dict`, plain,
  * optional or as a list's element (`list[]`) × known contents (an integer, text, a boolean, `null`, a nested list) ×
  * how they arrive: the initial value, a named value, a later store into an initially empty one, or a copy of the written
- * collection that then takes them. Nothing is owed: no diagnostic, no check, the run says DONE. The host-fed controls
+ * collection, at the end of a chain of one to three copies, that then takes them. Nothing is owed: no diagnostic, no check, the run says DONE. The host-fed controls
  * are `writtenCase`s of the unrestricted names.
  */
 export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() => {
@@ -362,12 +389,25 @@ export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() =
         ["null", "null"],
         ["[1]", "a nested list"],
       ] as const)
-        for (const arrival of ["initial", "named", "later", "copy"] as const) {
+        for (const arrival of [
+          "initial",
+          "named",
+          "later",
+          "copy",
+          "copy of a copy",
+          "copy of a copy of a copy",
+        ] as const) {
           const type = shape === "plain" ? kind : shape === "optional" ? `${kind}?` : `${kind}[]`;
           const known = (inner: string): string =>
             shape === "nested" ? `[${shell(kind, inner)}]` : shell(kind, inner);
           const blank = shape === "nested" ? "[]" : empty(kind);
-          const place = arrival === "copy" ? "copy" : "out";
+          const place = arrival.startsWith("copy") ? "copy" : "out";
+          const chain =
+            arrival === "copy"
+              ? ["let copy = out"]
+              : arrival === "copy of a copy"
+                ? ["let middle = out", "let copy = middle"]
+                : ["let first = out", "let second = first", "let copy = second"];
           const lines =
             arrival === "initial"
               ? [`let out: ${type} = ${known(content)}`]
@@ -375,7 +415,7 @@ export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() =
                 ? [`let v = ${content}`, `let out: ${type} = ${known("v")}`]
                 : arrival === "later"
                   ? [`let out: ${type} = ${blank}`, `out = ${known(content)}`]
-                  : [`let out: ${type} = ${blank}`, "let copy = out", `copy = ${known(content)}`];
+                  : [`let out: ${type} = ${blank}`, ...chain, `copy = ${known(content)}`];
           const levels: string[][] =
             shape === "nested"
               ? [["list"], [kind], ["unknown"]]
@@ -391,19 +431,13 @@ export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() =
 })();
 
 /**
- * The decisions the matrices take. A copy of a copy is not among them: its earliest decider is the unwritten copy, not
- * the written binding (A4's reach through an unwritten copy, a question for the lead).
- */
-const DECISIONS: readonly Decision[] = ["written", "early copy", "later copy"];
-
-/**
  * V30 §13's written-type matrix (the orchestrator's instruction): every type name (the scalars, `null`, the
  * unrestricted `list`, `set`, `dict`, `object`, the program-control names) in each form §13 lists, `T`, `T?`, `T[]`,
  * `T set`, `T dict`, `T?[]`, `T[]?`, `T | U` and `(T | U)[]` (beside `string`, `integer` for a `string`), nested to depth
  * three (`T[][]`, `T?[][]`, `T[]?[]`, `T[] set`, `T[] dict`, `T[][][]`; `null?` is `null`), × the place written, an early
- * or a later copy × the host value direct, named or held at an index. A union holding a whole collection beside another
- * type is §13's compile error and has no form here: the compiler does not report it yet (with the lead), nor is a copy
- * of a copy here (`DECISIONS`).
+ * or a later copy, a copy at the end of a chain of two or three copies × the host value direct, named or held at an
+ * index. A union holding a whole collection beside another type is §13's compile error and has no form here: the
+ * compiler does not report it yet, pre-existing, with the lead.
  */
 export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
   const out: WrittenCase[] = [];
