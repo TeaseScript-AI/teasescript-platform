@@ -283,3 +283,49 @@ export function recordDifferences(expected: CompactRecord, actual: CompactRecord
   differences.push(...excess(gotChecks, checks).map((entry) => `extra check ${entry}`));
   return differences;
 }
+
+/**
+ * A compact record written as lines, the carrier witnesses' notation: `outcome …`; a diagnostic per `D kind class
+ * start:end context` (`class` `warning` or `error`, `context` `-` where none is asserted); a check per `B kind target
+ * [against] start:end`, a boundary check, or `C …` for any other; every site in `main.tease`. Read as a fixture's record
+ * is, each field checked (`readCompactRecord`).
+ */
+export function recordOf(text: string): CompactRecord {
+  const [head, ...lines] = text
+    .trim()
+    .split("\n")
+    .map((line) => line.trim());
+  const outcome = /^outcome (\S+)$/u.exec(head ?? "");
+  assert.ok(outcome !== null, `an outcome line: ${head}`);
+  const site = (start: string, end: string) => ({
+    file: "main.tease",
+    offset: Number(start),
+    end: Number(end),
+  });
+  const diagnostics: unknown[] = [];
+  const checks: unknown[] = [];
+  for (const line of lines) {
+    const diagnostic = /^D (\S+) (warning|error) (\d+):(\d+) (\S+)$/u.exec(line);
+    if (diagnostic !== null) {
+      const [, kind, severity, start, end, context] = diagnostic;
+      diagnostics.push({
+        kind,
+        class: severity === "warning" ? "warning-runtime-check" : "compile-error",
+        site: site(start!, end!),
+        context: context === "-" ? null : context,
+      });
+      continue;
+    }
+    const check = /^([BC]) (\S+) (.+) \[([^\]]*)\] (\d+):(\d+)$/u.exec(line);
+    assert.ok(check !== null, `a diagnostic or a check: ${line}`);
+    const [, boundary, kind, target, against, start, end] = check;
+    checks.push({
+      kind,
+      target,
+      against: against!.split("|"),
+      boundary: boundary === "B",
+      site: site(start!, end!),
+    });
+  }
+  return readCompactRecord({ outcome: outcome[1], diagnostics, checks }, text);
+}

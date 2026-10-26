@@ -38,14 +38,19 @@ import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import {
   companions,
   derive,
-  derivedText,
   evaluate,
   Underivable,
   type CheckEvent,
-  type DerivedStore,
   type PredictedRun,
 } from "./helpers/type-core-derived.js";
 import { heldBack, readFixture } from "./helpers/type-core-fixture.js";
+import {
+  assignments,
+  derivedStores,
+  DOMAIN,
+  plannedStores,
+  runGlobals,
+} from "./helpers/type-core-route.js";
 import { recordDifferences } from "./helpers/type-core-records.js";
 
 // The coarse core on the test-only candidate route (the port plan's S5): source, candidate compile, plan, runtime.
@@ -170,71 +175,6 @@ function typeText(type: TypePlan | null): string {
 /** A plan's checked stores, each as `start:end type`: the store that checks, and the whole type it checks. */
 function checksOf(plan: InstructionPlan): string[] {
   return typeChecks(plan).map(({ so, eo, type }) => `${so}:${eo} ${typeText(type)}`);
-}
-
-/** A run of `plan` to its end with the host globals' values: its status, its failure and what it said, with offsets. */
-function runGlobals(
-  plan: InstructionPlan,
-  globals: Readonly<Record<string, SerializableRuntimeValue>>,
-): PredictedRun {
-  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals }));
-  const failure = result.events.find((event) => event.kind === "runtimeFailure");
-  return {
-    status: result.snapshot.status === "halted" ? "halted" : "failed",
-    failure:
-      failure?.kind === "runtimeFailure"
-        ? `${failure.code}@${failure.span.start.offset}:${failure.span.end.offset}`
-        : null,
-    said: result.events.flatMap((event) =>
-      event.kind === "say" ? [{ text: event.text, at: event.span.start.offset }] : [],
-    ),
-  };
-}
-
-/** A checked type in full, its unions' members sorted: the plan's side of `derivedText`. */
-function planText(type: TypePlan | null): string {
-  if (type === null) return "any";
-  if (type.kind === "union") return type.members.map(planText).sort().join("|");
-  if (type.kind === "list" || type.kind === "set" || type.kind === "dict")
-    return `${type.kind}<${planText(type.element)}>`;
-  if (type.kind === "object")
-    return `{${type.properties.map(({ name, type: of }) => `${name}: ${planText(of)}`).join(", ")}}`;
-  return type.kind;
-}
-
-/** A plan's checked stores as `derive` gives them: target, statement span, value span, whole type. */
-function plannedStores(plan: InstructionPlan): string[] {
-  return plan.instructions.flatMap((instruction) =>
-    (instruction.kind === "declareBinding" || instruction.kind === "assign") &&
-    instruction.typeCheck !== undefined
-      ? [
-          `${instruction.kind === "declareBinding" ? instruction.name : instruction.target.kind === "identifier" ? instruction.target.name : "?"} ` +
-            `${instruction.span.so}:${instruction.span.eo} ${instruction.value.span.so}:${instruction.value.span.eo} ` +
-            planText(instruction.typeCheck.type),
-        ]
-      : [],
-  );
-}
-
-function derivedStores(stores: readonly DerivedStore[]): string[] {
-  return stores.map(
-    (store) =>
-      `${store.target} ${store.so}:${store.eo} ${store.valueSo}:${store.valueEo} ${derivedText(store.type)}`,
-  );
-}
-
-/** The host values a run's inputs take (§5.2's derived domain): a whole number, text, a truth value, a fraction, null. */
-const DOMAIN: readonly SerializableRuntimeValue[] = [2, "text", true, 2.5, null];
-
-/** Every assignment of the domain's values to the globals. */
-function assignments(
-  globals: readonly string[],
-): Readonly<Record<string, SerializableRuntimeValue>>[] {
-  return globals.reduce<Record<string, SerializableRuntimeValue>[]>(
-    (partial, name) =>
-      partial.flatMap((assigned) => DOMAIN.map((value) => ({ ...assigned, [name]: value }))),
-    [{}],
-  );
 }
 
 /**

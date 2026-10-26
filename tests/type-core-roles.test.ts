@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compileSourceWithBackend } from "../src/compiler.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { CARRIER_ROLES, type CarrierRole } from "../src/type-inference/core/carriers.js";
+import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { withSolverSeam } from "../src/type-inference/core/solver.js";
+import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
+import { derive, evaluate } from "./helpers/type-core-derived.js";
+import { recordDifferences, recordOf } from "./helpers/type-core-records.js";
+import {
+  assignments,
+  derivedStores,
+  plannedStores,
+  runGlobals,
+} from "./helpers/type-core-route.js";
 import { BOTH, records, SCALAR, shapesOf, type RuleClass } from "./helpers/type-core-rule.js";
 
 /*
@@ -9,7 +22,9 @@ import { BOTH, records, SCALAR, shapesOf, type RuleClass } from "./helpers/type-
  * (`CARRIER_ROLES`), each with its four placements of the data: inside a literal operand, the whole operand, the
  * operation's own read, a member's receiver. Each placement is a class of the rule function (`type-core-rule.ts`), its
  * shapes each named and inline, without and with a later store, compared exactly in both orders; a placement a role
- * cannot have names why. A role the table gains without its row fails here.
+ * cannot have names why. A role the table gains without its row fails here. A shape the candidate route takes also
+ * plans the checked stores its record derives and runs as derived under every host value (§5.2, r4.59); the others
+ * report the route's reason.
  */
 
 type Placement = "literal operand" | "whole operand" | "own read" | "member receiver";
@@ -449,6 +464,8 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
       `${name}: a held shape the matrix generates`,
     );
   const wrong: string[] = [];
+  const outside = new Map<string, number>();
+  let routed = 0;
   for (const shape of all) {
     if (HELD.has(shape.name)) continue;
     const actual = records(shape.source);
@@ -456,10 +473,143 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
       wrong.push(
         `${shape.name}: ${JSON.stringify(actual)}, the rule owes ${JSON.stringify(shape.expected)}`,
       );
+    // the plan and its runs where the candidate route takes the shape (TABLE r4.59), derived from its record
+    let plan;
+    try {
+      plan = compileSourceWithBackend(shape.source, { globals: ["hostValue"] }, CORE_BACKEND).plan;
+    } catch (error) {
+      if (!(error instanceof CandidateOutsideSlice)) throw error;
+      const what = error.what.replace(/^this /, "");
+      outside.set(what, (outside.get(what) ?? 0) + 1);
+      continue;
+    }
+    routed += 1;
+    const request = coreRequest([{ path: "main.tease", source: shape.source }]);
+    assert.ok(request !== null && plan !== null, shape.name);
+    const { stores } = derive(shape.source, compactAnalysis(request));
+    assert.deepEqual(
+      plannedStores(plan),
+      derivedStores(stores),
+      `${shape.name}: the checked stores`,
+    );
+    for (const inputs of assignments(["hostValue"]))
+      assert.deepEqual(
+        runGlobals(plan, inputs),
+        evaluate(shape.source, stores, inputs).run,
+        `${shape.name} with ${JSON.stringify(inputs)}`,
+      );
   }
   t.diagnostic(
     `${all.length - HELD.size} of ${all.length} shapes in ${classes.length} role placements compared exactly, ` +
-      `${HELD.size} held for the lead; no shape: ${none.join("; ")}`,
+      `${HELD.size} held for the lead, ${routed} planned and run on the candidate route; outside the slice until ` +
+      `S7–S9b (the records only): ${[...outside].map(([what, count]) => `${what} ${count}`).join(", ")}; ` +
+      `no shape: ${none.join("; ")}`,
   );
   assert.deepEqual(wrong, [], wrong.join("\n"));
+});
+
+/**
+ * The role matrix's compositions (S6-CARRIERS §6), as exact records in both orders: round 4's eight choice regressions
+ * (inline data a published choice selects owes the store's boundary at the host value, an unselected property none),
+ * a carrier of a carrier and a carrier inside a literal inside a carrier (inline and named), a choice over a held list
+ * (§3.3's record boundary beside C1), a union holding a reference across two carriers (opaque by dispatch, checked at
+ * its consumer), and nullable root and inner receivers of a member (r4.60 beside each receiver's C5 check). The mixed
+ * selected-value and absent-value-text lists in both element orders are the cells test's (D1).
+ */
+test("the role matrix's compositions give their exact records, in both orders (§6)", () => {
+  const choice = (options: string): string => `let out = askChoice ${options}\nsay "AFTER"\n`;
+  const boundary = (against: string, span: string): string =>
+    `outcome valid\nB copy-type out [${against}] ${span}`;
+  const shapes: readonly (readonly [string, string, string])[] = [
+    ["choice-simple", choice("1, hostValue"), boundary("integer", "23:32")],
+    ["choice-list", choice("[1, hostValue]"), boundary("integer", "24:33")],
+    [
+      "choice-object",
+      choice('{text: "one", value: 1}, {text: "two", value: hostValue}'),
+      boundary("integer", "66:75"),
+    ],
+    [
+      "choice-object-list",
+      choice('[{text: "one", value: 1}, {text: "two", value: hostValue}]'),
+      boundary("integer", "67:76"),
+    ],
+    ["choice-text-list", choice('[{text: "one"}, {text: hostValue}]'), boundary("string", "43:52")],
+    ["choice-object-extra", choice('[{text: "one", value: 1, extra: hostValue}]'), "outcome valid"],
+    [
+      "choice-mixed-extra",
+      choice('[{text: "one", value: 1, extra: hostValue}, {text: "two", value: hostValue}]'),
+      boundary("integer", "85:94"),
+    ],
+    [
+      "choice-dict-values",
+      choice('dict{a: {text: "one", value: 1}, b: {text: "two", value: hostValue}}.values'),
+      boundary("integer", "77:86"),
+    ],
+    [
+      "an otherwise of an otherwise",
+      'let out = (([1, hostValue][1] otherwise 1) otherwise 1)\nsay "AFTER"\n',
+      boundary("integer", "16:25"),
+    ],
+    [
+      "a get inside a literal inside a projection",
+      'let out = [[1, hostValue].get(1, default: 1)][0]\nsay "AFTER"\n',
+      boundary("integer", "15:24"),
+    ],
+    [
+      "an otherwise inside a record a projection reads",
+      'let out = ({data: [1, hostValue][1] otherwise 1}).data\nsay "AFTER"\n',
+      boundary("integer", "22:31"),
+    ],
+    [
+      "named data in a get inside a literal inside a projection",
+      'let raw = hostValue\nlet out = [[1, raw].get(1, default: 1)][0]\nsay "AFTER"\n',
+      `outcome warning-runtime-check
+      D written-target warning 35:38 unknown
+      C copy-type out [integer] 35:38
+      B copy-type raw [unknown] 10:19`,
+    ],
+    [
+      "a choice over a held list",
+      'let opts = [{text: "one", value: 1}, {text: "two", value: hostValue}]\nlet out = askChoice opts\nsay "AFTER"\n',
+      `outcome warning-runtime-check
+      D written-target warning 58:67 unknown
+      C copy-type opts.element.value [integer] 58:67
+      B copy-type opts.element [object] 58:67`,
+    ],
+    [
+      "a union holding a reference across two carriers",
+      "let holder: integer[] | speaker = [1]\nlet out = [holder][0].get(0, default: 7)\nrepeat out {}\n",
+      `outcome warning-runtime-check
+      D member-read warning 48:59 unmodelled
+      D integer-use warning 86:89 unmodelled
+      C null-check [holder][0] [non-null] 48:59
+      C integer-check out [integer] 86:89`,
+    ],
+    [
+      "a member of nullable root and inner receivers",
+      'let out = [1, hostValue.inner.field][1]\nsay "AFTER"\n',
+      `outcome warning-runtime-check
+      D written-target warning 14:35 unknown
+      D member-read warning 14:23 unknown
+      D member-read warning 14:29 unknown
+      C copy-type out [integer] 14:35
+      C null-check hostValue [non-null] 14:23
+      C null-check hostValue.inner [non-null] 14:29
+      B copy-type out [integer] 14:23`,
+    ],
+  ];
+  for (const [name, source, text] of shapes) {
+    const request = coreRequest([{ path: "main.tease", source: `${source}exit\n` }]);
+    assert.ok(request !== null, name);
+    const expected = recordOf(text);
+    const forward = compactAnalysis(request);
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder(
+        (list) => [...list].reverse(),
+        () => compactAnalysis(request),
+      ),
+    );
+    assert.deepEqual(recordDifferences(expected, forward), [], name);
+    assert.deepEqual(recordDifferences(expected, reversed), [], `${name} reversed`);
+  }
 });
