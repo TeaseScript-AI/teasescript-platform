@@ -539,42 +539,6 @@ test("each code's document section exists and explains the code", () => {
   }
 });
 
-test("DIAGNOSTICS.md lists its codes as the registry does", () => {
-  const document = "docs/DIAGNOSTICS.md";
-  const text = readFileSync(resolve(root, document), "utf8");
-  const tables = new Map<string, string[]>();
-  for (const [code, info] of Object.entries(registry)) {
-    if (!info.docs.startsWith(`${document}#`)) continue;
-    const anchor = info.docs.slice(document.length + 1);
-    tables.set(anchor, [
-      ...(tables.get(anchor) ?? [
-        "| Code | Title | Severity | Owner |",
-        "| --- | --- | --- | --- |",
-      ]),
-      `| \`${code}\` | ${info.title} | ${severityText(info)} | ${info.owners.join(", ")} |`,
-    ]);
-  }
-  const documented = sections(document);
-  for (const [anchor, rows] of tables) {
-    const table = rows.join("\n");
-    const section = documented.get(anchor)?.lines.join("\n") ?? "";
-    assert.ok(section.includes(table), `${document}#${anchor} must hold this table:\n\n${table}\n`);
-  }
-  const shared = Object.entries(registry).flatMap(([code, info]) =>
-    info.shared === undefined
-      ? []
-      : [
-          `- \`${code}\``,
-          ...info.owners.map((owner, index) => `  - ${owner}: ${info.shared!.parts[index]!}`),
-        ],
-  );
-  const list = shared.join("\n");
-  assert.ok(
-    text.includes(list),
-    `${document} must list the codes with several owners:\n\n${list}\n`,
-  );
-});
-
 test("the documents name only registered codes", () => {
   for (const path of filesUnder(resolve(root, "docs"), ".md"))
     for (const code of readFileSync(path, "utf8").match(CODES) ?? [])

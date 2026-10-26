@@ -5,9 +5,8 @@ once in `src/diagnostic-codes.ts`: the pass or component that reports it (its ow
 the section that explains it. A rule that is an error where the compiler proves the problem and a warning where the
 script checks it when it runs keeps one code with both severities, shown as `error or warning`. Code that reports a
 diagnostic takes the registry's code types, so an unregistered code does not compile. `tests/diagnostic-codes.test.ts`
-checks that every code in `src/` is registered and reported only by its owners, that every registered code is still
-reported or marked as retired, and that the tables below match the registry. A retired code stays registered, so that it
-is never given to another problem.
+checks that every code in `src/` is registered and reported only by its owners, and that every registered code is still
+reported or marked as retired. A retired code stays registered, so that it is never given to another problem.
 
 This document lists the compiler's codes. Runtime errors (`TSR`) are listed in
 [Runtime errors](RUNTIME.md#runtime-errors), checkpoint errors (`TSK`) in
