@@ -1276,6 +1276,10 @@ test("a typed parse or load into a copy of a written type leaves the slice until
     "let a: number = 0\nlet b = a\nlet c = b\nc = fromJson(hostValue, default: 0, files: false)\nsay c\nexit\n",
     'let a: number = 0\nlet b = a\nb = load("k", default: 0)\nsay b\nexit\n',
     "let a: number[] = [0]\nlet b = a\nb = fromJson(hostValue, default: [0], files: false)\nsay b[0]\nexit\n",
+    // below a composite destination: a literal's element, a copied record's field, an empty intermediate (Sol r9)
+    'let a: number = 0\nlet out = [a]\nout = fromJson(hostValue, default: [0], files: false)\nsay "AFTER"\nexit\n',
+    'let a: number = 0\nlet base = {n: a}\nlet out = base\nout.n = fromJson(hostValue, default: 0, files: false)\nsay "AFTER"\nexit\n',
+    'let a: number[] = [0]\nlet middle = []\nmiddle = a\nlet out = middle\nout = fromJson(hostValue, default: [0], files: false)\nsay "AFTER"\nexit\n',
   ])
     assert.throws(
       () => compileSourceWithBackend(source, OPTIONS, CORE_BACKEND),
@@ -1293,6 +1297,14 @@ test("a typed parse or load into a copy of a written type leaves the slice until
   assert.deepEqual(contentOf(plan), [`expected call@${parse} integer`]);
   assert.deepEqual(ran(runWith(plan, "3")), halted(["3", "AFTER"]));
   assert.deepEqual(ran(runWith(plan, "1.5")), halted(["0", "AFTER"], [`TSW020@${parse}`]));
+  // a copy of a place its own literal decides, not of a written type: the default's kinds too
+  const copied =
+    "let base = {n: 1.5}\nlet out = base\nout = fromJson(hostValue, default: {n: 0}, files: false)\nsay out.n\nexit\n";
+  const read = at(copied, "fromJson(hostValue, default: {n: 0}, files: false)");
+  const copiedPlan = candidatePlan(copied);
+  assert.deepEqual(contentOf(copiedPlan), [`expected call@${read} {n: integer}`]);
+  assert.deepEqual(ran(runWith(copiedPlan, '{"n": 3}')), halted(["3"]));
+  assert.deepEqual(ran(runWith(copiedPlan, '{"n": 1.5}')), halted(["0"], [`TSW020@${read}`]));
 });
 
 /** A list value as the runtime holds it. */

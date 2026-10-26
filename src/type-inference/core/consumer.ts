@@ -274,6 +274,11 @@ export class SliceIndex {
     return file;
   }
 
+  /** The expression at a site of the analysis, or `undefined`. */
+  public findExpression(site: SourceSite): Expression | undefined {
+    return this.#bySite.get(`${site.file}:${site.start}:${site.end}`);
+  }
+
   /** The expression at a site of the analysis. */
   public expressionAt(site: SourceSite): Expression {
     const found = this.#bySite.get(`${site.file}:${site.start}:${site.end}`);
@@ -875,18 +880,29 @@ class Contracts {
         "a typed parse's or load's default that reads a variable",
       );
     const landing = this.#landing(call);
-    // a copy of a written type is F18's receiving context (A4, TABLE r4.75 (1), (1a)), but the core answers the call by
-    // its default there while its later facts follow that answer: the lowering cannot widen it alone
-    if (landing !== null && this.#copiesWrittenType(landing))
-      throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
-    return runCompileTask(
+    const expected = runCompileTask(
       this.#answerTask({ node: nodeOf(this.answers, this.index, call), call, landing }, [], [call]),
     );
+    // a copy of a written type is F18's receiving context (A4, TABLE r4.75 (1), (1a)), at every level the call's value
+    // reaches, but the core answers the call by its default there while its later facts follow that answer: the
+    // lowering cannot widen it alone
+    if (
+      landing !== null &&
+      expected !== null &&
+      levelsOf(expected).some((level) =>
+        this.#copiesWrittenType({ id: landing.id, path: [...landing.path, ...level] }),
+      )
+    )
+      throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
+    return expected;
   }
 
   /**
-   * Whether a place holds a written type's domain at a path through copies, not by its own written type: its admitted
-   * domain decided by a copy, followed through the copies' sources to a written one (A4, TABLE r4.75 (1)).
+   * Whether a place holds a written type's domain at a path through copies, not by its own written type (A4, TABLE
+   * r4.75 (1)): its admitted domain there decided by a read of another place, followed to the source's level. The read
+   * lands in the place at a prefix of the path (`#landing`), and the rest of the path continues in what it reads: `out =
+   * base` decides `out.n` by `base.n`, `let out = [a]` decides `out[i]` by `a`. A decider whose landing is not a prefix
+   * of the path counts as a copy, so the slice leaves out what it cannot follow.
    */
   #copiesWrittenType(start: Landing): boolean {
     const seen = new Set<string>();
@@ -900,7 +916,16 @@ class Contracts {
       const read = this.answers.graph.expressionAt(admitted.decider);
       const source = read === undefined ? null : (this.answers.at(read)?.place ?? null);
       if (source === null) return false;
-      at = { id: source.id, path: source.path };
+      const decider = this.index.findExpression(admitted.decider);
+      const lands = decider === undefined ? null : this.#landing(decider);
+      if (
+        lands === null ||
+        lands.id !== at.id ||
+        lands.path.length > at.path.length ||
+        lands.path.some((step, index) => at.path[index] !== step)
+      )
+        return true;
+      at = { id: source.id, path: [...source.path, ...at.path.slice(lands.path.length)] };
     }
   }
 
@@ -1279,6 +1304,29 @@ function landingStep(
     default:
       return null;
   }
+}
+
+/**
+ * The paths below a value that a plan describes: the value itself, a collection's elements and an object's properties,
+ * each structural member of a union's.
+ */
+function levelsOf(plan: TypePlan): string[][] {
+  const levels = new Map<string, string[]>();
+  const pending: [TypePlan, string[]][] = [[plan, []]];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const [at, path] = next;
+    if (at.kind === "union") {
+      for (const member of at.members) pending.push([member, path]);
+      continue;
+    }
+    levels.set(path.join("\u0000"), path);
+    if ((at.kind === "list" || at.kind === "set" || at.kind === "dict") && at.element !== null)
+      pending.push([at.element, [...path, "element"]]);
+    else if (at.kind === "object")
+      for (const property of at.properties)
+        pending.push([property.type, [...path, propertyStep(property.name)]]);
+  }
+  return [...levels.values()];
 }
 
 /** One plan of several: the plan itself, or the union of their members. */
