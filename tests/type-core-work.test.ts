@@ -110,7 +110,7 @@ test("every W34, W44 and W45 variant's work and each of its counters grow with t
  * at its measured doubling, not a bound at larger sizes; a change to admission's passes re-measures and proposes the
  * gate with its counts, never retunes it. Copies interleaved with conditional stores below their path (S6-CARRIERS
  * §4.7, condition (b)) are gated in the same form, a known limit by the owner's decision too (TABLE r4.69 (1)), and so
- * are copies separated by calls storing their source, proposed (r4.70 (2)).
+ * are copies separated by calls storing their source (r4.71).
  */
 test("every admission family's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters(ADMISSION_FAMILIES), []);
