@@ -121,7 +121,8 @@ function unionError(file: number, type: TypeAnnotation): WrittenTypeError | null
       if (member.kind !== "namedType") pending.push(member.element);
   }
   // each position's type as a number, its parts' first: one per distinct text of its members' sorted keys and `null`,
-  // where a collection's key holds its element's number, so a key stays as short as its level
+  // where a collection's key holds its element's number, so a key stays as short as its level (the work: the walk, and
+  // a sort of each level's distinct keys)
   const types = new Map<string, number>();
   const typeOf = new Map<TypeAnnotation, number>();
   let first: UnionType | null = null;

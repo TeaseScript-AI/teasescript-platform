@@ -1356,10 +1356,10 @@ test("a choice object's value is selected by its key, and a dict's values and ke
     // the same through an operation and a literal: the receiver's completed contract decides (review r3)
     [
       "a dict's keys through an operation whose receiver may be a reference",
-      'let o: string dict | speaker = dict{k: "bad"}\nrepeat (o otherwise null).keys.first {}\nexit',
+      // (a dict or the speaker: a value of an unrestricted dict, since a written union of them is V30 §13's error)
+      'speaker vera { length: 2 }\nlet pool: dict = dict{a: dict{k: "bad"}, b: vera}\nlet o = pool.get("a", default: vera)\nrepeat (o otherwise null).keys.first {}\nexit',
       (at) => [
-        "compile-error",
-        `written-type compile-error @${at("string dict | speaker")}`,
+        "warning-runtime-check",
         `member-read warning-runtime-check @${at("o otherwise")}`,
         `member-read warning-runtime-check @${at("o otherwise")}`,
         `member-read warning-runtime-check @${at("(o otherwise")}`,
