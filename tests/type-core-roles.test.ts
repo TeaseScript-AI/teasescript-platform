@@ -12,7 +12,9 @@ import { derive, evaluate, syntaxOf } from "./helpers/type-core-derived.js";
 import { recordDifferences, recordOf } from "./helpers/type-core-records.js";
 import {
   assignments,
+  derivedContent,
   derivedStores,
+  plannedContent,
   plannedStores,
   runGlobals,
 } from "./helpers/type-core-route.js";
@@ -36,6 +38,7 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
   const wrong: string[] = [];
   const outside = new Map<string, number>();
   let routed = 0;
+  let verified = 0;
   for (const shape of all) {
     // (the shape takes its role: a carrier of its program has that operand, Codex r23 F3); the request serves every
     // analysis of the shape below
@@ -65,25 +68,35 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
       continue;
     }
     routed += 1;
-    assert.ok(plan !== null, shape.name);
-    const syntax = syntaxOf(shape.source);
-    const { stores } = derive(syntax, record);
-    assert.deepEqual(
-      plannedStores(plan),
-      derivedStores(stores),
-      `${shape.name}: the checked stores`,
-    );
-    for (const inputs of assignments(["hostValue"]))
+    try {
+      const request = coreRequest([{ path: "main.tease", source: shape.source }]);
+      assert.ok(request !== null && plan !== null, shape.name);
+      const { stores, content } = derive(shape.source, compactAnalysis(request));
       assert.deepEqual(
-        runGlobals(plan, inputs),
-        evaluate(syntax, stores, inputs).run,
-        `${shape.name} with ${JSON.stringify(inputs)}`,
+        plannedContent(plan, shape.source),
+        derivedContent(content, shape.source),
+        `${shape.name}: S7 content`,
       );
+      assert.deepEqual(
+        plannedStores(plan),
+        derivedStores(stores),
+        `${shape.name}: the checked stores`,
+      );
+      for (const inputs of assignments(["hostValue"]))
+        assert.deepEqual(
+          runGlobals(plan, inputs),
+          evaluate(shape.source, stores, inputs, false, content).run,
+          `${shape.name} with ${JSON.stringify(inputs)}`,
+        );
+      verified += 1;
+    } catch (error) {
+      wrong.push(`${shape.name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   t.diagnostic(
     `${all.length} shapes in ${classes.length} role placements compared exactly, ` +
-      `${routed} planned and run on the candidate route; outside the slice until ` +
-      `S7–S9b (the records only): ${[...outside].map(([what, count]) => `${what} ${count}`).join(", ")}; ` +
+      `${routed} on the candidate route, ${verified} plan-and-run comparisons completed; outside the slice ` +
+      `(later port steps; the records only): ${[...outside].map(([what, count]) => `${what} ${count}`).join(", ")}; ` +
       `no shape: ${none.join("; ")}`,
   );
   assert.deepEqual(wrong, [], wrong.join("\n"));
