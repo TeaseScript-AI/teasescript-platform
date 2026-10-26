@@ -299,12 +299,14 @@ export function* parseInteractionExpression(
       parser.advance();
       colonSpan = copySpan(parser.previous().span);
     }
+    const diagnosticCount = parser.diagnostics.length;
     const expression = yield* parseChild(
       optionValue === null ? parser.parseOr() : parser.parseColonValueTask(false),
     );
     if (expression === null) {
       missingChoiceOptionWasReported = true;
-      parser.reportInsertion(
+      parser.reportMissing(
+        diagnosticCount,
         parserDiagnosticCode.expectedChoiceOption,
         optionValue === null
           ? "Expected at least one choice option."

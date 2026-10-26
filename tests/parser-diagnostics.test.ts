@@ -266,6 +266,31 @@ test("a string or regex without its closing delimiter reports only that", () => 
   assert.deepEqual(compileSource('say prose /"abc/\nexit').diagnostics, []);
 });
 
+test("a command reports its missing operand only when the operand reported nothing", () => {
+  for (const [source, expected] of [
+    ["wait 1 +", ["TSP012 8-8"]],
+    ['wait "unfinished', ["TSL003 5-16"]],
+    ['showButton "unfinished', ["TSL003 11-22"]],
+    ['save "unfinished', ["TSL003 5-16"]],
+    ['let v = load("unfinished', ["TSL003 13-24", "TSP017 24-24"]],
+    ["say 1 +", ["TSP012 7-7"]],
+    ['say "a", 1 +', ["TSP012 12-12"]],
+    // An operand that is not there at all is still reported.
+    ["wait", ["TSP012 4-4"]],
+    ["showButton", ["TSP028 10-10"]],
+    ["let v = load(default: 1)", ["TSP036 8-24"]],
+    ["say", ["TSP006 3-3"]],
+  ] as const) {
+    assert.deepEqual(
+      compileSource(source).diagnostics.map(
+        ({ code, span }) => `${code} ${span.start.offset}-${span.end.offset}`,
+      ),
+      expected,
+      source,
+    );
+  }
+});
+
 test("accepts physical continuation lines inside block-string interpolation", () => {
   const source = ['say """', "  ${", "    1 + 2", "  }", '"""', "exit"].join("\n");
   const result = parse(source);

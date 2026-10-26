@@ -43,9 +43,11 @@ export function parseWaitStatement(parser: Parser): WaitStatement | null {
     parser.synchronizeStatement();
     return null;
   }
+  const diagnosticCount = parser.diagnostics.length;
   const duration = parser.parseExpression();
   if (duration === null) {
-    parser.reportInsertion(
+    parser.reportMissing(
+      diagnosticCount,
       parserDiagnosticCode.expectedExpression,
       "Expected a duration after 'wait'.",
     );
@@ -87,9 +89,11 @@ export function* parseTimerParts(parser: Parser): ParseTask<TimerParts | null> {
       break;
     }
   }
+  const diagnosticCount = parser.diagnostics.length;
   const written = parser.parseExpression();
   if (written === null) {
-    parser.reportInsertion(
+    parser.reportMissing(
+      diagnosticCount,
       parserDiagnosticCode.expectedExpression,
       "Expected a timer duration such as '30 s' or '(5..10) s' after 'timer'.",
     );

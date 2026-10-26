@@ -193,11 +193,14 @@ export function* parseSayParts(parser: Parser, statement: boolean): ParseTask<Sa
     });
   }
 
-  const valueStart = parser.peek().kind;
+  let diagnosticCount = parser.diagnostics.length;
   const value = yield* parseChild(parser.parseOr());
   if (value === null) {
-    if (valueStart !== TokenKind.StringStart)
-      parser.reportInsertion(parserDiagnosticCode.expectedString, "Expected a string after 'say'.");
+    parser.reportMissing(
+      diagnosticCount,
+      parserDiagnosticCode.expectedString,
+      "Expected a string after 'say'.",
+    );
     if (statement) parser.synchronizeStatement();
     return null;
   }
@@ -210,9 +213,11 @@ export function* parseSayParts(parser: Parser, statement: boolean): ParseTask<Sa
       pacing = "instant";
       instantSpan = copySpan(endSpan);
     } else {
+      diagnosticCount = parser.diagnostics.length;
       const parsedPacing = yield* parseChild(parser.parseOr());
       if (parsedPacing === null) {
-        parser.reportInsertion(
+        parser.reportMissing(
+          diagnosticCount,
           parserDiagnosticCode.expectedExpression,
           "Expected a pacing value after ','.",
         );

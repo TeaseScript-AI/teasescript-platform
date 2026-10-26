@@ -68,9 +68,11 @@ export function* parseShowPopupParts(parser: Parser): ParseTask<ShowPopupParts |
     parser.recordCommand(command, call.span.end.offset, false);
     return { arguments: call.arguments, span: copySpan(call.span) };
   }
+  const diagnosticCount = parser.diagnostics.length;
   const message = yield* parseChild(parser.parseOr());
   if (message === null) {
-    parser.reportInsertion(
+    parser.reportMissing(
+      diagnosticCount,
       parserDiagnosticCode.expectedExpression,
       "Expected the popup's message after 'showPopup', as in 'showPopup \"Task completed\"'.",
     );
@@ -205,9 +207,11 @@ export function* parseShowButtonParts(parser: Parser): ParseTask<ShowButtonParts
     parser.synchronizeStatement();
     return null;
   }
+  const diagnosticCount = parser.diagnostics.length;
   const label = yield* parseChild(parser.parseOr());
   if (label === null) {
-    parser.reportInsertion(
+    parser.reportMissing(
+      diagnosticCount,
       parserDiagnosticCode.expectedInteractionText,
       "Expected button text after 'showButton'.",
     );

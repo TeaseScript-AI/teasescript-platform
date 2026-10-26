@@ -37,10 +37,12 @@ export function parseShowImageStatement(parser: Parser): ShowImageStatement | nu
   )
     return null;
   const tagged = parser.checkIdentifier("tagged");
+  const diagnosticCount = parser.diagnostics.length;
   const image = tagged ? parseTaggedQuery(parser, "images") : parser.parseExpression();
   if (image === null) {
     if (!tagged) {
-      parser.reportInsertion(
+      parser.reportMissing(
+        diagnosticCount,
         parserDiagnosticCode.expectedExpression,
         "Expected an image file or null after 'showImage'.",
       );
@@ -146,9 +148,11 @@ export function* parseMediaParts(parser: Parser): ParseTask<MediaParts | null> {
   if (parser.check(TokenKind.KeywordRepeat)) {
     repeat = Object.freeze({ kind: "indefinite", span: copySpan(parser.advance().span) });
   }
+  const diagnosticCount = parser.diagnostics.length;
   const file = yield* parseChild(parser.parseOr());
   if (file === null) {
-    parser.reportInsertion(
+    parser.reportMissing(
+      diagnosticCount,
       parserDiagnosticCode.expectedExpression,
       `Expected a media file such as "sounds/bell.mp3" after '${command.lexeme}'.`,
     );

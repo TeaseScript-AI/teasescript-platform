@@ -2023,6 +2023,18 @@ export class Parser {
     if (report !== undefined) this.diagnostics.push(report);
   }
 
+  /**
+   * Reports the operand missing here, unless its failed parse, which started at `diagnosticCount` diagnostics, reported
+   * its own error, as `1 +` in `wait 1 +` and the unclosed string of `wait "1 s` do.
+   */
+  public reportMissing(
+    diagnosticCount: number,
+    code: (typeof parserDiagnosticCode)[keyof typeof parserDiagnosticCode],
+    message: string,
+  ): void {
+    if (this.diagnostics.length === diagnosticCount) this.reportInsertion(code, message);
+  }
+
   public reportInsertion(
     code: (typeof parserDiagnosticCode)[keyof typeof parserDiagnosticCode],
     message: string,
