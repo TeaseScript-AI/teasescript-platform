@@ -1214,8 +1214,9 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
   "parse default": [
     {
       data: "its own read",
-      scalar: 'let out = fromJson("1", default: [1, D][1])',
-      collection: 'let out = fromJson("[]", default: [1, D])',
+      // text that is not JSON, so the default is the value
+      scalar: 'let out = fromJson("broken", default: [1, D][1])',
+      collection: 'let out = fromJson("broken", default: [1, D])',
       rule: { data: "typed", own: (k, _, h) => (k === "1" ? `[1, ${h}][1]` : `[1, ${h}]`) },
     },
   ],
