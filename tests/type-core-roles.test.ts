@@ -484,8 +484,8 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
  * (inline data a published choice selects owes the store's boundary at the host value, an unselected property none),
  * a carrier of a carrier and a carrier inside a literal inside a carrier (inline and named), inline and named data in one
  * selected collection (the named data's C1 at the selecting expression, the inline data's boundary alone: r4.63 (1), (2),
- * TABLE r4.67 (3)), a choice over a held list
- * (§3.3's record boundary beside C1), a union holding a reference across two carriers (opaque by dispatch, checked at
+ * TABLE r4.67 (3)) and inline data beside an own read's named data (its C1 at the store's value), a choice over a held
+ * list (§3.3's record boundary beside C1), a union holding a reference across two carriers (opaque by dispatch, checked at
  * its consumer), and nullable root and inner receivers of a member (r4.60 beside each receiver's C5 check). The mixed
  * selected-value and absent-value-text lists in both element orders are the cells test's (D1).
  */
@@ -549,6 +549,17 @@ test("the role matrix's compositions give their exact records, in both orders (�
       C copy-type out.element [integer] 30:58
       B copy-type raw [unknown] 10:19
       B copy-type out.element [integer] 37:46`,
+    ],
+    [
+      "inline data beside an own read's named data (Codex r23 N1)",
+      'let raw = hostValue\nlet out = hostValue otherwise [raw]\nout = [1]\nsay "AFTER"\n',
+      `outcome warning-runtime-check
+      D written-target warning 30:39 later
+      D written-target warning 30:55 later
+      C copy-type out [list] 30:39
+      C copy-type out.element [integer] 30:55
+      B copy-type raw [unknown] 10:19
+      B copy-type out [list] 30:39`,
     ],
     [
       "a choice over a held list",

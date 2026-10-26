@@ -415,13 +415,17 @@ export class Admission {
   /** Per provenance node, the ingresses its leaves name, and whether one of them no walk reached (`#resolve`). */
   readonly #nodeIngresses = new Map<IngressNode, ReadonlySet<PlaceId>>();
   /** Per store, the ingresses that reach its value through an operation's own read (`#ownLeaves`). */
-  readonly #ownReads = new Map<number, ReadonlySet<PlaceId>>();
+  readonly #ownReads = new Map<string, ReadonlySet<PlaceId>>();
   /** Per store and path, the ingresses of named data it brings beside its inline data (`#namedBeside`). */
   readonly #beside = new Map<string, ReadonlySet<PlaceId>>();
   /** Per store and key, its stops there (`#keyStops`). */
   readonly #keyed = new Map<string, KeyStops>();
-  /** Per store and provenance node (`#perNode`): `ownReadItem`'s answer, `ownIngress`'s whole test, `#firstStop`. */
+  /**
+   * Per store and provenance node (`#perNode`): `ownReadItem`'s answer, whether an item carries an own read's data
+   * (`ingressSiteOf`), `ownIngress`'s whole test, `#firstStop`.
+   */
   readonly #ownItems = new Map<number, Map<IngressNode, boolean>>();
+  readonly #someOwn = new Map<number, Map<IngressNode, boolean>>();
   readonly #wholeItems = new Map<number, Map<IngressNode, boolean>>();
   readonly #firstStops = new Map<number, Map<IngressNode, IngressStop | null>>();
   /** Per list of a walk's stops, the decider's snapshots of it, all and the unselected ones (`#snapshots`). */
@@ -2508,11 +2512,17 @@ export class Admission {
   public ingressSiteOf(d: Definition, at: readonly string[], item?: Item): SourceSite {
     if (d.kind !== "whole" || d.value === undefined) return d.site;
     // (the item's own ingress among them first, where it names one: the contribution that brought it; an item carrying
-    // named data the store brings beside its inline data is that named data's C1, sited by its rule, the inline data
-    // owing only its boundary: r4.63 (1), (2), TABLE r4.67 (3))
-    const own = item?.ingress === undefined ? null : this.#leafIngresses(item.ingress);
+    // named data the store brings beside its inline data, or a fallback's or a default's own read's data (a typed
+    // default's is its call's), is that data's C1, sited by its rule (an own read's at the store), the inline data owing
+    // only its boundary: r4.63 (1), (2), TABLE r4.67 (3), Codex r23 N1)
+    const node = item?.ingress;
+    const own = node === undefined ? null : this.#leafIngresses(node);
     const stops = this.#landingIndex().byStore.get(d);
-    const named = own !== null && stops !== undefined && this.#meet(own, this.#namedBeside(d, at));
+    const named =
+      own !== null &&
+      stops !== undefined &&
+      (this.#perNode(this.#someOwn, d, node!, () => this.#meet(own, this.#ownLeaves(d, false))) ||
+        this.#meet(own, this.#namedBeside(d, at)));
     let first: SourceSite | null = null;
     // (each prefix's sitings once per store, read in evaluation order only as far as the answer: Codex r23 F1)
     const lists: (readonly Siting[])[] = [];
@@ -2740,9 +2750,13 @@ export class Admission {
     });
   }
 
-  /** The ingresses that reach a store's value through an operation's own read, once per store. */
-  #ownLeaves(d: Definition): ReadonlySet<PlaceId> {
-    const known = this.#ownReads.get(d.uid);
+  /**
+   * The ingresses that reach a store's value through an operation's own read, once per store; `typed` false leaves out
+   * those only a typed default reads (F18: its data's C1 at the call's ingress, TABLE r4.66 (3)).
+   */
+  #ownLeaves(d: Definition, typed = true): ReadonlySet<PlaceId> {
+    const memoKey = `${d.uid}|${typed}`;
+    const known = this.#ownReads.get(memoKey);
     if (known !== undefined) return known;
     const { program, definitions, values } = this.pass;
     const own = new Set<PlaceId>();
@@ -2752,7 +2766,12 @@ export class Admission {
         for (const list of map.values())
           for (const stop of list) {
             program.work.charge("checks");
-            if (!stop.via.some((level) => OWN_ROLES.has(level.role))) continue;
+            if (
+              !stop.via.some(
+                (level) => OWN_ROLES.has(level.role) && (typed || !TYPED_ROLES.has(level.role)),
+              )
+            )
+              continue;
             let base = stop.value;
             while (!definitions.ingress.has(base) && program.projOf.has(base)) {
               program.work.charge("checks");
@@ -2767,7 +2786,7 @@ export class Admission {
                 for (const ingress of this.#leafIngresses(item.ingress)) own.add(ingress);
           }
     }
-    this.#ownReads.set(d.uid, own);
+    this.#ownReads.set(memoKey, own);
     return own;
   }
 
