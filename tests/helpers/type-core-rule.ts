@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { withConsumerOrder } from "../../src/type-inference/core/consumers.js";
+import type { CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./type-core-analysis.js";
 import type { CompactRecord } from "./type-core-records.js";
@@ -278,6 +279,15 @@ export function shapesOf(classes: readonly RuleClass[]): Shape[] {
 export function records(source: string): string[] {
   const request = coreRequest([{ path: "main.tease", source }]);
   assert.ok(request !== null, source);
+  return recordsOf(request).compared;
+}
+
+/** `records` of a one-file program's prepared request, beside the forward record whole they are taken from. */
+export function recordsOf(request: CoreAnalysisRequest): {
+  readonly compared: string[];
+  readonly record: CompactRecord;
+} {
+  const { source } = request.files[0]!;
   const of = (record: CompactRecord): string[] =>
     [
       ...record.diagnostics
@@ -298,7 +308,8 @@ export function records(source: string): string[] {
             `${check.site.offset}:${check.site.end}`,
         ),
     ].sort();
-  const forward = of(compactAnalysis(request));
+  const record = compactAnalysis(request);
+  const forward = of(record);
   const reversed = withSolverSeam({ reverseWorklist: true }, () =>
     withConsumerOrder(
       (list) => [...list].reverse(),
@@ -306,5 +317,5 @@ export function records(source: string): string[] {
     ),
   );
   assert.deepEqual(reversed, forward, `${source}: both orders`);
-  return forward;
+  return { compared: forward, record };
 }

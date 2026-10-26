@@ -17,7 +17,7 @@ import {
   runGlobals,
 } from "./helpers/type-core-route.js";
 import { COMPOSITIONS, roleClasses, ROLES } from "./helpers/type-core-roles.js";
-import { records, shapesOf } from "./helpers/type-core-rule.js";
+import { recordsOf, shapesOf } from "./helpers/type-core-rule.js";
 
 /*
  * The role matrix (S6-CARRIERS revision 5, §6), beside the floor: generated from the carrier table's roles
@@ -37,10 +37,11 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
   const outside = new Map<string, number>();
   let routed = 0;
   for (const shape of all) {
-    // (the shape takes its role: a carrier of its program has that operand, Codex r23 F3)
-    const parsed = coreRequest([{ path: "main.tease", source: shape.source }]);
-    assert.ok(parsed !== null, shape.name);
-    const program = new CoreProgram(parsed);
+    // (the shape takes its role: a carrier of its program has that operand, Codex r23 F3); the request serves every
+    // analysis of the shape below
+    const request = coreRequest([{ path: "main.tease", source: shape.source }]);
+    assert.ok(request !== null, shape.name);
+    const program = new CoreProgram(request);
     program.index();
     if (
       ![...program.projOf.keys(), ...program.opOf.keys()].some((value) =>
@@ -48,7 +49,7 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
       )
     )
       wrong.push(`${shape.name}: no carrier of its program has the role`);
-    const actual = records(shape.source);
+    const { compared: actual, record } = recordsOf(request);
     if (JSON.stringify(actual) !== JSON.stringify(shape.expected))
       wrong.push(
         `${shape.name}: ${JSON.stringify(actual)}, the rule owes ${JSON.stringify(shape.expected)}`,
@@ -64,10 +65,9 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
       continue;
     }
     routed += 1;
-    const request = coreRequest([{ path: "main.tease", source: shape.source }]);
-    assert.ok(request !== null && plan !== null, shape.name);
+    assert.ok(plan !== null, shape.name);
     const syntax = syntaxOf(shape.source);
-    const { stores } = derive(syntax, compactAnalysis(request));
+    const { stores } = derive(syntax, record);
     assert.deepEqual(
       plannedStores(plan),
       derivedStores(stores),
