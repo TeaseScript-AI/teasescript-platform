@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore } from "../src/type-inference/core/answers.js";
+import { CARRIER_ROLES, operandsOf } from "../src/type-inference/core/carriers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
@@ -3599,4 +3601,99 @@ test("named external data a carrier stores into a place published with a kind ow
     }
   }
   assert.deepEqual(differing, []);
+});
+
+/**
+ * S6-CARRIERS §1: the carrier table names each operand's role and its evaluation position among the carrier's
+ * operands, and every role of `CARRIER_ROLES` is some row's: a `get`'s receiver 0 and default 2 (its key is 1), an
+ * `otherwise`'s operand 0 and fallback 1, a `load`'s and a parse's default 1, a list's `+` and a choice by operand.
+ */
+test("the carrier table names each operand's role and evaluation position (S6-CARRIERS §1)", () => {
+  const source = [
+    "let xs = [1, 2]",
+    "let d = dict{a: 1}",
+    "let o = {f: 1}",
+    "let a = xs[0]",
+    "let b = o.f",
+    "let c = d.values",
+    'for item in xs { say "x" }',
+    "let e = hostValue otherwise 1",
+    "let f = xs.get(0, default: 3)",
+    'let g = load("k", default: 4)',
+    'let h = fromJson("1", default: 5)',
+    "let i = xs.take(1)",
+    "let j = xs.removeFirst()",
+    "let k = xs + [3] + [4]",
+    'let l = askChoice 1, [2], {text: "t", value: 3}',
+    "exit",
+  ].join("\n");
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const program = new CoreProgram(request);
+  program.index();
+  const rows = new Set<string>();
+  for (const value of [...program.projOf.keys(), ...program.opOf.keys()])
+    for (const { kind, role, position } of operandsOf(program, value)) {
+      assert.ok(role.startsWith(`${kind}/`), `${role} is a ${kind}'s`);
+      rows.add(`${role} ${position}`);
+    }
+  assert.deepEqual(
+    new Set([...rows].map((row) => row.slice(0, row.lastIndexOf(" ")))),
+    new Set(CARRIER_ROLES),
+  );
+  for (const row of [
+    "get/receiver 0",
+    "get/default 2",
+    "otherwise/operand 0",
+    "otherwise/fallback 1",
+    "load default/default 1",
+    "parse default/default 1",
+    "concatenation/operand 0",
+    "concatenation/operand 1",
+    "choice/option value 0",
+    "choice/option element value 1",
+    "choice/option text 2",
+  ])
+    assert.ok(rows.has(row), row);
+});
+
+/**
+ * S6-CARRIERS §2 (the design review's D1): stops are ordered by evaluation key, not by the walk's traversal, so in a
+ * list of choice objects the first element's selected text precedes the second element's selected value, whichever
+ * row reaches each, in both element orders. Each program's whole record, in both orders.
+ */
+test("a choice list's earliest evaluated ingress names C1's site, in both element orders (S6-CARRIERS §2, D1)", () => {
+  for (const [source, start] of [
+    [
+      'let out = askChoice [{text: hostValue}, {text: "two", value: hostValue}]\nout = "x"\nexit\n',
+      28,
+    ],
+    [
+      'let out = askChoice [{text: "two", value: hostValue}, {text: hostValue}]\nout = "x"\nexit\n',
+      42,
+    ],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const site = { file: "main.tease", offset: start, end: start + "hostValue".length };
+    const expected: CompactRecord = {
+      outcome: "warning-runtime-check",
+      diagnostics: [
+        { kind: "written-target", class: "warning-runtime-check", site, context: null },
+      ],
+      checks: [
+        { kind: "copy-type", target: "out", against: ["string"], boundary: false, site },
+        { kind: "copy-type", target: "out", against: ["string"], boundary: true, site },
+      ],
+    };
+    const forward = compactAnalysis(request);
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder(
+        (list) => [...list].reverse(),
+        () => compactAnalysis(request),
+      ),
+    );
+    assert.deepEqual(recordDifferences(expected, forward), [], source);
+    assert.deepEqual(recordDifferences(expected, reversed), [], `${source} reversed`);
+  }
 });

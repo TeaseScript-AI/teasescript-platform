@@ -1,6 +1,6 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { carried, keepsOwn, operandsOf, type Dispatch } from "./carriers.js";
+import { carried, keepsOwn, operandsOf, type CarrierRole, type Dispatch } from "./carriers.js";
 import { defaultOf, heldReference, termAt, typeTags, writtenOf } from "./contract.js";
 import {
   keyOf,
@@ -71,9 +71,26 @@ function family(tags: readonly ItemTag[]): boolean {
 /** A number the place admits: one an internal contribution gives, never one possible solely through external data. */
 const admitsNumber = (item: Item): boolean => item.tag === "number" && item.extOnly !== true;
 
-/** A contribution of a stored value at one path (`#stopsOf`): its order of evaluation, value and node, its written type. */
+/**
+ * An evaluation key (S6-CARRIERS §2): from the stored value down to a stop, each carrier's operand position (its own
+ * contribution after all of them, `OWN`) and each literal cell's source position. Keys compare lexicographically, a
+ * shorter key before the keys it prefixes.
+ */
+type EvaluationKey = readonly number[];
+
+/** A carrier's own contribution's position: after every operand it carries (A4: a selected copy precedes it). */
+const OWN = Number.MAX_SAFE_INTEGER;
+
+/** The order of two evaluation keys: negative where `a` is evaluated first. */
+function compareKeys(a: EvaluationKey, b: EvaluationKey): number {
+  for (let index = 0; index < a.length && index < b.length; index += 1)
+    if (a[index] !== b[index]) return a[index]! - b[index]!;
+  return a.length - b.length;
+}
+
+/** A contribution of a stored value at one path (`#stopsOf`): its evaluation key, value and node, its written type. */
 interface Stop {
-  readonly order: number;
+  readonly key: EvaluationKey;
   readonly value: PlaceId;
   readonly node: FlowNode;
   /** The path below the stored value it stands at. */
@@ -106,6 +123,8 @@ interface Via {
   readonly path: readonly string[];
   readonly strip: readonly string[];
   readonly operand: PlaceId;
+  /** The operand's role for the carrier (`carriers.ts`), part of a via's signature. */
+  readonly role: CarrierRole;
 }
 
 /** A stored value's contributions by path (`#stopsOf`): written copies, other whole values, and literals. */
@@ -801,7 +820,7 @@ export class Admission {
         ...(stops.written.get(at.join(".")) ?? []),
         ...(stops.values.get(at.join(".")) ?? []),
         ...(stops.literals.get(at.join(".")) ?? []),
-      ].sort((x, y) => x.order - y.order);
+      ].sort((x, y) => compareKeys(x.key, y.key));
       program.work.charge("checks", here.length + sortCost(here.length));
       for (const stop of here)
         if (
@@ -1048,7 +1067,7 @@ export class Admission {
   #carriersOf(
     value: PlaceId,
     strip: readonly string[],
-  ): readonly (readonly [PlaceId, readonly string[]])[] {
+  ): readonly (readonly [PlaceId, readonly string[], CarrierRole, number])[] {
     return carried(this.pass.program, value, strip, this.#dispatch);
   }
 
@@ -1554,9 +1573,15 @@ export class Admission {
       readonly Via[],
       boolean,
       boolean,
-    ])[] = [[value, node, [], [], false, [], false, true]];
-    for (let order = 0; pending.length > 0; order += 1) {
-      const [current, at, path, strip, deep, via, after, single] = pending.pop()!;
+      EvaluationKey,
+    ])[] = [[value, node, [], [], false, [], false, true, []]];
+    // a cell's position: its value's place in the literal's own source, never its index in a list one step filtered
+    const cellKey = (key: EvaluationKey, d: Definition): EvaluationKey => [
+      ...key,
+      program.places[d.value!]?.site?.start ?? 0,
+    ];
+    while (pending.length > 0) {
+      const [current, at, path, strip, deep, via, after, single, key] = pending.pop()!;
       program.work.charge("indexSteps");
       const written = this.#writtenSource(current, strip);
       const term = written?.term ?? null;
@@ -1574,6 +1599,7 @@ export class Admission {
             via,
             false,
             single && next.length === 1,
+            cellKey(key, next[index]![0]),
           ]);
         continue;
       }
@@ -1583,27 +1609,37 @@ export class Admission {
       if (!after && !literal && term === null && this.#sourceOf(current) === null) {
         const carried = this.#carriersOf(current, strip);
         if (carried.length > 0) {
-          pending.push([current, at, path, strip, deep, via, true, single]);
+          pending.push([current, at, path, strip, deep, via, true, single, [...key, OWN]]);
           for (let index = carried.length - 1; index >= 0; index -= 1) {
-            const [operand, rest] = carried[index]!;
+            const [operand, rest, role, position] = carried[index]!;
             const through = program.projOf.has(current)
               ? via
-              : [...via, { value: current, node: at, path, strip, operand }];
-            pending.push([operand, at, path, rest, true, through, false, single]);
+              : [...via, { value: current, node: at, path, strip, operand, role }];
+            pending.push([
+              operand,
+              at,
+              path,
+              rest,
+              true,
+              through,
+              false,
+              single,
+              [...key, position],
+            ]);
           }
           continue;
         }
       }
       const map = term !== null ? stops.written : literal ? stops.literals : stops.values;
-      const key = path.join(".");
+      const pathKey = path.join(".");
       // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2)
       if (path.length > 0 && map === stops.values && this.#sourceOf(current) !== null) {
-        const identity = `${key}|${strip.join(".")}|${contract.identityOf(current).id}`;
+        const identity = `${pathKey}|${strip.join(".")}|${contract.identityOf(current).id}`;
         if (sources.has(identity)) continue;
         sources.add(identity);
       }
       const stop: Stop = {
-        order,
+        key,
         value: current,
         node: at,
         path,
@@ -1613,16 +1649,32 @@ export class Admission {
         single,
         via,
       };
-      const list = map.get(key);
-      if (list === undefined) map.set(key, [stop]);
+      const list = map.get(pathKey);
+      if (list === undefined) map.set(pathKey, [stop]);
       else list.push(stop);
       if (!literal) continue;
       const next = cells(current, null);
       for (let index = next.length - 1; index >= 0; index -= 1) {
         const [d, step] = next[index]!;
-        pending.push([d.value!, d.node ?? at, [...path, step], [], false, via, false, single]);
+        pending.push([
+          d.value!,
+          d.node ?? at,
+          [...path, step],
+          [],
+          false,
+          via,
+          false,
+          single,
+          cellKey(key, d),
+        ]);
       }
     }
+    // each path's stops in evaluation order: the walk reaches a later row of one operand before an earlier cell
+    for (const map of [stops.written, stops.values, stops.literals])
+      for (const list of map.values()) {
+        program.work.charge("checks", sortCost(list.length));
+        list.sort((a, b) => compareKeys(a.key, b.key));
+      }
     this.#stops.set(value, stops);
     return stops;
   }
@@ -1645,13 +1697,13 @@ export class Admission {
     const stops = this.#stopsOf(value, node);
     const siteOf = (stop: Stop): SourceSite | null => program.places[stop.value]?.site ?? null;
     // the earliest copy whose written type reaches the rest of the path
-    let copy: { readonly order: number; readonly term: TypeTerm; readonly stop: Stop } | null =
+    let copy: { readonly key: EvaluationKey; readonly term: TypeTerm; readonly stop: Stop } | null =
       null;
     for (let length = 0; length <= at.length; length += 1) {
       program.work.charge("checks");
       for (const stop of stops.written.get(at.slice(0, length).join(".")) ?? []) {
         program.work.charge("checks");
-        if (copy !== null && stop.order > copy.order) break;
+        if (copy !== null && compareKeys(stop.key, copy.key) > 0) break;
         // (at the path's end itself a carried copy decides only where it surely is the value there: each literal it was
         // read out of has it alone, and each operation surely gives it)
         if (stop.deep && length === at.length && !(stop.single && this.#selects(stop, true)))
@@ -1660,7 +1712,7 @@ export class Admission {
         // (a written copy an operation carries decides only where the operation selects it: an operand it never gives
         // is no copy of the place, while a selected copy keeps its whole written type, A4)
         if (term !== null && (stop.via.length === 0 || this.#selects(stop)))
-          copy = { order: stop.order, term, stop };
+          copy = { key: stop.key, term, stop };
       }
     }
     // the values in evaluation order, those standing above the path's end with its rest, the literals at its end
@@ -1682,12 +1734,14 @@ export class Admission {
         if (
           positions[index]! < lists[index]!.list.length &&
           (best < 0 ||
-            lists[index]!.list[positions[index]!]!.order <
-              lists[best]!.list[positions[best]!]!.order)
+            compareKeys(
+              lists[index]!.list[positions[index]!]!.key,
+              lists[best]!.list[positions[best]!]!.key,
+            ) < 0)
         )
           best = index;
       const next = best < 0 ? null : lists[best]!.list[positions[best]!]!;
-      if (next === null || (copy !== null && copy.order < next.order))
+      if (next === null || (copy !== null && compareKeys(copy.key, next.key) < 0))
         return copy === null ? null : { term: copy.term, site: siteOf(copy.stop) };
       program.work.charge("checks", lists.length);
       positions[best]! += 1;
@@ -1788,7 +1842,7 @@ export class Admission {
             out.push({ stop, rest: at.slice(length) });
         }
     }
-    return out.sort((a, b) => a.stop.order - b.stop.order);
+    return out.sort((a, b) => compareKeys(a.stop.key, b.stop.key));
   }
 
   /**
