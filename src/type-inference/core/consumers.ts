@@ -450,7 +450,7 @@ export class Consumers {
             if (site === null) break;
             const named = admission
               .valueAt(d, at)
-              .filter((item) => isExternal(item) && !admission.ownIngress(item, d));
+              .filter((item) => isExternal(item) && !admission.ownIngress(item, d, at));
             const against = admission.admitted(root, path);
             for (const { item } of offendingKinds(named))
               this.#storeWarning(site, label, item, against);
@@ -600,7 +600,7 @@ export class Consumers {
               ? d.site
               : d.kind === "whole"
                 ? admission.ingressSiteOf(d, at, item)
-                : admission.cellSited(d.site, item, d),
+                : admission.contributionSited(d.site, item, d),
             label,
             later(item),
             nullableTags,

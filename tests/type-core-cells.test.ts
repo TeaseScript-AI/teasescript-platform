@@ -3923,6 +3923,92 @@ test("the landing index keeps F18's own check, sites a member's C1 at its read a
 });
 
 /**
+ * C9, C1 with TABLE r4.60 (Codex r21 B3, N1): named host data a store brings beside inline host data owes the
+ * destination's check at its read and keeps its source's boundary, the inline value its boundary at the store; what a
+ * receiver's operation (a copy) reads of host data that an add or an `addAll` brings owes C1 at that operation, C9 at
+ * the host value. The whole record, in both orders.
+ */
+test("named data beside inline host data keeps its check and boundary, and an add's C1 sits at its copy (Codex r21 B3, N1)", () => {
+  const at = (offset: number, end: number): CompactSite => ({ file: "main.tease", offset, end });
+  const check = (target: string, against: string, boundary: boolean, site: CompactSite) =>
+    ({ kind: "copy-type", target, against: [against], boundary, site }) as const;
+  const warned = (
+    diagnostics: readonly (readonly [CompactDiagnostic["kind"], CompactSite])[],
+    checks: readonly CompactCheck[],
+  ): CompactRecord => ({
+    outcome: "warning-runtime-check",
+    diagnostics: diagnostics.map(([kind, site]) => ({
+      kind,
+      class: "warning-runtime-check",
+      site,
+      context: "unknown",
+    })),
+    checks,
+  });
+  const nonNull = (site: CompactSite): CompactCheck => ({
+    kind: "null-check",
+    target: "hostValue",
+    against: ["non-null"],
+    boundary: false,
+    site,
+  });
+  const cases: readonly (readonly [string, CompactRecord])[] = [
+    [
+      'let raw = hostValue\nlet out = [1, hostValue, raw][2]\nsay "AFTER"\n',
+      warned(
+        [["written-target", at(45, 48)]],
+        [
+          check("out", "integer", false, at(45, 48)),
+          check("raw", "unknown", true, at(10, 19)),
+          check("out", "integer", true, at(34, 43)),
+        ],
+      ),
+    ],
+    [
+      'let xs = [[1]]\nxs.add(hostValue.toList())\nsay "AFTER"\n',
+      warned(
+        [
+          ["written-target", at(22, 40)],
+          ["member-read", at(22, 31)],
+        ],
+        [
+          check("xs.element.element", "integer", false, at(22, 40)),
+          nonNull(at(22, 31)),
+          check("xs.element", "list", true, at(22, 31)),
+        ],
+      ),
+    ],
+    [
+      'let xs = [1]\nxs.addAll(hostValue.toList())\nsay "AFTER"\n',
+      warned(
+        [
+          ["written-target", at(23, 41)],
+          ["member-read", at(23, 32)],
+        ],
+        [
+          check("xs.element", "integer", false, at(23, 41)),
+          nonNull(at(23, 32)),
+          check("xs.element", "integer", true, at(23, 32)),
+        ],
+      ),
+    ],
+  ];
+  for (const [source, expected] of cases) {
+    const request = coreRequest([{ path: "main.tease", source: `${source}exit\n` }]);
+    assert.ok(request !== null, source);
+    const forward = compactAnalysis(request);
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder(
+        (list) => [...list].reverse(),
+        () => compactAnalysis(request),
+      ),
+    );
+    assert.deepEqual(recordDifferences(expected, forward), [], source);
+    assert.deepEqual(recordDifferences(expected, reversed), [], `${source} reversed`);
+  }
+});
+
+/**
  * S6-CARRIERS §4.2, §4.3: copies of one source with equal signatures are one class, and the class decides through its
  * earliest member no test of the read's path holds (a guard marks a read possible, so it decides nothing): an unguarded
  * copy decides whether a guarded one comes before it or after it, the add of text then the misfit (A6); without a

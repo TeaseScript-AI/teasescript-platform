@@ -173,8 +173,10 @@ interface IngressStop {
   readonly key: EvaluationKey;
   /** The ingress's own expression, C9's site (r4.29). */
   readonly site: SourceSite;
-  /** The stop's own expression, C1's site (§3.4): the ingress itself where it is whole, a member read of it else. */
+  /** The stop's own expression (§3.4): the ingress itself where it is whole, a member read of it else. */
   readonly reads: SourceSite;
+  /** C1's site for it (`#contributionSite`): the stop's own expression, or what a receiver's operation reads of it. */
+  readonly contribution: SourceSite;
   readonly whole: boolean;
 }
 
@@ -354,6 +356,8 @@ export class Admission {
   readonly #hostSeen = new Set<string>();
   /** Per provenance node, the ingresses its leaves name, and whether one of them no walk reached (`#resolve`). */
   readonly #nodeIngresses = new Map<IngressNode, ReadonlySet<PlaceId>>();
+  /** Per store and path, the ingresses of named data it brings beside its inline data (`#namedBeside`). */
+  readonly #beside = new Map<string, ReadonlySet<PlaceId>>();
   readonly #resolved = new Map<IngressNode, boolean>();
   readonly #f18 = new Map<
     PlaceId,
@@ -2271,11 +2275,10 @@ export class Admission {
    */
   #contributionSite(stop: Stop, d: Definition): SourceSite {
     const { program } = this.pass;
-    for (let index = stop.via.length - 1; index >= 0; index -= 1) {
-      const level = stop.via[index]!;
-      if (RECEIVER_ROLES.has(level.role) && level.operand === stop.value)
-        return program.places[level.value]?.site ?? d.site;
-    }
+    // (only the innermost row takes the stop's value as its operand: a walk descends, each value one row's operand)
+    const level = stop.via.at(-1);
+    if (level !== undefined && RECEIVER_ROLES.has(level.role) && level.operand === stop.value)
+      return program.places[level.value]?.site ?? d.site;
     return program.places[stop.value]?.site ?? d.site;
   }
 
@@ -2636,6 +2639,7 @@ export class Admission {
           key: stop.key,
           site,
           reads: program.places[stop.value]?.site ?? site,
+          contribution: this.#contributionSite(stop, d),
           // (a loop variable's place takes its domain from the iterable, never inline: C1 beside the boundary, r4.63 (4))
           whole:
             d.how !== "loop variable" &&
@@ -2829,27 +2833,80 @@ export class Admission {
     return d.kind === "add" ? [...d.path, "element"] : d.path;
   }
 
-  /** Whether an item's external data came in at the store `d` itself (C9: its boundary there checks it). */
-  public ownIngress(item: Item, d: Definition): boolean {
+  /**
+   * Whether an item's external data came in at the store `d` itself (C9: its boundary there checks it): data that stands
+   * whole in the store's value, with what that ingress holds (a typed default's data is its call's). A member the store
+   * brings of host data (r4.60), or named data the store brings beside the inline data at `at`, owes its own check
+   * (Codex r21 B3).
+   */
+  public ownIngress(item: Item, d: Definition, at: readonly string[]): boolean {
     if (item.ingress === undefined) return false;
     const stops = this.#landingIndex().byStore.get(d);
     if (stops === undefined) return false;
-    // (an item merging inline whole data with a member the store brings of host data owes the member's check: r4.60)
-    const ingresses = [...this.#leafIngresses(item.ingress)];
-    return (
-      stops.some((stop) => stop.whole && ingresses.includes(stop.ingress)) &&
-      !stops.some((stop) => !stop.whole && ingresses.includes(stop.ingress))
-    );
+    const ingresses = this.#leafIngresses(item.ingress);
+    if (
+      !stops.some((stop) => stop.whole && ingresses.has(stop.ingress)) ||
+      stops.some((stop) => !stop.whole && ingresses.has(stop.ingress))
+    )
+      return false;
+    for (const ingress of this.#namedBeside(d, at, stops)) if (ingresses.has(ingress)) return false;
+    return true;
   }
 
-  /** C1's site for an item a store brings (§3.4): the earliest evaluated of its contributions there, else `site`. */
+  /**
+   * The ingresses of the named external data a store brings at `at` outside every ingress its value holds whole and
+   * every operation's own read (C10's): what an item merging them with inline data owes beside its boundary. Once per
+   * store and path.
+   */
+  #namedBeside(
+    d: Definition,
+    at: readonly string[],
+    stops: readonly IngressStop[],
+  ): ReadonlySet<PlaceId> {
+    const memoKey = `${d.uid}|${at.join(".")}`;
+    const known = this.#beside.get(memoKey);
+    if (known !== undefined) return known;
+    const { program, values } = this.pass;
+    const inline = new Set(stops.filter((stop) => stop.whole).map((stop) => stop.ingress));
+    const out = new Set<PlaceId>();
+    for (const { stop, rest } of this.#contributions(d, at)) {
+      program.work.charge("checks");
+      if (
+        this.#sourceOf(stop.value) === null ||
+        stop.via.some((level) => inline.has(level.value) || OWN_ROLES.has(level.role))
+      )
+        continue;
+      for (const item of this.#run(
+        values.valueItems(stop.value, stop.node, [...stop.strip, ...rest]),
+      ))
+        if (isExternal(item) && item.ingress !== undefined)
+          for (const ingress of this.#leafIngresses(item.ingress)) out.add(ingress);
+    }
+    this.#beside.set(memoKey, out);
+    return out;
+  }
+
+  /** C9's site for an item a store brings (§3.4): the earliest evaluated of its contributions there, else `site`. */
   public cellSited(site: SourceSite, item: Item, d: Definition): SourceSite {
-    if (item.ingress === undefined) return site;
+    return this.#firstStop(item, d)?.reads ?? site;
+  }
+
+  /**
+   * C1's site for an item an add or an `addAll` brings (§3.4, r4.60): the earliest evaluated of its contributions, what
+   * a receiver's operation reads of it at that operation (`xs.add(hostValue.get(0, default: 1))`: the `get`, Codex r21
+   * N1), else `site`.
+   */
+  public contributionSited(site: SourceSite, item: Item, d: Definition): SourceSite {
+    return this.#firstStop(item, d)?.contribution ?? site;
+  }
+
+  /** The earliest evaluated of a store's stops of an item's ingresses (its own expression). */
+  #firstStop(item: Item, d: Definition): IngressStop | undefined {
+    if (item.ingress === undefined) return undefined;
     const stops = this.#landingIndex().byStore.get(d);
-    if (stops === undefined) return site;
-    // (the earliest evaluated of the item's own contributions there: its own expression)
+    if (stops === undefined) return undefined;
     const ingresses = this.#leafIngresses(item.ingress);
-    return stops.find((stop) => ingresses.has(stop.ingress))?.reads ?? site;
+    return stops.find((stop) => ingresses.has(stop.ingress));
   }
 
   /** C9: the boundary check of an ingress store, once, against its destination's admitted type when it is published. */
