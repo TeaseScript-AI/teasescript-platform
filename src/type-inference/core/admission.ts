@@ -2326,6 +2326,9 @@ export class Admission {
         return copy === null ? null : { term: copy.term, site: siteOf(copy.stop) };
       program.work.charge("checks", lists.length);
       positions[best]! += 1;
+      // (a typed default's literal is the call's input, not the stored value's own element: where the default holds host
+      // data it leaves the path open, and the call decides nothing there beside it, F18, TABLE r4.66 (3))
+      if (next.via.some((level) => TYPED_ROLES.has(level.role))) continue;
       const rest = at.slice(lists[best]!.length);
       const items = withoutEmpty(
         this.#run(values.valueItems(next.value, next.node, [...next.strip, ...rest])),

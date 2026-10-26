@@ -130,7 +130,6 @@ const CLASSES: readonly FloorClass[] = [
     form: (k, v) => `load("parcel", default: [${k}, ${v}][1])`,
     endpoints: BOTH,
     data: "typed",
-    declares: true,
   },
   {
     carrier: "load default",
@@ -146,7 +145,6 @@ const CLASSES: readonly FloorClass[] = [
     form: (k, v) => `fromJson("broken", default: [${k}, ${v}][1])`,
     endpoints: BOTH,
     data: "typed",
-    declares: true,
   },
   {
     carrier: "parse default",
@@ -319,7 +317,8 @@ function owed(
     out.push(`D warning-runtime-check ${site} ${state === "later" ? "later" : "unknown"}`);
   };
   // each destination path's state: the place itself published by its one store or decided by the later one; a
-  // collection's element decided at the declaration where the carrier passes the decision on
+  // collection's element decided at the declaration where the carrier passes the decision on (a typed default's literal
+  // does not: F18 decides the list, its element open beside host data, TABLE r4.66 (3) with A7)
   const whole: State = later ? "later" : "published";
   const element: State = floor.declares === true ? "decided" : whole;
   const paths = (list: string): (readonly [string, string, State])[] => [
