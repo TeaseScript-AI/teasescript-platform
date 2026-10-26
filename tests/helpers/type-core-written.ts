@@ -931,12 +931,19 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
 const COMPOSED: readonly Decision[] = ["written", "early copy", "later copy"];
 
 /**
- * V30 §13's compositions of a type name `t` beyond `V30_TYPE_MATRIX`'s forms (Astra's M1): unions inside a typed set or
- * dict (§13's valid examples), at deeper list levels, with an optional member or optional whole, of three names; optional
- * set elements and dict values and optional typed sets and dicts; optional layers in mixed collections; typed sets and
- * dicts inside lists, sets and dicts; three mixed levels; and every placement of `?` in lists nested to depth three. A
- * union holding a whole collection beside another type is §13's error and has none: `list`, `set` and `dict` take no
- * union; `null?` is `null`, so `null` takes no optional leaf.
+ * Representative compositions of a type name `t` beyond `V30_TYPE_MATRIX`'s forms (Astra's M1), exactly these:
+ * - unions `(T | U) set`, `(T | U) dict` (§13's valid examples b, c), `(T | U)[][]`, `(T | U)[][][]`, `(T | U)?`,
+ *   `T? | U`, `(T? | U)[]` and `T | U | V`;
+ * - `T? set`, `T? dict`, `T set?`, `T dict?`, `T? set?`, `T? dict?`;
+ * - `T[]? set`, `T[]? dict`, `T?[] set`, `T?[] dict`;
+ * - `T set[]`, `T dict[]`, `T set set`, `T dict dict`, `T dict set`, `T set dict`;
+ * - `T[][] set`, `T[][] dict`;
+ * - and every placement of `?` in lists nested two and three deep.
+ * Left out: the other placements of `?` in mixed forms, even two deep (`T set?[]`, `T? set[]`, `T[] set?`, `T set? set`
+ * and their dict forms); the other placements of `?` around unions (`(T | U)?[]`, `(T | U)[]?`, `(T | U) set?`); other
+ * member combinations, four or more names, and unions nested further (`((T | U) set)[]`); the other three-level mixed
+ * sequences (`T set[][]`, `T[] set[]`, `T dict[] set`, …). A union holding a whole collection beside another type is
+ * §13's error and has none: `list`, `set` and `dict` take no union; `null?` is `null`, so `null` takes no optional leaf.
  */
 function compositionsOf(t: Form, u: Form, base: string): Form[] {
   const opt = (of: Form): Form => (base === "null" ? of : optional(of));
@@ -997,7 +1004,7 @@ function compositionsOf(t: Form, u: Form, base: string): Form[] {
  * three (`T[][]`, `T?[][]`, `T[]?[]`, `T[] set`, `T[] dict`, `T[][][]`), × the place written, an early or a later copy, a
  * copy at the end of a chain of two or three copies, for a list form a copy of its element (a typed index projection)
  * or a copy of that copy × the host value direct, named or held at an index; for a form of depth one at most a copy of
- * a place typed by each seed (`SEEDS`), the host value direct; and the compositions §13's grammar makes of the name
+ * a place typed by each seed (`SEEDS`), the host value direct; and representative compositions of the name
  * through the same depth (`compositionsOf`), written, an early and a later copy, the host value direct. `null?` is
  * `null`, so the forms that only make `null` optional are left out, while its optional collection layers (`null[]?`,
  * `null[]?[]`) remain. A union holding a whole collection beside another type is §13's compile error and has no form
@@ -1028,7 +1035,7 @@ export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
       // a union never holds a whole collection beside another type (§13): unions of the others only
       ...(collected ? [] : [union(t, other), collection("list", union(t, other))]),
     ];
-    // the compositions §13's grammar makes of them through the claimed depth (Astra's M1), each written, an early and a
+    // representative compositions of them through the same depth (Astra's M1, `compositionsOf`), each written, an early and a
     // later copy, the host value direct
     // (each written text once: `null set?` is both an optional set of `null` and one of `null?`)
     const known = new Set(forms.map(formText));
