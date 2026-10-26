@@ -22,6 +22,7 @@ import {
   targetName,
   type CoreDiagnostic,
   type CoreResult,
+  type DiagnosticKind,
   type Obligation,
 } from "../src/type-inference/core/result.js";
 import { itemScope } from "./helpers/type-core-items.js";
@@ -126,7 +127,7 @@ test("a target names a selection or index `element`, a dict's value `entry` (§1
 const at = (start: number, end: number, file = 0) => ({ file, start, end });
 
 function warning(
-  kind: CoreDiagnostic["kind"],
+  kind: DiagnosticKind,
   item: Item,
   obligation: Omit<Obligation, "boundary">,
 ): CoreDiagnostic {

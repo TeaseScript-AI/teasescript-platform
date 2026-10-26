@@ -55,9 +55,25 @@ export interface Provenance {
   readonly context: ContextWord;
 }
 
-/** An error, or a warning with its explanation and its one obligation (§4). */
+/**
+ * A written type that V30 §13 does not allow: a union that holds a whole list, set or dict beside another type
+ * (`written.ts`). It is the written type's own error, so no consumer owns it.
+ */
+export interface WrittenTypeError {
+  readonly class: "compile-error";
+  readonly kind: "written-type";
+  /** The whole written type. */
+  readonly site: SourceSite;
+  /** The offending union, the first in source order. */
+  readonly union: SourceSite;
+  /** The type V30 suggests in the union's place (`(integer | string)[]` for `integer | string[]`), or `null`. */
+  readonly suggestion: string | null;
+}
+
+/** An error, a written type's error, or a warning with its explanation and its one obligation (§4). */
 export type CoreDiagnostic =
   | { readonly class: "compile-error"; readonly kind: DiagnosticKind; readonly site: SourceSite }
+  | WrittenTypeError
   | {
       readonly class: "warning-runtime-check";
       readonly kind: DiagnosticKind;
@@ -171,7 +187,7 @@ export interface RecordObligation {
 
 export interface RecordDiagnostic {
   readonly class: DiagnosticClass;
-  readonly kind: DiagnosticKind;
+  readonly kind: CoreDiagnostic["kind"];
   readonly site: RecordSite;
   /** A warning's explanation: writer tokens `kind@file:offset`, `more` always `false` (F28). */
   readonly provenance?: {
@@ -180,6 +196,9 @@ export interface RecordDiagnostic {
     readonly context: ContextWord;
   };
   readonly obligation?: RecordObligation;
+  /** A written type's error: its offending union and V30's suggestion (`WrittenTypeError`). */
+  readonly union?: RecordSite;
+  readonly suggestion?: string | null;
 }
 
 /**
@@ -215,7 +234,14 @@ export function coreRecord(result: CoreResult, paths: readonly string[]): CoreRe
   });
   const diagnostics = result.diagnostics.map((diagnostic): RecordDiagnostic =>
     diagnostic.class === "compile-error"
-      ? { class: diagnostic.class, kind: diagnostic.kind, site: site(diagnostic.site) }
+      ? {
+          class: diagnostic.class,
+          kind: diagnostic.kind,
+          site: site(diagnostic.site),
+          ...(diagnostic.kind === "written-type"
+            ? { union: site(diagnostic.union), suggestion: diagnostic.suggestion }
+            : {}),
+        }
       : {
           class: diagnostic.class,
           kind: diagnostic.kind,

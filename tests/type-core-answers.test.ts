@@ -256,7 +256,11 @@ test("a receiver that may be a reference answers by F19a before its exact value 
   const read = (source: string, text: string): string => {
     const { answers, node } = analysed(source);
     const at = answers.at(node(text));
-    const diagnostics = answers.diagnostics.map((d) => `${d.kind} ${d.class}`).sort();
+    // (a written union of a list and the speaker is also V30 §13's error, which these reads set aside)
+    const diagnostics = answers.diagnostics
+      .filter((d) => d.kind !== "written-type")
+      .map((d) => `${d.kind} ${d.class}`)
+      .sort();
     const checks = answers.checks.map((check) => check.kind).sort();
     return `${at?.route}: ${at?.items.map((item) => item.tag).join(",")}; ${diagnostics.join(", ")}; ${checks.join(", ")}`;
   };
@@ -321,7 +325,11 @@ test("a `get` on a receiver that may be a reference is the runtime's, no default
       );
       assert.ok(node !== undefined, call);
       const at = answers.at(node);
-      const diagnostics = answers.diagnostics.map((d) => `${d.kind} ${d.class}`).sort();
+      // (a written union of a list and the speaker is also V30 §13's error, which these reads set aside)
+      const diagnostics = answers.diagnostics
+        .filter((d) => d.kind !== "written-type")
+        .map((d) => `${d.kind} ${d.class}`)
+        .sort();
       const checks = answers.checks.map((check) => check.kind).sort();
       return `${at?.route}: ${at?.items.map((item) => item.tag).join(",")}; ${diagnostics.join(", ")}; ${checks.join(", ")}`;
     });

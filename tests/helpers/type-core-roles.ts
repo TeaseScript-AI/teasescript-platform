@@ -514,7 +514,8 @@ export const COMPOSITIONS: readonly (readonly [string, string, string])[] = (() 
     [
       "a union holding a reference across two carriers",
       "let holder: integer[] | speaker = [1]\nlet out = [holder][0].get(0, default: 7)\nrepeat out {}\n",
-      `outcome warning-runtime-check
+      `outcome compile-error
+      D written-type error 12:31 -
       D member-read warning 48:59 unmodelled
       D integer-use warning 86:89 unmodelled
       C null-check [holder][0] [non-null] 48:59

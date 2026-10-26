@@ -44,9 +44,11 @@ import {
   type CoreOutcome,
   type CoreResult,
   type Obligation,
+  type WrittenTypeError,
 } from "./result.js";
 import { Solver, type DemandWork, type Work } from "./solver.js";
 import { Values } from "./values.js";
+import { writtenTypeErrors } from "./written.js";
 
 /*
  * The answer contract of the coarse core (checkpoint 9; the port plan's S3 note §1): `analyseCore` runs once per
@@ -267,9 +269,11 @@ export function analyseCore(request: CoreAnalysisRequest): Answers {
     exhausted = error.limit;
   }
   // a stop in the setup leaves nothing to ask: the answers are the stop's
-  return analysed === null
-    ? new StoppedAnswers(program, exhausted!)
-    : new CoreAnswers(analysed.pass, analysed.consumers, exhausted);
+  if (analysed === null) return new StoppedAnswers(program, exhausted!);
+  // the written types' own errors (V30 §13's union rule), from the declarations alone
+  const written =
+    exhausted === null ? writtenTypeErrors(request.files.map((file) => file.program)) : [];
+  return new CoreAnswers(analysed.pass, analysed.consumers, exhausted, written);
 }
 
 /** The core's result in S2's record shape, derived from its answers: the diagnostics, and the checks none owns. */
@@ -481,14 +485,19 @@ class CoreAnswers implements Answers {
   readonly #obligations = new Map<string, Obligation[]>();
   #stores: Map<FlowNode, Definition> | null = null;
 
-  public constructor(pass: CorePass, consumers: Consumers, exhausted: BudgetLimit | null) {
+  public constructor(
+    pass: CorePass,
+    consumers: Consumers,
+    exhausted: BudgetLimit | null,
+    written: readonly WrittenTypeError[],
+  ) {
     this.#pass = pass;
     this.#consumers = consumers;
     const program = pass.program;
     this.graph = program.flow;
     this.dominators = program.dom;
     this.initializers = initializersOf(program);
-    this.diagnostics = exhausted === null ? [...consumers.diagnostics] : [];
+    this.diagnostics = exhausted === null ? [...written, ...consumers.diagnostics] : [];
     this.outcome = exhausted === null ? outcomeOf(this.diagnostics) : "budget-error";
     // each warning's obligation, one per warning (§4), then the boundary checks no warning owes
     const checks: Obligation[] = [];
