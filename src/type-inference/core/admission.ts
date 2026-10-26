@@ -178,11 +178,6 @@ const OWN_ROLES: ReadonlySet<CarrierRole> = new Set([
 ]);
 
 /**
- * An ingress stop of a landing's walk (S6-CARRIERS §3.1): the ingress it is or reads through projections, its store,
- * its contribution path and its boundary path (the contribution path up to the first object property step), its
- * evaluation key, the ingress's own span, and whether it is the ingress whole and the operation's own read.
- */
-/**
  * A whole store's alias (S6-CARRIERS §4.1): the stable source path its value reads at `at` below it (the value itself,
  * or a literal's one read cell) and the node it is read at, its own guard's key and node whatever its class.
  */
@@ -208,6 +203,11 @@ function aliasKeyAt(alias: Alias, rest: readonly string[]): Key | null {
   return keyOf(keyPlace(alias.source), [...keyPath(alias.source), ...rest.slice(alias.at.length)]);
 }
 
+/**
+ * An ingress stop of a landing's walk (S6-CARRIERS §3.1): the ingress it is or reads through projections, its store,
+ * its contribution path and its boundary path (the contribution path up to the first object property step), its
+ * evaluation key, the ingress's own span, and whether it is the ingress whole.
+ */
 interface IngressStop {
   readonly ingress: PlaceId;
   readonly d: Definition;
@@ -284,6 +284,19 @@ interface Stops {
   readonly written: Map<string, Stop[]>;
   readonly values: Map<string, Stop[]>;
   readonly literals: Map<string, Stop[]>;
+}
+
+/** A store's stops at one key (`#keyStops`): the selected ones in evaluation order, its sitings and named data. */
+interface KeyStops {
+  readonly selected: readonly Stop[];
+  readonly sitings: () => readonly Siting[];
+  readonly named: () => readonly Stop[];
+}
+
+/** A contribution C1 may be sited at (`ingressSiteOf`): the ingress it reads, or `null` for named data sited by itself. */
+interface Siting {
+  readonly stop: Stop;
+  readonly ingress: PlaceId | null;
 }
 
 /** The values at one depth of a stored value's path, and the first of them no literal of it holds (`wholeBelow`). */
@@ -405,6 +418,14 @@ export class Admission {
   readonly #ownReads = new Map<number, ReadonlySet<PlaceId>>();
   /** Per store and path, the ingresses of named data it brings beside its inline data (`#namedBeside`). */
   readonly #beside = new Map<string, ReadonlySet<PlaceId>>();
+  /** Per store and key, its stops there (`#keyStops`). */
+  readonly #keyed = new Map<string, KeyStops>();
+  /** Per store and provenance node (`#perNode`): `ownReadItem`'s answer, `ownIngress`'s whole test, `#firstStop`. */
+  readonly #ownItems = new Map<number, Map<IngressNode, boolean>>();
+  readonly #wholeItems = new Map<number, Map<IngressNode, boolean>>();
+  readonly #firstStops = new Map<number, Map<IngressNode, IngressStop | null>>();
+  /** Per list of a walk's stops, the decider's snapshots of it, all and the unselected ones (`#snapshots`). */
+  readonly #snapshotLists = new WeakMap<readonly Stop[], (readonly Stop[] | undefined)[]>();
   readonly #resolved = new Map<IngressNode, boolean>();
   readonly #f18 = new Map<
     PlaceId,
@@ -2302,7 +2323,8 @@ export class Admission {
       null;
     for (let length = 0; length <= at.length; length += 1) {
       program.work.charge("checks");
-      for (const stop of stops.written.get(at.slice(0, length).join(".")) ?? []) {
+      const written = this.#snapshots(stops.written.get(at.slice(0, length).join(".")), false);
+      for (const stop of written ?? []) {
         program.work.charge("checks");
         if (copy !== null && compareKeys(stop.key, copy.key) > 0) break;
         // (at the path's end itself a carried copy decides only where it surely is the value there: each literal it was
@@ -2319,14 +2341,14 @@ export class Admission {
     // the values in evaluation order, those standing above the path's end with its rest, the literals at its end
     const lists: { readonly list: readonly Stop[]; readonly length: number }[] = [];
     // (a value a projection selects stands for its parts below the path, never at it)
-    const own = (list: readonly Stop[] | undefined): readonly Stop[] | undefined =>
-      list?.some((stop) => stop.deep) === true ? list.filter((stop) => !stop.deep) : list;
     for (let length = 0; length <= at.length; length += 1) {
-      const key = at.slice(0, length).join(".");
-      const list = length === at.length ? own(stops.values.get(key)) : stops.values.get(key);
+      const list = this.#snapshots(
+        stops.values.get(at.slice(0, length).join(".")),
+        length === at.length,
+      );
       if (list !== undefined) lists.push({ list, length });
     }
-    const literals = own(stops.literals.get(at.join(".")));
+    const literals = this.#snapshots(stops.literals.get(at.join(".")), true);
     if (literals !== undefined) lists.push({ list: literals, length: at.length });
     const positions = lists.map(() => 0);
     for (;;) {
@@ -2366,6 +2388,38 @@ export class Admission {
       )
         return { term: null, site: siteOf(next) };
     }
+  }
+
+  /**
+   * A list of a walk's stops as the decider reads it, once per list: each snapshot once (TABLE §8: one key read here),
+   * so of the reads of one key through one chain of operations at one strip only the first is read, the later ones
+   * holding what it holds (k reads of one host global, decided at k paths: Codex r23 F1); `shallow` leaves out the
+   * values a projection selects.
+   */
+  #snapshots(list: readonly Stop[] | undefined, shallow: boolean): readonly Stop[] | undefined {
+    if (list === undefined) return undefined;
+    let memo = this.#snapshotLists.get(list);
+    if (memo === undefined) this.#snapshotLists.set(list, (memo = []));
+    const known = memo[shallow ? 1 : 0];
+    if (known !== undefined) return known;
+    const { program, contract, guards } = this.pass;
+    const seen = new Map<readonly Via[], Set<string>>();
+    const out: Stop[] = [];
+    for (const stop of list) {
+      program.work.charge("checks");
+      if (shallow && stop.deep) continue;
+      const copied = contract.copiedKey(stop.value);
+      if (copied !== null) {
+        const snapshot = `${stop.strip.join(".")}|${stop.deep}|${stop.single}|${guards.guardedRead(stop.value) ? "g" : ""}${copied}`;
+        let reads = seen.get(stop.via);
+        if (reads === undefined) seen.set(stop.via, (reads = new Set()));
+        if (reads.has(snapshot)) continue;
+        reads.add(snapshot);
+      }
+      out.push(stop);
+    }
+    memo[shallow ? 1 : 0] = out;
+    return out;
   }
 
   /**
@@ -2435,17 +2489,12 @@ export class Admission {
     at: readonly string[],
   ): readonly { readonly stop: Stop; readonly rest: readonly string[] }[] {
     if (d.value === undefined) return [];
-    const stops = this.#stopsOf(d.value, d.node);
     const out: { stop: Stop; rest: readonly string[] }[] = [];
-    for (let length = 0; length <= at.length; length += 1) {
-      const key = at.slice(0, length).join(".");
-      for (const map of [stops.written, stops.values, stops.literals])
-        for (const stop of map.get(key) ?? []) {
-          this.pass.program.work.charge("checks");
-          if (stop.via.length === 0 || this.#selects(stop))
-            out.push({ stop, rest: at.slice(length) });
-        }
-    }
+    for (let length = 0; length <= at.length; length += 1)
+      for (const stop of this.#keyStops(d, at.slice(0, length).join(".")).selected) {
+        this.pass.program.work.charge("checks");
+        out.push({ stop, rest: at.slice(length) });
+      }
     return out.sort((a, b) => compareKeys(a.stop.key, b.stop.key));
   }
 
@@ -2457,33 +2506,133 @@ export class Admission {
    * decided place below a selecting operation (the set's sites).
    */
   public ingressSiteOf(d: Definition, at: readonly string[], item?: Item): SourceSite {
-    const { program, definitions } = this.pass;
-    if (d.kind !== "whole") return d.site;
+    if (d.kind !== "whole" || d.value === undefined) return d.site;
     // (the item's own ingress among them first, where it names one: the contribution that brought it; an item carrying
     // named data the store brings beside its inline data is that named data's C1, sited by its rule, the inline data
     // owing only its boundary: r4.63 (1), (2), TABLE r4.67 (3))
     const own = item?.ingress === undefined ? null : this.#leafIngresses(item.ingress);
     const stops = this.#landingIndex().byStore.get(d);
-    const beside = own === null || stops === undefined ? null : this.#namedBeside(d, at, stops);
-    const named = beside !== null && [...own!].some((ingress) => beside.has(ingress));
+    const named = own !== null && stops !== undefined && this.#meet(own, this.#namedBeside(d, at));
     let first: SourceSite | null = null;
-    for (const { stop } of this.#contributions(d, at)) {
-      if (stop.via.some((level) => OWN_ROLES.has(level.role))) continue;
-      if (this.#namedBelowCombining(stop) || this.#namedMember(stop))
-        return this.#contributionSite(stop, d);
-      // (a contribution read through projections of its source stands where that source does)
-      let value = stop.value;
+    // (each prefix's sitings once per store, read in evaluation order only as far as the answer: Codex r23 F1)
+    const lists: (readonly Siting[])[] = [];
+    for (let length = 0; length <= at.length; length += 1)
+      lists.push(this.#keyStops(d, at.slice(0, length).join(".")).sitings());
+    const positions = lists.map(() => 0);
+    for (;;) {
+      let best = -1;
+      for (let index = 0; index < lists.length; index += 1)
+        if (
+          positions[index]! < lists[index]!.length &&
+          (best < 0 ||
+            compareKeys(
+              lists[index]![positions[index]!]!.stop.key,
+              lists[best]![positions[best]!]!.stop.key,
+            ) < 0)
+        )
+          best = index;
+      if (best < 0) break;
+      this.pass.program.work.charge("checks", lists.length);
+      const { stop, ingress } = lists[best]![positions[best]!++]!;
+      if (ingress === null) return this.#contributionSite(stop, d);
+      if (named) continue;
+      if (own === null || own.has(ingress)) return this.#contributionSite(stop, d);
+      first ??= this.#contributionSite(stop, d);
+    }
+    return first ?? d.site;
+  }
+
+  /** Whether two sets of ingresses share one, reading the smaller. */
+  #meet(a: ReadonlySet<PlaceId>, b: ReadonlySet<PlaceId>): boolean {
+    const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+    for (const ingress of small) {
+      this.pass.program.work.charge("checks");
+      if (large.has(ingress)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * A store's stops at one key, once per store and key (Codex r23 F1: a path's readers take its prefixes' lists, never
+   * the store's whole walk again): the ones its operations may give (`#selects`), in evaluation order, and, on demand,
+   * the ones C1 may be sited at (`ingressSiteOf`) and the named data among them (`#namedBeside`).
+   */
+  #keyStops(d: Definition, key: string): KeyStops {
+    const memoKey = `${d.uid}|${key}`;
+    const known = this.#keyed.get(memoKey);
+    if (known !== undefined) return known;
+    const { program, definitions } = this.pass;
+    const stops = this.#stopsOf(d.value!, d.node);
+    const selected: Stop[] = [];
+    for (const map of [stops.written, stops.values, stops.literals])
+      for (const stop of map.get(key) ?? []) {
+        program.work.charge("checks");
+        if (stop.via.length === 0 || this.#selects(stop)) selected.push(stop);
+      }
+    program.work.charge("checks", sortCost(selected.length));
+    selected.sort((a, b) => compareKeys(a.key, b.key));
+    // (the ingress a value reads through projections of it, never an iteration's: where its source stands)
+    const baseOf = (value: PlaceId): PlaceId => {
       for (
         let projection = program.projOf.get(value);
         projection !== undefined && projection.step !== "iteration";
         projection = program.projOf.get(value)
-      )
+      ) {
+        program.work.charge("checks");
         value = projection.owner;
-      if (!definitions.ingress.has(value) || named) continue;
-      if (own === null || own.has(value)) return this.#contributionSite(stop, d);
-      first ??= this.#contributionSite(stop, d);
-    }
-    return first ?? d.site;
+      }
+      return value;
+    };
+    let sitings: readonly Siting[] | null = null;
+    let named: readonly Stop[] | null = null;
+    const entry: KeyStops = {
+      selected,
+      // an operation's own read is no contribution C1 is sited at (C10); named data below a combining operation or a
+      // member of named data is sited at its own expression (`ingress` null), an ingress where it is read
+      sitings: () => {
+        if (sitings !== null) return sitings;
+        const out: Siting[] = [];
+        for (const stop of selected) {
+          program.work.charge("checks");
+          if (stop.via.some((level) => OWN_ROLES.has(level.role))) continue;
+          if (this.#namedBelowCombining(stop) || this.#namedMember(stop))
+            out.push({ stop, ingress: null });
+          else {
+            const base = baseOf(stop.value);
+            if (definitions.ingress.has(base)) out.push({ stop, ingress: base });
+          }
+        }
+        return (sitings = out);
+      },
+      // named external data outside every ingress the store holds whole and every own read (`#namedBeside`)
+      named: () => {
+        if (named !== null) return named;
+        const inline = new Set(
+          (this.#landingIndex().byStore.get(d) ?? [])
+            .filter((stop) => stop.whole)
+            .map((stop) => stop.ingress),
+        );
+        const out: Stop[] = [];
+        for (const stop of selected) {
+          program.work.charge("checks");
+          // (host data itself, or a member of it, is the store's own ingress, no named data: its global has a key too)
+          let base = stop.value;
+          while (!definitions.ingress.has(base) && program.projOf.has(base)) {
+            program.work.charge("checks");
+            base = program.projOf.get(base)!.owner;
+          }
+          if (
+            !definitions.ingress.has(base) &&
+            this.#sourceOf(stop.value) !== null &&
+            !stop.via.some((level) => inline.has(level.value) || OWN_ROLES.has(level.role))
+          )
+            out.push(stop);
+        }
+        return (named = out);
+      },
+    };
+    this.#keyed.set(memoKey, entry);
+    return entry;
   }
 
   /**
@@ -2575,18 +2724,20 @@ export class Admission {
    * Whether an external item a store brings is an operation's own read's data alone (C10: a fallback's, a default's):
    * each ingress it names reaches the store's value through an own read, as host data or in named data. Its boundary is
    * against `[unknown]`, so A7's whole-store exception never stands in for the destination's check of it (TABLE r4.67
-   * (2)).
+   * (2)). It reads no path: once per store and provenance node (Codex r23 F1).
    */
   public ownReadItem(item: Item, d: Definition): boolean {
     if (item.ingress === undefined) return false;
     const ingresses = this.#leafIngresses(item.ingress);
-    if (ingresses.size === 0) return false;
-    const own = this.#ownLeaves(d);
-    for (const ingress of ingresses) {
-      this.pass.program.work.charge("checks");
-      if (!own.has(ingress)) return false;
-    }
-    return true;
+    return this.#perNode(this.#ownItems, d, item.ingress, () => {
+      if (ingresses.size === 0) return false;
+      const own = this.#ownLeaves(d);
+      for (const ingress of ingresses) {
+        this.pass.program.work.charge("checks");
+        if (!own.has(ingress)) return false;
+      }
+      return true;
+    });
   }
 
   /** The ingresses that reach a store's value through an operation's own read, once per store. */
@@ -3111,53 +3262,55 @@ export class Admission {
     const stops = this.#landingIndex().byStore.get(d);
     if (stops === undefined) return false;
     const ingresses = this.#leafIngresses(item.ingress);
-    if (
-      !stops.some((stop) => stop.whole && ingresses.has(stop.ingress)) ||
-      stops.some((stop) => !stop.whole && ingresses.has(stop.ingress))
-    )
-      return false;
-    for (const ingress of this.#namedBeside(d, at, stops)) if (ingresses.has(ingress)) return false;
-    return true;
+    // (whether the store holds the item's data whole and nowhere as a member reads no path: once per provenance node)
+    const whole = this.#perNode(this.#wholeItems, d, item.ingress, () => {
+      this.pass.program.work.charge("checks", stops.length);
+      return (
+        stops.some((stop) => stop.whole && ingresses.has(stop.ingress)) &&
+        !stops.some((stop) => !stop.whole && ingresses.has(stop.ingress))
+      );
+    });
+    return whole && !this.#meet(ingresses, this.#namedBeside(d, at));
   }
 
   /**
    * The ingresses of the named external data a store brings at `at` outside every ingress its value holds whole and
    * every operation's own read (C10's): what an item merging them with inline data owes beside its boundary. Once per
-   * store and path.
+   * store and path, reading only its prefixes' named data (`#keyStops`).
    */
-  #namedBeside(
-    d: Definition,
-    at: readonly string[],
-    stops: readonly IngressStop[],
-  ): ReadonlySet<PlaceId> {
+  #namedBeside(d: Definition, at: readonly string[]): ReadonlySet<PlaceId> {
     const memoKey = `${d.uid}|${at.join(".")}`;
     const known = this.#beside.get(memoKey);
     if (known !== undefined) return known;
-    const { program, values, definitions } = this.pass;
-    const inline = new Set(stops.filter((stop) => stop.whole).map((stop) => stop.ingress));
+    const { program, values } = this.pass;
     const out = new Set<PlaceId>();
-    for (const { stop, rest } of this.#contributions(d, at)) {
-      program.work.charge("checks");
-      // (host data itself, or a member of it, is the store's own ingress, no named data: its global has a key too)
-      let base = stop.value;
-      while (!definitions.ingress.has(base) && program.projOf.has(base)) {
+    for (let length = 0; length <= at.length; length += 1)
+      for (const stop of this.#keyStops(d, at.slice(0, length).join(".")).named()) {
         program.work.charge("checks");
-        base = program.projOf.get(base)!.owner;
+        for (const item of this.#run(
+          values.valueItems(stop.value, stop.node, [...stop.strip, ...at.slice(length)]),
+        ))
+          if (isExternal(item) && item.ingress !== undefined)
+            for (const ingress of this.#leafIngresses(item.ingress)) out.add(ingress);
       }
-      if (
-        definitions.ingress.has(base) ||
-        this.#sourceOf(stop.value) === null ||
-        stop.via.some((level) => inline.has(level.value) || OWN_ROLES.has(level.role))
-      )
-        continue;
-      for (const item of this.#run(
-        values.valueItems(stop.value, stop.node, [...stop.strip, ...rest]),
-      ))
-        if (isExternal(item) && item.ingress !== undefined)
-          for (const ingress of this.#leafIngresses(item.ingress)) out.add(ingress);
-    }
     this.#beside.set(memoKey, out);
     return out;
+  }
+
+  /** A store's answer for a provenance node, once: one that reads no path (Codex r23 F1). */
+  #perNode<T>(
+    memo: Map<number, Map<IngressNode, T>>,
+    d: Definition,
+    node: IngressNode,
+    answer: () => T,
+  ): T {
+    let known = memo.get(d.uid);
+    if (known === undefined) memo.set(d.uid, (known = new Map()));
+    const hit = known.get(node);
+    if (hit !== undefined) return hit;
+    const value = answer();
+    known.set(node, value);
+    return value;
   }
 
   /** C9's site for an item a store brings (§3.4): the earliest evaluated of its contributions there, else `site`. */
@@ -3174,13 +3327,19 @@ export class Admission {
     return this.#firstStop(item, d)?.contribution ?? site;
   }
 
-  /** The earliest evaluated of a store's stops of an item's ingresses (its own expression). */
-  #firstStop(item: Item, d: Definition): IngressStop | undefined {
-    if (item.ingress === undefined) return undefined;
+  /** The earliest evaluated of a store's stops of an item's ingresses (its own expression), once per provenance node. */
+  #firstStop(item: Item, d: Definition): IngressStop | null {
+    if (item.ingress === undefined) return null;
     const stops = this.#landingIndex().byStore.get(d);
-    if (stops === undefined) return undefined;
+    if (stops === undefined) return null;
     const ingresses = this.#leafIngresses(item.ingress);
-    return stops.find((stop) => ingresses.has(stop.ingress));
+    return this.#perNode(this.#firstStops, d, item.ingress, () => {
+      for (const stop of stops) {
+        this.pass.program.work.charge("checks");
+        if (ingresses.has(stop.ingress)) return stop;
+      }
+      return null;
+    });
   }
 
   /** C9: the boundary check of an ingress store, once, against its destination's admitted type when it is published. */

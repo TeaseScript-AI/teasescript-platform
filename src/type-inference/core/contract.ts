@@ -3085,10 +3085,12 @@ export class Contract {
           put(index.others, path, { g, value });
           continue;
         }
-        const id = `${path}|${source.id}`;
+        // (k reads of one host global are one entry as well, their leaves unioned: an occurrence stays fresh as its own
+        // leaf, never as an entry each path reads again, S6-CARRIERS §3.1, Codex r23 F1)
+        const leaf = this.#ingressLeaf(value);
+        const id = `${path}|${leaf === undefined ? source.id : (yield* this.#needKey(this.copiedKey(value)!)).id}`;
         // one snapshot: one key read here
         const exactId = `${path}|${guards.guardedRead(value) ? "g" : ""}${this.copiedKey(value)}`;
-        const leaf = this.#ingressLeaf(value);
         const read = reads.get(id);
         if (read === undefined) {
           this.facts.literalEntries += 1;

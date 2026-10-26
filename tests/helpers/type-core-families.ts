@@ -2082,6 +2082,34 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   })),
+  // S6-CARRIERS §3.1 (Codex r23 F1): k reads of one host global in one literal, its element stored and decided at k
+  // fields, each read; through an own read (a fallback's, a default's), inline, beside named data, as named data: each
+  // occurrence its own leaf, the reads one entry of the literal, each path's decider and C1 site from its prefixes' stops
+  ...(
+    [
+      ["own", "null otherwise [W][0]"],
+      ["default", "[].get(7, default: [W][0])"],
+      ["inline", "[W][0]"],
+      ["mixed", "[raw, W][0]"],
+      ["named", "null otherwise data"],
+    ] as const
+  ).map(([variant, value]): WorkFamily => ({
+    name: `A2-wide-ingresses-${variant}`,
+    measures: `§3.1: \`let out = ${value}\`, W k reads of \`hostValue\`, decided at k fields, each read (Codex r23 F1)`,
+    program: (k) => {
+      const wide = Array.from({ length: k }, () => "hostValue").join(", ");
+      return main(
+        lines(
+          "let raw = hostValue",
+          variant === "named" ? `let data = [${wide}][0]` : "",
+          `let out = ${value.replace("W", wide)}`,
+          `out = {${fields(k, () => "1")}}`,
+          rows(k, (i) => `repeat out.f${i} {}`),
+          "exit",
+        ),
+      );
+    },
+  })),
 ];
 
 /**
