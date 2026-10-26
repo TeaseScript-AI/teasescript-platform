@@ -6,7 +6,11 @@ import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
-import { recordDifferences, type CompactRecord } from "./helpers/type-core-records.js";
+import {
+  endDeviations,
+  recordDifferences,
+  type CompactRecord,
+} from "./helpers/type-core-records.js";
 
 /**
  * The coarse core against its independent expectation set (checkpoint 9, TABLE §10.2, §10.5; the port plan's §3.1):
@@ -23,12 +27,24 @@ function analysed(record: FixtureRecord): CompactRecord {
   return compactAnalysis(request);
 }
 
-test("the core gives the expected record for every record of the cells it completes", () => {
+test("the core gives the expected record for every record of the cells it completes", (t) => {
   assert.ok(asserted.length > 1_100, `asserted ${asserted.length} records`);
+  const deviating = new Map<string, number>();
+  let records = 0;
   const failures = asserted.flatMap((record) => {
-    const differences = recordDifferences(record.expected, analysed(record));
+    const actual = analysed(record);
+    const deviations = endDeviations(record.expected, actual);
+    if (deviations.length > 0) records += 1;
+    for (const kind of deviations) deviating.set(kind, (deviating.get(kind) ?? 0) + 1);
+    const differences = recordDifferences(record.expected, actual);
     return differences.length === 0 ? [] : [`${record.name}: ${differences.join("; ")}`];
   });
+  // (TABLE §3.4, D2: a member read's and an operator's sites are S8's; until then they compare by their start)
+  t.diagnostic(
+    `${asserted.length} records compared by whole sites; ${records} compare a member read's or an operator's site ` +
+      `by its start only, its end differing: ` +
+      [...deviating].map(([kind, count]) => `${kind} ${count}`).join(", "),
+  );
   assert.deepEqual(failures, []);
 });
 

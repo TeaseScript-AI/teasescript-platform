@@ -181,10 +181,11 @@ function excess(more: readonly string[], fewer: readonly string[]): string[] {
 }
 
 /**
- * The sites a record compares by their start only: a member read's and an operator's diagnostic, and a null-check at a
- * member read's site (C5's obligation). The set marks a member read's access or its receiver, and an operator's
- * operand, where the core marks the other span or the whole expression: 82 records at the set's revision `1de35708`,
- * with equal starts, none of them C1's, C9's or C10's. Their ends are the member read's and operator's own step's.
+ * The sites a record compares by their start only, by rule: a member read's and an operator's diagnostic, and a
+ * null-check at a member read's site (C5's obligation). TABLE §3.4 (D2, r4.53) fixes them: a member read's site is the
+ * member expression, an operator's its offending operand, else the operation once. The set and the core both deviate
+ * from it in places (82 records at the set's revision `1de35708`, with equal starts, none of them C1's, C9's or
+ * C10's). The core's ends are S8's, the set's Sol's revision before S8 (TABLE r4.62); every other site compares whole.
  */
 function startOnly(record: CompactRecord): ReadonlySet<string> {
   const start = (where: CompactSite): string => `${where.file}:${where.offset}`;
@@ -201,6 +202,42 @@ function startOnly(record: CompactRecord): ReadonlySet<string> {
       .filter((entry) => entry.kind === "null-check" && members.has(start(entry.site)))
       .map((entry) => `${entry.kind} ${start(entry.site)}`),
   ]);
+}
+
+/**
+ * The entries `startOnly` matched by their start whose ends differ, each as its kind, paired one to one: what the
+ * comparison leaves to S8 (TABLE §3.4, D2), reported by the cells test.
+ */
+export function endDeviations(expected: CompactRecord, actual: CompactRecord): string[] {
+  const loose = new Set([...startOnly(expected), ...startOnly(actual)]);
+  const out: string[] = [];
+  const pair = (
+    wanted: readonly { readonly kind: string; readonly site: CompactSite }[],
+    got: readonly { readonly kind: string; readonly site: CompactSite }[],
+  ): void => {
+    const left = [...got];
+    const same = (a: CompactSite, b: CompactSite): boolean =>
+      a.file === b.file && a.offset === b.offset;
+    for (const entry of wanted) {
+      if (!loose.has(`${entry.kind} ${entry.site.file}:${entry.site.offset}`)) continue;
+      const whole = left.findIndex(
+        (other) =>
+          other.kind === entry.kind &&
+          same(other.site, entry.site) &&
+          other.site.end === entry.site.end,
+      );
+      const index =
+        whole >= 0
+          ? whole
+          : left.findIndex((other) => other.kind === entry.kind && same(other.site, entry.site));
+      if (index < 0) continue;
+      if (whole < 0) out.push(entry.kind);
+      left.splice(index, 1);
+    }
+  };
+  pair(expected.diagnostics, actual.diagnostics);
+  pair(expected.checks, actual.checks);
+  return out;
 }
 
 /**
