@@ -14,6 +14,7 @@ import {
   keyOf,
   keyPath,
   keyPlace,
+  recordKey,
   recordPath,
   SELECTED_TEXT,
   SELECTED_VALUE,
@@ -1922,10 +1923,11 @@ export class Contract {
   }
 
   /**
-   * S6-CARRIERS §4.6: a value's structure identity, what its contract reads: a read's key, a call's result key, a
-   * carrier by the structures of the operands its result reads (a `get`'s key apart), a literal by its cells'
-   * structures; fresh (`v`) where an ingress occurrence stands at a position its result reads, so a structure shared by
-   * reference never merges an occurrence the result carries. A key's prefix entries are keyed by it.
+   * S6-CARRIERS §4.6: a value's structure identity, what its contract reads: a read's key and its guard, a call's
+   * result key, a carrier by the structures of the operands its result reads (a `get`'s key apart) and their guards, a
+   * literal by its cells' structures; fresh (`v`) where an ingress occurrence stands at a position its result reads,
+   * so a structure shared by reference never merges an occurrence the result carries. A key's prefix entries are keyed
+   * by it.
    */
   public structureOf(value: PlaceId): string {
     if (!this.#structures.has(value)) this.#settle(this.#structureWork(value));
@@ -1938,7 +1940,11 @@ export class Contract {
     program.work.charge("invSteps");
     let id = `v${value}`;
     if (this.copiedKey(value) !== null || this.resultKey(value) !== null) {
-      if (!definitions.ingress.has(value)) id = (yield* this.#needValue(value)).id;
+      // (a read under a test of its path is marked, §3.2)
+      if (!definitions.ingress.has(value)) {
+        const identity = yield* this.#needValue(value);
+        id = identity.guarded ? `${identity.id}g` : identity.id;
+      }
     } else if (program.hasOf.has(value)) {
       const index = yield* this.#needIndex(value);
       let plain = index.references.size === 0;
@@ -1967,12 +1973,30 @@ export class Contract {
       if (carried !== null) {
         const parts: string[] = [];
         for (const input of carried.of)
-          parts.push(input === null ? "" : yield* this.#needStructure(input));
+          parts.push(
+            input === null ? "" : `${yield* this.#needStructure(input)}${this.#guardsBelow(input)}`,
+          );
         if (!parts.some((part) => part.startsWith("v")))
           id = this.#internStructure(`${carried.name}(${parts.join(",")})`);
       }
     }
     this.#structures.set(value, id);
+  }
+
+  /**
+   * The tested paths below a carrier's operand read that the read is guarded at (§3.2), as part of the carrier's
+   * structure: no holder records a carrier operand's marks, as a literal's holder records its reads' (r4.15), so two
+   * carriers share a structure only where their operand reads are marked alike below them (Codex r20 B1).
+   */
+  #guardsBelow(operand: PlaceId): string {
+    const { guards, definitions } = this.pass;
+    const key = this.copiedKey(operand);
+    if (key === null || definitions.ingress.has(operand) || this.identityOf(operand).guarded)
+      return "";
+    const marked: string[] = [];
+    for (const below of guards.testedPathsBelow(recordKey(key)))
+      if (guards.guardedRead(operand, below)) marked.push(below.join("."));
+    return marked.length === 0 ? "" : `g[${marked.sort().join(";")}]`;
   }
 
   #internStructure(shape: string): string {

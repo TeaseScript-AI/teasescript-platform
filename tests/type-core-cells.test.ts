@@ -11,7 +11,10 @@ import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-f
 import {
   endDeviations,
   recordDifferences,
+  type CompactCheck,
+  type CompactDiagnostic,
   type CompactRecord,
+  type CompactSite,
 } from "./helpers/type-core-records.js";
 
 /**
@@ -3744,4 +3747,61 @@ test("two equal computations over host data keep each ingress's boundary (S6-CAR
   );
   assert.deepEqual(recordDifferences(expected, forward), []);
   assert.deepEqual(recordDifferences(expected, reversed), []);
+});
+
+/**
+ * S6-CARRIERS §4.6 with §3.2 (Codex r20 B1): literals grouped by the structure they hold at a path share an answer only
+ * where their reads are marked alike. A read under a test of its path, or of a path below it, inside a computed child (a
+ * `get`, a projection of a literal, an index, an `otherwise`) keeps its mark, so the definite fraction a guarded copy
+ * also holds is the warning with its check, never the error. The whole record, in both orders.
+ */
+test("a guarded read inside a computed child keeps its mark where literals share a level (§4.6, §3.2, Codex r20 B1)", () => {
+  const branch = (kind: CompactDiagnostic["kind"], site: CompactSite): CompactDiagnostic => ({
+    kind,
+    class: "warning-runtime-check",
+    site,
+    context: "branch",
+  });
+  const check = (
+    kind: CompactCheck["kind"],
+    target: string,
+    against: string,
+    site: CompactSite,
+  ): CompactCheck => ({ kind, target, against: [against], boundary: false, site });
+  const cases: readonly { readonly data: string; readonly guard: string; readonly own?: true }[] = [
+    { data: "[root].get(0, default: root)", guard: "root != null" },
+    { data: "({inner: root}).inner", guard: "root != null" },
+    { data: "[root][0]", guard: "root != null" },
+    { data: "(root otherwise null)", guard: "root.n is integer", own: true },
+  ];
+  for (const { data, guard, own } of cases) {
+    const source =
+      `let root = {n: 2.0}\nlet box = {noise: 0, data: ${data}}\n` +
+      `if ${guard} { box = {noise: 1.5, data: ${data}} }\nrepeat box.data.n {}\nexit\n`;
+    const read = source.indexOf("box.data.n");
+    const at = (end: number): CompactSite => ({ file: "main.tease", offset: read, end });
+    // (an `otherwise` may give its fallback, `null`: the member read's own check before the integer's)
+    const expected: CompactRecord = {
+      outcome: "warning-runtime-check",
+      diagnostics: [
+        ...(own ? [branch("member-read", at(read + 8))] : []),
+        branch("integer-use", at(read + 10)),
+      ],
+      checks: [
+        ...(own ? [check("null-check", "box.data", "non-null", at(read + 8))] : []),
+        check("integer-check", "box.data.n", "integer", at(read + 10)),
+      ],
+    };
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const forward = compactAnalysis(request);
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder(
+        (list) => [...list].reverse(),
+        () => compactAnalysis(request),
+      ),
+    );
+    assert.deepEqual(recordDifferences(expected, forward), [], source);
+    assert.deepEqual(recordDifferences(expected, reversed), [], `${source} reversed`);
+  }
 });

@@ -59,6 +59,7 @@ export class GuardIndex {
   readonly #operandCallables = new Map<Key, Set<Callable | null>>();
   /** The keys with a tested key strictly below them: a copy of one carries its read as a mark (§3.2 r4.15). */
   readonly belowTested = new Set<Key>();
+  readonly #testedPaths = new Map<Key, (readonly string[])[]>();
   /** The tested keys q below each key, per relative path q, and the longest such path (§8 r4.23's holders). */
   #testedRelative: Map<string, Set<Key>> | null = null;
   #byPlace: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> | null = null;
@@ -108,11 +109,24 @@ export class GuardIndex {
       this.#branches.set(key, sorted);
     }
     this.#operandRegions();
-    for (const key of [...this.#branches.keys(), ...this.#operands.keys()])
+    const listed = new Set<Key>();
+    for (const key of [...this.#branches.keys(), ...this.#operands.keys()]) {
+      const first = !listed.has(key);
+      listed.add(key);
       for (const prefix of prefixesOf(key)) {
         work.charge("indexSteps");
         this.belowTested.add(prefix);
+        if (!first) continue;
+        let paths = this.#testedPaths.get(prefix);
+        if (paths === undefined) this.#testedPaths.set(prefix, (paths = []));
+        paths.push(keyPath(key).slice(keyPath(prefix).length));
       }
+    }
+  }
+
+  /** The paths below `key`, relative to it, of the tested keys strictly below it (§3.2: where a read of it is marked). */
+  public testedPathsBelow(key: Key): readonly (readonly string[])[] {
+    return this.#testedPaths.get(key) ?? [];
   }
 
   /**
