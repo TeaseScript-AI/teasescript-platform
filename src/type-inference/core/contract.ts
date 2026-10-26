@@ -525,6 +525,16 @@ export class Contract {
   readonly #aliases = new Map<PlaceId, { readonly key: Key; readonly guarded: boolean }>();
   readonly #holders = new Map<string, Holder>();
   readonly #literals = new Map<PlaceId, LiteralIndex>();
+  /**
+   * The paths of the literal indexes, each made once per pass (TABLE r4.58): a path is its parent's and one step, with
+   * one text that the indexes of nested literals share; its id orders and names it in a literal's signature and
+   * structure, never its text. The empty path is id 0.
+   */
+  readonly #pathTexts: string[] = [""];
+  readonly #pathParents: number[] = [-1];
+  readonly #pathDepths: number[] = [0];
+  readonly #pathSteps: (Map<string, number> | undefined)[] = [];
+  readonly #pathIds = new Map<string, number>([["", 0]]);
   readonly #signatures = new Map<PlaceId, string>();
   /** A carrier value's identity by its shape (`#identityWork`), interned; a plain literal's (`#signatureWork`). */
   readonly #carrierIds = new Map<string, string>();
@@ -539,7 +549,7 @@ export class Contract {
   /** A literal's sub-structure below each path, and what stands at each path itself (`#levelsOf`). */
   readonly #literalLevels = new Map<
     PlaceId,
-    { readonly below: ReadonlyMap<string, string>; readonly at: ReadonlyMap<string, string> }
+    { readonly below: ReadonlyMap<number, string>; readonly at: ReadonlyMap<number, string> }
   >();
   /** A prefix's literal entries grouped at each path below it (`#groupsAt`), per prefix and path. */
   readonly #levelGroups = new Map<string, readonly LevelGroup[]>();
@@ -1060,13 +1070,14 @@ export class Contract {
       : this.#groupsAt(prefix, base, path.slice(0, -1))) {
       program.work.charge("structureSteps");
       const levels = this.#levelsOf(group.literal);
-      const full = [...group.at, ...path];
       // (what stands at each step above the path: entries read below it, objects lacking the next step, a
       // reference, an empty collection; and whether the literal is a cell, every path then below an element)
-      const above = Array.from(
-        { length: full.length },
-        (_, length) => levels.at.get(full.slice(0, length).join(".")) ?? "",
-      ).join("|");
+      const above: string[] = [];
+      let at = 0;
+      for (const step of [...group.at, ...path]) {
+        above.push(levels.at.get(at) ?? "");
+        at = this.#pathBelow(at, step);
+      }
       const cell = program.cellOwner.get(group.literal)?.kind === "cell" ? "cell" : "";
       // (its marks: alike where they cannot depend on steps past the path, else its own, §3.2 r4.23)
       const marks =
@@ -1075,7 +1086,7 @@ export class Contract {
           : this.#depthOf(group.holder) <= path.length
             ? String(this.#marksAt(group.holder, path))
             : group.holder.id;
-      const key = `${levels.below.get(full.join(".")) ?? ""}|${above}|${cell}|${marks}`;
+      const key = `${levels.below.get(at) ?? ""}|${above.join("|")}|${cell}|${marks}`;
       const position = merged.get(key);
       if (position === undefined) {
         merged.set(key, groups.length);
@@ -1099,32 +1110,38 @@ export class Contract {
   /**
    * A literal's structure by path, once (§4.6): what stands at each path of its index itself (its own terms' kinds,
    * its reads' and other values' structures, its objects' property names, a reference, an empty collection), and below
-   * each path everything under it, interned.
+   * each path everything under it, interned; by the paths' ids (`#pathAt`), -1 for none.
    */
   #levelsOf(literal: PlaceId): {
-    readonly below: ReadonlyMap<string, string>;
-    readonly at: ReadonlyMap<string, string>;
+    readonly below: ReadonlyMap<number, string>;
+    readonly at: ReadonlyMap<number, string>;
   } {
     const known = this.#literalLevels.get(literal);
     if (known !== undefined) return known;
     const { program } = this.pass;
     const index = this.literalIndex(literal);
-    // (the literal's own path too: its whole structure is a member's key at the prefix)
-    const paths = new Set<string>([
-      "",
-      ...index.terms.keys(),
-      ...index.reads.keys(),
-      ...index.others.keys(),
-      ...index.objects.keys(),
-      ...index.references,
-      ...index.empty,
-    ]);
+    // (the literal's own path too: its whole structure is a member's key at the prefix; and each path's prefixes)
+    const paths = new Set<number>([0]);
+    for (const texts of [
+      index.terms.keys(),
+      index.reads.keys(),
+      index.others.keys(),
+      index.objects.keys(),
+      index.references,
+      index.empty,
+    ])
+      for (const text of texts) paths.add(this.#pathId(text));
     for (const path of [...paths])
-      for (let cut = path.lastIndexOf("."); cut >= 0; cut = path.lastIndexOf(".", cut - 1))
-        paths.add(path.slice(0, cut));
-    const at = new Map<string, string>();
-    for (const path of paths) {
+      for (
+        let parent = this.#pathParents[path]!;
+        parent >= 0 && !paths.has(parent);
+        parent = this.#pathParents[parent]!
+      )
+        paths.add(parent);
+    const at = new Map<number, string>();
+    for (const id of paths) {
       program.work.charge("structureSteps");
+      const path = this.#pathTexts[id]!;
       const parts = [
         [...(index.terms.get(path)?.keys() ?? [])].sort().join(","),
         ...[...(index.reads.get(path) ?? []), ...(index.others.get(path) ?? [])].map((entry) =>
@@ -1136,27 +1153,26 @@ export class Contract {
         index.references.has(path) ? "ref" : "",
         index.empty.has(path) ? "empty" : "",
       ];
-      at.set(path, this.#internStructure(`at(${parts.join(";")})`));
+      at.set(id, this.#internStructure(`at(${parts.join(";")})`));
     }
     // below a path: its own and, deepest first, every path one step under it
-    const below = new Map<string, string>();
-    const children = new Map<string, string[]>();
-    for (const path of paths) {
-      const cut = path.lastIndexOf(".");
-      if (path === "") continue;
-      const parent = cut < 0 ? "" : path.slice(0, cut);
+    const below = new Map<number, string>();
+    const children = new Map<number, number[]>();
+    for (const id of paths) {
+      if (id === 0) continue;
+      const parent = this.#pathParents[id]!;
       let list = children.get(parent);
       if (list === undefined) children.set(parent, (list = []));
-      list.push(path);
+      list.push(id);
     }
-    const depth = (path: string): number => (path === "" ? 0 : path.split(".").length);
-    for (const path of [...paths].sort((a, b) => depth(b) - depth(a))) {
+    const depths = this.#pathDepths;
+    for (const id of [...paths].sort((a, b) => depths[b]! - depths[a]!)) {
       program.work.charge("structureSteps");
-      const under = (children.get(path) ?? [])
+      const under = (children.get(id) ?? [])
         .map((child) => `${child}=${below.get(child)}`)
         .sort()
         .join(",");
-      below.set(path, this.#internStructure(`below(${at.get(path)};${under})`));
+      below.set(id, this.#internStructure(`below(${at.get(id)};${under})`));
     }
     const levels = { below, at };
     this.#literalLevels.set(literal, levels);
@@ -2069,15 +2085,10 @@ export class Contract {
       let plain = index.references.size === 0;
       let marked = false;
       const parts: string[] = [];
-      const paths = new Set([
-        ...index.terms.keys(),
-        ...index.reads.keys(),
-        ...index.others.keys(),
-        ...index.objects.keys(),
-      ]);
-      for (const path of [...paths].sort()) {
+      for (const at of this.#pathOrder(index)) {
         program.work.charge("structureSteps");
-        parts.push(`${path}:${[...(index.terms.get(path)?.keys() ?? [])].sort().join(",")}`);
+        const path = this.#pathTexts[at]!;
+        parts.push(`${at}:${[...(index.terms.get(path)?.keys() ?? [])].sort().join(",")}`);
         for (const entry of [...(index.reads.get(path) ?? []), ...(index.others.get(path) ?? [])]) {
           const part = yield* this.#needStructure(entry.value);
           if (part.startsWith("v")) plain = false;
@@ -2087,7 +2098,7 @@ export class Contract {
         for (const object of index.objects.get(path)?.list ?? [])
           parts.push(`{${[...object.names].sort().join(",")}}`);
       }
-      parts.push(`empty:${[...index.empty].sort().join(",")}`);
+      parts.push(`empty:${this.#emptyIds(index)}`);
       if (plain) {
         id = this.#internStructure(`l(${parts.join(";")})`);
         if (marked) this.#markedStructures.add(id);
@@ -2945,6 +2956,8 @@ export class Contract {
       readonly rest: readonly string[];
       readonly memoKey: string;
       length: number;
+      /** The id of the rest's first `length` steps, -1 where no literal index holds them (`#pathBelow`). */
+      path: number;
       references: readonly HolderReference[];
       index: number;
       hit: boolean;
@@ -2967,6 +2980,7 @@ export class Contract {
         rest,
         memoKey,
         length: 0,
+        path: 0,
         references: asked.refsAt.get("") ?? [],
         index: 0,
         hit: asked.guarded.has(""),
@@ -2988,10 +3002,18 @@ export class Contract {
       }
       if (!frame.hit && frame.length < frame.rest.length) {
         frame.length += 1;
-        const at = frame.rest.slice(0, frame.length).join(".");
+        frame.path = this.#pathBelow(frame.path, frame.rest[frame.length - 1]!);
+        frame.index = 0;
+        // (a holder's guarded reads and references stand at the paths of literal indexes: none at a path no index
+        // holds, nor below it)
+        if (frame.path < 0) {
+          frame.length = frame.rest.length;
+          frame.references = [];
+          continue;
+        }
+        const at = this.#pathTexts[frame.path]!;
         if (frame.holder.guarded.has(at)) frame.hit = true;
         frame.references = frame.holder.refsAt.get(at) ?? [];
-        frame.index = 0;
         continue;
       }
       if (
@@ -3057,6 +3079,48 @@ export class Contract {
 
   // ---------------------------------------------------------------------------------------- the literal index (§8)
 
+  /** The id of the path one `step` below the path `parent`, made the first time it is asked. */
+  #pathAt(parent: number, step: string): number {
+    let steps = this.#pathSteps[parent];
+    if (steps === undefined) this.#pathSteps[parent] = steps = new Map();
+    const known = steps.get(step);
+    if (known !== undefined) return known;
+    const text = parent === 0 ? step : `${this.#pathTexts[parent]!}.${step}`;
+    const id = this.#pathTexts.length;
+    this.#pathTexts.push(text);
+    this.#pathParents.push(parent);
+    this.#pathDepths.push(this.#pathDepths[parent]! + 1);
+    this.#pathIds.set(text, id);
+    steps.set(step, id);
+    return id;
+  }
+
+  /** The id of a path one `step` below the path `parent` if an index has made it, else -1 (no index holds it). */
+  #pathBelow(parent: number, step: string): number {
+    return parent < 0 ? -1 : (this.#pathSteps[parent]?.get(step) ?? -1);
+  }
+
+  /** The id of an index's path, by its text. */
+  #pathId(text: string): number {
+    return this.#pathIds.get(text)!;
+  }
+
+  /** The paths an index holds kinds, reads, other values or objects at, by id in id order. */
+  #pathOrder(index: LiteralIndex): number[] {
+    const ids = new Set<number>();
+    for (const map of [index.terms, index.reads, index.others, index.objects])
+      for (const path of map.keys()) ids.add(this.#pathId(path));
+    return [...ids].sort((a, b) => a - b);
+  }
+
+  /** An index's empty collections' paths, as their ids in order. */
+  #emptyIds(index: LiteralIndex): string {
+    return [...index.empty]
+      .map((path) => this.#pathId(path))
+      .sort((a, b) => a - b)
+      .join(",");
+  }
+
   /**
    * One index of a literal's structure per literal value or cell, built once in the literal's size, through its nested
    * literals at every step. Per path: the kinds its own terms give (once per kind), the values standing there that are
@@ -3084,9 +3148,11 @@ export class Contract {
     };
     const seen = new Set<string>();
     const reads = new Map<string, ReadEntry>();
-    const put = <T>(map: Map<string, T[]>, path: string, entry: T): void => {
-      const list = map.get(path);
-      if (list === undefined) map.set(path, [entry]);
+    // (an entry under its path's one text, `#pathAt`)
+    const put = <T>(map: Map<string, T[]>, path: number, entry: T): void => {
+      const text = this.#pathTexts[path]!;
+      const list = map.get(text);
+      if (list === undefined) map.set(text, [entry]);
       else list.push(entry);
     };
     type Task =
@@ -3094,23 +3160,22 @@ export class Contract {
           readonly kind: "value";
           readonly g: Definition | null;
           readonly value: PlaceId;
-          readonly path: string;
+          readonly path: number;
         }
       | {
           readonly kind: "term";
           readonly site: Writer;
           readonly term: TypeTerm;
-          readonly path: string;
+          readonly path: number;
         };
     const pending: Task[] = [];
-    const at = (path: string, step: string): string => (path === "" ? step : `${path}.${step}`);
     if (program.hasOf.has(literal))
-      pending.push({ kind: "value", g: null, value: literal, path: "" });
+      pending.push({ kind: "value", g: null, value: literal, path: 0 });
     else
       for (const d of [...(definitions.cellDefs.get(literal) ?? [])].reverse())
         // a literal's element that admission rejected is ignored (A6, ADR 0021 1.3)
         if (this.pass.lists.live(d))
-          pending.push({ kind: "value", g: d, value: d.value!, path: "" });
+          pending.push({ kind: "value", g: d, value: d.value!, path: 0 });
     while (pending.length > 0) {
       const task = pending.pop()!;
       program.work.charge("invSteps");
@@ -3183,14 +3248,15 @@ export class Contract {
           if (this.pass.lists.live(d)) pending.push({ kind: "value", g: d, value: d.value!, path });
         continue;
       }
-      let kinds = index.terms.get(path);
-      if (kinds === undefined) index.terms.set(path, (kinds = new Map()));
+      const where = this.#pathTexts[path]!;
+      let kinds = index.terms.get(where);
+      if (kinds === undefined) index.terms.set(where, (kinds = new Map()));
       for (const tag of typeTags(term)) if (!kinds.has(tag)) kinds.set(tag, site);
-      if (term.kind === "atom" && REFERENCE.has(term.name)) index.references.add(path);
+      if (term.kind === "atom" && REFERENCE.has(term.name)) index.references.add(where);
       if (term.kind === "object") {
-        let objects = index.objects.get(path);
+        let objects = index.objects.get(where);
         if (objects === undefined)
-          index.objects.set(path, (objects = { list: [], count: new Map() }));
+          index.objects.set(where, (objects = { list: [], count: new Map() }));
         // its property names, and the property its button value reads, decided once per record (V30 §19)
         const names = new Set<string>();
         let value: Selected = null;
@@ -3208,13 +3274,13 @@ export class Contract {
             kind: "term",
             site,
             term: property.type,
-            path: at(path, propertyStep(property.name)),
+            path: this.#pathAt(path, propertyStep(property.name)),
           });
       } else if (term.kind === "list" || term.kind === "set" || term.kind === "dict") {
         const element = term.element;
         if (element.kind === "ref" && (definitions.cellDefs.get(element.place) ?? []).length === 0)
-          index.empty.add(at(path, "element"));
-        pending.push({ kind: "term", site, term: element, path: at(path, "element") });
+          index.empty.add(this.#pathTexts[this.#pathAt(path, "element")]!);
+        pending.push({ kind: "term", site, term: element, path: this.#pathAt(path, "element") });
       }
     }
     this.#literals.set(literal, index);
@@ -3235,15 +3301,11 @@ export class Contract {
     const index = yield* this.#needIndex(literal);
     let plain = index.references.size === 0;
     const parts: string[] = [];
-    const paths = new Set([
-      ...index.terms.keys(),
-      ...index.reads.keys(),
-      ...index.others.keys(),
-      ...index.objects.keys(),
-    ]);
-    for (const path of [...paths].sort()) {
+    // (each path by its id, in the order of the ids: one order for every literal of the pass)
+    for (const at of this.#pathOrder(index)) {
       this.pass.program.work.charge("invSteps");
-      parts.push(`${path}:${[...(index.terms.get(path)?.keys() ?? [])].sort().join(",")}`);
+      const path = this.#pathTexts[at]!;
+      parts.push(`${at}:${[...(index.terms.get(path)?.keys() ?? [])].sort().join(",")}`);
       for (const entry of index.reads.get(path) ?? []) {
         if (entry.ingress !== undefined) plain = false;
         parts.push(`r${(yield* this.#needValue(entry.value)).id}`);
@@ -3256,7 +3318,7 @@ export class Contract {
       for (const object of index.objects.get(path)?.list ?? [])
         parts.push(`{${[...object.names].sort().join(",")}}`);
     }
-    parts.push(`empty:${[...index.empty].sort().join(",")}`);
+    parts.push(`empty:${this.#emptyIds(index)}`);
     // (interned: a literal names its inputs by their own short identities, never by their expansions)
     let signature = `v${literal}`;
     if (plain) {
@@ -3333,15 +3395,24 @@ export class Contract {
     // the contributions the read gathers: past an element step, several of them are several elements, of which
     // positions do not tell which one (F12)
     let sources = 0;
-    for (const [tag, token] of index.terms.get(rest.join(".")) ?? []) {
+    // each prefix of the path by its text, `undefined` where no index holds it (`#pathBelow`)
+    const paths: (string | undefined)[] = [""];
+    for (let id = 0, length = 0; length < rest.length; length += 1) {
+      id = this.#pathBelow(id, rest[length]!);
+      paths.push(id < 0 ? undefined : this.#pathTexts[id]);
+    }
+    const whole = paths[rest.length];
+    for (const [tag, token] of (whole === undefined ? undefined : index.terms.get(whole)) ?? []) {
       out.push(makeItem(tag, token));
       sources += 1;
     }
+    let elementAbove = inElement;
     for (let length = 0; length <= rest.length; length += 1) {
       program.work.charge("invSteps");
-      const path = rest.slice(0, length).join(".");
+      if (length > 0 && rest[length - 1] === "element") elementAbove = true;
+      const path = paths[length];
+      if (path === undefined) break;
       const below = rest.slice(length);
-      const elementAbove = inElement || rest.slice(0, length).includes("element");
       if (!exact) {
         for (const entry of index.reads.get(path) ?? [])
           out.push(
@@ -3405,7 +3476,8 @@ export class Contract {
       // an empty collection on the way holds no element (the contract's M below it; the value's at its end)
       if (
         rest[length] === "element" &&
-        index.empty.has(rest.slice(0, length + 1).join(".")) &&
+        paths[length + 1] !== undefined &&
+        index.empty.has(paths[length + 1]!) &&
         (!exact || length === rest.length - 1)
       )
         out.push(EMPTY);
