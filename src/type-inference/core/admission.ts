@@ -3109,9 +3109,11 @@ export class Admission {
   // ------------------------------------------------------------------------------------------- the landing index
 
   /**
-   * S6-CARRIERS §3.2: every live store, add and transfer landing walked once (`#stopsOf`, the walk admission's deciders
-   * and C1's contributions read), then every operation's own read, as its own landing; each ingress stop recorded by
-   * the store that brings it, or as an own read. Built once per pass, at its first use.
+   * S6-CARRIERS §3.2: every store, add and transfer landing that admission does not reject walked once (`#stopsOf`, the
+   * walk admission's deciders and C1's contributions read), then every operation's own read, as its own landing; each
+   * ingress stop recorded by the store that brings it, or as an own read. Built once per pass, at its first use. A store
+   * in dead code and a dead call's argument for a written parameter are walked too: their boundaries are against the
+   * destination's admitted type, as in live code (AD-3: a written type is no flow fact).
    */
   #landingIndex(): LandingIndex {
     if (this.#landings !== null) return this.#landings;
@@ -3190,9 +3192,13 @@ export class Admission {
             else found(stop, ingress, own);
           }
     };
-    for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
+    for (const d of [
+      ...definitions.storeDefs,
+      ...definitions.transferDefs,
+      ...[...definitions.deadArguments.values()].flat(),
+    ]) {
       if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined) continue;
-      if (!lists.live(d) || !program.live(d.node)) continue;
+      if (!lists.live(d)) continue;
       walk(d.value, d.node, (stop, ingress, own) => {
         if (own) {
           entry(ingress).own = true;
