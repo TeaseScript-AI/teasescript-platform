@@ -655,7 +655,7 @@ export const INFERRED_COPY_MATRIX: readonly WrittenCase[] = (() => {
           const source = `${[...lines, 'say "DONE"', "exit"].join("\n")}\n`;
           const start = source.indexOf(`${hostLine}\n`);
           const end = start + hostLine.length;
-          const kinds = [...leafKinds].sort();
+          const kinds: string[] = [...leafKinds].sort();
           const levels = [...Array.from({ length: depth }, () => ["list"]), kinds];
           out.push({
             name: `${widening} into the source ${copied} the copy, depth ${depth}, ${host}`,
@@ -669,7 +669,7 @@ export const INFERRED_COPY_MATRIX: readonly WrittenCase[] = (() => {
             exact: true,
             runs: HOST_VALUES.map(([given, is]) => [
               given,
-              is.some((kind) => (kinds as readonly string[]).includes(kind))
+              is.some((kind) => kinds.includes(kind))
                 ? null
                 : `TSR058@${end - value.length}:${end}`,
             ]),
