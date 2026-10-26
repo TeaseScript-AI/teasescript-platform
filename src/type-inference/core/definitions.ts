@@ -376,19 +376,22 @@ export class DefinitionIndex {
     this.transferDefs.push(d);
   }
 
-  /** F21, F22: each argument is a whole store into its parameter at the parameter's binding node in the callee. */
+  /**
+   * F21, F22: each argument is a whole store into its parameter at the parameter's binding node in the callee. A dead
+   * call binds nothing (F21), but its argument for a written parameter is still checked against that type (F22, AD-3):
+   * a store at the dead call, as a dead store into a place is, and no transfer.
+   */
   #arguments(constraint: Extract<CoreProgram["constraints"][number], { kind: "call" }>): void {
     const program = this.program;
-    // F21: a dead call binds nothing
     const call = program.exprAt(constraint.site);
-    if (call !== null && !program.live(call)) return;
+    const dead = call !== null && !program.live(call) ? call : null;
     const fn = program.functionOf(constraint.fn);
     const region = program.functionRegion(constraint.fn);
     const bind = (parameter: PlaceId | undefined, argument: PlaceId): void => {
       if (parameter === undefined || region === undefined) return;
       const place = program.places[parameter];
-      if (place?.kind.kind !== "parameter") return;
-      const node = region.parameters.get(place.kind.name) ?? region.entry;
+      if (place?.kind.kind !== "parameter" || (dead !== null && place.kind.written === null))
+        return;
       const d = this.#add({
         kind: "whole",
         weak: false,
@@ -396,7 +399,7 @@ export class DefinitionIndex {
         place: parameter,
         path: [],
         value: argument,
-        node,
+        node: dead ?? region.parameters.get(place.kind.name) ?? region.entry,
         how: "argument",
         // r4.10: its diagnostics sit on the argument
         site: program.places[argument]?.site ?? constraint.site,
@@ -405,7 +408,7 @@ export class DefinitionIndex {
         prep: null,
       });
       this.#candidate(d, d.key);
-      this.transferDefs.push(d);
+      if (dead === null) this.transferDefs.push(d);
     };
     constraint.arguments.forEach((argument, index) => bind(fn.parameters[index], argument));
     for (const named of constraint.named)
