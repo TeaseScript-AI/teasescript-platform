@@ -1,5 +1,6 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
+import type { WorkLedger } from "./budget.js";
 import { carried, keepsOwn, operandsOf, type CarrierRole, type Dispatch } from "./carriers.js";
 import { defaultOf, heldReference, termAt, typeTags, writtenOf } from "./contract.js";
 import {
@@ -7,6 +8,7 @@ import {
   keyPath,
   keyPlace,
   prefixesOf,
+  recordKey,
   SELECTED_TEXT,
   SELECTED_VALUE,
   sortCost,
@@ -14,7 +16,7 @@ import {
   type Key,
 } from "./definitions.js";
 import { withoutEmpty } from "./exact-path.js";
-import type { FlowNode } from "./flow-graph.js";
+import type { Callable, FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
 import {
   ingressLeaves,
@@ -329,6 +331,10 @@ export class Admission {
   readonly #members = new Map<Definition, Definition[]>();
   /** An alias's source path and the node it is read at (`#aliasKey`). */
   readonly #aliases = new Map<Definition, { readonly source: Key; readonly read: FlowNode }>();
+  /** Per class (its representative), its eligible member at each tested key of its demanded paths (§4.3). */
+  readonly #eligible = new Map<Definition, Map<string, Definition | null>>();
+  /** Per key with stores, the rests below it of the paths the pass decides (`groups()`), once. */
+  #demands: Map<Key, (readonly string[])[]> | null = null;
   readonly #representative = new Map<Definition, Definition>();
   /** The expected types of typed ingresses by identity, for `#conflictClass`. */
   readonly #termIds = new Map<TypeTerm, string>();
@@ -875,7 +881,7 @@ export class Admission {
       readonly at: (index: number) => readonly string[];
     }[] = [{ ds: own.map((candidate) => candidate.d), at: (index) => own[index]!.at }];
     for (const { key: prefix, rest } of prefixes)
-      scans.push({ ds: this.#wholeOf(prefix, false), at: () => rest });
+      scans.push({ ds: this.#eligibleOf(prefix, rest), at: () => rest });
     for (const { key: prefix, rest } of prefixes)
       if (rest[0] === "element") {
         const adds = this.#wholeOf(prefix, true);
@@ -1062,10 +1068,230 @@ export class Admission {
   }
 
   /**
-   * §8: the stores of one alias class (`#aliasKey`), once per pass: their earliest as the representative, the later ones
-   * its members (`#members`); a scan or a check reads the representative, and a member only where it owes something. A
-   * store meets the same group in every list of its key that holds it, so it is recorded once, the first time; one
-   * another list grouped under another representative stays its own store here.
+   * A prefix's whole stores as A2's scan reads them at a rest (S6-CARRIERS §4.2, §4.3): each class's representative,
+   * and where a guard of the path holds it, its class's earliest eligible member too, which stands where it is in source
+   * order and decides with its own answer (a guard marks a read possible, so it decides nothing).
+   */
+  #eligibleOf(prefix: Key, rest: readonly string[]): Definition[] {
+    const list = this.#wholeOf(prefix, false);
+    let out: Definition[] | null = null;
+    for (const [index, representative] of list.entries()) {
+      if (this.#members.get(representative) === undefined) continue;
+      const eligible = this.#eligibleAt(representative, prefix, rest);
+      if (eligible === null || eligible === representative) continue;
+      out ??= list.slice(0, index);
+      out.push(eligible);
+    }
+    if (out === null) return list;
+    // (the representatives and the eligible members, in source order)
+    const merged = [...new Set([...list, ...out])];
+    this.pass.program.work.charge("eligibility", sortCost(merged.length));
+    return merged.sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b));
+  }
+
+  /**
+   * §4.3: a class's earliest member that no test of its read's path holds at `rest`, `null` where every member is
+   * guarded there: by the deepest tested key on the path's chain of prefixes, from the class's eligibility index.
+   */
+  #eligibleAt(representative: Definition, prefix: Key, rest: readonly string[]): Definition | null {
+    const { guards } = this.pass;
+    const alias = this.#aliases.get(representative)!;
+    const full = recordKey(keyOf(keyPlace(alias.source), [...keyPath(alias.source), ...rest]));
+    let deepest = "";
+    for (const key of [full, ...prefixesOf(full)]) {
+      this.pass.program.work.charge("eligibility");
+      if (tested(guards, key)) {
+        deepest = key;
+        break;
+      }
+    }
+    let index = this.#eligible.get(representative);
+    if (index === undefined) {
+      index = this.#eligibility(representative, prefix);
+      this.#eligible.set(representative, index);
+    }
+    if (!index.has(deepest)) index.set(deepest, this.#eligibleBy(representative, [deepest]));
+    return index.get(deepest)!;
+  }
+
+  /**
+   * §4.3's index of a class, once per class and pass: the tested keys on the chains of its demanded paths as a trie,
+   * walked depth first over a segment tree of its members in flow order (each leaf a guard count, each node its least
+   * count and the earliest member with it): entering a key adds one to every member a test of that key holds (a branch
+   * a range of the flow order, or each member asked where its callable holds more branches than members; an operand
+   * region each member it holds, a range of the text order), leaving it undoes that. Each key's eligible member is the
+   * earliest with no count.
+   */
+  #eligibility(representative: Definition, prefix: Key): Map<string, Definition | null> {
+    const { guards } = this.pass;
+    const alias = this.#aliases.get(representative)!;
+    const children = new Map<string, Set<string>>([["", new Set()]]);
+    for (const rest of this.#demandsOf(prefix)) {
+      const full = recordKey(keyOf(keyPlace(alias.source), [...keyPath(alias.source), ...rest]));
+      let parent = "";
+      for (const key of [...prefixesOf(full).reverse(), full]) {
+        this.pass.program.work.charge("eligibility");
+        if (!tested(guards, key)) continue;
+        if (!children.has(key)) children.set(key, new Set());
+        children.get(parent)!.add(key);
+        parent = key;
+      }
+    }
+    const out = new Map<string, Definition | null>();
+    const walk = this.#walkGuards(representative);
+    walk.enter(null);
+    out.set("", walk.eligible());
+    const pending: { readonly key: string; readonly leave: boolean }[] = [
+      ...[...children.get("")!].map((key) => ({ key, leave: false })),
+    ];
+    while (pending.length > 0) {
+      const { key, leave } = pending.pop()!;
+      this.pass.program.work.charge("eligibility");
+      if (leave) {
+        walk.leave();
+        continue;
+      }
+      walk.enter(key);
+      out.set(key, walk.eligible());
+      pending.push({ key, leave: true });
+      for (const child of children.get(key) ?? []) pending.push({ key: child, leave: false });
+    }
+    return out;
+  }
+
+  /** A class's eligible member under a chain of tested keys, the index's walk for one chain (a path not demanded). */
+  #eligibleBy(representative: Definition, chain: readonly string[]): Definition | null {
+    const { guards } = this.pass;
+    const walk = this.#walkGuards(representative);
+    walk.enter(null);
+    const keys = chain[0] === "" ? [] : [...prefixesOf(chain[0]!).reverse(), chain[0]!];
+    for (const key of keys) if (tested(guards, key)) walk.enter(key);
+    return walk.eligible();
+  }
+
+  /** §4.3's walk over a class's members: guard counts per tested key entered, undone in reverse. */
+  #walkGuards(representative: Definition): {
+    readonly enter: (key: string | null) => void;
+    readonly leave: () => void;
+    readonly eligible: () => Definition | null;
+  } {
+    const { program, guards } = this.pass;
+    const work = program.work;
+    const members = [representative, ...(this.#members.get(representative) ?? [])];
+    const reads = members.map((d) => this.#aliases.get(d)!.read);
+    // (an unreached read is never guarded: always eligible)
+    const unreached = members.findIndex((_, index) => !program.reached(reads[index]!));
+    // members in flow order (their reads' positions) and in text order (file, offset), as leaf indexes
+    const flow = members.map((_, index) => index);
+    flow.sort((a, b) => program.position(reads[a]!) - program.position(reads[b]!));
+    work.charge("eligibility", sortCost(flow.length));
+    const leafOf = new Map<number, number>(flow.map((member, leaf) => [member, leaf]));
+    const positions = flow.map((member) => program.position(reads[member]!));
+    const text = members.map((_, index) => index).filter((index) => reads[index]!.span !== null);
+    text.sort(
+      (a, b) =>
+        reads[a]!.file - reads[b]!.file ||
+        reads[a]!.span!.start.offset - reads[b]!.span!.start.offset,
+    );
+    work.charge("eligibility", sortCost(text.length));
+    const byCallable = new Map<Callable | null, number[]>();
+    for (const member of flow) {
+      const callable = program.callableAt(reads[member]!);
+      const list = byCallable.get(callable);
+      if (list === undefined) byCallable.set(callable, [member]);
+      else list.push(member);
+    }
+    const tree = new GuardTree(flow, work);
+    const log: (readonly [number, number])[][] = [];
+    const lowerBound = (list: readonly number[], value: number, from = 0): number => {
+      let low = from;
+      let high = list.length;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        work.charge("eligibility");
+        if (list[middle]! < value) low = middle + 1;
+        else high = middle;
+      }
+      return low;
+    };
+    const textStarts = text.map((member) => reads[member]!.span!.start.offset);
+    const textFiles = text.map((member) => reads[member]!.file);
+    return {
+      enter: (key) => {
+        const done: (readonly [number, number])[] = [];
+        log.push(done);
+        if (key === null) return;
+        const add = (low: number, high: number): void => {
+          tree.add(low, high, 1);
+          done.push([low, high]);
+        };
+        for (const [callable, inCallable] of byCallable) {
+          const branches = guards.branchesOf(key, callable);
+          if (branches === undefined) continue;
+          if (branches.list.length > inCallable.length) {
+            for (const member of inCallable)
+              if (guards.branchHolds(key, reads[member]!)) {
+                const leaf = leafOf.get(member)!;
+                add(leaf, leaf);
+              }
+            continue;
+          }
+          for (const entry of branches.list) {
+            const low = lowerBound(positions, program.position(entry));
+            const high = lowerBound(positions, program.positionEnd(entry) + 1) - 1;
+            if (low <= high) add(low, high);
+          }
+        }
+        for (const file of new Set(textFiles)) {
+          const regions = guards.operandsOf(key, file);
+          if (regions === undefined) continue;
+          const first = lowerBound(textFiles, file);
+          for (const region of regions.list) {
+            let at = lowerBound(textStarts, region.start, first);
+            for (
+              ;
+              at < text.length && textFiles[at] === file && textStarts[at]! <= region.end;
+              at += 1
+            ) {
+              const leaf = leafOf.get(text[at]!)!;
+              add(leaf, leaf);
+            }
+          }
+        }
+      },
+      leave: () => {
+        for (const [low, high] of log.pop() ?? []) tree.add(low, high, -1);
+      },
+      eligible: () => {
+        const leaf = tree.eligible();
+        const found = leaf === null ? -1 : flow[leaf]!;
+        const index = unreached >= 0 && (found < 0 || unreached < found) ? unreached : found;
+        return index < 0 ? null : members[index]!;
+      },
+    };
+  }
+
+  /** The rests below a key of the paths the pass decides (`groups()`): every split of every decided path, once. */
+  #demandsOf(prefix: Key): readonly (readonly string[])[] {
+    if (this.#demands === null) {
+      const demands = new Map<Key, (readonly string[])[]>();
+      for (const { root, path } of this.groups())
+        for (let length = 0; length < path.length; length += 1) {
+          this.pass.program.work.charge("eligibility");
+          const key = keyOf(root, path.slice(0, length));
+          const list = demands.get(key);
+          if (list === undefined) demands.set(key, [path.slice(length)]);
+          else list.push(path.slice(length));
+        }
+      this.#demands = demands;
+    }
+    return this.#demands.get(prefix) ?? [];
+  }
+
+  /**
+   * §8, S6-CARRIERS §4.1: a key's whole stores by alias class (`#aliasKey`), once per pass, in the key's own list (`#wholeOf`):
+   * their earliest as the representative, the later ones its members (`#members`); a scan or a check reads the
+   * representative, and a member only where it owes something.
    */
   #grouped(list: readonly Definition[]): Definition[] {
     const out: Definition[] = [];
@@ -1079,16 +1305,28 @@ export class Admission {
         out.push(d);
         continue;
       }
-      const recorded = this.#representative.get(d);
-      if (recorded === representative) continue;
-      if (recorded !== undefined) {
-        out.push(d);
-        continue;
-      }
       this.#representative.set(d, representative);
       const members = this.#members.get(representative);
       if (members === undefined) this.#members.set(representative, [d]);
       else members.push(d);
+    }
+    return out;
+  }
+
+  /**
+   * Stores as their classes stand for them (§4.1): each store's class representative, from its key's own list, once
+   * each, in source order; any other store as itself.
+   */
+  #representatives(list: readonly Definition[]): Definition[] {
+    const out: Definition[] = [];
+    const seen = new Set<Definition>();
+    for (const d of list) {
+      this.pass.program.work.charge("indexSteps");
+      if (d.kind === "whole") this.#wholeOf(d.key, false);
+      const representative = this.#representative.get(d) ?? d;
+      if (seen.has(representative)) continue;
+      seen.add(representative);
+      out.push(representative);
     }
     return out;
   }
@@ -1157,7 +1395,7 @@ export class Admission {
         if (d.kind === "whole") wholes.push(d);
         else if (d.kind === "add") adds.push(d);
     wholes.sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b));
-    return (known[index] = { wholes: this.#grouped(wholes), adds });
+    return (known[index] = { wholes: this.#representatives(wholes), adds });
   }
 
   /** Whether a value is a read of a host value: external data, with no kind and no `null` at any path. */
@@ -2805,6 +3043,85 @@ export class Admission {
       if (list === undefined) this.boundaries.set(key, [check]);
       else list.push(check);
     }
+  }
+}
+
+/** Whether a test of exactly `key` guards a branch or an operand region anywhere (§3.2). */
+function tested(guards: CorePass["guards"], key: Key): boolean {
+  return guards.branchCallables(key) !== undefined || guards.operandCallables(key) !== undefined;
+}
+
+/**
+ * §4.3's segment tree over a class's members in flow order: per leaf a guard count; per node its least count and,
+ * among its leaves with it, the earliest member (the least index in the class's source order); range additions are
+ * lazy. Every node a change visits is charged.
+ */
+class GuardTree {
+  readonly #size: number;
+  readonly #min: Int32Array;
+  readonly #least: Int32Array;
+  readonly #lazy: Int32Array;
+
+  public constructor(
+    /** The class's member index at each leaf. */
+    private readonly members: readonly number[],
+    private readonly work: WorkLedger,
+  ) {
+    this.#size = Math.max(1, members.length);
+    this.#min = new Int32Array(4 * this.#size);
+    this.#least = new Int32Array(4 * this.#size);
+    this.#lazy = new Int32Array(4 * this.#size);
+    this.#build(1, 0, this.#size - 1);
+  }
+
+  #build(node: number, low: number, high: number): void {
+    this.work.charge("eligibility");
+    if (low === high) {
+      this.#least[node] = low < this.members.length ? low : -1;
+      return;
+    }
+    const middle = (low + high) >> 1;
+    this.#build(2 * node, low, middle);
+    this.#build(2 * node + 1, middle + 1, high);
+    this.#pull(node);
+  }
+
+  #pull(node: number): void {
+    const left = 2 * node;
+    const right = left + 1;
+    const a = this.#min[left]!;
+    const b = this.#min[right]!;
+    if (a !== b) this.#least[node] = a < b ? this.#least[left]! : this.#least[right]!;
+    else {
+      const x = this.#least[left]!;
+      const y = this.#least[right]!;
+      this.#least[node] = x < 0 ? y : y < 0 ? x : this.members[x]! <= this.members[y]! ? x : y;
+    }
+    this.#min[node] = Math.min(a, b) + this.#lazy[node]!;
+  }
+
+  /** Adds `delta` to the counts of the leaves `low` to `high`. */
+  public add(low: number, high: number, delta: number): void {
+    this.#add(1, 0, this.#size - 1, low, high, delta);
+  }
+
+  #add(node: number, from: number, to: number, low: number, high: number, delta: number): void {
+    this.work.charge("eligibility");
+    if (high < from || to < low) return;
+    if (low <= from && to <= high) {
+      this.#min[node]! += delta;
+      this.#lazy[node]! += delta;
+      return;
+    }
+    const middle = (from + to) >> 1;
+    this.#add(2 * node, from, middle, low, high, delta);
+    this.#add(2 * node + 1, middle + 1, to, low, high, delta);
+    this.#pull(node);
+  }
+
+  /** The leaf of the earliest member with no guard count, or `null`. */
+  public eligible(): number | null {
+    return this.#min[1] === 0 && this.#least[1]! >= 0 ? this.#least[1]! : null;
   }
 }
 

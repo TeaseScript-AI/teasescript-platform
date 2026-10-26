@@ -1794,11 +1794,12 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   },
   ...(["one region", "k regions"] as const).map((variant): WorkFamily => ({
     name: `A2-guarded-quiet-copies-${variant.replace(" ", "-")}`,
-    measures: `§4.3, A2: k copies of a k-field record guarded in ${variant}${variant === "k regions" ? ", one unguarded" : ""}, every field read and fitting`,
+    measures: `§4.3, A2: k copies of a k-field record of named host data guarded in ${variant}${variant === "k regions" ? ", one unguarded" : ""}, every field read`,
     program: (k) =>
       main(
         lines(
-          `let root = {${fields(k, () => "1")}}`,
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
           "let box = root",
           variant === "one region"
             ? lines(
@@ -1810,7 +1811,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
                 rows(k, () => "if root != null { box = root }"),
                 "box = root",
               ),
-          rows(k, (i) => `let n${i}: integer = box.f${i}`),
+          rows(k, (i) => `repeat box.f${i} {}`),
           "exit",
         ),
       ),

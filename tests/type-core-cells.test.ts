@@ -3921,3 +3921,110 @@ test("the landing index keeps F18's own check, sites a member's C1 at its read a
     assert.deepEqual(recordDifferences(expected, reversed), [], `${source} reversed`);
   }
 });
+
+/**
+ * S6-CARRIERS §4.2, §4.3: copies of one source with equal signatures are one class, and the class decides through its
+ * earliest member no test of the read's path holds (a guard marks a read possible, so it decides nothing): an unguarded
+ * copy decides whether a guarded one comes before it or after it, the add of text then the misfit (A6); without a
+ * written type a guarded copy decides nothing (§4.2's trace: the add decides, the unguarded copy is the misfit); with
+ * one, the class's earliest copy decides by it, guarded or not (A4, Astra's third round B1). The whole record, in both
+ * orders.
+ */
+test("a class decides through its earliest member no guard of the path holds, in both orders (§4.2, §4.3)", () => {
+  type Diagnostic = readonly [
+    CompactDiagnostic["kind"],
+    CompactDiagnostic["class"],
+    number,
+    number,
+    CompactDiagnostic["context"],
+  ];
+  type Check = readonly [CompactCheck["kind"], string, string, boolean, number, number];
+  const record = (
+    outcome: CompactRecord["outcome"],
+    diagnostics: readonly Diagnostic[],
+    checks: readonly Check[],
+  ): CompactRecord => ({
+    outcome,
+    diagnostics: diagnostics.map(([kind, cls, offset, end, context]) => ({
+      kind,
+      class: cls,
+      site: { file: "main.tease", offset, end },
+      context,
+    })),
+    checks: checks.map(([kind, target, against, boundary, offset, end]) => ({
+      kind,
+      target,
+      against: [against],
+      boundary,
+      site: { file: "main.tease", offset, end },
+    })),
+  });
+  const after = 'box.add("word")\nrepeat box[0] {}\nexit\n';
+  const cases: readonly (readonly [string, CompactRecord])[] = [
+    [
+      `let root = [1]\nlet box = [null]\nif root != null {\n  box = root\n}\nbox = root\n${after}`,
+      record("compile-error", [["written-target", "compile-error", 84, 90, null]], []),
+    ],
+    [
+      `let root = [1]\nlet box = [null]\nbox = root\nif root != null {\n  box = root\n}\n${after}`,
+      record(
+        "compile-error",
+        [
+          ["written-target", "compile-error", 84, 90, null],
+          ["integer-use", "warning-runtime-check", 99, 105, "member"],
+        ],
+        [["null-check", "box.element", "integer", false, 99, 105]],
+      ),
+    ],
+    [
+      'let raw = hostValue\nraw = 1\nlet root = [raw]\nlet box = [null]\nif root != null {\n  box = root\n}\nbox.add("word")\nbox = root\nrepeat box[0] {}\nexit\n',
+      record(
+        "compile-error",
+        [
+          ["written-target", "warning-runtime-check", 10, 19, "later"],
+          ["written-target", "warning-runtime-check", 88, 92, "later"],
+          ["written-target", "compile-error", 117, 121, null],
+          ["integer-use", "warning-runtime-check", 129, 135, "member"],
+          ["integer-use", "warning-runtime-check", 129, 135, "unknown"],
+          ["integer-use", "warning-runtime-check", 129, 135, "member"],
+        ],
+        [
+          ["copy-type", "raw", "integer", false, 10, 19],
+          ["copy-type", "box.element", "string", false, 88, 92],
+          ["null-check", "box.element", "integer", false, 129, 135],
+          ["integer-check", "box.element", "integer", false, 129, 135],
+          ["integer-check", "box.element", "integer", false, 129, 135],
+          ["copy-type", "raw", "integer", true, 10, 19],
+        ],
+      ),
+    ],
+    [
+      `let root: integer[] = [1]\nlet box = [null]\nif root != null {\n  box = root\n}\nbox.add("word")\nbox = root\nrepeat box[0] {}\nexit\n`,
+      record("compile-error", [["written-target", "compile-error", 84, 90, null]], []),
+    ],
+    [
+      `let root: integer[] = [1]\nlet box = [null]\nbox = root\nif root != null {\n  box = root\n}\n${after}`,
+      record(
+        "compile-error",
+        [
+          ["written-target", "compile-error", 95, 101, null],
+          ["integer-use", "warning-runtime-check", 110, 116, "member"],
+        ],
+        [["null-check", "box.element", "integer", false, 110, 116]],
+      ),
+    ],
+  ];
+  for (const [source, expected] of cases) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const forward = compactAnalysis(request);
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder(
+        (list) => [...list].reverse(),
+        () => compactAnalysis(request),
+      ),
+    );
+    assert.deepEqual(recordDifferences(expected, forward), [], source);
+    assert.deepEqual(recordDifferences(expected, reversed), [], `${source} reversed`);
+  }
+});
