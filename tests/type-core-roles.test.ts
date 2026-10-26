@@ -69,9 +69,9 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
     }
     routed += 1;
     try {
-      const request = coreRequest([{ path: "main.tease", source: shape.source }]);
-      assert.ok(request !== null && plan !== null, shape.name);
-      const { stores, content } = derive(shape.source, compactAnalysis(request));
+      assert.ok(plan !== null, shape.name);
+      const syntax = syntaxOf(shape.source);
+      const { stores, content } = derive(syntax, record);
       assert.deepEqual(
         plannedContent(plan, shape.source),
         derivedContent(content, shape.source),
@@ -85,7 +85,7 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
       for (const inputs of assignments(["hostValue"]))
         assert.deepEqual(
           runGlobals(plan, inputs),
-          evaluate(shape.source, stores, inputs, false, content).run,
+          evaluate(syntax, stores, inputs, false, content).run,
           `${shape.name} with ${JSON.stringify(inputs)}`,
         );
       verified += 1;

@@ -620,7 +620,7 @@ export function defaultSites(
   readonly written: string;
   readonly lowered: boolean;
 }[] {
-  return expressions(statementsOf(source))
+  return expressions(syntaxOf(source).statements)
     .flatMap((owner) => {
       const fallback = fallbackOf(owner);
       const at = unwrap(owner);
@@ -801,9 +801,9 @@ export function derive(
   readonly discharges: readonly Discharge[];
   readonly content: DerivedContent;
 } {
-  const parsed = statementsOf(source);
-  const statements = allStatements(parsed);
-  const all = expressions(parsed).map(unwrap);
+  const { source } = syntax;
+  const statements = allStatements(syntax.statements);
+  const all = expressions(syntax.statements).map(unwrap);
   const owners = all.filter(
     (expression): expression is DefaultOwner => fallbackOf(expression) !== null,
   );

@@ -52,7 +52,6 @@ import {
   assignments,
   derivedContent,
   derivedStores,
-  DOMAIN,
   plannedContent,
   plannedStores,
   runGlobals,
@@ -236,7 +235,6 @@ test("every positive-list record the candidate route reaches plans and runs as i
     TSV043: "integer-use",
   };
   const accepted: string[] = [];
-  const failures: string[] = [];
   const outside = new Map<string, number>();
   const classes = new Map<string, number>();
   const originals = new Map<string, string | null>();
@@ -261,174 +259,172 @@ test("every positive-list record the candidate route reaches plans and runs as i
     accepted.push(record.name);
     assert.equal(record.files.length, 1, `${record.name}: one file`);
     const source = record.files[0]!.source;
-    try {
-      // records: the diagnostics at their whole sites, the obligations exactly, alike on the one-file route
-      const diagnosed = (compiled: Pick<CompilationResult, "diagnostics">): string[] =>
-        compiled.diagnostics
-          .filter((diagnostic) => kinds[diagnostic.code] !== undefined)
-          .map(
-            (diagnostic) =>
-              `${diagnostic.severity} ${diagnostic.code === "TSV043" && diagnostic.message.includes("property or member") ? "member-read" : kinds[diagnostic.code]} ` +
-              `${diagnostic.span.start.offset}:${diagnostic.message.includes("property or member") ? diagnostic.span.start.offset : diagnostic.span.end.offset}`,
-          )
-          .sort();
+    // records: the diagnostics at their whole sites, the obligations exactly, alike on the one-file route
+    const diagnosed = (compiled: Pick<CompilationResult, "diagnostics">): string[] =>
+      compiled.diagnostics
+        .filter((diagnostic) => kinds[diagnostic.code] !== undefined)
+        .map(
+          (diagnostic) =>
+            `${diagnostic.severity} ${diagnostic.code === "TSV043" && diagnostic.message.includes("property or member") ? "member-read" : kinds[diagnostic.code]} ` +
+            `${diagnostic.span.start.offset}:${diagnostic.message.includes("property or member") ? diagnostic.span.start.offset : diagnostic.span.end.offset}`,
+        )
+        .sort();
+    assert.deepEqual(
+      diagnosed(result),
+      record.expected.diagnostics
+        .map(
+          (diagnostic) =>
+            `${diagnostic.class === "compile-error" ? "error" : "warning"} ${diagnostic.kind} ` +
+            `${diagnostic.site.offset}:${diagnostic.kind === "member-read" ? diagnostic.site.offset : diagnostic.site.end}`,
+        )
+        .sort(),
+      record.name,
+    );
+    const request = coreRequest(record.files);
+    assert.ok(request !== null, record.name);
+    assert.deepEqual(recordDifferences(record.expected, compactAnalysis(request)), [], record.name);
+    assert.equal(result.plan === null, record.expected.outcome === "compile-error", record.name);
+    const single = inBothOrders(() => candidate(source));
+    assert.deepEqual(diagnosed(single), diagnosed(result), `${record.name}: the one-file route`);
+    if (result.plan === null) continue;
+    plans += 1;
+    // discharges and checked stores, by rule (a construct the rules do not cover fails here, named); the source's syntax
+    // serves every evaluation of it below
+    const [syntax, { stores, discharges, content }] = (() => {
+      try {
+        const syntax = syntaxOf(source);
+        return [syntax, derive(syntax, record.expected)] as const;
+      } catch (error) {
+        if (error instanceof Underivable)
+          throw new Error(`${record.name}: underivable: ${error.message}`);
+        throw error;
+      }
+    })();
+    assert.deepEqual(
+      plannedContent(result.plan, source),
+      derivedContent(content, source),
+      `${record.name}: S7 content`,
+    );
+    assert.deepEqual(
+      plannedContent(single.plan!, source),
+      derivedContent(content, source),
+      `${record.name}: one-file S7 content`,
+    );
+    assert.deepEqual(
+      plannedStores(result.plan),
+      derivedStores(stores),
+      `${record.name}: the checked stores`,
+    );
+    assert.deepEqual(
+      plannedStores(single.plan!),
+      derivedStores(stores),
+      `${record.name}: the one-file route's`,
+    );
+    // runs: the original under every assignment of its host input (in the domain's order), each run once, predicted
+    // stopping at its first failing check and evaluated through every check (for the discharges)
+    const plan = result.plan;
+    const own = assignments(["hostValue"]).map((inputs) => ({
+      inputs,
+      ran: runGlobals(plan, inputs),
+      predicted: evaluate(syntax, stores, inputs, false, content).run,
+      events: evaluate(syntax, stores, inputs, true, content).events,
+    }));
+    // the original, as written: each input at the value fitting the earliest check it feeds
+    const original =
+      own.find(({ events }) => {
+        const fed = events.find((event) => event.from.has("hostValue"));
+        return fed === undefined || fed.fits;
+      }) ?? own[0]!;
+    assert.deepEqual(original.ran, original.predicted, `${record.name}: the original`);
+    originals.set(record.name, original.ran.failure);
+    compared += 1;
+    // under every assignment: a violating value stops at its check, as derived
+    const observed: { run: PredictedRun; events: readonly CheckEvent[] }[] = [];
+    for (const { inputs, ran, predicted, events } of own) {
       assert.deepEqual(
-        diagnosed(result),
-        record.expected.diagnostics
-          .map(
-            (diagnostic) =>
-              `${diagnostic.class === "compile-error" ? "error" : "warning"} ${diagnostic.kind} ` +
-              `${diagnostic.site.offset}:${diagnostic.kind === "member-read" ? diagnostic.site.offset : diagnostic.site.end}`,
-          )
-          .sort(),
-        record.name,
+        ran,
+        predicted,
+        `${record.name}, the original with ${JSON.stringify(inputs)}`,
       );
-      const request = coreRequest(record.files);
-      assert.ok(request !== null, record.name);
-      assert.deepEqual(
-        recordDifferences(record.expected, compactAnalysis(request)),
-        [],
-        record.name,
-      );
-      assert.equal(result.plan === null, record.expected.outcome === "compile-error", record.name);
-      const single = inBothOrders(() => candidate(source));
-      assert.deepEqual(diagnosed(single), diagnosed(result), `${record.name}: the one-file route`);
-      if (result.plan === null) continue;
-      plans += 1;
-      // discharges and checked stores, by rule (a construct the rules do not cover fails here, named)
-      const derived = (() => {
-        try {
-          return derive(source, record.expected);
-        } catch (error) {
-          if (error instanceof Underivable)
-            throw new Error(`${record.name}: underivable: ${error.message}`);
-          throw error;
-        }
-      })();
-      const { stores, discharges, content } = derived;
-      assert.deepEqual(
-        plannedContent(result.plan, source),
-        derivedContent(content, source),
-        `${record.name}: S7 content`,
-      );
-      assert.deepEqual(
-        plannedContent(single.plan!, source),
-        derivedContent(content, source),
-        `${record.name}: one-file S7 content`,
-      );
-      assert.deepEqual(
-        plannedStores(result.plan),
-        derivedStores(stores),
-        `${record.name}: the checked stores`,
-      );
-      assert.deepEqual(
-        plannedStores(single.plan!),
-        derivedStores(stores),
-        `${record.name}: the one-file route's`,
-      );
-      // runs: the original, as written, each input at the value fitting the earliest check it feeds
-      const fitting =
-        DOMAIN.find((value) => {
-          const fed = evaluate(source, stores, { hostValue: value }, true, content).events.find(
-            (event) => event.from.has("hostValue"),
-          );
-          return fed === undefined || fed.fits;
-        }) ?? DOMAIN[0]!;
-      const original = runGlobals(result.plan, { hostValue: fitting });
-      assert.deepEqual(
-        original,
-        evaluate(source, stores, { hostValue: fitting }, false, content).run,
-        `${record.name}: the original`,
-      );
-      originals.set(record.name, original.failure);
+      observed.push({ run: ran, events });
       runs += 1;
-      // the companions with the same checked stores, under every assignment of their inputs
-      const observed: { run: PredictedRun; events: readonly CheckEvent[] }[] = [];
-      // the original under every assignment of its host input too: a violating value stops at its check, as derived
-      for (const inputs of assignments(["hostValue"])) {
-        const ran = runGlobals(result.plan, inputs);
+      compared += 1;
+    }
+    // the companions with the same checked stores, under every assignment of their inputs
+    const ranCompanions = companionRuns.get(record.name) ?? [];
+    for (const companion of companions(syntax)) {
+      const compiled = insideSlice(() =>
+        inBothOrders(() =>
+          compileSourceWithBackend(
+            companion.source,
+            { globals: [...companion.globals] },
+            CORE_BACKEND,
+          ),
+        ),
+      );
+      const at = `${record.name}, companion ${companion.label}`;
+      assert.ok(compiled !== null, `${at}: inside the slice`);
+      assert.ok(compiled.plan !== null, `${at}: a plan`);
+      assert.deepEqual(
+        plannedStores(compiled.plan),
+        derivedStores(stores),
+        `${at}: the checked stores`,
+      );
+      const companionSyntax = syntaxOf(companion.source);
+      const companionContent = derive(companionSyntax, record.expected).content;
+      assert.deepEqual(
+        plannedContent(compiled.plan, companion.source),
+        derivedContent(companionContent, companion.source),
+        `${at}: S7 content`,
+      );
+      for (const inputs of assignments(companion.globals)) {
+        const ran = runGlobals(compiled.plan, inputs);
         assert.deepEqual(
           ran,
-          evaluate(source, stores, inputs, false, content).run,
-          `${record.name}, the original with ${JSON.stringify(inputs)}`,
+          evaluate(companionSyntax, stores, inputs, false, companionContent).run,
+          `${record.name}, companion ${companion.label}, with ${JSON.stringify(inputs)}`,
         );
-        observed.push({ run: ran, events: evaluate(source, stores, inputs, true, content).events });
+        observed.push({
+          run: ran,
+          events: evaluate(companionSyntax, stores, inputs, true, companionContent).events,
+        });
+        ranCompanions.push(ran);
         runs += 1;
         compared += 1;
       }
-      for (const companion of companions(source)) {
-        const compiled = insideSlice(() =>
-          inBothOrders(() =>
-            compileSourceWithBackend(
-              companion.source,
-              { globals: [...companion.globals] },
-              CORE_BACKEND,
-            ),
-          ),
+    }
+    if (ranCompanions.length > 0) companionRuns.set(record.name, ranCompanions);
+    // each discharge classified by the runs: a store's at its value, the runtime's at its use, each by its own check
+    for (const discharge of discharges) {
+      if (discharge.by === "native" && discharge.what === "representable") {
+        classes.set(
+          "not violable (representable)",
+          (classes.get("not violable (representable)") ?? 0) + 1,
         );
-        const at = `${record.name}, companion ${companion.label}`;
-        assert.ok(compiled !== null, `${at}: inside the slice`);
-        assert.ok(compiled.plan !== null, `${at}: a plan`);
-        assert.deepEqual(
-          plannedStores(compiled.plan),
-          derivedStores(stores),
-          `${at}: the checked stores`,
-        );
-        const companionContent = derive(companion.source, record.expected).content;
-        assert.deepEqual(
-          plannedContent(compiled.plan, companion.source),
-          derivedContent(companionContent, companion.source),
-          `${at}: S7 content`,
-        );
-        for (const inputs of assignments(companion.globals)) {
-          const ran = runGlobals(compiled.plan, inputs);
-          assert.deepEqual(
-            ran,
-            evaluate(companion.source, stores, inputs, false, companionContent).run,
-            `${record.name}, companion ${companion.label}, with ${JSON.stringify(inputs)}`,
-          );
-          observed.push({
-            run: ran,
-            events: evaluate(companion.source, stores, inputs, true, companionContent).events,
-          });
-          companionRuns.set(record.name, [...(companionRuns.get(record.name) ?? []), ran]);
-          runs += 1;
-        }
+        continue;
       }
-      // each discharge classified by the runs: a store's at its value, the runtime's at its use, each by its own check
-      for (const discharge of discharges) {
-        if (discharge.by === "native" && discharge.what === "representable") {
-          classes.set(
-            "not violable (representable)",
-            (classes.get("not violable (representable)") ?? 0) + 1,
-          );
-          continue;
-        }
-        const named =
-          discharge.by === "store"
-            ? `${discharge.store.valueSo}:${discharge.store.valueEo}`
-            : discharge.site;
-        // each discharge by its own check's codes, never another's at the same site
-        const codes = discharge.by === "store" ? STORE_CODES : (NATIVE_CODES[discharge.what] ?? []);
-        const own = (code: string | null): boolean => codes.includes(code);
-        const key = `${record.name}#${discharge.by === "store" ? "store" : discharge.what}@${named}`;
-        if (classOf.has(key)) continue;
-        const ownAt = (event: CheckEvent): boolean => event.site === named && own(event.code);
-        const verdict = observed.some(({ run: ran }) => {
-          const [code, at] = ran.failure?.split("@") ?? [];
-          return at === named && own(code ?? null);
-        })
-          ? "violable"
-          : observed.some(({ events }) => events.some((event) => ownAt(event) && !event.fits))
-            ? "preempted"
-            : observed.some(({ events }) => events.some(ownAt))
-              ? "not violable"
-              : "unreachable";
-        classOf.set(key, verdict);
-        classes.set(verdict, (classes.get(verdict) ?? 0) + 1);
-      }
-    } catch (error) {
-      failures.push(`${record.name}: ${error instanceof Error ? error.message : String(error)}`);
+      const named =
+        discharge.by === "store"
+          ? `${discharge.store.valueSo}:${discharge.store.valueEo}`
+          : discharge.site;
+      // each discharge by its own check's codes, never another's at the same site
+      const codes = discharge.by === "store" ? STORE_CODES : (NATIVE_CODES[discharge.what] ?? []);
+      const own = (code: string | null): boolean => codes.includes(code);
+      const key = `${record.name}#${discharge.by === "store" ? "store" : discharge.what}@${named}`;
+      if (classOf.has(key)) continue;
+      const ownAt = (event: CheckEvent): boolean => event.site === named && own(event.code);
+      const verdict = observed.some(({ run: ran }) => {
+        const [code, at] = ran.failure?.split("@") ?? [];
+        return at === named && own(code ?? null);
+      })
+        ? "violable"
+        : observed.some(({ events }) => events.some((event) => ownAt(event) && !event.fits))
+          ? "preempted"
+          : observed.some(({ events }) => events.some(ownAt))
+            ? "not violable"
+            : "unreachable";
+      classOf.set(key, verdict);
+      classes.set(verdict, (classes.get(verdict) ?? 0) + 1);
     }
   }
   const counted = [...outside.values()].reduce((sum, count) => sum + count, 0);
@@ -439,8 +435,8 @@ test("every positive-list record the candidate route reaches plans and runs as i
       .join(", ");
   t.diagnostic(
     `${positive} positive-list records: ${accepted.length} on the candidate route, ${plans} with a plan, ${runs} ` +
-      `runs predicted and run; discharges: ${listed(classes)}; outside the candidate slice (later port steps): ` +
-      listed(outside),
+      `runs, ${compared} comparisons with a predicted run (each original's is its fitting assignment's run); ` +
+      `discharges: ${listed(classes)}; outside the candidate slice (later port steps): ${listed(outside)}`,
   );
   assert.equal(accepted.length + counted, positive);
   // the literal witnesses of the rules (§5.2): each class and each original outcome the note names
@@ -501,7 +497,6 @@ test("every positive-list record the candidate route reaches plans and runs as i
     "cp9-cells/r8/written-list/mixed",
   ])
     assert.ok(accepted.includes(name), `${name} inside the slice`);
-  assert.deepEqual(failures, [], failures.join("\n"));
 });
 
 test("the S7 oracle derives receiving written types and observes native discharges", () => {
@@ -515,7 +510,7 @@ test("the S7 oracle derives receiving written types and observes native discharg
     const source = `${prefix}${initializer}\nsay out\nexit\n`;
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null);
-    const derived = derive(source, compactAnalysis(request));
+    const derived = derive(syntaxOf(source), compactAnalysis(request));
     const owner = `${prefix.length}:${source.indexOf("\n", prefix.length)}`;
     assert.deepEqual(
       derivedContent(derived.content, source),
@@ -535,7 +530,7 @@ test("the S7 oracle derives receiving written types and observes native discharg
     );
     assert.deepEqual(
       runGlobals(compiled.plan, {}),
-      evaluate(source, derived.stores, {}, false, derived.content).run,
+      evaluate(syntaxOf(source), derived.stores, {}, false, derived.content).run,
       source,
     );
   }
@@ -543,12 +538,12 @@ test("the S7 oracle derives receiving written types and observes native discharg
     const source = `say ${operand}\nexit\n`;
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null);
-    const derived = derive(source, compactAnalysis(request));
+    const derived = derive(syntaxOf(source), compactAnalysis(request));
     const ingress = derived.discharges.filter(
       (entry) => entry.by === "native" && entry.what === "typed-ingress",
     );
     assert.equal(ingress.length, 1, source);
-    const predicted = evaluate(source, derived.stores, {}, false, derived.content);
+    const predicted = evaluate(syntaxOf(source), derived.stores, {}, false, derived.content);
     assert.ok(
       predicted.events.some((event) => event.site === `4:${source.indexOf("\n")}` && event.fits),
       source,
@@ -561,7 +556,7 @@ test("the S7 oracle derives receiving written types and observes native discharg
     const source = `let v = hostValue\nlet out: integer = ${access}\nsay out\nexit\n`;
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null);
-    const derived = derive(source, compactAnalysis(request));
+    const derived = derive(syntaxOf(source), compactAnalysis(request));
     const accessSite = `${source.indexOf(access)}:${source.indexOf(access) + access.length}`;
     assert.ok(
       derived.discharges.some(
@@ -585,7 +580,13 @@ test("the S7 oracle derives receiving written types and observes native discharg
       { kind: "set", items: [] },
       { kind: "dict", entries: [] },
     ] satisfies SerializableRuntimeValue[]) {
-      const predicted = evaluate(source, derived.stores, { hostValue }, false, derived.content);
+      const predicted = evaluate(
+        syntaxOf(source),
+        derived.stores,
+        { hostValue },
+        false,
+        derived.content,
+      );
       assert.deepEqual(
         runGlobals(compiled.plan, { hostValue }),
         predicted.run,
@@ -645,7 +646,12 @@ test("the S7 oracle derives object admissions and default structures from their 
     ],
   ] as const;
   const inputs: readonly SerializableRuntimeValue[] = [
-    ...DOMAIN,
+    // the fixture route's domain
+    2,
+    "text",
+    true,
+    2.5,
+    null,
     "null",
     "1.5",
     "{}",
@@ -665,7 +671,7 @@ test("the S7 oracle derives object admissions and default structures from their 
     try {
       const request = coreRequest([{ path: "main.tease", source }]);
       assert.ok(request !== null);
-      const derived = derive(source, compactAnalysis(request));
+      const derived = derive(syntaxOf(source), compactAnalysis(request));
       const content = derivedContent(derived.content, source);
       assert.ok(
         (check === "store"
@@ -681,7 +687,7 @@ test("the S7 oracle derives object admissions and default structures from their 
       for (const hostValue of inputs)
         assert.deepEqual(
           runGlobals(compiled.plan, { hostValue }),
-          evaluate(source, derived.stores, { hostValue }, false, derived.content).run,
+          evaluate(syntaxOf(source), derived.stores, { hostValue }, false, derived.content).run,
           `${source} with ${JSON.stringify(hostValue)}`,
         );
     } catch (error) {
