@@ -501,10 +501,11 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
  * (inline data a published choice selects owes the store's boundary at the host value, an unselected property none),
  * a carrier of a carrier and a carrier inside a literal inside a carrier (inline and named), inline and named data in one
  * selected collection (the named data's C1 at the selecting expression, the inline data's boundary alone: r4.63 (1), (2),
- * TABLE r4.67 (3)) and inline data beside an own read's named data (its C1 at the store's value), a choice over a held
- * list (§3.3's record boundary beside C1), a union holding a reference across two carriers (opaque by dispatch, checked at
- * its consumer), and nullable root and inner receivers of a member (r4.60 beside each receiver's C5 check). The mixed
- * selected-value and absent-value-text lists in both element orders are the cells test's (D1).
+ * TABLE r4.67 (3)) and inline data or a host member beside an own read's named data (the merged item's C1 at the store's
+ * value, the member's own place's at its read: r4.70 (1)), a choice over a held list (§3.3's record boundary beside C1),
+ * a union holding a reference across two carriers (opaque by dispatch, checked at its consumer), and nullable root and
+ * inner receivers of a member (r4.60 beside each receiver's C5 check). The mixed selected-value and absent-value-text
+ * lists in both element orders are the cells test's (D1).
  */
 test("the role matrix's compositions give their exact records, in both orders (§6)", () => {
   const choice = (options: string): string => `let out = askChoice ${options}\nsay "AFTER"\n`;
@@ -575,6 +576,19 @@ test("the role matrix's compositions give their exact records, in both orders (�
       D written-target warning 30:55 later
       C copy-type out [list] 30:39
       C copy-type out.element [integer] 30:55
+      B copy-type raw [unknown] 10:19
+      B copy-type out [list] 30:39`,
+    ],
+    [
+      "a host member beside an own read's named data (TABLE r4.70 (1))",
+      'let raw = hostValue\nlet out = hostValue.field otherwise [raw]\nout = [1]\nsay "AFTER"\n',
+      `outcome warning-runtime-check
+      D written-target warning 30:45 later
+      D written-target warning 30:61 later
+      D member-read warning 30:39 unknown
+      C copy-type out [list] 30:45
+      C copy-type out.element [integer] 30:61
+      C null-check hostValue [non-null] 30:39
       B copy-type raw [unknown] 10:19
       B copy-type out [list] 30:39`,
     ],

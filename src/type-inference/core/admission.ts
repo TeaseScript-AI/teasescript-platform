@@ -290,7 +290,7 @@ interface Stops {
 interface KeyStops {
   readonly selected: readonly Stop[];
   readonly sitings: () => readonly Siting[];
-  /** Of the sitings, the named data's (`ingress` null). */
+  /** Of the sitings, the named data's (`ingress` null, no member of host data). */
   readonly namedSitings: () => readonly Siting[];
   readonly named: () => readonly Stop[];
 }
@@ -307,6 +307,8 @@ interface StoreIngresses {
 interface Siting {
   readonly stop: Stop;
   readonly ingress: PlaceId | null;
+  /** A member of host data the store reads (r4.60): its own place's C1, no named data's. */
+  readonly host?: true;
 }
 
 /** The values at one depth of a stored value's path, and the first of them no literal of it holds (`wholeBelow`). */
@@ -2540,7 +2542,7 @@ export class Admission {
     // (the item's own ingress among them first, where it names one: the contribution that brought it; an item carrying
     // named data the store brings beside its inline data, or a fallback's or a default's own read's data (a typed
     // default's is its call's), is that data's C1, sited by its rule (an own read's at the store), the inline data owing
-    // only its boundary: r4.63 (1), (2), TABLE r4.67 (3), Codex r23 N1)
+    // only its boundary and a host member beside it its own place's C1: r4.63 (1), (2), TABLE r4.67 (3), r4.70 (1))
     const node = item?.ingress;
     const own = node === undefined ? null : this.#leafIngresses(node);
     const stops = this.#landingIndex().byStore.get(d);
@@ -2636,7 +2638,11 @@ export class Admission {
           program.work.charge("checks");
           if (stop.via.some((level) => OWN_ROLES.has(level.role))) continue;
           if (this.#namedBelowCombining(stop) || this.#namedMember(stop))
-            out.push({ stop, ingress: null });
+            out.push(
+              definitions.ingress.has(baseOf(stop.value))
+                ? { stop, ingress: null, host: true }
+                : { stop, ingress: null },
+            );
           else {
             const base = baseOf(stop.value);
             if (definitions.ingress.has(base)) out.push({ stop, ingress: base });
@@ -2644,8 +2650,11 @@ export class Admission {
         }
         return (sitings = out);
       },
+      // (a member of host data beside them is its own place's C1, never the merged item's: TABLE r4.70 (1))
       namedSitings: () =>
-        (namedSitings ??= entry.sitings().filter((siting) => siting.ingress === null)),
+        (namedSitings ??= entry
+          .sitings()
+          .filter((siting) => siting.ingress === null && siting.host === undefined)),
       // named external data outside every ingress the store holds whole and every own read (`#namedBeside`)
       named: () => {
         if (named !== null) return named;
