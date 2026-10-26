@@ -2310,8 +2310,9 @@ export class Admission {
   /**
    * A4 through copies (ADR 0021 1.3: a copy of a binding with a written type keeps that type, so a copy of that copy
    * does too; the lead's ruling on the merged S6's chains): the written type an unwritten binding has where its earliest
-   * decider, in source order, is a whole copy of a binding with one, written or itself such a copy; `null` where another
-   * definite contribution decides first (A2), and on a cycle of copies.
+   * decider, in source order, is a whole copy of a binding with one, written or itself such a copy, or of a projection of
+   * such a binding (`let middle = typed[0]`: the type at that path); `null` where another definite contribution decides
+   * first (A2), and on a cycle of copies.
    */
   #chainTerm(binding: PlaceId): TypeTerm | null {
     const known = this.#chainTerms.get(binding);
@@ -2329,9 +2330,10 @@ export class Admission {
     program.work.charge("checks", stores.length + sortCost(stores.length));
     let found: TypeTerm | null = null;
     for (const d of [...stores].sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b))) {
-      const source = program.occurrenceOf.get(d.value!);
-      if (source !== undefined) {
-        found = this.#typeOf(source);
+      // (a whole copy of such a binding, or of a projection of one: its written type at the projection's path, F12)
+      const source = this.#writtenSource(d.value!, []);
+      if (source !== null) {
+        found = permittedAt(source.term, source.strip);
         if (found !== null) break;
       }
       const items = this.valueAt(d, []);

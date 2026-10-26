@@ -189,7 +189,8 @@ type Decision =
   | "later copy"
   | "copy of a copy"
   | "copy of a copy of a copy"
-  | "projection";
+  | "projection"
+  | "copy of a projection";
 
 type Host = "direct" | "named" | "index-held";
 
@@ -257,13 +258,14 @@ function siteIn(source: string, line: string, of: string): string {
  * The source of `form` under `decision` with the host value `host`: `typed` written with the form, initialised with a
  * literal of it (else the host value), then the place that receives the host value (`typed` itself, a copy taken
  * before or after that store, a copy at the end of a chain of two or three copies, or, with `projection`, a copy of the
- * written list's element).
+ * written list's element, with `copy of a projection` a copy of that copy).
  */
 function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
   const type = formText(form);
   const literal = leafLiteral(form);
   const init = valueOf(form, literal ?? "hostValue");
-  const placed = decision === "projection" && form.kind === "collection" ? form.of : form;
+  const projected = decision === "projection" || decision === "copy of a projection";
+  const placed = projected && form.kind === "collection" ? form.of : form;
   const leaf = host === "direct" ? "hostValue" : host === "named" ? "h" : "[hostValue][0]";
   // (a later copy's host store holds the host value whole: a literal around it would decide its levels first, A2)
   const value = decision === "later copy" ? leaf : valueOf(placed, leaf);
@@ -296,6 +298,10 @@ function writtenCase(form: Form, decision: Decision, host: Host): WrittenCase {
     case "projection":
       hostLine = `copy = ${value}`;
       lines.push("let copy = typed[0]", hostLine);
+      break;
+    case "copy of a projection":
+      hostLine = `copy = ${value}`;
+      lines.push("let middle = typed[0]", "let copy = middle", hostLine);
       break;
   }
   const source = `${[...lines, 'say "DONE"', "exit"].join("\n")}\n`;
@@ -391,14 +397,14 @@ const DECISIONS: readonly Decision[] = [
   "copy of a copy of a copy",
 ];
 
-/** The decision of a written list's element: a copy of it (a typed index projection). */
-const PROJECTIONS: readonly Decision[] = ["projection"];
+/** The decisions of a written list's element: a copy of it (a typed index projection), and a copy of that copy. */
+const PROJECTIONS: readonly Decision[] = ["projection", "copy of a projection"];
 
 /**
  * The merged S6's B1 (the reviewer's written-domain matrix, rebuilt by axes): nine element domains (the four usual
  * scalars, each optional, and `null` alone) × list depths 0–3, the outermost list optional or not × the place written,
- * an early or a later copy, a copy at the end of a chain of two or three copies, or a copy of the written list's element
- * (a typed index projection) × the host value direct, named or held at an index.
+ * an early or a later copy, a copy at the end of a chain of two or three copies, a copy of the written list's element
+ * (a typed index projection) or a copy of that copy × the host value direct, named or held at an index.
  */
 export const WRITTEN_DOMAIN_MATRIX: readonly WrittenCase[] = (() => {
   const out: WrittenCase[] = [];
@@ -503,8 +509,9 @@ export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() =
  * Sol's round 1 on #1049 (B2's invariant through optionals, unions and projections): an `object`'s properties admit
  * every kind (V30 §13; r4.74 (2)) in each form that holds one, `object`, `object?`, `object | string`, and as a list's
  * element at depths 1 and 2, optional or in a union too × the property's contents (an integer, text, a boolean, `null`,
- * a list, the host value) × the place written, a copy of it at the end of a chain of one to three copies, or a copy of
- * the property (a projection), each then taking them. Nothing is owed: no diagnostic, no check, no boundary. The candidate route does not take object literals: the decision layer only.
+ * a list, the host value) × the place written, a copy of it at the end of a chain of one to three copies, a copy of the
+ * property (a projection) or a copy of that copy, each then taking them. Nothing is owed: no diagnostic, no check, no
+ * boundary. The candidate route does not take object literals: the decision layer only.
  */
 export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
   const out: UnrestrictedCase[] = [];
@@ -538,8 +545,9 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
         "copy of a copy",
         "copy of a copy of a copy",
         "projection",
+        "copy of a projection",
       ] as const) {
-        const projected = arrival === "projection";
+        const projected = arrival === "projection" || arrival === "copy of a projection";
         const place = arrival === "written" ? "typed" : "copy";
         const chain =
           arrival === "copy"
@@ -550,7 +558,9 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
                 ? ["let first = typed", "let second = first", "let copy = second"]
                 : arrival === "projection"
                   ? [`let copy = typed${index}.p`]
-                  : [];
+                  : arrival === "copy of a projection"
+                    ? [`let middle = typed${index}.p`, "let copy = middle"]
+                    : [];
         const lines = [
           `let typed: ${type} = ${valueOf(form, "{p: 1}")}`,
           ...chain,
@@ -574,7 +584,7 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
  * `T set`, `T dict`, `T?[]`, `T[]?`, `T | U` and `(T | U)[]` (beside `string`, `integer` for a `string`), nested to depth
  * three (`T[][]`, `T?[][]`, `T[]?[]`, `T[] set`, `T[] dict`, `T[][][]`; `null?` is `null`), × the place written, an early
  * or a later copy, a copy at the end of a chain of two or three copies, and for a list form a copy of its element (a
- * typed index projection) × the host value direct, named or held at an index. A union holding a whole collection beside another type is §13's compile error and has no form here: the
+ * typed index projection) or a copy of that copy × the host value direct, named or held at an index. A union holding a whole collection beside another type is §13's compile error and has no form here: the
  * compiler does not report it yet, pre-existing, with the lead.
  */
 export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
