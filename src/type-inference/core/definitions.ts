@@ -1,10 +1,9 @@
 import type { ForStatement } from "../../ast.js";
 import type { PlaceId, SourceSite } from "../graph.js";
-import { operandsOf, type Operand } from "./carriers.js";
 import type { Callable, FlowLoop, FlowNode } from "./flow-graph.js";
 import { makeItem, writerKey, type ContextWord, type Item, type Writer } from "./items.js";
-import { conversionCategory, dictList, methodCategory } from "./method-categories.js";
-import { propertyStep, siteKey, type CoreProgram } from "./program.js";
+import { conversionCategory, methodCategory } from "./method-categories.js";
+import { siteKey, type CoreProgram } from "./program.js";
 
 /*
  * The definitions of the coarse core (checkpoint 9, TABLE §2, §3.1 X2–X6, §6 O, §8): every store, add, clear,
@@ -160,21 +159,10 @@ export class DefinitionIndex {
   readonly byValue = new Map<PlaceId, Definition[]>();
   /** The operation a fallback operand or a default belongs to: it lands where the operation's result lands. */
   readonly fallbackOf = new Map<PlaceId, PlaceId>();
-  /** C9: the values external data enters by, and the store that brought each in (its ingress store). */
+  /** C9: the values external data enters by (a syntactic set: where each lands is admission's landing index). */
   readonly ingress = new Set<PlaceId>();
   /** Each ingress by the key of its leaf (`ingressLeaf`): the value its own expression's writer names. */
   readonly ingressAt = new Map<string, PlaceId>();
-  readonly ingressStore = new Map<PlaceId, Writer>();
-  /**
-   * Per ingress store's token (`writerKey`): its store, the path below its destination, the distinct paths below it
-   * its ingresses stand at, its earliest carried site.
-   */
-  readonly storeByToken = new Map<string, Definition>();
-  readonly ingressSuffix = new Map<string, readonly string[]>();
-  readonly ingressWays = new Map<string, Map<string, readonly string[]>>();
-  readonly cellSiteOf = new Map<string, SourceSite>();
-  /** A fallback's or a default's own ingress read, by its token (C10: checked at the read). */
-  readonly readIngress = new Map<string, PlaceId>();
   /** The keys below each key that have definitions (X6's own events, X7's keys below). */
   readonly #keysBelow = new Map<Key, Key[]>();
   readonly #foreignAt = new Set<Key>();
@@ -481,15 +469,7 @@ export class DefinitionIndex {
     }
   }
 
-  /**
-   * C9: the values external data enters by (a load, `fromJson`, a read of a host global) and each one's ingress store:
-   * the whole store of the value, or of the value that carries it there (the outermost literal holding it, a property
-   * or element read of it, the fallback whose direct value it is, an `askChoice` whose option it is or whose option's
-   * selected value it is, r4.42, r4.46 (1)). A fallback or default carries nothing to its operation's store (C10): data
-   * there names its own read. Per store, the path below its destination its ingresses share (A8: a collection literal's
-   * element; an object literal's record level, a read of the carrier taking its outermost step), and the earliest
-   * ingress expression a literal or a choice carries (C9 r4.29: the boundary's site).
-   */
+  /** C9: the values external data enters by: a load, `fromJson`, a read of a host global; each by its leaf's key. */
   #ingress(): void {
     const program = this.program;
     for (const constraint of program.constraints)
@@ -506,136 +486,6 @@ export class DefinitionIndex {
       const site = program.places[value]?.site;
       if (site !== null && site !== undefined)
         this.ingressAt.set(writerKey(ingressLeaf(program, site)), value);
-    }
-    // the carrier table's operands, upwards: each value to the carrier that holds it and how (`carriers.ts`), an own read
-    // (a fallback's or a default's, C10) where the walk stops; an iteration and a length hold no copy of their operand
-    const ownOperand = new Set<PlaceId>();
-    const upOf = new Map<PlaceId, { readonly carrier: PlaceId; readonly operand: Operand }>();
-    for (const carrier of [...program.projOf.keys(), ...program.opOf.keys()])
-      for (const operand of operandsOf(program, carrier)) {
-        program.work.charge("indexSteps");
-        if (operand.kind === "iteration" || operand.below[0] === "length") continue;
-        if (operand.own) ownOperand.add(operand.operand);
-        if (!upOf.has(operand.operand)) upOf.set(operand.operand, { carrier, operand });
-      }
-    const storeOfValue = new Map<PlaceId, Definition>();
-    for (const d of [...this.storeDefs, ...this.transferDefs])
-      if (
-        (d.kind === "whole" || d.kind === "add") &&
-        d.value !== undefined &&
-        !storeOfValue.has(d.value)
-      )
-        storeOfValue.set(d.value, d);
-    const cellOfValue = new Map<PlaceId, PlaceId>();
-    for (const [cell, definitions] of this.cellDefs)
-      for (const d of definitions) if (d.value !== undefined) cellOfValue.set(d.value, cell);
-    // an object literal's property names, for a choice object's selected value
-    const propertiesOf = new Map<PlaceId, Set<string>>();
-    for (const place of program.places)
-      if (place.kind.kind === "property") {
-        let names = propertiesOf.get(place.kind.owner);
-        if (names === undefined) propertiesOf.set(place.kind.owner, (names = new Set()));
-        names.add(place.kind.name);
-      }
-    const carrierOf = (value: PlaceId): PlaceId | undefined => {
-      const cell = cellOfValue.get(value);
-      if (cell !== undefined) return program.cellOwner.get(cell)!.owner;
-      return upOf.get(value)?.carrier;
-    };
-    for (const value of this.ingress) {
-      let current = value;
-      // the path below the store the literals add, the steps from `current` down to the value by name and as key steps
-      // with the object literal holding each property step, and whether a literal or a choice carried the value; the
-      // paths are kept last step first, so each carrier is one step at any depth
-      const suffix: string[] = [];
-      const way: string[] = [];
-      const steps: string[] = [];
-      const objects: (PlaceId | null)[] = [];
-      let carried = false;
-      while (
-        !storeOfValue.has(current) &&
-        !ownOperand.has(current) &&
-        carrierOf(current) !== undefined
-      ) {
-        program.work.charge("indexSteps");
-        const cell = cellOfValue.get(current);
-        if (cell !== undefined) {
-          const owner = program.place(cell).kind;
-          if (owner.kind === "property") suffix.length = 0;
-          else suffix.push("element");
-          way.push(owner.kind === "property" ? owner.name : "element");
-          steps.push(owner.kind === "property" ? propertyStep(owner.name) : "element");
-          objects.push(owner.kind === "property" ? owner.owner : null);
-          carried = true;
-        } else if (upOf.get(current)!.operand.below.length === 1) {
-          // a projection, a `get`'s receiver or a removal: one step into the operand; r4.46 (2): a dict literal's
-          // `values` holds its values at the element step, its `keys` none of them
-          const { carrier, operand } = upOf.get(current)!;
-          const listed =
-            operand.kind === "projection" &&
-            (program.hasOf.get(current) ?? []).some((has) => has.type.kind === "dict")
-              ? dictList(program.projOf.get(carrier)?.step ?? "")
-              : undefined;
-          if (listed === "keys") break;
-          if (listed !== "values") {
-            suffix.pop();
-            way.pop();
-            steps.pop();
-            objects.pop();
-          }
-        } else if (upOf.get(current)!.operand.kind === "choice") {
-          // an option's own value, an element of its list, or a choice object's `value` (its `text` without one)
-          const at = way.at(-1) === "element" ? 2 : 1;
-          const step = way.at(-at);
-          if (
-            step !== undefined &&
-            step !== "value" &&
-            !(step === "text" && !propertiesOf.get(objects.at(-at)!)?.has("value"))
-          )
-            break;
-          suffix.length = 0;
-          way.length = 0;
-          steps.length = 0;
-          objects.length = 0;
-          carried = true;
-        }
-        current = carrierOf(current)!;
-      }
-      suffix.reverse();
-      // a host read there, or a load or `fromJson` call: its own read, so the consumers it reaches stay linked to it
-      if (ownOperand.has(current)) {
-        const site = program.places[value]?.site;
-        if (site !== null && site !== undefined) {
-          const token = program.writer("read", site);
-          this.ingressStore.set(value, token);
-          this.readIngress.set(writerKey(token), value);
-        }
-        continue;
-      }
-      const store = storeOfValue.get(current);
-      if (store === undefined) continue;
-      const token = program.writer(store.how, store.site);
-      const key = writerKey(token);
-      this.ingressStore.set(value, token);
-      this.storeByToken.set(key, store);
-      const site = program.places[value]?.site;
-      const earliest = this.cellSiteOf.get(key);
-      if (carried && site && (earliest === undefined || site.start < earliest.start))
-        this.cellSiteOf.set(key, site);
-      const was = this.ingressSuffix.get(key);
-      let common = 0;
-      while (
-        was !== undefined &&
-        common < was.length &&
-        common < suffix.length &&
-        was[common] === suffix[common]
-      )
-        common += 1;
-      this.ingressSuffix.set(key, was === undefined ? suffix : was.slice(0, common));
-      steps.reverse();
-      let ways = this.ingressWays.get(key);
-      if (ways === undefined) this.ingressWays.set(key, (ways = new Map()));
-      ways.set(steps.join("."), steps);
     }
   }
 

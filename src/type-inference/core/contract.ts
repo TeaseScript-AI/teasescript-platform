@@ -2966,14 +2966,13 @@ export class Contract {
   }
 
   /**
-   * The leaf naming an ingress value (S6-CARRIERS §3.1), where an ingress store or an own read brought it in; else
-   * `undefined`, its external data loose.
+   * The leaf naming an ingress value (S6-CARRIERS §3.1): every ingress's, where it lands being admission's; else
+   * `undefined`, external data created where no ingress is, loose.
    */
   #ingressLeaf(value: PlaceId): IngressNode | undefined {
     const { definitions, program } = this.pass;
     const site = program.places[value]?.site;
-    if (!definitions.ingressStore.has(value) || site === null || site === undefined)
-      return undefined;
+    if (!definitions.ingress.has(value) || site === null || site === undefined) return undefined;
     return program.scope.ingress.leaf(ingressLeaf(program, site));
   }
 

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { withLandingIndex } from "../src/type-inference/core/admission.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
@@ -28,7 +27,6 @@ import type { CompactRecord } from "./helpers/type-core-records.js";
  *   owes one boundary, at the host value, of the ingress landing on the loop variable (r4.64, r4.65 (2)).
  * A place's state is S4's decision, taken as given: published by its one store, decided by the later store, or, for a
  * collection's element, decided at the declaration where the carrier passes the decision on (A2 with F7, F10, F17b).
- * Until §9 step 4's cutover, the shapes run under the landing index, the mechanism the cutover adopts.
  */
 
 type Endpoint = "scalar" | "collection";
@@ -271,444 +269,11 @@ const CLASSES: readonly FloorClass[] = [
 ];
 
 /**
- * The shapes whose records differ from the rule function at this head, each with its records exactly as the head
- * gives them, which §9 step 4 repairs; the list must be empty at the pull request's head.
+ * The shapes whose records differ from the rule function on a reading the lead has not ruled, each with its records
+ * exactly as the head gives them; the list must be empty at the pull request's head.
  */
-const UNTIL_CUTOVER: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
-  // r4.60: a member of host data owes the destination's C1 at the member read
-  [
-    "copy/whole receiver/collection/inline/later",
-    [
-      "B copy-type out [list] 19:28",
-      "C copy-type out [list] 19:28",
-      "C copy-type out.element [integer] 19:28",
-      "D warning-runtime-check 19:28 later",
-      "D warning-runtime-check 19:28 later",
-    ],
-  ],
-  [
-    "copy/whole receiver/collection/inline/no-later",
-    [
-      "B copy-type out [list] 19:28",
-      "C copy-type out [list] 19:28",
-      "C copy-type out.element [integer] 19:28",
-      "D warning-runtime-check 19:28 unknown",
-      "D warning-runtime-check 19:28 unknown",
-    ],
-  ],
-  [
-    "copy/whole receiver/collection/named/later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [list] 33:61",
-      "C copy-type out.element [integer] 33:61",
-      "D warning-runtime-check 33:61 later",
-      "D warning-runtime-check 33:61 later",
-    ],
-  ],
-  [
-    "copy/whole receiver/collection/named/no-later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [list] 42:48",
-      "C copy-type out.element [integer] 42:48",
-      "D warning-runtime-check 42:48 unknown",
-      "D warning-runtime-check 42:48 unknown",
-    ],
-  ],
-  [
-    "copy/whole receiver/scalar/inline/later",
-    [
-      "B copy-type out [integer] 17:26",
-      "C copy-type out [integer] 17:26",
-      "D warning-runtime-check 17:26 later",
-    ],
-  ],
-  [
-    "copy/whole receiver/scalar/inline/no-later",
-    [
-      "B copy-type out [integer] 17:26",
-      "C copy-type out [integer] 17:26",
-      "D warning-runtime-check 17:26 unknown",
-    ],
-  ],
-  [
-    "copy/whole receiver/scalar/named/later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 33:59",
-      "D warning-runtime-check 33:59 later",
-    ],
-  ],
-  [
-    "copy/whole receiver/scalar/named/no-later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 40:46",
-      "D warning-runtime-check 40:46 unknown",
-    ],
-  ],
-  [
-    "get/unknown receiver/collection/inline/later",
-    [
-      "B copy-type out [list] 16:25",
-      "C copy-type out [list] 16:25",
-      "C copy-type out.element [integer] 16:25",
-      "D warning-runtime-check 16:25 later",
-      "D warning-runtime-check 16:25 unknown",
-    ],
-  ],
-  [
-    "get/unknown receiver/collection/inline/no-later",
-    [
-      "B copy-type out [list] 16:25",
-      "C copy-type out [list] 16:25",
-      "C copy-type out.element [integer] 16:25",
-      "D warning-runtime-check 16:25 unknown",
-      "D warning-runtime-check 16:25 unknown",
-    ],
-  ],
-  [
-    "get/unknown receiver/collection/named/later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [list] 33:70",
-      "C copy-type out.element [integer] 33:70",
-      "D warning-runtime-check 33:70 later",
-      "D warning-runtime-check 33:70 unknown",
-    ],
-  ],
-  [
-    "get/unknown receiver/collection/named/no-later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [list] 39:45",
-      "C copy-type out.element [integer] 33:70",
-      "D warning-runtime-check 33:70 unknown",
-      "D warning-runtime-check 39:45 unknown",
-    ],
-  ],
-  [
-    "get/unknown receiver/scalar/inline/later",
-    [
-      "B copy-type out [integer] 14:23",
-      "C copy-type out [integer] 14:23",
-      "D warning-runtime-check 14:23 later",
-    ],
-  ],
-  [
-    "get/unknown receiver/scalar/inline/no-later",
-    [
-      "B copy-type out [integer] 14:23",
-      "C copy-type out [integer] 14:23",
-      "D warning-runtime-check 14:23 unknown",
-    ],
-  ],
-  [
-    "get/unknown receiver/scalar/named/later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 33:66",
-      "D warning-runtime-check 33:66 later",
-    ],
-  ],
-  [
-    "get/unknown receiver/scalar/named/no-later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 37:43",
-      "D warning-runtime-check 37:43 unknown",
-    ],
-  ],
-  [
-    "projection/unknown receiver/collection/inline/later",
-    [
-      "B copy-type out [list] 16:25",
-      "C copy-type out [list] 16:25",
-      "C copy-type out.element [integer] 16:25",
-      "D warning-runtime-check 16:25 later",
-      "D warning-runtime-check 16:25 unknown",
-    ],
-  ],
-  [
-    "projection/unknown receiver/collection/inline/no-later",
-    [
-      "B copy-type out [list] 16:25",
-      "C copy-type out [list] 16:31",
-      "C copy-type out.element [integer] 16:25",
-      "D warning-runtime-check 16:25 unknown",
-      "D warning-runtime-check 16:31 unknown",
-    ],
-  ],
-  [
-    "projection/unknown receiver/collection/named/later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [list] 33:55",
-      "C copy-type out.element [integer] 33:55",
-      "D warning-runtime-check 33:55 later",
-      "D warning-runtime-check 33:55 unknown",
-    ],
-  ],
-  [
-    "projection/unknown receiver/collection/named/no-later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [list] 39:51",
-      "C copy-type out.element [integer] 33:55",
-      "D warning-runtime-check 33:55 unknown",
-      "D warning-runtime-check 39:51 unknown",
-    ],
-  ],
-  [
-    "projection/unknown receiver/scalar/inline/later",
-    [
-      "B copy-type out [integer] 14:23",
-      "C copy-type out [integer] 14:23",
-      "D warning-runtime-check 14:23 later",
-    ],
-  ],
-  [
-    "projection/unknown receiver/scalar/named/later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 33:53",
-      "D warning-runtime-check 33:53 later",
-    ],
-  ],
-  [
-    "removal/whole receiver/collection/inline/later",
-    [
-      "B copy-type out [list] 16:25",
-      "C copy-type out [list] 16:25",
-      "C copy-type out.element [integer] 16:25",
-      "D warning-runtime-check 16:25 later",
-      "D warning-runtime-check 16:25 unknown",
-    ],
-  ],
-  [
-    "removal/whole receiver/collection/inline/no-later",
-    [
-      "B copy-type out [list] 16:25",
-      "C copy-type out [list] 16:25",
-      "C copy-type out.element [integer] 16:25",
-      "D warning-runtime-check 16:25 unknown",
-      "D warning-runtime-check 16:25 unknown",
-    ],
-  ],
-  [
-    "removal/whole receiver/collection/named/later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [list] 33:61",
-      "C copy-type out.element [integer] 33:61",
-      "D warning-runtime-check 33:61 later",
-      "D warning-runtime-check 33:61 unknown",
-    ],
-  ],
-  [
-    "removal/whole receiver/collection/named/no-later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [list] 39:45",
-      "C copy-type out.element [integer] 33:61",
-      "D warning-runtime-check 33:61 unknown",
-      "D warning-runtime-check 39:45 unknown",
-    ],
-  ],
-  [
-    "removal/whole receiver/scalar/inline/later",
-    [
-      "B copy-type out [integer] 14:23",
-      "C copy-type out [integer] 14:23",
-      "D warning-runtime-check 14:23 later",
-    ],
-  ],
-  [
-    "removal/whole receiver/scalar/inline/no-later",
-    [
-      "B copy-type out [integer] 14:23",
-      "C copy-type out [integer] 14:23",
-      "D warning-runtime-check 14:23 unknown",
-    ],
-  ],
-  [
-    "removal/whole receiver/scalar/named/later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 33:59",
-      "D warning-runtime-check 33:59 later",
-    ],
-  ],
-  [
-    "removal/whole receiver/scalar/named/no-later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 37:43",
-      "D warning-runtime-check 37:43 unknown",
-    ],
-  ],
-  // r4.63 (3): an own default's destination C1 at the store's value span
-  [
-    "get/whole default/collection/inline/no-later",
-    [
-      "B copy-type hostValue [unknown] 33:42",
-      "C copy-type [hostValue].element [integer|number] 32:43",
-      "C copy-type out.element [integer] 33:42",
-      "D warning-runtime-check 32:43 unknown",
-      "D warning-runtime-check 33:42 unknown",
-    ],
-  ],
-  [
-    "get/whole default/collection/named/no-later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type [parcel].element [integer|number] 55:63",
-      "C copy-type out.element [integer] 56:62",
-      "D warning-runtime-check 55:63 unknown",
-      "D warning-runtime-check 56:62 unknown",
-    ],
-  ],
-  [
-    "get/whole default/scalar/inline/no-later",
-    [
-      "B copy-type hostValue [unknown] 30:39",
-      "C copy-type hostValue [integer|number] 30:39",
-      "C copy-type out [integer] 30:39",
-      "D warning-runtime-check 30:39 unknown",
-      "D warning-runtime-check 30:39 unknown",
-    ],
-  ],
-  [
-    "get/whole default/scalar/named/no-later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 53:59",
-      "C copy-type parcel [integer|number] 53:59",
-      "D warning-runtime-check 53:59 unknown",
-      "D warning-runtime-check 53:59 unknown",
-    ],
-  ],
-  [
-    "otherwise/whole fallback/scalar/inline/no-later",
-    [
-      "B copy-type hostValue [unknown] 30:39",
-      "C copy-type out [integer] 30:39",
-      "D warning-runtime-check 30:39 unknown",
-    ],
-  ],
-  [
-    "otherwise/whole fallback/scalar/named/no-later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 53:59",
-      "D warning-runtime-check 53:59 unknown",
-    ],
-  ],
-  // r4.63 (4), r4.64, r4.65 (2): a loop variable's boundary against its own contract, one ingress landing on it
-  [
-    "iteration/literal/collection/inline/later",
-    [
-      "B copy-type entry.element [integer] 20:29",
-      "B copy-type entry.element [unknown] 13:31",
-      "B copy-type out.element [unknown] 44:49",
-      "C copy-type entry.element [integer] 20:29",
-      "C copy-type out.element [integer] 44:49",
-      "D warning-runtime-check 20:29 unknown",
-      "D warning-runtime-check 44:49 later",
-    ],
-  ],
-  [
-    "iteration/literal/collection/inline/no-later",
-    [
-      "B copy-type entry.element [integer] 20:29",
-      "B copy-type entry.element [unknown] 13:31",
-      "C copy-type entry.element [integer] 20:29",
-      "D warning-runtime-check 20:29 unknown",
-    ],
-  ],
-  [
-    "iteration/literal/scalar/inline/later",
-    [
-      "B copy-type entry [integer] 17:26",
-      "B copy-type entry [unknown] 17:26",
-      "B copy-type out [unknown] 40:45",
-      "C copy-type entry [integer] 17:26",
-      "C copy-type out [integer] 40:45",
-      "D warning-runtime-check 17:26 unknown",
-      "D warning-runtime-check 40:45 later",
-    ],
-  ],
-  [
-    "iteration/literal/scalar/inline/no-later",
-    [
-      "B copy-type entry [integer] 17:26",
-      "B copy-type entry [unknown] 17:26",
-      "C copy-type entry [integer] 17:26",
-      "D warning-runtime-check 17:26 unknown",
-    ],
-  ],
-  [
-    "iteration/whole operand/collection/inline/later",
-    [
-      "B copy-type hostValue [unknown] 13:22",
-      "B copy-type out [unknown] 35:50",
-      "B copy-type out.element [unknown] 35:50",
-      "C copy-type out [list] 35:50",
-      "C copy-type out.element [integer] 35:50",
-      "D warning-runtime-check 35:50 later",
-      "D warning-runtime-check 35:50 unknown",
-    ],
-  ],
-  [
-    "iteration/whole operand/collection/inline/no-later",
-    [
-      "B copy-type hostValue [unknown] 13:22",
-      "B copy-type out [unknown] 41:46",
-      "B copy-type out.element [unknown] 35:50",
-      "C copy-type out [list] 41:46",
-      "C copy-type out.element [integer] 35:50",
-      "D warning-runtime-check 35:50 unknown",
-      "D warning-runtime-check 41:46 unknown",
-    ],
-  ],
-  [
-    "iteration/whole operand/scalar/inline/later",
-    [
-      "B copy-type hostValue [unknown] 13:22",
-      "B copy-type out [unknown] 35:48",
-      "C copy-type out [integer] 35:48",
-      "D warning-runtime-check 35:48 later",
-    ],
-  ],
-  [
-    "iteration/whole operand/scalar/inline/no-later",
-    [
-      "B copy-type hostValue [unknown] 13:22",
-      "B copy-type out [unknown] 39:44",
-      "C copy-type out [integer] 39:44",
-      "D warning-runtime-check 39:44 unknown",
-    ],
-  ],
-  // r4.63 (3): a typed default owes no own read beside the call's boundary
-  [
-    "load default/whole default/collection/inline/later",
-    [
-      "B copy-type hostValue [unknown] 41:50",
-      "B copy-type out [list] 16:52",
-      "C copy-type out.element [integer] 16:52",
-      "D warning-runtime-check 16:52 unknown",
-    ],
-  ],
-  [
-    "load default/whole default/collection/inline/no-later",
-    [
-      "B copy-type hostValue [unknown] 41:50",
-      "B copy-type out [list] 16:52",
-      "C copy-type out.element [integer] 16:52",
-      "D warning-runtime-check 16:52 unknown",
-    ],
-  ],
+const HELD: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
+  // named data in a typed default of an inferred place: the head owes its source's own boundary where a consumer meets the loaded value; the rule function reads r4.63 (3) as covering it (held for the lead)
   [
     "load default/whole default/collection/named/later",
     [
@@ -728,39 +293,12 @@ const UNTIL_CUTOVER: ReadonlyMap<string, readonly string[]> = new Map<string, re
     ],
   ],
   [
-    "load default/whole default/scalar/inline/later",
-    [
-      "B copy-type hostValue [unknown] 38:47",
-      "B copy-type out [integer] 14:48",
-      "C copy-type out [integer] 14:48",
-      "D warning-runtime-check 14:48 later",
-    ],
-  ],
-  [
     "load default/whole default/scalar/named/later",
     [
       "B copy-type out [integer] 37:68",
       "B copy-type parcel [unknown] 13:22",
       "C copy-type out [integer] 37:68",
       "D warning-runtime-check 37:68 later",
-    ],
-  ],
-  [
-    "parse default/whole default/collection/inline/later",
-    [
-      "B copy-type hostValue [unknown] 45:54",
-      "B copy-type out [list] 16:56",
-      "C copy-type out.element [integer] 16:56",
-      "D warning-runtime-check 16:56 unknown",
-    ],
-  ],
-  [
-    "parse default/whole default/collection/inline/no-later",
-    [
-      "B copy-type hostValue [unknown] 45:54",
-      "B copy-type out [list] 16:56",
-      "C copy-type out.element [integer] 16:56",
-      "D warning-runtime-check 16:56 unknown",
     ],
   ],
   [
@@ -782,15 +320,6 @@ const UNTIL_CUTOVER: ReadonlyMap<string, readonly string[]> = new Map<string, re
     ],
   ],
   [
-    "parse default/whole default/scalar/inline/later",
-    [
-      "B copy-type hostValue [unknown] 42:51",
-      "B copy-type out [integer] 14:52",
-      "C copy-type out [integer] 14:52",
-      "D warning-runtime-check 14:52 later",
-    ],
-  ],
-  [
     "parse default/whole default/scalar/named/later",
     [
       "B copy-type out [integer] 37:72",
@@ -799,40 +328,7 @@ const UNTIL_CUTOVER: ReadonlyMap<string, readonly string[]> = new Map<string, re
       "D warning-runtime-check 37:72 later",
     ],
   ],
-  // r4.63 (2): named data below a removing or combining operation owes C1 at the named read
-  [
-    "concatenation/literal operand/collection/named/later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out.element [integer] 33:56",
-      "D warning-runtime-check 33:56 later",
-    ],
-  ],
-  [
-    "concatenation/literal operand/scalar/named/later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 33:52",
-      "D warning-runtime-check 33:52 later",
-    ],
-  ],
-  [
-    "removal/literal receiver/collection/named/later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out.element [integer] 33:60",
-      "D warning-runtime-check 33:60 later",
-    ],
-  ],
-  [
-    "removal/literal receiver/scalar/named/later",
-    [
-      "B copy-type parcel [unknown] 13:22",
-      "C copy-type out [integer] 33:56",
-      "D warning-runtime-check 33:56 later",
-    ],
-  ],
-  // the rule function's reading, held for the lead: C1 beside a typed call's boundary where a later store decides a collection's element
+  // a typed call's literal default holding host data, a later store deciding the collection's element: the rule function reads C1 as owed beside the call's boundary, the head owes none (held for the lead)
   ["load default/literal default/collection/inline/later", ["B copy-type out [list] 10:56"]],
   ["load default/literal default/collection/named/later", ["B copy-type out [list] 33:76"]],
   ["parse default/literal default/collection/inline/later", ["B copy-type out [list] 10:60"]],
@@ -1039,13 +535,11 @@ function records(source: string): string[] {
             `${check.site.offset}:${check.site.end}`,
         ),
     ].sort();
-  const forward = withLandingIndex(() => of(compactAnalysis(request)));
-  const reversed = withLandingIndex(() =>
-    withSolverSeam({ reverseWorklist: true }, () =>
-      withConsumerOrder(
-        (list) => [...list].reverse(),
-        () => of(compactAnalysis(request)),
-      ),
+  const forward = of(compactAnalysis(request));
+  const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+    withConsumerOrder(
+      (list) => [...list].reverse(),
+      () => of(compactAnalysis(request)),
     ),
   );
   assert.deepEqual(reversed, forward, `${source}: both orders`);
@@ -1057,19 +551,19 @@ test("the carrier floor's complete C1, C9 and C10 records are what the rule func
   assert.equal(all.length, 184);
   assert.equal(new Set(all.map((shape) => shape.name)).size, 184);
   const wrong: string[] = [];
-  let deferred = 0;
+  let held = 0;
   for (const shape of all) {
     const actual = records(shape.source);
-    const until = UNTIL_CUTOVER.get(shape.name);
+    const until = HELD.get(shape.name);
     if (until !== undefined) {
-      deferred += 1;
-      // (a deferred shape gives exactly its listed records, and still not the rule's)
+      held += 1;
+      // (a held shape gives exactly its listed records, and still not the rule's)
       if (JSON.stringify(actual) !== JSON.stringify([...until].sort()))
         wrong.push(
-          `${shape.name}: deferred as ${JSON.stringify(until)}, got ${JSON.stringify(actual)}`,
+          `${shape.name}: held as ${JSON.stringify(until)}, got ${JSON.stringify(actual)}`,
         );
       else if (JSON.stringify(actual) === JSON.stringify(shape.expected))
-        wrong.push(`${shape.name}: deferred, yet as the rule owes`);
+        wrong.push(`${shape.name}: held, yet as the rule owes`);
       continue;
     }
     if (JSON.stringify(actual) !== JSON.stringify(shape.expected))
@@ -1079,7 +573,7 @@ test("the carrier floor's complete C1, C9 and C10 records are what the rule func
   }
   t.diagnostic(
     `${all.length} shapes in ${new Set(all.map((shape) => shape.name.split("/").slice(0, 3).join("/"))).size} ` +
-      `classes compared exactly; ${deferred} deferred to the cutover`,
+      `classes compared exactly; ${held} held for the lead`,
   );
   assert.deepEqual(wrong, [], wrong.join("\n"));
 });

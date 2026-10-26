@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { withLandingIndex } from "../src/type-inference/core/admission.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CARRIER_ROLES, operandsOf } from "../src/type-inference/core/carriers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
@@ -3081,7 +3080,13 @@ test("a literal's own elements decide through the operations that carry it, unde
     ],
     ["takeLast", "let xs = [1, a].takeLast(1)", "warning-runtime-check", checked],
     ["toSet", "let xs = [1, a].toSet()", "warning-runtime-check", checked],
-    ["+", "let xs = [1, a] + []", "warning-runtime-check", checked],
+    // (a list's `+` combines: the named read that brought the kind is C1's site, TABLE r4.63 (2))
+    [
+      "+",
+      "let xs = [1, a] + []",
+      "warning-runtime-check",
+      ["a [unknown] B @8", "xs.element [integer] @31"],
+    ],
     // (a removal's possible element decides nothing, F7, but the place is published with the literal's whole numbers,
     // so the named host value owes its check there: C9 r4.12, r4.50 (1))
     [
@@ -3808,7 +3813,7 @@ test("a guarded read inside a computed child keeps its mark where literals share
 });
 
 /**
- * S6-CARRIERS §3.3, §3.4 (Codex r20 B6, N1, N2), under the landing index until the cutover: a typed `load` or `fromJson`
+ * S6-CARRIERS §3.3, §3.4 (Codex r20 B6, N1, N2), from the landing index: a typed `load` or `fromJson`
  * no store brings, its property never stored or its text only displayed, keeps F18's own check where it runs (r4.57); a
  * member of host data owes C1 at the member read and C9 at the host value; and a surely measured length is derived
  * (F14), never the external data of the ingress it measures. The whole record, in both orders.
@@ -3885,13 +3890,11 @@ test("the landing index keeps F18's own check, sites a member's C1 at its read a
   for (const [source, expected] of cases) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
-    const forward = withLandingIndex(() => compactAnalysis(request));
-    const reversed = withLandingIndex(() =>
-      withSolverSeam({ reverseWorklist: true }, () =>
-        withConsumerOrder(
-          (list) => [...list].reverse(),
-          () => compactAnalysis(request),
-        ),
+    const forward = compactAnalysis(request);
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder(
+        (list) => [...list].reverse(),
+        () => compactAnalysis(request),
       ),
     );
     assert.deepEqual(recordDifferences(expected, forward), [], source);

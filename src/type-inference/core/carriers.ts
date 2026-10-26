@@ -12,8 +12,8 @@ import { stepName, type CoreProgram } from "./program.js";
 
 /*
  * The carriers (S6): the values that are, or hold, another value, their operand. One table, read by every walk over
- * them: admission's stops and structures, the written-copy index and the obligations they leave (`admission.ts`), the
- * ingress index (`definitions.ts`) and the property names (`answers.ts`). A literal is structure, no carrier: its cells
+ * them: admission's stops and structures, its landing index, the written-copy index and the obligations they leave
+ * (`admission.ts`), and the property names (`answers.ts`). A literal is structure, no carrier: its cells
  * stand at its element or property step, read through the literal index.
  */
 
@@ -76,7 +76,7 @@ export interface Operand {
   readonly when: "list or set" | "object" | "dict" | "elements" | null;
 }
 
-/** The table: a value's carrier operands by its syntax alone, before any decision (the ingress index reads it so). */
+/** The table: a value's carrier operands by its syntax alone, before any decision (the landing index reads it so). */
 export function operandsOf(program: CoreProgram, value: PlaceId): readonly Operand[] {
   const operand = (
     role: CarrierRole,
