@@ -5,6 +5,7 @@ import { withMemberOracle, withoutChains } from "../src/type-inference/core/admi
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
+import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
@@ -33,23 +34,34 @@ import { readFixture } from "./helpers/type-core-fixture.js";
  */
 const DOUBLING = 2.15;
 
-/** A family's analysis at size k, in the source order or with the consumers' and the solver's orders reversed. */
-function analysed(family: WorkFamily, k: number, reversed = false): Answers {
+/** A family's program at size k, prepared once for each of its analyses. */
+interface Sized {
+  readonly name: string;
+  readonly request: CoreAnalysisRequest;
+}
+
+function sized(family: WorkFamily, k: number): Sized {
+  const name = `${family.name} at ${k}`;
   const request = coreRequest(family.program(k));
-  assert.ok(request !== null, `${family.name} at ${k}: its files parse and resolve`);
+  assert.ok(request !== null, `${name}: its files parse and resolve`);
+  return { name, request };
+}
+
+/** A fresh analysis of a family's program, in the source order or with the consumers' and the solver's orders reversed. */
+function analysed({ name, request }: Sized, reversed = false): Answers {
   const answers = reversed
     ? withConsumerOrder(
         (list) => [...list].reverse(),
         () => withSolverSeam({ reverseWorklist: true }, () => analyseCore(request)),
       )
     : analyseCore(request);
-  assert.notEqual(answers.outcome, "budget-error", `${family.name} at ${k}: within the allowance`);
+  assert.notEqual(answers.outcome, "budget-error", `${name}: within the allowance`);
   return answers;
 }
 
 /** The charged work of a family's program at size k, and its syntax nodes. */
 function work(family: WorkFamily, k: number): { total: number; nodes: number } {
-  const answers = analysed(family, k);
+  const answers = analysed(sized(family, k));
   return { total: answers.budget.total, nodes: answers.budget.counts.get("syntaxNodes") ?? 0 };
 }
 
@@ -77,10 +89,11 @@ const COUNTER_DOUBLING = 2.35;
 /** The families of `families` whose total or a counter of at least 200 units grows faster than linearly, either order. */
 function steepCounters(families: readonly WorkFamily[]): string[] {
   const steep: string[] = [];
-  for (const family of families)
+  for (const family of families) {
+    const [at64, at128] = [sized(family, 64), sized(family, 128)];
     for (const reversed of [false, true]) {
-      const small = analysed(family, 64, reversed).budget;
-      const large = analysed(family, 128, reversed).budget;
+      const small = analysed(at64, reversed).budget;
+      const large = analysed(at128, reversed).budget;
       const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
       const name = `${family.name}${reversed ? " reversed" : ""}`;
       const doubling = (before: number, after: number): number =>
@@ -97,6 +110,7 @@ function steepCounters(families: readonly WorkFamily[]): string[] {
             `${name} ${counter}: ${doubling(small.counts.get(counter) ?? 0, after).toFixed(3)}`,
           );
     }
+  }
   return steep;
 }
 
@@ -116,15 +130,17 @@ test("every W34, W44 and W45 variant's work and each of its counters grow with t
 test("every admission family's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters(ADMISSION_FAMILIES), []);
   const steep: string[] = [];
-  for (const family of ADMISSION_KNOWN_PRODUCTS)
+  for (const family of ADMISSION_KNOWN_PRODUCTS) {
+    const [at64, at128] = [sized(family, 64), sized(family, 128)];
     for (const reversed of [false, true]) {
-      const small = analysed(family, 64, reversed).budget;
-      const large = analysed(family, 128, reversed).budget;
+      const small = analysed(at64, reversed).budget;
+      const large = analysed(at128, reversed).budget;
       const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
       const doubling = (2 * (large.total / small.total)) / scale;
       if (doubling > family.measured)
         steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
     }
+  }
   assert.deepEqual(steep, []);
 });
 
@@ -135,10 +151,11 @@ test("every admission family's work and each of its counters grow with the progr
  */
 test("admission's work on literals of typed ingresses of one default grows with the program in either order", () => {
   const steep: string[] = [];
-  for (const family of ADMISSION_INGRESS_PRESETS)
+  for (const family of ADMISSION_INGRESS_PRESETS) {
+    const [at64, at128] = [sized(family, 64), sized(family, 128)];
     for (const reversed of [false, true]) {
-      const small = analysed(family, 64, reversed).budget;
-      const large = analysed(family, 128, reversed).budget;
+      const small = analysed(at64, reversed).budget;
+      const large = analysed(at128, reversed).budget;
       const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
       for (const counter of ["checks", "indexSteps"] as const) {
         const doubling =
@@ -150,6 +167,7 @@ test("admission's work on literals of typed ingresses of one default grows with 
           );
       }
     }
+  }
   assert.deepEqual(steep, []);
 });
 
@@ -160,10 +178,11 @@ test("admission's work on literals of typed ingresses of one default grows with 
  */
 test("admission's work on same-source adds and choices grows with the program in either order", () => {
   const steep: string[] = [];
-  for (const family of ADMISSION_SAME_SOURCES)
+  for (const family of ADMISSION_SAME_SOURCES) {
+    const [at64, at128] = [sized(family, 64), sized(family, 128)];
     for (const reversed of [false, true]) {
-      const small = analysed(family, 64, reversed).budget;
-      const large = analysed(family, 128, reversed).budget;
+      const small = analysed(at64, reversed).budget;
+      const large = analysed(at128, reversed).budget;
       const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
       const doubling = (before: number, after: number): number =>
         (2 * (after / Math.max(1, before))) / scale;
@@ -185,6 +204,7 @@ test("admission's work on same-source adds and choices grows with the program in
           );
       }
     }
+  }
   assert.deepEqual(steep, []);
 });
 
@@ -245,15 +265,17 @@ test("a chain of carriers over shared inputs is identified in linear space", () 
  */
 test("W34's two known products grow no faster than measured", () => {
   const steep: string[] = [];
-  for (const family of W34_KNOWN_PRODUCTS)
+  for (const family of W34_KNOWN_PRODUCTS) {
+    const [at64, at128] = [sized(family, 64), sized(family, 128)];
     for (const reversed of [false, true]) {
-      const small = analysed(family, 64, reversed).budget;
-      const large = analysed(family, 128, reversed).budget;
+      const small = analysed(at64, reversed).budget;
+      const large = analysed(at128, reversed).budget;
       const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
       const doubling = (2 * (large.total / small.total)) / scale;
       if (doubling > family.measured)
         steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
     }
+  }
   assert.deepEqual(steep, []);
 });
 
@@ -302,9 +324,11 @@ test("every alias member answers as its class does at every decided path, in bot
     compared += 1;
     if (difference !== null) differences.push(difference);
   };
-  const run = (name: string, files: readonly SourceFile[], reversed: boolean): void => {
-    const request = coreRequest(files);
-    assert.ok(request !== null, `${name}: its files parse and resolve`);
+  const run = (
+    files: readonly SourceFile[],
+    request: CoreAnalysisRequest,
+    reversed: boolean,
+  ): void => {
     const answers = withMemberOracle(report, () =>
       reversed
         ? withConsumerOrder(
@@ -316,20 +340,26 @@ test("every alias member answers as its class does at every decided path, in bot
     resolvedRecords.set(recordKey(files, reversed), publishedRecord(answers, files));
   };
 
-  for (const reversed of [false, true]) {
-    for (const family of [
-      ...WORK_FAMILIES,
-      ...W34_VARIANTS,
-      ...W44_VARIANTS,
-      ...W45_VARIANTS,
-      ...ADMISSION_FAMILIES,
-      ...ADMISSION_SAME_SOURCES,
-    ])
-      for (const k of [2, 3, 5]) run(`${family.name} at ${k}`, family.program(k), reversed);
-    for (const { name, files } of ORACLE_PROGRAMS) run(name, files, reversed);
+  // each program prepared once, then analysed in each order
+  const inBoth = (name: string, files: readonly SourceFile[]): void => {
+    const request = coreRequest(files);
+    assert.ok(request !== null, `${name}: its files parse and resolve`);
+    for (const reversed of [false, true]) run(files, request, reversed);
+  };
+  for (const family of [
+    ...WORK_FAMILIES,
+    ...W34_VARIANTS,
+    ...W44_VARIANTS,
+    ...W45_VARIANTS,
+    ...ADMISSION_FAMILIES,
+    ...ADMISSION_SAME_SOURCES,
+  ])
+    for (const k of [2, 3, 5]) inBoth(`${family.name} at ${k}`, family.program(k));
+  for (const { name, files } of ORACLE_PROGRAMS) inBoth(name, files);
+  for (const record of readFixture()) {
+    const request = coreRequest(record.files);
+    if (request !== null) run(record.files, request, false);
   }
-  for (const record of readFixture())
-    if (coreRequest(record.files) !== null) run(record.name, record.files, false);
   t.diagnostic(`${compared} member answers compared with their classes'`);
   assert.deepEqual(differences, []);
   assert.ok(compared > 1_000, `${compared} member answers compared`);
@@ -343,9 +373,12 @@ test("every alias member answers as its class does at every decided path, in bot
  */
 test("resolving chains of copies changes no published record or writer, in both orders (§4.1)", () => {
   const differing: string[] = [];
-  const compare = (name: string, files: readonly SourceFile[], reversed: boolean): void => {
-    const request = coreRequest(files);
-    assert.ok(request !== null, `${name}: its files parse and resolve`);
+  const compare = (
+    name: string,
+    files: readonly SourceFile[],
+    request: CoreAnalysisRequest,
+    reversed: boolean,
+  ): void => {
     const run = (): string => {
       const analysed = (): Answers => analyseCore(request);
       const answers = reversed
@@ -359,18 +392,26 @@ test("resolving chains of copies changes no published record or writer, in both 
     const resolved = resolvedRecords.get(recordKey(files, reversed)) ?? run();
     if (resolved !== withoutChains(run)) differing.push(`${name}${reversed ? " reversed" : ""}`);
   };
-  for (const reversed of [false, true])
-    for (const family of [
-      ...WORK_FAMILIES,
-      ...W34_VARIANTS,
-      ...W44_VARIANTS,
-      ...W45_VARIANTS,
-      ...ADMISSION_FAMILIES,
-      ...ADMISSION_SAME_SOURCES,
-    ])
-      for (const k of [2, 3, 5]) compare(`${family.name} at ${k}`, family.program(k), reversed);
-  for (const record of readFixture())
-    if (coreRequest(record.files) !== null) compare(record.name, record.files, false);
+  // each program prepared once, then compared in each order
+  for (const family of [
+    ...WORK_FAMILIES,
+    ...W34_VARIANTS,
+    ...W44_VARIANTS,
+    ...W45_VARIANTS,
+    ...ADMISSION_FAMILIES,
+    ...ADMISSION_SAME_SOURCES,
+  ])
+    for (const k of [2, 3, 5]) {
+      const name = `${family.name} at ${k}`;
+      const files = family.program(k);
+      const request = coreRequest(files);
+      assert.ok(request !== null, `${name}: its files parse and resolve`);
+      for (const reversed of [false, true]) compare(name, files, request, reversed);
+    }
+  for (const record of readFixture()) {
+    const request = coreRequest(record.files);
+    if (request !== null) compare(record.name, record.files, request, false);
+  }
   assert.deepEqual(differing, []);
 });
 
@@ -387,7 +428,7 @@ test("every family's member visits are bounded by its output and its decided pat
     ...W45_VARIANTS,
     ...ADMISSION_FAMILIES,
   ]) {
-    const answers = analysed(family, 32);
+    const answers = analysed(sized(family, 32));
     const counts = answers.budget.counts;
     const visits = counts.get("c1Visits") ?? 0;
     const bound =
