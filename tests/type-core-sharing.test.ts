@@ -26,6 +26,14 @@ import { readFixture } from "./helpers/type-core-fixture.js";
 import { COMPOSITIONS, roleClasses } from "./helpers/type-core-roles.js";
 import { shapesOf } from "./helpers/type-core-rule.js";
 import { CARRIER_WITNESSES, WRITTEN_COPY_MATRIX } from "./helpers/type-core-witnesses.js";
+import {
+  DEFAULT_CHAIN_MATRIX,
+  INFERRED_COPY_MATRIX,
+  OBJECT_PROPERTY_MATRIX,
+  UNRESTRICTED_COLLECTION_MATRIX,
+  V30_TYPE_MATRIX,
+  WRITTEN_DOMAIN_MATRIX,
+} from "./helpers/type-core-written.js";
 
 /*
  * The sharing differential (TABLE r4.72): S6's sharing of answers between equivalent values (alias classes and chains
@@ -34,8 +42,9 @@ import { CARRIER_WITNESSES, WRITTEN_COPY_MATRIX } from "./helpers/type-core-witn
  * every program below, in both orders, the published diagnostics, the owed checks, every binding's admitted type at its
  * root and its element (the decider's site with it) and the candidate route's lowered plan (or its rejection) are
  * byte-identical with the sharing on and off (`withoutSharing`). Any difference fails the test. On CI (GitHub Actions
- * sets `CI`) the fixtures' records run in the source order only, every other program in both; a local `npm run check`
- * runs them all in both orders (the orchestrator's decision on the CI job's time, 2026-10-26).
+ * sets `CI`) the fixtures' records and the written-domain matrices' sources (whose own tests run each source in both
+ * orders) run in the source order only, every other program in both; a local `npm run check` runs them all in both
+ * orders (the orchestrator's decision on the CI job's time, 2026-10-26, and the lead's for the matrices).
  *
  * Two components of a snapshot have no program here yet where they alone change the output (Astra r6): the guard bit
  * (`Contract.readSnapshot`) and the via signature in the stop identity and the decider's snapshots. No such program is
@@ -50,11 +59,11 @@ import { CARRIER_WITNESSES, WRITTEN_COPY_MATRIX } from "./helpers/type-core-witn
 interface Program {
   readonly name: string;
   readonly files: readonly SourceFile[];
-  /** A fixture's record, in the source order only on CI. */
-  readonly fixture?: true;
+  /** A fixture's record or a written-domain matrix's source, in the source order only on CI. */
+  readonly sourceOrderOnCi?: true;
 }
 
-const FIXTURE_ORDERS = process.env["CI"] === "true" ? [false] : [false, true];
+const CI_ORDERS = process.env["CI"] === "true" ? [false] : [false, true];
 
 const one = (name: string, source: string): Program => ({
   name,
@@ -85,6 +94,20 @@ function programs(): Program[] {
   for (const { name, files } of ORACLE_PROGRAMS) out.push({ name: `oracle ${name}`, files });
   // external round 7 B1's written copies (`WRITTEN_COPY_MATRIX`)
   for (const { name, source } of WRITTEN_COPY_MATRIX) out.push(one(`written copy ${name}`, source));
+  // the merged S6's written-domain matrices (`type-core-written.ts`), each exact source once (Astra's D3)
+  const sources = new Set<string>();
+  for (const { name, source } of [
+    ...WRITTEN_DOMAIN_MATRIX,
+    ...UNRESTRICTED_COLLECTION_MATRIX,
+    ...V30_TYPE_MATRIX,
+    ...INFERRED_COPY_MATRIX,
+    ...OBJECT_PROPERTY_MATRIX,
+    ...DEFAULT_CHAIN_MATRIX,
+  ])
+    if (!sources.has(source)) {
+      sources.add(source);
+      out.push({ ...one(`written domain ${name}`, source), sourceOrderOnCi: true });
+    }
   // Astra's round-5 D1 witness: a decider beside an unselected read of its source (her B1 shape is the oracle's)
   out.push(
     one(
@@ -93,11 +116,12 @@ function programs(): Program[] {
     ),
   );
   for (const record of readFixture())
-    out.push({ name: record.name, files: record.files, fixture: true });
+    out.push({ name: record.name, files: record.files, sourceOrderOnCi: true });
   return out;
 }
 
-const GLOBALS = ["hostValue"];
+// (a written-domain matrix's host-started binding reads `hostInit`, `WrittenCase.globals`)
+const GLOBALS = ["hostValue", "hostInit"];
 
 /** A program's request and its bindings, built once for its four analyses. */
 interface Prepared {
@@ -158,7 +182,7 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   const changed = new Map<string, boolean>();
   for (const program of all) {
     let ready: Prepared | undefined;
-    for (const reversed of program.fixture === true ? FIXTURE_ORDERS : [false, true]) {
+    for (const reversed of program.sourceOrderOnCi === true ? CI_ORDERS : [false, true]) {
       const input = `${reversed}|${JSON.stringify(program.files)}`;
       let differs = changed.get(input);
       if (differs === undefined) {
@@ -171,8 +195,8 @@ test("the core's sharing of answers is output-neutral for every family, witness 
     }
   }
   t.diagnostic(
-    `${all.length} programs in ${runs} runs (each in both orders, the fixtures' in ${FIXTURE_ORDERS.length}; one ` +
-      "run per exact input and order), with the sharing on and off",
+    `${all.length} programs in ${runs} runs (each in both orders, the fixtures' and the matrices' in ` +
+      `${CI_ORDERS.length}; one run per exact input and order), with the sharing on and off`,
   );
   assert.deepEqual(differing, []);
   assert.ok(all.length > 2_500, `${all.length} programs`);

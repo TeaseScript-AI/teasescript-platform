@@ -638,7 +638,8 @@ class CoreAnswers implements Answers {
   }
 
   #admitted(id: PlaceId, path: readonly string[], term: TypeTerm | null): AdmittedType {
-    if (term !== null) return { by: "written", kinds: typeTags(term) };
+    // (each kind once: `(null | string)?` admits `null` and `string`)
+    if (term !== null) return { by: "written", kinds: [...new Set(typeTags(term))] };
     const { admission } = this.#consumers;
     const kinds = admission.admitted(id, path);
     // (the decider's site is found where it is read: A3's settled paths have no scan to keep it from)
