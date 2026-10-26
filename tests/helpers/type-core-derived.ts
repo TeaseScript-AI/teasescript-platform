@@ -681,7 +681,30 @@ function expectedType(
   const key = `ingress:${site(owner)}`;
   if (seen.has(key)) return null; // this contribution adds no source structure; an earlier store may decide it
   const next = new Set([...seen, key]);
-  const inValue = (
+  const written = writtenLanding(owner, [], statements);
+  if (written !== undefined) return written;
+  const fallback = fallbackOf(owner);
+  const literal = fallback === null ? null : literalType(fallback, statements, next);
+  return literal === null ? null : withoutNull(literal);
+}
+
+/** Whether a type holds `null`. */
+function holdsNull(type: DerivedType): boolean {
+  return type.kind === "kinds"
+    ? type.kinds.includes("null")
+    : type.kind === "union" && type.members.some(holdsNull);
+}
+
+/**
+ * The written type at `path` below the owner where the owner lands directly in a `let` or variable with a written type,
+ * through list and set elements and `otherwise`; `undefined` where it lands in none.
+ */
+function writtenLanding(
+  owner: Expression,
+  path: readonly string[],
+  statements: readonly Statement[],
+): DerivedType | null | undefined {
+  const landsIn = (
     expression: Expression,
     type: DerivedType | null,
   ): DerivedType | null | undefined => {
@@ -689,12 +712,12 @@ function expectedType(
     if (at === owner) return type;
     if (at.kind === "listLiteral" || at.kind === "setLiteral") {
       for (const element of at.elements) {
-        const result = inValue(element, partOf(type, "element"));
-        if (result !== undefined) return result;
+        const found = landsIn(element, partOf(type, "element"));
+        if (found !== undefined) return found;
       }
     } else if (at.kind === "binaryExpression" && at.operator === "otherwise") {
-      const left = inValue(at.left, type);
-      return left !== undefined ? left : inValue(at.right, type);
+      const left = landsIn(at.left, type);
+      return left !== undefined ? left : landsIn(at.right, type);
     }
     return undefined;
   };
@@ -712,12 +735,11 @@ function expectedType(
             (candidate) => candidate.kind === "letStatement" && candidate.name.name === store.name,
           );
     if (declaration?.kind !== "letStatement" || declaration.typeAnnotation === null) continue;
-    const type = inValue(store.value, writtenType(declaration.typeAnnotation));
-    if (type !== undefined) return type;
+    const found = landsIn(store.value, writtenType(declaration.typeAnnotation));
+    if (found !== undefined)
+      return path.reduce<DerivedType | null>((type, step) => partOf(type, step), found);
   }
-  const fallback = fallbackOf(owner);
-  const literal = fallback === null ? null : literalType(fallback, statements, next);
-  return literal === null ? null : withoutNull(literal);
+  return undefined;
 }
 
 /** A fallback obligation can name a part (`[hostValue].element`), checked at the whole selected operand. */
@@ -729,8 +751,17 @@ function fallbackType(
 ): DerivedType {
   const value = fallbackOf(owner)!;
   const root = sourceShape(value, statements) ?? sourceShape(owner, statements);
+  // C10 (ADR 0021 7.2): below the fallback itself an element may also be null, unless the written type of a place
+  // the owner lands in directly excludes it there
+  const written = path.length === 0 ? undefined : writtenLanding(owner, path, statements);
+  const nullable =
+    path.length > 0 && (written === undefined || written === null || holdsNull(written));
   const at = (shape: DerivedType | null, remaining: readonly string[]): DerivedType => {
-    if (remaining.length === 0) return { kind: "kinds", kinds: against };
+    if (remaining.length === 0)
+      return {
+        kind: "kinds",
+        kinds: nullable && !against.includes("null") ? [...against, "null"] : against,
+      };
     const [step, ...rest] = remaining;
     if (step !== "element")
       return {

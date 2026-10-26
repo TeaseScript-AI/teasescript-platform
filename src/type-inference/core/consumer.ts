@@ -27,6 +27,7 @@ import { members, openType, union, UNKNOWN_TYPE, type StaticType } from "../../s
 import { typeFromAnnotation } from "../../static-types/annotations.js";
 import { typeKey } from "../../storage-types.js";
 import { typePlan } from "../../type-plans.js";
+import { lazyDefaultArgument } from "../../lazy-defaults.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../value-kinds.js";
 import type {
   CoreRuntimeChecks,
@@ -39,7 +40,7 @@ import type { PlaceId, SourceSite } from "../graph.js";
 import { closedType, type Answers } from "./answers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import type { Item, ItemTag } from "./items.js";
-import type { CoreAnalysisRequest } from "./program.js";
+import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
 import type { CoreDiagnostic, Obligation, RequiredKind } from "./result.js";
 
 /*
@@ -94,8 +95,6 @@ export class SliceIndex {
   readonly #getOfIndex = new Map<Expression, CallExpression>();
   /** The expression each expression is an operand of, within its statement. */
   readonly #parent = new Map<Expression, Expression>();
-  /** The property names the source writes: an object literal's, and those it reads and stores. */
-  readonly propertyNames = new Set<string>();
   readonly #file = new Map<object, number>();
   readonly #bySite = new Map<string, Expression>();
   readonly #statementsBySite = new Map<string, Statement>();
@@ -136,7 +135,6 @@ export class SliceIndex {
               pending.push({ expression: statement.value, store: statement, whole: true });
               // a property store reads its receiver, which a member check at the store reads (C5c)
               if (statement.target.kind === "propertyAccessExpression") {
-                this.propertyNames.add(statement.target.property.name);
                 for (const held of operands(statement.target.object))
                   this.#storeOfReceiver.set(held, statement);
                 pending.push({ expression: statement.target.object, store: null, whole: false });
@@ -201,8 +199,6 @@ export class SliceIndex {
             break;
           }
           case "objectLiteral":
-            for (const property of expression.properties)
-              this.propertyNames.add(property.name.name);
             for (let at = expression.properties.length - 1; at >= 0; at -= 1)
               pending.push({
                 expression: expression.properties[at]!.value,
@@ -213,7 +209,6 @@ export class SliceIndex {
             break;
           case "propertyAccessExpression":
             this.properties.push(expression);
-            this.propertyNames.add(expression.property.name);
             pending.push({
               expression: expression.object,
               store,
@@ -489,7 +484,7 @@ export function coreCheckResult(
     diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, answers, index, request));
   }
   const { checks, core } = runtimeChecks(answers, index, request);
-  // a `fromJson` that reads its JSON as an expected type gives what the plan decides, which the fold does not see
+  // a `fromJson` reads its JSON as the plan's expected type, so its known value is the one the run gets
   const values = new KnownValues(
     (identifier) => {
       const initializer = answers.initializers.get(
@@ -497,7 +492,7 @@ export function coreCheckResult(
       );
       return initializer === undefined ? undefined : index.expressionAt(initializer);
     },
-    (expression) => expression.kind === "callExpression" && core.expected.has(expression),
+    (call) => core.expected.get(call),
   );
   const known = (expression: Expression) => values.known(expression);
   const paths = new Map<Statement, readonly boolean[]>();
@@ -566,7 +561,7 @@ function runtimeChecks(
     const file = index.fileOf(node);
     return request.files[file]!.source.slice(node.span.start.offset, node.span.end.offset);
   };
-  const lets = declarations(answers, index);
+  const contracts = new Contracts(answers, index, declarations(answers, index));
   const checks = new Map<RuntimeCheckSite, TypeCheckPlan>();
   const core = {
     requireExisting: new Set<AssignmentStatement>(),
@@ -615,7 +610,7 @@ function runtimeChecks(
     }
   }
   for (const [owner, { fallback, depths }] of fallbacks) {
-    const type = fallbackPlan(fallback, depths);
+    const type = fallbackPlan(fallback, depths, (steps) => contracts.takesNull(owner, steps));
     if (type !== null)
       core.fallbackChecks.set(owner, { type, place: `the value of '${textOf(owner)}'` });
   }
@@ -623,7 +618,7 @@ function runtimeChecks(
   // the types a typed load and a `fromJson` read their value as (F18)
   const typed = new Set<Expression>();
   for (const load of index.loads) {
-    const type = expectedPlan(answers, index, load, lets);
+    const type = contracts.expected(load);
     if (type === null) continue;
     typed.add(load);
     checks.set(load, { type, place: `Storage key ${textOf(unwrap(load.key))}` });
@@ -631,7 +626,7 @@ function runtimeChecks(
   }
   for (const call of index.calls)
     if (call.callee.kind === "identifier" && call.callee.name === "fromJson") {
-      const type = expectedPlan(answers, index, call, lets);
+      const type = contracts.expected(call);
       if (type === null) continue;
       typed.add(call);
       core.expected.set(call, type);
@@ -647,7 +642,7 @@ function runtimeChecks(
       throw new Error("A check of the slice belongs to no store.");
     }
     if (checks.has(store)) continue;
-    const type = storedPlan(answers, index, lets, store);
+    const type = contracts.stored(store);
     if (type !== null) checks.set(store, type);
   }
   return { checks, core };
@@ -669,10 +664,15 @@ function fallbackSteps(target: string, text: string): string[] | null {
 
 /**
  * The check of a selected fallback from C10's obligations at its depths (ADR 0021 7.2, nested literals by their
- * elements): at each depth the kinds required there, the collection below it as the fallback's literal is one, else a
- * list or a set for an element and a dict for an entry; `null` where no depth requires a kind.
+ * elements): at each depth the kinds required there, `null` below the fallback itself where `takesNull` allows it, the
+ * collection below it as the fallback's literal is one, else a list or a set for an element and a dict for an entry;
+ * `null` where no depth requires a kind.
  */
-function fallbackPlan(fallback: Expression, depths: readonly FallbackDepth[]): TypePlan | null {
+function fallbackPlan(
+  fallback: Expression,
+  depths: readonly FallbackDepth[],
+  takesNull: (steps: readonly string[]) => boolean,
+): TypePlan | null {
   const deepest = Math.max(...depths.map((depth) => depth.steps.length));
   // the literal the fallback's value is at each depth, as far as a literal holds it
   const literals: (Expression | null)[] = [];
@@ -708,11 +708,16 @@ function fallbackPlan(fallback: Expression, depths: readonly FallbackDepth[]): T
                   { kind: "list", element: below },
                   { kind: "set", element: below },
                 ];
-    const others = kindsPlan(
-      collections.length === 0
+    // below the fallback itself an element may be `null` too, unless a written place it lands in excludes it (C10)
+    const steps = depths.find((entry) => entry.steps.length >= depth)?.steps.slice(0, depth) ?? [];
+    const others = kindsPlan([
+      ...(collections.length === 0
         ? kinds
-        : kinds.filter((kind) => kind !== "list" && kind !== "set" && kind !== "dict"),
-    );
+        : kinds.filter((kind) => kind !== "list" && kind !== "set" && kind !== "dict")),
+      ...(depth > 0 && (kinds.length > 0 || collections.length > 0) && takesNull(steps)
+        ? (["null"] as const)
+        : []),
+    ]);
     const parts = [...collections, ...(others === null ? [] : [others])];
     below = parts.length === 0 ? null : unionOf(parts);
   }
@@ -737,34 +742,6 @@ function selectedLiteral(expression: Expression): Expression | null {
     : null;
 }
 
-/** The check of a store: the destination's written type, or else its admitted type at the stored path (A1–A9). */
-function storedPlan(
-  answers: Answers,
-  index: SliceIndex,
-  lets: ReadonlyMap<PlaceId, LetStatement>,
-  store: Store,
-): TypeCheckPlan | null {
-  const declaration = declarationOf(answers, index, lets, store);
-  const whole = store.kind === "letStatement" || store.target.kind === "identifier";
-  const place = answers.at(nodeOf(answers, index, store))?.place;
-  const written = whole && declaration.typeAnnotation !== null;
-  const admitted = typePlan(
-    written
-      ? typeFromAnnotation(declaration.typeAnnotation!)
-      : place === null || place === undefined
-        ? UNKNOWN_TYPE
-        : admittedType(answers, place.id, place.path),
-  );
-  if (admitted === null) return null;
-  // a decided object checks its decided properties too (C9's record-level boundary, A7's whole-store exception)
-  const type =
-    written || place === null || place === undefined
-      ? admitted
-      : runCompileTask(filledTask(answers, place.id, place.path, admitted, index.propertyNames));
-  const name = [declaration.name.name, ...(whole ? [] : (place?.path ?? []))].join(".");
-  return { type, place: `'${name}'` };
-}
-
 /** The plan of the kinds an obligation requires: each kind, a collection's elements and an object's properties left open. */
 function kindsPlan(kinds: readonly (ItemTag | RequiredKind)[]): TypePlan | null {
   const members = [...new Set(kinds)].flatMap((kind): TypePlan[] =>
@@ -786,73 +763,6 @@ function kindPlan(kind: ValueKind): TypePlan {
  * must still have, so that a missing one takes the default's.
  */
 const ANY_VALUE: TypePlan = { kind: "union", members: VALUE_KIND_NAMES.map(kindPlan) };
-
-/**
- * The type a typed load or `fromJson` reads its value as (F18, S3 §3): the written type of the variable it lands in
- * directly, else its default's, a literal's parts by their own answers and another value's by its place; `null` where
- * the result's kinds hold an unknown or only `null` (F19), or a load's key is computed.
- */
-function expectedPlan(
-  answers: Answers,
-  index: SliceIndex,
-  call: CallExpression | LoadExpression,
-  lets: ReadonlyMap<PlaceId, LetStatement>,
-): TypePlan | null {
-  if (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") return null;
-  const tags = (answers.at(nodeOf(answers, index, call))?.items ?? []).map((item) => item.tag);
-  if (tags.includes("unknown") || !tags.some((tag) => tag !== "null" && tag !== "empty"))
-    return null;
-  // the written type of the place the value lands in directly, as written (ADR 0021 rules 2.6, 7.3)
-  const receiving = receivingType(answers, index, call, lets);
-  if (receiving !== undefined) return receiving === null ? null : typePlan(receiving);
-  const fallback =
-    call.kind === "loadExpression"
-      ? call.defaultValue
-      : (call.arguments.find(
-          (argument) => argument.kind === "namedArgument" && argument.name.name === "default",
-        )?.value ?? null);
-  if (fallback === null) return null;
-  return withoutNull(runCompileTask(valuePlanTask(answers, index, fallback, true, lets)));
-}
-
-/**
- * The written type of the place `value` lands in directly (ADR 0021 rule 7.3): through parentheses, the operands of
- * `otherwise` and the elements of list and set literals, into a `let` with a written type or an assignment to a variable
- * that has one; `undefined` where it lands in none.
- */
-function receivingType(
-  answers: Answers,
-  index: SliceIndex,
-  value: Expression,
-  lets: ReadonlyMap<PlaceId, LetStatement>,
-): StaticType | null | undefined {
-  const steps: string[] = [];
-  let node = value;
-  for (let parent = index.parentOf(node); parent !== undefined; parent = index.parentOf(node)) {
-    if (parent.kind === "listLiteral" || parent.kind === "setLiteral") steps.push("element");
-    else if (
-      parent.kind !== "parenthesizedExpression" &&
-      !(parent.kind === "binaryExpression" && parent.operator === "otherwise")
-    )
-      return undefined;
-    node = parent;
-  }
-  const store = index.storeOf(value);
-  if (
-    store === undefined ||
-    (store.kind === "letStatement" ? store.initializer : store.value) !== node
-  )
-    return undefined;
-  if (store.kind === "assignmentStatement" && store.target.kind !== "identifier") return undefined;
-  const annotation = declarationOf(answers, index, lets, store).typeAnnotation;
-  if (annotation === null) return undefined;
-  let type: StaticType = typeFromAnnotation(annotation);
-  for (let at = 0; at < steps.length; at += 1) {
-    if (!members(type).some((part) => part.kind === "list" || part.kind === "set")) return null;
-    type = elementOf(type);
-  }
-  return type;
-}
 
 /** A plan without its `null` member, or `null` when nothing else is left. */
 function withoutNull(plan: TypePlan | null): TypePlan | null {
@@ -882,126 +792,311 @@ export class UnfollowedDefault extends Error {
   }
 }
 
-/**
- * The plan of a value's kinds as the core answers them: a literal's parts by their own answers, a read of a place by its
- * admitted type with an object's properties (`filledTask`), a typed parse or load by its own type; a property that only `null` or an unknown gives is
- * `ANY_VALUE` (`top` false), the whole value `null` then. Any other object or collection throws `UnfollowedDefault`.
- */
-function* valuePlanTask(
-  answers: Answers,
-  index: SliceIndex,
-  expression: Expression,
-  top: boolean,
-  lets: ReadonlyMap<PlaceId, LetStatement>,
-): CompileTask<TypePlan | null> {
-  const node = selectedLiteral(expression) ?? unwrap(expression);
-  const flow = nodeOf(answers, index, node);
-  const answer = answers.at(flow);
-  const tags = [...new Set((answer?.items ?? []).map((item) => item.tag))].filter(
-    (tag) => tag !== "empty",
-  );
-  if (tags.includes("unknown") || !tags.some((tag) => tag !== "null"))
-    return top ? null : ANY_VALUE;
-  // a typed parse or load gives the type it reads its value as
-  if (
-    node.kind === "loadExpression" ||
-    (node.kind === "callExpression" &&
-      node.callee.kind === "identifier" &&
-      node.callee.name === "fromJson")
-  ) {
-    const typed = expectedPlan(answers, index, node, lets);
-    return typed ?? (top ? null : ANY_VALUE);
-  }
-  const literal =
-    node.kind === "objectLiteral" || node.kind === "listLiteral" || node.kind === "setLiteral";
-  const place = answer?.place ?? null;
-  if (!literal && place !== null) {
-    const plan = typePlan(admittedType(answers, place.id, place.path));
-    if (plan === null) return top ? null : ANY_VALUE;
-    return yield* compileChild(
-      filledTask(answers, place.id, place.path, plan, index.propertyNames),
-    );
-  }
-  const members: TypePlan[] = [];
-  for (const tag of tags)
-    if (tag === "object") {
-      if (node.kind !== "objectLiteral") throw new UnfollowedDefault(node);
-      const properties: TypePropertyPlan[] = [];
-      for (const property of node.properties)
-        properties.push({
-          name: property.name.name,
-          type: (yield* compileChild(valuePlanTask(answers, index, property.value, false, lets)))!,
-        });
-      members.push({ kind: "object", properties });
-    } else if (tag === "list" || tag === "set" || tag === "dict") {
-      if (node.kind !== "listLiteral" && node.kind !== "setLiteral")
-        throw new UnfollowedDefault(node);
-      const elements: TypePlan[] = [];
-      for (const item of node.elements) {
-        const plan = yield* compileChild(valuePlanTask(answers, index, item, true, lets));
-        if (plan === null) {
-          elements.length = 0;
-          break;
-        }
-        elements.push(plan);
-      }
-      members.push({ kind: tag, element: elements.length === 0 ? null : unionOf(elements) });
-    } else if (tag !== "unknown") members.push(kindPlan(tag));
-  return unionOf(members);
+/** Where a value lands directly: the place a store brings it into, and the path below the place's root. */
+interface Landing {
+  readonly id: PlaceId;
+  readonly path: readonly string[];
 }
 
 /**
- * `plan`, a place's admitted type at `path` (`admittedType`), with the properties of each object the place decided:
- * each of the source's property names the place decides below it, by its own admitted type; a written `object` and an
- * undecided one stay open.
+ * The contracts the plan content of one program carries, each from the core's answers once (S3 §4, F18, C9, C10): a
+ * place's contract at a path, objects with their decided properties; where a value lands; the type a typed parse or
+ * load reads its value as. Memoized and built on one task stack, so nested values and defaults neither repeat work nor
+ * deepen the native stack.
  */
-function* filledTask(
-  answers: Answers,
-  id: PlaceId,
-  path: readonly string[],
-  plan: TypePlan,
-  names: ReadonlySet<string>,
-): CompileTask<TypePlan> {
-  switch (plan.kind) {
-    case "union": {
-      const members: TypePlan[] = [];
-      for (const member of plan.members)
-        members.push(yield* compileChild(filledTask(answers, id, path, member, names)));
-      return { kind: "union", members };
-    }
-    case "list":
-    case "set":
-    case "dict":
-      return plan.element === null || path.length + 1 >= SLICE_DEPTH
-        ? plan
-        : {
-            kind: plan.kind,
-            element: yield* compileChild(
-              filledTask(answers, id, [...path, "element"], plan.element, names),
-            ),
-          };
-    case "object": {
-      if (
-        plan.properties.length > 0 ||
-        path.length + 1 >= SLICE_DEPTH ||
-        answers.place(id, path).admitted.by !== "decided"
-      )
-        return plan;
-      const properties: TypePropertyPlan[] = [];
-      for (const name of names) {
-        const at = [...path, name];
-        if (answers.place(id, at).admitted.by === "undecided") continue;
-        const below = typePlan(admittedType(answers, id, at));
-        if (below !== null)
-          properties.push({
-            name,
-            type: yield* compileChild(filledTask(answers, id, at, below, names)),
-          });
+class Contracts {
+  readonly #landings = new Map<Expression, Landing | null>();
+  readonly #contracts = new Map<string, TypePlan | null>();
+  readonly #expected = new Map<CallExpression | LoadExpression, TypePlan | null>();
+
+  public constructor(
+    private readonly answers: Answers,
+    private readonly index: SliceIndex,
+    private readonly lets: ReadonlyMap<PlaceId, LetStatement>,
+  ) {}
+
+  /** The check of a store: the destination's written type, or else its contract at the stored path (A1–A9). */
+  public stored(store: Store): TypeCheckPlan | null {
+    const declaration = declarationOf(this.answers, this.index, this.lets, store);
+    const whole = store.kind === "letStatement" || store.target.kind === "identifier";
+    const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
+    const type =
+      whole && declaration.typeAnnotation !== null
+        ? typePlan(typeFromAnnotation(declaration.typeAnnotation))
+        : place === null
+          ? null
+          : runCompileTask(this.#contractTask(place.id, place.path));
+    if (type === null) return null;
+    const name = [
+      declaration.name.name,
+      ...(whole ? [] : (place?.path ?? []).map(propertyName)),
+    ].join(".");
+    return { type, place: `'${name}'` };
+  }
+
+  /** The type a typed load or `fromJson` reads its value as (`#expectedTask`). */
+  public expected(call: CallExpression | LoadExpression): TypePlan | null {
+    return runCompileTask(this.#expectedTask(call));
+  }
+
+  /**
+   * Whether an element of a fallback at `steps` below it may be `null` (C10): unless the fallback lands directly in a
+   * written place whose type there excludes it.
+   */
+  public takesNull(owner: Expression, steps: readonly string[]): boolean {
+    const landing = this.#landing(owner);
+    if (landing === null) return true;
+    const admitted = this.answers.place(landing.id, [...landing.path, ...steps]).admitted;
+    return admitted.by !== "written" || admitted.kinds.includes("null");
+  }
+
+  /**
+   * Where `value` lands directly (ADR 0021 rule 7.3): through parentheses, either operand of `otherwise`, the `default:`
+   * of a call or a load, a list's or set's element and an object's property, to the value a store brings into a place;
+   * `null` where it lands in none.
+   */
+  #landing(value: Expression): Landing | null {
+    const climbed: [Expression, readonly string[]][] = [];
+    let base: Landing | null = null;
+    for (let node = value; ;) {
+      const known = this.#landings.get(node);
+      if (known !== undefined) {
+        base = known;
+        break;
       }
-      return { kind: "object", properties };
+      const parent = this.index.parentOf(node);
+      if (parent === undefined) {
+        const store = this.index.storeOf(node);
+        const place =
+          store === undefined ||
+          (store.kind === "letStatement" ? store.initializer : store.value) !== node
+            ? null
+            : (this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null);
+        base = place === null ? null : { id: place.id, path: place.path };
+        this.#landings.set(node, base);
+        break;
+      }
+      const step = landingStep(parent, node);
+      if (step === null) {
+        this.#landings.set(node, null);
+        break;
+      }
+      climbed.push([node, step]);
+      node = parent;
     }
+    // the values climbed through land below their parent, from the outermost down
+    for (let at = climbed.length - 1; at >= 0; at -= 1) {
+      const [node, step] = climbed[at]!;
+      base = base === null ? null : { id: base.id, path: [...base.path, ...step] };
+      this.#landings.set(node, base);
+    }
+    return base;
+  }
+
+  /**
+   * A place's contract at a path: its admitted type (`admittedType`) with each object the place decided given the
+   * properties the core finds for it (`Answers.placeProperties`), each by its own contract; a written `object` and an
+   * undecided one stay open.
+   */
+  *#contractTask(id: PlaceId, path: readonly string[]): CompileTask<TypePlan | null> {
+    const key = `${id}|${path.join(".")}`;
+    const known = this.#contracts.get(key);
+    if (known !== undefined) return known;
+    const admitted = typePlan(admittedType(this.answers, id, path));
+    const plan = admitted === null ? null : yield* compileChild(this.#fillTask(id, path, admitted));
+    this.#contracts.set(key, plan);
+    return plan;
+  }
+
+  *#fillTask(id: PlaceId, path: readonly string[], plan: TypePlan): CompileTask<TypePlan> {
+    switch (plan.kind) {
+      case "union": {
+        const members: TypePlan[] = [];
+        for (const member of plan.members)
+          members.push(yield* compileChild(this.#fillTask(id, path, member)));
+        return { kind: "union", members };
+      }
+      case "list":
+      case "set":
+      case "dict":
+        return plan.element === null || path.length + 1 >= SLICE_DEPTH
+          ? plan
+          : {
+              kind: plan.kind,
+              element: yield* compileChild(this.#fillTask(id, [...path, "element"], plan.element)),
+            };
+      case "object": {
+        if (
+          plan.properties.length > 0 ||
+          path.length + 1 >= SLICE_DEPTH ||
+          this.answers.place(id, path).admitted.by !== "decided"
+        )
+          return plan;
+        const properties: TypePropertyPlan[] = [];
+        for (const name of [...this.answers.placeProperties(id, path)].sort()) {
+          const at = [...path, propertyStep(name)];
+          if (this.answers.place(id, at).admitted.by === "undecided") continue;
+          const below = yield* compileChild(this.#contractTask(id, at));
+          if (below !== null) properties.push({ name, type: below });
+        }
+        return { kind: "object", properties };
+      }
+      default:
+        return plan;
+    }
+  }
+
+  /**
+   * What a place holds at a path, as F18 reads a default's kinds and as they reach the parse's result: a written level's
+   * written kinds, else the kinds its values bring (its contract), integers among numbers as numbers (the decided
+   * family, ADR 0021 1.2); a collection's elements and an object's properties (`Answers.placeProperties`) below, each by
+   * the same rule; `null` where a level holds an unknown or nothing.
+   */
+  *#holdsTask(id: PlaceId, path: readonly string[]): CompileTask<TypePlan | null> {
+    const place = this.answers.place(id, path);
+    const held = new Set(place.contract.kinds.map((item) => item.tag));
+    if (held.has("number")) held.delete("integer");
+    const tags = place.admitted.by === "written" ? [...place.admitted.kinds] : [...held];
+    if (tags.includes("unknown") || tags.length === 0 || path.length + 1 >= SLICE_DEPTH)
+      return null;
+    const members: TypePlan[] = [];
+    for (const tag of tags)
+      if (tag === "list" || tag === "set" || tag === "dict")
+        members.push({
+          kind: tag,
+          element: yield* compileChild(this.#holdsTask(id, [...path, "element"])),
+        });
+      else if (tag === "object") {
+        const properties: TypePropertyPlan[] = [];
+        if (place.admitted.by !== "written")
+          for (const name of [...this.answers.placeProperties(id, path)].sort()) {
+            const below = yield* compileChild(this.#holdsTask(id, [...path, propertyStep(name)]));
+            properties.push({ name, type: below ?? ANY_VALUE });
+          }
+        members.push({ kind: "object", properties });
+      } else if (tag !== "empty" && tag !== "unknown") members.push(kindPlan(tag));
+    return members.length === 0 ? null : unionOf(members);
+  }
+
+  /**
+   * The type a typed load or `fromJson` reads its value as (F18, S3 §3): where it lands directly in a written place
+   * (a written type, or a copy of one, ADR 0021 1.3), that place's contract there, nullable as written; else its
+   * default's (`#valueTask`) without `null`; `null` where the result's kinds hold an unknown or only `null` (F19), or a
+   * load's key is computed.
+   */
+  *#expectedTask(call: CallExpression | LoadExpression): CompileTask<TypePlan | null> {
+    const known = this.#expected.get(call);
+    if (known !== undefined) return known;
+    let plan: TypePlan | null = null;
+    const tags = (this.answers.at(nodeOf(this.answers, this.index, call))?.items ?? []).map(
+      (item) => item.tag,
+    );
+    const landing = this.#landing(call);
+    const fallback =
+      call.kind === "loadExpression"
+        ? call.defaultValue
+        : (call.arguments.find(
+            (argument) => argument.kind === "namedArgument" && argument.name.name === "default",
+          )?.value ?? null);
+    if (
+      (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") ||
+      tags.includes("unknown") ||
+      !tags.some((tag) => tag !== "null" && tag !== "empty")
+    )
+      plan = null;
+    else if (
+      landing !== null &&
+      this.answers.place(landing.id, landing.path).admitted.by === "written"
+    )
+      plan = yield* compileChild(this.#contractTask(landing.id, landing.path));
+    else if (fallback !== null)
+      plan = withoutNull(yield* compileChild(this.#valueTask(fallback, true)));
+    this.#expected.set(call, plan);
+    return plan;
+  }
+
+  /**
+   * The plan of a value's kinds as the core answers them: a literal's parts by their own answers, a read of a place by
+   * what the place holds (`#holdsTask`), a typed parse or load by its own type; a property that only `null` or an
+   * unknown gives is `ANY_VALUE` (`top` false), the whole value `null` then. Any other object or collection throws
+   * `UnfollowedDefault`.
+   */
+  *#valueTask(expression: Expression, top: boolean): CompileTask<TypePlan | null> {
+    const node = selectedLiteral(expression) ?? unwrap(expression);
+    const answer = this.answers.at(nodeOf(this.answers, this.index, node));
+    const tags = [...new Set((answer?.items ?? []).map((item) => item.tag))].filter(
+      (tag) => tag !== "empty",
+    );
+    if (tags.includes("unknown") || !tags.some((tag) => tag !== "null"))
+      return top ? null : ANY_VALUE;
+    if (
+      node.kind === "loadExpression" ||
+      (node.kind === "callExpression" &&
+        node.callee.kind === "identifier" &&
+        node.callee.name === "fromJson")
+    ) {
+      const typed = yield* compileChild(this.#expectedTask(node));
+      return typed ?? (top ? null : ANY_VALUE);
+    }
+    const literal =
+      node.kind === "objectLiteral" || node.kind === "listLiteral" || node.kind === "setLiteral";
+    const place = answer?.place ?? null;
+    if (!literal && place !== null) {
+      const plan = yield* compileChild(this.#holdsTask(place.id, place.path));
+      return plan ?? (top ? null : ANY_VALUE);
+    }
+    const members: TypePlan[] = [];
+    for (const tag of tags)
+      if (tag === "object") {
+        if (node.kind !== "objectLiteral") throw new UnfollowedDefault(node);
+        const properties: TypePropertyPlan[] = [];
+        for (const property of node.properties)
+          properties.push({
+            name: property.name.name,
+            type: (yield* compileChild(this.#valueTask(property.value, false)))!,
+          });
+        members.push({ kind: "object", properties });
+      } else if (tag === "list" || tag === "set" || tag === "dict") {
+        if (node.kind !== "listLiteral" && node.kind !== "setLiteral")
+          throw new UnfollowedDefault(node);
+        const elements: TypePlan[] = [];
+        for (const item of node.elements) {
+          const plan = yield* compileChild(this.#valueTask(item, true));
+          if (plan === null) {
+            elements.length = 0;
+            break;
+          }
+          elements.push(plan);
+        }
+        members.push({ kind: tag, element: elements.length === 0 ? null : unionOf(elements) });
+      } else if (tag !== "unknown") members.push(kindPlan(tag));
+    return unionOf(members);
+  }
+}
+
+/**
+ * The steps a value adds below its parent where it lands where the parent does (`Contracts.#landing`): none through
+ * parentheses, `otherwise` and a `default:`, an element, a property; `null` where it lands nowhere.
+ */
+function landingStep(parent: Expression, node: Expression): readonly string[] | null {
+  switch (parent.kind) {
+    case "parenthesizedExpression":
+      return [];
+    case "binaryExpression":
+      return parent.operator === "otherwise" ? [] : null;
+    case "listLiteral":
+    case "setLiteral":
+      return ["element"];
+    case "objectLiteral": {
+      const property = parent.properties.find((candidate) => candidate.value === node);
+      return property === undefined ? null : [propertyStep(property.name.name)];
+    }
+    case "callExpression":
+      return lazyDefaultArgument(parent)?.argument.value === node ? [] : null;
+    case "loadExpression":
+      return parent.defaultValue === node ? [] : null;
     default:
-      return plan;
+      return null;
   }
 }
 

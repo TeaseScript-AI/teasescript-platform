@@ -138,7 +138,12 @@ export function storedFieldMismatch(key: string, field: MissingField): string {
 
 /** The developer warning `TSW020` for JSON of another kind than `fromJson` reads it as, which gives its default. */
 export function jsonKindMismatch(value: SerializableRuntimeValue, type: TypePlan): string {
-  return `fromJson(...) reads this JSON as ${describeType(type)}, but it is ${describeValue(value)}, so the call gives its default.`;
+  const mismatch = findTypeMismatch(value, type);
+  const found =
+    mismatch === null || mismatch.path === ""
+      ? `it is ${describeValue(value)}`
+      : `it has ${describeValue(mismatch.value)} at ${mismatch.path}`;
+  return `fromJson(...) reads this JSON as ${describeType(type)}, but ${found}, so the call gives its default.`;
 }
 
 /** The developer warning `TSW020` for a field of JSON read as an object that `fromJson` takes from its default. */

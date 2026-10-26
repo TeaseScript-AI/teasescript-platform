@@ -220,6 +220,8 @@ export interface Answers {
   ): readonly Item[];
   /** The known properties of an object value, with their answers. */
   properties(node: FlowNode): ReadonlyMap<string, readonly Item[]>;
+  /** The names of a place's known properties at a path, as `properties` finds a value's from its key. */
+  placeProperties(id: PlaceId, path?: readonly string[]): ReadonlySet<string>;
   view(node: FlowNode): CoreView;
 }
 
@@ -463,10 +465,20 @@ class StoppedAnswers implements Answers {
     throw new BudgetExhausted(this.#limit);
   }
 
+  public placeProperties(): ReadonlySet<string> {
+    throw new BudgetExhausted(this.#limit);
+  }
+
   public view(): CoreView {
     throw new BudgetExhausted(this.#limit);
   }
 }
+
+/** A task of a property name search (`CoreAnswers.#propertyNames`): a value at a path, a key, or a literal at a path. */
+type PropertyNamesTask =
+  | { readonly value: PlaceId; readonly path: readonly string[] }
+  | { readonly key: Key }
+  | { readonly literal: PlaceId; readonly path: readonly string[] };
 
 class CoreAnswers implements Answers {
   readonly outcome: CoreOutcome;
@@ -678,9 +690,13 @@ class CoreAnswers implements Answers {
     const value = this.#valueOf(node);
     const out = new Map<string, readonly Item[]>();
     if (value === null) return out;
-    for (const name of [...this.#propertyNames(value)].sort())
+    for (const name of [...this.#propertyNames({ value, path: [] })].sort())
       out.set(name, this.#run(this.#pass.values.valueItems(value, node, [propertyStep(name)])));
     return out;
+  }
+
+  public placeProperties(id: PlaceId, path: readonly string[] = []): ReadonlySet<string> {
+    return this.#propertyNames({ key: keyOf(id, path) });
   }
 
   /**
@@ -690,14 +706,10 @@ class CoreAnswers implements Answers {
    * call's result key or a literal; a key to its prefixes' stores and their sources' own stores; a literal to the
    * reads and calls standing at its path or above it.
    */
-  #propertyNames(value: PlaceId): ReadonlySet<string> {
+  #propertyNames(start: PropertyNamesTask): ReadonlySet<string> {
     const { program, contract, definitions } = this.#pass;
     const names = new Set<string>();
-    type Task =
-      | { readonly value: PlaceId; readonly path: readonly string[] }
-      | { readonly key: Key }
-      | { readonly literal: PlaceId; readonly path: readonly string[] };
-    const pending: Task[] = [{ value, path: [] }];
+    const pending: PropertyNamesTask[] = [start];
     const seen = new Set<string>();
     const dispatch: Dispatch = {
       kinds: (of) => new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag)),

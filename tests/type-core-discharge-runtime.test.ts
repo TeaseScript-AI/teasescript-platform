@@ -50,16 +50,21 @@ function decision(source: string): { diagnostics: string[]; checks: string[] } {
   assert.ok(request !== null, source);
   return inBothOrders(() => {
     const record = compactAnalysis(request);
+    // as multisets: a record's order is not part of it
     return {
-      diagnostics: record.diagnostics.map(
-        (diagnostic) =>
-          `${diagnostic.class} ${diagnostic.kind} @${diagnostic.site.offset}:${diagnostic.site.end}`,
-      ),
-      checks: record.checks.map(
-        (check) =>
-          `${check.kind} ${check.target} [${check.against.join(", ")}]${check.boundary ? " boundary" : ""} ` +
-          `@${check.site.offset}:${check.site.end}`,
-      ),
+      diagnostics: record.diagnostics
+        .map(
+          (diagnostic) =>
+            `${diagnostic.class} ${diagnostic.kind} @${diagnostic.site.offset}:${diagnostic.site.end}`,
+        )
+        .sort(),
+      checks: record.checks
+        .map(
+          (check) =>
+            `${check.kind} ${check.target} [${check.against.join(", ")}]${check.boundary ? " boundary" : ""} ` +
+            `@${check.site.offset}:${check.site.end}`,
+        )
+        .sort(),
     };
   });
 }
@@ -762,19 +767,37 @@ test("plan validation rejects S7's fields where they do not belong (S3 §4's ser
   assert.deepEqual(validateInstructionPlan(JSON.parse(json)).errors, []);
 });
 
-test("a store's check, a parse's expected type and a fallback's check keep the structure the core decided, in both orders (S7 review r1 B1, B2, B4)", () => {
+/** A plan's checked stores, as `target type`: the `let`s and assignments that check what they store. */
+function checkedStores(plan: InstructionPlan): string[] {
+  return plan.instructions.flatMap((instruction) =>
+    (instruction.kind === "declareBinding" || instruction.kind === "assign") &&
+    instruction.typeCheck !== undefined
+      ? [`${instruction.typeCheck.place} ${typeText(instruction.typeCheck.type)}`]
+      : [],
+  );
+}
+
+test("a store's check, a parse's expected type and a fallback's check keep the structure the core decided, in three layers, in both orders (S7 review r1 B1, B2, B4, r2 B1, B2)", () => {
   // a record stored whole from host data: its boundary validates the decided fields (C9 at the record level, A7)
-  const whole = 'let p = {n: 1}\np = hostValue\nsay p.n\nsay "AFTER"\nexit\n';
+  const whole = 'let p = {stats: {n: 1}}\np = hostValue\nsay p.stats.n\nsay "AFTER"\nexit\n';
+  assert.ok(
+    decision(whole).checks.includes(`copy-type p [object] boundary @${at(whole, "hostValue")}`),
+  );
   const store = candidatePlan(whole);
-  assert.deepEqual(ran(runWith(store, object({ n: 3 }))), halted(["3", "AFTER"]));
+  assert.deepEqual(checkedStores(store), ["'p' {stats: {n: integer}}"]);
   assert.deepEqual(
-    ran(runWith(store, object({ n: "bad" }))),
+    ran(runWith(store, object({ stats: object({ n: 3 }) }))),
+    halted(["3", "AFTER"]),
+  );
+  assert.deepEqual(
+    ran(runWith(store, object({ stats: object({ n: "bad" }) }))),
     failed(`TSR058@${at(whole, "hostValue")}`),
   );
-  // a named object default gives its fields' types at every depth, on both lowerings
+  // a named object default gives what it holds at every depth, on both lowerings
   for (const files of ["", ", files: false"]) {
     const named = `let d = {stats: {count: 0}}\nlet p = fromJson(hostValue, default: d${files})\nsay p.stats.count\nexit\n`;
     const parse = at(named, `fromJson(hostValue, default: d${files})`);
+    assert.ok(decision(named).checks.includes(`copy-type p [object] boundary @${parse}`));
     const plan = candidatePlan(named);
     assert.ok(
       contentOf(plan).some((entry) => entry.endsWith(`@${parse} {stats: {count: integer}}`)),
@@ -786,7 +809,8 @@ test("a store's check, a parse's expected type and a fallback's check keep the s
       halted(["0"], [`TSW020@${parse}`]),
     );
   }
-  // a fallback's elements: C10 at the fallback's element depth checks the selected list where it is selected
+  // a fallback's elements: C10 at the fallback's element depth checks the selected list where it is selected, a null
+  // element allowed as C10 allows it
   const nested =
     'let xs = [[1], null][1]\nlet n = (xs otherwise [hostValue, 2])[1]\nsay n\nsay "AFTER"\nexit\n';
   const fallback = at(nested, "[hostValue, 2]");
@@ -798,19 +822,68 @@ test("a store's check, a parse's expected type and a fallback's check keep the s
   const checked = candidatePlan(nested);
   assert.ok(
     contentOf(checked).includes(
-      `fallbackCheck binary@${at(nested, "xs otherwise [hostValue, 2]")} list<integer|number>`,
+      `fallbackCheck binary@${at(nested, "xs otherwise [hostValue, 2]")} list<integer|number|null>`,
     ),
     JSON.stringify(contentOf(checked)),
   );
   assert.deepEqual(ran(runWith(checked, 3)), halted(["2", "AFTER"]));
+  assert.deepEqual(ran(runWith(checked, null)), halted(["2", "AFTER"]));
   assert.deepEqual(ran(runWith(checked, "bad")), failed(`TSR058@${fallback}`));
-  // the written type of the place a parse lands in directly, through a literal's elements, nullable as written
-  const listed =
-    "let xs: number[] = [fromJson(hostValue, default: 0, files: false)]\nsay xs[0]\nexit\n";
-  assert.deepEqual(ran(runWith(candidatePlan(listed), "1.5")), halted(["1.5"]));
-  const optional = "let n: integer? = fromJson(hostValue, default: 0, files: false)\nsay n\nexit\n";
-  assert.deepEqual(ran(runWith(candidatePlan(optional), "null")), halted(["null"]));
-  assert.deepEqual(ran(runWith(candidatePlan(optional), "3")), halted(["3"]));
+  // the written type of the place a parse lands in directly, through a literal's elements and a get's default,
+  // nullable as written: the core's own answer at the call (its kinds possible, F18)
+  for (const [source, json, expected, said] of [
+    [
+      "let xs: number[] = [fromJson(hostValue, default: 0, files: false)]\nsay xs[0]\nexit\n",
+      "1.5",
+      "number",
+      "1.5",
+    ],
+    [
+      "let a: number[] = [[1].get(2, default: fromJson(hostValue, default: 0, files: false))]\nsay a[0]\nexit\n",
+      "1.5",
+      "number",
+      "1.5",
+    ],
+    [
+      "let n: integer? = fromJson(hostValue, default: 0, files: false)\nsay n\nexit\n",
+      "null",
+      "integer|null",
+      "null",
+    ],
+  ] as const) {
+    const call = at(source, "fromJson(hostValue, default: 0, files: false)");
+    assert.ok(
+      decision(source).checks.some((check) => check.endsWith(`boundary @${call}`)),
+      source,
+    );
+    const plan = candidatePlan(source);
+    assert.deepEqual(contentOf(plan), [`expected call@${call} ${expected}`], source);
+    assert.deepEqual(ran(runWith(plan, json)), halted([said]), source);
+  }
+  // the default's kinds as the core reads them, through a copy of a written list: what it holds (F18)
+  const copied =
+    'let a: number[] = [0]\nlet b = a\nlet p = fromJson(hostValue, default: b, files: false)\nsay p[0]\nsay "AFTER"\nexit\n';
+  const parse = at(copied, "fromJson(hostValue, default: b, files: false)");
+  const plan = candidatePlan(copied);
+  assert.deepEqual(contentOf(plan), [`expected call@${parse} list<integer>`]);
+  assert.deepEqual(checkedStores(plan), ["'p' list<integer>"]);
+  assert.deepEqual(ran(runWith(plan, "[3]")), halted(["3", "AFTER"]));
+  assert.deepEqual(ran(runWith(plan, "[1.5]")), halted(["0", "AFTER"], [`TSW020@${parse}`]));
+});
+
+test("a typed parse's known value is the one its run gets: a known bad count is still the kept check's error (S7 review r2 B4)", () => {
+  // JSON that fits the expected type keeps its value for the kept count check; JSON that does not gives the default
+  assert.deepEqual(
+    compileSourceWithBackend(
+      'repeat fromJson("-1", default: 0, files: false) { say "BODY" }\nsay "AFTER"\nexit\n',
+      OPTIONS,
+      CORE_BACKEND,
+    ).diagnostics.map((diagnostic) => `${diagnostic.severity} ${diagnostic.code}`),
+    ["error TSV011"],
+  );
+  const repaired =
+    'repeat fromJson("1.5", default: 0, files: false) { say "BODY" }\nsay "AFTER"\nexit\n';
+  assert.deepEqual(ran(runWith(candidatePlan(repaired), null)).said, ["AFTER"]);
 });
 
 test("the candidate route rejects the loads whose storage rules S9b brings (S3 §3)", () => {
