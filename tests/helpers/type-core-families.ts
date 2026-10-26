@@ -2144,7 +2144,8 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
  * passes × stores, each pass charged. A gated known limit by the owner's decision (TABLE r4.49, option A): its doubling
  * at k = 64 → 128 as measured, re-measured and proposed with its counts on a change to admission's passes, never
  * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
- * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), proposed in the same form.
+ * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form
+ * (TABLE r4.69 (1)).
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -2171,12 +2172,12 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
     name: "A2-interleaved-conditional-copies",
     measures:
       "§4.1, condition (b): k copies of a k-field record of named host data, each after a conditional store below it",
-    // PROPOSED, not accepted (the owner decides it with the merge request): each copy sees one more conditional store
-    // below the copied path, so each has its own signature, k classes, each answered at each of the k fields read
-    // (S6-CARRIERS §4.7's first unmerged shape; a rule beyond the class rule merges them). 377,394 / 1,357,242 units at
-    // k = 64, 128 in both orders (3.6086; 3.6164 before TABLE r4.68 (1), 3.6222 before Codex r23's repairs, 3.6236 before
-    // TABLE r4.67); the allowance reached at k = 618; at k = 1,024 82,408,018 units under a raised test allowance,
-    // 274.7 % of its 30,000,000 (the analysis itself stops at the allowance with the budget error)
+    // A gated known limit by the owner's decision (TABLE r4.69 (1), option A): each copy sees one more conditional
+    // store below the copied path, so each has its own signature, k classes, each answered at each of the k fields read
+    // (S6-CARRIERS §4.7's first unmerged shape; a rule beyond the class rule merges them). 377,525 / 1,357,501 units at
+    // k = 64, 128 in both orders (3.6080; 3.6222 before Codex r23's repairs, 3.6236 before TABLE r4.67); the allowance
+    // reached at k = 618; at k = 1,024 82,410,069 units under a raised test allowance, 274.7 % of its 30,000,000 (the
+    // analysis itself stops at the allowance with the budget error)
     measured: 3.63,
     program: (k) =>
       main(
